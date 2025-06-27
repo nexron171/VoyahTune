@@ -1,0 +1,1 @@
+adb shell "am start ru.big.town.anative/.MainActivity"

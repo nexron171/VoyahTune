@@ -1,0 +1,11 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+   <item>
+      <shape 
+          android:shape="rectangle">
+          <corners android:radius="20dp" />
+          <solid android:color="#FAFAFA" />
+      </shape>
+   </item>
+   <!-- Put any image or anything here as the drawable -->
+   <item android:drawable="?attr/selectableItemBackground"/>
+</layer-list>
