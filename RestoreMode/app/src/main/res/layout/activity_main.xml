@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:animateLayoutChanges="true"
+        android:background="#000000"
+        android:orientation="vertical"
+        tools:layout_editor_absoluteX="1dp"
+        tools:layout_editor_absoluteY="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="10dp"
+            android:animateLayoutChanges="true"
+            android:background="@drawable/layout_category_bg"
+            android:orientation="vertical"
+            tools:layout_editor_absoluteX="1dp"
+            tools:layout_editor_absoluteY="1dp">
+
+            <TextView
+                android:id="@+id/drive_modes_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="30px"
+                android:paddingVertical="0dp"
+                android:tag="binding_2"
+                android:text="Настройка режимов вождения"
+                android:textColor="#ffffff"
+                android:textSize="26px" />
+
+            <RadioGroup
+                android:id="@+id/drive_modes_group"
+                style="@style/radio_group_height_70_style"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="@drawable/radio_group_height_70_bg"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="0dp">
+
+                <RadioButton
+                    android:tag="ECO"
+                    android:id="@+id/ECO"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Eco"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="COMFORT"
+                    android:id="@+id/COMFORT"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Comf"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="SPORT"
+                    android:id="@+id/SPORT"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Sport"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="OUTING"
+                    android:id="@+id/OUTING"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:animateLayoutChanges="true"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Outing"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="SNOW"
+                    android:id="@+id/SNOW"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Snow"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="INDIVIDUAL"
+                    android:id="@+id/INDIVIDUAL"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Indiv"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+            </RadioGroup>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="10dp"
+            android:animateLayoutChanges="true"
+            android:background="@drawable/layout_category_bg"
+            android:orientation="vertical"
+            tools:layout_editor_absoluteX="1dp"
+            tools:layout_editor_absoluteY="1dp">
+
+            <TextView
+                android:id="@+id/recycle_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="30px"
+                android:tag="binding_2"
+                android:text="Уровень рекуперации энергии"
+                android:textColor="#ffffff"
+                android:textSize="26px" />
+
+            <RadioGroup
+                android:id="@+id/recycle_modes_group"
+                style="@style/radio_group_height_70_style"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="@drawable/radio_group_height_70_bg"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <RadioButton
+                    android:tag="LOW"
+                    android:id="@+id/LOW"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Низкий"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="MEDIUM"
+                    android:id="@+id/MEDIUM"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Стандартный"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="HIGH"
+                    android:id="@+id/HIGH"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Высокий"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+
+            </RadioGroup>
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="10dp"
+            android:animateLayoutChanges="true"
+            android:background="@drawable/layout_category_bg"
+            android:orientation="vertical"
+            tools:layout_editor_absoluteX="1dp"
+            tools:layout_editor_absoluteY="1dp">
+
+            <TextView
+                android:id="@+id/energy_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="30px"
+                android:tag="binding_2"
+                android:text="Режим использования энергии"
+                android:textColor="#ffffff"
+                android:textSize="26px" />
+
+            <RadioGroup
+                android:id="@+id/energy_modes_group"
+                style="@style/radio_group_height_70_style"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="@drawable/radio_group_height_70_bg"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <RadioButton
+                    android:tag="SMART"
+                    android:id="@+id/SMART"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Intelligent"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="EV"
+                    android:id="@+id/EV"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Electric"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="REV"
+                    android:id="@+id/REV"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Fuel mode"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:tag="SREV"
+                    android:id="@+id/SREV"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:text="Save mode"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+            </RadioGroup>
+        </LinearLayout>
+    </LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

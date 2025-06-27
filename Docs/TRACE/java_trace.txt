@@ -1,0 +1,81 @@
+
+package com.qinggan.app.vehiclesetting;
+public void resetSettings() {
+        Bundle bundle = new Bundle();
+        if (!AppCommonUtils.isOverSeaVehicle()) {
+            bundle.putInt(DFVehicleState.DRIVING_MODE_RETAIN.toString(), 1);
+        }
+        bundle.putInt(DFVehicleState.IVI_SOC_MODESET.toString(), 1);
+        bundle.putInt(DFVehicleState.DRIVING_MODE_SET.toString(), 1);
+        bundle.putInt(DFVehicleState.EPS_MODE_SET.toString(), 2);
+        bundle.putInt(DFVehicleState.PROP_MODE_SET.toString(), 1);
+        bundle.putInt(DFVehicleState.HUM_ENERGY_PTREGEN_LEVL.toString(), 4);
+        if (QGSettings.Global.getInt(CarSettingApplication.instance.getApplicationContext().getContentResolver(), Constants.DRIVE_MODE_ATM, 0) == 1) {
+            bundle.putInt(DFVehicleState.VEHICLE_AMBIENT_LIGHT_COLOR.toString(), Constants.driveModeAtm.get(1).intValue());
+        }
+        this.mCanBusManager.setVehicleAndAirConditionBundleState(null, bundle);
+    }
+    
+package com.qinggan.canbus.service.protocol.dongfeng_h97c;
+@Override // com.qinggan.canbus.service.BaseCanBusComponent, com.qinggan.canbus.service.AbstractCanBusComponent
+    public int setVehicleAndAirConditionBundleState(Bundle airBundle, Bundle vehicleBundle) {
+        Log.d(TAG, "setVehicleAndAirConditionBundleState pid = " + Binder.getCallingPid());
+        ModeSettingTask modeSettingTask = new ModeSettingTask(this);
+        if (vehicleBundle != null) {
+            HashMap<VehicleState, Integer> vehicleSetMap = getVehicleStateMap(vehicleBundle);
+            modeSettingTask.mVehicleSetMap = vehicleSetMap;
+        }
+        if (airBundle != null) {
+            HashMap<AirConditionState, Integer> airSetMap = getAirConditionStateMap(airBundle);
+            modeSettingTask.mAirSetMap = airSetMap;
+        }
+        modeSettingTask.execute(1);
+        return 0;
+    }
+
+
+private class ModeSettingTask extends AsyncTask<Integer, Integer, Boolean> {
+    /* JADX INFO: Access modifiers changed from: protected */
+        @Override // android.os.AsyncTask
+        public Boolean doInBackground(Integer... params) {
+            if (this.mVehicleSetMap != null && this.mVehicleSetMap.size() > 0) {
+                setVehicleMode(this.mVehicleSetMap);
+            }
+            if (this.mAirSetMap != null && this.mAirSetMap.size() > 0) {
+                setAirConditionMode(this.mAirSetMap);
+            }
+            return Boolean.valueOf(DongfengH97CCanBusComponentImpl.BAIC_ICM_DEBUG);
+        }
+}
+
+ private boolean setVehicleMode(HashMap<VehicleState, Integer> vehicleMap) {
+
+    ................
+    if (maintenance_reset_req == 1 && this.mComponent.sendCanIOCtl(0, 
+                    DongfengH97CCanBusComponentImpl.this.FillCommand(127, buf_maintenance_reset, buf_maintenance_reset.length)) < 0) {
+                Log.e(DongfengH97CCanBusComponentImpl.TAG, "ModeSettingTask::setVehicleMode CAN_MSG_IVI_MAINTENANCE_RESET_REQ fail");
+                return false;
+            }
+ }
+
+ public int sendCanIOCtl(int cmd, byte[] args, boolean showlog) {
+        if (args.length > 0 && showlog) {
+            printDataWithLog("SysToCanBox send raw data by canbuservice", args);
+        }
+        if (this.mCanBusOperator != null) {
+            return this.mCanBusOperator.sendCanCmd(this.can_fd, cmd, args);
+        }
+        Log.e(TAG, "mCanBusOperator is null");
+        return -1;
+    }
+
+        @Override // com.qinggan.canbus.service.ICanBusOperator
+        public int sendCanCmd(int fd, int cmd, byte[] args) {
+            if (CanBusService.this.can_fd >= 0) {
+                return CanBusService.this.cis_can_control(CanBusService.this.can_fd, cmd, args);
+            }
+            Log.e(CanBusService.TAG, "can bus ioctl device file not opened!!");
+            return -1;
+        }
+        public native int cis_can_control(int i, int i2, byte[] bArr);
+
