@@ -5,6 +5,8 @@
         <provider
             android:authorities="ru.big.town.restoremode.restoremodecontentprovider" />
     </queries>
+    <uses-permission android:name="android.permission.CAR_POWER" />
+    <uses-feature android:name="android.hardware.type.car" />
 
     <uses-feature
         android:name="android.hardware.type.automotive"
@@ -103,6 +105,7 @@
             android:permission="android.permission.DEVICE_POWER">
             <intent-filter>
                 <action android:name="ru.big.town.anative.APPLY_DRIVE_MODES" />
+                <action android:name="ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER" />
 
                 <action android:name="android.intent.action.ACTION_PREFERRED_ACTIVITY_CHANGED"/>
                 <action android:name="com.android.server.jobscheduler.GARAGE_MODE_OFF" />

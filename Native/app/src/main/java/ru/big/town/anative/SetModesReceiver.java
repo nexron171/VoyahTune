@@ -11,16 +11,23 @@ import android.util.Log;
 
 public class SetModesReceiver extends BroadcastReceiver {
     public static volatile int repeat = 7;
-    public static volatile int running=0;
+    public static volatile boolean isButton = false;
+    public static volatile int running = 0;
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        Log.i("$$$ SetModesReceiver $$$", "onReceive enter");
-        if (intent.getAction().equals("ru.big.town.anative.APPLY_DRIVE_MODES")) {
-            repeat = 3;
-        } else { repeat = 7; }
+        String receivedIntent = intent.getAction();
 
-        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
+        Log.i("$$$ SetModesReceiver $$$", "onReceive enter by intent" + receivedIntent);
+        if (receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES")) {
+            repeat = 2;
+            isButton = true;
+        } else {
+            repeat = 7;
+            isButton = false;
+        }
+
+        if (Intent.ACTION_BOOT_COMPLETED.equals(receivedIntent)) {
             //context.startService(new Intent(context, SetModesService.class));
             context.startForegroundService(new Intent(context, SetModesService.class));
             Log.i("$$$ SetModesReceiver $$$", "onReceive START SERVICE");
@@ -28,20 +35,26 @@ public class SetModesReceiver extends BroadcastReceiver {
 
 //        final PendingResult result = goAsync();
         MainActivity.initValueModes(context);
-        String action = intent.getAction();
-        if( running==0) {
+        if (running == 0 &&
+                (
+                        receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER") ||
+                        receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES") ||
+                        Intent.ACTION_BOOT_COMPLETED.equals(receivedIntent)
+                )
+        ){
             Thread thread = new Thread() {
                 public void run() {
                     try {
-                        running=1;
+                        running = 1;
+                        //if(isButton){Thread.sleep(5000);}
                         for (int i = 0; i <= repeat; i++) {
-                            Log.i("$$$ SetModesReceiver $$$", action+" runCmds();");
+                            Log.i("$$$ SetModesReceiver $$$", receivedIntent + " runCmds();");
                             MainActivity.runCmds();
-                            Thread.sleep(1500);
+                            Thread.sleep(3500);
                         }
-                        running=0;
+                        running = 0;
                     } catch (InterruptedException e) {
-                        running=0;
+                        running = 0;
                         throw new RuntimeException(e);
                     }
 //                result.setResultCode(0);

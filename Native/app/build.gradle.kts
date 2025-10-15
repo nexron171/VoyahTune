@@ -39,6 +39,8 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    ndkVersion = "27.0.12077973"
+    buildToolsVersion = "35.0.0"
 }
 
 dependencies {
@@ -48,7 +50,11 @@ dependencies {
     implementation(libs.constraintlayout)
     implementation(libs.legacy.support.v4)
     implementation(libs.legacy.support.v13)
+    implementation(files("/home/big/AndroidStudioProjects/Native/app/lib/android.car.jar"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
+
+    val sdkDir = project.android.sdkDirectory.canonicalPath
+    val androidCarJar = "$sdkDir/platforms/android-35/optional/android.car.jar"
 }

@@ -8,7 +8,7 @@ kill `pgrep -f 'adb logcat'`
 
 ALL=` wc -l $FN | cut -d' ' -f1`
 
-FLINE=`grep -n "$FN" "$FN" | head -n1 | cut -d':' -f1`
+FLINE=`grep -n " $FN" "$FN" | head -n1 | cut -d':' -f1`
 
 let NUMLINES=$((ALL - FLINE))
 echo "ALL =" $ALL
