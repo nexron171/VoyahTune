@@ -20,7 +20,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission
-        android:name="android.permission.REBOOTGA"
+        android:name="android.permission.REBOOT"
         tools:ignore="ProtectedPermissions" />
     <uses-permission
         android:name="android.permission.DEVICE_POWER"
@@ -102,7 +102,7 @@
             android:name=".SetModesReceiver"
             android:enabled="true"
             android:exported="true"
-            android:permission="android.permission.DEVICE_POWER">
+            >
             <intent-filter>
                 <action android:name="ru.big.town.anative.APPLY_DRIVE_MODES" />
                 <action android:name="ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER" />

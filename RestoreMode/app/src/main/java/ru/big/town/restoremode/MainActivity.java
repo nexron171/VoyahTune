@@ -1,6 +1,7 @@
 package ru.big.town.restoremode;
 
 
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -158,7 +159,13 @@ public class MainActivity extends AppCompatActivity {
         };
     }
     public void onButtonClickApply(View v){
-        sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
+        //sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
+        Intent intent = new Intent("ru.big.town.anative.APPLY_DRIVE_MODES");
+        intent.setComponent(new ComponentName(
+                "ru.big.town.anative",
+                "ru.big.town.anative.SetModesReceiver"
+        ));
+        sendBroadcast(intent);
         Log.i("$$$ TAG $$$", "Click" );
         // isAppInForeground(getApplicationContext(),  "com.qinggan.canbus.service")
     }
