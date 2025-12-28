@@ -4,16 +4,23 @@ package ru.big.town.restoremode;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Message;
+import android.os.Messenger;
+import android.os.RemoteException;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
@@ -30,9 +37,91 @@ public class MainActivity extends AppCompatActivity {
 
     private SharedPreferences sharedPreferences;
 
+    private Messenger serviceMessenger;
+    private boolean isBound;
+    static final int MSG_RESULT = 4;
+    static final int MSG_ALLPY_DRIVE_MODES = 1;
+
+
+    class IncomingHandler extends Handler {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case MSG_RESULT:
+                    //Bundle data = msg.getData();
+                    //String result = data.getString("result");
+                    //Log.i("$$$ IncomingHandler $$$", result);
+                    Log.i("$$$ DRIVE MODE $$$", "handleMessage() MSG_RESULT");
+
+                    break;
+                default:
+                    Log.i("$$$ DRIVE MODE $$$", "handleMessage() default");
+                    super.handleMessage(msg);
+            }
+        }
+    }
+
+    final Messenger clientMessenger = new Messenger(new IncomingHandler());
+
+    private ServiceConnection connection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            Log.i("$$$ DRIVE MODE $$$", "onServiceConnected()");
+            serviceMessenger = new Messenger(service);
+            isBound = true;
+//
+//            // Register client with service
+//            try {
+//                Message registerMsg = Message.obtain(null, MSG_ALLPY_DRIVE_MODES);
+//                registerMsg.replyTo = clientMessenger;
+//                serviceMessenger.send(registerMsg);
+//            } catch (RemoteException e) {
+//                e.printStackTrace();
+//            }
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            serviceMessenger = null;
+            isBound = false;
+        }
+    };
+
+    private void bindToMessengerService() {
+        Log.i("$$$ DRIVE MODE $$$", "bindToMessengerService() begin");
+
+        Intent intent = new Intent();
+        intent.setComponent(new ComponentName(
+                "ru.big.town.anative",
+                "ru.big.town.anative.SetModesService"
+        ));
+        //intent.setPackage("ru.big.town.anative");
+        bindService(intent, connection, Context.BIND_AUTO_CREATE);
+        Log.i("$$$ DRIVE MODE $$$", "bindToMessengerService() end");
+
+    }
+
+    private void sendMessageToService() {
+        if (!isBound) return;
+
+        try {
+            Message msg = Message.obtain(null, MSG_ALLPY_DRIVE_MODES);
+//            Bundle data = new Bundle();
+//            data.putString("data", "Hello from client");
+//            msg.setData(data);
+            msg.replyTo = clientMessenger;
+            serviceMessenger.send(msg);
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        bindToMessengerService();
+
         EdgeToEdge.enable(this);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
@@ -160,17 +249,41 @@ public class MainActivity extends AppCompatActivity {
     }
     public void onButtonClickApply(View v){
         //sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
-        Intent intent = new Intent("ru.big.town.anative.APPLY_DRIVE_MODES");
-        intent.setComponent(new ComponentName(
-                "ru.big.town.anative",
-                "ru.big.town.anative.SetModesReceiver"
-        ));
-        sendBroadcast(intent);
+//        Intent intent = new Intent("ru.big.town.anative.APPLY_DRIVE_MODES");
+//        intent.setComponent(new ComponentName(
+//                "ru.big.town.anative",
+//                "ru.big.town.anative.SetModesService"
+//        ));
+//        intent.setPackage("ru.big.town.anative");
+
+        //sendBroadcast(intent);
+        //startService(intent);
+        //startForegroundService(intent);
+        sendMessageToService();
         Log.i("$$$ TAG $$$", "Click" );
         // isAppInForeground(getApplicationContext(),  "com.qinggan.canbus.service")
     }
     public void onButtonClickClose(View v){
         finish();
+    }
+
+    @Override
+    protected void onDestroy() {
+//        // Unregister client
+//        if (isBound && serviceMessenger != null) {
+//            try {
+//                Message unregisterMsg = Message.obtain(null, MessengerService.MSG_UNREGISTER_CLIENT);
+//                serviceMessenger.send(unregisterMsg);
+//            } catch (RemoteException e) {
+//                e.printStackTrace();
+//            }
+//        }
+
+        super.onDestroy();
+        if (isBound) {
+            unbindService(connection);
+            isBound = false;
+        }
     }
 }
 

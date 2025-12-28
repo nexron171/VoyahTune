@@ -5,44 +5,72 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.car.Car;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
-import android.os.PowerManager;
+import android.os.Message;
+import android.os.Messenger;
 import android.car.hardware.power.CarPowerManager;
+import android.os.RemoteException;
 import android.util.Log;
-
 
 import androidx.core.app.NotificationCompat;
 
 public class SetModesService extends Service {
-    private static final String TAG="$$$ SetModesService $$$";
-    private  SetModesReceiver setModesReceiver;
-    private final String CHANNEL_ID = "screen_monitor_channel";
 
+    private Messenger clientMessenger;
+    static final int MSG_ALLPY_DRIVE_MODES = 1;
+    static final int MSG_RESULT = 4;
+
+    class IncomingHandler extends Handler {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case MSG_ALLPY_DRIVE_MODES:
+                    clientMessenger = msg.replyTo;
+                    SetModesReceiver.worker(7, 250);
+                    Log.i(TAG, "handleMessage() MSG_ALLPY_DRIVE_MODES");
+                    try {
+                        clientMessenger.send(Message.obtain(null, MSG_RESULT));
+                    } catch (RemoteException e) {
+                        throw new RuntimeException(e);
+                    }
+
+                    break;
+                default:
+                    Log.i(TAG, "handleMessage() default" );
+                    super.handleMessage(msg);
+            }
+        }
+    }
+    private boolean isWorking = false;
+    private static final String TAG = "$$$ SetModesService $$$";
+    private SetModesReceiver setModesReceiver;
+    private final String CHANNEL_ID = "screen_monitor_channel";
     private Car mCar;
     private CarPowerManager mCarPowerManager;
 
     @Override
     public void onCreate() {
-        Log.i(TAG,"onCreate()");
+        Log.i(TAG, "onCreate()");
         super.onCreate();
         initializeCarPowerManager();
         setModesReceiver = new SetModesReceiver();
-        Log.i(TAG,"onCreateEd");
-
+        Log.i(TAG, "onCreateEd");
     }
+
     private final CarPowerManager.CarPowerStateListener mPowerStateListener =
             new CarPowerManager.CarPowerStateListener() {
                 @Override
                 public void onStateChanged(int state) {
                     Log.i(TAG, "Power state changed: " + state);
 //                    if(state==2 || state==6 || state==8 || state==10 ){
-                    if( state == 6 ){
-                        sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER"));
+                    if (state == 6) {
+                        //sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER"));
+                        //LocalBroadcastManager.getInstance(SetModesService.this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER"));
+                        SetModesReceiver.worker(7);
                     }
 
 //                    STATE_SHUTDOWN_PREPARE 7
@@ -81,7 +109,7 @@ public class SetModesService extends Service {
         try {
             // Create Car instance
             mCar = Car.createCar(this);
-            if(!mCar.isConnected()) mCar.connect();
+            if (!mCar.isConnected()) mCar.connect();
 
             // Get CarPowerManager instance
             mCarPowerManager = (CarPowerManager) mCar.getCarManager(Car.POWER_SERVICE);
@@ -101,37 +129,49 @@ public class SetModesService extends Service {
         }
     }
 
-    public SetModesService() {
-    }
     @Override
-    public int onStartCommand(Intent intent, int flags, int startId){
-        Log.i(TAG, "onStartCommand()");
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        String action="";
+        if(intent != null && intent.getAction()!=null) action=intent.getAction();
 
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Screen Monitor")
-                .setContentText("Monitoring screen state")
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .build();
+        Log.i(TAG, "onStartCommand() Intent: "+ action);
+        if (!isWorking) {
+            Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
+                    .setContentTitle("Screen Monitor")
+                    .setContentText("Monitoring screen state")
+                    .setSmallIcon(R.drawable.ic_launcher_foreground)
+                    .build();
 
-        createNotificationChannel();
-        startForeground(1, notification);
+            createNotificationChannel();
+            startForeground(1, notification);
 
-        //BroadcastReceiver powerSaveReceiver = new SetModesReceiver();
-        IntentFilter filter = new IntentFilter();
-        filter.addAction("android.os.action.POWER_SAVE_MODE_CHANGED");
-        filter.addAction("android.intent.action.SCREEN_ON");
-        filter.addAction("com.android.server.jobscheduler.GARAGE_MODE_OFF");
-        filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES");
-        filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER");
+            //BroadcastReceiver powerSaveReceiver = new SetModesReceiver();
+            IntentFilter filter = new IntentFilter();
+            filter.addAction("android.os.action.POWER_SAVE_MODE_CHANGED");
+            filter.addAction("android.intent.action.SCREEN_ON");
+            filter.addAction("com.android.server.jobscheduler.GARAGE_MODE_OFF");
+//            filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES");
+//            filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER");
 
-        // Register receiver with filter
-        registerReceiver(setModesReceiver, filter, RECEIVER_EXPORTED);
-        sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER"));
+            // Register receiver with filter
+            registerReceiver(setModesReceiver, filter, RECEIVER_EXPORTED);
+            //sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER"));
+            //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER"));
+            SetModesReceiver.worker(7);
+            //return START_STICKY;
+            //return super.onStartCommand( intent,  flags,  startId);
 
-        //return START_STICKY;
-        //return super.onStartCommand( intent,  flags,  startId);
+            // Первый вызов после старта сервиса
+            Log.i(TAG, "onStartCommand() first run!");
+            isWorking = true;
+        }
+        //if(action.equals("ru.big.town.anative.APPLY_DRIVE_MODES")){
+          //  Log.i(TAG, "onStartCommand() Intent is ru.big.town.anative.APPLY_DRIVE_MODES!");
+            //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
+        //}
         return START_STICKY;
     }
+
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
@@ -144,16 +184,16 @@ public class SetModesService extends Service {
         }
     }
 
+    final Messenger serviceMessenger = new Messenger(new IncomingHandler());
+
     @Override
     public IBinder onBind(Intent intent) {
-        // TODO: Return the communication channel to the service.
-        //throw new UnsupportedOperationException("Not yet implemented");
-        return null;
+        return serviceMessenger.getBinder();
     }
 
     @Override
     public void onDestroy() {
-        Log.i(TAG,"onDestroy()");
+        Log.i(TAG, "onDestroy()");
         super.onDestroy();
 
         // Clean up resources

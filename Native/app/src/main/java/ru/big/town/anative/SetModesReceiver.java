@@ -1,9 +1,4 @@
 package ru.big.town.anative;
-
-import static java.lang.Thread.*;
-
-import android.app.Activity;
-import android.app.Application;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -12,7 +7,6 @@ import android.util.Log;
 public class SetModesReceiver extends BroadcastReceiver {
     public static volatile int repeat = 7;
     public static volatile boolean isButton = false;
-    public static volatile int running = 0;
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -20,7 +14,7 @@ public class SetModesReceiver extends BroadcastReceiver {
 
         Log.i("$$$ SetModesReceiver $$$", "onReceive enter by intent" + receivedIntent);
         if (receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES")) {
-            repeat = 2;
+            repeat = 3;
             isButton = true;
         } else {
             repeat = 7;
@@ -33,28 +27,33 @@ public class SetModesReceiver extends BroadcastReceiver {
             Log.i("$$$ SetModesReceiver $$$", "onReceive START SERVICE");
         }
 
-//        final PendingResult result = goAsync();
-        MainActivity.initValueModes(context);
-        if (running == 0 &&
-                (
-                        receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER") ||
-                        receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES") ||
-                        Intent.ACTION_BOOT_COMPLETED.equals(receivedIntent)
-                )
-        ){
+        if (Intent.ACTION_BOOT_COMPLETED.equals(receivedIntent)) worker(repeat);
+
+        //throw new UnsupportedOperationException("Not yet implemented");
+        if (isOrderedBroadcast()) {
+            setResultCode(-1);
+        }
+    }
+
+    static public void worker(int repeat) {
+        Log.i("$$$ SetModesReceiver $$$", " Call worker");
+        if (GlobalVars.running == 0 && GlobalVars.SAVE_CONTEXT != null) {
+            Log.i("$$$ SetModesReceiver $$$", " Run worker");
+
+            MainActivity.initValueModes(GlobalVars.SAVE_CONTEXT);
+
             Thread thread = new Thread() {
                 public void run() {
                     try {
-                        running = 1;
+                        GlobalVars.running = 1;
                         //if(isButton){Thread.sleep(5000);}
                         for (int i = 0; i <= repeat; i++) {
-                            Log.i("$$$ SetModesReceiver $$$", receivedIntent + " runCmds();");
                             MainActivity.runCmds();
                             Thread.sleep(3500);
                         }
-                        running = 0;
+                        GlobalVars.running = 0;
                     } catch (InterruptedException e) {
-                        running = 0;
+                        GlobalVars.running = 0;
                         throw new RuntimeException(e);
                     }
 //                result.setResultCode(0);
@@ -63,10 +62,33 @@ public class SetModesReceiver extends BroadcastReceiver {
             };
             thread.start();
         }
+    }
+    static public void worker(int repeat, int pause) {
+        Log.i("$$$ SetModesReceiver $$$", " Call worker");
+        if (GlobalVars.running == 0 && GlobalVars.SAVE_CONTEXT != null) {
+            Log.i("$$$ SetModesReceiver $$$", " Run worker");
 
-        //throw new UnsupportedOperationException("Not yet implemented");
-        if (isOrderedBroadcast()) {
-            setResultCode(-1);
+            MainActivity.initValueModes(GlobalVars.SAVE_CONTEXT);
+
+            Thread thread = new Thread() {
+                public void run() {
+                    try {
+                        GlobalVars.running = 1;
+                        //if(isButton){Thread.sleep(5000);}
+                        for (int i = 0; i <= repeat; i++) {
+                            MainActivity.runCmds();
+                            Thread.sleep(pause);
+                        }
+                        GlobalVars.running = 0;
+                    } catch (InterruptedException e) {
+                        GlobalVars.running = 0;
+                        throw new RuntimeException(e);
+                    }
+//                result.setResultCode(0);
+//                result.finish();
+                }
+            };
+            thread.start();
         }
     }
 

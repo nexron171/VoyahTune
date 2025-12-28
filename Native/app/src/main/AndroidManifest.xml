@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+
+    <permission
+        android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE"
+        android:protectionLevel="signature" />
+
     <queries>
         <provider
             android:authorities="ru.big.town.restoremode.restoremodecontentprovider" />
@@ -14,10 +19,7 @@
     <uses-permission android:name="android.car.permission.READ_CAR_POWER_POLICY" />
     <uses-permission android:name="android.car.permission.CAR_POWER" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission
         android:name="android.permission.REBOOT"
@@ -29,7 +31,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -75,6 +76,7 @@
         android:required="false" />
 
     <application
+        android:name=".Anative"
         android:allowBackup="true"
         android:appCategory="audio"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -84,7 +86,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Native"
-        tools:targetApi="31">
+        tools:targetApi="31"
+        >
 
         <service
             android:name=".SetModesService"
@@ -92,11 +95,9 @@
             android:enabled="true"
             android:exported="true"
             android:foregroundServiceType="shortService"
-            android:permission="android.permission.BIND_JOB_SERVICE">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="explanation_for_special_use" />
-        </service>
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE"
+            />
+
 
         <receiver
             android:name=".SetModesReceiver"

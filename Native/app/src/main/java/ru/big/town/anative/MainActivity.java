@@ -1,6 +1,7 @@
 package ru.big.town.anative;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -217,9 +218,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void onButtonClick(View v){
-        initValueModes(getApplicationContext());
-        runCmds();
-       // isAppInForeground(getApplicationContext(),  "com.qinggan.canbus.service")
+        Log.i("$$$ MainActivity click $$$","");
+//                IntentFilter filter = new IntentFilter();
+//        filter.addAction("android.os.action.POWER_SAVE_MODE_CHANGED");
+//        filter.addAction("android.intent.action.SCREEN_ON");
+//        filter.addAction("com.android.server.jobscheduler.GARAGE_MODE_OFF");
+//        filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES");
+//        filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER");
+//
+//        // Register receiver with filter
+//        BroadcastReceiver setModesReceiver = new SetModesReceiver();
+//
+//        LocalBroadcastManager.getInstance(this).registerReceiver(setModesReceiver, filter);
+        //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
+        SetModesReceiver.worker(2);
+        //initValueModes(getApplicationContext());
+        //runCmds();
    }
 
 

@@ -1,4 +1,4 @@
-import com.android.build.gradle.internal.dependency.isProguardRule
+//import com.android.build.gradle.internal.dependency.isProguardRule
 
 plugins {
     alias(libs.plugins.android.application)
