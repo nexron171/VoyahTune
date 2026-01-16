@@ -51,6 +51,12 @@ public class SetModesReceiver extends BroadcastReceiver {
                             MainActivity.runCmds();
                             Thread.sleep(3500);
                         }
+                        for (int i = 1; i <= MainActivity.customCommandCount; i++) {
+                            MainActivity.setCanValues(1,MainActivity.getCustomCommand());
+                            Thread.sleep(3500);
+                            Log.i("$$$ SetModesReceiver $$$", " Run customCommand");
+                        }
+
                         GlobalVars.running = 0;
                     } catch (InterruptedException e) {
                         GlobalVars.running = 0;
@@ -79,6 +85,13 @@ public class SetModesReceiver extends BroadcastReceiver {
                             MainActivity.runCmds();
                             Thread.sleep(pause);
                         }
+
+                        for (int i = 1; i <= MainActivity.customCommandCount; i++) {
+                            MainActivity.setCanValues(1,MainActivity.getCustomCommand());
+                            Thread.sleep(pause);
+                            Log.i("$$$ SetModesReceiver $$$", " Run customCommand");
+                        }
+
                         GlobalVars.running = 0;
                     } catch (InterruptedException e) {
                         GlobalVars.running = 0;

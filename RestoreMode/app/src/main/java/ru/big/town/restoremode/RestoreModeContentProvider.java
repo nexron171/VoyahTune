@@ -14,6 +14,8 @@ public class RestoreModeContentProvider extends ContentProvider {
     private String driveMode="INDIVIDUAL";
     private String energy="SREV";
     private  String recycle="LOW";
+    private  String customCommand="";
+    private  int customCommandCount=1;
     public RestoreModeContentProvider() {
     }
 
@@ -47,14 +49,21 @@ public class RestoreModeContentProvider extends ContentProvider {
         driveMode = sharedPreferences.getString("driveMode", "INDIVIDUAL");
         energy = sharedPreferences.getString("energy", "SREV");
         recycle = sharedPreferences.getString("recycle", "LOW");
+        customCommand = sharedPreferences.getString("customCommand", "");
+        customCommandCount = sharedPreferences.getInt("customCommandCount", 1);
+
+
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",
                 "energy",
-                "recycle"
+                "recycle",
+                "customCommand",
+                "customCommandCount",
+
         });
 
-        cursor.addRow(new Object[]{driveMode,energy,recycle});
+        cursor.addRow(new Object[]{driveMode,energy,recycle,customCommand,customCommandCount});
        return cursor;
 
     }

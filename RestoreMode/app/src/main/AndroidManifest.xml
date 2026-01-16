@@ -2,9 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
-
 
     <queries>
         <package android:name="ru.big.town.restoremode" />
@@ -20,11 +19,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RestoreMode"
         tools:targetApi="31">
+        <activity
+            android:name=".AdvanceActivity"
+            android:exported="false" />
+
         <provider
             android:name=".RestoreModeContentProvider"
             android:authorities="ru.big.town.restoremode.restoremodecontentprovider"
             android:enabled="true"
-            android:exported="true"></provider>
+            android:exported="true" />
 
         <activity
             android:name=".MainActivity"

@@ -33,6 +33,8 @@ public class MainActivity extends AppCompatActivity {
     private static String driveMode="INDIVIDUAL";
     private static String energy="SREV";
     private static String recycle="LOW";
+    private static String customCommand="";
+    public static int customCommandCount=1;
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes){
         for(byte[] b: bytes){
@@ -90,7 +92,7 @@ public class MainActivity extends AppCompatActivity {
             cmdsBytes[indexCmd] = parseHexBinary(cmd);
             indexCmd++;
         }
-        printBytesArrayToLog("$$$  MAIN $$$",cmdsBytes);
+        printBytesArrayToLog("$$$  MAIN arraysStr2arraysBytes $$$",cmdsBytes);
         return cmdsBytes;
     }
     //-------------- Вспомогательная шляпа не паримся ---------------------
@@ -105,6 +107,11 @@ public class MainActivity extends AppCompatActivity {
 
     private ActivityMainBinding binding;
     //------------- Метод получения команд CAN режимов энергии  -------------------------------------
+    public static byte[][] getCustomCommand(){
+        if(customCommand=="") return new byte[][]{{}};
+        String[] cmds = customCommand.split("\n");
+        return arraysStr2arraysBytes(cmds);
+    }
     public static byte[][] getEnergyCanCommand(String mode){
         Bundle energyMode = new Bundle();
         energyMode.putStringArray("Smart", new String[]{"68 08 03 00 00 f0 2c 14 18 00"});
@@ -190,8 +197,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public static void setCanValues(int cmdNum, byte[][] cmds){
+        //printBytesArrayToLog("$$$ MAIN setCanValues $$$",cmds);
         for(byte[] cmd: cmds) {
-            cis_can_control_bytes(cmdNum, cmd);
+            if(cmd.length==10) cis_can_control_bytes(cmdNum, cmd);
         }
     }
     public static void initValueModes(Context context){
@@ -205,6 +213,8 @@ public class MainActivity extends AppCompatActivity {
             driveMode = cursor.getString(0);
             energy = cursor.getString(1);
             recycle = cursor.getString(2);
+            customCommand = cursor.getString(3);
+            customCommandCount = cursor.getInt(4);
         } else {
             Log.w("$$$ MainActivity initValueModes", "Content provider not found");
         }

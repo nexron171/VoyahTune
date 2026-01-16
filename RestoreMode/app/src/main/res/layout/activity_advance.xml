@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="1920dp"
+    android:layout_height="720dp"
+    tools:context=".AdvanceActivity">
+
+    <GridLayout
+        android:layout_width="1920dp"
+        android:layout_height="720dp"
+        android:animateLayoutChanges="true"
+        android:background="@drawable/layout_category_bg_noround"
+        android:columnCount="3"
+        android:padding="30dp"
+        android:rowCount="2">
+
+        <TextView
+            android:id="@+id/TextWarn"
+            android:layout_width="1000dp"
+            android:layout_height="500dp"
+            android:text="@string/can_n_n_https_www_drive2_ru_l_707392522158091462_n_10"
+            android:textColor="#ff0000"
+            android:textSize="26px" />
+
+        <EditText
+            android:id="@+id/rawCanCodes"
+            android:layout_height="500dp"
+            android:layout_columnSpan="2"
+            android:background="#ffffff"
+            android:ems="17"
+            android:fontFamily="monospace"
+            android:gravity="clip_vertical"
+            android:text="1f 08 00 04 ff f8 00 01 01 7f\n"
+            android:textColor="#909090"
+            android:textSize="36px" />
+
+        <Button
+            android:id="@+id/buttonBack"
+            android:layout_width="wrap_content"
+            android:layout_height="70dp"
+            android:layout_margin="30dp"
+            android:layout_marginHorizontal="20dp"
+            android:layout_marginStart="30dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickFinish"
+            android:paddingTop="0dp"
+            android:text="Назад"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp"
+            app:cornerRadius="20dp" />
+
+        <Button
+            android:id="@+id/buttonClean"
+            android:layout_width="wrap_content"
+            android:layout_height="70dp"
+            android:layout_row="1"
+            android:layout_column="2"
+            android:layout_gravity="left"
+            android:layout_margin="30dp"
+            android:layout_marginHorizontal="20dp"
+            android:layout_marginStart="30dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickClean"
+            android:paddingTop="0dp"
+            android:text="Очистить"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp"
+            app:cornerRadius="20dp" />
+
+        <NumberPicker
+            android:id="@+id/pickerCustomCommandCount"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:layout_row="1"
+            android:layout_column="1"
+            android:layout_gravity="end"
+            android:layout_marginStart="300dp"
+            android:orientation="horizontal"
+            android:outlineAmbientShadowColor="#C14A24"
+            android:outlineSpotShadowColor="#8BC34A" />
+
+        <TextView
+            android:id="@+id/textView"
+            android:layout_width="wrap_content"
+            android:layout_height="62dp"
+            android:layout_row="1"
+            android:layout_column="1"
+            android:layout_gravity="left"
+            android:layout_margin="30dp"
+            android:text="Повторы"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp" />
+
+
+    </GridLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

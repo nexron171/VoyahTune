@@ -34,14 +34,36 @@ public class MainActivity extends AppCompatActivity {
     private String driveMode="INDIVIDUAL";
     private String energy="SREV";
     private  String recycle="LOW";
+    private String customCommand="";
+    private int customCommandCount=1;
 
     private SharedPreferences sharedPreferences;
-
     private Messenger serviceMessenger;
     private boolean isBound;
     static final int MSG_RESULT = 4;
     static final int MSG_ALLPY_DRIVE_MODES = 1;
+    static final int REQUEST_CODE=1;
 
+    private Intent resultIntent=null;
+    private SharedPreferences.Editor editor=null;
+
+
+    // Handling result
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_CODE && resultCode == RESULT_OK) {
+            Log.i("onActivityResult",String.format("requestCode - %d resultCode - %d data %s",requestCode,resultCode,data.toString()));
+
+            customCommand = data.getStringExtra("customCommand");
+            customCommandCount = data.getIntExtra("customCommandCount",1);
+            Log.i("onActivityResult",String.format("customCommand - %s customCommandCount - %d ",customCommand, customCommandCount));
+
+            editor.putString("customCommand", customCommand);
+            editor.putInt("customCommandCount", customCommandCount);
+            editor.apply();
+        }
+    }
 
     class IncomingHandler extends Handler {
         @Override
@@ -140,10 +162,25 @@ public class MainActivity extends AppCompatActivity {
         radioGroupDriveModes = findViewById(R.id.recycle_modes_group);
         radioGroupDriveModes.setOnCheckedChangeListener(powerModeListener());
 
+        sharedPreferences = getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
+
+        if(sharedPreferences==null){
+            Log.w("###$$$$$","PIZDEC");} else {Log.w("###$$$$$","HUYNY");}
+
+        editor = sharedPreferences.edit();
+
         getModes();
         initRadioButonDriveMode(driveMode);
         initRadioButonEnergy(energy);
         initRadioButonRecycle(recycle);
+        initIntent();
+    }
+    public void initIntent(){
+        if(resultIntent==null){
+            resultIntent = new Intent(this, AdvanceActivity.class);
+        }
+        resultIntent.putExtra("customCommand", customCommand);
+        resultIntent.putExtra("customCommandCount", customCommandCount);
     }
     public void initRadioButonDriveMode(String driveMode){
         switch (driveMode) {
@@ -198,6 +235,7 @@ public class MainActivity extends AppCompatActivity {
                 break;
         }
     }
+
     private void getModes(){
 
         Cursor cursor = getContentResolver().query(Uri
@@ -209,11 +247,16 @@ public class MainActivity extends AppCompatActivity {
             driveMode=cursor.getString(0);
             energy=cursor.getString(1);
             recycle=cursor.getString(2);
+            customCommand=cursor.getString(3);
+            customCommandCount=cursor.getInt(4);
 
-            Log.i("$$$ Restore Mode on Create $$$", "Query Result:" +
+
+            Log.i("$$$ getModes() $$$", "Query Result:" +
                     "\ndriveMode: " + driveMode +
                     "\nenergy: " + energy +
-                    "\nrecycle: " + recycle
+                    "\nrecycle: " + recycle +
+                    "\ncustomCommand: " + customCommand +
+                    "\ncustomCommandCount: " + customCommandCount
             );
         }
         cursor.close();    }
@@ -221,12 +264,6 @@ public class MainActivity extends AppCompatActivity {
         return new RadioGroup.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(RadioGroup group, int checkedId) {
-                sharedPreferences = getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
-
-                if(sharedPreferences==null){
-                    Log.w("###$$$$$","PIZDEC");} else {Log.w("###$$$$$","HUYNY");}
-
-                SharedPreferences.Editor editor = sharedPreferences.edit();
 
                 RadioButton radioButton = findViewById(checkedId);
                 if(group.getId() == R.id.drive_modes_group) {
@@ -265,6 +302,14 @@ public class MainActivity extends AppCompatActivity {
     }
     public void onButtonClickClose(View v){
         finish();
+    }
+
+    public void onButtonClickAdvance(View v){
+        //startActivity(new Intent(this, AdvanceActivity.class));
+        getModes();
+        initIntent();
+        Log.i("$$$ Main onButtonClickAdvance $$$$", String.format("%s %d", customCommand, customCommandCount));
+        startActivityForResult(resultIntent,REQUEST_CODE);
     }
 
     @Override

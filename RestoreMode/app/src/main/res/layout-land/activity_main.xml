@@ -287,6 +287,21 @@
                 android:textColor="#FFFFFF"
                 android:textSize="40dp"
                 app:cornerRadius="20dp" />
+
+            <Button
+                android:id="@+id/buttonAdvance"
+                android:layout_width="wrap_content"
+                android:layout_height="70dp"
+                android:layout_gravity="end"
+                android:layout_marginStart="795dp"
+                android:backgroundTint="#373f4a"
+                android:gravity="center"
+                android:onClick="onButtonClickAdvance"
+                android:paddingTop="0dp"
+                android:text="Дополнительно"
+                android:textColor="#FFFFFF"
+                android:textSize="40dp"
+                app:cornerRadius="20dp" />
         </LinearLayout>
 
     </LinearLayout>

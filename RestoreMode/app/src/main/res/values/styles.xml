@@ -18,4 +18,7 @@
         <item name="android:layout_height">70dp</item>
         <item name="android:layout_marginTop">25dp</item>
     </style>
+    <style name="NumberPickerTextColorStyle">
+        <item name="android:textColorPrimary">#ffffff</item>
+    </style>
 </resources>
