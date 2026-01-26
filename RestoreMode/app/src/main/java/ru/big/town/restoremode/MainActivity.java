@@ -1,6 +1,9 @@
 package ru.big.town.restoremode;
 
 
+import static android.view.View.GONE;
+import static android.view.View.VISIBLE;
+
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -18,6 +21,7 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.CheckBox;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.Toast;
@@ -47,6 +51,7 @@ public class MainActivity extends AppCompatActivity {
     private Intent resultIntent=null;
     private SharedPreferences.Editor editor=null;
 
+    private CheckBox checkBox34 = null;
 
     // Handling result
     @Override
@@ -164,10 +169,15 @@ public class MainActivity extends AppCompatActivity {
 
         sharedPreferences = getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
 
+        checkBox34 = findViewById(R.id.checkBox34);
+
+
         if(sharedPreferences==null){
             Log.w("###$$$$$","PIZDEC");} else {Log.w("###$$$$$","HUYNY");}
 
         editor = sharedPreferences.edit();
+
+        initCheckBox34();
 
         getModes();
         initRadioButonDriveMode(driveMode);
@@ -324,11 +334,41 @@ public class MainActivity extends AppCompatActivity {
 //            }
 //        }
 
+
         super.onDestroy();
         if (isBound) {
             unbindService(connection);
             isBound = false;
         }
     }
+
+    private void initCheckBox34(){
+        boolean checkBox34State=sharedPreferences.getBoolean("checkBox34", false);
+        checkBox34.setChecked(checkBox34State);
+        Log.i("$$$ initCheckBox34 $$$", checkBox34.isChecked()?"true":"false");
+        setCheckBox34State();
+        Log.i("$$$ 2 initCheckBox34 $$$", checkBox34State?"true":"false");
+
+    }
+    public void onCheckBox34Click(View v){
+        setCheckBox34State();
+    }
+    public void setCheckBox34State(){
+
+        RadioButton smart = findViewById(R.id.SMART);
+
+        if(checkBox34.isChecked()){
+            smart.setVisibility(GONE);
+            checkBox34.setText("4 кнопки");
+            editor.putBoolean("checkBox34",true);
+        } else {
+            smart.setVisibility(VISIBLE);
+            checkBox34.setText("3 кнопки");
+            editor.putBoolean("checkBox34",false);
+        }
+        editor.commit();
+        Log.i("$$$ onCheckBox34Click $$$", checkBox34.isChecked()?"true":"false");
+    }
+
 }
 

@@ -65,6 +65,17 @@ public class AdvanceActivity extends AppCompatActivity {
                 Log.i("$$$ Advance Create $$$$", String.format("%s %d", customCommand, customCommandCount));
                 // Do something with the data
             }
+        canCommansEditor.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                if (hasFocus) {
+                    Log.i("$$$ setOnFocusChangeListener $$$$", "FOCUS ON");
+                } else {
+                    Log.i("$$$ setOnFocusChangeListener $$$$", "FOCUS OFF");
+
+                }
+            }
+        });
 
 
         canCommansEditor.addTextChangedListener(new TextWatcher() {
@@ -123,6 +134,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
             }
         });
+
 
     }
 }
