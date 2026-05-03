@@ -43,6 +43,7 @@
 
     <queries>
         <provider android:authorities="ru.big.town.restoremode.restoremodecontentprovider" />
+        <package android:name="com.qinggan.carsignal.service" />
     </queries>
 
     <uses-permission android:name="android.permission.CAR_POWER" />
@@ -54,12 +55,12 @@
 
     <uses-permission android:name="android.car.permission.READ_CAR_POWER_POLICY" />
     <uses-permission android:name="android.car.permission.CAR_POWER" />
+    <uses-permission android:name="android.car.permission.CAR_EXTERIOR_LIGHTS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission
         android:name="android.permission.DEVICE_POWER"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -75,7 +76,6 @@
         android:maxSdkVersion="21" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.QUICKBOOT_POWERON" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
@@ -94,12 +94,6 @@
         android:largeScreens="true"
         android:normalScreens="true" />
 
-    <uses-feature
-        android:name="android.hardware.location.network"
-        android:required="false" />
-    <uses-feature
-        android:name="android.hardware.location.gps"
-        android:required="false" />
     <uses-feature
         android:name="android.hardware.wifi"
         android:required="false" />
@@ -128,6 +122,12 @@
             android:exported="true"
             android:foregroundServiceType="shortService"
             android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+
+        <service
+            android:name=".LightSensorService"
+            android:enabled="true"
+            android:exported="false"
+            />
 
         <receiver
             android:name=".SetModesReceiverStatic"

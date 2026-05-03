@@ -50,7 +50,7 @@ dependencies {
     implementation(libs.constraintlayout)
     implementation(libs.legacy.support.v4)
     implementation(libs.legacy.support.v13)
-    implementation(files("/home/big/AndroidStudioProjects/Native/app/lib/android.car.jar"))
+    implementation(files("lib/android.car.jar"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)

@@ -9,8 +9,10 @@ import android.car.VehiclePropertyIds;
 import android.car.hardware.CarPropertyConfig;
 import android.car.hardware.CarPropertyValue;
 import android.car.hardware.property.CarPropertyManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -28,13 +30,16 @@ import java.util.List;
 public class SetModesService extends Service {
 
     private Messenger clientMessenger;
-    static final int MSG_APPLY_DRIVE_MODES = 1;
+    static final int MSG_APPLY_DRIVE_MODES          = 1;
     static final int MSG_APPLY_DRIVE_MODES_STAR_BUTTON = 2;
-    static final int MSG_RESULT = 4;
-    static final int STATE_ON = 6;
-    static final int STATE_SHUTDOWN_PREPARE = 7;
+    static final int MSG_RESULT                     = 4;
+    static final int STATE_ON                       = 6;
+    static final int STATE_SHUTDOWN_PREPARE         = 7;
+    static final int MSG_AUTO_LIGHT_ENABLE          = 10; // включить автосвет
+    static final int MSG_AUTO_LIGHT_DISABLE         = 11; // выключить автосвет
     static final String TAG = "$$$ SetModesService $$$";
-        class IncomingHandler extends Handler {
+
+    class IncomingHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
@@ -49,12 +54,8 @@ public class SetModesService extends Service {
                     }
                     break;
                 case MSG_APPLY_DRIVE_MODES_STAR_BUTTON:
-//                    CarPropertyValue<Integer> gear = mCarPropertyManager.getProperty(
-//                            VehiclePropertyIds.GEAR_SELECTION, 1);
-//                    Log.i(TAG,"###############" + gear.toString());
                     clientMessenger = msg.replyTo;
                     worker(1, 100, MSG_APPLY_DRIVE_MODES_STAR_BUTTON, msg.arg1);
-
                     Log.i(TAG, "handleMessage() MSG_APPLY_DRIVE_MODES_STAR_BUTTON");
                     try {
                         clientMessenger.send(Message.obtain(null, MSG_RESULT));
@@ -62,11 +63,53 @@ public class SetModesService extends Service {
                         throw new RuntimeException(e);
                     }
                     break;
+
+                case MSG_AUTO_LIGHT_ENABLE:
+                    Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_ENABLE");
+                    saveAutoLightState(true);
+                    startLightSensorService();
+                    break;
+
+                case MSG_AUTO_LIGHT_DISABLE:
+                    Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_DISABLE");
+                    saveAutoLightState(false);
+                    stopLightSensorService();
+                    break;
+
                 default:
-                    //Log.i(TAG, "handleMessage() default - " + String.format("%d",msg.what));
+                    Log.i(TAG, "handleMessage() default");
                     super.handleMessage(msg);
             }
         }
+    }
+
+    private SharedPreferences prefs() {
+        return getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+    }
+
+    private void saveAutoLightState(boolean enabled) {
+        prefs().edit().putBoolean("autoLight", enabled).apply();
+        Log.i(TAG, "saveAutoLightState: " + enabled);
+    }
+
+    private void restoreAutoLightState() {
+        boolean autoLight = prefs().getBoolean("autoLight", false);
+        Log.i(TAG, "restoreAutoLightState: autoLight=" + autoLight);
+        if (autoLight) {
+            startLightSensorService();
+        }
+    }
+
+    private void startLightSensorService() {
+        Intent intent = new Intent(this, LightSensorService.class);
+        startForegroundService(intent);
+        Log.i(TAG, "LightSensorService started");
+    }
+
+    private void stopLightSensorService() {
+        Intent intent = new Intent(this, LightSensorService.class);
+        stopService(intent);
+        Log.i(TAG, "LightSensorService stopped");
     }
 
     //private boolean isWorking = false;
@@ -80,9 +123,8 @@ public class SetModesService extends Service {
         Log.i(TAG, "onCreate()");
         super.onCreate();
         initializeCarPowerManager();
-
         setModesReceiverDynamic = new SetModesReceiverDynamic();
-        Log.i(TAG, "onCreateEd");
+        Log.i(TAG, "onCreated");
     }
 
 
@@ -149,18 +191,24 @@ public class SetModesService extends Service {
             GlobalVars.mCarPowerManager = (CarPowerManager) mCar.getCarManager(Car.POWER_SERVICE);
 
             if (GlobalVars.mCarPowerManager != null) {
-                // Create executor for listener callbacks
-                //mExecutor = Executors.newSingleThreadExecutor();
-
-                // Register the power state listener
-                GlobalVars.mCarPowerManager.setListener(mPowerStateListener);
-                Log.i(TAG, "CarPowerStateListener registered successfully");
+                registerPowerStateListener();
             } else {
                 Log.e(TAG, "Failed to get CarPowerManager");
             }
         } catch (Exception e) {
             GlobalVars.mCarPowerManager = null;
             Log.e(TAG, "Error initializing CarPowerManager", e);
+        }
+    }
+
+    private void registerPowerStateListener() {
+        try {
+            GlobalVars.mCarPowerManager.setListener(mPowerStateListener);
+            Log.i(TAG, "CarPowerStateListener registered");
+        } catch (NoSuchMethodError e) {
+            Log.w(TAG, "setListener(Listener) not available on this platform, skipping");
+        } catch (Throwable e) {
+            Log.e(TAG, "setListener failed: " + e.getMessage());
         }
     }
 
@@ -210,7 +258,9 @@ public class SetModesService extends Service {
             // Первый вызов после старта сервиса
             Log.i(TAG, "onStartCommand() first run!");
             //   isWorking = true;
-        //}
+
+            // Восстанавливаем состояние автосвета
+            restoreAutoLightState();
         //if(action.equals("ru.big.town.anative.APPLY_DRIVE_MODES")){
         //  Log.i(TAG, "onStartCommand() Intent is ru.big.town.anative.APPLY_DRIVE_MODES!");
         //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
@@ -243,8 +293,14 @@ public class SetModesService extends Service {
         getApplicationContext().unregisterReceiver(setModesReceiverDynamic);
         // Clean up resources
         if (GlobalVars.mCarPowerManager != null) {
-            GlobalVars.mCarPowerManager.clearListener();
-            Log.i(TAG, "CarPowerStateListener unregistered");
+            try {
+                GlobalVars.mCarPowerManager.clearListener();
+                Log.i(TAG, "CarPowerStateListener unregistered");
+            } catch (NoSuchMethodError e) {
+                Log.w(TAG, "clearListener() not available on this platform");
+            } catch (Exception e) {
+                Log.w(TAG, "clearListener() failed: " + e.getMessage());
+            }
         }
 
         if (mCar != null) {

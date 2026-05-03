@@ -1,5 +1,6 @@
 <resources>
-    <string name="app_name">RestoreMode</string>
+    <string name="app_name">VoyahTune</string>
+
     <string name="activity_advance_text">
         Эти команды будут выполнены при снятии с охраны\n
         ВНИМАНИЕ! Эти команды будут посланы в CAN-шину\n
