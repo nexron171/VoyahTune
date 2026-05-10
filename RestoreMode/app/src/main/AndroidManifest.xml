@@ -20,6 +20,9 @@
         android:theme="@style/Theme.RestoreMode"
         tools:targetApi="31">
         <activity
+            android:name=".AdvanceActivityStarButton"
+            android:exported="false" />
+        <activity
             android:name=".AdvanceActivity"
             android:exported="false" />
 

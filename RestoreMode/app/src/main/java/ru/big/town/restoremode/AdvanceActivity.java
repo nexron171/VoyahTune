@@ -22,18 +22,18 @@ import java.util.List;
 
 
 public class AdvanceActivity extends AppCompatActivity {
-    private EditText canCommansEditor;
+    private EditText canCommandEditor;
     private Button buttonBack;
     private NumberPicker pickerCustomCommandCount;
     public void onButtonClickFinish(View v){
         Intent intent = new Intent();
-                intent.putExtra("customCommand", canCommansEditor.getText().toString());
+                intent.putExtra("customCommand", canCommandEditor.getText().toString());
                 intent.putExtra("customCommandCount", pickerCustomCommandCount.getValue());
         setResult(RESULT_OK, intent);
         finish();
     }
     public void onButtonClickClean(View v){
-        canCommansEditor.setText("");
+        canCommandEditor.setText("");
     }
 
     @Override
@@ -46,7 +46,7 @@ public class AdvanceActivity extends AppCompatActivity {
 //            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
 //            return insets;
 //        });
-        canCommansEditor = findViewById(R.id.rawCanCodes);
+        canCommandEditor = findViewById(R.id.rawCanCodes);
         buttonBack = findViewById(R.id.buttonBack);
         pickerCustomCommandCount = findViewById(R.id.pickerCustomCommandCount);
         pickerCustomCommandCount.setMaxValue(10);
@@ -60,12 +60,12 @@ public class AdvanceActivity extends AppCompatActivity {
                 // Extract data from the intent
                 String customCommand = intent.getStringExtra("customCommand");
                 int customCommandCount = intent.getIntExtra("customCommandCount",1);
-                canCommansEditor.setText(customCommand);
+                canCommandEditor.setText(customCommand);
                 pickerCustomCommandCount.setValue(customCommandCount);
                 Log.i("$$$ Advance Create $$$$", String.format("%s %d", customCommand, customCommandCount));
                 // Do something with the data
             }
-        canCommansEditor.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+        canCommandEditor.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (hasFocus) {
@@ -78,7 +78,7 @@ public class AdvanceActivity extends AppCompatActivity {
         });
 
 
-        canCommansEditor.addTextChangedListener(new TextWatcher() {
+        canCommandEditor.addTextChangedListener(new TextWatcher() {
             private boolean isFormatting = false;
 
             @Override
@@ -112,19 +112,19 @@ public class AdvanceActivity extends AppCompatActivity {
                 Log.i("$$$ LENGTH formatted.length $$$ ",String.format("%d",formatted.length()));
 
                 if(formatted.length() % 31 == 0){
-                    canCommansEditor.setBackgroundColor(Color.WHITE);
+                    canCommandEditor.setBackgroundColor(Color.WHITE);
                     buttonBack.setEnabled(true);
                     buttonBack.setTextColor(Color.WHITE);
                 } else {
-                    canCommansEditor.setBackgroundColor(0xffffafaf);
+                    canCommandEditor.setBackgroundColor(0xffffafaf);
                     buttonBack.setEnabled(false);
                     buttonBack.setTextColor(Color.GRAY);
                 }
 
-                canCommansEditor.removeTextChangedListener(this);
-                    canCommansEditor.setText(formatted.toString());
-                    canCommansEditor.setSelection(formatted.length());
-                    canCommansEditor.addTextChangedListener(this);
+                canCommandEditor.removeTextChangedListener(this);
+                    canCommandEditor.setText(formatted.toString());
+                    canCommandEditor.setSelection(formatted.length());
+                    canCommandEditor.addTextChangedListener(this);
                     isFormatting = false;
             }
 

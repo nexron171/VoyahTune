@@ -22,7 +22,7 @@
             android:layout_height="500dp"
             android:layout_row="1"
             android:layout_column="0"
-            android:text="@string/can_n_n_https_www_drive2_ru_l_707392522158091462_n_10"
+            android:text="@string/activity_advance_text"
             android:textColor="#ff0000"
             android:textSize="26px" />
 
@@ -58,7 +58,7 @@
             app:cornerRadius="20dp" />
 
         <Button
-            android:id="@+id/buttonClean"
+            android:id="@+id/buttonCleanOff"
             android:layout_width="wrap_content"
             android:layout_height="70dp"
             android:layout_row="0"

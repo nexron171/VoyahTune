@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/mainStarButton"
+    android:layout_width="1920dp"
+    android:layout_height="720dp"
+    tools:context=".AdvanceActivityStarButton">
+
+    <GridLayout
+        android:layout_width="1920dp"
+        android:layout_height="720dp"
+        android:animateLayoutChanges="true"
+        android:background="@drawable/layout_category_bg_noround"
+        android:columnCount="3"
+        android:padding="30dp"
+        android:rowCount="2">
+
+        <Button
+            android:id="@+id/buttonBackStarButton"
+            android:layout_width="260dp"
+            android:layout_height="70dp"
+            android:layout_row="1"
+            android:layout_column="0"
+            android:layout_marginStart="20dp"
+            android:layout_marginEnd="20dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickBackStarButton"
+            android:paddingTop="0dp"
+            android:text="Назад"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp"
+            app:cornerRadius="20dp" />
+
+        <Button
+            android:id="@+id/buttonSaveStarButton"
+            android:layout_width="260dp"
+            android:layout_height="70dp"
+            android:layout_row="1"
+            android:layout_column="0"
+            android:layout_marginStart="20dp"
+            android:layout_marginTop="100dp"
+            android:layout_marginEnd="20dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickSaveStarButton"
+            android:paddingTop="0dp"
+            android:text="Сохранить"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp"
+            app:cornerRadius="20dp" />
+        <!-- 0 1 -->
+        <Button
+            android:id="@+id/buttonApplyStarButton1"
+            android:layout_width="wrap_content"
+            android:layout_height="70dp"
+            android:layout_row="0"
+            android:layout_column="1"
+            android:layout_margin="10dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickApplyStarButton1"
+            android:paddingTop="0dp"
+            android:text="Выполнить"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp"
+            app:cornerRadius="20dp" />
+
+        <Button
+            android:layout_margin="10dp"
+            android:layout_marginLeft="300dp"
+            android:id="@+id/buttonCleanStarButton1"
+            android:layout_width="wrap_content"
+            android:layout_height="70dp"
+            android:layout_row="0"
+            android:layout_column="1"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickCleanStarButton1"
+            android:paddingTop="0dp"
+            android:text="Очистить"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp"
+            app:cornerRadius="20dp" />
+        <!-- 0 2 -->
+        <Button
+            android:id="@+id/buttonApplyStarButton2"
+            android:layout_width="wrap_content"
+            android:layout_height="70dp"
+            android:layout_row="0"
+            android:layout_column="2"
+            android:layout_margin="10dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickApplyStarButton2"
+            android:paddingTop="0dp"
+            android:text="Выполнить"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp"
+            app:cornerRadius="20dp" />
+
+        <Button
+            android:layout_margin="10dp"
+            android:layout_marginLeft="300dp"
+            android:id="@+id/buttonCleanStarButton2"
+            android:layout_width="wrap_content"
+            android:layout_height="70dp"
+            android:layout_row="0"
+            android:layout_column="2"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickCleanStarButton2"
+            android:paddingTop="0dp"
+            android:text="Очистить"
+            android:textColor="#FFFFFF"
+            android:textSize="40dp"
+            app:cornerRadius="20dp" />
+
+
+
+        <EditText
+            android:layout_margin="10dp"
+            android:id="@+id/rawCanCodesStarButton1"
+            android:layout_width="wrap_content"
+            android:layout_height="500dp"
+            android:layout_row="1"
+            android:layout_column="1"
+            android:background="#ffffff"
+            android:ems="17"
+            android:fontFamily="monospace"
+            android:gravity="clip_vertical"
+            android:textColor="#909090"
+            android:textSize="36px" />
+
+        <EditText
+            android:layout_margin="10dp"
+            android:id="@+id/rawCanCodesStarButton2"
+            android:layout_width="wrap_content"
+            android:layout_height="500dp"
+            android:layout_row="1"
+            android:layout_column="2"
+            android:background="#ffffff"
+            android:ems="17"
+            android:fontFamily="monospace"
+            android:gravity="clip_vertical"
+            android:textColor="#909090"
+            android:textSize="36px" />
+
+    </GridLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

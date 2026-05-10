@@ -193,6 +193,8 @@
             android:gravity="fill_horizontal"
             android:orientation="horizontal"
             android:layout_weight="1"
+            android:layout_margin="0dp"
+            android:padding="0dp"
             >
 
             <TextView
@@ -214,7 +216,7 @@
             <CheckBox
                 android:id="@+id/checkBox34"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="28dp"
                 android:layout_marginEnd="30dp"
                 android:onClick="onCheckBox34Click"
                 android:text="3 кнопки"
@@ -316,15 +318,35 @@
                 android:textSize="40dp"
                 app:cornerRadius="20dp" />
 
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
             <Button
                 android:id="@+id/buttonAdvance"
-                android:layout_width="370dp"
+                android:layout_width="380dp"
                 android:layout_height="70dp"
+                android:layout_marginHorizontal="20dp"
                 android:backgroundTint="#373f4a"
                 android:gravity="center"
                 android:onClick="onButtonClickAdvance"
                 android:paddingTop="0dp"
                 android:text="Дополнительно"
+                android:textColor="#FFFFFF"
+                android:textSize="40dp"
+                app:cornerRadius="20dp" />
+
+            <Button
+                android:id="@+id/buttonAdvanceOff"
+                android:layout_width="wrap_content"
+                android:layout_height="70dp"
+                android:layout_marginEnd="50dp"
+                android:backgroundTint="#373f4a"
+                android:gravity="center"
+                android:onClick="onButtonClickAdvanceStarButton"
+                android:paddingTop="0dp"
+                android:text="На кнопку"
                 android:textColor="#FFFFFF"
                 android:textSize="40dp"
                 app:cornerRadius="20dp" />

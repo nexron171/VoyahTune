@@ -1,5 +1,5 @@
 #dumpsys activity broadcasts
-dumpsys activity broadcasts history
+adb shell dumpsys activity broadcasts history
 
 #statuc
 #adb shell dumpsys activity b

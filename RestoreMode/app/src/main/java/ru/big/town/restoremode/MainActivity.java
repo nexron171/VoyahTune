@@ -24,34 +24,37 @@ import android.view.WindowManager;
 import android.widget.CheckBox;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
-import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
-import androidx.appcompat.app.AppCompatActivity;
+
 
 public class MainActivity extends AppCompatActivity {
     private RadioGroup radioGroupDriveModes, radioGroupEnergy, RadioGroupRecyles;
     private String driveMode="INDIVIDUAL";
     private String energy="SREV";
     private  String recycle="LOW";
-    private String customCommand="";
-    private int customCommandCount=1;
+    private String StarButton="";
+    private int StarButtonCount=1;
+
+    private String StarButtonStarButton1="";
+    private String StarButtonStarButton2="";
 
     private SharedPreferences sharedPreferences;
-    private Messenger serviceMessenger;
-    private boolean isBound;
+    //private boolean isBound;
     static final int MSG_RESULT = 4;
-    static final int MSG_ALLPY_DRIVE_MODES = 1;
+    static final int MSG_APPLY_DRIVE_MODES = 1;
     static final int REQUEST_CODE=1;
-
     private Intent resultIntent=null;
+    private Intent resultIntentStarButton=null;
     private SharedPreferences.Editor editor=null;
-
     private CheckBox checkBox34 = null;
+
+    static final String TAG = "$$$ MainActivityRestoreMode $$$";
+
 
     // Handling result
     @Override
@@ -60,12 +63,12 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == REQUEST_CODE && resultCode == RESULT_OK) {
             Log.i("onActivityResult",String.format("requestCode - %d resultCode - %d data %s",requestCode,resultCode,data.toString()));
 
-            customCommand = data.getStringExtra("customCommand");
-            customCommandCount = data.getIntExtra("customCommandCount",1);
-            Log.i("onActivityResult",String.format("customCommand - %s customCommandCount - %d ",customCommand, customCommandCount));
+            StarButton = data.getStringExtra("StarButton");
+            StarButtonCount = data.getIntExtra("StarButtonCount",1);
+            Log.i("onActivityResult",String.format("StarButton - %s StarButtonCount - %d ",StarButton, StarButtonCount));
 
-            editor.putString("customCommand", customCommand);
-            editor.putInt("customCommandCount", customCommandCount);
+            editor.putString("StarButton", StarButton);
+            editor.putInt("StarButtonCount", StarButtonCount);
             editor.apply();
         }
     }
@@ -78,44 +81,34 @@ public class MainActivity extends AppCompatActivity {
                     //Bundle data = msg.getData();
                     //String result = data.getString("result");
                     //Log.i("$$$ IncomingHandler $$$", result);
-                    Log.i("$$$ DRIVE MODE $$$", "handleMessage() MSG_RESULT");
+                    Log.i(TAG, "handleMessage() MSG_RESULT");
 
                     break;
                 default:
-                    Log.i("$$$ DRIVE MODE $$$", "handleMessage() default");
+                    Log.i(TAG, "handleMessage() default");
                     super.handleMessage(msg);
             }
         }
     }
 
-    final Messenger clientMessenger = new Messenger(new IncomingHandler());
-
+    //final Messenger clientMessenger = new Messenger(new IncomingHandler());
     private ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            Log.i("$$$ DRIVE MODE $$$", "onServiceConnected()");
-            serviceMessenger = new Messenger(service);
-            isBound = true;
-//
-//            // Register client with service
-//            try {
-//                Message registerMsg = Message.obtain(null, MSG_ALLPY_DRIVE_MODES);
-//                registerMsg.replyTo = clientMessenger;
-//                serviceMessenger.send(registerMsg);
-//            } catch (RemoteException e) {
-//                e.printStackTrace();
-//            }
+            Log.i(TAG, "onServiceConnected()");
+            GlobalVars.serviceMessenger = new Messenger(service);
+            GlobalVars.isBound = true;
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            serviceMessenger = null;
-            isBound = false;
+            GlobalVars.serviceMessenger = null;
+            GlobalVars.isBound = false;
         }
     };
 
     private void bindToMessengerService() {
-        Log.i("$$$ DRIVE MODE $$$", "bindToMessengerService() begin");
+        Log.i(TAG, "bindToMessengerService() begin");
 
         Intent intent = new Intent();
         intent.setComponent(new ComponentName(
@@ -124,20 +117,20 @@ public class MainActivity extends AppCompatActivity {
         ));
         //intent.setPackage("ru.big.town.anative");
         bindService(intent, connection, Context.BIND_AUTO_CREATE);
-        Log.i("$$$ DRIVE MODE $$$", "bindToMessengerService() end");
+        Log.i(TAG, "bindToMessengerService() end");
 
     }
 
-    private void sendMessageToService() {
-        if (!isBound) return;
+    public void sendMessageToService(int message) {
+        if (!GlobalVars.isBound) return;
 
         try {
-            Message msg = Message.obtain(null, MSG_ALLPY_DRIVE_MODES);
+            Message msg = Message.obtain(null, message);
 //            Bundle data = new Bundle();
 //            data.putString("data", "Hello from client");
 //            msg.setData(data);
-            msg.replyTo = clientMessenger;
-            serviceMessenger.send(msg);
+            msg.replyTo = GlobalVars.clientMessenger;
+            GlobalVars.serviceMessenger.send(msg);
         } catch (RemoteException e) {
             e.printStackTrace();
         }
@@ -168,6 +161,7 @@ public class MainActivity extends AppCompatActivity {
         radioGroupDriveModes.setOnCheckedChangeListener(powerModeListener());
 
         sharedPreferences = getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
+        GlobalVars.sharedPreferences=sharedPreferences;
 
         checkBox34 = findViewById(R.id.checkBox34);
 
@@ -176,6 +170,7 @@ public class MainActivity extends AppCompatActivity {
             Log.w("###$$$$$","PIZDEC");} else {Log.w("###$$$$$","HUYNY");}
 
         editor = sharedPreferences.edit();
+        GlobalVars.editor=editor;
 
         initCheckBox34();
 
@@ -184,13 +179,23 @@ public class MainActivity extends AppCompatActivity {
         initRadioButonEnergy(energy);
         initRadioButonRecycle(recycle);
         initIntent();
+        GlobalVars.clientMessenger = new Messenger(new IncomingHandler());
     }
     public void initIntent(){
         if(resultIntent==null){
             resultIntent = new Intent(this, AdvanceActivity.class);
         }
-        resultIntent.putExtra("customCommand", customCommand);
-        resultIntent.putExtra("customCommandCount", customCommandCount);
+        
+        resultIntent.putExtra("StarButton", StarButton);
+        resultIntent.putExtra("StarButtonCount", StarButtonCount);
+    }
+    public void initIntentStarButton(){
+        if(resultIntentStarButton==null){
+            resultIntentStarButton = new Intent(this, AdvanceActivityStarButton.class);
+        }
+
+        resultIntent.putExtra("StarButtonStarButton1", StarButtonStarButton1);
+        resultIntent.putExtra("StarButtonStarButton2", StarButtonStarButton2);
     }
     public void initRadioButonDriveMode(String driveMode){
         switch (driveMode) {
@@ -257,16 +262,21 @@ public class MainActivity extends AppCompatActivity {
             driveMode=cursor.getString(0);
             energy=cursor.getString(1);
             recycle=cursor.getString(2);
-            customCommand=cursor.getString(3);
-            customCommandCount=cursor.getInt(4);
+            StarButton=cursor.getString(3);
+            StarButtonCount=cursor.getInt(4);
+            StarButtonStarButton1=cursor.getString(5);
+            StarButtonStarButton2=cursor.getString(6);
+
 
 
             Log.i("$$$ getModes() $$$", "Query Result:" +
                     "\ndriveMode: " + driveMode +
                     "\nenergy: " + energy +
                     "\nrecycle: " + recycle +
-                    "\ncustomCommand: " + customCommand +
-                    "\ncustomCommandCount: " + customCommandCount
+                    "\nStarButton: " + StarButton +
+                    "\nStarButtonCount: " + StarButtonCount +
+                    "\nStarButtonStarButton1: " + StarButtonStarButton1 +
+                    "\nStarButtonStarButton2: " + StarButtonStarButton2
             );
         }
         cursor.close();    }
@@ -279,7 +289,7 @@ public class MainActivity extends AppCompatActivity {
                 if(group.getId() == R.id.drive_modes_group) {
                     editor.putString("driveMode",radioButton.getTag().toString());
                     editor.apply();
-                    Log.i("$$$ DRIVE MODE $$$", radioButton.getTag().toString());
+                    Log.i(TAG, radioButton.getTag().toString());
                 }
                 if(group.getId() == R.id.energy_modes_group) {
                     editor.putString("energy",radioButton.getTag().toString());
@@ -306,8 +316,8 @@ public class MainActivity extends AppCompatActivity {
         //sendBroadcast(intent);
         //startService(intent);
         //startForegroundService(intent);
-        sendMessageToService();
-        Log.i("$$$ TAG $$$", "Click" );
+        sendMessageToService(MSG_APPLY_DRIVE_MODES);
+        Log.i(TAG, "Click" );
         // isAppInForeground(getApplicationContext(),  "com.qinggan.canbus.service")
     }
     public void onButtonClickClose(View v){
@@ -318,8 +328,15 @@ public class MainActivity extends AppCompatActivity {
         //startActivity(new Intent(this, AdvanceActivity.class));
         getModes();
         initIntent();
-        Log.i("$$$ Main onButtonClickAdvance $$$$", String.format("%s %d", customCommand, customCommandCount));
+        Log.i("$$$ Main onButtonClickAdvance $$$", String.format("%s %d", StarButton, StarButtonCount));
         startActivityForResult(resultIntent,REQUEST_CODE);
+    }
+    public void onButtonClickAdvanceStarButton(View v){
+        //startActivity(new Intent(this, AdvanceActivity.class));
+        getModes();
+        initIntentStarButton();
+        Log.i("$$$ Main onButtonClickAdvanceStarButton $$$", String.format("%s %s", StarButtonStarButton1, StarButtonStarButton2));
+        startActivity(resultIntentStarButton);
     }
 
     @Override
@@ -336,9 +353,9 @@ public class MainActivity extends AppCompatActivity {
 
 
         super.onDestroy();
-        if (isBound) {
+        if (GlobalVars.isBound) {
             unbindService(connection);
-            isBound = false;
+            GlobalVars.isBound = false;
         }
     }
 

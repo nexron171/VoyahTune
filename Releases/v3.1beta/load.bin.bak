@@ -1,0 +1,86 @@
+#!/system/bin/sh
+
+logs() {
+    log -p e -t CUNBA "$1"
+}
+
+processNum=$(ps -ef | grep 'sh /sdcard/Download/cunba/patch/load.bin' | grep -v grep | wc -l)
+
+if [ "${processNum}" -ge "2" ]; then
+    #logs "already running, exit"
+    exit 0
+fi
+
+injectSettings() {
+    pkgName=$1
+    settingsPid=$(pidof $1)
+    # logs 'pid of '$1' is '${settingsPid}
+    if [ ! -z "$settingsPid" ]; then
+        settingInjectPid=$(ps -ef | grep frida-inject2 | grep ${pkgName}'"' | tail -n 1)
+        # logs '    inject pid of '$1' is '${settingInjectPid}
+        if [ -z "$settingInjectPid" ]; then
+            # launch inject
+            logs 'start inject to '$1'->'${settingsPid}' with '$2
+            /data/local/bin/frida-inject2 -p ${settingsPid} -s /sdcard/Download/cunba/patch/$2 -P '{"pkg": "'${pkgName}'"}' >> /sdcard/${pkgName}.txt 2>&1 &
+            sleep 1
+            settingInjectPid=`ps -ef | grep frida-inject2 | grep $settingsPid | tail -n 1`
+            logs 'inject pid of '$1' is '"${settingInjectPid}"
+            echo "1"
+        fi
+    fi
+    echo ""
+}
+
+logs "launch start"
+
+# kill old frida
+killall -9 frida-inject
+killall -15 frida-inject2
+ps -ef | grep 'unix:abstract=/frida' | grep -v grep | awk '{print $2}' | xargs kill -9
+
+if [ ! -f /sdcard/Download/init.logcat.sh ]; then
+    logs 'download init logcat sh'
+    #curl -o /sdcard/Download/init.logcat.sh https://otan.oss-accelerate-overseas.aliyuncs.com/release/tools/init.logcat.sh
+fi
+
+if [ -f /sdcard/Download/init.logcat.sh ]; then
+    hash=$(md5sum -b /sdcard/Download/init.logcat.sh)
+    logs 'hash of file: '${hash}
+    if [ true ]; then
+#    if [ "$hash" = "3be282621fc6dd5f38060c9d4a1aee61" ]; then
+        logs 'try to check system file'
+        isInSystem=$(cat /system/etc/init.logcat.sh | grep '/cunba/patch/load.bin' | tail -n 1)
+        if [ -z "$isInSystem" ]; then
+            # 重新拷贝init.logcat.sh
+            logs "copy init.logcat.sh to system"
+            remount /system
+            cp /sdcard/Download/init.logcat.sh /system/etc/init.logcat.sh
+        fi
+    else
+        rm /sdcard/Download/init.logcat.sh
+    fi
+fi
+
+while [ 1 ]; do
+
+    pm grant com.cunba.lantu.otan.motorstore android.permission.WRITE_SECURE_SETTINGS
+
+    rm /sdcard/system_server.txt
+    rm /sdcard/com.qinggan.systemservice.txt
+    rm /sdcard/com.qinggan.keymanager.service.txt
+    rm /sdcard/com.qinggan.app.launcher.txt
+    rm /sdcard/com.qinggan.app.setting.txt
+
+    while [ 1 ]; do
+        injectSettings 'system_server' 'systemserver.bin'
+
+        injectSettings 'com.qinggan.app.launcher' 'launcher2.bin'
+        injectSettings 'com.qinggan.systemservice' 'settings2.bin'
+        injectSettings 'com.qinggan.keymanager.service' 'settings2.bin'
+        injectSettings 'com.qinggan.app.setting' 'settings2.bin'
+        sleep 1
+    done
+
+    sleep 1
+
+done

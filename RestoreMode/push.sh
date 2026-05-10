@@ -2,6 +2,8 @@
 
 #./gradlew clean && ./gradlew assembleRelease
 #./gradlew assembleRelease
+#rm -f app/debug/*.apk ;
+#./gradlew assembleDebug
 adb shell pm uninstall ru.big.town.restoremode
 
 #adb install -r -g app/release/app-release.apk

@@ -16,6 +16,9 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  String recycle="LOW";
     private  String customCommand="";
     private  int customCommandCount=1;
+    private  String customCommandStarButton1="";
+    private  String customCommandStarButton2="";
+
     public RestoreModeContentProvider() {
     }
 
@@ -51,8 +54,8 @@ public class RestoreModeContentProvider extends ContentProvider {
         recycle = sharedPreferences.getString("recycle", "LOW");
         customCommand = sharedPreferences.getString("customCommand", "");
         customCommandCount = sharedPreferences.getInt("customCommandCount", 1);
-
-
+        customCommandStarButton1 = sharedPreferences.getString("customCommandStarButton1", "");
+        customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",
@@ -60,10 +63,11 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "recycle",
                 "customCommand",
                 "customCommandCount",
-
+                "customCommandStarButton1",
+                "customCommandStarButton2",
         });
 
-        cursor.addRow(new Object[]{driveMode,energy,recycle,customCommand,customCommandCount});
+        cursor.addRow(new Object[]{driveMode,energy,recycle,customCommand,customCommandCount,customCommandStarButton1,customCommandStarButton2});
        return cursor;
 
     }
