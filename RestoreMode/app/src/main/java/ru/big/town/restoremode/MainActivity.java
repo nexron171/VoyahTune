@@ -4,9 +4,11 @@ package ru.big.town.restoremode;
 import static android.view.View.GONE;
 import static android.view.View.VISIBLE;
 
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
@@ -22,8 +24,13 @@ import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.CheckBox;
+import android.widget.CompoundButton;
+import android.widget.NumberPicker;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.Switch;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
@@ -33,7 +40,7 @@ import androidx.core.view.WindowInsetsCompat;
 
 
 public class MainActivity extends AppCompatActivity {
-    private RadioGroup radioGroupDriveModes, radioGroupEnergy, RadioGroupRecyles;
+    private RadioGroup radioGroupDriveModes, radioGroupEnergy, radioGroupRecycles;
     private String driveMode="INDIVIDUAL";
     private String energy="SREV";
     private  String recycle="LOW";
@@ -43,15 +50,43 @@ public class MainActivity extends AppCompatActivity {
     private String StarButtonStarButton1="";
     private String StarButtonStarButton2="";
 
+    private String customCommand="";
+    private int customCommandCount=1;
+
     private SharedPreferences sharedPreferences;
     //private boolean isBound;
-    static final int MSG_RESULT = 4;
-    static final int MSG_APPLY_DRIVE_MODES = 1;
-    static final int REQUEST_CODE=1;
+    static final int MSG_RESULT             = 4;
+    static final int MSG_APPLY_DRIVE_MODES  = 1;
+    static final int MSG_AUTO_LIGHT_ENABLE  = 10;
+    static final int MSG_AUTO_LIGHT_DISABLE = 11;
+    static final int REQUEST_CODE           = 1;
     private Intent resultIntent=null;
     private Intent resultIntentStarButton=null;
     private SharedPreferences.Editor editor=null;
     private CheckBox checkBox34 = null;
+    private Switch switchAutoLight = null;
+    private TextView textSensorLevel = null;
+
+    private Switch switchDriveMode = null;
+    private Switch switchRecycle   = null;
+    private Switch switchEnergy    = null;
+
+    private NumberPicker pickerSensorInterval  = null;
+    private NumberPicker pickerSensorThreshold = null;
+    private NumberPicker pickerThresholdOff    = null;
+
+    // BroadcastReceiver для приёма уровня датчика освещённости из Native
+    private final BroadcastReceiver luxReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int sensorLevel = intent.getIntExtra("sensorLevel", -1);
+            if (textSensorLevel != null) {
+                textSensorLevel.setText(sensorLevel >= 0
+                        ? "Датчик: " + sensorLevel
+                        : "Датчик: —");
+            }
+        }
+    };
 
     static final String TAG = "$$$ MainActivityRestoreMode $$$";
 
@@ -63,9 +98,11 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == REQUEST_CODE && resultCode == RESULT_OK) {
             Log.i("onActivityResult",String.format("requestCode - %d resultCode - %d data %s",requestCode,resultCode,data.toString()));
 
-            StarButton = data.getStringExtra("StarButton");
-            StarButtonCount = data.getIntExtra("StarButtonCount",1);
-            Log.i("onActivityResult",String.format("StarButton - %s StarButtonCount - %d ",StarButton, StarButtonCount));
+            customCommand      = data.getStringExtra("customCommand");
+            customCommandCount = data.getIntExtra("customCommandCount", 1);
+
+            Log.i("onActivityResult", String.format(
+                    "customCommand=%s count=%d", customCommand, customCommandCount));
 
             editor.putString("StarButton", StarButton);
             editor.putInt("StarButtonCount", StarButtonCount);
@@ -91,13 +128,25 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    //final Messenger clientMessenger = new Messenger(new IncomingHandler());
+    // Команда отложенная до момента подключения сервиса
+    private Integer pendingAutoLightMessage = null;
+
     private ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             Log.i(TAG, "onServiceConnected()");
             GlobalVars.serviceMessenger = new Messenger(service);
             GlobalVars.isBound = true;
+            // Отправляем отложенную команду если была
+            if (pendingAutoLightMessage != null) {
+                Log.i(TAG, "Sending pending autoLight message: " + pendingAutoLightMessage);
+                try {
+                    GlobalVars.serviceMessenger.send(Message.obtain(null, pendingAutoLightMessage));
+                } catch (RemoteException e) {
+                    e.printStackTrace();
+                }
+                pendingAutoLightMessage = null;
+            }
         }
 
         @Override
@@ -126,11 +175,23 @@ public class MainActivity extends AppCompatActivity {
 
         try {
             Message msg = Message.obtain(null, message);
-//            Bundle data = new Bundle();
-//            data.putString("data", "Hello from client");
-//            msg.setData(data);
             msg.replyTo = GlobalVars.clientMessenger;
             GlobalVars.serviceMessenger.send(msg);
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendAutoLightMessage(boolean enable) {
+        int what = enable ? MSG_AUTO_LIGHT_ENABLE : MSG_AUTO_LIGHT_DISABLE;
+        if (!GlobalVars.isBound) {
+            Log.w(TAG, "sendAutoLightMessage: service not bound, queuing message");
+            pendingAutoLightMessage = what;
+            return;
+        }
+        try {
+            GlobalVars.serviceMessenger.send(Message.obtain(null, what));
+            Log.i(TAG, "sendAutoLightMessage: " + (enable ? "ENABLE" : "DISABLE"));
         } catch (RemoteException e) {
             e.printStackTrace();
         }
@@ -173,11 +234,14 @@ public class MainActivity extends AppCompatActivity {
         GlobalVars.editor=editor;
 
         initCheckBox34();
+        initAutoLightSwitch();
+        initSensorPickers();
+        initModeToggles();
 
         getModes();
-        initRadioButonDriveMode(driveMode);
-        initRadioButonEnergy(energy);
-        initRadioButonRecycle(recycle);
+        initRadioButtonDriveMode(driveMode);
+        initRadioButtonEnergy(energy);
+        initRadioButtonRecycle(recycle);
         initIntent();
         GlobalVars.clientMessenger = new Messenger(new IncomingHandler());
     }
@@ -197,7 +261,7 @@ public class MainActivity extends AppCompatActivity {
         resultIntent.putExtra("StarButtonStarButton1", StarButtonStarButton1);
         resultIntent.putExtra("StarButtonStarButton2", StarButtonStarButton2);
     }
-    public void initRadioButonDriveMode(String driveMode){
+    public void initRadioButtonDriveMode(String driveMode){
         switch (driveMode) {
             case ("ECO"):
                 ((RadioButton)findViewById(R.id.ECO)).setChecked(true);
@@ -219,7 +283,7 @@ public class MainActivity extends AppCompatActivity {
                 break;
         }
     }
-    public void initRadioButonEnergy(String energy){
+    public void initRadioButtonEnergy(String energy){
         switch (energy) {
             case ("SMART"):
                 ((RadioButton)findViewById(R.id.SMART)).setChecked(true);
@@ -237,7 +301,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public void initRadioButonRecycle(String recycle){
+    public void initRadioButtonRecycle(String recycle){
         switch (recycle) {
             case ("LOW"):
                 ((RadioButton)findViewById(R.id.LOW)).setChecked(true);
@@ -262,13 +326,8 @@ public class MainActivity extends AppCompatActivity {
             driveMode=cursor.getString(0);
             energy=cursor.getString(1);
             recycle=cursor.getString(2);
-            StarButton=cursor.getString(3);
-            StarButtonCount=cursor.getInt(4);
-            StarButtonStarButton1=cursor.getString(5);
-            StarButtonStarButton2=cursor.getString(6);
-
-
-
+            customCommand=cursor.getString(3);
+            customCommandCount=cursor.getInt(4);
             Log.i("$$$ getModes() $$$", "Query Result:" +
                     "\ndriveMode: " + driveMode +
                     "\nenergy: " + energy +
@@ -356,6 +415,137 @@ public class MainActivity extends AppCompatActivity {
         if (GlobalVars.isBound) {
             unbindService(connection);
             GlobalVars.isBound = false;
+        }
+    }
+
+    private void initAutoLightSwitch() {
+        switchAutoLight = findViewById(R.id.switchAutoLight);
+        textSensorLevel = findViewById(R.id.textSensorLevel);
+
+        boolean autoLightState = sharedPreferences.getBoolean("autoLight", false);
+        switchAutoLight.setChecked(autoLightState);
+
+        switchAutoLight.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                editor.putBoolean("autoLight", isChecked);
+                editor.apply();
+                sendAutoLightMessage(isChecked);
+                if (!isChecked) {
+                    if (textSensorLevel != null) textSensorLevel.setText("Датчик: —");
+                }
+                Log.i("$$$ AUTO LIGHT $$$", isChecked ? "ENABLED" : "DISABLED");
+            }
+        });
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        IntentFilter filter = new IntentFilter("ru.big.town.anative.LUX_UPDATE");
+        registerReceiver(luxReceiver, filter, RECEIVER_EXPORTED);
+        // Запрашиваем немедленное обновление из LightSensorService
+        Intent req = new Intent("ru.big.town.anative.REQUEST_LUX_UPDATE");
+        req.setPackage("ru.big.town.anative");
+        sendBroadcast(req);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        try {
+            unregisterReceiver(luxReceiver);
+        } catch (Exception e) {
+            // receiver не был зарегистрирован — игнорируем
+        }
+    }
+
+    private void initModeToggles() {
+        switchDriveMode = findViewById(R.id.switchDriveMode);
+        switchRecycle   = findViewById(R.id.switchRecycle);
+        switchEnergy    = findViewById(R.id.switchEnergy);
+
+        // Восстанавливаем состояния — fallback false (отключено)
+        boolean driveEnabled   = sharedPreferences.getBoolean("driveEnabled",   false);
+        boolean recycleEnabled = sharedPreferences.getBoolean("recycleEnabled", false);
+        boolean energyEnabled  = sharedPreferences.getBoolean("energyEnabled",  false);
+
+        if (switchDriveMode != null) {
+            switchDriveMode.setChecked(driveEnabled);
+            applyModeToggle(R.id.drive_modes_group, driveEnabled);
+            switchDriveMode.setOnCheckedChangeListener((btn, checked) -> {
+                editor.putBoolean("driveEnabled", checked).apply();
+                applyModeToggle(R.id.drive_modes_group, checked);
+            });
+        }
+        if (switchRecycle != null) {
+            switchRecycle.setChecked(recycleEnabled);
+            applyModeToggle(R.id.recycle_modes_group, recycleEnabled);
+            switchRecycle.setOnCheckedChangeListener((btn, checked) -> {
+                editor.putBoolean("recycleEnabled", checked).apply();
+                applyModeToggle(R.id.recycle_modes_group, checked);
+            });
+        }
+        if (switchEnergy != null) {
+            switchEnergy.setChecked(energyEnabled);
+            applyModeToggle(R.id.energy_modes_group, energyEnabled);
+            switchEnergy.setOnCheckedChangeListener((btn, checked) -> {
+                editor.putBoolean("energyEnabled", checked).apply();
+                applyModeToggle(R.id.energy_modes_group, checked);
+            });
+        }
+    }
+
+    /** Делает RadioGroup кликабельным/некликабельным и меняет прозрачность. */
+    private void applyModeToggle(int groupId, boolean enabled) {
+        RadioGroup group = findViewById(groupId);
+        if (group == null) return;
+        group.setAlpha(enabled ? 1.0f : 0.4f);
+        for (int i = 0; i < group.getChildCount(); i++) {
+            group.getChildAt(i).setEnabled(enabled);
+            group.getChildAt(i).setClickable(enabled);
+        }
+    }
+
+    private void initSensorPickers() {
+        pickerSensorInterval  = findViewById(R.id.pickerSensorInterval);
+        pickerSensorThreshold = findViewById(R.id.pickerSensorThreshold);
+        pickerThresholdOff    = findViewById(R.id.pickerThresholdOff);
+        if (pickerSensorInterval == null || pickerSensorThreshold == null) return;
+
+        // Интервал поллинга: 1..30 секунд, default 5
+        pickerSensorInterval.setMinValue(1);
+        pickerSensorInterval.setMaxValue(30);
+        pickerSensorInterval.setTextColor(0xffffffff);
+        int savedInterval = sharedPreferences.getInt("lightSensorIntervalSec", 5);
+        pickerSensorInterval.setValue(savedInterval);
+        pickerSensorInterval.setOnValueChangedListener((picker, oldVal, newVal) -> {
+            editor.putInt("lightSensorIntervalSec", newVal).apply();
+            Log.i("$$$ SENSOR $$$", "interval=" + newVal + "s");
+        });
+
+        // Порог включения (нижний): 1..7, default 3
+        pickerSensorThreshold.setMinValue(1);
+        pickerSensorThreshold.setMaxValue(7);
+        pickerSensorThreshold.setTextColor(0xffffffff);
+        int savedThreshold = sharedPreferences.getInt("lightSensorThreshold", 3);
+        pickerSensorThreshold.setValue(savedThreshold);
+        pickerSensorThreshold.setOnValueChangedListener((picker, oldVal, newVal) -> {
+            editor.putInt("lightSensorThreshold", newVal).apply();
+            Log.i("$$$ SENSOR $$$", "thresholdOn=" + newVal);
+        });
+
+        // Порог выключения (верхний): 1..7, default 5
+        if (pickerThresholdOff != null) {
+            pickerThresholdOff.setMinValue(1);
+            pickerThresholdOff.setMaxValue(7);
+            pickerThresholdOff.setTextColor(0xffffffff);
+            int savedThresholdOff = sharedPreferences.getInt("lightSensorThresholdOff", 5);
+            pickerThresholdOff.setValue(savedThresholdOff);
+            pickerThresholdOff.setOnValueChangedListener((picker, oldVal, newVal) -> {
+                editor.putInt("lightSensorThresholdOff", newVal).apply();
+                Log.i("$$$ SENSOR $$$", "thresholdOff=" + newVal);
+            });
         }
     }
 

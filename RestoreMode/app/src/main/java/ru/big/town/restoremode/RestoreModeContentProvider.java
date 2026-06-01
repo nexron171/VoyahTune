@@ -16,9 +16,13 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  String recycle="LOW";
     private  String customCommand="";
     private  int customCommandCount=1;
-    private  String customCommandStarButton1="";
-    private  String customCommandStarButton2="";
-
+    private  boolean autoLight=false;
+    private  boolean driveEnabled=false;
+    private  boolean recycleEnabled=false;
+    private  boolean energyEnabled=false;
+    private  int lightSensorThreshold=3;
+    private  int lightSensorThresholdOff=5;
+    private  int lightSensorIntervalSec=5;
     public RestoreModeContentProvider() {
     }
 
@@ -54,20 +58,39 @@ public class RestoreModeContentProvider extends ContentProvider {
         recycle = sharedPreferences.getString("recycle", "LOW");
         customCommand = sharedPreferences.getString("customCommand", "");
         customCommandCount = sharedPreferences.getInt("customCommandCount", 1);
-        customCommandStarButton1 = sharedPreferences.getString("customCommandStarButton1", "");
-        customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
+        autoLight = sharedPreferences.getBoolean("autoLight", false);
+        driveEnabled          = sharedPreferences.getBoolean("driveEnabled",          false);
+        recycleEnabled        = sharedPreferences.getBoolean("recycleEnabled",        false);
+        energyEnabled         = sharedPreferences.getBoolean("energyEnabled",         false);
+        lightSensorThreshold    = sharedPreferences.getInt("lightSensorThreshold",    3);
+        lightSensorThresholdOff = sharedPreferences.getInt("lightSensorThresholdOff", 5);
+        lightSensorIntervalSec  = sharedPreferences.getInt("lightSensorIntervalSec",  5);
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
-                "driveMode",
-                "energy",
-                "recycle",
-                "customCommand",
-                "customCommandCount",
-                "customCommandStarButton1",
-                "customCommandStarButton2",
+                "driveMode",               // 0
+                "energy",                  // 1
+                "recycle",                 // 2
+                "customCommand",           // 3
+                "customCommandCount",      // 4
+                "autoLight",               // 5
+                "driveEnabled",            // 6
+                "recycleEnabled",          // 7
+                "energyEnabled",           // 8
+                "lightSensorThreshold",    // 9
+                "lightSensorIntervalSec",  // 10
+                "lightSensorThresholdOff", // 11
         });
 
-        cursor.addRow(new Object[]{driveMode,energy,recycle,customCommand,customCommandCount,customCommandStarButton1,customCommandStarButton2});
+        cursor.addRow(new Object[]{
+                driveMode, energy, recycle, customCommand, customCommandCount,
+                autoLight ? 1 : 0,
+                driveEnabled   ? 1 : 0,
+                recycleEnabled ? 1 : 0,
+                energyEnabled  ? 1 : 0,
+                lightSensorThreshold,
+                lightSensorIntervalSec,
+                lightSensorThresholdOff,
+        });
        return cursor;
 
     }

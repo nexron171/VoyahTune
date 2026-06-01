@@ -6,8 +6,10 @@ import android.os.Bundle;
 import android.text.Editable;
 import android.util.Log;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
@@ -22,18 +24,20 @@ import java.util.List;
 
 
 public class AdvanceActivity extends AppCompatActivity {
-    private EditText canCommandEditor;
+    private EditText canCommandsEditor;
     private Button buttonBack;
     private NumberPicker pickerCustomCommandCount;
+
     public void onButtonClickFinish(View v){
         Intent intent = new Intent();
-                intent.putExtra("customCommand", canCommandEditor.getText().toString());
-                intent.putExtra("customCommandCount", pickerCustomCommandCount.getValue());
+        intent.putExtra("customCommand", canCommandsEditor.getText().toString());
+        intent.putExtra("customCommandCount", pickerCustomCommandCount.getValue());
         setResult(RESULT_OK, intent);
         finish();
     }
+
     public void onButtonClickClean(View v){
-        canCommandEditor.setText("");
+        canCommandsEditor.setText("");
     }
 
     @Override
@@ -41,31 +45,40 @@ public class AdvanceActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_advance);
-//        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-//            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-//            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-//            return insets;
-//        });
-        canCommandEditor = findViewById(R.id.rawCanCodes);
-        buttonBack = findViewById(R.id.buttonBack);
+
+        canCommandsEditor   = findViewById(R.id.rawCanCodes);
+        buttonBack          = findViewById(R.id.buttonBack);
         pickerCustomCommandCount = findViewById(R.id.pickerCustomCommandCount);
         pickerCustomCommandCount.setMaxValue(10);
         pickerCustomCommandCount.setMinValue(1);
         pickerCustomCommandCount.setTextColor(0xffffffff);
         pickerCustomCommandCount.setTextSize(40f);
 
-
         Intent intent = getIntent();
-            if (intent != null) {
-                // Extract data from the intent
-                String customCommand = intent.getStringExtra("customCommand");
-                int customCommandCount = intent.getIntExtra("customCommandCount",1);
-                canCommandEditor.setText(customCommand);
-                pickerCustomCommandCount.setValue(customCommandCount);
-                Log.i("$$$ Advance Create $$$$", String.format("%s %d", customCommand, customCommandCount));
-                // Do something with the data
+        if (intent != null) {
+            String customCommand    = intent.getStringExtra("customCommand");
+            int customCommandCount  = intent.getIntExtra("customCommandCount", 1);
+
+            canCommandsEditor.setText(customCommand);
+            pickerCustomCommandCount.setValue(customCommandCount);
+
+            Log.i("$$$ Advance Create $$$$", String.format(
+                    "%s %d", customCommand, customCommandCount));
+        }
+        TextView textWarn = findViewById(R.id.TextWarn);
+        textWarn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                View focused = getCurrentFocus();
+                if (imm != null && focused != null) {
+                    imm.hideSoftInputFromWindow(focused.getWindowToken(), 0);
+                    focused.clearFocus();
+                }
             }
-        canCommandEditor.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+        });
+
+        canCommandsEditor.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (hasFocus) {
@@ -78,7 +91,7 @@ public class AdvanceActivity extends AppCompatActivity {
         });
 
 
-        canCommandEditor.addTextChangedListener(new TextWatcher() {
+        canCommandsEditor.addTextChangedListener(new TextWatcher() {
             private boolean isFormatting = false;
 
             @Override
@@ -112,19 +125,19 @@ public class AdvanceActivity extends AppCompatActivity {
                 Log.i("$$$ LENGTH formatted.length $$$ ",String.format("%d",formatted.length()));
 
                 if(formatted.length() % 31 == 0){
-                    canCommandEditor.setBackgroundColor(Color.WHITE);
+                    canCommandsEditor.setBackgroundColor(Color.WHITE);
                     buttonBack.setEnabled(true);
                     buttonBack.setTextColor(Color.WHITE);
                 } else {
-                    canCommandEditor.setBackgroundColor(0xffffafaf);
+                    canCommandsEditor.setBackgroundColor(0xffffafaf);
                     buttonBack.setEnabled(false);
                     buttonBack.setTextColor(Color.GRAY);
                 }
 
-                canCommandEditor.removeTextChangedListener(this);
-                    canCommandEditor.setText(formatted.toString());
-                    canCommandEditor.setSelection(formatted.length());
-                    canCommandEditor.addTextChangedListener(this);
+                canCommandsEditor.removeTextChangedListener(this);
+                    canCommandsEditor.setText(formatted.toString());
+                    canCommandsEditor.setSelection(formatted.length());
+                    canCommandsEditor.addTextChangedListener(this);
                     isFormatting = false;
             }
 

@@ -23,6 +23,9 @@ public class MainActivity extends AppCompatActivity {
     public static String customCommandStarButton1 = "";
     public static String customCommandStarButton2 = "";
 
+    private static boolean driveEnabled   = false;
+    private static boolean recycleEnabled = false;
+    private static boolean energyEnabled  = false;
 
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
@@ -179,6 +182,24 @@ public class MainActivity extends AppCompatActivity {
         return arraysStr2arraysBytes(cmds);
     }
 
+    //------------- Методы получения команд CAN управления фарами  ----------------------------------
+    public static void setHeadlights(boolean on){
+        Log.i("$$$ MainActivity setHeadlights $$$", "sending CAN: headlights " + (on ? "ON" : "OFF"));
+        if (on) {
+            setCanValues(1, arraysStr2arraysBytes(new String[]{
+                    "1f 08 00 10 ff f8 00 04 02 7f",
+                    "6f 08 08 00 80 11 43 04 00 40",
+                    "76 08 04 00 00 00 00 00 00 00"
+            }));
+        } else {
+            setCanValues(1, arraysStr2arraysBytes(new String[]{
+                    "6f 08 08 00 80 11 43 00 00 40",
+                    "1f 08 00 00 ff f9 00 04 02 7f",
+                    "76 08 00 00 00 00 00 00 00 00"
+            }));
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -209,34 +230,43 @@ public class MainActivity extends AppCompatActivity {
             if (cmd.length == 10) cis_can_control_bytes(cmdNum, cmd);
         }
     }
-
     public static void initValueModes(Context context) {
-
-        Cursor cursor = context.getContentResolver().query(Uri
-                        .parse("content://ru.big.town.restoremode.restoremodecontentprovider/"),
-                null, null,
-                null, null);
-        if (cursor != null && cursor.getCount() != 0) {
-            cursor.moveToFirst();
-            driveMode = cursor.getString(0);
-            energy = cursor.getString(1);
-            recycle = cursor.getString(2);
-            customCommand = cursor.getString(3);
-            customCommandCount = cursor.getInt(4);
-            customCommandStarButton1 = cursor.getString(5);
-            customCommandStarButton2 = cursor.getString(6);
-
-        } else {
-            Log.w("$$$ MainActivity initValueModes", "Content provider not found");
+        Cursor cursor = null;
+        try {
+            cursor = context.getContentResolver().query(Uri
+                            .parse("content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                    null, null,
+                    null, null);
+            if (cursor != null && cursor.getCount() != 0 && cursor.getColumnCount() >= 5) {
+                cursor.moveToFirst();
+                driveMode = cursor.getString(0);
+                energy = cursor.getString(1);
+                recycle = cursor.getString(2);
+                customCommand = cursor.getString(3);
+                customCommandCount = cursor.getInt(4);
+                // cols 6,7,8 — флаги включения (0=отключено, fallback=false)
+                driveEnabled   = cursor.getColumnCount() > 6 && cursor.getInt(6) == 1;
+                recycleEnabled = cursor.getColumnCount() > 7 && cursor.getInt(7) == 1;
+                energyEnabled  = cursor.getColumnCount() > 8 && cursor.getInt(8) == 1;
+                Log.i("$$$ MainActivity initValueModes", "driveEnabled=" + driveEnabled
+                        + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled);
+            } else {
+                Log.w("$$$ MainActivity initValueModes", "Content provider not ready or missing columns"
+                        + (cursor != null ? " cols=" + cursor.getColumnCount() : " cursor=null"));
+            }
+        } catch (Exception e) {
+            Log.e("$$$ MainActivity initValueModes", "Exception reading ContentProvider: " + e.getMessage());
+        } finally {
+            if (cursor != null) cursor.close();
         }
     }
 
     public static void runCmds() {
-        Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle);
-        setCanValues(1, getEnergyCanCommand(energy));
-        setCanValues(1, getDriveModeCanCommand(driveMode));
-        setCanValues(1, getRecEnergyCanCommand(recycle));
-        //Toast.makeText(this, "Значения установлены!", Toast.LENGTH_SHORT).show();
+        Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
+                + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled);
+        if (energyEnabled)  setCanValues(1, getEnergyCanCommand(energy));
+        if (driveEnabled)   setCanValues(1, getDriveModeCanCommand(driveMode));
+        if (recycleEnabled) setCanValues(1, getRecEnergyCanCommand(recycle));
     }
     public static void setDriveMode(String driveMode){
         setCanValues(1, getDriveModeCanCommand(driveMode));
