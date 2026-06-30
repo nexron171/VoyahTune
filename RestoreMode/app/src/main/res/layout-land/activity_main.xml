@@ -9,7 +9,7 @@
     android:orientation="horizontal"
     tools:context=".MainActivity">
 
-    <!-- ЛЕВАЯ КОЛОНКА: режимы вождения + рекуперация + энергия + автосвет -->
+    <!-- ЛЕВАЯ КОЛОНКА: автосвет + режимы вождения + рекуперация + энергия -->
     <ScrollView
         android:layout_width="0dp"
         android:layout_height="match_parent"
@@ -25,6 +25,133 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingEnd="4dp">
+
+        <!-- Автоматический ближний свет -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="5dp"
+            android:animateLayoutChanges="true"
+            android:background="@drawable/layout_category_bg"
+            android:orientation="vertical">
+
+            <!-- Верхний ряд: заголовок + подзаголовок | показание датчика -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginHorizontal="6dp"
+                android:layout_marginTop="4dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Автоматический ближний свет"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="На автомобилях ОД С+ отключает матричный свет"
+                        android:textColor="#888888"
+                        android:textSize="20px" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/textSensorLevel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Датчик: —"
+                    android:textColor="#aaaaaa"
+                    android:textSize="22px"
+                    android:visibility="visible" />
+
+            </LinearLayout>
+
+            <!-- Нижний ряд: тоггл Выкл/Вкл + пороги датчика -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginHorizontal="6dp"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="6dp">
+
+                <!-- Сегмент-контрол Выкл/Вкл, небольшой -->
+                <RadioGroup
+                    android:id="@+id/autoLightGroup"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="wrap_content"
+                    android:layout_height="70dp"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal"
+                    android:layout_marginEnd="20dp">
+
+                    <RadioButton
+                        android:id="@+id/autoLightOff"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="200dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="OFF"
+                        android:text="Выкл"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/autoLightOn"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="200dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="ON"
+                        android:text="Вкл"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Вкл ≤"
+                    android:textColor="#aaaaaa"
+                    android:textSize="22px"
+                    android:layout_marginEnd="4dp" />
+
+                <NumberPicker
+                    android:id="@+id/pickerSensorThreshold"
+                    android:layout_width="100dp"
+                    android:layout_height="100dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Выкл >"
+                    android:textColor="#aaaaaa"
+                    android:textSize="22px"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="4dp" />
+
+                <NumberPicker
+                    android:id="@+id/pickerThresholdOff"
+                    android:layout_width="100dp"
+                    android:layout_height="100dp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
 
         <!-- Режимы вождения -->
         <LinearLayout
@@ -139,85 +266,6 @@
             </RadioGroup>
         </LinearLayout>
 
-        <!-- Рекуперация -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="5dp"
-            android:animateLayoutChanges="true"
-            android:background="@drawable/layout_category_bg"
-            android:orientation="vertical">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginHorizontal="6dp"
-                android:layout_marginBottom="8dp">
-
-                <TextView
-                    android:id="@+id/recycle_text"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:tag="binding_2"
-                    android:text="Сохранять уровень рекуперации"
-                    android:textColor="#ffffff"
-                    android:textSize="26px" />
-
-                <Switch
-                    android:id="@+id/switchRecycle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checked="true"
-                    android:thumb="@drawable/switch_thumb"
-                    android:track="@drawable/switch_track" />
-
-            </LinearLayout>
-
-            <RadioGroup
-                android:id="@+id/recycle_modes_group"
-                style="@style/radio_group_height_70_style"
-                android:layout_width="match_parent"
-                android:layout_height="70dp"
-                android:background="@drawable/radio_group_height_70_bg"
-                android:orientation="horizontal"
-                android:layout_marginHorizontal="6dp">
-
-                <RadioButton
-                    android:id="@+id/LOW"
-                    style="@style/radio_button_height_70_style"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:background="@drawable/radio_group_button_70_bg"
-                    android:tag="LOW"
-                    android:text="Низкий"
-                    android:textColor="@color/radio_button_text_color_selector" />
-
-                <RadioButton
-                    android:id="@+id/MEDIUM"
-                    style="@style/radio_button_height_70_style"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:background="@drawable/radio_group_button_70_bg"
-                    android:tag="MEDIUM"
-                    android:text="Стандартный"
-                    android:textColor="@color/radio_button_text_color_selector" />
-
-                <RadioButton
-                    android:id="@+id/HIGH"
-                    style="@style/radio_button_height_70_style"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:background="@drawable/radio_group_button_70_bg"
-                    android:tag="HIGH"
-                    android:text="Высокий"
-                    android:textColor="@color/radio_button_text_color_selector" />
-
-            </RadioGroup>
-        </LinearLayout>
-
         <!-- Режим использования энергии -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -317,7 +365,7 @@
             </RadioGroup>
         </LinearLayout>
 
-        <!-- Автоматический ближний свет -->
+        <!-- Рекуперация -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -326,122 +374,74 @@
             android:background="@drawable/layout_category_bg"
             android:orientation="vertical">
 
-            <!-- Строка заголовок + переключатель -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:minHeight="70dp">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical"
-                    android:layout_marginHorizontal="6dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Автоматический ближний свет"
-                        android:textColor="#ffffff"
-                        android:textSize="26px" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="На автомобилях ОД С+ отключает матричный свет"
-                        android:textColor="#888888"
-                        android:textSize="20px" />
-
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:layout_marginStart="4dp"
-                    android:layout_marginEnd="12dp">
-
-                    <TextView
-                        android:id="@+id/textSensorLevel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Датчик: —"
-                        android:textColor="#aaaaaa"
-                        android:textSize="22px"
-                        android:visibility="visible" />
-
-                </LinearLayout>
-
-                <Switch
-                    android:id="@+id/switchAutoLight"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:checked="false"
-                    android:textColor="#ffffff"
-                    android:textSize="24px"
-                    android:textOff="Выкл"
-                    android:textOn="Вкл"
-                    android:thumb="@drawable/switch_thumb"
-                    android:track="@drawable/switch_track" />
-
-            </LinearLayout>
-
-            <!-- Строка с пикерами: интервал и порог датчика -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:layout_marginHorizontal="6dp"
-                android:layout_marginBottom="6dp">
+                android:layout_marginBottom="8dp">
 
                 <TextView
+                    android:id="@+id/recycle_text"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:tag="binding_2"
+                    android:text="Сохранять уровень рекуперации"
+                    android:textColor="#ffffff"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchRecycle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Интервал (сек):"
-                    android:textColor="#aaaaaa"
-                    android:textSize="22px"
-                    android:layout_marginEnd="4dp" />
-
-                <NumberPicker
-                    android:id="@+id/pickerSensorInterval"
-                    android:layout_width="100dp"
-                    android:layout_height="100dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Вкл ≤"
-                    android:textColor="#aaaaaa"
-                    android:textSize="22px"
-                    android:layout_marginStart="20dp"
-                    android:layout_marginEnd="4dp" />
-
-                <NumberPicker
-                    android:id="@+id/pickerSensorThreshold"
-                    android:layout_width="100dp"
-                    android:layout_height="100dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Выкл >"
-                    android:textColor="#aaaaaa"
-                    android:textSize="22px"
-                    android:layout_marginStart="20dp"
-                    android:layout_marginEnd="4dp" />
-
-                <NumberPicker
-                    android:id="@+id/pickerThresholdOff"
-                    android:layout_width="100dp"
-                    android:layout_height="100dp" />
+                    android:checked="true"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
 
             </LinearLayout>
 
+            <RadioGroup
+                android:id="@+id/recycle_modes_group"
+                style="@style/radio_group_height_70_style"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="@drawable/radio_group_height_70_bg"
+                android:orientation="horizontal"
+                android:layout_marginHorizontal="6dp">
+
+                <RadioButton
+                    android:id="@+id/LOW"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="LOW"
+                    android:text="Низкий"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:id="@+id/MEDIUM"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="MEDIUM"
+                    android:text="Стандартный"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:id="@+id/HIGH"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="HIGH"
+                    android:text="Высокий"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+            </RadioGroup>
         </LinearLayout>
 
     </LinearLayout>
