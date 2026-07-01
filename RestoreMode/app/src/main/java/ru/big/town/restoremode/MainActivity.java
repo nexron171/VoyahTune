@@ -64,14 +64,13 @@ public class MainActivity extends AppCompatActivity {
     private Intent resultIntentStarButton=null;
     private SharedPreferences.Editor editor=null;
     private CheckBox checkBox34 = null;
-    private Switch switchAutoLight = null;
+    private RadioGroup autoLightGroup = null;
     private TextView textSensorLevel = null;
 
     private Switch switchDriveMode = null;
     private Switch switchRecycle   = null;
     private Switch switchEnergy    = null;
 
-    private NumberPicker pickerSensorInterval  = null;
     private NumberPicker pickerSensorThreshold = null;
     private NumberPicker pickerThresholdOff    = null;
 
@@ -419,23 +418,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initAutoLightSwitch() {
-        switchAutoLight = findViewById(R.id.switchAutoLight);
+        autoLightGroup  = findViewById(R.id.autoLightGroup);
         textSensorLevel = findViewById(R.id.textSensorLevel);
+        if (autoLightGroup == null) return;
 
         boolean autoLightState = sharedPreferences.getBoolean("autoLight", false);
-        switchAutoLight.setChecked(autoLightState);
+        autoLightGroup.check(autoLightState ? R.id.autoLightOn : R.id.autoLightOff);
 
-        switchAutoLight.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                editor.putBoolean("autoLight", isChecked);
-                editor.apply();
-                sendAutoLightMessage(isChecked);
-                if (!isChecked) {
-                    if (textSensorLevel != null) textSensorLevel.setText("Датчик: —");
-                }
-                Log.i("$$$ AUTO LIGHT $$$", isChecked ? "ENABLED" : "DISABLED");
+        autoLightGroup.setOnCheckedChangeListener((group, checkedId) -> {
+            boolean enabled = (checkedId == R.id.autoLightOn);
+            editor.putBoolean("autoLight", enabled);
+            editor.apply();
+            sendAutoLightMessage(enabled);
+            if (!enabled && textSensorLevel != null) {
+                textSensorLevel.setText("Датчик: —");
             }
+            Log.i("$$$ AUTO LIGHT $$$", enabled ? "ENABLED" : "DISABLED");
         });
     }
 
@@ -508,45 +506,42 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initSensorPickers() {
-        pickerSensorInterval  = findViewById(R.id.pickerSensorInterval);
         pickerSensorThreshold = findViewById(R.id.pickerSensorThreshold);
         pickerThresholdOff    = findViewById(R.id.pickerThresholdOff);
-        if (pickerSensorInterval == null || pickerSensorThreshold == null) return;
+        if (pickerSensorThreshold == null) return;
 
-        // Интервал поллинга: 1..30 секунд, default 5
-        pickerSensorInterval.setMinValue(1);
-        pickerSensorInterval.setMaxValue(30);
-        pickerSensorInterval.setTextColor(0xffffffff);
-        int savedInterval = sharedPreferences.getInt("lightSensorIntervalSec", 5);
-        pickerSensorInterval.setValue(savedInterval);
-        pickerSensorInterval.setOnValueChangedListener((picker, oldVal, newVal) -> {
-            editor.putInt("lightSensorIntervalSec", newVal).apply();
-            Log.i("$$$ SENSOR $$$", "interval=" + newVal + "s");
-        });
-
-        // Порог включения (нижний): 1..7, default 3
+        // Порог включения (нижний): 1..6 (макс 6, т.к. выключение должно быть строго больше)
         pickerSensorThreshold.setMinValue(1);
-        pickerSensorThreshold.setMaxValue(7);
+        pickerSensorThreshold.setMaxValue(6);
         pickerSensorThreshold.setTextColor(0xffffffff);
-        int savedThreshold = sharedPreferences.getInt("lightSensorThreshold", 3);
+        int savedThreshold = Math.min(Math.max(sharedPreferences.getInt("lightSensorThreshold", 3), 1), 6);
         pickerSensorThreshold.setValue(savedThreshold);
-        pickerSensorThreshold.setOnValueChangedListener((picker, oldVal, newVal) -> {
-            editor.putInt("lightSensorThreshold", newVal).apply();
-            Log.i("$$$ SENSOR $$$", "thresholdOn=" + newVal);
-        });
 
-        // Порог выключения (верхний): 1..7, default 5
+        // Порог выключения (верхний): строго > порога включения, максимум 7
         if (pickerThresholdOff != null) {
-            pickerThresholdOff.setMinValue(1);
             pickerThresholdOff.setMaxValue(7);
+            pickerThresholdOff.setMinValue(savedThreshold + 1);
             pickerThresholdOff.setTextColor(0xffffffff);
-            int savedThresholdOff = sharedPreferences.getInt("lightSensorThresholdOff", 5);
+            int savedThresholdOff = Math.max(
+                    sharedPreferences.getInt("lightSensorThresholdOff", 5),
+                    savedThreshold + 1);
             pickerThresholdOff.setValue(savedThresholdOff);
             pickerThresholdOff.setOnValueChangedListener((picker, oldVal, newVal) -> {
                 editor.putInt("lightSensorThresholdOff", newVal).apply();
                 Log.i("$$$ SENSOR $$$", "thresholdOff=" + newVal);
             });
         }
+
+        // Изменение порога включения двигает нижнюю границу выключения (Выкл > Вкл)
+        pickerSensorThreshold.setOnValueChangedListener((picker, oldVal, newVal) -> {
+            editor.putInt("lightSensorThreshold", newVal).apply();
+            Log.i("$$$ SENSOR $$$", "thresholdOn=" + newVal);
+            if (pickerThresholdOff != null) {
+                pickerThresholdOff.setMinValue(newVal + 1);
+                // setMinValue сам поднимет значение, если оно стало ниже границы
+                editor.putInt("lightSensorThresholdOff", pickerThresholdOff.getValue()).apply();
+            }
+        });
     }
 
     private void initCheckBox34(){

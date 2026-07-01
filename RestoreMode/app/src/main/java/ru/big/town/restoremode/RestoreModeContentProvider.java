@@ -22,7 +22,6 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  boolean energyEnabled=false;
     private  int lightSensorThreshold=3;
     private  int lightSensorThresholdOff=5;
-    private  int lightSensorIntervalSec=5;
     public RestoreModeContentProvider() {
     }
 
@@ -64,7 +63,6 @@ public class RestoreModeContentProvider extends ContentProvider {
         energyEnabled         = sharedPreferences.getBoolean("energyEnabled",         false);
         lightSensorThreshold    = sharedPreferences.getInt("lightSensorThreshold",    3);
         lightSensorThresholdOff = sharedPreferences.getInt("lightSensorThresholdOff", 5);
-        lightSensorIntervalSec  = sharedPreferences.getInt("lightSensorIntervalSec",  5);
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
@@ -77,8 +75,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "recycleEnabled",          // 7
                 "energyEnabled",           // 8
                 "lightSensorThreshold",    // 9
-                "lightSensorIntervalSec",  // 10
-                "lightSensorThresholdOff", // 11
+                "lightSensorThresholdOff", // 10
         });
 
         cursor.addRow(new Object[]{
@@ -88,7 +85,6 @@ public class RestoreModeContentProvider extends ContentProvider {
                 recycleEnabled ? 1 : 0,
                 energyEnabled  ? 1 : 0,
                 lightSensorThreshold,
-                lightSensorIntervalSec,
                 lightSensorThresholdOff,
         });
        return cursor;
