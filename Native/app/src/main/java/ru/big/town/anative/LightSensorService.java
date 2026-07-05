@@ -35,6 +35,17 @@ import androidx.core.app.NotificationCompat;
  *    при коннекте читаем уровень синхронно через TX=36 (getLightSensorLevel).
  *  - Safety-poll каждые SAFETY_POLL_MS: страховка от пропущенного события.
  *    CAN шлёт только при реальной смене цели — холостого трафика не создаёт.
+ *  - Подписка на CanBusService.onLightStatusChanged (код 10, addCallback TX=28):
+ *    даёт LightStatus с полем autoLamp. Когда BCM сам уходит в «авто» (перевод КПП
+ *    в Drive сбрасывает фары в auto) при нашем таргете «ближний» — возвращаем ближний.
+ *    Ручное «выкл» (autoLamp=0, headLight=0) под правило не попадает — уважается.
+ *    Guard HEADLIGHT_GUARD_MS отсекает «эхо» собственных команд. Так заменяется
+ *    старый 10-сек поллинг без спама в CAN.
+ *    (CarSignalService.onHeadLightStateChanged код 7 НЕ реагирует на смену режима —
+ *    проверено на живой машине, поэтому используем именно CanBus.)
+ *  - Дебаунс SENSOR_DEBOUNCE_MS на значения датчика — гасит дребезг.
+ *  - force-init через FORCE_INIT_MS после коннекта — гарантия установки режима
+ *    на холодном старте (колбэки дельта-only).
  *
  * Решение по уровню → режим (с гистерезисом):
  *  - level ≤ threshOn  → ближний свет (setHeadlights(true))
@@ -69,18 +80,39 @@ public class LightSensorService extends Service {
     // «устоялся» — гасит дребезг и слишком частые переключения.
     private static final long SENSOR_DEBOUNCE_MS = 3_000L;
 
-    // ICarSignalService — transact через IBinder напрямую
+    // ICarSignalService — датчик света (transact через IBinder напрямую)
     private static final String CAR_SIGNAL_DESCRIPTOR  = "com.qinggan.carsignal.ICarSignalService";
     private static final int    TX_getLightSensorLevel = 36;
     private static final int    TX_registerCallback    = 46;
     private static final int    TX_unregisterCallback  = 47;
 
-    // ICarSignalServiceCallBack — наш stub, сервис вызывает его методы по этим кодам
-    private static final String CALLBACK_DESCRIPTOR    = "com.qinggan.carsignal.ICarSignalServiceCallBack";
+    // ICarSignalServiceCallBack — наш stub датчика
+    private static final String CALLBACK_DESCRIPTOR     = "com.qinggan.carsignal.ICarSignalServiceCallBack";
     private static final int    CB_onLightSensorChanged = 13;
 
     private static final String CAR_SIGNAL_ACTION  = "com.qinggan.carsignal.CarSignalService";
     private static final String CAR_SIGNAL_PACKAGE = "com.qinggan.carsignal.service";
+
+    // ICanBusService — статус фар (LightStatus.autoLamp) для отлова внешнего сброса режима
+    private static final String CANBUS_DESCRIPTOR    = "com.qinggan.canbus.ICanBusService";
+    private static final String CANBUS_CB_DESCRIPTOR = "com.qinggan.canbus.ICanBusServiceCallback";
+    private static final int    TX_addCallback          = 28;
+    private static final int    TX_removeCallback       = 29;
+    private static final int    CB_onLightStatusChanged = 10;
+    private static final String CANBUS_ACTION  = "com.qinggan.canbus.CanBusService";
+    private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
+    // Индексы нужных полей в LightStatus (17 int'ов после флага наличия)
+    private static final int LS_IDX_DIPPED_BEAM = 7;
+    private static final int LS_IDX_HEAD_LIGHT  = 13;
+    private static final int LS_IDX_AUTO_LAMP   = 16;
+    private static final int LS_FIELD_COUNT     = 17;
+
+    // Окно после нашей CAN-команды, в течение которого статус фар считаем «эхом»
+    // своей же команды и игнорируем (защита от самозацикливания).
+    private static final long HEADLIGHT_GUARD_MS = 2_500L;
+    // Выдержка после того как поймали «авто», прежде чем вернуть таргет. Если за это
+    // время состояние ушло из «авто» — переустановку отменяем (debounce + анти-луп).
+    private static final long CANBUS_REASSERT_DELAY_MS = 5_000L;
 
     private Handler timerHandler;
     private IBinder carSignalBinder = null;
@@ -93,9 +125,20 @@ public class LightSensorService extends Service {
     private boolean everSent     = false;
     private boolean forceInitScheduled = false;
     private int     pendingSensorLevel = -1;
+    private long    lastCommitElapsed  = 0L;
 
     // Последний уровень датчика для broadcast в UI
     private int lastSensorLevel = -1;
+
+    // CanBusService — подписка на LightStatus (autoLamp)
+    private IBinder canBusBinder = null;
+    private boolean canBusBound  = false;
+    private boolean canBusCallbackAdded   = false;
+    private long    lastCanBusBindAttempt = 0L;
+    // Последние значимые поля LightStatus — фильтр шума от поворотников/стопа
+    private int lastAutoLamp   = -1;
+    private int lastDippedBeam = -1;
+    private int lastHeadLight  = -1;
 
     // -------------------------------------------------------------------------
     // ICarSignalServiceCallBack — Binder stub (сервис вызывает onTransact ONEWAY)
@@ -115,6 +158,34 @@ public class LightSensorService extends Service {
                     timerHandler.removeCallbacks(sensorDebounceRunnable);
                     timerHandler.postDelayed(sensorDebounceRunnable, SENSOR_DEBOUNCE_MS);
                 });
+                return true;
+            }
+            return super.onTransact(code, data, reply, flags);
+        }
+    };
+
+    // -------------------------------------------------------------------------
+    // ICanBusServiceCallback — stub для LightStatus (autoLamp)
+    // -------------------------------------------------------------------------
+
+    private final IBinder canBusCallbackBinder = new Binder() {
+        @Override
+        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
+                throws RemoteException {
+            if (code == CB_onLightStatusChanged) {
+                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
+                // readInt() = флаг наличия объекта, затем 17 int-полей LightStatus
+                int autoLamp = -1, dippedBeam = -1, headLight = -1;
+                if (data.readInt() != 0) {
+                    for (int i = 0; i < LS_FIELD_COUNT; i++) {
+                        int v = data.readInt();
+                        if (i == LS_IDX_DIPPED_BEAM) dippedBeam = v;
+                        else if (i == LS_IDX_HEAD_LIGHT) headLight = v;
+                        else if (i == LS_IDX_AUTO_LAMP) autoLamp = v;
+                    }
+                }
+                final int fAuto = autoLamp, fDipped = dippedBeam, fHead = headLight;
+                timerHandler.post(() -> onLightStatusChanged(fAuto, fDipped, fHead));
                 return true;
             }
             return super.onTransact(code, data, reply, flags);
@@ -161,6 +232,83 @@ public class LightSensorService extends Service {
             Log.i(TAG, "ensureBound: bindService returned " + ok);
         } catch (Exception e) {
             Log.e(TAG, "ensureBound: exception: " + e.getMessage(), e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // CanBusService — bind + addCallback (LightStatus)
+    // -------------------------------------------------------------------------
+
+    private final ServiceConnection canBusConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            canBusBinder = service;
+            canBusBound  = true;
+            Log.i(TAG, "CanBusService connected, alive=" + service.isBinderAlive());
+            addCanBusCallback();
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            canBusBinder = null;
+            canBusBound  = false;
+            canBusCallbackAdded = false;
+            Log.w(TAG, "CanBusService disconnected — will rebind on next poll");
+        }
+    };
+
+    private void ensureCanBusBound() {
+        if (canBusBound) return;
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
+        lastCanBusBindAttempt = now;
+        try {
+            Intent intent = new Intent(CANBUS_ACTION);
+            intent.setPackage(CANBUS_PACKAGE);
+            boolean ok = bindService(intent, canBusConnection, Context.BIND_AUTO_CREATE);
+            Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
+        } catch (Exception e) {
+            Log.e(TAG, "ensureCanBusBound: exception: " + e.getMessage(), e);
+        }
+    }
+
+    /** Регистрирует canBusCallbackBinder в CanBusService (TX=28, addCallback). */
+    private void addCanBusCallback() {
+        if (!canBusBound || canBusBinder == null || canBusCallbackAdded) return;
+        Parcel data  = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+            data.writeStrongBinder(canBusCallbackBinder);
+            canBusBinder.transact(TX_addCallback, data, reply, 0);
+            reply.readException();
+            int result = reply.readInt();
+            canBusCallbackAdded = true;
+            Log.i(TAG, "addCanBusCallback: OK (TX=" + TX_addCallback + ") result=" + result);
+        } catch (RemoteException | RuntimeException e) {
+            Log.w(TAG, "addCanBusCallback: error: " + e.getMessage());
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    private void removeCanBusCallback() {
+        if (!canBusBound || canBusBinder == null || !canBusCallbackAdded) return;
+        Parcel data  = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+            data.writeStrongBinder(canBusCallbackBinder);
+            canBusBinder.transact(TX_removeCallback, data, reply, 0);
+            reply.readException();
+            Log.i(TAG, "removeCanBusCallback: OK");
+        } catch (RemoteException | RuntimeException e) {
+            Log.w(TAG, "removeCanBusCallback: error: " + e.getMessage());
+        } finally {
+            data.recycle();
+            reply.recycle();
+            canBusCallbackAdded = false;
         }
     }
 
@@ -246,6 +394,7 @@ public class LightSensorService extends Service {
         registerReceiver(requestReceiver, reqFilter, RECEIVER_EXPORTED);
 
         ensureBound();
+        ensureCanBusBound();
         timerHandler.postDelayed(safetyRunnable, 2_000L);
     }
 
@@ -267,6 +416,7 @@ public class LightSensorService extends Service {
         timerHandler.removeCallbacks(safetyRunnable);
         timerHandler.removeCallbacks(forceInitRunnable);
         timerHandler.removeCallbacks(sensorDebounceRunnable);
+        timerHandler.removeCallbacks(canbusReassertRunnable);
         if (carSignalBound) {
             unregisterCallback();
             try {
@@ -275,6 +425,15 @@ public class LightSensorService extends Service {
                 Log.w(TAG, "onDestroy: unbindService failed: " + e.getMessage());
             }
             carSignalBound = false;
+        }
+        if (canBusBound) {
+            removeCanBusCallback();
+            try {
+                unbindService(canBusConnection);
+            } catch (Exception e) {
+                Log.w(TAG, "onDestroy: canbus unbindService failed: " + e.getMessage());
+            }
+            canBusBound = false;
         }
         super.onDestroy();
     }
@@ -312,6 +471,8 @@ public class LightSensorService extends Service {
         public void run() {
             ensureBound();
             registerCallback(); // no-op если уже зарегистрирован
+            ensureCanBusBound();
+            addCanBusCallback(); // no-op если уже добавлен
 
             int level = readSensorLevel();
             if (level >= 0) {
@@ -362,10 +523,68 @@ public class LightSensorService extends Service {
 
     private void commit(boolean targetOn, String reason) {
         Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "авто") + ") — " + reason);
-        headlightsOn = targetOn;
-        everSent     = true;
+        headlightsOn      = targetOn;
+        everSent          = true;
+        lastCommitElapsed = SystemClock.elapsedRealtime();
         MainActivity.setHeadlights(targetOn);
     }
+
+    /**
+     * Статус фар из CanBusService (LightStatus). Ловим внешний сброс режима: при
+     * переводе КПП в Drive BCM уходит в «авто» (autoLamp=1). Если наш таргет —
+     * «ближний» (темно), возвращаем ближний. Ручное «выкл» (autoLamp=0, headLight=0)
+     * под правило не попадает — уважается. Guard отсекает эхо своих команд.
+     */
+    private void onLightStatusChanged(int autoLamp, int dippedBeam, int headLight) {
+        // Фильтр шума: реагируем только на изменение значимых полей
+        // (поворотники/стоп меняют другие поля и сыпят событиями постоянно).
+        if (autoLamp == lastAutoLamp && dippedBeam == lastDippedBeam && headLight == lastHeadLight) {
+            return;
+        }
+        lastAutoLamp = autoLamp; lastDippedBeam = dippedBeam; lastHeadLight = headLight;
+
+        long since = SystemClock.elapsedRealtime() - lastCommitElapsed;
+        Log.i(TAG, "lightstatus: autoLamp=" + autoLamp + " dippedBeam=" + dippedBeam
+                + " headLight=" + headLight
+                + " ourTarget=" + (headlightsOn ? "ближний" : "авто")
+                + " sinceCommit=" + since + "ms");
+
+        // Любое значимое изменение статуса отменяет отложенную переустановку —
+        // решение принимаем заново по свежему состоянию.
+        timerHandler.removeCallbacks(canbusReassertRunnable);
+
+        if (!everSent) return;                 // режим ещё не выставляли — ждём force-init
+        if (!headlightsOn) return;             // таргет «авто» (светло) — не вмешиваемся
+        if (since < HEADLIGHT_GUARD_MS) {      // эхо нашей же команды
+            Log.i(TAG, "lightstatus: игнор — эхо нашей команды (" + since + "ms назад)");
+            return;
+        }
+        if (autoLamp == 1) {
+            // BCM ушёл в «авто» при таргете «ближний» → Drive-сброс/переключение.
+            // Ждём CANBUS_REASSERT_DELAY_MS: если состояние не устаканится обратно —
+            // вернём ближний. Отменяемо любым новым значимым событием (см. выше).
+            Log.i(TAG, "lightstatus: поймал АВТО при таргете ближний → выдержка "
+                    + CANBUS_REASSERT_DELAY_MS + "ms");
+            timerHandler.postDelayed(canbusReassertRunnable, CANBUS_REASSERT_DELAY_MS);
+        }
+    }
+
+    // Отложенная переустановка ближнего после того как поймали «авто». Перед запуском
+    // ещё раз проверяем актуальность (таргет ближний и BCM всё ещё в авто).
+    private final Runnable canbusReassertRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!everSent || !headlightsOn) return;
+            if (lastAutoLamp != 1) {           // за время выдержки ушли из «авто» — отменяем
+                Log.i(TAG, "canbus-reset: за выдержку состояние ушло из авто — отмена");
+                return;
+            }
+            Log.i(TAG, "canbus-reset: выдержка прошла, BCM всё ещё в авто → возвращаем ближний");
+            int level = readSensorLevel();
+            if (level >= 0) onSensorLevel(level, "canbus-reset", true);
+            else commit(true, "canbus-reset");
+        }
+    };
 
     // -------------------------------------------------------------------------
     // ContentProvider — настройки RestoreMode (один запрос за вызов)

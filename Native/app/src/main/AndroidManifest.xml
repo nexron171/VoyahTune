@@ -44,6 +44,7 @@
     <queries>
         <provider android:authorities="ru.big.town.restoremode.restoremodecontentprovider" />
         <package android:name="com.qinggan.carsignal.service" />
+        <package android:name="com.qinggan.canbus.service" />
     </queries>
 
     <uses-permission android:name="android.permission.CAR_POWER" />
