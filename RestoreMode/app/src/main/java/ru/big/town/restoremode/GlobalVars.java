@@ -8,5 +8,5 @@ public class GlobalVars {
     static SharedPreferences.Editor editor=null;
     static Messenger serviceMessenger = null;
     static Messenger clientMessenger = null;
-    static boolean isBound = true;
+    static boolean isBound = false;
 }

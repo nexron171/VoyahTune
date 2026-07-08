@@ -17,15 +17,18 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.NumberPicker;
+import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.Switch;
@@ -70,9 +73,17 @@ public class MainActivity extends AppCompatActivity {
     private Switch switchDriveMode = null;
     private Switch switchRecycle   = null;
     private Switch switchEnergy    = null;
+    private RadioGroup pedestrianSoundGroup = null;
 
     private NumberPicker pickerSensorThreshold = null;
     private NumberPicker pickerThresholdOff    = null;
+
+    // Блокировка «Применить» + прогрессбар на время цикла отправки
+    private Button buttonApply = null;
+    private ProgressBar applyProgress = null;
+    private boolean applying = false;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable applyTimeout = () -> setApplying(false);
 
     // BroadcastReceiver для приёма уровня датчика освещённости из Native
     private final BroadcastReceiver luxReceiver = new BroadcastReceiver() {
@@ -118,7 +129,7 @@ public class MainActivity extends AppCompatActivity {
                     //String result = data.getString("result");
                     //Log.i("$$$ IncomingHandler $$$", result);
                     Log.i(TAG, "handleMessage() MSG_RESULT");
-
+                    setApplying(false);   // цикл отправки завершён — разблокируем кнопку
                     break;
                 default:
                     Log.i(TAG, "handleMessage() default");
@@ -169,16 +180,27 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    public void sendMessageToService(int message) {
-        if (!GlobalVars.isBound) return;
+    public boolean sendMessageToService(int message) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) return false;
 
         try {
             Message msg = Message.obtain(null, message);
             msg.replyTo = GlobalVars.clientMessenger;
             GlobalVars.serviceMessenger.send(msg);
+            return true;
         } catch (RemoteException e) {
             e.printStackTrace();
+            return false;
         }
+    }
+
+    /** Блокирует «Применить» и показывает прогрессбар, пока идёт цикл отправки. */
+    private void setApplying(boolean on) {
+        applying = on;
+        if (buttonApply != null) buttonApply.setEnabled(!on);
+        if (applyProgress != null) applyProgress.setVisibility(on ? View.VISIBLE : View.GONE);
+        uiHandler.removeCallbacks(applyTimeout);
+        if (on) uiHandler.postDelayed(applyTimeout, 12000); // страховка, если MSG_RESULT не придёт
     }
 
     private void sendAutoLightMessage(boolean enable) {
@@ -224,6 +246,8 @@ public class MainActivity extends AppCompatActivity {
         GlobalVars.sharedPreferences=sharedPreferences;
 
         checkBox34 = findViewById(R.id.checkBox34);
+        buttonApply   = findViewById(R.id.button);
+        applyProgress = findViewById(R.id.applyProgress);
 
 
         if(sharedPreferences==null){
@@ -236,6 +260,7 @@ public class MainActivity extends AppCompatActivity {
         initAutoLightSwitch();
         initSensorPickers();
         initModeToggles();
+        initPedestrianSoundGroup();
 
         getModes();
         initRadioButtonDriveMode(driveMode);
@@ -374,7 +399,10 @@ public class MainActivity extends AppCompatActivity {
         //sendBroadcast(intent);
         //startService(intent);
         //startForegroundService(intent);
-        sendMessageToService(MSG_APPLY_DRIVE_MODES);
+        if (applying) return;                       // уже идёт цикл — игнорируем
+        if (sendMessageToService(MSG_APPLY_DRIVE_MODES)) {
+            setApplying(true);                      // блок кнопки + прогресс до MSG_RESULT
+        }
         Log.i(TAG, "Click" );
         // isAppInForeground(getApplicationContext(),  "com.qinggan.canbus.service")
     }
@@ -411,6 +439,7 @@ public class MainActivity extends AppCompatActivity {
 
 
         super.onDestroy();
+        uiHandler.removeCallbacks(applyTimeout);
         if (GlobalVars.isBound) {
             unbindService(connection);
             GlobalVars.isBound = false;
@@ -492,6 +521,22 @@ public class MainActivity extends AppCompatActivity {
                 applyModeToggle(R.id.energy_modes_group, checked);
             });
         }
+    }
+
+    /** Сегмент-контрол Выкл/Вкл «Отключить звук для пешеходов» (как автосвет). Дефолт — Выкл. */
+    private void initPedestrianSoundGroup() {
+        pedestrianSoundGroup = findViewById(R.id.pedestrianSoundGroup);
+        if (pedestrianSoundGroup == null) return;
+
+        boolean disabled = sharedPreferences.getBoolean("disablePedestrianSound", false);
+        pedestrianSoundGroup.check(disabled ? R.id.pedestrianSoundOn : R.id.pedestrianSoundOff);
+
+        pedestrianSoundGroup.setOnCheckedChangeListener((group, checkedId) -> {
+            boolean off = (checkedId == R.id.pedestrianSoundOn);
+            editor.putBoolean("disablePedestrianSound", off).apply();
+            // Команда применяется по кнопке «Применить» и при пробуждении (runCmds), не в реальном времени
+            Log.i("$$$ PEDESTRIAN SOUND $$$", off ? "DISABLED (muted)" : "ENABLED (default)");
+        });
     }
 
     /** Делает RadioGroup кликабельным/некликабельным и меняет прозрачность. */

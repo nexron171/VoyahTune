@@ -7,6 +7,8 @@
 
     <queries>
         <package android:name="ru.big.town.restoremode" />
+        <!-- Нужно для bindService к SetModesService (видимость пакетов, API 30+) -->
+        <package android:name="ru.big.town.anative" />
     </queries>
 
     <application
