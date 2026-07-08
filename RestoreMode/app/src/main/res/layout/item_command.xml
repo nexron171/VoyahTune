@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:layout_marginBottom="8dp">
+
+    <!-- Кнопка команды: вставляет команду в поле -->
+    <Button
+        android:id="@+id/cmdButton"
+        android:layout_width="0dp"
+        android:layout_height="58dp"
+        android:layout_weight="1"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        android:backgroundTint="#373f4a"
+        android:gravity="start|center_vertical"
+        android:paddingHorizontal="16dp"
+        android:textAllCaps="false"
+        android:textColor="#FFFFFF"
+        android:textSize="24px"
+        android:singleLine="true"
+        android:ellipsize="end"
+        app:cornerRadius="14dp" />
+
+    <!-- Кнопка удаления команды из поля -->
+    <ImageButton
+        android:id="@+id/cmdDelete"
+        android:layout_width="58dp"
+        android:layout_height="58dp"
+        android:layout_marginStart="10dp"
+        android:padding="15dp"
+        android:background="@drawable/nav_back_circle_bg"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_delete"
+        android:contentDescription="Удалить команду" />
+
+</LinearLayout>

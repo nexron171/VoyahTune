@@ -5,100 +5,282 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/layout_category_bg_noround"
-    android:orientation="vertical"
-    android:paddingHorizontal="24dp"
-    android:paddingVertical="12dp"
+    android:background="#22252f"
+    android:orientation="horizontal"
     android:fitsSystemWindows="true"
     tools:context=".AdvanceActivity">
 
-    <!-- Строка 1: Назад | Повторы + NumberPicker | Очистить -->
+    <!-- ===================== Navigation rail ===================== -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="8dp">
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingVertical="20dp"
+        android:gravity="top">
 
-        <Button
+        <!-- Круглая кнопка «назад» -->
+        <ImageButton
             android:id="@+id/buttonBack"
-            android:layout_width="wrap_content"
-            android:layout_height="70dp"
-            android:backgroundTint="#373f4a"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:padding="20dp"
+            android:background="@drawable/nav_back_circle_bg"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_chevron_left"
             android:onClick="onButtonClickFinish"
-            android:text="Назад"
+            android:contentDescription="Назад" />
+
+        <!-- Раздел: Собственные команды -->
+        <TextView
+            android:id="@+id/navCustomCommands"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="40dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Собственные команды"
             android:textColor="#FFFFFF"
-            android:textSize="40dp"
-            app:cornerRadius="20dp" />
+            android:textSize="26px" />
+
+        <!-- Раздел: Другое -->
+        <TextView
+            android:id="@+id/navOther"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Другое"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
+    </LinearLayout>
+
+    <!-- ===================== Разделитель ===================== -->
+    <View
+        android:layout_width="2dp"
+        android:layout_height="match_parent"
+        android:layout_marginVertical="20dp"
+        android:background="#373f4a" />
+
+    <!-- ===================== Контент (переключаемые разделы) ===================== -->
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1">
+
+    <!-- Раздел: Собственные команды -->
+    <LinearLayout
+        android:id="@+id/pageCustomCommands"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingHorizontal="28dp"
+        android:paddingVertical="20dp">
+
+        <!-- Заголовок + Повторы -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Собственные команды"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="44px" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:text="Повторы"
+                    android:textColor="#FFFFFF"
+                    android:textSize="30px" />
+
+                <NumberPicker
+                    android:id="@+id/pickerCustomCommandCount"
+                    android:layout_width="90dp"
+                    android:layout_height="110dp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Описание + поле ввода команд -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal">
+
+            <ScrollView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginEnd="20dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/TextWarn"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/activity_advance_text"
+                        android:textColor="#ff6b6b"
+                        android:textSize="20px" />
+
+                    <!-- QR-код: как узнать нужные команды (в скролле) -->
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="12dp">
+
+                        <ImageView
+                            android:layout_width="110dp"
+                            android:layout_height="110dp"
+                            android:background="#ffffff"
+                            android:padding="5dp"
+                            android:src="@drawable/qr_drive2"
+                            android:contentDescription="QR-код: как узнать нужные команды на drive2.ru" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="14dp"
+                            android:text="как узнать нужные\nкоманды на drive2.ru"
+                            android:textColor="#aaaaaa"
+                            android:textSize="22px" />
+
+                    </LinearLayout>
+
+                    <!-- Примеры команд — после QR-кода, список кнопок -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="8dp"
+                        android:text="Примеры команд:"
+                        android:textColor="#FFFFFF"
+                        android:textSize="24px" />
+
+                    <LinearLayout
+                        android:id="@+id/examplesContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                </LinearLayout>
+
+            </ScrollView>
+
+            <LinearLayout
+                android:layout_width="520dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <EditText
+                    android:id="@+id/rawCanCodes"
+                    android:layout_width="match_parent"
+                    android:layout_height="320dp"
+                    android:background="#ffffff"
+                    android:fontFamily="monospace"
+                    android:gravity="top"
+                    android:text="1f 08 00 04 ff f8 00 01 01 7f\n"
+                    android:textColor="#909090"
+                    android:textSize="26px"
+                    android:padding="8dp" />
+
+                <Button
+                    android:id="@+id/buttonClean"
+                    android:layout_width="wrap_content"
+                    android:layout_height="60dp"
+                    android:layout_gravity="end"
+                    android:layout_marginTop="12dp"
+                    android:backgroundTint="#373f4a"
+                    android:onClick="onButtonClickClean"
+                    android:text="Очистить"
+                    android:textColor="#FFFFFF"
+                    android:textSize="30dp"
+                    app:cornerRadius="20dp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+    <!-- конец pageCustomCommands -->
+
+    <!-- Раздел: Другое -->
+    <LinearLayout
+        android:id="@+id/pageOther"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingHorizontal="28dp"
+        android:paddingVertical="20dp"
+        android:visibility="gone">
 
         <TextView
-            android:id="@+id/textView"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="24dp"
-            android:text="Повторы"
+            android:layout_marginBottom="16dp"
+            android:text="Другое"
             android:textColor="#FFFFFF"
-            android:textSize="40dp" />
+            android:textStyle="bold"
+            android:textSize="44px" />
 
-        <NumberPicker
-            android:id="@+id/pickerCustomCommandCount"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            android:layout_marginStart="8dp"
+        <!-- Режим отладки -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:outlineAmbientShadowColor="#C14A24"
-            android:outlineSpotShadowColor="#8BC34A" />
+            android:gravity="center_vertical"
+            android:background="@drawable/layout_category_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp">
 
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Режим отладки"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
 
-        <Button
-            android:id="@+id/buttonClean"
-            android:layout_width="wrap_content"
-            android:layout_height="70dp"
-            android:backgroundTint="#373f4a"
-            android:onClick="onButtonClickClean"
-            android:text="Очистить"
-            android:textColor="#FFFFFF"
-            android:textSize="40dp"
-            app:cornerRadius="20dp" />
+            <Switch
+                android:id="@+id/switchDebugMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
 
-    </LinearLayout>
-
-    <!-- Строка 2: предупреждение слева + EditText справа -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="horizontal"
-        android:layout_marginBottom="8dp">
-
-        <TextView
-            android:id="@+id/TextWarn"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="@string/activity_advance_text"
-            android:textColor="#ff0000"
-            android:textSize="20px"
-            android:layout_marginEnd="12dp" />
-
-        <EditText
-            android:id="@+id/rawCanCodes"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:background="#ffffff"
-            android:fontFamily="monospace"
-            android:gravity="top"
-            android:text="1f 08 00 04 ff f8 00 01 01 7f\n"
-            android:textColor="#909090"
-            android:textSize="26px"
-            android:padding="8dp" />
+        </LinearLayout>
 
     </LinearLayout>
 
+    </FrameLayout>
 
 </LinearLayout>

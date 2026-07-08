@@ -444,6 +444,71 @@
             </RadioGroup>
         </LinearLayout>
 
+        <!-- Отключить звук для пешеходов -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="5dp"
+            android:animateLayoutChanges="true"
+            android:background="@drawable/layout_category_bg"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginHorizontal="6dp"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:id="@+id/pedestrian_sound_text"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Предупреждение пешеходов"
+                    android:textColor="#ffffff"
+                    android:textSize="26px" />
+
+            </LinearLayout>
+
+            <!-- Сегмент-контрол Со звуком/Без звука под заголовком (как автосвет, шире под текст) -->
+            <RadioGroup
+                android:id="@+id/pedestrianSoundGroup"
+                style="@style/radio_group_height_70_style"
+                android:layout_width="wrap_content"
+                android:layout_height="70dp"
+                android:layout_gravity="start"
+                android:background="@drawable/radio_group_height_70_bg"
+                android:orientation="horizontal"
+                android:layout_marginHorizontal="6dp">
+
+                <RadioButton
+                    android:id="@+id/pedestrianSoundOff"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="260dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="0"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="OFF"
+                    android:text="Со звуком"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:id="@+id/pedestrianSoundOn"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="260dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="0"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="ON"
+                    android:text="Без звука"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+            </RadioGroup>
+
+        </LinearLayout>
+
     </LinearLayout>
 
     </ScrollView>
@@ -469,6 +534,15 @@
             android:textSize="26dp"
             android:singleLine="true"
             app:cornerRadius="20dp" />
+
+        <ProgressBar
+            android:id="@+id/applyProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:indeterminate="true"
+            android:visibility="gone" />
 
         <Space
             android:layout_width="0dp"

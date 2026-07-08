@@ -26,6 +26,7 @@ public class MainActivity extends AppCompatActivity {
     private static boolean driveEnabled   = false;
     private static boolean recycleEnabled = false;
     private static boolean energyEnabled  = false;
+    private static boolean disablePedestrianSound = false;
 
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
@@ -182,6 +183,19 @@ public class MainActivity extends AppCompatActivity {
         return arraysStr2arraysBytes(cmds);
     }
 
+    //------------- Метод получения команд CAN «Отключить звук для пешеходов»  ----------------------
+    public static byte[][] getPedestrianSoundCanCommand(boolean disabled) {
+        Log.i("$$$ MainActivity getPedestrianSoundCanCommand $$$",
+                "pedestrian sound " + (disabled ? "DISABLED (mute)" : "ENABLED (default)"));
+        if (disabled) {
+            // Звук оповещения пешеходов ВЫКЛ
+            return arraysStr2arraysBytes(new String[]{"6a 08 00 03 00 00 00 10 7c 00"});
+        } else {
+            // Звук оповещения пешеходов ВКЛ
+            return arraysStr2arraysBytes(new String[]{"6a 08 00 03 00 00 00 20 7c 00"});
+        }
+    }
+
     //------------- Методы получения команд CAN управления фарами  ----------------------------------
     public static void setHeadlights(boolean on){
         Log.i("$$$ MainActivity setHeadlights $$$", "sending CAN: headlights " + (on ? "ON" : "OFF"));
@@ -190,13 +204,13 @@ public class MainActivity extends AppCompatActivity {
                     "1f 08 00 10 ff f8 00 04 02 7f",
                     "6f 08 08 00 80 11 43 04 00 40",
                     "76 08 04 00 00 00 00 00 00 00"
-            }));
+            }), "headlights: ON (low beam / manual)");
         } else {
             setCanValues(1, arraysStr2arraysBytes(new String[]{
                     "6f 08 08 00 80 11 43 00 00 40",
                     "1f 08 00 00 ff f9 00 04 02 7f",
                     "76 08 00 00 00 00 00 00 00 00"
-            }));
+            }), "headlights: OFF (auto)");
         }
     }
 
@@ -225,10 +239,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public static void setCanValues(int cmdNum, byte[][] cmds) {
+        setCanValues(cmdNum, cmds, null);
+    }
+
+    public static void setCanValues(int cmdNum, byte[][] cmds, String label) {
         //printBytesArrayToLog("$$$ MAIN setCanValues $$$",cmds);
-        for (byte[] cmd : cmds) {
-            if (cmd.length == 10) cis_can_control_bytes(cmdNum, cmd);
-        }
+        // Отправка идёт через CanSender: в режиме отладки команды логируются (эмуляция) с меткой,
+        // иначе уходят в шину через cis_can_control_bytes.
+        CanSender.send(cmdNum, cmds, label);
     }
     public static void initValueModes(Context context) {
         Cursor cursor = null;
@@ -248,8 +266,15 @@ public class MainActivity extends AppCompatActivity {
                 driveEnabled   = cursor.getColumnCount() > 6 && cursor.getInt(6) == 1;
                 recycleEnabled = cursor.getColumnCount() > 7 && cursor.getInt(7) == 1;
                 energyEnabled  = cursor.getColumnCount() > 8 && cursor.getInt(8) == 1;
+                // col 11 — «Отключить звук для пешеходов» (1=отключить, fallback=false)
+                disablePedestrianSound = cursor.getColumnCount() > 11 && cursor.getInt(11) == 1;
+                // col 12 — «Режим отладки»: эмуляция CAN в логи вместо реальной отправки
+                boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
+                CanSender.setDebugMode(debugMode);
                 Log.i("$$$ MainActivity initValueModes", "driveEnabled=" + driveEnabled
-                        + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled);
+                        + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
+                        + " disablePedestrianSound=" + disablePedestrianSound
+                        + " debugMode=" + debugMode);
             } else {
                 Log.w("$$$ MainActivity initValueModes", "Content provider not ready or missing columns"
                         + (cursor != null ? " cols=" + cursor.getColumnCount() : " cursor=null"));
@@ -263,13 +288,17 @@ public class MainActivity extends AppCompatActivity {
 
     public static void runCmds() {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
-                + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled);
-        if (energyEnabled)  setCanValues(1, getEnergyCanCommand(energy));
-        if (driveEnabled)   setCanValues(1, getDriveModeCanCommand(driveMode));
-        if (recycleEnabled) setCanValues(1, getRecEnergyCanCommand(recycle));
+                + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
+                + " disablePedestrianSound=" + disablePedestrianSound);
+        if (energyEnabled)  setCanValues(1, getEnergyCanCommand(energy),        "energy mode: " + energy);
+        if (driveEnabled)   setCanValues(1, getDriveModeCanCommand(driveMode),  "drive mode: " + driveMode);
+        if (recycleEnabled) setCanValues(1, getRecEnergyCanCommand(recycle),    "recuperation level: " + recycle);
+        // «Отключить звук для пешеходов» — бинарное состояние, применяем всегда
+        setCanValues(1, getPedestrianSoundCanCommand(disablePedestrianSound),
+                "pedestrian sound mode " + (disablePedestrianSound ? "off" : "on"));
     }
     public static void setDriveMode(String driveMode){
-        setCanValues(1, getDriveModeCanCommand(driveMode));
+        setCanValues(1, getDriveModeCanCommand(driveMode), "drive mode: " + driveMode);
     }
 
     public void onButtonClick(View v) {

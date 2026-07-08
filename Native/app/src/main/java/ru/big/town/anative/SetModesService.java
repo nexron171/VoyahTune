@@ -30,6 +30,8 @@ import java.util.List;
 public class SetModesService extends Service {
 
     private Messenger clientMessenger;
+    // Кому отправить MSG_RESULT по завершении цикла «Применить» (worker статический — поле тоже)
+    static volatile Messenger applyResultClient = null;
     static final int MSG_APPLY_DRIVE_MODES          = 1;
     static final int MSG_APPLY_DRIVE_MODES_STAR_BUTTON = 2;
     static final int MSG_RESULT                     = 4;
@@ -45,13 +47,11 @@ public class SetModesService extends Service {
             switch (msg.what) {
                 case MSG_APPLY_DRIVE_MODES:
                     clientMessenger = msg.replyTo;
+                    // MSG_RESULT отправим по ЗАВЕРШЕНИИ цикла worker (см. worker()), чтобы клиент
+                    // держал кнопку «Применить» заблокированной всё время отправки.
+                    applyResultClient = msg.replyTo;
                     worker(7, 250);
                     Log.i(TAG, "handleMessage() MSG_APPLY_DRIVE_MODES");
-                    try {
-                        clientMessenger.send(Message.obtain(null, MSG_RESULT));
-                    } catch (RemoteException e) {
-                        throw new RuntimeException(e);
-                    }
                     break;
                 case MSG_APPLY_DRIVE_MODES_STAR_BUTTON:
                     clientMessenger = msg.replyTo;
@@ -320,6 +320,9 @@ public class SetModesService extends Service {
             MainActivity.initValueModes(GlobalVars.SAVE_CONTEXT);
             Log.i(TAG, " Command is  1 - " + MainActivity.customCommandStarButton1+" 2 -" + MainActivity.customCommandStarButton2);
 
+            final Messenger notify = applyResultClient;   // кого уведомить по завершении
+            applyResultClient = null;
+
             Thread thread = new Thread() {
                 public void run() {
                     try {
@@ -333,7 +336,7 @@ public class SetModesService extends Service {
                             }
 
                             for (int i = 1; i <= MainActivity.customCommandCount; i++) {
-                                MainActivity.setCanValues(1, MainActivity.getCustomCommand());
+                                MainActivity.setCanValues(1, MainActivity.getCustomCommand(), "custom command (unlock/wake)");
                                 Thread.sleep(pause);
                                 Log.i(TAG, " Run customCommand");
                             }
@@ -342,12 +345,29 @@ public class SetModesService extends Service {
                     } catch (InterruptedException e) {
                         GlobalVars.running = 0;
                         throw new RuntimeException(e);
+                    } finally {
+                        notifyApplyDone(notify);   // разблокировать «Применить» на клиенте
                     }
 //                result.setResultCode(0);
 //                result.finish();
                 }
             };
             thread.start();
+        } else {
+            // Цикл уже идёт или контекст не готов — сразу отпускаем клиента, чтобы кнопка не залипла
+            Messenger notify = applyResultClient;
+            applyResultClient = null;
+            notifyApplyDone(notify);
+        }
+    }
+
+    /** Уведомить клиента о завершении цикла «Применить» (разблокировка кнопки). */
+    private static void notifyApplyDone(Messenger client) {
+        if (client == null) return;
+        try {
+            client.send(Message.obtain(null, MSG_RESULT));
+        } catch (RemoteException e) {
+            Log.w(TAG, "notifyApplyDone failed: " + e.getMessage());
         }
     }
     static public void worker(int repeat, int pause, int mode, int msg_arg1) {
@@ -369,8 +389,8 @@ public class SetModesService extends Service {
                         //if(isButton){Thread.sleep(5000);}
                         if (mode == MSG_APPLY_DRIVE_MODES_STAR_BUTTON) {
                             Log.i(TAG, " Run customCommandStarButton");
-                            if(msg_arg1==1) MainActivity.setCanValues(1, MainActivity.getCustomCommandStarButton1());
-                            if(msg_arg1==2) MainActivity.setCanValues(1, MainActivity.getCustomCommandStarButton2());
+                            if(msg_arg1==1) MainActivity.setCanValues(1, MainActivity.getCustomCommandStarButton1(), "star button command 1");
+                            if(msg_arg1==2) MainActivity.setCanValues(1, MainActivity.getCustomCommandStarButton2(), "star button command 2");
                             Thread.sleep(pause);
                         }
                         GlobalVars.running = 0;
