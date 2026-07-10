@@ -24,6 +24,7 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  int lightSensorThresholdOff=5;
     private  boolean disablePedestrianSound=false;
     private  boolean debugMode=false;
+    private  boolean wiperColdMode=false;
     public RestoreModeContentProvider() {
     }
 
@@ -67,6 +68,7 @@ public class RestoreModeContentProvider extends ContentProvider {
         lightSensorThresholdOff = sharedPreferences.getInt("lightSensorThresholdOff", 5);
         disablePedestrianSound  = sharedPreferences.getBoolean("disablePedestrianSound", false);
         debugMode               = sharedPreferences.getBoolean("debugMode",              false);
+        wiperColdMode           = sharedPreferences.getBoolean("wiperColdMode",          false);
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
@@ -82,6 +84,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "lightSensorThresholdOff", // 10
                 "disablePedestrianSound",  // 11
                 "debugMode",               // 12
+                "wiperColdMode",           // 13
         });
 
         cursor.addRow(new Object[]{
@@ -94,6 +97,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 lightSensorThresholdOff,
                 disablePedestrianSound ? 1 : 0,
                 debugMode ? 1 : 0,
+                wiperColdMode ? 1 : 0,
         });
        return cursor;
 
