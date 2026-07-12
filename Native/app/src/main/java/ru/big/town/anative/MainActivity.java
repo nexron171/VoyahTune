@@ -4,6 +4,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.database.Cursor;
 import android.net.Uri;
@@ -105,18 +106,18 @@ public class MainActivity extends AppCompatActivity {
 
     //------------- Метод получения команд CAN режимов энергии  -------------------------------------
     public static byte[][] getCustomCommand() {
-        if (customCommand == "") return new byte[][]{{}};
+        if (customCommand == null || customCommand.isEmpty()) return new byte[][]{{}};
         String[] cmds = customCommand.split("\n");
         return arraysStr2arraysBytes(cmds);
     }
 
     public static byte[][] getCustomCommandStarButton1() {
-        if (customCommandStarButton1 == "") return new byte[][]{{}};
+        if (customCommandStarButton1 == null || customCommandStarButton1.isEmpty()) return new byte[][]{{}};
         String[] cmds = customCommandStarButton1.split("\n");
         return arraysStr2arraysBytes(cmds);
     }
     public static byte[][] getCustomCommandStarButton2() {
-        if (customCommandStarButton2 == "") return new byte[][]{{}};
+        if (customCommandStarButton2 == null || customCommandStarButton2.isEmpty()) return new byte[][]{{}};
         String[] cmds = customCommandStarButton2.split("\n");
         return arraysStr2arraysBytes(cmds);
     }
@@ -238,17 +239,39 @@ public class MainActivity extends AppCompatActivity {
 //        tv.setText("----------");
     }
 
-    public static void setCanValues(int cmdNum, byte[][] cmds) {
-        setCanValues(cmdNum, cmds, null);
+    public static boolean setCanValues(int cmdNum, byte[][] cmds) {
+        return setCanValues(cmdNum, cmds, null);
     }
 
-    public static void setCanValues(int cmdNum, byte[][] cmds, String label) {
+    public static boolean setCanValues(int cmdNum, byte[][] cmds, String label) {
         //printBytesArrayToLog("$$$ MAIN setCanValues $$$",cmds);
         // Отправка идёт через CanSender: в режиме отладки команды логируются (эмуляция) с меткой,
         // иначе уходят в шину через cis_can_control_bytes.
-        CanSender.send(cmdNum, cmds, label);
+        return CanSender.send(cmdNum, cmds, label);
     }
-    public static void initValueModes(Context context) {
+
+    private static final String MODES_LOG = "$$$ MainActivity loadModes";
+
+    /**
+     * Загружает настройки режимов. Источник №1 — {@link ru.big.town.restoremode}-провайдер
+     * (актуальные значения). Если он ещё не поднят (частый случай сразу после пробуждения),
+     * подхватываем последний удачно прочитанный снимок из локального кэша (NativePrefs),
+     * чтобы не применять пустые дефолты.
+     *
+     * @return 2 — прочитаны свежие данные из провайдера;
+     *         1 — провайдер недоступен, но применён локальный кэш;
+     *         0 — данных нет ни в провайдере, ни в кэше (применять нечего).
+     */
+    public static int loadModes(Context context) {
+        return loadModes(context, true);
+    }
+
+    /**
+     * @param allowCache false — принимать только свежие данные провайдера (кэш не трогаем);
+     *                   используется ApplyEngine в первых попытках, чтобы дать провайдеру
+     *                   шанс подняться, прежде чем соглашаться на устаревший снимок.
+     */
+    public static int loadModes(Context context, boolean allowCache) {
         Cursor cursor = null;
         try {
             cursor = context.getContentResolver().query(Uri
@@ -270,32 +293,122 @@ public class MainActivity extends AppCompatActivity {
                 disablePedestrianSound = cursor.getColumnCount() > 11 && cursor.getInt(11) == 1;
                 // col 12 — «Режим отладки»: эмуляция CAN в логи вместо реальной отправки
                 boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
-                CanSender.setDebugMode(debugMode);
-                Log.i("$$$ MainActivity initValueModes", "driveEnabled=" + driveEnabled
+                // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
+                boolean wiperColdMode = cursor.getColumnCount() > 13 && cursor.getInt(13) == 1;
+                applyModeSideEffects(context, debugMode, wiperColdMode);
+                saveModesCache(context, debugMode, wiperColdMode);
+                Log.i(MODES_LOG, "FRESH: driveEnabled=" + driveEnabled
                         + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
                         + " disablePedestrianSound=" + disablePedestrianSound
-                        + " debugMode=" + debugMode);
+                        + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode);
+                return 2;
             } else {
-                Log.w("$$$ MainActivity initValueModes", "Content provider not ready or missing columns"
+                Log.w(MODES_LOG, "Content provider not ready or missing columns"
                         + (cursor != null ? " cols=" + cursor.getColumnCount() : " cursor=null"));
             }
         } catch (Exception e) {
-            Log.e("$$$ MainActivity initValueModes", "Exception reading ContentProvider: " + e.getMessage());
+            Log.e(MODES_LOG, "Exception reading ContentProvider: " + e.getMessage());
         } finally {
             if (cursor != null) cursor.close();
         }
+        // Провайдер не дал данных — пробуем локальный кэш (если разрешён)
+        if (!allowCache) return 0;
+        return loadModesFromCache(context) ? 1 : 0;
     }
 
-    public static void runCmds() {
+    /** Совместимость: прежнее имя. */
+    public static void initValueModes(Context context) {
+        loadModes(context);
+    }
+
+    private static SharedPreferences nativePrefs(Context context) {
+        return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+    }
+
+    /** Сохраняет успешно прочитанный снимок настроек в NativePrefs (кэш на случай «глухого» пробуждения). */
+    private static void saveModesCache(Context context, boolean debugMode, boolean wiperColdMode) {
+        nativePrefs(context).edit()
+                .putString("cacheDriveMode", driveMode)
+                .putString("cacheEnergy", energy)
+                .putString("cacheRecycle", recycle)
+                .putString("cacheCustomCommand", customCommand)
+                .putInt("cacheCustomCommandCount", customCommandCount)
+                .putBoolean("cacheDriveEnabled", driveEnabled)
+                .putBoolean("cacheRecycleEnabled", recycleEnabled)
+                .putBoolean("cacheEnergyEnabled", energyEnabled)
+                .putBoolean("cacheDisablePedestrianSound", disablePedestrianSound)
+                .putBoolean("cacheDebugMode", debugMode)
+                .putBoolean("cacheWiperColdMode", wiperColdMode)
+                .putBoolean("cacheValid", true)
+                .apply();
+    }
+
+    /** Восстанавливает настройки из кэша NativePrefs. @return true, если кэш существовал. */
+    private static boolean loadModesFromCache(Context context) {
+        SharedPreferences p = nativePrefs(context);
+        if (!p.getBoolean("cacheValid", false)) {
+            Log.w(MODES_LOG, "No cached modes available");
+            return false;
+        }
+        driveMode          = p.getString("cacheDriveMode", driveMode);
+        energy             = p.getString("cacheEnergy", energy);
+        recycle            = p.getString("cacheRecycle", recycle);
+        customCommand      = p.getString("cacheCustomCommand", customCommand);
+        customCommandCount = p.getInt("cacheCustomCommandCount", customCommandCount);
+        driveEnabled       = p.getBoolean("cacheDriveEnabled", false);
+        recycleEnabled     = p.getBoolean("cacheRecycleEnabled", false);
+        energyEnabled      = p.getBoolean("cacheEnergyEnabled", false);
+        disablePedestrianSound = p.getBoolean("cacheDisablePedestrianSound", false);
+        boolean debugMode     = p.getBoolean("cacheDebugMode", false);
+        boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
+        applyModeSideEffects(context, debugMode, wiperColdMode);
+        Log.i(MODES_LOG, "CACHE: driveEnabled=" + driveEnabled
+                + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
+                + " disablePedestrianSound=" + disablePedestrianSound
+                + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode);
+        return true;
+    }
+
+    /** Побочные эффекты настроек, не зависящие от отправки CAN: режим отладки и сервис дворников. */
+    private static void applyModeSideEffects(Context context, boolean debugMode, boolean wiperColdMode) {
+        CanSender.setDebugMode(debugMode);
+        applyWiperColdMode(context, wiperColdMode);
+    }
+
+    /**
+     * Старт/стоп {@link WiperColdService} по настройке «Сервисный режим дворников в
+     * холодную погоду». Флаг дублируем в NativePrefs («wiperCold»), чтобы
+     * {@link SetModesService} мог синхронно узнать состояние на power on/boot.
+     */
+    public static void applyWiperColdMode(Context context, boolean enabled) {
+        if (context == null) return;
+        Log.i("$$$ WiperCold $$$", "applyWiperColdMode: enabled=" + enabled);
+        context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                .edit().putBoolean("wiperCold", enabled).apply();
+        Intent intent = new Intent(context, WiperColdService.class);
+        if (enabled) {
+            context.startForegroundService(intent);
+        } else {
+            // НЕ сбрасываем wiperServiceActive: если дворники по нашей оценке в сервисном
+            // режиме, их надо вернуть на ближайшем power on (даже с выключенной опцией) —
+            // SetModesService.resetWiperColdOnPowerOn учитывает этот флаг.
+            context.stopService(intent);
+        }
+    }
+
+    /** @return true, если все включённые команды ушли без ошибки CAN. */
+    public static boolean runCmds() {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound);
-        if (energyEnabled)  setCanValues(1, getEnergyCanCommand(energy),        "energy mode: " + energy);
-        if (driveEnabled)   setCanValues(1, getDriveModeCanCommand(driveMode),  "drive mode: " + driveMode);
-        if (recycleEnabled) setCanValues(1, getRecEnergyCanCommand(recycle),    "recuperation level: " + recycle);
+        boolean ok = true;
+        if (energyEnabled)  ok &= setCanValues(1, getEnergyCanCommand(energy),        "energy mode: " + energy);
+        if (driveEnabled)   ok &= setCanValues(1, getDriveModeCanCommand(driveMode),  "drive mode: " + driveMode);
+        if (recycleEnabled) ok &= setCanValues(1, getRecEnergyCanCommand(recycle),    "recuperation level: " + recycle);
         // «Отключить звук для пешеходов» — бинарное состояние, применяем всегда
-        setCanValues(1, getPedestrianSoundCanCommand(disablePedestrianSound),
+        ok &= setCanValues(1, getPedestrianSoundCanCommand(disablePedestrianSound),
                 "pedestrian sound mode " + (disablePedestrianSound ? "off" : "on"));
+        return ok;
     }
     public static void setDriveMode(String driveMode){
         setCanValues(1, getDriveModeCanCommand(driveMode), "drive mode: " + driveMode);
@@ -315,7 +428,7 @@ public class MainActivity extends AppCompatActivity {
 //
 //        LocalBroadcastManager.getInstance(this).registerReceiver(setModesReceiver, filter);
         //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
-        SetModesService.worker(2,3500);
+        ApplyEngine.scheduleApply("MainActivity button");
         //initValueModes(getApplicationContext());
         //runCmds();
     }

@@ -44,6 +44,19 @@
             android:textColor="#FFFFFF"
             android:textSize="26px" />
 
+        <!-- Раздел: Комфорт -->
+        <TextView
+            android:id="@+id/navComfort"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Комфорт"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
         <!-- Раздел: Другое -->
         <TextView
             android:id="@+id/navOther"
@@ -232,6 +245,64 @@
 
     </LinearLayout>
     <!-- конец pageCustomCommands -->
+
+    <!-- Раздел: Комфорт -->
+    <LinearLayout
+        android:id="@+id/pageComfort"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingHorizontal="28dp"
+        android:paddingVertical="20dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="Комфорт"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:textSize="44px" />
+
+        <!-- Сервисный режим дворников в холодную погоду -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/layout_category_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Сервисный режим дворников в холодную погоду"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <Switch
+                android:id="@+id/switchWiperCold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+
+        </LinearLayout>
+
+        <!-- Пояснение (мельче, серым) -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="@string/wiper_cold_desc"
+            android:textColor="#888888"
+            android:textSize="20px" />
+
+    </LinearLayout>
+    <!-- конец pageComfort -->
 
     <!-- Раздел: Другое -->
     <LinearLayout

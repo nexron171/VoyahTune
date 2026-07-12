@@ -41,8 +41,8 @@ public class AdvanceActivity extends AppCompatActivity {
     private final List<ImageButton> deleteButtons = new ArrayList<>();
 
     // Навигация (разделы)
-    private TextView navCustomCommands, navOther;
-    private View pageCustomCommands, pageOther;
+    private TextView navCustomCommands, navComfort, navOther;
+    private View pageCustomCommands, pageComfort, pageOther;
 
     // Примеры команд: {команда, описание}
     private static final String[][] EXAMPLE_COMMANDS = {
@@ -241,16 +241,27 @@ public class AdvanceActivity extends AppCompatActivity {
 
         // Навигация между разделами
         navCustomCommands = findViewById(R.id.navCustomCommands);
+        navComfort        = findViewById(R.id.navComfort);
         navOther          = findViewById(R.id.navOther);
         pageCustomCommands = findViewById(R.id.pageCustomCommands);
+        pageComfort        = findViewById(R.id.pageComfort);
         pageOther          = findViewById(R.id.pageOther);
         navCustomCommands.setOnClickListener(v -> setSection(0));
-        navOther.setOnClickListener(v -> setSection(1));
+        navComfort.setOnClickListener(v -> setSection(1));
+        navOther.setOnClickListener(v -> setSection(2));
         setSection(0);
+
+        SharedPreferences prefs = getSharedPreferences("DrivePreferences", MODE_PRIVATE);
+
+        // Раздел «Комфорт»: тоггл «Сервисный режим дворников в холодную погоду».
+        // Применяется на «Применить»/пробуждении/старте (Native читает колонку 13 провайдера).
+        Switch switchWiperCold = findViewById(R.id.switchWiperCold);
+        switchWiperCold.setChecked(prefs.getBoolean("wiperColdMode", false));
+        switchWiperCold.setOnCheckedChangeListener((b, checked) ->
+                prefs.edit().putBoolean("wiperColdMode", checked).apply());
 
         // Раздел «Другое»: тоггл «Режим отладки» (состояние сохраняется, поведение — позже)
         Switch switchDebugMode = findViewById(R.id.switchDebugMode);
-        SharedPreferences prefs = getSharedPreferences("DrivePreferences", MODE_PRIVATE);
         switchDebugMode.setChecked(prefs.getBoolean("debugMode", false));
         switchDebugMode.setOnCheckedChangeListener((b, checked) ->
                 prefs.edit().putBoolean("debugMode", checked).apply());
@@ -259,8 +270,10 @@ public class AdvanceActivity extends AppCompatActivity {
     /** Переключение разделов навигации. */
     private void setSection(int index) {
         if (pageCustomCommands != null) pageCustomCommands.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
-        if (pageOther != null)          pageOther.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
+        if (pageComfort != null)        pageComfort.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
+        if (pageOther != null)          pageOther.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
         if (navCustomCommands != null)  navCustomCommands.setSelected(index == 0);
-        if (navOther != null)           navOther.setSelected(index == 1);
+        if (navComfort != null)         navComfort.setSelected(index == 1);
+        if (navOther != null)           navOther.setSelected(index == 2);
     }
 }

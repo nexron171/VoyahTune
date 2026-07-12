@@ -44,14 +44,13 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 //            repeat = 7;
 //            isButton = false;
 //        }
-        //Если не удалось инициализировать mCarPowerManager то пробуем через broad Cast
-        if(GlobalVars.mCarPowerManager==null){
-            if (Intent.ACTION_SCREEN_ON.equals(receivedIntent) ||
-                    "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent)) {
-                Log.i(TAG, "onReceive ACTION_SCREEN_ON or GARAGE_MODE_OFF");
-                //MainActivity.setCanValues(1, MainActivity.getCustomCommandOff());
-                SetModesService.worker(7, 3500);
-            }
+        // Fallback-триггер пробуждения через броадкасты. Держим его активным всегда (даже если
+        // power-listener работает): при рестарте CarService слушатель может «протухнуть», а этот
+        // путь остаётся. Возможные дубли с power-listener гасит дебаунс в ApplyEngine.
+        if (Intent.ACTION_SCREEN_ON.equals(receivedIntent) ||
+                "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent)) {
+            Log.i(TAG, "onReceive ACTION_SCREEN_ON or GARAGE_MODE_OFF");
+            ApplyEngine.scheduleApply(receivedIntent);
         }
 
                 //throw new UnsupportedOperationException("Not yet implemented");

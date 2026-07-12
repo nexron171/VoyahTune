@@ -32,26 +32,42 @@ public final class CanSender {
         return debugMode;
     }
 
-    /** Отправка одного 10-байтного фрейма с человекочитаемой меткой (что это за команда). */
-    public static void send(int cmdNum, byte[] frame, String label) {
-        if (frame == null || frame.length != 10) return;
+    /**
+     * Отправка одного 10-байтного фрейма с человекочитаемой меткой (что это за команда).
+     *
+     * @return {@code true}, если фрейм отправлен (или сэмулирован в debug-режиме);
+     *         {@code false}, если нативный слой вернул ошибку (напр. не загрузилась libqg_hal).
+     *         Пустой/некорректный фрейм считаем «нечего слать» → {@code true}.
+     */
+    public static boolean send(int cmdNum, byte[] frame, String label) {
+        if (frame == null || frame.length != 10) return true;
         if (debugMode) {
             Log.i(TAG, "EMULATE CAN [" + (label == null || label.isEmpty() ? "?" : label) + "]"
                     + " cmd=" + cmdNum + " frame=" + MainActivity.printHexBinary(frame));
-        } else {
-            MainActivity.cis_can_control_bytes(cmdNum, frame);
+            return true;
         }
+        int res = MainActivity.cis_can_control_bytes(cmdNum, frame);
+        if (res < 0) {
+            Log.w(TAG, "CAN send failed (res=" + res + ") [" + label + "]");
+            return false;
+        }
+        return true;
     }
 
-    /** Отправка набора фреймов с меткой. */
-    public static void send(int cmdNum, byte[][] frames, String label) {
-        if (frames == null) return;
+    /**
+     * Отправка набора фреймов с меткой.
+     * @return {@code true}, только если ВСЕ фреймы ушли без ошибки.
+     */
+    public static boolean send(int cmdNum, byte[][] frames, String label) {
+        if (frames == null) return true;
+        boolean ok = true;
         for (byte[] frame : frames) {
-            send(cmdNum, frame, label);
+            ok &= send(cmdNum, frame, label);
         }
+        return ok;
     }
 
     // Совместимость: вызовы без метки
-    public static void send(int cmdNum, byte[] frame)   { send(cmdNum, frame, null); }
-    public static void send(int cmdNum, byte[][] frames) { send(cmdNum, frames, null); }
+    public static boolean send(int cmdNum, byte[] frame)   { return send(cmdNum, frame, null); }
+    public static boolean send(int cmdNum, byte[][] frames) { return send(cmdNum, frames, null); }
 }
