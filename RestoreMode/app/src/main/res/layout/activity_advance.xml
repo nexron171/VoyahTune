@@ -31,16 +31,16 @@
             android:onClick="onButtonClickFinish"
             android:contentDescription="Назад" />
 
-        <!-- Раздел: Собственные команды -->
+        <!-- Раздел: Режимы вождения и безопасность -->
         <TextView
-            android:id="@+id/navCustomCommands"
+            android:id="@+id/navDriveModes"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="40dp"
             android:background="@drawable/nav_rail_item_bg"
             android:paddingHorizontal="16dp"
             android:paddingVertical="16dp"
-            android:text="Собственные команды"
+            android:text="Режимы вождения и безопасность"
             android:textColor="#FFFFFF"
             android:textSize="26px" />
 
@@ -54,6 +54,19 @@
             android:paddingHorizontal="16dp"
             android:paddingVertical="16dp"
             android:text="Комфорт"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
+        <!-- Раздел: Собственные команды -->
+        <TextView
+            android:id="@+id/navCustomCommands"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Собственные команды"
             android:textColor="#FFFFFF"
             android:textSize="26px" />
 
@@ -79,10 +92,68 @@
         android:layout_marginVertical="20dp"
         android:background="#373f4a" />
 
-    <!-- ===================== Контент (переключаемые разделы) ===================== -->
-    <FrameLayout
+    <!-- ============ Контент: верхняя панель «Применить» + переключаемые разделы ============ -->
+    <LinearLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+    <!-- Верхняя панель: заголовок раздела + кнопка «Применить» на одной строке -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="28dp"
+        android:paddingTop="16dp">
+
+        <TextView
+            android:id="@+id/sectionTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="16dp"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:text="Режимы вождения и безопасность"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:textSize="44px" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <Button
+                android:id="@+id/buttonApplyAdvance"
+                android:layout_width="200dp"
+                android:layout_height="64dp"
+                android:backgroundTint="#373f4a"
+                android:onClick="onButtonClickApply"
+                android:text="Применить"
+                android:textColor="#FFFFFF"
+                android:textSize="26dp"
+                android:singleLine="true"
+                app:cornerRadius="20dp" />
+
+            <ProgressBar
+                android:id="@+id/applyProgressAdvance"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:indeterminate="true"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
         android:layout_weight="1">
 
     <!-- Раздел: Собственные команды -->
@@ -93,48 +164,6 @@
         android:orientation="vertical"
         android:paddingHorizontal="28dp"
         android:paddingVertical="20dp">
-
-        <!-- Заголовок + Повторы -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Собственные команды"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold"
-                android:textSize="44px" />
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/layout_category_bg"
-                android:paddingHorizontal="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
-                    android:text="Повторы"
-                    android:textColor="#FFFFFF"
-                    android:textSize="30px" />
-
-                <NumberPicker
-                    android:id="@+id/pickerCustomCommandCount"
-                    android:layout_width="90dp"
-                    android:layout_height="110dp" />
-
-            </LinearLayout>
-
-        </LinearLayout>
 
         <!-- Описание + поле ввода команд -->
         <LinearLayout
@@ -205,6 +234,31 @@
                         android:layout_height="wrap_content"
                         android:orientation="vertical" />
 
+                    <!-- Повторы (кол-во отправок кастомной команды) — после списка примеров -->
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/layout_category_bg"
+                        android:paddingHorizontal="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:text="Повторы"
+                            android:textColor="#FFFFFF"
+                            android:textSize="30px" />
+
+                        <NumberPicker
+                            android:id="@+id/pickerCustomCommandCount"
+                            android:layout_width="90dp"
+                            android:layout_height="110dp" />
+
+                    </LinearLayout>
+
                 </LinearLayout>
 
             </ScrollView>
@@ -246,62 +300,563 @@
     </LinearLayout>
     <!-- конец pageCustomCommands -->
 
-    <!-- Раздел: Комфорт -->
-    <LinearLayout
-        android:id="@+id/pageComfort"
+    <!-- Раздел: Режимы вождения (перенесено с главного экрана) -->
+    <ScrollView
+        android:id="@+id/pageDriveModes"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
         android:paddingHorizontal="28dp"
         android:paddingVertical="20dp"
+        android:scrollbars="none"
         android:visibility="gone">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:text="Комфорт"
-            android:textColor="#FFFFFF"
-            android:textStyle="bold"
-            android:textSize="44px" />
-
-        <!-- Сервисный режим дворников в холодную погоду -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@drawable/layout_category_bg"
-            android:paddingHorizontal="16dp"
-            android:paddingVertical="8dp">
+            android:orientation="vertical">
 
-            <TextView
-                android:layout_width="0dp"
+            <!-- Режим вождения -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Сервисный режим дворников в холодную погоду"
-                android:textColor="#FFFFFF"
-                android:textSize="26px" />
+                android:layout_margin="5dp"
+                android:animateLayoutChanges="true"
+                android:background="@drawable/layout_category_bg"
+                android:orientation="vertical">
 
-            <Switch
-                android:id="@+id/switchWiperCold"
-                android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:id="@+id/drive_modes_text"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:tag="binding_2"
+                        android:text="Сохранять режим вождения"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                    <Switch
+                        android:id="@+id/switchDriveMode"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
+                <RadioGroup
+                    android:id="@+id/drive_modes_group"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="70dp"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal"
+                    android:layout_marginHorizontal="6dp">
+
+                    <RadioButton
+                        android:id="@+id/ECO"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="ECO"
+                        android:text="Eco"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/COMFORT"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="COMFORT"
+                        android:text="Comf"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/SPORT"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="SPORT"
+                        android:text="Sport"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/OUTING"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:animateLayoutChanges="true"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="OUTING"
+                        android:text="Outing"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/SNOW"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="SNOW"
+                        android:text="Snow"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/INDIVIDUAL"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="INDIVIDUAL"
+                        android:text="Indiv"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+            </LinearLayout>
+
+            <!-- Режим использования энергии -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:thumb="@drawable/switch_thumb"
-                android:track="@drawable/switch_track" />
+                android:layout_margin="5dp"
+                android:animateLayoutChanges="true"
+                android:background="@drawable/layout_category_bg"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginHorizontal="6dp"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:id="@+id/energy_text"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:tag="binding_2"
+                        android:text="Сохранять режим энергии"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                    <CheckBox
+                        android:id="@+id/checkBox34"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="16dp"
+                        android:onClick="onCheckBox34Click"
+                        android:text="3 кнопки"
+                        android:textColor="#ffffffff"
+                        android:textSize="26px" />
+
+                    <Switch
+                        android:id="@+id/switchEnergy"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
+                <RadioGroup
+                    android:id="@+id/energy_modes_group"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="70dp"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal"
+                    android:layout_marginHorizontal="6dp">
+
+                    <RadioButton
+                        android:id="@+id/SMART"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="SMART"
+                        android:text="Intelligent"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/EV"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="EV"
+                        android:text="Electric"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/REV"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="REV"
+                        android:text="Fuel mode"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/SREV"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="SREV"
+                        android:text="Save mode"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+            </LinearLayout>
+
+            <!-- Рекуперация -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:animateLayoutChanges="true"
+                android:background="@drawable/layout_category_bg"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:id="@+id/recycle_text"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:tag="binding_2"
+                        android:text="Сохранять уровень рекуперации"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                    <Switch
+                        android:id="@+id/switchRecycle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
+                <RadioGroup
+                    android:id="@+id/recycle_modes_group"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="70dp"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal"
+                    android:layout_marginHorizontal="6dp">
+
+                    <RadioButton
+                        android:id="@+id/LOW"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="LOW"
+                        android:text="Низкий"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/MEDIUM"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="MEDIUM"
+                        android:text="Стандартный"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/HIGH"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="HIGH"
+                        android:text="Высокий"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+            </LinearLayout>
+
+            <!-- Предупреждение пешеходов (перенесено с главного экрана) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:animateLayoutChanges="true"
+                android:background="@drawable/layout_category_bg"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:id="@+id/pedestrian_sound_text"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Предупреждение пешеходов"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                </LinearLayout>
+
+                <RadioGroup
+                    android:id="@+id/pedestrianSoundGroup"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="wrap_content"
+                    android:layout_height="70dp"
+                    android:layout_gravity="start"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal"
+                    android:layout_marginHorizontal="6dp">
+
+                    <RadioButton
+                        android:id="@+id/pedestrianSoundOff"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="260dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="OFF"
+                        android:text="Со звуком"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/pedestrianSoundOn"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="260dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="ON"
+                        android:text="Без звука"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+
+            </LinearLayout>
 
         </LinearLayout>
+    </ScrollView>
+    <!-- конец pageDriveModes -->
 
-        <!-- Пояснение (мельче, серым) -->
-        <TextView
+    <!-- Раздел: Комфорт -->
+    <ScrollView
+        android:id="@+id/pageComfort"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:paddingHorizontal="28dp"
+        android:paddingVertical="20dp"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="@string/wiper_cold_desc"
-            android:textColor="#888888"
-            android:textSize="20px" />
+            android:orientation="vertical">
 
-    </LinearLayout>
+            <!-- Автоматический ближний свет (перенесено с главного экрана) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:animateLayoutChanges="true"
+                android:background="@drawable/layout_category_bg"
+                android:orientation="vertical">
+
+                <!-- Верхний ряд: заголовок + подзаголовок | показание датчика -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginTop="4dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Автоматический ближний свет"
+                            android:textColor="#ffffff"
+                            android:textSize="26px" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="На автомобилях ОД С+ отключает матричный свет"
+                            android:textColor="#888888"
+                            android:textSize="20px" />
+
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/textSensorLevel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Датчик: —"
+                        android:textColor="#aaaaaa"
+                        android:textSize="22px"
+                        android:visibility="visible" />
+
+                </LinearLayout>
+
+                <!-- Нижний ряд: тоггл Выкл/Вкл + пороги датчика -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="6dp">
+
+                    <!-- Сегмент-контрол Выкл/Вкл, небольшой -->
+                    <RadioGroup
+                        android:id="@+id/autoLightGroup"
+                        style="@style/radio_group_height_70_style"
+                        android:layout_width="wrap_content"
+                        android:layout_height="70dp"
+                        android:background="@drawable/radio_group_height_70_bg"
+                        android:orientation="horizontal"
+                        android:layout_marginEnd="20dp">
+
+                        <RadioButton
+                            android:id="@+id/autoLightOff"
+                            style="@style/radio_button_height_70_style"
+                            android:layout_width="200dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="0"
+                            android:background="@drawable/radio_group_button_70_bg"
+                            android:tag="OFF"
+                            android:text="Выкл"
+                            android:textColor="@color/radio_button_text_color_selector" />
+
+                        <RadioButton
+                            android:id="@+id/autoLightOn"
+                            style="@style/radio_button_height_70_style"
+                            android:layout_width="200dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="0"
+                            android:background="@drawable/radio_group_button_70_bg"
+                            android:tag="ON"
+                            android:text="Вкл"
+                            android:textColor="@color/radio_button_text_color_selector" />
+
+                    </RadioGroup>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Вкл ≤"
+                        android:textColor="#aaaaaa"
+                        android:textSize="22px"
+                        android:layout_marginEnd="4dp" />
+
+                    <NumberPicker
+                        android:id="@+id/pickerSensorThreshold"
+                        android:layout_width="100dp"
+                        android:layout_height="100dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Выкл >"
+                        android:textColor="#aaaaaa"
+                        android:textSize="22px"
+                        android:layout_marginStart="20dp"
+                        android:layout_marginEnd="4dp" />
+
+                    <NumberPicker
+                        android:id="@+id/pickerThresholdOff"
+                        android:layout_width="100dp"
+                        android:layout_height="100dp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Сервисный режим дворников в холодную погоду -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="5dp"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Сервисный режим дворников в холодную погоду"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchWiperCold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Пояснение (мельче, серым) -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="5dp"
+                android:layout_marginTop="14dp"
+                android:text="@string/wiper_cold_desc"
+                android:textColor="#888888"
+                android:textSize="20px" />
+
+        </LinearLayout>
+    </ScrollView>
     <!-- конец pageComfort -->
 
     <!-- Раздел: Другое -->
@@ -313,15 +868,6 @@
         android:paddingHorizontal="28dp"
         android:paddingVertical="20dp"
         android:visibility="gone">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:text="Другое"
-            android:textColor="#FFFFFF"
-            android:textStyle="bold"
-            android:textSize="44px" />
 
         <!-- Режим отладки -->
         <LinearLayout
@@ -353,5 +899,7 @@
     </LinearLayout>
 
     </FrameLayout>
+
+    </LinearLayout>
 
 </LinearLayout>
