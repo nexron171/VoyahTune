@@ -402,6 +402,29 @@ public class MainActivity extends AppCompatActivity {
         setCanValues(1, arraysStr2arraysBytes(WASH_MODE_FRAMES), "wash mode");
     }
 
+    // ------------------------------------------------------------------------
+    // Прогрев высоковольтной батареи.
+    //
+    // CAN-команда активации прогрева ВВБ (предоставлена пользователем). Формат — как у остальных
+    // команд (LEAVE_CAR_FRAMES / WASH_MODE_FRAMES): 10-байтные строки hex через пробел.
+    private static final String[] BATTERY_HEAT_FRAMES = {
+            "65 08 00 00 c1 c0 00 00 00 00",
+    };
+
+    /**
+     * Активация прогрева батареи. Вызывается из {@link BatteryHeatService} (авто-прогрев по
+     * температуре и ручной клик в виджете). Шлёт {@link #BATTERY_HEAT_FRAMES} в шину;
+     * пустой массив (если когда-нибудь очистят) — безопасный no-op с логом.
+     */
+    public static void sendBatteryHeatCommand() {
+        if (BATTERY_HEAT_FRAMES.length == 0) {
+            Log.w("$$$ MainActivity batteryHeat $$$",
+                    "sendBatteryHeatCommand: CAN-команда прогрева ещё не задана (заглушка BATTERY_HEAT_FRAMES)");
+            return;
+        }
+        setCanValues(1, arraysStr2arraysBytes(BATTERY_HEAT_FRAMES), "battery preheat");
+    }
+
     /** Немедленно применить звук пешеходов (тоггл с главного экрана). disabled=true → заглушить. */
     public static void sendPedestrianSoundCommand(boolean disabled) {
         setCanValues(1, getPedestrianSoundCanCommand(disabled),

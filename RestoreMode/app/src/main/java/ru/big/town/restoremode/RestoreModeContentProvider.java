@@ -28,6 +28,7 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  String customCommandStarButton1="";
     private  String customCommandStarButton2="";
     private  boolean autoLaunchOnWake=false;
+    private  boolean batteryHeatAuto=false;
     public RestoreModeContentProvider() {
     }
 
@@ -75,6 +76,7 @@ public class RestoreModeContentProvider extends ContentProvider {
         customCommandStarButton1 = sharedPreferences.getString("customCommandStarButton1", "");
         customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
         autoLaunchOnWake        = sharedPreferences.getBoolean("autoLaunchOnWake",         false);
+        batteryHeatAuto         = sharedPreferences.getBoolean("batteryHeatAuto",          false);
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
@@ -94,6 +96,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "customCommandStarButton1",// 14
                 "customCommandStarButton2",// 15
                 "autoLaunchOnWake",        // 16
+                "batteryHeatAuto",         // 17
         });
 
         cursor.addRow(new Object[]{
@@ -110,6 +113,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 customCommandStarButton1,
                 customCommandStarButton2,
                 autoLaunchOnWake ? 1 : 0,
+                batteryHeatAuto ? 1 : 0,
         });
        return cursor;
 

@@ -535,6 +535,12 @@ public class SetModesService extends Service {
         startForegroundService(intent);
     }
 
+    /** Стартует BatteryHeatService (статус ВВБ для виджета + авто-прогрев по температуре). */
+    private void startBatteryHeatService() {
+        Intent intent = new Intent(this, BatteryHeatService.class);
+        startForegroundService(intent);
+    }
+
     /** Восстанавливает WiperColdService на старте, если опция была включена. */
     private void restoreWiperColdState() {
         boolean enabled = prefs().getBoolean("wiperCold", false);
@@ -752,6 +758,8 @@ public class SetModesService extends Service {
         restoreWiperColdState();
         // Учёт поездок работает всегда
         startTripStatsService();
+        // Статус ВВБ для виджета + авто-прогрев по уличной температуре
+        startBatteryHeatService();
         // Плавающая кнопка «Назад»: восстановить после загрузки/рестарта сервиса
         // (с задержкой — даём системе поднять a11y-подсистему).
         new android.os.Handler(android.os.Looper.getMainLooper())

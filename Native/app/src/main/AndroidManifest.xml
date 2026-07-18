@@ -155,6 +155,12 @@
             />
 
         <service
+            android:name=".BatteryHeatService"
+            android:enabled="true"
+            android:exported="false"
+            />
+
+        <service
             android:name=".BackButtonService"
             android:enabled="true"
             android:exported="true"

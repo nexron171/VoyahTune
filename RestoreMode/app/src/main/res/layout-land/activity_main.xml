@@ -370,6 +370,111 @@
 
     </GridLayout>
 
+    <!-- Виджет «Прогрев батареи»: статус ВВБ + активация в один клик -->
+    <LinearLayout
+        android:id="@+id/cardBatteryHeat"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="6dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/layout_category_bg"
+        android:paddingHorizontal="18dp"
+        android:paddingVertical="12dp"
+        android:visibility="gone">
+
+        <!-- Графический индикатor: иконка батареи, тонируется цветом состояния -->
+        <ImageView
+            android:id="@+id/batteryHeatIcon"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_marginEnd="16dp"
+            android:src="@drawable/ic_battery_indicator"
+            android:contentDescription="Состояние прогрева батареи" />
+
+        <!-- Левая часть: температура + строки статуса -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Прогрев батареи"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"
+                    android:textSize="28px" />
+
+                <!-- Цветная «пилюля» со статусом (цвет и текст задаются в коде) -->
+                <TextView
+                    android:id="@+id/batteryHeatState"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:paddingHorizontal="14dp"
+                    android:paddingVertical="3dp"
+                    android:text="—"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"
+                    android:textSize="20px" />
+
+                <TextView
+                    android:id="@+id/batteryHeatTemp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="18dp"
+                    android:text="за бортом: —"
+                    android:textColor="#aaaaaa"
+                    android:textSize="24px" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/batteryHeatStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Нагрев: —   ·   Pre-heat: —   ·   Автоподогрев: —"
+                android:textColor="#cccccc"
+                android:textSize="20px" />
+
+            <TextView
+                android:id="@+id/batteryHeatFail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text=""
+                android:textColor="#ff6b6b"
+                android:textSize="20px"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- Правая часть: активация в один клик -->
+        <Button
+            android:id="@+id/buttonBatteryHeat"
+            android:layout_width="wrap_content"
+            android:layout_height="72dp"
+            android:layout_marginStart="16dp"
+            android:minWidth="220dp"
+            android:backgroundTint="#2f7fd0"
+            android:onClick="onButtonBatteryHeat"
+            android:text="Прогреть батарею"
+            android:textColor="#FFFFFF"
+            android:textSize="24dp"
+            app:cornerRadius="20dp" />
+
+    </LinearLayout>
+
     <!-- Сплиты: прокручиваемая сетка плиток (по пресетам из «Разделение экрана») -->
     <ScrollView
         android:id="@+id/contentScroll"

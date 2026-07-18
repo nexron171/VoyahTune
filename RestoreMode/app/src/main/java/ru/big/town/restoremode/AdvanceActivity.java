@@ -350,6 +350,7 @@ public class AdvanceActivity extends AppCompatActivity {
         bindShowSwitch(R.id.switchShowWashMode,  "showWashMode");
         bindShowSwitch(R.id.switchShowAutoLight, "showAutoLight");
         bindShowSwitch(R.id.switchShowPedestrian, "showPedestrian");
+        bindShowSwitch(R.id.switchShowBatteryHeat, "showBatteryHeat");
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
         Switch switchSaveHistory = findViewById(R.id.switchSaveTripHistory);
@@ -374,6 +375,15 @@ public class AdvanceActivity extends AppCompatActivity {
         initModeEnableToggles();
         initCheckBox34();
         initPedestrianSoundGroup();
+
+        // Автоматический прогрев батареи: при <10°C на улице Native включит прогрев.
+        // Флаг читает Native из ContentProvider (колонка 17), broadcast не нужен.
+        Switch switchBatteryHeat = findViewById(R.id.switchBatteryHeatAuto);
+        if (switchBatteryHeat != null) {
+            switchBatteryHeat.setChecked(prefs.getBoolean("batteryHeatAuto", false));
+            switchBatteryHeat.setOnCheckedChangeListener((b, checked) ->
+                    prefs.edit().putBoolean("batteryHeatAuto", checked).apply());
+        }
 
         // Раздел «Комфорт»: автосвет + сервисный режим дворников
         initAutoLight();

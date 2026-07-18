@@ -10,6 +10,7 @@ import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.database.Cursor;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -82,6 +83,22 @@ public class MainActivity extends AppCompatActivity {
     private TextView autoLightBadge, pedestrianBadge;
     private boolean autoLightOn, pedestrianOn;
 
+    // -------- Виджет «Прогрев батареи» --------
+    static final String ACTION_BATTERY_HEAT_UPDATE   = "ru.big.town.anative.BATTERY_HEAT_UPDATE";
+    static final String ACTION_REQUEST_BATTERY_HEAT  = "ru.big.town.anative.REQUEST_BATTERY_HEAT";
+    static final String ACTION_BATTERY_HEAT_ACTIVATE = "ru.big.town.anative.BATTERY_HEAT_ACTIVATE";
+    private static final int BH_UNKNOWN = Integer.MIN_VALUE;
+    private static final int BH_TEMP_INVALID = -9999;
+    private View cardBatteryHeat;
+    private android.widget.ImageView batteryHeatIcon;
+    private TextView batteryHeatState, batteryHeatTemp, batteryHeatStatus, batteryHeatFail;
+    // Палитра состояний прогрева (цвет = состояние термоменеджмента ВВБ)
+    private static final int BH_COLOR_COLD    = 0xFF3D7FD0; // синий — на улице холодно, прогрев уместен
+    private static final int BH_COLOR_HEATING = 0xFF35B06A; // зелёный — идёт прогрев
+    private static final int BH_COLOR_NORMAL  = 0xFF6B7280; // серый — норма / нет данных
+    private static final int BH_COLOR_WARN    = 0xFFD0A92F; // жёлтый — внимание (прогрев невозможен)
+    private static final int BH_COLOR_FAULT   = 0xFFD04A4A; // красный — неисправность ВВБ
+
     // Сплиты — прокручиваемая сетка плиток по пресетам из «Разделение экрана»
     private android.widget.GridLayout splitTilesGrid;
 
@@ -98,6 +115,13 @@ public class MainActivity extends AppCompatActivity {
             String tj = intent.getStringExtra("tripsJson");
             if (tj != null) lastTripsJson = tj;
             updateTripTimer();
+        }
+    };
+
+    private final BroadcastReceiver batteryHeatReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            renderBatteryHeat(intent);
         }
     };
 
@@ -123,6 +147,110 @@ public class MainActivity extends AppCompatActivity {
     private static String fmtDuration(long ms) {
         long s = ms / 1000;
         return String.format(Locale.US, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
+    }
+
+    /** Показ снимка статуса прогрева батареи в виджете (данные из BatteryHeatService). */
+    private void renderBatteryHeat(Intent intent) {
+        if (batteryHeatTemp == null) return;
+        int temp    = intent.getIntExtra("ambientTemp",   BH_TEMP_INVALID);
+        int status  = intent.getIntExtra("controlStatus", BH_UNKNOWN);
+        int preheat = intent.getIntExtra("preheatSet",    BH_UNKNOWN);
+        int bms     = intent.getIntExtra("bmsState",      BH_UNKNOWN);
+        int autoCtl = intent.getIntExtra("autoCtrl",      BH_UNKNOWN);
+        int fail    = intent.getIntExtra("failReason",    BH_UNKNOWN);
+
+        int threshold = intent.getIntExtra("tempThreshold", 10);
+        boolean tempValid = temp != BH_TEMP_INVALID && temp != BH_UNKNOWN;
+
+        batteryHeatTemp.setText(tempValid ? "за бортом: " + temp + " °C" : "за бортом: —");
+
+        String preheatTxt = (bms == 9) ? "идёт" : bhOnOff(preheat);
+        batteryHeatStatus.setText("Нагрев: " + bhHeating(status)
+                + "   ·   Pre-heat: " + preheatTxt
+                + "   ·   Автоподогрев: " + bhOnOff(autoCtl));
+
+        String failTxt = bhFail(fail);
+        if (failTxt != null) {
+            batteryHeatFail.setText("Не удалось запустить прогрев: " + failTxt);
+            batteryHeatFail.setVisibility(View.VISIBLE);
+        } else {
+            batteryHeatFail.setVisibility(View.GONE);
+        }
+
+        applyBatteryHeatIndicator(status, bms, fail, temp, tempValid, threshold);
+    }
+
+    /**
+     * Графический индикатор состояния прогрева: тон иконки + цветная «пилюля» с подписью.
+     * Числовой температуры батареи голова не отдаёт, поэтому цвет отражает состояние
+     * термоменеджмента ВВБ и уличный холод (приоритет — сверху вниз):
+     *  красный  — неисправность ВВБ (BMS_STATE=FAULT);
+     *  зелёный  — идёт прогрев;
+     *  жёлтый   — прогрев невозможен (зарядка / низкий заряд / ВВ выкл / температура вне диапазона);
+     *  синий    — на улице холодно (ниже порога), прогрев уместен;
+     *  серый    — норма / нет данных.
+     */
+    private void applyBatteryHeatIndicator(int status, int bms, int fail,
+                                           int temp, boolean tempValid, int threshold) {
+        int color; String label;
+        boolean anyData = status != BH_UNKNOWN || bms != BH_UNKNOWN || fail != BH_UNKNOWN || tempValid;
+        if (bms == 8) {                              // BMS_STATE_FAULT
+            color = BH_COLOR_FAULT;   label = "Неисправность";
+        } else if (status == 1 || bms == 9) {        // активный нагрев / preheat
+            color = BH_COLOR_HEATING; label = "Прогрев";
+        } else if (fail >= 1 && fail <= 4) {         // прогрев невозможен
+            color = BH_COLOR_WARN;    label = "Внимание";
+        } else if (tempValid && temp < threshold) {  // на улице холодно
+            color = BH_COLOR_COLD;    label = "Холодно";
+        } else {
+            color = BH_COLOR_NORMAL;  label = anyData ? "Норма" : "Нет данных";
+        }
+
+        if (batteryHeatIcon != null) batteryHeatIcon.setColorFilter(color);
+        if (batteryHeatState != null) {
+            batteryHeatState.setText(label);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(color);
+            bg.setCornerRadius(getResources().getDisplayMetrics().density * 14f);
+            batteryHeatState.setBackground(bg);
+        }
+    }
+
+    private static String bhHeating(int v) {
+        switch (v) {
+            case 0:  return "нет";
+            case 1:  return "идёт";
+            case 2:  return "инициализация";
+            default: return "—";
+        }
+    }
+
+    private static String bhOnOff(int v) {
+        switch (v) {
+            case 1:  return "вкл";
+            case 2:  return "выкл";
+            default: return "—";
+        }
+    }
+
+    /** Причина отказа прогрева (FAIL_STATE): null — отказа нет / нет данных. */
+    private static String bhFail(int v) {
+        switch (v) {
+            case 1:  return "идёт зарядка";
+            case 2:  return "высоковольтная сеть выключена";
+            case 3:  return "низкий заряд батареи";
+            case 4:  return "температура вне допустимого диапазона";
+            default: return null; // 0 = нет отказа, прочее/UNKNOWN — не показываем
+        }
+    }
+
+    /** Прогрев батареи в один клик — шлём в BatteryHeatService (тот дёргает CAN-команду). */
+    public void onButtonBatteryHeat(View v) {
+        Intent i = new Intent(ACTION_BATTERY_HEAT_ACTIVATE);
+        i.setPackage("ru.big.town.anative");
+        sendBroadcast(i);
+        showSnack("Запуск прогрева батареи…");
+        Log.i(TAG, "BATTERY_HEAT_ACTIVATE отправлен");
     }
 
     /** Открыть отдельный экран истории поездок (снимок лога передаём в интенте). */
@@ -305,6 +433,12 @@ public class MainActivity extends AppCompatActivity {
         cardWashMode   = findViewById(R.id.cardWashMode);
         cardAutoLight  = findViewById(R.id.cardAutoLight);
         cardPedestrian = findViewById(R.id.cardPedestrian);
+        cardBatteryHeat   = findViewById(R.id.cardBatteryHeat);
+        batteryHeatIcon   = findViewById(R.id.batteryHeatIcon);
+        batteryHeatState  = findViewById(R.id.batteryHeatState);
+        batteryHeatTemp   = findViewById(R.id.batteryHeatTemp);
+        batteryHeatStatus = findViewById(R.id.batteryHeatStatus);
+        batteryHeatFail   = findViewById(R.id.batteryHeatFail);
         splitTilesGrid = findViewById(R.id.splitTilesGrid);
         dockIcons      = findViewById(R.id.dockIcons);
 
@@ -435,6 +569,10 @@ public class MainActivity extends AppCompatActivity {
         sendBroadcast(req);
         uiHandler.removeCallbacks(tripTick);
         uiHandler.post(tripTick);
+        registerReceiver(batteryHeatReceiver, new IntentFilter(ACTION_BATTERY_HEAT_UPDATE), RECEIVER_EXPORTED);
+        Intent bhReq = new Intent(ACTION_REQUEST_BATTERY_HEAT);
+        bhReq.setPackage("ru.big.town.anative");
+        sendBroadcast(bhReq);
         refreshToggles();   // подхватить изменения, сделанные в «Дополнительно»
         applyMainScreenVisibility();
         renderSplitTiles();
@@ -551,6 +689,7 @@ public class MainActivity extends AppCompatActivity {
         setCardVisible(cardWashMode,   "showWashMode");
         setCardVisible(cardAutoLight,  "showAutoLight");
         setCardVisible(cardPedestrian, "showPedestrian");
+        setCardVisible(cardBatteryHeat, "showBatteryHeat");
         // Кнопка «История поездок» в виджете — только если история включена.
         View histBtn = findViewById(R.id.buttonTripHistory);
         if (histBtn != null) {
@@ -731,6 +870,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         try { unregisterReceiver(tripReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(batteryHeatReceiver); } catch (Exception ignored) {}
         uiHandler.removeCallbacks(tripTick);
     }
 

@@ -374,6 +374,34 @@
 
             </LinearLayout>
 
+            <!-- Прогрев батареи -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Прогрев батареи"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowBatteryHeat"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
             <!-- Сохранять историю поездок (отдельно от таймера) -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -966,6 +994,57 @@
                         android:textColor="@color/radio_button_text_color_selector" />
 
                 </RadioGroup>
+
+            </LinearLayout>
+
+            <!-- Прогрев высоковольтной батареи -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:animateLayoutChanges="true"
+                android:background="@drawable/layout_category_bg"
+                android:orientation="vertical"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Автоматический прогрев батареи"
+                            android:textColor="#ffffff"
+                            android:textSize="26px" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="В холодное время (на улице ниже +10 °C) автоматически включать прогрев высоковольтной батареи. Статус и ручное включение — в виджете на главном экране."
+                            android:textColor="#888888"
+                            android:textSize="20px" />
+
+                    </LinearLayout>
+
+                    <Switch
+                        android:id="@+id/switchBatteryHeatAuto"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
 
             </LinearLayout>
 
