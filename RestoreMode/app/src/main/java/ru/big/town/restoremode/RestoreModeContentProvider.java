@@ -25,6 +25,9 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  boolean disablePedestrianSound=false;
     private  boolean debugMode=false;
     private  boolean wiperColdMode=false;
+    private  String customCommandStarButton1="";
+    private  String customCommandStarButton2="";
+    private  boolean autoLaunchOnWake=false;
     public RestoreModeContentProvider() {
     }
 
@@ -69,6 +72,9 @@ public class RestoreModeContentProvider extends ContentProvider {
         disablePedestrianSound  = sharedPreferences.getBoolean("disablePedestrianSound", false);
         debugMode               = sharedPreferences.getBoolean("debugMode",              false);
         wiperColdMode           = sharedPreferences.getBoolean("wiperColdMode",          false);
+        customCommandStarButton1 = sharedPreferences.getString("customCommandStarButton1", "");
+        customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
+        autoLaunchOnWake        = sharedPreferences.getBoolean("autoLaunchOnWake",         false);
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
@@ -85,6 +91,9 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "disablePedestrianSound",  // 11
                 "debugMode",               // 12
                 "wiperColdMode",           // 13
+                "customCommandStarButton1",// 14
+                "customCommandStarButton2",// 15
+                "autoLaunchOnWake",        // 16
         });
 
         cursor.addRow(new Object[]{
@@ -98,6 +107,9 @@ public class RestoreModeContentProvider extends ContentProvider {
                 disablePedestrianSound ? 1 : 0,
                 debugMode ? 1 : 0,
                 wiperColdMode ? 1 : 0,
+                customCommandStarButton1,
+                customCommandStarButton2,
+                autoLaunchOnWake ? 1 : 0,
         });
        return cursor;
 

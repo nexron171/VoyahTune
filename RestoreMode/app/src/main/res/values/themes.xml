@@ -6,4 +6,30 @@
     </style>
 
     <style name="Theme.RestoreMode" parent="Base.Theme.RestoreMode" />
+
+    <!-- Тёмный диалог подтверждения с крупными кнопками -->
+    <style name="DarkDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">#22252f</item>
+        <item name="colorOnSurface">#FFFFFF</item>
+        <item name="colorOnSurfaceVariant">#cfd3da</item>
+        <item name="colorPrimary">#4d9fff</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#cfd3da</item>
+        <item name="alertDialogStyle">@style/DarkDialogStyle</item>
+        <item name="buttonBarPositiveButtonStyle">@style/DarkDialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/DarkDialogButton</item>
+    </style>
+
+    <style name="DarkDialogStyle" parent="MaterialAlertDialog.Material3">
+        <item name="backgroundTint">#22252f</item>
+    </style>
+
+    <style name="DarkDialogButton" parent="Widget.Material3.Button.TextButton.Dialog">
+        <item name="android:textSize">22sp</item>
+        <item name="android:minHeight">60dp</item>
+        <item name="android:minWidth">130dp</item>
+        <item name="android:paddingLeft">28dp</item>
+        <item name="android:paddingRight">28dp</item>
+        <item name="android:textColor">#4d9fff</item>
+    </style>
 </resources>

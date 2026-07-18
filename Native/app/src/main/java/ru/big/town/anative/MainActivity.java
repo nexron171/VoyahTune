@@ -295,6 +295,9 @@ public class MainActivity extends AppCompatActivity {
                 boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
                 // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
                 boolean wiperColdMode = cursor.getColumnCount() > 13 && cursor.getInt(13) == 1;
+                // cols 14,15 — команды кнопок на руле (короткое/долгое нажатие)
+                if (cursor.getColumnCount() > 14) customCommandStarButton1 = cursor.getString(14);
+                if (cursor.getColumnCount() > 15) customCommandStarButton2 = cursor.getString(15);
                 applyModeSideEffects(context, debugMode, wiperColdMode);
                 saveModesCache(context, debugMode, wiperColdMode);
                 Log.i(MODES_LOG, "FRESH: driveEnabled=" + driveEnabled
@@ -373,6 +376,36 @@ public class MainActivity extends AppCompatActivity {
     private static void applyModeSideEffects(Context context, boolean debugMode, boolean wiperColdMode) {
         CanSender.setDebugMode(debugMode);
         applyWiperColdMode(context, wiperColdMode);
+    }
+
+    // Power Hold (leave car) — быстрая активация с главного экрана. Две CAN-команды активации.
+    private static final String[] LEAVE_CAR_FRAMES = {
+            "6c 08 00 3e 64 21 c7 00 00 00",
+            "77 08 00 00 00 00 00 1f 00 00",
+    };
+    public static void sendLeaveCarCommand() {
+        setCanValues(1, arraysStr2arraysBytes(LEAVE_CAR_FRAMES), "leave car (power hold)");
+    }
+
+    // Режим мойки — машина засыпает и не реагирует на открытие дверей. Последовательность CAN-команд.
+    private static final String[] WASH_MODE_FRAMES = {
+            "1f 08 00 00 ff f8 00 01 02 ff",
+            "6f 08 04 00 80 11 43 01 00 40",
+            "76 08 01 00 00 00 00 00 00 00",
+            "6f 08 04 00 40 11 43 01 00 40",
+            "1f 08 00 00 ff f8 00 01 02 7f",
+            "73 08 00 00 f0 ff 3f ff ff 07",
+            "6f 08 04 00 80 11 43 00 00 40",
+            "76 08 00 00 00 00 00 00 00 00",
+    };
+    public static void sendWashModeCommand() {
+        setCanValues(1, arraysStr2arraysBytes(WASH_MODE_FRAMES), "wash mode");
+    }
+
+    /** Немедленно применить звук пешеходов (тоггл с главного экрана). disabled=true → заглушить. */
+    public static void sendPedestrianSoundCommand(boolean disabled) {
+        setCanValues(1, getPedestrianSoundCanCommand(disabled),
+                "pedestrian sound " + (disabled ? "off" : "on"));
     }
 
     /**

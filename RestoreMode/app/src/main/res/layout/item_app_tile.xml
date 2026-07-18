@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@drawable/card_dark_ripple"
+    android:clickable="true"
+    android:focusable="true"
+    android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/tileIco"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/tileTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:text=""
+        android:textColor="#FFFFFF"
+        android:textSize="18px" />
+
+</LinearLayout>

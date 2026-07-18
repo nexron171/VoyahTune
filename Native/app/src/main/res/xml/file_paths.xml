@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- /sdcard/tmp/... (основное расположение лог-файла) -->
+    <external-path name="ext_tmp" path="tmp/" />
+    <!-- запасное расположение: app-specific external -->
+    <external-files-path name="ext_files" path="." />
+</paths>

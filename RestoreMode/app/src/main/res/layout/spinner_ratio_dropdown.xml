@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Пункт выпадающего списка спиннера (тёмный popup) -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="16dp"
+    android:gravity="center_vertical"
+    android:textColor="#FFFFFF"
+    android:textSize="22sp"
+    android:background="?android:attr/selectableItemBackground" />

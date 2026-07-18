@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Native</string>
+    <string name="floating_back_desc">Плавающая кнопка «Назад» поверх интерфейса системы</string>
 </resources>

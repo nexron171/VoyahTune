@@ -31,16 +31,55 @@
             android:onClick="onButtonClickFinish"
             android:contentDescription="Назад" />
 
-        <!-- Раздел: Режимы вождения и безопасность -->
+        <!-- Список разделов в скролле (на узких/низких экранах не обрезается) -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <!-- Раздел: Главный экран -->
         <TextView
-            android:id="@+id/navDriveModes"
+            android:id="@+id/navMainScreen"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="40dp"
             android:background="@drawable/nav_rail_item_bg"
             android:paddingHorizontal="16dp"
             android:paddingVertical="16dp"
+            android:text="Главный экран"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
+        <!-- Раздел: Режимы вождения и безопасность -->
+        <TextView
+            android:id="@+id/navDriveModes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
             android:text="Режимы вождения и безопасность"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
+        <!-- Раздел: Разделение экрана -->
+        <TextView
+            android:id="@+id/navSplitScreen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Разделение экрана"
             android:textColor="#FFFFFF"
             android:textSize="26px" />
 
@@ -70,6 +109,19 @@
             android:textColor="#FFFFFF"
             android:textSize="26px" />
 
+        <!-- Раздел: Кнопки на руле -->
+        <TextView
+            android:id="@+id/navSteeringButtons"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Кнопки на руле"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
         <!-- Раздел: Другое -->
         <TextView
             android:id="@+id/navOther"
@@ -82,6 +134,9 @@
             android:text="Другое"
             android:textColor="#FFFFFF"
             android:textSize="26px" />
+
+        </LinearLayout>
+        </ScrollView>
 
     </LinearLayout>
 
@@ -155,6 +210,250 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
+
+    <!-- Раздел: Главный экран -->
+    <ScrollView
+        android:id="@+id/pageMainScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="28dp"
+            android:paddingVertical="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"
+                android:text="Отображать на главном экране:"
+                android:textColor="#FFFFFF"
+                android:textSize="28px" />
+
+            <!-- Время в пути -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Время в пути"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowTripTimer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Режим Power Hold -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Режим Power Hold"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowPowerHold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Режим мойки -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Режим мойки"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowWashMode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Автосвет -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Автосвет"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowAutoLight"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Звук предупреждения пешеходов -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Звук предупреждения пешеходов"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowPedestrian"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Сохранять историю поездок (отдельно от таймера) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Сохранять историю поездок"
+                        android:textColor="#FFFFFF"
+                        android:textSize="26px" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Вести журнал завершённых поездок. Если выключить — история удаляется, остаётся только таймер."
+                        android:textColor="#888888"
+                        android:textSize="20px" />
+
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/switchSaveTripHistory"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Приложения-ярлыки на главном экране -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:text="Приложения на главном экране"
+                android:textColor="#FFFFFF"
+                android:textSize="28px" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Добавленные приложения появятся плитками на главном экране и будут запускаться обычным образом (на весь экран, не в сплите)."
+                android:textColor="#888888"
+                android:textSize="20px" />
+
+            <LinearLayout
+                android:id="@+id/appShortcutsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/buttonAddAppShortcut"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:layout_marginTop="14dp"
+                android:backgroundTint="#2f7fd0"
+                android:onClick="onAddAppShortcut"
+                android:text="＋ Добавить приложение"
+                android:textColor="#FFFFFF"
+                android:textSize="24dp"
+                app:cornerRadius="20dp" />
+
+        </LinearLayout>
+    </ScrollView>
+    <!-- конец pageMainScreen -->
 
     <!-- Раздел: Собственные команды -->
     <LinearLayout
@@ -674,6 +973,52 @@
     </ScrollView>
     <!-- конец pageDriveModes -->
 
+    <!-- Раздел: Разделение экрана -->
+    <ScrollView
+        android:id="@+id/pageSplitScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="28dp"
+            android:paddingVertical="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="Настройте несколько сплитов: в каждом — два приложения и соотношение (3:4 / 1:1 / 4:3 / 5:2 / 2:5). Каждый сплит с выбранными приложениями появится плиткой на главном экране."
+                android:textColor="#888888"
+                android:textSize="20px" />
+
+            <!-- Динамический список пресетов (item_split_preset) -->
+            <LinearLayout
+                android:id="@+id/splitPresetsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/buttonAddSplit"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:layout_marginTop="14dp"
+                android:backgroundTint="#2f7fd0"
+                android:onClick="onAddSplitPreset"
+                android:text="＋ Добавить сплит"
+                android:textColor="#FFFFFF"
+                android:textSize="24dp"
+                app:cornerRadius="20dp" />
+
+        </LinearLayout>
+    </ScrollView>
+    <!-- конец pageSplitScreen -->
+
     <!-- Раздел: Комфорт -->
     <ScrollView
         android:id="@+id/pageComfort"
@@ -785,33 +1130,6 @@
 
                     </RadioGroup>
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Вкл ≤"
-                        android:textColor="#aaaaaa"
-                        android:textSize="22px"
-                        android:layout_marginEnd="4dp" />
-
-                    <NumberPicker
-                        android:id="@+id/pickerSensorThreshold"
-                        android:layout_width="100dp"
-                        android:layout_height="100dp" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Выкл >"
-                        android:textColor="#aaaaaa"
-                        android:textSize="22px"
-                        android:layout_marginStart="20dp"
-                        android:layout_marginEnd="4dp" />
-
-                    <NumberPicker
-                        android:id="@+id/pickerThresholdOff"
-                        android:layout_width="100dp"
-                        android:layout_height="100dp" />
-
                 </LinearLayout>
 
             </LinearLayout>
@@ -860,14 +1178,19 @@
     <!-- конец pageComfort -->
 
     <!-- Раздел: Другое -->
-    <LinearLayout
+    <ScrollView
         android:id="@+id/pageOther"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingHorizontal="28dp"
-        android:paddingVertical="20dp"
-        android:visibility="gone">
+        android:paddingVertical="20dp">
 
         <!-- Режим отладки -->
         <LinearLayout
@@ -896,7 +1219,383 @@
 
         </LinearLayout>
 
+        <!-- Автозапуск VoyahTune -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/layout_category_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Автозапуск VoyahTune"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Открывать приложение автоматически при пробуждении системы"
+                    android:textColor="#888888"
+                    android:textSize="20px" />
+
+            </LinearLayout>
+
+            <Switch
+                android:id="@+id/switchAutoLaunch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+
+        </LinearLayout>
+
+        <!-- Плавающая кнопка «Назад»: тумблер + положение (единый блок) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:background="@drawable/layout_category_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp">
+
+            <!-- Верхняя строка: заголовок + подзаголовок | тумблер -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Плавающая кнопка «Назад»"
+                        android:textColor="#FFFFFF"
+                        android:textSize="26px" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Кнопка поверх интерфейса; вызывает системное «Назад»"
+                        android:textColor="#888888"
+                        android:textSize="20px" />
+
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/switchFloatingBack"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Положение кнопки -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Положение кнопки"
+                android:textColor="#FFFFFF"
+                android:textSize="24px" />
+
+            <RadioGroup
+                android:id="@+id/floatingBackSideGroup"
+                style="@style/radio_group_height_70_style"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/radio_group_height_70_bg"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/sideLeft"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="0"
+                    android:text="Слева"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:id="@+id/sideTop"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="1"
+                    android:text="Сверху"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+                <RadioButton
+                    android:id="@+id/sideRight"
+                    style="@style/radio_button_height_70_style"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="2"
+                    android:text="Справа"
+                    android:textColor="@color/radio_button_text_color_selector" />
+
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Потяните кнопку вдоль выбранной стороны, чтобы изменить положение — оно запомнится"
+                android:textColor="#888888"
+                android:textSize="20px" />
+
+        </LinearLayout>
+
+        <!-- Перезагрузка системы -->
+        <Button
+            android:id="@+id/buttonCloseAll"
+            android:layout_width="match_parent"
+            android:layout_height="70dp"
+            android:layout_marginTop="20dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonCloseAll"
+            android:text="Закрыть приложения"
+            android:textColor="#FFFFFF"
+            android:textSize="26dp"
+            app:cornerRadius="20dp" />
+
+        <Button
+            android:id="@+id/buttonGrantInstall"
+            android:layout_width="match_parent"
+            android:layout_height="70dp"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonGrantInstall"
+            android:text="Выдать права на установку"
+            android:textColor="#FFFFFF"
+            android:textSize="26dp"
+            app:cornerRadius="20dp" />
+
+        <Button
+            android:id="@+id/buttonReboot"
+            android:layout_width="match_parent"
+            android:layout_height="70dp"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonRebootSystem"
+            android:text="Перезагрузить систему"
+            android:textColor="#FFFFFF"
+            android:textSize="26dp"
+            app:cornerRadius="20dp" />
+
+        <Button
+            android:id="@+id/buttonLogging"
+            android:layout_width="match_parent"
+            android:layout_height="70dp"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonLogging"
+            android:text="Логирование"
+            android:textColor="#FFFFFF"
+            android:textSize="26dp"
+            app:cornerRadius="20dp" />
+
     </LinearLayout>
+    </ScrollView>
+
+    <!-- Раздел: Кнопки на руле (перенос с экрана «На кнопку») -->
+    <ScrollView
+        android:id="@+id/pageSteeringButtons"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="28dp"
+        android:paddingVertical="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:text="Короткое нажатие кнопки-звёздочки на руле поочерёдно отправляет «Команда 1» и «Команда 2» (переключение). Долгое нажатие открывает это приложение. Перехват работает через frida-inject и подавляет штатное действие кнопки."
+            android:textColor="#888888"
+            android:textSize="20px" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <!-- Кнопка 1 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="12dp"
+                android:orientation="vertical"
+                android:background="@drawable/layout_category_bg"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:text="Команда 1"
+                    android:textColor="#FFFFFF"
+                    android:textSize="24px" />
+
+                <EditText
+                    android:id="@+id/rawCanCodesStarButton1"
+                    android:layout_width="match_parent"
+                    android:layout_height="300dp"
+                    android:background="#ffffff"
+                    android:fontFamily="monospace"
+                    android:gravity="top"
+                    android:textColor="#909090"
+                    android:textSize="26px"
+                    android:padding="8dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="12dp">
+
+                    <Button
+                        android:id="@+id/buttonApplyStarButton1"
+                        android:layout_width="0dp"
+                        android:layout_height="60dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:backgroundTint="#373f4a"
+                        android:onClick="onButtonClickApplyStarButton1"
+                        android:text="Выполнить"
+                        android:textColor="#FFFFFF"
+                        android:textSize="26dp"
+                        app:cornerRadius="20dp" />
+
+                    <Button
+                        android:id="@+id/buttonCleanStarButton1"
+                        android:layout_width="0dp"
+                        android:layout_height="60dp"
+                        android:layout_weight="1"
+                        android:backgroundTint="#373f4a"
+                        android:onClick="onButtonClickCleanStarButton1"
+                        android:text="Очистить"
+                        android:textColor="#FFFFFF"
+                        android:textSize="26dp"
+                        app:cornerRadius="20dp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Кнопка 2 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:background="@drawable/layout_category_bg"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:text="Команда 2"
+                    android:textColor="#FFFFFF"
+                    android:textSize="24px" />
+
+                <EditText
+                    android:id="@+id/rawCanCodesStarButton2"
+                    android:layout_width="match_parent"
+                    android:layout_height="300dp"
+                    android:background="#ffffff"
+                    android:fontFamily="monospace"
+                    android:gravity="top"
+                    android:textColor="#909090"
+                    android:textSize="26px"
+                    android:padding="8dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="12dp">
+
+                    <Button
+                        android:id="@+id/buttonApplyStarButton2"
+                        android:layout_width="0dp"
+                        android:layout_height="60dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:backgroundTint="#373f4a"
+                        android:onClick="onButtonClickApplyStarButton2"
+                        android:text="Выполнить"
+                        android:textColor="#FFFFFF"
+                        android:textSize="26dp"
+                        app:cornerRadius="20dp" />
+
+                    <Button
+                        android:id="@+id/buttonCleanStarButton2"
+                        android:layout_width="0dp"
+                        android:layout_height="60dp"
+                        android:layout_weight="1"
+                        android:backgroundTint="#373f4a"
+                        android:onClick="onButtonClickCleanStarButton2"
+                        android:text="Очистить"
+                        android:textColor="#FFFFFF"
+                        android:textSize="26dp"
+                        app:cornerRadius="20dp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/buttonSaveStarButton"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginTop="16dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonClickSaveStarButton"
+            android:text="Сохранить"
+            android:textColor="#FFFFFF"
+            android:textSize="28dp"
+            app:cornerRadius="20dp" />
+
+    </LinearLayout>
+    </ScrollView>
+    <!-- конец pageSteeringButtons -->
 
     </FrameLayout>
 

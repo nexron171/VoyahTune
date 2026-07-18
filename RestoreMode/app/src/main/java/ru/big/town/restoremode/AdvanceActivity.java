@@ -52,14 +52,21 @@ public class AdvanceActivity extends AppCompatActivity {
     // Кнопки удаления примеров (tag = нормализованный hex команды)
     private final List<ImageButton> deleteButtons = new ArrayList<>();
 
-    // Навигация (разделы): 0 режимы+безопасность, 1 комфорт, 2 команды, 3 другое
-    private TextView navCustomCommands, navDriveModes, navComfort, navOther;
-    private View pageCustomCommands, pageDriveModes, pageComfort, pageOther;
+    // Навигация: 0 главный экран, 1 режимы+безопасность, 2 разделение экрана, 3 комфорт,
+    //            4 команды, 5 кнопки на руле, 6 другое
+    private TextView navMainScreen, navCustomCommands, navDriveModes, navSplitScreen, navComfort, navSteeringButtons, navOther;
+    private View pageMainScreen, pageCustomCommands, pageDriveModes, pageSplitScreen, pageComfort, pageSteeringButtons, pageOther;
     // Заголовок раздела в верхней панели (на одной строке с «Применить»)
     private TextView sectionTitle;
     private static final String[] SECTION_TITLES = {
-            "Режимы вождения и безопасность", "Комфорт", "Собственные команды", "Другое"
+            "Главный экран", "Режимы вождения и безопасность", "Разделение экрана", "Комфорт",
+            "Собственные команды", "Кнопки на руле", "Другое"
     };
+
+    // Кнопки на руле (перенос с экрана «На кнопку»)
+    private EditText steerEditor1, steerEditor2;
+    private Button steerApply1, steerApply2, steerSave;
+    static final int MSG_APPLY_STAR_BUTTON = 2;
 
     // DrivePreferences — единый источник настроек
     private SharedPreferences prefs;
@@ -67,7 +74,6 @@ public class AdvanceActivity extends AppCompatActivity {
     // Автосвет (перенесён в «Комфорт»)
     private RadioGroup autoLightGroup;
     private TextView textSensorLevel;
-    private NumberPicker pickerSensorThreshold, pickerThresholdOff;
     private CheckBox checkBox34;
 
     // Сообщения в SetModesService (через GlobalVars.serviceMessenger, забинденный MainActivity)
@@ -75,6 +81,11 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_AUTO_LIGHT_DISABLE = 11;
     static final int MSG_APPLY_DRIVE_MODES  = 1;
     static final int MSG_RESULT             = 4;
+    static final int MSG_REBOOT             = 22;
+    static final int MSG_FLOATING_BACK      = 24;
+    static final int MSG_FLOATING_BACK_SIDE = 25;
+    static final int MSG_GRANT_INSTALL      = 26;
+    static final int MSG_CLOSE_ALL          = 27;
 
     // Кнопка «Применить» (верхняя панель) — блокировка + прогресс на время цикла отправки
     private Button buttonApplyAdvance;
@@ -304,19 +315,49 @@ public class AdvanceActivity extends AppCompatActivity {
         buildExampleButtons();
 
         // Навигация между разделами
+        navMainScreen     = findViewById(R.id.navMainScreen);
         navCustomCommands = findViewById(R.id.navCustomCommands);
         navDriveModes     = findViewById(R.id.navDriveModes);
+        navSplitScreen    = findViewById(R.id.navSplitScreen);
         navComfort        = findViewById(R.id.navComfort);
+        navSteeringButtons = findViewById(R.id.navSteeringButtons);
         navOther          = findViewById(R.id.navOther);
+        pageMainScreen     = findViewById(R.id.pageMainScreen);
         pageCustomCommands = findViewById(R.id.pageCustomCommands);
         pageDriveModes     = findViewById(R.id.pageDriveModes);
+        pageSplitScreen    = findViewById(R.id.pageSplitScreen);
         pageComfort        = findViewById(R.id.pageComfort);
+        pageSteeringButtons = findViewById(R.id.pageSteeringButtons);
         pageOther          = findViewById(R.id.pageOther);
-        navDriveModes.setOnClickListener(v -> setSection(0));
-        navComfort.setOnClickListener(v -> setSection(1));
-        navCustomCommands.setOnClickListener(v -> setSection(2));
-        navOther.setOnClickListener(v -> setSection(3));
+        navMainScreen.setOnClickListener(v -> setSection(0));
+        navDriveModes.setOnClickListener(v -> setSection(1));
+        navSplitScreen.setOnClickListener(v -> setSection(2));
+        navComfort.setOnClickListener(v -> setSection(3));
+        navCustomCommands.setOnClickListener(v -> setSection(4));
+        navSteeringButtons.setOnClickListener(v -> setSection(5));
+        navOther.setOnClickListener(v -> setSection(6));
         setSection(0);
+
+        // Раздел «Главный экран»: тумблеры видимости карточек (по умолчанию все включены)
+        bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer");
+        bindShowSwitch(R.id.switchShowPowerHold, "showPowerHold");
+        bindShowSwitch(R.id.switchShowWashMode,  "showWashMode");
+        bindShowSwitch(R.id.switchShowAutoLight, "showAutoLight");
+        bindShowSwitch(R.id.switchShowPedestrian, "showPedestrian");
+
+        // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
+        Switch switchSaveHistory = findViewById(R.id.switchSaveTripHistory);
+        switchSaveHistory.setChecked(prefs.getBoolean("saveTripHistory", true));
+        switchSaveHistory.setOnCheckedChangeListener((b, checked) -> {
+            prefs.edit().putBoolean("saveTripHistory", checked).apply();
+            Intent i = new Intent("ru.big.town.anative.TRIP_HISTORY").setPackage("ru.big.town.anative");
+            i.putExtra("enabled", checked);
+            sendBroadcast(i);
+        });
+
+        initAppShortcuts();
+
+        initSplitScreen();
 
         // Раздел «Режимы вождения и безопасность» (перенесено с главного экрана)
         initModeRadios();
@@ -326,7 +367,6 @@ public class AdvanceActivity extends AppCompatActivity {
 
         // Раздел «Комфорт»: автосвет + сервисный режим дворников
         initAutoLight();
-        initSensorPickers();
 
         Switch switchWiperCold = findViewById(R.id.switchWiperCold);
         switchWiperCold.setChecked(prefs.getBoolean("wiperColdMode", false));
@@ -338,6 +378,39 @@ public class AdvanceActivity extends AppCompatActivity {
         switchDebugMode.setChecked(prefs.getBoolean("debugMode", false));
         switchDebugMode.setOnCheckedChangeListener((b, checked) ->
                 prefs.edit().putBoolean("debugMode", checked).apply());
+
+        // Раздел «Другое»: «Автозапуск VoyahTune» (по умолчанию выключено) —
+        // при пробуждении Native откроет RestoreMode. Настройку дублируем в Native (NativePrefs).
+        Switch switchAutoLaunch = findViewById(R.id.switchAutoLaunch);
+        switchAutoLaunch.setChecked(prefs.getBoolean("autoLaunchOnWake", false));
+        switchAutoLaunch.setOnCheckedChangeListener((b, checked) ->
+                // Флаг читает Native из ContentProvider (единый источник) — broadcast не нужен.
+                prefs.edit().putBoolean("autoLaunchOnWake", checked).apply());
+
+        // Раздел «Другое»: тоггл «Плавающая кнопка Назад» (по умолчанию выключено)
+        Switch switchFloatingBack = findViewById(R.id.switchFloatingBack);
+        switchFloatingBack.setChecked(prefs.getBoolean("floatingBackButton", false));
+        switchFloatingBack.setOnCheckedChangeListener((b, checked) -> {
+            prefs.edit().putBoolean("floatingBackButton", checked).apply();
+            sendFloatingBack(checked);
+        });
+
+        // Положение плавающей кнопки: 0 лево, 1 верх, 2 право
+        RadioGroup sideGroup = findViewById(R.id.floatingBackSideGroup);
+        if (sideGroup != null) {
+            checkRadioByTag(sideGroup, String.valueOf(prefs.getInt("floatingBackSide", 0)));
+            sideGroup.setOnCheckedChangeListener((g, id) -> {
+                View c = findViewById(id);
+                if (c != null && c.getTag() != null) {
+                    int side = Integer.parseInt(c.getTag().toString());
+                    prefs.edit().putInt("floatingBackSide", side).apply();
+                    sendFloatingBackSide(side);
+                }
+            });
+        }
+
+        // Раздел «Кнопки на руле»
+        initSteeringButtons();
     }
 
     /**
@@ -369,18 +442,393 @@ public class AdvanceActivity extends AppCompatActivity {
         if (on) uiHandler.postDelayed(applyTimeout, 12000); // страховка, если MSG_RESULT не придёт
     }
 
-    /** Переключение разделов навигации (0 режимы+безопасность, 1 комфорт, 2 команды, 3 другое). */
+    /** Тумблер видимости карточки на главном экране: пишет флаг в DrivePreferences (MainActivity читает в onResume). */
+    private void bindShowSwitch(int switchId, String key) {
+        Switch sw = findViewById(switchId);
+        if (sw == null) return;
+        sw.setChecked(prefs.getBoolean(key, true));
+        sw.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(key, checked).apply());
+    }
+
+    /** Вкл/выкл плавающую кнопку «Назад» — шлём в SetModesService (тот правит secure settings). */
+    private void sendFloatingBack(boolean enable) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+            Log.w("$$$ Advance floatBack $$$", "SetModesService не забинден");
+            return;
+        }
+        try {
+            GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_FLOATING_BACK, enable ? 1 : 0, 0));
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /** Сторона плавающей кнопки (0 лево, 1 верх, 2 право). */
+    private void sendFloatingBackSide(int side) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+            Log.w("$$$ Advance floatBack $$$", "SetModesService не забинден");
+            return;
+        }
+        try {
+            GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_FLOATING_BACK_SIDE, side, 0));
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /** «Закрыть приложения»: сторонние приложения force-stop в Native (priv-app) → стартуют с нуля. */
+    public void onButtonCloseAll(View v) {
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+                .setTitle("Закрыть приложения")
+                .setMessage("Все открытые сторонние приложения будут полностью закрыты и при следующем запуске откроются с нуля. Системные приложения не затрагиваются. Продолжить?")
+                .setPositiveButton("Закрыть", (d, w) -> {
+                    boolean ok = false;
+                    if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
+                        try {
+                            GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_CLOSE_ALL));
+                            ok = true;
+                        } catch (RemoteException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                    com.google.android.material.snackbar.Snackbar.make(
+                            findViewById(R.id.main),
+                            ok ? "Приложения закрыты" : "Сервис не готов",
+                            com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
+                    Log.i("$$$ Advance closeAll $$$", "MSG_CLOSE_ALL sent=" + ok);
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /** Колбэк выбора приложения из диалога-списка. */
+    interface AppPicked { void onPicked(String pkg, String label); }
+
+    /** Диалог со списком установленных лаунчер-приложений; выбор → cb. */
+    private void showAppPicker(String title, AppPicked cb) {
+        android.content.pm.PackageManager pm = getPackageManager();
+        Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        java.util.List<android.content.pm.ResolveInfo> apps = pm.queryIntentActivities(launcher, 0);
+
+        java.util.LinkedHashMap<String, String> map = new java.util.LinkedHashMap<>();
+        for (android.content.pm.ResolveInfo ri : apps) {
+            String pkg = ri.activityInfo.packageName;
+            if (!map.containsKey(pkg)) map.put(pkg, ri.loadLabel(pm).toString());
+        }
+        final java.util.List<String> pkgs = new java.util.ArrayList<>(map.keySet());
+        java.util.Collections.sort(pkgs, (a, b) -> map.get(a).compareToIgnoreCase(map.get(b)));
+
+        final CharSequence[] items = new CharSequence[pkgs.size()];
+        for (int i = 0; i < pkgs.size(); i++) items[i] = map.get(pkgs.get(i)) + "  ·  " + pkgs.get(i);
+
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+                .setTitle(title)
+                .setItems(items, (d, which) -> cb.onPicked(pkgs.get(which), map.get(pkgs.get(which))))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /**
+     * «Выдать права на установку»: выбор приложения →
+     * MSG_GRANT_INSTALL в Native (priv-app), тот выдаёт app-op REQUEST_INSTALL_PACKAGES.
+     */
+    public void onButtonGrantInstall(View v) {
+        showAppPicker("Выдать права на установку", (pkg, label) -> {
+            sendGrantInstall(pkg);
+            com.google.android.material.snackbar.Snackbar.make(
+                    findViewById(R.id.main), "Право на установку выдано: " + label,
+                    com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Приложения-ярлыки на главном экране (плитки как у сплита, запуск обычный)
+    // -------------------------------------------------------------------------
+    private android.widget.LinearLayout appShortcutsContainer;
+
+    private void initAppShortcuts() {
+        appShortcutsContainer = findViewById(R.id.appShortcutsContainer);
+        renderAppShortcuts();
+    }
+
+    /** Кнопка «＋ Добавить приложение». */
+    public void onAddAppShortcut(View v) {
+        showAppPicker("Добавить приложение", (pkg, label) -> {
+            java.util.List<String> list = AppShortcutStore.load(prefs);
+            if (!list.contains(pkg)) {
+                list.add(pkg);
+                AppShortcutStore.save(prefs, list);
+                renderAppShortcuts();
+            }
+        });
+    }
+
+    private void renderAppShortcuts() {
+        if (appShortcutsContainer == null) return;
+        appShortcutsContainer.removeAllViews();
+        java.util.List<String> list = AppShortcutStore.load(prefs);
+        android.content.pm.PackageManager pm = getPackageManager();
+        LayoutInflater inf = LayoutInflater.from(this);
+        for (int i = 0; i < list.size(); i++) {
+            final String pkg = list.get(i);
+            View row = inf.inflate(R.layout.item_app_shortcut, appShortcutsContainer, false);
+            android.widget.ImageView ico = row.findViewById(R.id.shortcutIco);
+            TextView label = row.findViewById(R.id.shortcutLabel);
+            ImageButton del = row.findViewById(R.id.shortcutDelete);
+            String name = pkg;
+            try {
+                android.content.pm.ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                name = pm.getApplicationLabel(ai).toString();
+                ico.setImageDrawable(pm.getApplicationIcon(ai));
+            } catch (Exception ignored) {
+            }
+            label.setText(name);
+            del.setOnClickListener(v -> {
+                java.util.List<String> l2 = AppShortcutStore.load(prefs);
+                l2.remove(pkg);
+                AppShortcutStore.save(prefs, l2);
+                renderAppShortcuts();
+            });
+            appShortcutsContainer.addView(row);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Разделение экрана (split screen) — список пресетов
+    // -------------------------------------------------------------------------
+    private android.widget.LinearLayout splitPresetsContainer;
+
+    private void initSplitScreen() {
+        splitPresetsContainer = findViewById(R.id.splitPresetsContainer);
+        renderSplitPresets();
+    }
+
+    /** Кнопка «＋ Добавить сплит». */
+    public void onAddSplitPreset(View v) {
+        java.util.List<SplitStore.Preset> list = SplitStore.load(prefs);
+        list.add(new SplitStore.Preset());
+        SplitStore.save(prefs, list);
+        renderSplitPresets();
+    }
+
+    private void renderSplitPresets() {
+        if (splitPresetsContainer == null) return;
+        splitPresetsContainer.removeAllViews();
+        final java.util.List<SplitStore.Preset> list = SplitStore.load(prefs);
+        LayoutInflater inf = LayoutInflater.from(this);
+
+        for (int i = 0; i < list.size(); i++) {
+            final int idx = i;
+            SplitStore.Preset ps = list.get(i);
+            View row = inf.inflate(R.layout.item_split_preset, splitPresetsContainer, false);
+
+            Button lb = row.findViewById(R.id.splitLeftBtn);
+            Button rb = row.findViewById(R.id.splitRightBtn);
+            Button del = row.findViewById(R.id.splitDeleteBtn);
+            android.widget.Spinner sp = row.findViewById(R.id.splitRatioSpinner);
+
+            lb.setText("Слева: " + (ps.ll.isEmpty() ? "не выбрано" : ps.ll));
+            rb.setText("Справа: " + (ps.rl.isEmpty() ? "не выбрано" : ps.rl));
+
+            lb.setOnClickListener(v -> showAppPicker("Приложение слева", (pkg, label) -> {
+                java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
+                if (idx < l2.size()) { l2.get(idx).l = pkg; l2.get(idx).ll = label; SplitStore.save(prefs, l2); renderSplitPresets(); }
+            }));
+            rb.setOnClickListener(v -> showAppPicker("Приложение справа", (pkg, label) -> {
+                java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
+                if (idx < l2.size()) { l2.get(idx).r = pkg; l2.get(idx).rl = label; SplitStore.save(prefs, l2); renderSplitPresets(); }
+            }));
+
+            android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<>(
+                    this, R.layout.spinner_ratio_item, SplitStore.RATIO_LABELS);
+            ad.setDropDownViewResource(R.layout.spinner_ratio_dropdown);
+            sp.setAdapter(ad);
+            sp.setSelection(ps.ratio, false);
+            sp.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(android.widget.AdapterView<?> parent, View view, int pos, long id) {
+                    java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
+                    if (idx < l2.size() && l2.get(idx).ratio != pos) { l2.get(idx).ratio = pos; SplitStore.save(prefs, l2); }
+                }
+                @Override
+                public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+            });
+
+            del.setOnClickListener(v -> {
+                java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
+                if (idx < l2.size()) { l2.remove(idx); SplitStore.save(prefs, l2); renderSplitPresets(); }
+            });
+
+            splitPresetsContainer.addView(row);
+        }
+    }
+
+    /** Отправляет имя пакета + uid в SetModesService для выдачи app-op установки. */
+    private void sendGrantInstall(String pkg) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+            Log.w("$$$ Advance grantInstall $$$", "SetModesService не забинден");
+            return;
+        }
+        int uid;
+        try {
+            uid = getPackageManager().getApplicationInfo(pkg, 0).uid;
+        } catch (Exception e) {
+            Log.w("$$$ Advance grantInstall $$$", "не найден uid для " + pkg);
+            return;
+        }
+        try {
+            Message m = Message.obtain(null, MSG_GRANT_INSTALL, uid, 0);
+            Bundle b = new Bundle();
+            b.putString("pkg", pkg);
+            m.setData(b);
+            GlobalVars.serviceMessenger.send(m);
+            Log.i("$$$ Advance grantInstall $$$", "MSG_GRANT_INSTALL pkg=" + pkg + " uid=" + uid);
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /** «Перезагрузить систему»: диалог подтверждения → MSG_REBOOT в Native (priv-app), тот зовёт PowerManager.reboot. */
+    public void onButtonRebootSystem(View v) {
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+                .setTitle("Перезагрузка системы")
+                .setMessage("Система (голова) будет перезагружена. Несохранённые действия могут прерваться. Продолжить?")
+                .setPositiveButton("Перезагрузить", (d, w) -> {
+                    if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
+                        try {
+                            GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_REBOOT));
+                            Log.i("$$$ Advance reboot $$$", "MSG_REBOOT sent");
+                        } catch (RemoteException e) {
+                            e.printStackTrace();
+                        }
+                    } else {
+                        Log.w("$$$ Advance reboot $$$", "SetModesService не забинден");
+                    }
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /** «Логирование»: экран с тумблером записи логов Native, живой лентой и выгрузкой файла. */
+    public void onButtonLogging(View v) {
+        startActivity(new Intent(this, LoggingActivity.class));
+    }
+
+    /** Переключение разделов (0 главный экран, 1 режимы, 2 разделение экрана, 3 комфорт, 4 команды, 5 кнопки на руле, 6 другое). */
     private void setSection(int index) {
         if (sectionTitle != null && index >= 0 && index < SECTION_TITLES.length)
             sectionTitle.setText(SECTION_TITLES[index]);
-        if (pageDriveModes != null)     pageDriveModes.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
-        if (pageComfort != null)        pageComfort.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
-        if (pageCustomCommands != null) pageCustomCommands.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
-        if (pageOther != null)          pageOther.setVisibility(index == 3 ? View.VISIBLE : View.GONE);
-        if (navDriveModes != null)      navDriveModes.setSelected(index == 0);
-        if (navComfort != null)         navComfort.setSelected(index == 1);
-        if (navCustomCommands != null)  navCustomCommands.setSelected(index == 2);
-        if (navOther != null)           navOther.setSelected(index == 3);
+        if (pageMainScreen != null)      pageMainScreen.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
+        if (pageDriveModes != null)      pageDriveModes.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
+        if (pageSplitScreen != null)     pageSplitScreen.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
+        if (pageComfort != null)         pageComfort.setVisibility(index == 3 ? View.VISIBLE : View.GONE);
+        if (pageCustomCommands != null)  pageCustomCommands.setVisibility(index == 4 ? View.VISIBLE : View.GONE);
+        if (pageSteeringButtons != null) pageSteeringButtons.setVisibility(index == 5 ? View.VISIBLE : View.GONE);
+        if (pageOther != null)           pageOther.setVisibility(index == 6 ? View.VISIBLE : View.GONE);
+        if (navMainScreen != null)       navMainScreen.setSelected(index == 0);
+        if (navDriveModes != null)       navDriveModes.setSelected(index == 1);
+        if (navSplitScreen != null)      navSplitScreen.setSelected(index == 2);
+        if (navComfort != null)          navComfort.setSelected(index == 3);
+        if (navCustomCommands != null)   navCustomCommands.setSelected(index == 4);
+        if (navSteeringButtons != null)  navSteeringButtons.setSelected(index == 5);
+        if (navOther != null)            navOther.setSelected(index == 6);
+    }
+
+    // -------------------------------------------------------------------------
+    // Кнопки на руле (перенос с экрана «На кнопку»)
+    // -------------------------------------------------------------------------
+
+    private void initSteeringButtons() {
+        steerEditor1 = findViewById(R.id.rawCanCodesStarButton1);
+        steerEditor2 = findViewById(R.id.rawCanCodesStarButton2);
+        steerApply1  = findViewById(R.id.buttonApplyStarButton1);
+        steerApply2  = findViewById(R.id.buttonApplyStarButton2);
+        steerSave    = findViewById(R.id.buttonSaveStarButton);
+
+        if (steerEditor1 != null) {
+            steerEditor1.setText(prefs.getString("customCommandStarButton1", ""));
+            steerEditor1.addTextChangedListener(new HexFormatter(steerEditor1, steerApply1));
+        }
+        if (steerEditor2 != null) {
+            steerEditor2.setText(prefs.getString("customCommandStarButton2", ""));
+            steerEditor2.addTextChangedListener(new HexFormatter(steerEditor2, steerApply2));
+        }
+    }
+
+    /** Форматирует hex-команды (пробелы + строки по 10 байт) и валидирует по длине % 31. */
+    private class HexFormatter implements TextWatcher {
+        private final EditText editor;
+        private final Button applyBtn;
+        private boolean isFormatting = false;
+
+        HexFormatter(EditText editor, Button applyBtn) {
+            this.editor = editor;
+            this.applyBtn = applyBtn;
+        }
+
+        @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+        @Override public void afterTextChanged(Editable s) {}
+
+        @Override
+        public void onTextChanged(CharSequence s, int start, int before, int count) {
+            if (isFormatting) return;
+            isFormatting = true;
+
+            String filtered = s.toString().toLowerCase().replaceAll("[^0-9a-f,\n]", "");
+            StringBuilder formatted = new StringBuilder();
+            for (String line : filtered.split("\n")) {
+                for (int j = 0; j < line.length(); j++) {
+                    if (j % 2 == 0) formatted.append(" ");
+                    formatted.append(line.charAt(j));
+                    if (j >= 19) formatted.append("\n");
+                }
+            }
+
+            boolean valid = formatted.length() % 31 == 0;
+            editor.setBackgroundColor(valid ? Color.WHITE : 0xffffafaf);
+            if (applyBtn != null) {
+                applyBtn.setEnabled(valid);
+                applyBtn.setTextColor(valid ? Color.WHITE : Color.GRAY);
+            }
+            if (steerSave != null) {
+                steerSave.setEnabled(valid);
+                steerSave.setTextColor(valid ? Color.WHITE : Color.GRAY);
+            }
+
+            editor.removeTextChangedListener(this);
+            editor.setText(formatted.toString());
+            editor.setSelection(formatted.length());
+            editor.addTextChangedListener(this);
+            isFormatting = false;
+        }
+    }
+
+    public void onButtonClickApplyStarButton1(View v) { sendStarButton(1); }
+    public void onButtonClickApplyStarButton2(View v) { sendStarButton(2); }
+    public void onButtonClickCleanStarButton1(View v) { if (steerEditor1 != null) steerEditor1.setText(""); }
+    public void onButtonClickCleanStarButton2(View v) { if (steerEditor2 != null) steerEditor2.setText(""); }
+
+    public void onButtonClickSaveStarButton(View v) {
+        prefs.edit()
+                .putString("customCommandStarButton1", steerEditor1 != null ? steerEditor1.getText().toString() : "")
+                .putString("customCommandStarButton2", steerEditor2 != null ? steerEditor2.getText().toString() : "")
+                .apply();
+        Log.i("$$$ Advance steer $$$", "saved star button commands");
+    }
+
+    /** Отправляет команду руля (which=1|2) в SetModesService через мессенджер MainActivity. */
+    private void sendStarButton(int which) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+            Log.w("$$$ Advance steer $$$", "SetModesService не забинден");
+            return;
+        }
+        try {
+            Message msg = Message.obtain(null, MSG_APPLY_STAR_BUTTON, which, 0);
+            msg.replyTo = GlobalVars.clientMessenger;
+            GlobalVars.serviceMessenger.send(msg);
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
     }
 
     /** Сегмент-контрол «Предупреждение пешеходов» (Со звуком/Без звука). Перенесён с главного. */
@@ -520,39 +968,6 @@ public class AdvanceActivity extends AppCompatActivity {
         }
     }
 
-    private void initSensorPickers() {
-        pickerSensorThreshold = findViewById(R.id.pickerSensorThreshold);
-        pickerThresholdOff    = findViewById(R.id.pickerThresholdOff);
-        if (pickerSensorThreshold == null) return;
-
-        // Порог включения (нижний): 1..6 (макс 6, т.к. выключение должно быть строго больше)
-        pickerSensorThreshold.setMinValue(1);
-        pickerSensorThreshold.setMaxValue(6);
-        pickerSensorThreshold.setTextColor(0xffffffff);
-        int savedThreshold = Math.min(Math.max(prefs.getInt("lightSensorThreshold", 3), 1), 6);
-        pickerSensorThreshold.setValue(savedThreshold);
-
-        // Порог выключения (верхний): строго > порога включения, максимум 7
-        if (pickerThresholdOff != null) {
-            pickerThresholdOff.setMaxValue(7);
-            pickerThresholdOff.setMinValue(savedThreshold + 1);
-            pickerThresholdOff.setTextColor(0xffffffff);
-            int savedThresholdOff = Math.max(
-                    prefs.getInt("lightSensorThresholdOff", 5), savedThreshold + 1);
-            pickerThresholdOff.setValue(savedThresholdOff);
-            pickerThresholdOff.setOnValueChangedListener((picker, oldVal, newVal) ->
-                    prefs.edit().putInt("lightSensorThresholdOff", newVal).apply());
-        }
-
-        // Изменение порога включения двигает нижнюю границу выключения (Выкл > Вкл)
-        pickerSensorThreshold.setOnValueChangedListener((picker, oldVal, newVal) -> {
-            prefs.edit().putInt("lightSensorThreshold", newVal).apply();
-            if (pickerThresholdOff != null) {
-                pickerThresholdOff.setMinValue(newVal + 1);
-                prefs.edit().putInt("lightSensorThresholdOff", pickerThresholdOff.getValue()).apply();
-            }
-        });
-    }
 
     @Override
     protected void onResume() {

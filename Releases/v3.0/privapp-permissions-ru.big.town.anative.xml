@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Whitelist привилегированных (signature|privileged) разрешений для priv-app Native.
+  Нужен, если голова в режиме ro.control_privapp_permissions=enforce — иначе система НЕ выдаёт
+  такие пермишены, и не работают: FORCE_STOP_PACKAGES (закрытие сплита), WRITE_SECURE_SETTINGS
+  (кнопка «Назад» через a11y), MANAGE_APP_OPS_MODES (права установки), REBOOT и т.д.
+  Кладётся install-скриптом в /system/etc/permissions/, удаляется remove-скриптом.
+  На не-enforce ROM файл просто игнорируется (безвредно).
+-->
+<permissions>
+    <privapp-permissions package="ru.big.town.anative">
+        <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
+        <permission name="android.permission.WRITE_SETTINGS"/>
+        <permission name="android.permission.READ_LOGS"/>
+        <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND"/>
+        <permission name="android.permission.REBOOT"/>
+        <permission name="android.permission.DEVICE_POWER"/>
+        <permission name="android.permission.MANAGE_APP_OPS_MODES"/>
+        <permission name="android.permission.FORCE_STOP_PACKAGES"/>
+        <permission name="android.permission.INJECT_EVENTS"/>
+        <permission name="android.permission.MANAGE_USB"/>
+        <permission name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS"/>
+        <permission name="android.permission.CHANGE_NETWORK_STATE"/>
+        <permission name="android.car.permission.CAR_POWER"/>
+        <permission name="android.car.permission.READ_CAR_POWER_POLICY"/>
+        <permission name="android.car.permission.CAR_EXTERIOR_LIGHTS"/>
+        <permission name="android.car.permission.CAR_MOCK_VEHICLE_HAL"/>
+        <permission name="android.car.permission.CAR_PROPERTY"/>
+        <permission name="android.car.permission.CAR_SPEED"/>
+        <permission name="android.car.permission.CAR_ENERGY"/>
+        <permission name="android.car.permission.CONTROL_CAR_CLIMATE"/>
+        <permission name="android.car.permission.CAR_MILEAGE"/>
+        <permission name="android.car.permission.CAR_DISPLAY_IN_CLUSTER"/>
+        <permission name="android.car.permission.CAR_INSTRUMENT_CLUSTER_CONTROL"/>
+        <permission name="android.car.permission.STORAGE_MONITORING"/>
+        <permission name="android.car.permission.VEHICLE_DYNAMICS_STATE"/>
+        <permission name="android.car.permission.CAR_NAVIGATION_MANAGER"/>
+        <permission name="android.car.permission.CAR_CONTROL_AUDIO_VOLUME"/>
+        <permission name="android.car.permission.CAR_CAMERA"/>
+    </privapp-permissions>
+</permissions>

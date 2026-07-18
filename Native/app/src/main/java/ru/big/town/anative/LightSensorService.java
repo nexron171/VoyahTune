@@ -99,6 +99,13 @@ public class LightSensorService extends Service {
     private static final int    TX_addCallback          = 28;
     private static final int    TX_removeCallback       = 29;
     private static final int    CB_onLightStatusChanged = 10;
+    private static final int    CB_onVehicleStateChanged = 36;   // тестовый режим: RSM lightSWReason
+    private static final int    CB_onGearStatusChanged   = 12;   // перевод в Drive → анти-Auto
+    private static final int    GEAR_DRIVE               = 3;
+    // BCM_RSM_lightSWReason (value 1072): 0 Day, 1 Others, 2 Dark, 3 Tunnel, 4 Darkstart
+    private static final int    RSM_LIGHT_SW_REASON      = 1072;
+    // Задержка после перевода в Drive: даём BCM сбросить фары в Auto, затем выставляем наш таргет.
+    private static final long   DRIVE_FALLBACK_MS        = 5_000L;
     private static final String CANBUS_ACTION  = "com.qinggan.canbus.CanBusService";
     private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
     // Индексы нужных полей в LightStatus (17 int'ов после флага наличия)
@@ -130,6 +137,10 @@ public class LightSensorService extends Service {
     // Последний уровень датчика для broadcast в UI
     private int lastSensorLevel = -1;
 
+    // Тестовый режим уличного сенсора: последняя КПП и последнее решение RSM (для анти-Auto по Drive)
+    private int lastGear   = -1;
+    private int lastReason = -1;
+
     // CanBusService — подписка на LightStatus (autoLamp)
     private IBinder canBusBinder = null;
     private boolean canBusBound  = false;
@@ -160,6 +171,11 @@ public class LightSensorService extends Service {
                 });
                 return true;
             }
+            // Прочие oneway-колбэки CarSignal (код 7/25/…) тихо поглощаем — иначе Binder
+            // спамит UNKNOWN_TRANSACTION на каждый. Спец-коды (INTERFACE/DUMP) — в super.
+            if (code >= IBinder.FIRST_CALL_TRANSACTION && code <= IBinder.LAST_CALL_TRANSACTION) {
+                return true;
+            }
             return super.onTransact(code, data, reply, flags);
         }
     };
@@ -186,6 +202,32 @@ public class LightSensorService extends Service {
                 }
                 final int fAuto = autoLamp, fDipped = dippedBeam, fHead = headLight;
                 timerHandler.post(() -> onLightStatusChanged(fAuto, fDipped, fHead));
+                return true;
+            }
+            if (code == CB_onGearStatusChanged) {
+                // Перевод в Drive → BCM сбросит фары в Auto; планируем анти-Auto.
+                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
+                int gearVal = -1;
+                if (data.readInt() != 0) { data.readInt(); gearVal = data.readInt(); }
+                final int g = gearVal;
+                timerHandler.post(() -> onGear(g));
+                return true;
+            }
+            if (code == CB_onVehicleStateChanged) {
+                // Тестовый режим уличного сенсора: ловим BCM_RSM_lightSWReason (1072).
+                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
+                int id = -1;
+                if (data.readInt() != 0) { data.readInt(); id = data.readInt(); }
+                int state = data.readInt();
+                if (id == RSM_LIGHT_SW_REASON) {
+                    final int r = state;
+                    timerHandler.post(() -> onLightSwReason(r));
+                }
+                return true;
+            }
+            // Прочие oneway-колбэки CanBus тихо поглощаем — иначе Binder спамит
+            // UNKNOWN_TRANSACTION на каждый (тысячи/сек). Спец-коды — в super.
+            if (code >= IBinder.FIRST_CALL_TRANSACTION && code <= IBinder.LAST_CALL_TRANSACTION) {
                 return true;
             }
             return super.onTransact(code, data, reply, flags);
@@ -417,6 +459,7 @@ public class LightSensorService extends Service {
         timerHandler.removeCallbacks(forceInitRunnable);
         timerHandler.removeCallbacks(sensorDebounceRunnable);
         timerHandler.removeCallbacks(canbusReassertRunnable);
+        timerHandler.removeCallbacks(driveFallbackRunnable);
         if (carSignalBound) {
             unregisterCallback();
             try {
@@ -447,18 +490,12 @@ public class LightSensorService extends Service {
         }
     };
 
-    // Один раз через FORCE_INIT_MS после готовности подписок принудительно
-    // отправляем таргет по текущему уровню датчика — гарантия установки режима
-    // на холодном старте.
+    // Один раз через FORCE_INIT_MS после готовности подписок принудительно выставляем таргет
+    // (уличный если известен, иначе фолбэк на салонный) — гарантия установки на холодном старте.
     private final Runnable forceInitRunnable = new Runnable() {
         @Override
         public void run() {
-            int level = readSensorLevel();
-            if (level >= 0) {
-                onSensorLevel(level, "force-init", true);
-            } else {
-                Log.w(TAG, "force-init: датчик недоступен — ждём callback/poll");
-            }
+            applyTarget("force-init");
         }
     };
 
@@ -485,40 +522,33 @@ public class LightSensorService extends Service {
     };
 
     /**
-     * Единая точка обработки уровня (из колбэка, начального снимка или safety-poll).
-     * Гистерезис → цель; смена цели или heartbeat → CAN.
+     * Показание салонного датчика (из колбэка/поллинга) — только для индикации в UI.
+     * Решения по фарам принимает уличный датчик (lightSWReason) + анти-Auto по Drive/старту;
+     * салонный используется лишь как ФОЛБЭК внутри {@link #applyTarget}, а не непрерывно.
      */
     private void onSensorLevel(int level, String source) {
-        onSensorLevel(level, source, false);
-    }
-
-    private void onSensorLevel(int level, String source, boolean force) {
         lastSensorLevel = level;
         broadcastUpdate(level);
+    }
 
-        Settings s = readSettings();
-
-        boolean desired;
-        if (level <= s.threshOn) {
-            desired = true;           // темно → ближний
-        } else if (level > s.threshOff) {
-            desired = false;          // светло → авто
-        } else {
-            desired = headlightsOn;   // мёртвая зона — не меняем
+    /**
+     * Выставить целевой режим фар: приоритет — уличный датчик (последний lightSWReason);
+     * если данных улицы нет — фолбэк на салонный уровень по порогам.
+     */
+    private void applyTarget(String src) {
+        Boolean desired = reasonToDesired(lastReason);
+        String s2 = src + " ext reason=" + lastReason;
+        if (desired == null) {
+            int level = readSensorLevel();
+            desired = desiredFromCabin(level, readSettings());
+            s2 = src + " cabin level=" + level;
         }
-
-        Log.i(TAG, source + ": sensor=" + level
-                + " threshOn=" + s.threshOn + " threshOff=" + s.threshOff
-                + " current=" + (headlightsOn ? "ближний" : "авто")
-                + " desired=" + (desired ? "ближний" : "авто")
-                + (force ? " [force]" : ""));
-
-        // CAN при реальной смене цели, первом запуске или принудительной отправке.
-        // Heartbeat намеренно убран: если пользователь ночью вручную сменил режим,
-        // он сохраняется до фактического изменения освещённости.
-        if (force || !everSent || desired != headlightsOn) {
-            commit(desired, source);
+        if (desired == null) {
+            Log.i(TAG, src + ": нет данных (reason=" + lastReason + ") — не трогаем");
+            return;
         }
+        Log.i(TAG, s2 + " → " + (desired ? "ближний" : "авто"));
+        commit(desired, s2);
     }
 
     private void commit(boolean targetOn, String reason) {
@@ -528,6 +558,60 @@ public class LightSensorService extends Service {
         lastCommitElapsed = SystemClock.elapsedRealtime();
         MainActivity.setHeadlights(targetOn);
     }
+
+    /**
+     * Уличный датчик (BCM_RSM_lightSWReason, лобовой RSM) — основной источник автосвета.
+     * 0 Day → авто; 2 Dark / 3 Tunnel / 4 Darkstart → ближний; 1 Others — не меняем.
+     */
+    private void onLightSwReason(int reason) {
+        lastReason = reason; // запоминаем последнее известное состояние улицы (для анти-Auto по Drive)
+        Boolean desired = reasonToDesired(reason);
+        Log.i(TAG, "RSM lightSWReason=" + reason + " → "
+                + (desired == null ? "без изменений" : (desired ? "ближний" : "авто")));
+        if (desired == null) return;
+        if (!everSent || desired != headlightsOn) commit(desired, "ext-sensor reason=" + reason);
+    }
+
+    /** RSM lightSWReason → цель: 0 Day→авто, 2/3/4 Dark/Tunnel/Darkstart→ближний, иначе null. */
+    private Boolean reasonToDesired(int reason) {
+        switch (reason) {
+            case 0: return Boolean.FALSE;                     // день → авто/выкл
+            case 2: case 3: case 4: return Boolean.TRUE;      // темно/тоннель → ближний
+            default: return null;                             // 1 Others / неизвестно
+        }
+    }
+
+    /** Салонный уровень (0–7) → цель по порогам (фолбэк, если нет данных уличного). */
+    private Boolean desiredFromCabin(int level, Settings s) {
+        if (level < 0) return null;
+        if (level <= s.threshOn)  return Boolean.TRUE;   // темно → ближний
+        if (level >  s.threshOff) return Boolean.FALSE;  // светло → авто
+        return null;                                     // мёртвая зона
+    }
+
+    /**
+     * Перевод КПП в Drive: BCM сам сбрасывает фары в Auto (матрица). Если освещённость не меняется,
+     * lightSWReason не придёт и мы застрянем в Auto — поэтому через {@link #DRIVE_FALLBACK_MS}
+     * принудительно выставляем таргет.
+     */
+    private void onGear(int gearVal) {
+        if (gearVal < 0 || gearVal == lastGear) return;
+        boolean toDrive = (gearVal == GEAR_DRIVE);
+        lastGear = gearVal;
+        if (toDrive) {
+            Log.i(TAG, "gear=Drive → через " + DRIVE_FALLBACK_MS + "мс выставим таргет (анти-Auto)");
+            timerHandler.removeCallbacks(driveFallbackRunnable);
+            timerHandler.postDelayed(driveFallbackRunnable, DRIVE_FALLBACK_MS);
+        }
+    }
+
+    // Анти-Auto после Drive: выставляем таргет по уличному датчику (если знаем), иначе по салонному.
+    private final Runnable driveFallbackRunnable = new Runnable() {
+        @Override
+        public void run() {
+            applyTarget("drive+5s (анти-Auto)");
+        }
+    };
 
     /**
      * Статус фар из CanBusService (LightStatus). Ловим внешний сброс режима: при
@@ -580,9 +664,7 @@ public class LightSensorService extends Service {
                 return;
             }
             Log.i(TAG, "canbus-reset: выдержка прошла, BCM всё ещё в авто → возвращаем ближний");
-            int level = readSensorLevel();
-            if (level >= 0) onSensorLevel(level, "canbus-reset", true);
-            else commit(true, "canbus-reset");
+            commit(true, "canbus-reset");
         }
     };
 

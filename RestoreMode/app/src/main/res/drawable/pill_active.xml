@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Голубая капсула-тег «активно» -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#2f7fd0" />
+    <corners android:radius="100dp" />
+    <padding android:left="16dp" android:top="5dp" android:right="16dp" android:bottom="5dp" />
+</shape>

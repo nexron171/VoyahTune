@@ -6,97 +6,327 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000"
-    android:orientation="horizontal"
+    android:orientation="vertical"
     tools:context=".MainActivity">
 
-    <!-- ЛЕВАЯ ОБЛАСТЬ: все настройки перенесены в «Дополнительно» -->
-    <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="1"
-        android:gravity="center"
-        android:orientation="vertical">
+    <!-- Верхний блок фиксированных виджетов: 5 колонок × 2 ряда (на весах внутри фикс. высоты) -->
+    <GridLayout
+        android:layout_width="match_parent"
+        android:layout_height="360dp"
+        android:columnCount="5"
+        android:rowCount="2"
+        android:padding="10dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="VoyahTune"
-            android:textColor="#40FFFFFF"
-            android:textSize="64px"
-            android:textStyle="bold" />
+        <!-- Якоря колонок: 5 равных долей ширины -->
+        <Space android:layout_row="0" android:layout_column="0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" />
+        <Space android:layout_row="0" android:layout_column="1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" />
+        <Space android:layout_row="0" android:layout_column="2" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" />
+        <Space android:layout_row="0" android:layout_column="3" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" />
+        <Space android:layout_row="0" android:layout_column="4" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" />
+        <!-- Якоря рядов: 2 равные доли высоты -->
+        <Space android:layout_row="0" android:layout_column="0" android:layout_width="0dp" android:layout_height="0dp" android:layout_rowWeight="1" />
+        <Space android:layout_row="1" android:layout_column="0" android:layout_width="0dp" android:layout_height="0dp" android:layout_rowWeight="1" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Настройки — в разделе «Дополнительно»"
-            android:textColor="#40FFFFFF"
-            android:textSize="24px" />
-
-    </LinearLayout>
-
-    <!-- ПРАВАЯ КОЛОНКА: кнопки вертикально, фиксированная ширина -->
-    <LinearLayout
-        android:layout_width="280dp"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:gravity="top"
-        android:paddingStart="4dp"
-        android:paddingEnd="5dp"
-        android:paddingTop="5dp">
-
-        <Button
-            android:id="@+id/button"
-            android:layout_width="match_parent"
-            android:layout_height="70dp"
-            android:backgroundTint="#373f4a"
-            android:onClick="onButtonClickApply"
-            android:text="Применить"
-            android:textColor="#FFFFFF"
-            android:textSize="26dp"
-            android:singleLine="true"
-            app:cornerRadius="20dp" />
-
-        <ProgressBar
-            android:id="@+id/applyProgress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:indeterminate="true"
-            android:visibility="gone" />
-
-        <Space
+        <!-- Таймер поездки (2x2) с кнопками «История поездок» + «Сброс» -->
+        <LinearLayout
+            android:id="@+id/tripCard"
+            android:layout_row="0"
+            android:layout_column="0"
+            android:layout_columnSpan="2"
+            android:layout_rowSpan="2"
             android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <Button
-            android:id="@+id/buttonAdvance"
-            android:layout_width="match_parent"
-            android:layout_height="70dp"
-            android:backgroundTint="#373f4a"
+            android:layout_height="0dp"
+            android:layout_gravity="fill"
+            android:layout_margin="6dp"
+            android:orientation="vertical"
             android:gravity="center"
+            android:background="@drawable/layout_category_bg"
+            android:padding="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Время в пути"
+                android:textColor="#aaaaaa"
+                android:textSize="24px" />
+
+            <TextView
+                android:id="@+id/tripTimer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="0:00:00"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="52px" />
+
+            <TextView
+                android:id="@+id/tripStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="14dp"
+                android:text="нет активной поездки"
+                android:textColor="#888888"
+                android:textSize="20px" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/buttonTripHistory"
+                    android:layout_width="0dp"
+                    android:layout_height="52dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="6dp"
+                    android:backgroundTint="#373f4a"
+                    android:onClick="onButtonTripHistory"
+                    android:text="История поездок"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22dp"
+                    android:singleLine="true"
+                    app:cornerRadius="16dp" />
+
+                <Button
+                    android:id="@+id/buttonTripReset"
+                    android:layout_width="wrap_content"
+                    android:layout_height="52dp"
+                    android:backgroundTint="#373f4a"
+                    android:onClick="onButtonTripReset"
+                    android:text="Сброс"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22dp"
+                    android:singleLine="true"
+                    app:cornerRadius="16dp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Power Hold -->
+        <LinearLayout
+            android:id="@+id/cardLeaveCar"
+            android:layout_row="0"
+            android:layout_column="2"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_gravity="fill"
+            android:layout_margin="6dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/card_dark_ripple"
+            android:clickable="true"
+            android:focusable="true"
+            android:onClick="onButtonLeaveCar"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Power Hold"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="26px" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="Не глушить машину при запирании"
+                android:textColor="#aaaaaa"
+                android:textSize="15px" />
+
+        </LinearLayout>
+
+        <!-- Режим мойки -->
+        <LinearLayout
+            android:id="@+id/cardWashMode"
+            android:layout_row="1"
+            android:layout_column="2"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_gravity="fill"
+            android:layout_margin="6dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/card_dark_ripple"
+            android:clickable="true"
+            android:focusable="true"
+            android:onClick="onCardWashMode"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Режим мойки"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="26px" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="Машина засыпает и не реагирует на открытие дверей"
+                android:textColor="#aaaaaa"
+                android:textSize="15px" />
+
+        </LinearLayout>
+
+        <!-- Настройки -->
+        <LinearLayout
+            android:id="@+id/cardSettings"
+            android:layout_row="0"
+            android:layout_column="3"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_gravity="fill"
+            android:layout_margin="6dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/card_dark_ripple"
+            android:clickable="true"
+            android:focusable="true"
             android:onClick="onButtonClickAdvance"
-            android:text="Дополнительно"
-            android:textColor="#FFFFFF"
-            android:textSize="26dp"
-            android:singleLine="true"
-            app:cornerRadius="20dp" />
+            android:padding="8dp">
 
-        <Button
-            android:id="@+id/buttonAdvanceOff"
-            android:layout_width="match_parent"
-            android:layout_height="70dp"
-            android:backgroundTint="#373f4a"
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Настройки"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="28px" />
+
+        </LinearLayout>
+
+        <!-- Настройки Android -->
+        <LinearLayout
+            android:id="@+id/cardAndroidSettings"
+            android:layout_row="1"
+            android:layout_column="3"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_gravity="fill"
+            android:layout_margin="6dp"
+            android:orientation="vertical"
             android:gravity="center"
-            android:onClick="onButtonClickAdvanceStarButton"
-            android:text="На кнопку"
-            android:textColor="#FFFFFF"
-            android:textSize="26dp"
-            android:singleLine="true"
-            app:cornerRadius="20dp" />
+            android:background="@drawable/card_dark_ripple"
+            android:clickable="true"
+            android:focusable="true"
+            android:onClick="onCardAndroidSettings"
+            android:padding="8dp">
 
-    </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Настройки Android"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="28px" />
+
+        </LinearLayout>
+
+        <!-- Автосвет -->
+        <LinearLayout
+            android:id="@+id/cardAutoLight"
+            android:layout_row="0"
+            android:layout_column="4"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_gravity="fill"
+            android:layout_margin="6dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/card_dark_ripple"
+            android:clickable="true"
+            android:focusable="true"
+            android:onClick="onCardAutoLight"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Автосвет"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="28px" />
+
+            <TextView
+                android:id="@+id/autoLightBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/pill_inactive"
+                android:text="не активно"
+                android:textColor="#FFFFFF"
+                android:textSize="18px" />
+
+        </LinearLayout>
+
+        <!-- Звук пешеходов -->
+        <LinearLayout
+            android:id="@+id/cardPedestrian"
+            android:layout_row="1"
+            android:layout_column="4"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_gravity="fill"
+            android:layout_margin="6dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/card_dark_ripple"
+            android:clickable="true"
+            android:focusable="true"
+            android:onClick="onCardPedestrian"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Звук пешеходов"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="28px" />
+
+            <TextView
+                android:id="@+id/pedestrianBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/pill_inactive"
+                android:text="не активно"
+                android:textColor="#FFFFFF"
+                android:textSize="18px" />
+
+        </LinearLayout>
+
+    </GridLayout>
+
+    <!-- Сплиты: прокручиваемая сетка плиток (по пресетам из «Разделение экрана») -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollbars="none">
+
+        <GridLayout
+            android:id="@+id/splitTilesGrid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:columnCount="5"
+            android:paddingHorizontal="10dp"
+            android:paddingBottom="10dp" />
+
+    </ScrollView>
 
 </LinearLayout>

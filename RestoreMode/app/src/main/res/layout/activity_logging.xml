@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#22252f"
+    android:orientation="vertical"
+    android:fitsSystemWindows="true">
+
+  <!-- Контейнер с паддингами: fitsSystemWindows на корне не затирает их -->
+  <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:orientation="vertical"
+      android:paddingHorizontal="28dp"
+      android:paddingTop="16dp"
+      android:paddingBottom="24dp">
+
+    <!-- Верхняя панель: назад + заголовок + тумблер -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageButton
+            android:id="@+id/buttonBackLogging"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:padding="18dp"
+            android:background="@drawable/nav_back_circle_bg"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_chevron_left"
+            android:onClick="onButtonBackLogging"
+            android:contentDescription="Назад" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="16dp"
+            android:text="Логирование"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:textSize="44px" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="12dp"
+            android:text="Запись в файл"
+            android:textColor="#aaaaaa"
+            android:textSize="24px" />
+
+        <Switch
+            android:id="@+id/switchLogging"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/textLogPath"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Файл: —"
+        android:textColor="#888888"
+        android:textSize="20px" />
+
+    <!-- Живая лента логов -->
+    <ScrollView
+        android:id="@+id/scrollLog"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="10dp"
+        android:background="#12151c"
+        android:padding="10dp"
+        android:scrollbars="vertical">
+
+        <TextView
+            android:id="@+id/textLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="#c8d0da"
+            android:textSize="18px"
+            android:textIsSelectable="true"
+            android:text="" />
+
+    </ScrollView>
+
+    <Button
+        android:id="@+id/buttonShareLog"
+        android:layout_width="match_parent"
+        android:layout_height="70dp"
+        android:layout_marginTop="14dp"
+        android:backgroundTint="#2f7fd0"
+        android:onClick="onButtonShareLog"
+        android:text="Выгрузить логи"
+        android:textColor="#FFFFFF"
+        android:textSize="26dp"
+        app:cornerRadius="20dp" />
+
+  </LinearLayout>
+
+</LinearLayout>
