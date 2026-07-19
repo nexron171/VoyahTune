@@ -55,6 +55,21 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
+    }
+
+    // Флейворы: full = сплит/док/кнопки на руле/VirtualDisplay; light = без них (только не-root логика,
+    // которой не мешает split/dock/Frida). Разводка по BuildConfig.IS_FULL.
+    flavorDimensions += "tier"
+    productFlavors {
+        create("full") {
+            dimension = "tier"
+            buildConfigField("boolean", "IS_FULL", "true")
+        }
+        create("light") {
+            dimension = "tier"
+            buildConfigField("boolean", "IS_FULL", "false")
+        }
     }
     dependenciesInfo {
         includeInApk = true

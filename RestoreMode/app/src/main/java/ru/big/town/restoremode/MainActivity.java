@@ -308,6 +308,13 @@ public class MainActivity extends AppCompatActivity {
         splitTilesGrid = findViewById(R.id.splitTilesGrid);
         dockIcons      = findViewById(R.id.dockIcons);
 
+        // LIGHT: без дока (нет сплита/VD). Секцию плиток НЕ прячем — в ней остаются ярлыки приложений
+        // (в light они открывают приложение обычным способом; плитки сплитов не рисуются).
+        if (!BuildConfig.IS_FULL) {
+            View dockCol = findViewById(R.id.dock);
+            if (dockCol != null) dockCol.setVisibility(View.GONE);
+        }
+
         editor = sharedPreferences.edit();
         GlobalVars.editor=editor;
 
@@ -463,7 +470,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Наполнить левый док иконками: те же сплиты и ярлыки, что и на главном, но компактно (CarPlay). */
     private void renderDock() {
-        if (dockIcons == null) return;
+        if (!BuildConfig.IS_FULL || dockIcons == null) return;
         dockIcons.removeAllViews();
         android.content.pm.PackageManager pm = getPackageManager();
         android.view.LayoutInflater inf = android.view.LayoutInflater.from(this);
@@ -571,7 +578,6 @@ public class MainActivity extends AppCompatActivity {
             anchor.setLayoutParams(alp);
             splitTilesGrid.addView(anchor);
         }
-        java.util.List<SplitStore.Preset> list = SplitStore.load(sharedPreferences);
         android.content.pm.PackageManager pm = getPackageManager();
         android.view.LayoutInflater inf = android.view.LayoutInflater.from(this);
         float d = getResources().getDisplayMetrics().density;
@@ -579,37 +585,41 @@ public class MainActivity extends AppCompatActivity {
         final int cols = 5;
         int shown = 0;
 
-        for (int i = 0; i < list.size(); i++) {
-            SplitStore.Preset ps = list.get(i);
-            if (!ps.ready()) continue;             // на главный попадают только полностью заданные
-            final SplitStore.Preset preset = ps;
+        // Плитки сплитов — только в full (в light сплита нет; ниже остаются лишь ярлыки приложений).
+        if (BuildConfig.IS_FULL) {
+            java.util.List<SplitStore.Preset> list = SplitStore.load(sharedPreferences);
+            for (int i = 0; i < list.size(); i++) {
+                SplitStore.Preset ps = list.get(i);
+                if (!ps.ready()) continue;             // на главный попадают только полностью заданные
+                final SplitStore.Preset preset = ps;
 
-            View tile = inf.inflate(R.layout.item_split_tile, splitTilesGrid, false);
-            android.widget.ImageView icoL = tile.findViewById(R.id.tileIcoLeft);
-            android.widget.ImageView icoR = tile.findViewById(R.id.tileIcoRight);
-            TextView title = tile.findViewById(R.id.tileTitle);
-            TextView ratio = tile.findViewById(R.id.tileRatio);
-            TextView state = tile.findViewById(R.id.tileState);
+                View tile = inf.inflate(R.layout.item_split_tile, splitTilesGrid, false);
+                android.widget.ImageView icoL = tile.findViewById(R.id.tileIcoLeft);
+                android.widget.ImageView icoR = tile.findViewById(R.id.tileIcoRight);
+                TextView title = tile.findViewById(R.id.tileTitle);
+                TextView ratio = tile.findViewById(R.id.tileRatio);
+                TextView state = tile.findViewById(R.id.tileState);
 
-            try { icoL.setImageDrawable(pm.getApplicationIcon(ps.l)); } catch (Exception ignored) {}
-            try { icoR.setImageDrawable(pm.getApplicationIcon(ps.r)); } catch (Exception ignored) {}
-            title.setText(ps.ll + "  |  " + ps.rl);
-            ratio.setText(SplitStore.RATIO_LABELS[Math.max(0, Math.min(4, ps.ratio))]);
-            state.setText("");
-            tile.setOnClickListener(v -> onSplitTileClick(preset));
+                try { icoL.setImageDrawable(pm.getApplicationIcon(ps.l)); } catch (Exception ignored) {}
+                try { icoR.setImageDrawable(pm.getApplicationIcon(ps.r)); } catch (Exception ignored) {}
+                title.setText(ps.ll + "  |  " + ps.rl);
+                ratio.setText(SplitStore.RATIO_LABELS[Math.max(0, Math.min(4, ps.ratio))]);
+                state.setText("");
+                tile.setOnClickListener(v -> onSplitTileClick(preset));
 
-            android.widget.GridLayout.LayoutParams lp = new android.widget.GridLayout.LayoutParams();
-            lp.width = 0;
-            lp.height = tileH;
-            lp.columnSpec = android.widget.GridLayout.spec(shown % cols, 1, 1f);
-            lp.rowSpec = android.widget.GridLayout.spec(shown / cols);
-            lp.setMargins(m, m, m, m);
-            tile.setLayoutParams(lp);
-            splitTilesGrid.addView(tile);
-            shown++;
+                android.widget.GridLayout.LayoutParams lp = new android.widget.GridLayout.LayoutParams();
+                lp.width = 0;
+                lp.height = tileH;
+                lp.columnSpec = android.widget.GridLayout.spec(shown % cols, 1, 1f);
+                lp.rowSpec = android.widget.GridLayout.spec(shown / cols);
+                lp.setMargins(m, m, m, m);
+                tile.setLayoutParams(lp);
+                splitTilesGrid.addView(tile);
+                shown++;
+            }
         }
 
-        // Плитки-ярлыки приложений (обычный запуск на весь экран), в той же сетке
+        // Плитки-ярлыки приложений (в full — на VD, в light — обычный запуск), в той же сетке
         for (String pkg : AppShortcutStore.load(sharedPreferences)) {
             final String p = pkg;
             View tile = inf.inflate(R.layout.item_app_tile, splitTilesGrid, false);
@@ -637,10 +647,32 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Клик по плитке-ярлыку: открыть приложение полноэкранно на нашем VirtualDisplay (per-app DPI, те же отступы). */
+    /**
+     * Клик по плитке-ярлыку приложения:
+     *  - full  → открыть на нашем VirtualDisplay (per-app DPI, те же отступы, док);
+     *  - light → обычный запуск приложения (без VD/root).
+     */
     private void onAppTileClick(String pkg) {
-        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
-        sendAppVd(pkg);
+        if (BuildConfig.IS_FULL) {
+            if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
+            sendAppVd(pkg);
+        } else {
+            launchAppNormally(pkg);
+        }
+    }
+
+    /** LIGHT: обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
+    private void launchAppNormally(String pkg) {
+        try {
+            Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+            if (i == null) { showSnack("Не удалось открыть приложение"); return; }
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            Log.i(TAG, "launchAppNormally " + pkg);
+        } catch (Exception e) {
+            showSnack("Не удалось открыть приложение");
+            Log.w(TAG, "launchAppNormally " + pkg + ": " + e.getMessage());
+        }
     }
 
     /** Запуск одиночного приложения полноэкранно на нашем VirtualDisplay (пустой right = single mode). */

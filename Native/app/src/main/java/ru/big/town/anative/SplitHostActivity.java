@@ -89,6 +89,8 @@ public class SplitHostActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // LIGHT-сборка: VD-сплит-хост отключён (нет Frida/trusted-display) — сразу закрываемся.
+        if (!BuildConfig.IS_FULL) { finish(); return; }
         // Поверх всего, не гаснуть, landscape. Edge-to-edge — чтобы получить реальные window insets
         // и самим задать отступы (иначе система инсетит контент и мы бы отступали повторно).
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);

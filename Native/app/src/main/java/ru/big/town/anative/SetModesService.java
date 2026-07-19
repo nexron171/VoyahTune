@@ -132,6 +132,7 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_SPLIT_LAUNCH_VD: {
+                    if (!BuildConfig.IS_FULL) { Log.i(TAG, "MSG_SPLIT_LAUNCH_VD игнор (light-сборка)"); break; }
                     android.os.Bundle d = msg.getData();
                     String left = (d != null) ? d.getString("left") : null;
                     String right = (d != null) ? d.getString("right") : null;

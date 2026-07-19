@@ -49,6 +49,11 @@ adb shell mount -o rw,remount /
 adb push init.logcat.sh /system/etc/init.logcat.sh
 adb shell "chmod 644 /system/etc/init.logcat.sh"
 
+# NB: install.sh — это ОБНОВЛЕНИЕ и СОХРАНЯЕТ настройки. RestoreMode ставится через -r (его data
+# остаётся); Native обновляется пушем APK в /system БЕЗ сноса data, поэтому локальные тумблеры Native
+# (autoLight / wiperCold / floatingBack, читаются из его prefs) тоже сохраняются.
+# Полная чистка протухшего состояния Native (лечение краха zygote "data_de/null") вынесена в remove.sh.
+# Порядок для чистого baseline (после порчи от старого remove): remove.sh → install.sh.
 echo "=== Native.apk в /system/priv-app ==="
 adb shell mkdir -p /system/priv-app/Native
 adb shell chmod 755 /system/priv-app/Native

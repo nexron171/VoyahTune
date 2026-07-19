@@ -31,6 +31,9 @@ adb shell "ls -all /system/priv-app/Native"
 adb shell pm uninstall ru.big.town.anative
 adb shell pm uninstall ru.big.town.restoremode
 adb shell am force-stop ru.big.town.anative
+# Полностью вычистить data-каталоги Native: pm uninstall системного priv-app не всегда их удаляет,
+# а протухшие данные ломают СЛЕДУЮЩУЮ установку (краш zygote при монтировании data_de/null/…).
+adb shell "rm -rf /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative /data/data/ru.big.town.anative"
 
 # --- Откат наших global settings (freeform для VirtualDisplay-сплита) ---
 adb shell settings delete global enable_freeform_support

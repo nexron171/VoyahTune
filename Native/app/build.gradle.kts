@@ -38,6 +38,21 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
+    }
+
+    // Флейворы: full = VirtualDisplay-сплит-хост; light = без VD/Frida (только не-root CAN-логика).
+    // Разводка по BuildConfig.IS_FULL.
+    flavorDimensions += "tier"
+    productFlavors {
+        create("full") {
+            dimension = "tier"
+            buildConfigField("boolean", "IS_FULL", "true")
+        }
+        create("light") {
+            dimension = "tier"
+            buildConfigField("boolean", "IS_FULL", "false")
+        }
     }
     ndkVersion = "27.0.12077973"
     buildToolsVersion = "35.0.0"

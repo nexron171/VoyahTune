@@ -125,9 +125,12 @@
             android:enabled="true"
             android:exported="true"></receiver>
 
+        <!-- БЕЗ directBootAware: он делал пакет PARTIALLY_DIRECT_BOOT_AWARE и ломал создание
+             DE-каталога (/data/user_de/0/...) при boot-скане /system priv-app на этой ROM →
+             zygote-краш "Failed to mount data_de/null". Сервис стартует по BOOT_COMPLETED
+             (уже после разблокировки), direct-boot ему не нужен. -->
         <service
             android:name=".SetModesService"
-            android:directBootAware="true"
             android:enabled="true"
             android:exported="true"
             android:foregroundServiceType="shortService"

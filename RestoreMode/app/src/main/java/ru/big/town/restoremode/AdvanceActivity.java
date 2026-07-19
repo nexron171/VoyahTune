@@ -338,6 +338,12 @@ public class AdvanceActivity extends AppCompatActivity {
         navOther.setOnClickListener(v -> setSection(6));
         setSection(0);
 
+        // LIGHT: скрываем разделы «Разделение экрана» (2) и «Кнопки на руле» (5) — это split/VD и Frida-руль.
+        if (!BuildConfig.IS_FULL) {
+            if (navSplitScreen != null)     navSplitScreen.setVisibility(View.GONE);
+            if (navSteeringButtons != null) navSteeringButtons.setVisibility(View.GONE);
+        }
+
         // Раздел «Главный экран»: тумблеры видимости карточек (по умолчанию все включены)
         bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer");
         bindShowSwitch(R.id.switchShowPowerHold, "showPowerHold");
@@ -355,10 +361,13 @@ public class AdvanceActivity extends AppCompatActivity {
             sendBroadcast(i);
         });
 
+        // Ярлыки приложений на главном — в обоих флейворах (в light открывают приложение обычным
+        // способом, в full — на VD). Пресеты сплита и per-app DPI — только в full.
         initAppShortcuts();
-
-        initSplitScreen();
-        initAppDpiList();
+        if (BuildConfig.IS_FULL) {
+            initSplitScreen();
+            initAppDpiList();
+        }
 
         // Раздел «Режимы вождения и безопасность» (перенесено с главного экрана)
         initModeRadios();
@@ -410,8 +419,10 @@ public class AdvanceActivity extends AppCompatActivity {
             });
         }
 
-        // Раздел «Кнопки на руле»
-        initSteeringButtons();
+        // Раздел «Кнопки на руле» (Frida-перехват кнопки-звёздочки) — только в full.
+        if (BuildConfig.IS_FULL) {
+            initSteeringButtons();
+        }
     }
 
     /**
