@@ -1,0 +1,50 @@
+#!/system/bin/sh
+# Самодостаточный Frida-оркестратор Open Voyah (не зависит от cunba/Tweaks).
+# Держит два хука через watchdog-цикл:
+#   1) vd_bypass.js в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит);
+#   2) keymng2.js в com.qinggan.keymanager.service — кнопка-звёздочка на руле.
+#
+# КРИТИЧНО ДЛЯ СТАБИЛЬНОСТИ: инжектим через -e (eternalize) — frida-inject ставит хук и ВЫХОДИТ,
+# НЕ держит ptrace на system_server (приаттаченный frida-inject дестабилизирует system_server и
+# роняет его watchdog'ом). Переинжект — ТОЛЬКО когда цель сменила pid (рестарт), по pid-маркеру,
+# который load.bin (root) пишет после успешного инжекта. Так нет ни постоянного ptrace, ни стекания.
+
+logs() { log -p e -t VOYAH "$1"; }
+
+# один экземпляр (грепаем ИМЕННО наш путь)
+n=$(ps -ef | grep 'local/bin/load.bin' | grep -v grep | wc -l)
+[ "$n" -ge 2 ] && exit 0
+
+FI=/data/local/bin/frida-inject
+VD=/data/local/bin/vd_bypass.js
+KM=/data/local/bin/keymng2.js
+VDMARK=/data/local/tmp/voyah_vd.pid     # pid system_server, куда уже поставлен хук
+KMMARK=/data/local/tmp/voyah_km.pid     # pid keymanager, куда уже поставлен хук
+
+logs "voyah load.bin start"
+
+while [ 1 ]; do
+    # VD-хук в system_server: переинжект только если маркер != текущий pid (рестарт/первый раз)
+    SS=$(pidof system_server)
+    if [ -n "$SS" ] && [ -f "$VD" ]; then
+        MK=$(cat "$VDMARK" 2>/dev/null)
+        if [ "$MK" != "$SS" ]; then
+            logs "inject vd_bypass -> system_server $SS (eternalize)"
+            "$FI" -p "$SS" -s "$VD" -e >> /data/local/tmp/voyah_vd_bypass.txt 2>&1
+            [ $? -eq 0 ] && echo "$SS" > "$VDMARK"
+        fi
+    fi
+
+    # Кнопка-звёздочка в keymanager: аналогично по pid keymanager
+    KMP=$(pidof com.qinggan.keymanager.service)
+    if [ -n "$KMP" ] && [ -f "$KM" ]; then
+        MK=$(cat "$KMMARK" 2>/dev/null)
+        if [ "$MK" != "$KMP" ]; then
+            logs "inject keymng2 -> keymanager $KMP (eternalize)"
+            "$FI" -n com.qinggan.keymanager.service -s "$KM" -e >> /data/local/tmp/voyah_keymng.txt 2>&1
+            echo "$KMP" > "$KMMARK"
+        fi
+    fi
+
+    sleep 10
+done

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Главный экран = свой лончер: слева CarPlay-style док, справа контент (виджеты + плитки). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -6,8 +7,65 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000"
-    android:orientation="vertical"
+    android:orientation="horizontal"
     tools:context=".MainActivity">
+
+    <!-- ЛЕВЫЙ ДОК: продублированные ярлыки сплитов/приложений + кнопка «на главный» снизу -->
+    <LinearLayout
+        android:id="@+id/dock"
+        android:layout_width="104dp"
+        android:layout_height="match_parent"
+        android:background="#111318"
+        android:orientation="vertical">
+
+        <ScrollView
+            android:id="@+id/dockScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:paddingHorizontal="6dp"
+            android:fillViewport="true"
+            android:scrollbars="none">
+
+            <!-- fillViewport + gravity=center → иконки по центру дока и по вертикали, и по горизонтали
+                 (равный отступ сверху/снизу); при переполнении — обычная прокрутка. -->
+            <LinearLayout
+                android:id="@+id/dockIcons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center" />
+
+        </ScrollView>
+
+        <!-- Домик: выход на системный главный экран (мы уже на нашем «лончере») -->
+        <FrameLayout
+            android:id="@+id/dockHome"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/dock_item_bg"
+            android:clickable="true"
+            android:focusable="true"
+            android:onClick="onDockHome"
+            android:paddingVertical="16dp">
+
+            <ImageView
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_dock_house" />
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <!-- ПРАВЫЙ КОНТЕНТ: то, что раньше было главным экраном (виджеты + плитки) -->
+    <LinearLayout
+        android:id="@+id/mainContent"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical">
 
     <!-- Верхний блок фиксированных виджетов: 5 колонок × 2 ряда (на весах внутри фикс. высоты) -->
     <GridLayout
@@ -314,6 +372,7 @@
 
     <!-- Сплиты: прокручиваемая сетка плиток (по пресетам из «Разделение экрана») -->
     <ScrollView
+        android:id="@+id/contentScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
@@ -328,5 +387,8 @@
             android:paddingBottom="10dp" />
 
     </ScrollView>
+
+    </LinearLayout>
+    <!-- /mainContent -->
 
 </LinearLayout>

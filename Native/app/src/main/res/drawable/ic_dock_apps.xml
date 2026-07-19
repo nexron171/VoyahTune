@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Иконка «на главный экран»: кубик + полоски (как кнопка приложений/дашборда в CarPlay). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="30dp"
+    android:height="30dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+
+    <!-- Кубик слева -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M4,7.5 L10,7.5 L10,13.5 L4,13.5 Z" />
+
+    <!-- Три полоски справа -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M13,8.2 L20.5,8.2" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M13,10.9 L20.5,10.9" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M13,13.6 L20.5,13.6" />
+</vector>

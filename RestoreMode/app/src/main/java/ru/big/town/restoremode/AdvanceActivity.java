@@ -358,6 +358,7 @@ public class AdvanceActivity extends AppCompatActivity {
         initAppShortcuts();
 
         initSplitScreen();
+        initAppDpiList();
 
         // Раздел «Режимы вождения и безопасность» (перенесено с главного экрана)
         initModeRadios();
@@ -660,6 +661,72 @@ public class AdvanceActivity extends AppCompatActivity {
             });
 
             splitPresetsContainer.addView(row);
+        }
+    }
+
+    // Значения DPI для пикера приложений (0 = авто = плотность экрана по умолчанию)
+    private static final int[]    DPI_VALUES = {0, 120, 140, 160, 180, 200, 213, 240, 260, 280, 300, 320, 360};
+    private static final String[] DPI_LABELS = {"Авто", "120", "140", "160", "180", "200", "213", "240", "260", "280", "300", "320", "360"};
+
+    private int dpiIndex(int dpi) {
+        for (int i = 0; i < DPI_VALUES.length; i++) if (DPI_VALUES[i] == dpi) return i;
+        return 0; // авто
+    }
+
+    /**
+     * Список сторонних приложений с пикером DPI на каждое. Значение сохраняется в {@link AppDpiStore}
+     * (per-app) и применяется к окну этого приложения при открытии сплита. Пикер — тёмный спиннер
+     * (как у соотношения), без белого фона.
+     */
+    private void initAppDpiList() {
+        android.widget.LinearLayout container = findViewById(R.id.appDpiContainer);
+        if (container == null) return;
+        container.removeAllViews();
+        android.content.pm.PackageManager pm = getPackageManager();
+        LayoutInflater inf = LayoutInflater.from(this);
+
+        // Сторонние (не системные) запускаемые приложения, отсортированы по имени
+        Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        java.util.LinkedHashMap<String, String> map = new java.util.LinkedHashMap<>();
+        for (android.content.pm.ResolveInfo ri : pm.queryIntentActivities(launcher, 0)) {
+            String pkg = ri.activityInfo.packageName;
+            if (map.containsKey(pkg)) continue;
+            try {
+                android.content.pm.ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                if ((ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) continue; // только сторонние
+            } catch (Exception e) {
+                continue;
+            }
+            map.put(pkg, ri.loadLabel(pm).toString());
+        }
+        final java.util.List<String> pkgs = new java.util.ArrayList<>(map.keySet());
+        java.util.Collections.sort(pkgs, (a, b) -> map.get(a).compareToIgnoreCase(map.get(b)));
+
+        for (String pkg : pkgs) {
+            final String fpkg = pkg;
+            View row = inf.inflate(R.layout.item_app_dpi, container, false);
+            android.widget.ImageView ico = row.findViewById(R.id.appDpiIco);
+            TextView label = row.findViewById(R.id.appDpiLabel);
+            android.widget.Spinner sp = row.findViewById(R.id.appDpiSpinner);
+
+            try { ico.setImageDrawable(pm.getApplicationIcon(pkg)); } catch (Exception ignored) {}
+            label.setText(map.get(pkg));
+
+            android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<>(
+                    this, R.layout.spinner_ratio_item, DPI_LABELS);
+            ad.setDropDownViewResource(R.layout.spinner_ratio_dropdown);
+            sp.setAdapter(ad);
+            sp.setSelection(dpiIndex(AppDpiStore.get(prefs, pkg)), false);
+            sp.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(android.widget.AdapterView<?> parent, View v, int pos, long id) {
+                    if (DPI_VALUES[pos] != AppDpiStore.get(prefs, fpkg)) AppDpiStore.set(prefs, fpkg, DPI_VALUES[pos]);
+                }
+                @Override
+                public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+            });
+
+            container.addView(row);
         }
     }
 

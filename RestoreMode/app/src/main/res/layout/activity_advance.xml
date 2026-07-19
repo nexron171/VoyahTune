@@ -1015,6 +1015,29 @@
                 android:textSize="24dp"
                 app:cornerRadius="20dp" />
 
+            <!-- DPI приложений: масштаб интерфейса для каждого приложения при открытии в сплите -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:text="DPI приложений"
+                android:textColor="#FFFFFF"
+                android:textSize="28px" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Масштаб интерфейса (плотность) для каждого приложения. Значение применяется к окну этого приложения при открытии сплита. «Авто» — плотность экрана по умолчанию."
+                android:textColor="#888888"
+                android:textSize="20px" />
+
+            <LinearLayout
+                android:id="@+id/appDpiContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
         </LinearLayout>
     </ScrollView>
     <!-- конец pageSplitScreen -->

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="10dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/layout_category_bg"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="8dp">
+
+    <ImageView
+        android:id="@+id/appDpiIco"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginEnd="14dp"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/appDpiLabel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text=""
+        android:textColor="#FFFFFF"
+        android:textSize="26px"
+        android:singleLine="true"
+        android:ellipsize="end" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="10dp"
+        android:text="DPI"
+        android:textColor="#aaaaaa"
+        android:textSize="22px" />
+
+    <!-- Тёмный спиннер как у соотношения (popup #2b2f38, светлый текст) -->
+    <Spinner
+        android:id="@+id/appDpiSpinner"
+        android:layout_width="150dp"
+        android:layout_height="wrap_content"
+        android:popupBackground="#2b2f38" />
+
+</LinearLayout>

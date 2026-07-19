@@ -57,9 +57,7 @@ public class MainActivity extends AppCompatActivity {
     static final int MSG_LEAVE_CAR          = 20;
     static final int MSG_APPLY_PEDESTRIAN   = 21;
     static final int MSG_WASH_MODE          = 23;
-    static final int MSG_SPLIT_LAUNCH       = 28;
-    static final int MSG_SPLIT_CLOSE        = 29;
-    static final int MSG_LAUNCH_APP         = 31; // обычный запуск приложения (ярлык на главном)
+    static final int MSG_SPLIT_LAUNCH_VD    = 34; // сплит/одиночное приложение на VirtualDisplay (per-app DPI)
     static final int REQUEST_CODE           = 1;
     private Intent resultIntent=null;
     private Intent resultIntentStarButton=null;
@@ -86,6 +84,9 @@ public class MainActivity extends AppCompatActivity {
 
     // Сплиты — прокручиваемая сетка плиток по пресетам из «Разделение экрана»
     private android.widget.GridLayout splitTilesGrid;
+
+    // Левый док-лончер (CarPlay-style): вертикальная колонка иконок = дубли плиток сплитов + ярлыков
+    private android.widget.LinearLayout dockIcons;
 
     private final BroadcastReceiver tripReceiver = new BroadcastReceiver() {
         @Override
@@ -283,9 +284,14 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
 
+        // Инсеты раздаём двум колонкам: док прижат к левому краю (его фон тянется на всю
+        // высоту, а иконки/кубик уходят под статус-бар и над навбаром), контент — правее.
+        final View dock = findViewById(R.id.dock);
+        final View mainContent = findViewById(R.id.mainContent);
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            Insets sb = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            dock.setPadding(sb.left, sb.top, 0, sb.bottom);
+            mainContent.setPadding(0, sb.top, sb.right, sb.bottom);
             return insets;
         });
 
@@ -300,6 +306,7 @@ public class MainActivity extends AppCompatActivity {
         cardAutoLight  = findViewById(R.id.cardAutoLight);
         cardPedestrian = findViewById(R.id.cardPedestrian);
         splitTilesGrid = findViewById(R.id.splitTilesGrid);
+        dockIcons      = findViewById(R.id.dockIcons);
 
         editor = sharedPreferences.edit();
         GlobalVars.editor=editor;
@@ -424,6 +431,110 @@ public class MainActivity extends AppCompatActivity {
         refreshToggles();   // подхватить изменения, сделанные в «Дополнительно»
         applyMainScreenVisibility();
         renderSplitTiles();
+        renderDock();
+    }
+
+    // Правило дока: максимум 6 плиток. Сплиты (до 3) идут первыми, приложения занимают ОСТАТОК
+    // до 6 (т.е. до 6 − число_сплитов). Нет сплитов → до 6 приложений; 2 сплита → до 4 приложений.
+    private static final int DOCK_MAX = 6;
+    private static final int DOCK_MAX_SPLITS = 3;
+
+    /** Готовые сплиты для дока (не больше DOCK_MAX_SPLITS, в порядке пресетов). */
+    private java.util.List<SplitStore.Preset> dockSplitList() {
+        java.util.List<SplitStore.Preset> out = new java.util.ArrayList<>();
+        for (SplitStore.Preset p : SplitStore.load(sharedPreferences)) {
+            if (!p.ready()) continue;
+            out.add(p);
+            if (out.size() >= DOCK_MAX_SPLITS) break;
+        }
+        return out;
+    }
+
+    /** Ярлыки приложений для дока: занимают остаток до DOCK_MAX после сплитов. */
+    private java.util.List<String> dockAppList(int splitsShown) {
+        int cap = DOCK_MAX - splitsShown;
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String p : AppShortcutStore.load(sharedPreferences)) {
+            if (out.size() >= cap) break;
+            out.add(p);
+        }
+        return out;
+    }
+
+    /** Наполнить левый док иконками: те же сплиты и ярлыки, что и на главном, но компактно (CarPlay). */
+    private void renderDock() {
+        if (dockIcons == null) return;
+        dockIcons.removeAllViews();
+        android.content.pm.PackageManager pm = getPackageManager();
+        android.view.LayoutInflater inf = android.view.LayoutInflater.from(this);
+        float d = getResources().getDisplayMetrics().density;
+        int gap = (int) (7 * d);
+
+        // Сплиты (две мини-иконки) — открывают VD-хост
+        java.util.List<SplitStore.Preset> splits = dockSplitList();
+        for (SplitStore.Preset ps : splits) {
+            final SplitStore.Preset preset = ps;
+            View item = inf.inflate(R.layout.item_dock_split, dockIcons, false);
+            android.widget.ImageView l = item.findViewById(R.id.dockIcoLeft);
+            android.widget.ImageView r = item.findViewById(R.id.dockIcoRight);
+            try { l.setImageDrawable(pm.getApplicationIcon(ps.l)); } catch (Exception ignored) {}
+            try { r.setImageDrawable(pm.getApplicationIcon(ps.r)); } catch (Exception ignored) {}
+            item.setOnClickListener(v -> onSplitTileClick(preset));
+            addDockItem(item, gap);
+        }
+
+        // Ярлыки приложений (одна иконка) — открывают приложение полноэкранно на VD
+        for (String pkg : dockAppList(splits.size())) {
+            final String p = pkg;
+            View item = inf.inflate(R.layout.item_dock_app, dockIcons, false);
+            android.widget.ImageView ico = item.findViewById(R.id.dockIco);
+            try { ico.setImageDrawable(pm.getApplicationIcon(pkg)); } catch (Exception ignored) {}
+            item.setOnClickListener(v -> onAppTileClick(p));
+            addDockItem(item, gap);
+        }
+    }
+
+    private void addDockItem(View item, int bottomGap) {
+        // WRAP_CONTENT по ширине + gravity=center_horizontal у колонки → иконки строго по центру дока.
+        android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = bottomGap;
+        dockIcons.addView(item, lp);
+    }
+
+    /** Домик в доке — выход на системный главный экран (мы уже на нашем «лончере»). */
+    public void onDockHome(View v) {
+        try {
+            Intent i = new Intent(Intent.ACTION_MAIN);
+            i.addCategory(Intent.CATEGORY_HOME);
+            i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Exception e) {
+            Log.w(TAG, "onDockHome (system home) failed: " + e.getMessage());
+        }
+    }
+
+    // Модель дока для SplitHostActivity: те же ярлыки/сплиты, чтобы док был и поверх открытых окон.
+    // Формат: dockApps = "pkg|dpi"; dockSplits = "lpkg|rpkg|ratio|leftDpi|rightDpi".
+    private String[] buildDockApps() {
+        java.util.List<String> apps = dockAppList(dockSplitList().size());
+        String[] out = new String[apps.size()];
+        for (int i = 0; i < apps.size(); i++) {
+            String p = apps.get(i);
+            out[i] = p + "|" + AppDpiStore.get(sharedPreferences, p);
+        }
+        return out;
+    }
+
+    private String[] buildDockSplits() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (SplitStore.Preset p : dockSplitList()) {
+            out.add(p.l + "|" + p.r + "|" + p.ratio
+                    + "|" + AppDpiStore.get(sharedPreferences, p.l)
+                    + "|" + AppDpiStore.get(sharedPreferences, p.r));
+        }
+        return out.toArray(new String[0]);
     }
 
     /** Скрыть/показать карточки главного экрана по настройкам раздела «Главный экран». */
@@ -461,7 +572,6 @@ public class MainActivity extends AppCompatActivity {
             splitTilesGrid.addView(anchor);
         }
         java.util.List<SplitStore.Preset> list = SplitStore.load(sharedPreferences);
-        int activeIdx = sharedPreferences.getInt("splitActiveIdx", -1);
         android.content.pm.PackageManager pm = getPackageManager();
         android.view.LayoutInflater inf = android.view.LayoutInflater.from(this);
         float d = getResources().getDisplayMetrics().density;
@@ -472,7 +582,6 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < list.size(); i++) {
             SplitStore.Preset ps = list.get(i);
             if (!ps.ready()) continue;             // на главный попадают только полностью заданные
-            final int idx = i;
             final SplitStore.Preset preset = ps;
 
             View tile = inf.inflate(R.layout.item_split_tile, splitTilesGrid, false);
@@ -486,8 +595,8 @@ public class MainActivity extends AppCompatActivity {
             try { icoR.setImageDrawable(pm.getApplicationIcon(ps.r)); } catch (Exception ignored) {}
             title.setText(ps.ll + "  |  " + ps.rl);
             ratio.setText(SplitStore.RATIO_LABELS[Math.max(0, Math.min(4, ps.ratio))]);
-            state.setText(idx == activeIdx ? "нажмите, чтобы закрыть" : "");
-            tile.setOnClickListener(v -> onSplitTileClick(preset, idx));
+            state.setText("");
+            tile.setOnClickListener(v -> onSplitTileClick(preset));
 
             android.widget.GridLayout.LayoutParams lp = new android.widget.GridLayout.LayoutParams();
             lp.width = 0;
@@ -528,68 +637,59 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Клик по плитке-ярлыку: закрыть активный сплит (если есть) и открыть приложение на весь экран. */
+    /** Клик по плитке-ярлыку: открыть приложение полноэкранно на нашем VirtualDisplay (per-app DPI, те же отступы). */
     private void onAppTileClick(String pkg) {
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
-        int active = sharedPreferences.getInt("splitActiveIdx", -1);
-        if (active >= 0) {
-            sendSplit(MSG_SPLIT_CLOSE,
-                    sharedPreferences.getString("splitActiveLeft", ""),
-                    sharedPreferences.getString("splitActiveRight", ""), 0);
-            editor.putInt("splitActiveIdx", -1).apply();
-        }
-        sendLaunchApp(pkg);
-        renderSplitTiles();
+        sendAppVd(pkg);
     }
 
-    /** Обычный запуск приложения через Native (force-stop → открыть на весь экран, не в сплите). */
-    private void sendLaunchApp(String pkg) {
+    /** Запуск одиночного приложения полноэкранно на нашем VirtualDisplay (пустой right = single mode). */
+    private void sendAppVd(String pkg) {
         if (pkg == null || pkg.isEmpty()) return;
+        int dpi = AppDpiStore.get(sharedPreferences, pkg);
         try {
-            Message m = Message.obtain(null, MSG_LAUNCH_APP);
+            Message m = Message.obtain(null, MSG_SPLIT_LAUNCH_VD, 1, 0);
             Bundle b = new Bundle();
-            b.putString("pkg", pkg);
+            b.putString("left", pkg);
+            b.putString("right", "");     // пусто = одиночное полноэкранное окно на VD
+            b.putInt("leftDpi", dpi);
+            b.putInt("rightDpi", 0);
+            b.putStringArray("dockApps", buildDockApps());
+            b.putStringArray("dockSplits", buildDockSplits());
             m.setData(b);
             m.replyTo = GlobalVars.clientMessenger;
             GlobalVars.serviceMessenger.send(m);
-            Log.i(TAG, "sendLaunchApp " + pkg);
+            Log.i(TAG, "sendAppVd " + pkg + " dpi=" + dpi);
         } catch (RemoteException e) {
             e.printStackTrace();
         }
     }
 
-    /** Клик по плитке сплита: запуск ЛИБО закрытие (если это активный сплит). */
-    private void onSplitTileClick(SplitStore.Preset preset, int idx) {
+    /** Клик по плитке сплита: открываем VD-хост (per-app DPI, живой ресайз, свап). Закрытие — в самом хосте. */
+    private void onSplitTileClick(SplitStore.Preset preset) {
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
-        int active = sharedPreferences.getInt("splitActiveIdx", -1);
-        if (active == idx) {
-            sendSplit(MSG_SPLIT_CLOSE,
-                    sharedPreferences.getString("splitActiveLeft", preset.l),
-                    sharedPreferences.getString("splitActiveRight", preset.r), 0);
-            editor.putInt("splitActiveIdx", -1).apply();
-            showSnack("Сплит закрыт");
-        } else {
-            // Переключение на другой сплит: предыдущий просто перестаёт быть активным,
-            // его приложения НЕ закрываем (по требованию).
-            sendSplit(MSG_SPLIT_LAUNCH, preset.l, preset.r, preset.ratio);
-            editor.putInt("splitActiveIdx", idx)
-                    .putString("splitActiveLeft", preset.l)
-                    .putString("splitActiveRight", preset.r).apply();
-        }
-        renderSplitTiles();
+        sendSplitVd(preset);
     }
 
-    private void sendSplit(int what, String left, String right, int ratio) {
-        if (left == null || left.isEmpty() || right == null || right.isEmpty()) return;
+    /** Запуск сплита на VirtualDisplay: пакеты + соотношение + per-app DPI (из {@link AppDpiStore}). */
+    private void sendSplitVd(SplitStore.Preset preset) {
+        if (preset.l == null || preset.l.isEmpty() || preset.r == null || preset.r.isEmpty()) return;
+        int lDpi = AppDpiStore.get(sharedPreferences, preset.l);
+        int rDpi = AppDpiStore.get(sharedPreferences, preset.r);
         try {
-            Message m = Message.obtain(null, what, ratio, 0);
+            Message m = Message.obtain(null, MSG_SPLIT_LAUNCH_VD, preset.ratio, 0);
             Bundle b = new Bundle();
-            b.putString("left", left);
-            b.putString("right", right);
+            b.putString("left", preset.l);
+            b.putString("right", preset.r);
+            b.putInt("leftDpi", lDpi);
+            b.putInt("rightDpi", rDpi);
+            b.putStringArray("dockApps", buildDockApps());
+            b.putStringArray("dockSplits", buildDockSplits());
             m.setData(b);
             m.replyTo = GlobalVars.clientMessenger;
             GlobalVars.serviceMessenger.send(m);
-            Log.i(TAG, "sendSplit what=" + what + " left=" + left + " right=" + right + " ratio=" + ratio);
+            Log.i(TAG, "sendSplitVd left=" + preset.l + " right=" + preset.r
+                    + " ratio=" + preset.ratio + " lDpi=" + lDpi + " rDpi=" + rDpi);
         } catch (RemoteException e) {
             e.printStackTrace();
         }

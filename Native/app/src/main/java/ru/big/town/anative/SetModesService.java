@@ -46,11 +46,9 @@ public class SetModesService extends Service {
     static final int MSG_FLOATING_BACK_SIDE         = 25; // сторона кнопки (arg1: 0 лево, 1 верх, 2 право)
     static final int MSG_GRANT_INSTALL              = 26; // выдать app-op установки из неизв. источников (data: "pkg")
     static final int MSG_CLOSE_ALL                  = 27; // закрыть все сторонние приложения (forceStopPackage)
-    static final int MSG_SPLIT_LAUNCH               = 28; // запустить 2 приложения в split (data left/right, arg1=ratio)
-    static final int MSG_SPLIT_CLOSE                = 29; // закрыть окна сплита (force-stop left/right)
-    static final int MSG_LAUNCH_APP                 = 31; // обычный запуск приложения на весь экран (data: "pkg")
     static final int MSG_LOGGING_ENABLE             = 32; // вкл/выкл захват логов в файл (arg1: 1=вкл)
     static final int MSG_LOGGING_SHARE              = 33; // «Выгрузить логи» → share лог-файла
+    static final int MSG_SPLIT_LAUNCH_VD            = 34; // сплит на VirtualDisplay (data left/right, arg1=ratio, data leftDpi/rightDpi)
     static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
     static final String ACTION_LOG_UPDATE  = "ru.big.town.anative.LOG_UPDATE";
     static final String ACTION_LOGGING_SET   = "ru.big.town.anative.LOGGING_SET";   // extra "on" bool
@@ -123,23 +121,6 @@ public class SetModesService extends Service {
                     closeAllApps();
                     break;
 
-                case MSG_SPLIT_LAUNCH: {
-                    String left = (msg.getData() != null) ? msg.getData().getString("left") : null;
-                    String right = (msg.getData() != null) ? msg.getData().getString("right") : null;
-                    Log.i(TAG, "handleMessage() MSG_SPLIT_LAUNCH left=" + left + " right=" + right + " ratio=" + msg.arg1);
-                    launchSplit(left, right, msg.arg1);
-                    break;
-                }
-
-                case MSG_SPLIT_CLOSE: {
-                    String left = (msg.getData() != null) ? msg.getData().getString("left") : null;
-                    String right = (msg.getData() != null) ? msg.getData().getString("right") : null;
-                    Log.i(TAG, "handleMessage() MSG_SPLIT_CLOSE left=" + left + " right=" + right);
-                    forceStopPkg(left);
-                    forceStopPkg(right);
-                    break;
-                }
-
                 case MSG_APPLY_PEDESTRIAN:
                     Log.i(TAG, "handleMessage() MSG_APPLY_PEDESTRIAN arg1=" + msg.arg1);
                     MainActivity.sendPedestrianSoundCommand(msg.arg1 == 1);
@@ -150,10 +131,17 @@ public class SetModesService extends Service {
                     rebootSystem();
                     break;
 
-                case MSG_LAUNCH_APP: {
-                    String pkg = (msg.getData() != null) ? msg.getData().getString("pkg") : null;
-                    Log.i(TAG, "handleMessage() MSG_LAUNCH_APP pkg=" + pkg);
-                    launchAppNormally(pkg);
+                case MSG_SPLIT_LAUNCH_VD: {
+                    android.os.Bundle d = msg.getData();
+                    String left = (d != null) ? d.getString("left") : null;
+                    String right = (d != null) ? d.getString("right") : null;
+                    int lDpi = (d != null) ? d.getInt("leftDpi", 0) : 0;
+                    int rDpi = (d != null) ? d.getInt("rightDpi", 0) : 0;
+                    String[] dockApps = (d != null) ? d.getStringArray("dockApps") : null;
+                    String[] dockSplits = (d != null) ? d.getStringArray("dockSplits") : null;
+                    Log.i(TAG, "handleMessage() MSG_SPLIT_LAUNCH_VD left=" + left + " right=" + right
+                            + " ratio=" + msg.arg1 + " lDpi=" + lDpi + " rDpi=" + rDpi);
+                    launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi, dockApps, dockSplits);
                     break;
                 }
 
@@ -387,95 +375,35 @@ public class SetModesService extends Service {
     }
 
     /**
-     * Запускает два приложения бок о бок во freeform-окнах: левое/правое с расчётными bounds по
-     * соотношению (0=3:4, 1=1:1, 2=4:3, левое:правое). Требует включённого freeform на голове
-     * (enable_freeform_support/force_resizable_activities — ставит install-скрипт; здесь дублируем
-     * на всякий случай, применяется после ребута). setLaunchWindowingMode — hidden API (priv-app).
+     * Сплит на VirtualDisplay ({@link SplitHostActivity}): каждое приложение на своём VD с
+     * заданным DPI, живой ресайз пропорций, свап по двойному тапу. Единственный движок сплита.
+     * freeform-настройки нужны, чтобы приложения на VD были resizable.
      */
-    private void launchSplit(String leftPkg, String rightPkg, int ratio) {
-        if (leftPkg == null || rightPkg == null) return;
+    private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi,
+                                    String[] dockApps, String[] dockSplits) {
+        if (leftPkg == null || leftPkg.isEmpty()) return; // rightPkg пуст = одиночный полноэкранный режим
+        if (rightPkg == null) rightPkg = "";
         try {
             android.provider.Settings.Global.putInt(getContentResolver(), "enable_freeform_support", 1);
             android.provider.Settings.Global.putInt(getContentResolver(), "force_resizable_activities", 1);
         } catch (Exception e) {
             Log.w(TAG, "freeform settings: " + e.getMessage());
         }
-        // Принудительно закрываем оба приложения, затем запускаем в окнах: уже открытое на весь
-        // экран приложение иначе не встаёт в split-окно. Пауза — дать таскам/процессам умереть.
-        forceStopPkg(leftPkg);
-        forceStopPkg(rightPkg);
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
-                () -> doLaunchSplit(leftPkg, rightPkg, ratio), 600);
-    }
-
-    private void doLaunchSplit(String leftPkg, String rightPkg, int ratio) {
         try {
-            android.view.WindowManager wm = (android.view.WindowManager) getSystemService(Context.WINDOW_SERVICE);
-            android.view.WindowMetrics metrics = wm.getMaximumWindowMetrics(); // API 30
-            android.graphics.Rect full = metrics.getBounds();
-
-            // Отступы под системные панели (боковой навбар + статус-бар). Берём insets окна;
-            // если Service вернул нули — падаем на ресурсные размеры (status_bar_height/navigation_bar_width).
-            int il = 0, it = 0, ir = 0, ib = 0;
-            try {
-                android.graphics.Insets bars = metrics.getWindowInsets()
-                        .getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars());
-                il = bars.left; it = bars.top; ir = bars.right; ib = bars.bottom;
-            } catch (Exception ignored) {
-            }
-            if (it == 0) it = dimen("status_bar_height");
-            // Левый системный навбар головы НЕ сообщает свой размер в insets (висит поверх).
-            // Замерено по скриншоту головы (1920x720): контент начинается с x≈142 → навбар ≈142px.
-            // Гарантируем минимальный левый отступ, чтобы окно не уезжало под навбар.
-            int sideNavPx = dp(144);
-            if (il < sideNavPx) il = sideNavPx;
-            Log.i(TAG, "split insets applied: left=" + il + " top=" + it + " right=" + ir + " bottom=" + ib);
-
-            int left = full.left + il, top = full.top + it, right = full.right - ir, bottom = full.bottom - ib;
-            int usableW = right - left;
-            // доля левого окна: 0=3:4, 1=1:1, 2=4:3, 3=5:2, 4=2:5
-            float f;
-            switch (ratio) {
-                case 0: f = 3f / 7f; break;
-                case 2: f = 4f / 7f; break;
-                case 3: f = 5f / 7f; break;
-                case 4: f = 2f / 7f; break;
-                default: f = 0.5f; break;
-            }
-            int gap = dp(6);
-            int splitX = left + Math.round(usableW * f);
-            Log.i(TAG, "split full=" + full + " insets[l=" + il + ",t=" + it + ",r=" + ir + ",b=" + ib
-                    + "] usable=[" + left + "," + top + "," + right + "," + bottom + "] splitX=" + splitX);
-
-            launchInBounds(leftPkg, new android.graphics.Rect(left, top, splitX - gap / 2, bottom));
-            launchInBounds(rightPkg, new android.graphics.Rect(splitX + gap / 2, top, right, bottom));
+            Intent i = new Intent(this, SplitHostActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            i.putExtra(SplitHostActivity.EXTRA_LEFT, leftPkg);
+            i.putExtra(SplitHostActivity.EXTRA_RIGHT, rightPkg);
+            i.putExtra(SplitHostActivity.EXTRA_RATIO, ratio);
+            i.putExtra(SplitHostActivity.EXTRA_LEFT_DPI, leftDpi);
+            i.putExtra(SplitHostActivity.EXTRA_RIGHT_DPI, rightDpi);
+            i.putExtra(SplitHostActivity.EXTRA_DOCK_APPS, dockApps);
+            i.putExtra(SplitHostActivity.EXTRA_DOCK_SPLITS, dockSplits);
+            startActivity(i);
+            Log.i(TAG, "launchVirtualSplit host started");
         } catch (Exception e) {
-            Log.e(TAG, "launchSplit failed: " + e.getMessage());
+            Log.e(TAG, "launchVirtualSplit failed: " + e.getMessage());
         }
-    }
-
-    /**
-     * Обычный запуск приложения на весь экран (ярлык с главного). Сначала force-stop — если
-     * приложение было в окне сплита, иначе не откроется на весь экран, — затем с паузой
-     * запускаем его штатным launch-intent'ом (без freeform-bounds → полноэкранно).
-     */
-    private void launchAppNormally(String pkg) {
-        if (pkg == null || pkg.isEmpty()) return;
-        forceStopPkg(pkg);
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            try {
-                Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
-                if (i == null) {
-                    Log.w(TAG, "launchAppNormally: нет launch intent для " + pkg);
-                    return;
-                }
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                startActivity(i);
-                Log.i(TAG, "launchAppNormally " + pkg);
-            } catch (Exception e) {
-                Log.e(TAG, "launchAppNormally failed " + pkg + ": " + e.getMessage());
-            }
-        }, 600);
     }
 
     // -------------------------------------------------------------------------
@@ -544,56 +472,6 @@ public class SetModesService extends Service {
         }
     };
 
-    /** Force-stop одного пакета (закрытие окна сплита → при повторном запуске откроется на весь экран). */
-    private void forceStopPkg(String pkg) {
-        if (pkg == null || pkg.isEmpty()) return;
-        try {
-            android.app.ActivityManager am =
-                    (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-            java.lang.reflect.Method m = android.app.ActivityManager.class
-                    .getMethod("forceStopPackage", String.class);
-            m.invoke(am, pkg);
-            Log.i(TAG, "forceStopPkg " + pkg);
-        } catch (Exception e) {
-            Throwable c = (e instanceof java.lang.reflect.InvocationTargetException
-                    && e.getCause() != null) ? e.getCause() : e;
-            Log.e(TAG, "forceStopPkg failed " + pkg + ": " + c);
-        }
-    }
-
-    private int dimen(String resName) {
-        int id = getResources().getIdentifier(resName, "dimen", "android");
-        return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
-    }
-
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
-    }
-
-    private void launchInBounds(String pkg, android.graphics.Rect bounds) {
-        try {
-            Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
-            if (i == null) {
-                Log.w(TAG, "нет launch intent для " + pkg);
-                return;
-            }
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
-            android.app.ActivityOptions opts = android.app.ActivityOptions.makeBasic();
-            opts.setLaunchBounds(bounds);
-            try {
-                // WINDOWING_MODE_FREEFORM = 5 (hidden)
-                java.lang.reflect.Method m = android.app.ActivityOptions.class
-                        .getMethod("setLaunchWindowingMode", int.class);
-                m.invoke(opts, 5);
-            } catch (Exception e) {
-                Log.w(TAG, "setLaunchWindowingMode: " + e.getMessage());
-            }
-            startActivity(i, opts.toBundle());
-            Log.i(TAG, "launchInBounds " + pkg + " " + bounds);
-        } catch (Exception e) {
-            Log.e(TAG, "launchInBounds failed " + pkg + ": " + e.getMessage());
-        }
-    }
 
     /** Перезагрузка системы (головы). Требует REBOOT (signature|privileged) — выдаётся priv-app. */
     private void rebootSystem() {
