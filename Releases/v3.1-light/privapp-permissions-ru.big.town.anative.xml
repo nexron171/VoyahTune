@@ -11,6 +11,9 @@
     <privapp-permissions package="ru.big.town.anative">
         <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
         <permission name="android.permission.WRITE_SETTINGS"/>
+        <permission name="android.permission.MEDIA_CONTENT_CONTROL"/>
+        <permission name="android.permission.REAL_GET_TASKS"/>
+        <permission name="android.permission.REMOVE_TASKS"/>
         <permission name="android.permission.READ_LOGS"/>
         <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND"/>
         <permission name="android.permission.REBOOT"/>

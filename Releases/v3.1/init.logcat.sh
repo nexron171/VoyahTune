@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # init.logcat.sh Open Voyah: штатное логирование + setenforce 0 + запуск нашего Frida-оркестратора
-# (load.bin: vd_bypass.js в system_server для VirtualDisplay-сплита + keymng2.js для кнопки-звёздочки).
+# (load.bin: vd_bypass.js в system_server для VD-сплита + steeringwheelkeys.js для кнопок руля).
 # remove.sh возвращает init.logcat.original.sh (чистое логирование, без рут-обвязки).
 
 LOG_TAG="logcat"

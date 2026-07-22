@@ -175,6 +175,9 @@ public class TripStatsService extends Service {
                     id = data.readInt();     // стабильный id сигнала (1070/1071/1072/1073 = RSM)
                 }
                 int state = data.readInt();  // значение сигнала
+                // req 3: синк «последнего активированного» режима при ВНЕШНЕЙ смене (штатное меню машины)
+                // → pref RestoreMode. ИНЕРТНО до снятия value-ID на голове (см. maybeSyncMode).
+                maybeSyncMode(id, state);
                 // Логируем только когда включён захват логов — иначе это «пожарный шланг».
                 if (NativeLog.get().isRunning()) {
                     logVehicleState(id, state);
@@ -471,6 +474,65 @@ public class TripStatsService extends Service {
             default:   name = "id" + id;            break;
         }
         Log.i(TAG, "VSTATE " + name + " (" + id + ") = " + state);
+    }
+
+    // ------------------------------------------------------------------------
+    // req 3: СИНХРОНИЗАЦИЯ РЕЖИМА ПРИ ВНЕШНЕЙ СМЕНЕ (штатное меню машины и пр.).
+    //
+    // Наше приложение раньше не узнавало о смене режима вождения/энергии извне → сохранённый режим
+    // (который восстанавливается на пробуждении и показан в UI) устаревал. Здесь ловим VehicleState и,
+    // если это сигнал режима, пишем «последний активированный» в источник истины (MainActivity.persistSavedMode
+    // → pref RestoreMode). Тогда: пробуждение восстановит реальный последний режим, а кнопка руля циклирует
+    // относительно него (без «клика в пустоту»).
+    //
+    // ⚠️ ИНЕРТНО, пока не сняты value-ID на голове. КАК ДОСНЯТЬ (≈2 мин, в машине):
+    //   1) включить захват логов (Режим отладки);
+    //   2) сменить режим ВОЖДЕНИЯ и ЭНЕРГОрежим через ШТАТНОЕ меню машины, по одному значению;
+    //   3) в логе TripStats смотреть строки "VSTATE idXXXX = YY" — запомнить id (стабильный) и state
+    //      для каждого режима;
+    //   4) вписать ID-константы ниже и заполнить switch state→имя (имена — ровно как сохранённые значения
+    //      режимов: вождение ECO/COMFORT/SPORT/OUTING/SNOW/INDIVIDUAL; энергия SMART/EV/REV/SREV —
+    //      SMART в верхнем регистре, как тег радио). После этого синк оживает без иных правок.
+    private static final int DRIVE_MODE_VSTATE_ID  = -1;   // TODO(head): value-ID режима вождения
+    private static final int ENERGY_MODE_VSTATE_ID = -1;   // TODO(head): value-ID энергорежима
+
+    // Guard от «пожарного шланга»: пишем pref только на РЕАЛЬНУЮ смену state (VehicleState может повторяться).
+    private static int lastDriveState = Integer.MIN_VALUE, lastEnergyState = Integer.MIN_VALUE;
+
+    private void maybeSyncMode(int id, int state) {
+        if (id < 0) return;                                // -1 = «нет id» в parcel; не коллизимся с сентинелом
+        try {
+            if (id == DRIVE_MODE_VSTATE_ID) {
+                if (state == lastDriveState) return;
+                lastDriveState = state;
+                String m = driveModeFromState(state);
+                if (m != null) MainActivity.persistSavedMode(getApplicationContext(), false, m);
+            } else if (id == ENERGY_MODE_VSTATE_ID) {
+                if (state == lastEnergyState) return;
+                lastEnergyState = state;
+                String m = energyModeFromState(state);
+                if (m != null) MainActivity.persistSavedMode(getApplicationContext(), true, m);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "maybeSyncMode: " + e.getMessage());
+        }
+    }
+
+    /** state → имя режима вождения. TODO(head): заполнить по разведке (см. блок выше). */
+    private static String driveModeFromState(int state) {
+        switch (state) {
+            // case 0: return "ECO"; case 1: return "COMFORT"; case 2: return "SPORT";
+            // case 3: return "OUTING"; case 4: return "SNOW"; case 5: return "INDIVIDUAL";
+            default: return null;
+        }
+    }
+
+    /** state → имя энергорежима. TODO(head): заполнить по разведке (см. блок выше). */
+    private static String energyModeFromState(int state) {
+        switch (state) {
+            // case 0: return "SMART"; case 1: return "EV"; case 2: return "REV"; case 3: return "SREV";
+            default: return null;
+        }
     }
 
     // -------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Хост сплита = наш лончер поверх открытых окон: слева тот же док, справа область окон. -->
+<!-- Хост сплита: два окна (VirtualDisplay). Отступы (статус-бар + левый родной док) задаются в коде
+     по window insets. Ресайз делителем ВРЕМЕННО отключён — делитель только визуальный + двойной тап
+     по нему меняет окна местами. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/splitHostRoot"
     android:layout_width="match_parent"
@@ -7,64 +9,12 @@
     android:background="#000000"
     android:orientation="horizontal">
 
-    <!-- ЛЕВЫЙ ДОК: дубли ярлыков/сплитов + кубик (возврат на наш главный экран) -->
-    <LinearLayout
-        android:id="@+id/splitDock"
-        android:layout_width="104dp"
-        android:layout_height="match_parent"
-        android:background="#111318"
-        android:orientation="vertical">
-
-        <ScrollView
-            android:id="@+id/splitDockScroll"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:paddingHorizontal="6dp"
-            android:fillViewport="true"
-            android:scrollbars="none">
-
-            <!-- fillViewport + gravity=center → иконки по центру дока (равный отступ сверху/снизу);
-                 при переполнении — обычная прокрутка. -->
-            <LinearLayout
-                android:id="@+id/splitDockIcons"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:gravity="center" />
-
-        </ScrollView>
-
-        <!-- Кубик + полоски: вернуться на наш главный экран (RestoreMode) -->
-        <FrameLayout
-            android:id="@+id/splitDockHome"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/dock_item_bg"
-            android:clickable="true"
-            android:focusable="true"
-            android:paddingVertical="18dp">
-
-            <ImageView
-                android:layout_width="46dp"
-                android:layout_height="46dp"
-                android:layout_gravity="center"
-                android:src="@drawable/ic_dock_apps" />
-
-        </FrameLayout>
-
-    </LinearLayout>
-
-    <!-- Область окон: [SurfaceView A][handle-bar][SurfaceView B].
-         Отступы (статус-бар + системные панели) задаются в коде по window insets. -->
     <LinearLayout
         android:id="@+id/splitPanes"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_weight="1"
         android:orientation="horizontal">
 
-        <!-- Окно 1 (левое): контейнер со скруглением, внутри SurfaceView виртуального дисплея -->
         <FrameLayout
             android:id="@+id/splitPaneLeft"
             android:layout_width="0dp"
@@ -78,11 +28,11 @@
 
         </FrameLayout>
 
-        <!-- Handle-bar: тянуть — менять размеры, двойной тап — поменять окна местами -->
         <FrameLayout
             android:id="@+id/splitDivider"
             android:layout_width="34dp"
             android:layout_height="match_parent"
+            android:background="#000000"
             android:paddingVertical="12dp">
 
             <View
@@ -94,7 +44,6 @@
 
         </FrameLayout>
 
-        <!-- Окно 2 (правое) -->
         <FrameLayout
             android:id="@+id/splitPaneRight"
             android:layout_width="0dp"

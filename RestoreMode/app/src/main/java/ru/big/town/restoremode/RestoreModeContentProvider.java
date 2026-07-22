@@ -29,6 +29,7 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  String customCommandStarButton2="";
     private  boolean autoLaunchOnWake=false;
     private  boolean batteryHeatAuto=false;
+    private  boolean pauseMediaOnDoor=false;
     public RestoreModeContentProvider() {
     }
 
@@ -77,6 +78,7 @@ public class RestoreModeContentProvider extends ContentProvider {
         customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
         autoLaunchOnWake        = sharedPreferences.getBoolean("autoLaunchOnWake",         false);
         batteryHeatAuto         = sharedPreferences.getBoolean("batteryHeatAuto",          false);
+        pauseMediaOnDoor        = sharedPreferences.getBoolean("pauseMediaOnDoor",         false);
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
@@ -97,6 +99,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "customCommandStarButton2",// 15
                 "autoLaunchOnWake",        // 16
                 "batteryHeatAuto",         // 17
+                "pauseMediaOnDoor",        // 18
         });
 
         cursor.addRow(new Object[]{
@@ -114,15 +117,32 @@ public class RestoreModeContentProvider extends ContentProvider {
                 customCommandStarButton2,
                 autoLaunchOnWake ? 1 : 0,
                 batteryHeatAuto ? 1 : 0,
+                pauseMediaOnDoor ? 1 : 0,
         });
        return cursor;
 
     }
 
+    /**
+     * Разрешаем записывать ТОЛЬКО режимы (driveMode/energy/recycle) в prefs DrivePreferences — это тот же
+     * источник истины, что читают query() и UI VoyahTune, и что восстанавливает Native на пробуждении.
+     * Нужно, чтобы смена режима кнопкой руля (и внешняя смена) синхронизировала «последний активированный»
+     * режим сюда → он переживёт пробуждение и отразится в настройках. Пишет Native (см.
+     * MainActivity.persistSavedMode). Прочие ключи игнорируем (провайдер остаётся почти read-only).
+     */
     @Override
     public int update(Uri uri, ContentValues values, String selection,
                       String[] selectionArgs) {
-        Log.i("$$$", "UPDATE");
-        return 0;
+        if (values == null || sharedPreferences == null) return 0;
+        SharedPreferences.Editor e = sharedPreferences.edit();
+        int n = 0;
+        for (String key : new String[]{"driveMode", "energy", "recycle"}) {
+            if (values.containsKey(key)) {
+                String v = values.getAsString(key);
+                if (v != null && !v.isEmpty()) { e.putString(key, v); n++; Log.i("$$$", "provider UPDATE " + key + "=" + v); }
+            }
+        }
+        if (n > 0) e.apply();
+        return n;
     }
 }

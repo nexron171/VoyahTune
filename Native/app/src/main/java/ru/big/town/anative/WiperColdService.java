@@ -8,6 +8,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.media.AudioManager;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
@@ -16,6 +17,7 @@ import android.os.Parcel;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
+import android.view.KeyEvent;
 
 import androidx.core.app.NotificationCompat;
 
@@ -77,6 +79,14 @@ public class WiperColdService extends Service {
     // Наша оценка текущего состояния сервисного режима (персист — переживает рестарт процесса)
     private static final String PREFS_NAME          = "NativePrefs";
     private static final String PREF_SERVICE_ACTIVE = "wiperServiceActive";
+    // Флаги-потребители сигнала двери (пишет MainActivity.applyDoorReactor). Сервис может быть запущен
+    // ради любого из них, поэтому каждое действие гейтим своим флагом.
+    private static final String PREF_WIPER_ENABLED  = "wiperCold";
+    private static final String PREF_MEDIA_PAUSE    = "pauseMediaOnDoor";
+
+    // Пауза музыки при открытии двери водителя — плавное затухание громкости, затем KEYCODE_MEDIA_PAUSE.
+    private static final int  FADE_STEPS = 12;      // шагов затухания
+    private static final long FADE_TOTAL_MS = 500;  // общая длительность затухания
 
     // Одна команда-переключатель (toggle): включает и выключает сервисный режим
     private static final String WIPER_TOGGLE_FRAME = "65 08 00 00 c1 c0 00 00 40 00";
@@ -103,6 +113,7 @@ public class WiperColdService extends Service {
     private static final int DOOR_FIELD_COUNT = 10;
     private static final int DOOR_IDX_FL      = 1;
     private static final int DOOR_OPEN        = 1;
+    private static final int DOOR_CLOSED      = 0;
 
     // Периодичность страховочной проверки коннекта/подписки
     private static final long SAFETY_POLL_MS = 30_000L;
@@ -253,7 +264,9 @@ public class WiperColdService extends Service {
         int fl = readDriverDoor();
         if (fl >= 0) lastFLDoor = fl;
         Log.i(TAG, "seed: fLDoor=" + lastFLDoor + " active=" + isServiceActive());
-        evaluate("seed");
+        // На seed трогаем только дворники (level-triggered); паузу музыки НЕ шлём — это состояние на
+        // момент коннекта/пробуждения, а не событие открытия двери.
+        if (isWiperEnabled()) evaluate("seed");
     }
 
     /** Синхронно читает статус водительской двери (TX=2, DoorStatus.fLDoor). -1 при ошибке. */
@@ -291,9 +304,16 @@ public class WiperColdService extends Service {
 
     private void onDoorState(int fLDoor) {
         if (fLDoor < 0 || fLDoor == lastFLDoor) return;
+        // Открытие двери = переход В открытое из ЛЮБОГО другого (закрыта/неизвестно). onDoorState
+        // приходит только на РЕАЛЬНЫЕ дельта-события (seed выставляет lastFLDoor напрямую и зовёт
+        // evaluate, сюда не заходит), так что паузу шлём на настоящее открытие, а не на пробуждении.
+        boolean openedNow = (fLDoor == DOOR_OPEN);
         lastFLDoor = fLDoor;
-        Log.i(TAG, "door: fLDoor=" + fLDoor + " active=" + isServiceActive());
-        evaluate("door");
+        boolean mediaOn = isMediaPauseEnabled();
+        Log.i(TAG, "door: fLDoor=" + fLDoor + " openedNow=" + openedNow + " mediaPause=" + mediaOn
+                + " wiper=" + isWiperEnabled() + " active=" + isServiceActive());
+        if (openedNow && mediaOn) pauseActiveMediaWithFade();
+        if (isWiperEnabled()) evaluate("door");
     }
 
     /**
@@ -375,6 +395,81 @@ public class WiperColdService extends Service {
         return getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_SERVICE_ACTIVE, false);
     }
 
+    /** Включён ли «Сервисный режим дворников» — гейт для действий с дворниками (сервис может жить и ради паузы музыки). */
+    private boolean isWiperEnabled() {
+        return getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_WIPER_ENABLED, false);
+    }
+
+    /** Включена ли «Пауза музыки при открытии двери водителя». */
+    private boolean isMediaPauseEnabled() {
+        return getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_MEDIA_PAUSE, false);
+    }
+
+    // -------------------------------------------------------------------------
+    // Пауза музыки при открытии двери водителя (с плавным затуханием громкости)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Плавно приглушает медиа-громкость до нуля за {@link #FADE_TOTAL_MS}, затем ставит активную
+     * медиа-сессию на паузу ({@code KEYCODE_MEDIA_PAUSE}) и возвращает исходный уровень громкости
+     * (на паузе он не слышен, зато следующее воспроизведение стартует на нормальной громкости).
+     *
+     * <p>Затухание через {@link AudioManager#setStreamVolume} по {@code STREAM_MUSIC} — best-effort:
+     * на голове с car-audio (CarAudioManager, аудио-зоны) смена stream-громкости может не влиять на
+     * реальный выход; в этом случае fade будет незаметен, но сама ПАУЗА отработает в любом случае
+     * (dispatchMediaKeyEvent пермишенов не требует). Пауза, а не toggle, — открытие двери именно
+     * останавливает музыку, а не переключает play/pause.
+     */
+    private void pauseActiveMediaWithFade() {
+        final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) { return; }
+        // Уже идёт затухание (дверь дёрнули повторно за <1с) — не запускаем второй ramp, чтобы не
+        // захватить промежуточную (низкую) громкость как «исходную» и не оставить звук приглушённым.
+        // Просто ещё раз шлём паузу.
+        if (mediaFading) { dispatchMediaPause(am); return; }
+        int startVol;
+        try {
+            startVol = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+        } catch (Exception e) {
+            Log.w(TAG, "pauseActiveMedia: getStreamVolume: " + e.getMessage());
+            dispatchMediaPause(am);
+            return;
+        }
+        Log.i(TAG, "pauseActiveMediaWithFade: startVol=" + startVol + " (дверь водителя открыта)");
+        if (startVol <= 0) { dispatchMediaPause(am); return; }
+
+        mediaFading = true;
+        final int startVolF = startVol;
+        final long stepMs = Math.max(30, FADE_TOTAL_MS / FADE_STEPS);
+        for (int i = 1; i <= FADE_STEPS; i++) {
+            final int target = Math.round(startVolF * (float) (FADE_STEPS - i) / FADE_STEPS);
+            timerHandler.postDelayed(() -> {
+                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, target), 0); } catch (Exception ignored) {}
+            }, stepMs * i);
+        }
+        // После затухания: пауза + вернуть исходную громкость (на паузе не слышна).
+        timerHandler.postDelayed(() -> {
+            dispatchMediaPause(am);
+            try { am.setStreamVolume(AudioManager.STREAM_MUSIC, startVolF, 0); } catch (Exception ignored) {}
+            mediaFading = false;
+            Log.i(TAG, "pauseActiveMediaWithFade: пауза отправлена, громкость возвращена=" + startVolF);
+        }, stepMs * FADE_STEPS + 80);
+    }
+
+    private volatile boolean mediaFading = false;
+
+    /** Отправляет KEYCODE_MEDIA_PAUSE (down+up) активной медиа-сессии. Пермишен не нужен. */
+    private void dispatchMediaPause(AudioManager am) {
+        try {
+            long t = SystemClock.uptimeMillis();
+            am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE, 0));
+            am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_UP,   KeyEvent.KEYCODE_MEDIA_PAUSE, 0));
+            Log.i(TAG, "dispatchMediaPause: KEYCODE_MEDIA_PAUSE отправлен");
+        } catch (Exception e) {
+            Log.w(TAG, "dispatchMediaPause: " + e.getMessage());
+        }
+    }
+
     private void setServiceActive(boolean active) {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SERVICE_ACTIVE, active).apply();
     }
@@ -391,8 +486,8 @@ public class WiperColdService extends Service {
 
         createNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Сервисный режим дворников")
-                .setContentText("Контроль водительской двери")
+                .setContentTitle("Контроль двери водителя")
+                .setContentText("Сервисный режим дворников / пауза музыки")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .build();
         startForeground(3, notification);

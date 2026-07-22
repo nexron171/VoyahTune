@@ -52,21 +52,21 @@ public class AdvanceActivity extends AppCompatActivity {
     // Кнопки удаления примеров (tag = нормализованный hex команды)
     private final List<ImageButton> deleteButtons = new ArrayList<>();
 
-    // Навигация: 0 главный экран, 1 режимы+безопасность, 2 разделение экрана, 3 комфорт,
-    //            4 команды, 5 кнопки на руле, 6 другое
-    private TextView navMainScreen, navCustomCommands, navDriveModes, navSplitScreen, navComfort, navSteeringButtons, navOther;
-    private View pageMainScreen, pageCustomCommands, pageDriveModes, pageSplitScreen, pageComfort, pageSteeringButtons, pageOther;
+    // Навигация: 0 главный экран, 1 настройки автомобиля (+комфорт), 2 приложения и разделение экрана,
+    //            3 (комфорт — удалён, слит в 1), 4 команды (скрыт), 5 кнопки на руле, 6 другое
+    private TextView navMainScreen, navCustomCommands, navDriveModes, navSplitScreen, navSteeringButtons, navOther;
+    private View pageMainScreen, pageCustomCommands, pageDriveModes, pageSplitScreen, pageSteeringButtons, pageOther;
     // Заголовок раздела в верхней панели (на одной строке с «Применить»)
     private TextView sectionTitle;
+    // Индекс 3 (Комфорт) больше не используется — раздел удалён, его настройки слиты в «Настройки
+    // автомобиля» (1). Индекс 4 (Собственные команды) скрыт из навигации, страница/данные сохранены.
     private static final String[] SECTION_TITLES = {
-            "Главный экран", "Режимы вождения и безопасность", "Разделение экрана", "Комфорт",
+            "Главный экран", "Настройки автомобиля", "Приложения и разделение экрана", "Комфорт",
             "Собственные команды", "Кнопки на руле", "Другое"
     };
 
-    // Кнопки на руле (перенос с экрана «На кнопку»)
-    private EditText steerEditor1, steerEditor2;
-    private Button steerApply1, steerApply2, steerSave;
-    static final int MSG_APPLY_STAR_BUTTON = 2;
+    // Кнопки на руле — 4 кнопки-пикера действий (звёздочка/DVR × короткое/долгое). Поля/логика ниже.
+    private Button steerStarShortBtn, steerStarLongBtn, steerDvrShortBtn, steerDvrLongBtn;
 
     // DrivePreferences — единый источник настроек
     private SharedPreferences prefs;
@@ -86,6 +86,7 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_FLOATING_BACK_SIDE = 25;
     static final int MSG_GRANT_INSTALL      = 26;
     static final int MSG_CLOSE_ALL          = 27;
+    static final int MSG_SET_THEME          = 28;
 
     // Кнопка «Применить» (верхняя панель) — блокировка + прогресс на время цикла отправки
     private Button buttonApplyAdvance;
@@ -203,6 +204,7 @@ public class AdvanceActivity extends AppCompatActivity {
         EdgeToEdge.enable(this);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         setContentView(R.layout.activity_advance);
+        applyWindowInsets();
 
         prefs = getSharedPreferences("DrivePreferences", MODE_PRIVATE);
 
@@ -319,26 +321,26 @@ public class AdvanceActivity extends AppCompatActivity {
         navCustomCommands = findViewById(R.id.navCustomCommands);
         navDriveModes     = findViewById(R.id.navDriveModes);
         navSplitScreen    = findViewById(R.id.navSplitScreen);
-        navComfort        = findViewById(R.id.navComfort);
         navSteeringButtons = findViewById(R.id.navSteeringButtons);
         navOther          = findViewById(R.id.navOther);
         pageMainScreen     = findViewById(R.id.pageMainScreen);
         pageCustomCommands = findViewById(R.id.pageCustomCommands);
         pageDriveModes     = findViewById(R.id.pageDriveModes);
         pageSplitScreen    = findViewById(R.id.pageSplitScreen);
-        pageComfort        = findViewById(R.id.pageComfort);
         pageSteeringButtons = findViewById(R.id.pageSteeringButtons);
         pageOther          = findViewById(R.id.pageOther);
         navMainScreen.setOnClickListener(v -> setSection(0));
         navDriveModes.setOnClickListener(v -> setSection(1));
         navSplitScreen.setOnClickListener(v -> setSection(2));
-        navComfort.setOnClickListener(v -> setSection(3));
-        navCustomCommands.setOnClickListener(v -> setSection(4));
         navSteeringButtons.setOnClickListener(v -> setSection(5));
         navOther.setOnClickListener(v -> setSection(6));
         setSection(0);
 
-        // LIGHT: скрываем разделы «Разделение экрана» (2) и «Кнопки на руле» (5) — это split/VD и Frida-руль.
+        // «Собственные команды» (4) скрыты из навигации по решению пользователя. Страница и данные
+        // (rawCanCodes) остаются — кастомная команда по-прежнему прокидывается через customCommand.
+        if (navCustomCommands != null) navCustomCommands.setVisibility(View.GONE);
+
+        // LIGHT: скрываем разделы «Приложения и разделение экрана» (2) и «Кнопки на руле» (5) — split/VD и Frida-руль.
         if (!BuildConfig.IS_FULL) {
             if (navSplitScreen != null)     navSplitScreen.setVisibility(View.GONE);
             if (navSteeringButtons != null) navSteeringButtons.setVisibility(View.GONE);
@@ -365,12 +367,13 @@ public class AdvanceActivity extends AppCompatActivity {
         // Ярлыки приложений на главном — в обоих флейворах (в light открывают приложение обычным
         // способом, в full — на VD). Пресеты сплита и per-app DPI — только в full.
         initAppShortcuts();
+        initDockOverride();
         if (BuildConfig.IS_FULL) {
             initSplitScreen();
             initAppDpiList();
         }
 
-        // Раздел «Режимы вождения и безопасность» (перенесено с главного экрана)
+        // Раздел «Настройки автомобиля» (режимы + безопасность + комфорт слиты в один раздел)
         initModeRadios();
         initModeEnableToggles();
         initCheckBox34();
@@ -385,13 +388,22 @@ public class AdvanceActivity extends AppCompatActivity {
                     prefs.edit().putBoolean("batteryHeatAuto", checked).apply());
         }
 
-        // Раздел «Комфорт»: автосвет + сервисный режим дворников
+        // Автосвет + сервисный режим дворников (были в «Комфорт», теперь в «Настройки автомобиля»)
         initAutoLight();
 
         Switch switchWiperCold = findViewById(R.id.switchWiperCold);
         switchWiperCold.setChecked(prefs.getBoolean("wiperColdMode", false));
         switchWiperCold.setOnCheckedChangeListener((b, checked) ->
                 prefs.edit().putBoolean("wiperColdMode", checked).apply());
+
+        // «Пауза музыки при открытии двери водителя»: флаг читает Native из ContentProvider (колонка 18)
+        // и старт/стоп сервиса-реактора двери — broadcast не нужен, применяется на ближайшем чтении настроек.
+        Switch switchPauseMedia = findViewById(R.id.switchPauseMediaOnDoor);
+        if (switchPauseMedia != null) {
+            switchPauseMedia.setChecked(prefs.getBoolean("pauseMediaOnDoor", false));
+            switchPauseMedia.setOnCheckedChangeListener((b, checked) ->
+                    prefs.edit().putBoolean("pauseMediaOnDoor", checked).apply());
+        }
 
         // Раздел «Другое»: тоггл «Режим отладки»
         Switch switchDebugMode = findViewById(R.id.switchDebugMode);
@@ -415,6 +427,21 @@ public class AdvanceActivity extends AppCompatActivity {
             sendFloatingBack(checked);
         });
 
+        // Раздел «Другое»: тема оформления (0 авто, 1 светлая, 2 тёмная) — применяет Native через
+        // Settings.Secure.ui_night_mode + UiModeManager. Затрагивает систему и приложения, следующие теме.
+        RadioGroup themeGroup = findViewById(R.id.themeOverrideGroup);
+        if (themeGroup != null) {
+            checkRadioByTag(themeGroup, String.valueOf(prefs.getInt("themeOverride", 0)));
+            themeGroup.setOnCheckedChangeListener((g, id) -> {
+                View c = findViewById(id);
+                if (c != null && c.getTag() != null) {
+                    int mode = Integer.parseInt(c.getTag().toString());
+                    prefs.edit().putInt("themeOverride", mode).apply();
+                    sendTheme(mode);
+                }
+            });
+        }
+
         // Положение плавающей кнопки: 0 лево, 1 верх, 2 право
         RadioGroup sideGroup = findViewById(R.id.floatingBackSideGroup);
         if (sideGroup != null) {
@@ -433,6 +460,28 @@ public class AdvanceActivity extends AppCompatActivity {
         if (BuildConfig.IS_FULL) {
             initSteeringButtons();
         }
+    }
+
+    /**
+     * Отступы экрана настроек: системные панели из insets + левый родной док головы (~145dp, висит
+     * поверх и в insets НЕ приходит — как в главном экране и хосте сплита). Иначе левая навигационная
+     * рейка уезжает под родной док.
+     */
+    private void applyWindowInsets() {
+        final float density = getResources().getDisplayMetrics().density;
+        final int nativeDock = Math.round(density * 145f);
+        View root = findViewById(R.id.main);
+        if (root == null) return;
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets sb = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            int top = sb.top;
+            if (top == 0) {
+                int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+                if (id > 0) top = getResources().getDimensionPixelSize(id);
+            }
+            v.setPadding(nativeDock + sb.left, top, sb.right, sb.bottom);
+            return insets;
+        });
     }
 
     /**
@@ -485,6 +534,19 @@ public class AdvanceActivity extends AppCompatActivity {
         }
     }
 
+    /** Тема оформления (0 авто, 1 светлая, 2 тёмная) → Native применит через secure-настройку + UiModeManager. */
+    private void sendTheme(int mode) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+            Log.w("$$$ Advance theme $$$", "SetModesService не забинден");
+            return;
+        }
+        try {
+            GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_SET_THEME, mode, 0));
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+    }
+
     /** Сторона плавающей кнопки (0 лево, 1 верх, 2 право). */
     private void sendFloatingBackSide(int side) {
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
@@ -521,6 +583,109 @@ public class AdvanceActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    // -------------------------------------------------------------------------
+    // Системный док — переопределение приложений в доке лаунчера (слоты 1 и 2).
+    // Выбранные пакеты хранятся в DrivePreferences (dockOverride1/2 + *Label); их читает
+    // Frida-хук в процессе лаунчера, чтобы подменить ярлыки дока и открывать их на нашем VD.
+    // -------------------------------------------------------------------------
+    private Button dockApp1Btn, dockApp2Btn;
+    private Button dockSplit1Btn, dockSplit2Btn;
+
+    private void initDockOverride() {
+        // «Системный док» завязан на Frida-хук лаунчера → только full. В light прячем весь блок.
+        View block = findViewById(R.id.dockOverrideBlock);
+        if (!BuildConfig.IS_FULL) {
+            if (block != null) block.setVisibility(View.GONE);
+            return;
+        }
+        dockApp1Btn = findViewById(R.id.buttonDockApp1);
+        dockApp2Btn = findViewById(R.id.buttonDockApp2);
+        dockSplit1Btn = findViewById(R.id.buttonDockSplit1);
+        dockSplit2Btn = findViewById(R.id.buttonDockSplit2);
+        refreshDockButtons();
+        if (dockApp1Btn != null) dockApp1Btn.setOnLongClickListener(v -> { clearDockApp(1); return true; });
+        if (dockApp2Btn != null) dockApp2Btn.setOnLongClickListener(v -> { clearDockApp(2); return true; });
+        pushDockConfig();   // синхронизируем выбор дока в Native при открытии раздела
+    }
+
+    public void onPickDockApp1(View v) { pickDockApp(1); }
+    public void onPickDockApp2(View v) { pickDockApp(2); }
+    public void onPickDockSplit1(View v) { pickDockSplit(1); }
+    public void onPickDockSplit2(View v) { pickDockSplit(2); }
+
+    private void pickDockApp(int slot) {
+        showAppPicker("Приложение " + slot + " в доке", (pkg, label) -> {
+            prefs.edit().putString("dockOverride" + slot, pkg)
+                        .putString("dockOverride" + slot + "Label", label).apply();
+            refreshDockButtons();
+            pushDockConfig();
+        });
+    }
+
+    /** Выбор сплита, открываемого долгим нажатием на слот дока. Список — только «готовые» пресеты
+     *  (оба приложения выбраны). «Нет» снимает назначение. Индекс пресета хранится в dockOverride&lt;slot&gt;Split. */
+    private void pickDockSplit(int slot) {
+        final java.util.List<SplitStore.Preset> all = SplitStore.load(prefs);
+        final java.util.List<Integer> readyIdx = new java.util.ArrayList<>();
+        final java.util.List<CharSequence> labels = new java.util.ArrayList<>();
+        labels.add("Нет (только открыть приложение)");
+        for (int i = 0; i < all.size(); i++) {
+            SplitStore.Preset ps = all.get(i);
+            if (ps.ready()) {
+                readyIdx.add(i);
+                labels.add((ps.ll.isEmpty() ? ps.l : ps.ll) + "  /  " + (ps.rl.isEmpty() ? ps.r : ps.rl));
+            }
+        }
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+                .setTitle("Сплит по долгому нажатию (слот " + slot + ")")
+                .setItems(labels.toArray(new CharSequence[0]), (d, which) -> {
+                    if (which == 0) {
+                        prefs.edit().remove("dockOverride" + slot + "Split")
+                                    .remove("dockOverride" + slot + "SplitLabel").apply();
+                    } else {
+                        int idx = readyIdx.get(which - 1);
+                        prefs.edit().putInt("dockOverride" + slot + "Split", idx)
+                                    .putString("dockOverride" + slot + "SplitLabel", labels.get(which).toString()).apply();
+                    }
+                    refreshDockButtons();
+                    pushDockConfig();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void clearDockApp(int slot) {
+        // Слот сброшен → назначение сплита на этот слот теряет смысл, чистим и его.
+        prefs.edit().remove("dockOverride" + slot).remove("dockOverride" + slot + "Label")
+                    .remove("dockOverride" + slot + "Split").remove("dockOverride" + slot + "SplitLabel").apply();
+        refreshDockButtons();
+        pushDockConfig();
+        com.google.android.material.snackbar.Snackbar.make(findViewById(R.id.main),
+                "Слот " + slot + " сброшен", com.google.android.material.snackbar.Snackbar.LENGTH_SHORT).show();
+    }
+
+    private void refreshDockButtons() {
+        setDockButtonText(dockApp1Btn, 1);
+        setDockButtonText(dockApp2Btn, 2);
+        setDockSplitButton(dockSplit1Btn, 1);
+        setDockSplitButton(dockSplit2Btn, 2);
+    }
+
+    private void setDockButtonText(Button b, int slot) {
+        if (b == null) return;
+        String label = prefs.getString("dockOverride" + slot + "Label", "");
+        b.setText("Приложение " + slot + ": " + (label.isEmpty() ? "не выбрано" : label));
+    }
+
+    /** Кнопка выбора сплита для слота: видима только когда в слоте выбрано приложение; текст — назначенный сплит. */
+    private void setDockSplitButton(Button b, int slot) {
+        if (b == null) return;
+        boolean hasApp = !prefs.getString("dockOverride" + slot, "").isEmpty();
+        b.setVisibility(hasApp ? View.VISIBLE : View.GONE);
+        String label = prefs.getString("dockOverride" + slot + "SplitLabel", "");
+        b.setText("Сплит по долгому нажатию: " + (label.isEmpty() ? "не выбран" : label));
     }
 
     /** Колбэк выбора приложения из диалога-списка. */
@@ -802,122 +967,158 @@ public class AdvanceActivity extends AppCompatActivity {
         startActivity(new Intent(this, LoggingActivity.class));
     }
 
-    /** Переключение разделов (0 главный экран, 1 режимы, 2 разделение экрана, 3 комфорт, 4 команды, 5 кнопки на руле, 6 другое). */
+    /** Переключение разделов (0 главный экран, 1 настройки автомобиля, 2 приложения и разделение экрана,
+     *  4 команды [скрыт], 5 кнопки на руле, 6 другое). Индекс 3 (Комфорт) удалён. */
     private void setSection(int index) {
         if (sectionTitle != null && index >= 0 && index < SECTION_TITLES.length)
             sectionTitle.setText(SECTION_TITLES[index]);
         if (pageMainScreen != null)      pageMainScreen.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
         if (pageDriveModes != null)      pageDriveModes.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
         if (pageSplitScreen != null)     pageSplitScreen.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
-        if (pageComfort != null)         pageComfort.setVisibility(index == 3 ? View.VISIBLE : View.GONE);
         if (pageCustomCommands != null)  pageCustomCommands.setVisibility(index == 4 ? View.VISIBLE : View.GONE);
         if (pageSteeringButtons != null) pageSteeringButtons.setVisibility(index == 5 ? View.VISIBLE : View.GONE);
         if (pageOther != null)           pageOther.setVisibility(index == 6 ? View.VISIBLE : View.GONE);
         if (navMainScreen != null)       navMainScreen.setSelected(index == 0);
         if (navDriveModes != null)       navDriveModes.setSelected(index == 1);
         if (navSplitScreen != null)      navSplitScreen.setSelected(index == 2);
-        if (navComfort != null)          navComfort.setSelected(index == 3);
         if (navCustomCommands != null)   navCustomCommands.setSelected(index == 4);
         if (navSteeringButtons != null)  navSteeringButtons.setSelected(index == 5);
         if (navOther != null)            navOther.setSelected(index == 6);
     }
 
     // -------------------------------------------------------------------------
-    // Кнопки на руле (перенос с экрана «На кнопку»)
+    // Кнопки на руле — назначение действий на короткое/долгое нажатие (звёздочка + DVR).
+    // Действие читает Frida-хук (keymng2.js для звёздочки; system_server для DVR). Дефолт "none" =
+    // «Не менять» → штатное системное поведение (хук пропускает). ЧТОБЫ ДОБАВИТЬ ДЕЙСТВИЕ: одна
+    // строка в STEER_ACTIONS ниже {id, ярлык} + обработка этого id в хуке. 4 слота хранят id в prefs.
     // -------------------------------------------------------------------------
 
+    // {id, ярлык}. Для energy:<режимы> последовательное нажатие циклирует режимы по кругу
+    // (Native хранит текущий и шлёт CAN). Режимы: EV=Electric, REV=Fuel, SREV=Save.
+    static final String[][] STEER_ACTIONS = {
+            {"none",               "Не менять"},
+            {"open_voyahtune",     "Открыть VoyahTune"},
+            {"energy:EV",          "Энергорежим: Electric"},
+            {"energy:REV",         "Энергорежим: Fuel"},
+            {"energy:SREV",        "Энергорежим: Save"},
+            {"energy:EV,REV",      "Энергорежим: Electric → Fuel"},
+            {"energy:EV,REV,SREV", "Энергорежим: Electric → Fuel → Save"},
+            {"energy:EV,SREV",     "Энергорежим: Electric → Save"},
+            {"energy:REV,SREV",    "Энергорежим: Fuel → Save"},
+            {"drive:ECO",                "Режим езды: Eco"},
+            {"drive:COMFORT",            "Режим езды: Comf"},
+            {"drive:SPORT",              "Режим езды: Sport"},
+            {"drive:OUTING",             "Режим езды: Outing"},
+            {"drive:SNOW",               "Режим езды: Snow"},
+            {"drive:INDIVIDUAL",         "Режим езды: Indiv"},
+            {"drive:ECO,COMFORT",        "Режим езды: Eco → Comf"},
+            {"drive:ECO,SPORT",          "Режим езды: Eco → Sport"},
+            {"drive:ECO,OUTING",         "Режим езды: Eco → Outing"},
+            {"drive:ECO,SNOW",           "Режим езды: Eco → Snow"},
+            {"drive:ECO,INDIVIDUAL",     "Режим езды: Eco → Indiv"},
+            {"drive:COMFORT,SPORT",      "Режим езды: Comf → Sport"},
+            {"drive:COMFORT,OUTING",     "Режим езды: Comf → Outing"},
+            {"drive:COMFORT,SNOW",       "Режим езды: Comf → Snow"},
+            {"drive:COMFORT,INDIVIDUAL", "Режим езды: Comf → Indiv"},
+            {"drive:SPORT,OUTING",       "Режим езды: Sport → Outing"},
+            {"drive:SPORT,SNOW",         "Режим езды: Sport → Snow"},
+            {"drive:SPORT,INDIVIDUAL",   "Режим езды: Sport → Indiv"},
+            {"drive:OUTING,SNOW",        "Режим езды: Outing → Snow"},
+            {"drive:OUTING,INDIVIDUAL",  "Режим езды: Outing → Indiv"},
+            {"drive:SNOW,INDIVIDUAL",    "Режим езды: Snow → Indiv"},
+    };
+
     private void initSteeringButtons() {
-        steerEditor1 = findViewById(R.id.rawCanCodesStarButton1);
-        steerEditor2 = findViewById(R.id.rawCanCodesStarButton2);
-        steerApply1  = findViewById(R.id.buttonApplyStarButton1);
-        steerApply2  = findViewById(R.id.buttonApplyStarButton2);
-        steerSave    = findViewById(R.id.buttonSaveStarButton);
+        steerStarShortBtn = findViewById(R.id.steerStarShortBtn);
+        steerStarLongBtn  = findViewById(R.id.steerStarLongBtn);
+        steerDvrShortBtn  = findViewById(R.id.steerDvrShortBtn);
+        steerDvrLongBtn   = findViewById(R.id.steerDvrLongBtn);
+        refreshSteerButtons();
+        pushSteerConfig();   // синхронизируем выбор в Native при открытии раздела
+    }
 
-        if (steerEditor1 != null) {
-            steerEditor1.setText(prefs.getString("customCommandStarButton1", ""));
-            steerEditor1.addTextChangedListener(new HexFormatter(steerEditor1, steerApply1));
-        }
-        if (steerEditor2 != null) {
-            steerEditor2.setText(prefs.getString("customCommandStarButton2", ""));
-            steerEditor2.addTextChangedListener(new HexFormatter(steerEditor2, steerApply2));
+    public void onPickSteerStarShort(View v) { pickSteerAction("steerStarShort", steerStarShortBtn); }
+    public void onPickSteerStarLong(View v)  { pickSteerAction("steerStarLong",  steerStarLongBtn); }
+    public void onPickSteerDvrShort(View v)  { pickSteerAction("steerDvrShort",  steerDvrShortBtn); }
+    public void onPickSteerDvrLong(View v)   { pickSteerAction("steerDvrLong",   steerDvrLongBtn); }
+
+    /** Диалог выбора действия для слота; сохраняет id в prefs, обновляет подпись кнопки. */
+    private void pickSteerAction(String key, Button btn) {
+        final CharSequence[] labels = new CharSequence[STEER_ACTIONS.length];
+        for (int i = 0; i < STEER_ACTIONS.length; i++) labels[i] = STEER_ACTIONS[i][1];
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+                .setTitle("Действие")
+                .setItems(labels, (d, which) -> {
+                    prefs.edit().putString(key, STEER_ACTIONS[which][0]).apply();
+                    setSteerButtonText(btn, key);
+                    pushSteerConfig();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void refreshSteerButtons() {
+        setSteerButtonText(steerStarShortBtn, "steerStarShort");
+        setSteerButtonText(steerStarLongBtn,  "steerStarLong");
+        setSteerButtonText(steerDvrShortBtn,  "steerDvrShort");
+        setSteerButtonText(steerDvrLongBtn,   "steerDvrLong");
+    }
+
+    private void setSteerButtonText(Button b, String key) {
+        if (b == null) return;
+        String id = prefs.getString(key, "none");
+        String label = "Не менять";
+        for (String[] a : STEER_ACTIONS) if (a[0].equals(id)) { label = a[1]; break; }
+        b.setText(label);
+    }
+
+    /** Зеркалим выбор действий кнопок в Native (он пишет их в Settings.Global — оттуда читает keymng2.js). */
+    private void pushSteerConfig() {
+        Intent i = new Intent("ru.big.town.anative.STEER_CONFIG");
+        i.setClassName("ru.big.town.anative", "ru.big.town.anative.SetModesReceiverDynamic");
+        i.putExtra("steerStarShort", prefs.getString("steerStarShort", "none"));
+        i.putExtra("steerStarLong",  prefs.getString("steerStarLong",  "none"));
+        i.putExtra("steerDvrShort",  prefs.getString("steerDvrShort",  "none"));
+        i.putExtra("steerDvrLong",   prefs.getString("steerDvrLong",   "none"));
+        sendBroadcast(i);
+    }
+
+    /** Зеркалим выбор «Системного дока» в Native (он пишет voyahtune_dock* в Settings.Global — оттуда
+     *  читает launcherdock.js в процессе лаунчера и перерисовывает иконки/перехватывает клик). */
+    private void pushDockConfig() {
+        String p1 = prefs.getString("dockOverride1", "");
+        String p2 = prefs.getString("dockOverride2", "");
+        Intent i = new Intent("ru.big.town.anative.DOCK_CONFIG");
+        i.setClassName("ru.big.town.anative", "ru.big.town.anative.SetModesReceiverDynamic");
+        i.putExtra("dock1", p1.isEmpty() ? "none" : p1);
+        i.putExtra("dock2", p2.isEmpty() ? "none" : p2);
+        i.putExtra("dock1Dpi", p1.isEmpty() ? 0 : AppDpiStore.get(prefs, p1));
+        i.putExtra("dock2Dpi", p2.isEmpty() ? 0 : AppDpiStore.get(prefs, p2));
+        addDockSplitExtras(i, 1, p1);
+        addDockSplitExtras(i, 2, p2);
+        sendBroadcast(i);
+    }
+
+    /** Резолвит назначенный слоту сплит (по индексу пресета) и кладёт его в DOCK_CONFIG-интент.
+     *  dock&lt;slot&gt;HasSplit=false, если приложение слота не выбрано, назначения нет, индекс вне диапазона
+     *  или пресет неполный. Native зеркалит эти extras в Settings.Global — оттуда читает launcherdock.js
+     *  (флаг HasSplit) и обработчик OPEN_DOCK_SPLIT (детали сплита). */
+    private void addDockSplitExtras(Intent i, int slot, String slotPkg) {
+        int idx = slotPkg.isEmpty() ? -1 : prefs.getInt("dockOverride" + slot + "Split", -1);
+        java.util.List<SplitStore.Preset> all = SplitStore.load(prefs);
+        if (idx >= 0 && idx < all.size() && all.get(idx).ready()) {
+            SplitStore.Preset ps = all.get(idx);
+            i.putExtra("dock" + slot + "HasSplit", true);
+            i.putExtra("dock" + slot + "SplitL", ps.l);
+            i.putExtra("dock" + slot + "SplitR", ps.r);
+            i.putExtra("dock" + slot + "SplitRatio", ps.ratio);
+            i.putExtra("dock" + slot + "SplitLDpi", AppDpiStore.get(prefs, ps.l));
+            i.putExtra("dock" + slot + "SplitRDpi", AppDpiStore.get(prefs, ps.r));
+        } else {
+            i.putExtra("dock" + slot + "HasSplit", false);
         }
     }
 
-    /** Форматирует hex-команды (пробелы + строки по 10 байт) и валидирует по длине % 31. */
-    private class HexFormatter implements TextWatcher {
-        private final EditText editor;
-        private final Button applyBtn;
-        private boolean isFormatting = false;
-
-        HexFormatter(EditText editor, Button applyBtn) {
-            this.editor = editor;
-            this.applyBtn = applyBtn;
-        }
-
-        @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-        @Override public void afterTextChanged(Editable s) {}
-
-        @Override
-        public void onTextChanged(CharSequence s, int start, int before, int count) {
-            if (isFormatting) return;
-            isFormatting = true;
-
-            String filtered = s.toString().toLowerCase().replaceAll("[^0-9a-f,\n]", "");
-            StringBuilder formatted = new StringBuilder();
-            for (String line : filtered.split("\n")) {
-                for (int j = 0; j < line.length(); j++) {
-                    if (j % 2 == 0) formatted.append(" ");
-                    formatted.append(line.charAt(j));
-                    if (j >= 19) formatted.append("\n");
-                }
-            }
-
-            boolean valid = formatted.length() % 31 == 0;
-            editor.setBackgroundColor(valid ? Color.WHITE : 0xffffafaf);
-            if (applyBtn != null) {
-                applyBtn.setEnabled(valid);
-                applyBtn.setTextColor(valid ? Color.WHITE : Color.GRAY);
-            }
-            if (steerSave != null) {
-                steerSave.setEnabled(valid);
-                steerSave.setTextColor(valid ? Color.WHITE : Color.GRAY);
-            }
-
-            editor.removeTextChangedListener(this);
-            editor.setText(formatted.toString());
-            editor.setSelection(formatted.length());
-            editor.addTextChangedListener(this);
-            isFormatting = false;
-        }
-    }
-
-    public void onButtonClickApplyStarButton1(View v) { sendStarButton(1); }
-    public void onButtonClickApplyStarButton2(View v) { sendStarButton(2); }
-    public void onButtonClickCleanStarButton1(View v) { if (steerEditor1 != null) steerEditor1.setText(""); }
-    public void onButtonClickCleanStarButton2(View v) { if (steerEditor2 != null) steerEditor2.setText(""); }
-
-    public void onButtonClickSaveStarButton(View v) {
-        prefs.edit()
-                .putString("customCommandStarButton1", steerEditor1 != null ? steerEditor1.getText().toString() : "")
-                .putString("customCommandStarButton2", steerEditor2 != null ? steerEditor2.getText().toString() : "")
-                .apply();
-        Log.i("$$$ Advance steer $$$", "saved star button commands");
-    }
-
-    /** Отправляет команду руля (which=1|2) в SetModesService через мессенджер MainActivity. */
-    private void sendStarButton(int which) {
-        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
-            Log.w("$$$ Advance steer $$$", "SetModesService не забинден");
-            return;
-        }
-        try {
-            Message msg = Message.obtain(null, MSG_APPLY_STAR_BUTTON, which, 0);
-            msg.replyTo = GlobalVars.clientMessenger;
-            GlobalVars.serviceMessenger.send(msg);
-        } catch (RemoteException e) {
-            e.printStackTrace();
-        }
-    }
 
     /** Сегмент-контрол «Предупреждение пешеходов» (Со звуком/Без звука). Перенесён с главного. */
     private void initPedestrianSoundGroup() {

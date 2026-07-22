@@ -46,6 +46,7 @@ public class SetModesService extends Service {
     static final int MSG_FLOATING_BACK_SIDE         = 25; // сторона кнопки (arg1: 0 лево, 1 верх, 2 право)
     static final int MSG_GRANT_INSTALL              = 26; // выдать app-op установки из неизв. источников (data: "pkg")
     static final int MSG_CLOSE_ALL                  = 27; // закрыть все сторонние приложения (forceStopPackage)
+    static final int MSG_SET_THEME                  = 28; // тема системы/приложений (arg1: 0 авто, 1 светлая, 2 тёмная)
     static final int MSG_LOGGING_ENABLE             = 32; // вкл/выкл захват логов в файл (arg1: 1=вкл)
     static final int MSG_LOGGING_SHARE              = 33; // «Выгрузить логи» → share лог-файла
     static final int MSG_SPLIT_LAUNCH_VD            = 34; // сплит на VirtualDisplay (data left/right, arg1=ratio, data leftDpi/rightDpi)
@@ -131,6 +132,11 @@ public class SetModesService extends Service {
                     rebootSystem();
                     break;
 
+                case MSG_SET_THEME:
+                    Log.i(TAG, "handleMessage() MSG_SET_THEME arg1=" + msg.arg1);
+                    applyTheme(msg.arg1);
+                    break;
+
                 case MSG_SPLIT_LAUNCH_VD: {
                     if (!BuildConfig.IS_FULL) { Log.i(TAG, "MSG_SPLIT_LAUNCH_VD игнор (light-сборка)"); break; }
                     android.os.Bundle d = msg.getData();
@@ -138,11 +144,9 @@ public class SetModesService extends Service {
                     String right = (d != null) ? d.getString("right") : null;
                     int lDpi = (d != null) ? d.getInt("leftDpi", 0) : 0;
                     int rDpi = (d != null) ? d.getInt("rightDpi", 0) : 0;
-                    String[] dockApps = (d != null) ? d.getStringArray("dockApps") : null;
-                    String[] dockSplits = (d != null) ? d.getStringArray("dockSplits") : null;
                     Log.i(TAG, "handleMessage() MSG_SPLIT_LAUNCH_VD left=" + left + " right=" + right
                             + " ratio=" + msg.arg1 + " lDpi=" + lDpi + " rDpi=" + rDpi);
-                    launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi, dockApps, dockSplits);
+                    launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi);
                     break;
                 }
 
@@ -380,8 +384,7 @@ public class SetModesService extends Service {
      * заданным DPI, живой ресайз пропорций, свап по двойному тапу. Единственный движок сплита.
      * freeform-настройки нужны, чтобы приложения на VD были resizable.
      */
-    private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi,
-                                    String[] dockApps, String[] dockSplits) {
+    private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi) {
         if (leftPkg == null || leftPkg.isEmpty()) return; // rightPkg пуст = одиночный полноэкранный режим
         if (rightPkg == null) rightPkg = "";
         try {
@@ -398,8 +401,6 @@ public class SetModesService extends Service {
             i.putExtra(SplitHostActivity.EXTRA_RATIO, ratio);
             i.putExtra(SplitHostActivity.EXTRA_LEFT_DPI, leftDpi);
             i.putExtra(SplitHostActivity.EXTRA_RIGHT_DPI, rightDpi);
-            i.putExtra(SplitHostActivity.EXTRA_DOCK_APPS, dockApps);
-            i.putExtra(SplitHostActivity.EXTRA_DOCK_SPLITS, dockSplits);
             startActivity(i);
             Log.i(TAG, "launchVirtualSplit host started");
         } catch (Exception e) {
@@ -489,6 +490,29 @@ public class SetModesService extends Service {
         }
     }
 
+    /**
+     * Переопределение темы системы (и приложений, следующих системной DayNight-теме).
+     * mode: 0=Авто, 1=Светлая (NIGHT_NO), 2=Тёмная (NIGHT_YES) — совпадает с {@code UiModeManager.MODE_NIGHT_*}
+     * и значениями {@code Settings.Secure.ui_night_mode}. Пишем secure-настройку (WRITE_SECURE_SETTINGS,
+     * переживёт ребут) И зовём {@code UiModeManager.setNightMode} для мгновенного применения (в try — на
+     * части прошивок нужен signature-пермишен MODIFY_DAY_NIGHT_MODE; тогда применится по secure-настройке).
+     */
+    private void applyTheme(int mode) {
+        if (mode < 0 || mode > 3) mode = 0;
+        try {
+            android.provider.Settings.Secure.putInt(getContentResolver(), "ui_night_mode", mode);
+        } catch (Exception e) {
+            Log.w(TAG, "applyTheme secure ui_night_mode: " + e.getMessage());
+        }
+        try {
+            android.app.UiModeManager ui = (android.app.UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
+            if (ui != null) ui.setNightMode(mode);
+        } catch (Exception e) {
+            Log.w(TAG, "applyTheme setNightMode (нет MODIFY_DAY_NIGHT_MODE?): " + e.getMessage());
+        }
+        Log.i(TAG, "applyTheme mode=" + mode);
+    }
+
     private void saveAutoLightState(boolean enabled) {
         prefs().edit().putBoolean("autoLight", enabled).apply();
         Log.i(TAG, "saveAutoLightState: " + enabled);
@@ -541,11 +565,20 @@ public class SetModesService extends Service {
         startForegroundService(intent);
     }
 
-    /** Восстанавливает WiperColdService на старте, если опция была включена. */
+    /** Стартует NowPlayingService (ридер метаданных активной медиа-сессии для наших поверхностей). */
+    private void startNowPlayingService() {
+        Intent intent = new Intent(this, NowPlayingService.class);
+        startForegroundService(intent);
+    }
+
+    /** Восстанавливает WiperColdService (реактор двери) на старте, если включён хотя бы один его
+     *  потребитель: сервисный режим дворников ({@code wiperCold}) или пауза музыки при открытии
+     *  двери ({@code pauseMediaOnDoor}). */
     private void restoreWiperColdState() {
-        boolean enabled = prefs().getBoolean("wiperCold", false);
-        Log.i(TAG, "restoreWiperColdState: wiperCold=" + enabled);
-        if (enabled) {
+        boolean wiper       = prefs().getBoolean("wiperCold", false);
+        boolean pauseMedia  = prefs().getBoolean("pauseMediaOnDoor", false);
+        Log.i(TAG, "restoreWiperColdState: wiperCold=" + wiper + " pauseMediaOnDoor=" + pauseMedia);
+        if (wiper || pauseMedia) {
             Intent intent = new Intent(this, WiperColdService.class);
             startForegroundService(intent);
         }
@@ -760,6 +793,12 @@ public class SetModesService extends Service {
         startTripStatsService();
         // Статус ВВБ для виджета + авто-прогрев по уличной температуре
         startBatteryHeatService();
+        // Ридер «сейчас играет» — стартуем с задержкой и в try, чтобы НИКАК не влиять на критичное
+        // применение режима на старте (оно уже запланировано выше). Изолируем от старта.
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            try { startNowPlayingService(); }
+            catch (Exception e) { Log.w(TAG, "startNowPlayingService: " + e.getMessage()); }
+        }, 6000);
         // Плавающая кнопка «Назад»: восстановить после загрузки/рестарта сервиса
         // (с задержкой — даём системе поднять a11y-подсистему).
         new android.os.Handler(android.os.Looper.getMainLooper())

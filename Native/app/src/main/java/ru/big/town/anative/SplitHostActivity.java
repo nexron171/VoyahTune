@@ -4,20 +4,26 @@ import android.app.Activity;
 import android.app.ActivityOptions;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.graphics.Bitmap;
 import android.graphics.Outline;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.InputEvent;
 import android.view.MotionEvent;
+import android.view.PixelCopy;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.WindowManager;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 
 import java.lang.reflect.Method;
@@ -34,7 +40,7 @@ import java.lang.reflect.Method;
  * пермишен, которого у Native фактически НЕТ (голова на release-keys, подпись dev-ключом; whitelist
  * его не выдаёт). Поэтому {@link #injectTouch} обёрнут в try/catch и на этой голове, скорее всего,
  * бросит SecurityException. Рабочая доставка ввода — отдельная задача (root+Frida-инъекция вызова
- * injectInputEvent в system_server, как делает VoyahTweaks, ЛИБО роутинг ввода самим WM для
+ * injectInputEvent в system_server ЛИБО роутинг ввода самим WM для
  * trusted-дисплея). Рендер, per-app DPI и живой ресайз работают независимо от ввода.
  *
  * Extras: leftPkg, rightPkg (String), ratio (int 0..4), leftDpi, rightDpi (int, 0=дефолт дисплея).
@@ -48,12 +54,6 @@ public class SplitHostActivity extends Activity {
     public static final String EXTRA_RATIO    = "ratio";
     public static final String EXTRA_LEFT_DPI = "leftDpi";
     public static final String EXTRA_RIGHT_DPI = "rightDpi";
-    // Док-модель (дубли ярлыков/сплитов с нашего главного): dockApps="pkg|dpi",
-    // dockSplits="lpkg|rpkg|ratio|leftDpi|rightDpi". Нужны, чтобы док работал поверх открытых окон.
-    public static final String EXTRA_DOCK_APPS   = "dockApps";
-    public static final String EXTRA_DOCK_SPLITS = "dockSplits";
-
-    private static final String LAUNCHER_PKG = "ru.big.town.restoremode";
 
     // Флаги VirtualDisplay. TRUSTED(1<<10) обязателен, чтобы на дисплей можно было запускать
     // чужие активити и (в перспективе) роутить ввод; требует ADD_TRUSTED_DISPLAY (privapp whitelist).
@@ -80,11 +80,14 @@ public class SplitHostActivity extends Activity {
         Pane(String side) { this.side = side; }
     }
 
+    // ВРЕМЕННО: ресайз делителем отключён (порча текстуры/рассинхрон приложений при живом ресайзе VD).
+    // Делитель — только визуальный + двойной тап меняет окна местами.
     private final Pane left  = new Pane("L");
     private final Pane right = new Pane("R");
 
-    private String[] dockApps = new String[0];
-    private String[] dockSplits = new String[0];
+    // Ссылка на активный сплит-хост — чтобы Native мог закрыть сплит, когда пользователь открывает
+    // приложение из дока во freeform (иначе приложение-панель «уехало» бы с VD с глитчем). См. closeActiveSplit.
+    private static volatile SplitHostActivity sCurrent;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -105,13 +108,10 @@ public class SplitHostActivity extends Activity {
         Intent in = getIntent();
         left.pkg   = in.getStringExtra(EXTRA_LEFT);
         right.pkg  = in.getStringExtra(EXTRA_RIGHT);
+        sCurrent = this;   // этот сплит теперь активный (для закрытия из Native при OPEN_FREEFORM)
         left.dpi   = in.getIntExtra(EXTRA_LEFT_DPI, 0);
         right.dpi  = in.getIntExtra(EXTRA_RIGHT_DPI, 0);
         int ratio  = in.getIntExtra(EXTRA_RATIO, 1);
-        String[] da = in.getStringArrayExtra(EXTRA_DOCK_APPS);
-        String[] ds = in.getStringArrayExtra(EXTRA_DOCK_SPLITS);
-        dockApps   = (da != null) ? da : new String[0];
-        dockSplits = (ds != null) ? ds : new String[0];
 
         left.container  = findViewById(R.id.splitPaneLeft);
         right.container = findViewById(R.id.splitPaneRight);
@@ -137,12 +137,22 @@ public class SplitHostActivity extends Activity {
             applyRoundedCorners(right.container);
         }
 
-        buildDock();
-
         Log.i(TAG, "onCreate single=" + single + " left=" + left.pkg + " right=" + right.pkg
                 + " ratio=" + ratio + " lDpi=" + left.dpi + " rDpi=" + right.dpi
-                + " defaultDpi=" + defaultDpi + " dockApps=" + dockApps.length
-                + " dockSplits=" + dockSplits.length);
+                + " defaultDpi=" + defaultDpi);
+    }
+
+    /**
+     * Хост уже открыт (launchMode=singleTop) и пришёл НОВЫЙ запрос — напр. клик по иконке дока
+     * (одиночный запуск) поверх ранее открытого сплита. Без этого singleTop получил бы onNewIntent,
+     * а старый сплит остался бы на экране. Обновляем интент и пересобираем хост с чистого листа:
+     * старые VirtualDisplay/панели освобождаются в onDestroy → onCreate перечитывает новые extras.
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        recreate();
     }
 
     /**
@@ -153,9 +163,8 @@ public class SplitHostActivity extends Activity {
      */
     private void applyWindowInsets() {
         final float density = getResources().getDisplayMetrics().density;
-        final int gap = Math.round(density * 6f);      // небольшой внутренний зазор
-        final LinearLayout panes = findViewById(R.id.splitPanes);
-        final View dock = findViewById(R.id.splitDock);
+        final int gap = Math.round(density * 6f);          // небольшой внутренний зазор
+        final int nativeDock = Math.round(density * 145f); // родной док головы висит поверх слева (в insets не приходит)
         View root = findViewById(R.id.splitHostRoot);
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
             androidx.core.graphics.Insets sb =
@@ -165,106 +174,12 @@ public class SplitHostActivity extends Activity {
                 int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
                 if (id > 0) top = getResources().getDimensionPixelSize(id);
             }
-            // Наш док теперь и есть «левый отступ»: иконки под статус-баром, кубик над навбаром.
-            dock.setPadding(sb.left, top, 0, sb.bottom);
-            // Область окон — сразу справа от дока, только внутренний зазор + правый/нижний/верхний insets.
-            panes.setPadding(gap, top + gap, sb.right + gap, sb.bottom + gap);
+            // Инсет на КОРЕНЬ (FrameLayout) → и панели, и оверлей-маска отступают одинаково и совпадают.
+            v.setPadding(nativeDock + sb.left + gap, top + gap, sb.right + gap, sb.bottom + gap);
             return insets;
         });
     }
 
-    // -------------------------------------------------------------------------
-    // Док (тот же, что на нашем главном) — работает поверх открытых окон
-    // -------------------------------------------------------------------------
-
-    /** Наполнить левый док иконками из переданной модели + повесить действия. */
-    private void buildDock() {
-        LinearLayout col = findViewById(R.id.splitDockIcons);
-        if (col != null) {
-            col.removeAllViews();
-            android.content.pm.PackageManager pm = getPackageManager();
-            android.view.LayoutInflater inf = android.view.LayoutInflater.from(this);
-            int gap = Math.round(getResources().getDisplayMetrics().density * 7f);
-
-            // Сплиты (две мини-иконки) → переключить хост на этот сплит
-            for (String s : dockSplits) {
-                if (s == null) continue;
-                String[] p = s.split("\\|");
-                if (p.length < 3) continue;
-                final String lp = p[0], rp = p[1];
-                final int rt = parseIntSafe(p[2], 1);
-                final int ld = p.length > 3 ? parseIntSafe(p[3], 0) : 0;
-                final int rd = p.length > 4 ? parseIntSafe(p[4], 0) : 0;
-                View item = inf.inflate(R.layout.item_dock_split, col, false);
-                setIcon(pm, item, R.id.dockIcoLeft, lp);
-                setIcon(pm, item, R.id.dockIcoRight, rp);
-                item.setOnClickListener(v -> relaunchHost(lp, rp, rt, ld, rd));
-                addDockItem(col, item, gap);
-            }
-            // Ярлыки приложений (одна иконка) → одиночное полноэкранное окно на VD
-            for (String s : dockApps) {
-                if (s == null) continue;
-                String[] p = s.split("\\|");
-                final String pk = p[0];
-                final int dp = p.length > 1 ? parseIntSafe(p[1], 0) : 0;
-                View item = inf.inflate(R.layout.item_dock_app, col, false);
-                setIcon(pm, item, R.id.dockIco, pk);
-                item.setOnClickListener(v -> relaunchHost(pk, "", 0, dp, 0));
-                addDockItem(col, item, gap);
-            }
-        }
-        // Кубик снизу → вернуться на наш главный экран (RestoreMode)
-        View home = findViewById(R.id.splitDockHome);
-        if (home != null) home.setOnClickListener(v -> goHomeToLauncher());
-    }
-
-    private void setIcon(android.content.pm.PackageManager pm, View item, int id, String pkg) {
-        android.widget.ImageView iv = item.findViewById(id);
-        try { iv.setImageDrawable(pm.getApplicationIcon(pkg)); } catch (Exception ignored) {}
-    }
-
-    private void addDockItem(LinearLayout col, View item, int bottomGap) {
-        // WRAP_CONTENT по ширине + gravity=center_horizontal у колонки → иконки строго по центру дока.
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = bottomGap;
-        col.addView(item, lp);
-    }
-
-    private static int parseIntSafe(String s, int def) {
-        try { return Integer.parseInt(s.trim()); } catch (Exception e) { return def; }
-    }
-
-    /**
-     * Переключить хост на другое приложение/сплит из дока: перезапуск хоста с новым конфигом,
-     * док-модель несём дальше. Надёжнее живого пересбора панелей и переиспользует весь onCreate.
-     */
-    private void relaunchHost(String l, String r, int ratio, int ld, int rd) {
-        Intent i = new Intent(this, SplitHostActivity.class);
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        i.putExtra(EXTRA_LEFT, l);
-        i.putExtra(EXTRA_RIGHT, r);
-        i.putExtra(EXTRA_RATIO, ratio);
-        i.putExtra(EXTRA_LEFT_DPI, ld);
-        i.putExtra(EXTRA_RIGHT_DPI, rd);
-        i.putExtra(EXTRA_DOCK_APPS, dockApps);
-        i.putExtra(EXTRA_DOCK_SPLITS, dockSplits);
-        startActivity(i);
-    }
-
-    /** Кубик — вернуться на наш главный экран (RestoreMode home), закрыв хост. */
-    private void goHomeToLauncher() {
-        try {
-            Intent i = getPackageManager().getLaunchIntentForPackage(LAUNCHER_PKG);
-            if (i != null) {
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "goHomeToLauncher failed: " + e.getMessage());
-        }
-        finish();
-    }
 
     // Вес левого окна по соотношению (0=3:4,1=1:1,2=4:3,3=5:2,4=2:5) — как во freeform-движке.
     private void applyRatioWeights(int ratio) {
@@ -311,6 +226,9 @@ public class SplitHostActivity extends Activity {
                     createVirtualDisplay(pane, holder.getSurface());
                     launchApp(pane);
                 } else {
+                    // Реальные окна ресайзятся ТОЛЬКО на отпускании делителя (endResizeMask меняет вес
+                    // контейнера один раз) → ровно один surfaceChanged → один чистый vd.resize. Во время
+                    // драга сюда не заходим (веса панелей не меняем, двигаем только оверлей-маску).
                     try {
                         pane.vd.resize(width, height, effectiveDpi(pane));
                     } catch (Exception e) {
@@ -354,21 +272,67 @@ public class SplitHostActivity extends Activity {
 
     private void launchApp(Pane pane) {
         if (pane.vd == null || pane.launched || pane.pkg == null || pane.pkg.isEmpty()) return;
-        try {
-            Intent li = getPackageManager().getLaunchIntentForPackage(pane.pkg);
-            if (li == null) {
-                Log.w(TAG, "нет launch intent для " + pane.pkg);
-                return;
-            }
-            li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
-            ActivityOptions o = ActivityOptions.makeBasic();
-            o.setLaunchDisplayId(pane.vd.getDisplay().getDisplayId());
-            startActivity(li, o.toBundle());
-            pane.launched = true;
-            Log.i(TAG, "launched " + pane.pkg + " on display " + pane.vd.getDisplay().getDisplayId());
-        } catch (Exception e) {
-            Log.e(TAG, "launchApp " + pane.pkg + " failed: " + e.getMessage());
+        final Intent li = getPackageManager().getLaunchIntentForPackage(pane.pkg);
+        if (li == null) {
+            Log.w(TAG, "нет launch intent для " + pane.pkg);
+            return;
         }
+        // ВАЖНО (фикс «пустая панель + уехавшее приложение»): приложение-одиночка (launchMode
+        // singleTask/singleInstance или общий taskAffinity), УЖЕ открытое на другом дисплее (freeform на
+        // display 0/1 или в другом сплите), при setLaunchDisplayId НЕ дублируется, а ПЕРЕЕЗЖАЕТ на наш VD —
+        // WM бросает "Failed to find a stack behind stack", панель остаётся пустой. Поэтому освобождаем
+        // приложение с исходного дисплея — но НЕ force-stop процесса (иначе музыка глохнет), а завершаем
+        // только его ЗАДАЧУ (removeTask): активити умирает, процесс + foreground-плейбек живут → музыка
+        // продолжает играть, а окно стартует ЗАНОВО на нашем VD. Teardown асинхронный → запуск с задержкой.
+        finishTasksForPackage(pane.pkg);
+        pane.launched = true;   // помечаем сразу — повторные проходы (surface recreate) не запустят дважды
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            if (pane.vd == null) return;   // сплит закрыли/пересоздали за время задержки
+            try {
+                int displayId = pane.vd.getDisplay().getDisplayId();
+                li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+                ActivityOptions o = ActivityOptions.makeBasic();
+                o.setLaunchDisplayId(displayId);
+                startActivity(li, o.toBundle());
+                Log.i(TAG, "launched " + pane.pkg + " on display " + displayId + " (после force-stop)");
+            } catch (Exception e) {
+                pane.launched = false;
+                Log.e(TAG, "launchApp " + pane.pkg + " failed: " + e.getMessage());
+            }
+        }, 450);
+    }
+
+    /**
+     * Завершает ЗАДАЧИ приложения (по всем дисплеям) через {@code IActivityTaskManager.removeTask},
+     * НЕ убивая процесс. Активити приложения финишируются и освобождают исходный дисплей (снимается
+     * коллизия «одиночка на двух дисплеях»), но процесс с foreground-сервисом жив → плейбек музыки НЕ
+     * прерывается. Требует REAL_GET_TASKS (перечислить чужие задачи) + REMOVE_TASKS (завершить их) —
+     * оба в privapp-whitelist. Не найдено задач → дешёвый no-op (приложение нигде не открыто, коллизии нет).
+     * @return число завершённых задач.
+     */
+    private int finishTasksForPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return 0;
+        int removed = 0;
+        try {
+            android.app.ActivityManager am =
+                    (android.app.ActivityManager) getSystemService(android.content.Context.ACTIVITY_SERVICE);
+            Object atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null);
+            java.lang.reflect.Method removeTask = atm.getClass().getMethod("removeTask", int.class);
+            for (android.app.ActivityManager.RunningTaskInfo t : am.getRunningTasks(1000)) {
+                String p = (t.topActivity != null) ? t.topActivity.getPackageName()
+                        : (t.baseActivity != null ? t.baseActivity.getPackageName() : null);
+                if (pkg.equals(p)) {
+                    try { removeTask.invoke(atm, t.taskId); removed++; }
+                    catch (Exception e) { Log.w(TAG, "removeTask " + t.taskId + " (" + pkg + "): " + e.getMessage()); }
+                }
+            }
+            Log.i(TAG, "finishTasksForPackage " + pkg + " → завершено задач: " + removed + " (процесс жив)");
+        } catch (Exception e) {
+            Throwable c = (e instanceof java.lang.reflect.InvocationTargetException
+                    && e.getCause() != null) ? e.getCause() : e;
+            Log.w(TAG, "finishTasksForPackage " + pkg + ": " + c);
+        }
+        return removed;
     }
 
     private int effectiveDpi(Pane pane) {
@@ -414,9 +378,8 @@ public class SplitHostActivity extends Activity {
 
     private void setupDivider() {
         final View divider = findViewById(R.id.splitDivider);
-        final LinearLayout panes = findViewById(R.id.splitPanes);
 
-        // Двойной тап по handle-бару — поменять окна местами.
+        // Двойной тап по handle-бару — поменять окна местами. Драг-ресайз ВРЕМЕННО отключён.
         final GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override
             public boolean onDoubleTap(MotionEvent e) {
@@ -424,36 +387,7 @@ public class SplitHostActivity extends Activity {
                 return true;
             }
         });
-
-        divider.setOnTouchListener(new View.OnTouchListener() {
-            float startX;
-            float startLW, startRW;
-            @Override
-            public boolean onTouch(View v, MotionEvent e) {
-                gd.onTouchEvent(e);  // двойной тап → swap
-                switch (e.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        startX = e.getRawX();
-                        startLW = ((LinearLayout.LayoutParams) left.container.getLayoutParams()).weight;
-                        startRW = ((LinearLayout.LayoutParams) right.container.getLayoutParams()).weight;
-                        return true;
-                    case MotionEvent.ACTION_MOVE: {
-                        float total = startLW + startRW;
-                        int usable = panes.getWidth() - divider.getWidth();
-                        if (usable <= 0) return true;
-                        float dxWeight = (e.getRawX() - startX) / usable * total;
-                        float nl = startLW + dxWeight;
-                        float nr = startRW - dxWeight;
-                        float min = total * 0.15f;   // не даём окну схлопнуться
-                        if (nl < min || nr < min) return true;
-                        setWeight(left.container, nl);
-                        setWeight(right.container, nr);
-                        return true;
-                    }
-                }
-                return false;
-            }
-        });
+        divider.setOnTouchListener((v, e) -> { gd.onTouchEvent(e); return true; });
     }
 
     /** Скруглённые углы окна (SurfaceView через outline-клип). */
@@ -493,8 +427,56 @@ public class SplitHostActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (sCurrent == this) sCurrent = null;
         releasePane(left);
         releasePane(right);
         super.onDestroy();
+    }
+
+    /** Запустить сплит на VirtualDisplay из статического контекста (напр. из {@link SetModesReceiverDynamic}
+     *  по долгому нажатию на слот дока). Дублирует {@code SetModesService.launchVirtualSplit}: включает
+     *  freeform-настройки (resizable) и стартует хост с extras. Пустой left/right → no-op. */
+    public static void launchSplit(android.content.Context ctx, String left, String right, int ratio, int leftDpi, int rightDpi) {
+        if (left == null || left.isEmpty() || right == null || right.isEmpty()) {
+            Log.w(TAG, "launchSplit: пустой пакет — пропуск");
+            return;
+        }
+        try {
+            android.provider.Settings.Global.putInt(ctx.getContentResolver(), "enable_freeform_support", 1);
+            android.provider.Settings.Global.putInt(ctx.getContentResolver(), "force_resizable_activities", 1);
+        } catch (Exception e) {
+            Log.w(TAG, "launchSplit freeform settings: " + e.getMessage());
+        }
+        try {
+            Intent i = new Intent(ctx, SplitHostActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            i.putExtra(EXTRA_LEFT, left);
+            i.putExtra(EXTRA_RIGHT, right);
+            i.putExtra(EXTRA_RATIO, ratio);
+            i.putExtra(EXTRA_LEFT_DPI, leftDpi);
+            i.putExtra(EXTRA_RIGHT_DPI, rightDpi);
+            ctx.startActivity(i);
+            Log.i(TAG, "launchSplit host started " + left + "/" + right);
+        } catch (Exception e) {
+            Log.e(TAG, "launchSplit failed: " + e.getMessage());
+        }
+    }
+
+    /** Закрыть активный сплит, если есть: завершаем ЗАДАЧИ обеих панелей (removeTask, без убийства
+     *  процессов → музыка не глохнет), чтобы приложения не остались «застрявшими» на VD и открылись
+     *  заново ЧИСТО там, где их запросили из дока, + finish хоста. Зовёт Native при OPEN_FREEFORM
+     *  (пользователь открыл приложение из дока во freeform поверх сплита).
+     *  @return true, если сплит был активен (тогда запуск во freeform стоит отложить на teardown). */
+    static boolean closeActiveSplit() {
+        final SplitHostActivity a = sCurrent;
+        if (a == null) return false;
+        sCurrent = null;
+        try {
+            if (a.left.pkg  != null && !a.left.pkg.isEmpty())  a.finishTasksForPackage(a.left.pkg);
+            if (a.right.pkg != null && !a.right.pkg.isEmpty()) a.finishTasksForPackage(a.right.pkg);
+            a.runOnUiThread(a::finish);
+            Log.i(TAG, "closeActiveSplit: сплит закрыт (removeTask панелей + finish)");
+        } catch (Exception e) { Log.w(TAG, "closeActiveSplit: " + e.getMessage()); }
+        return true;
     }
 }

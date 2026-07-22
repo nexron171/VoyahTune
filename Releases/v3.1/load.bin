@@ -1,13 +1,18 @@
 #!/system/bin/sh
-# Самодостаточный Frida-оркестратор Open Voyah (не зависит от cunba/Tweaks).
-# Держит два хука через watchdog-цикл:
-#   1) vd_bypass.js в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит);
-#   2) keymng2.js в com.qinggan.keymanager.service — кнопка-звёздочка на руле.
+# Самодостаточный Frida-оркестратор Open Voyah (не зависит от сторонних обвязок).
+# Держит хуки через watchdog-цикл:
+#   1) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
+#   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
+#   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain).
 #
-# КРИТИЧНО ДЛЯ СТАБИЛЬНОСТИ: инжектим через -e (eternalize) — frida-inject ставит хук и ВЫХОДИТ,
-# НЕ держит ptrace на system_server (приаттаченный frida-inject дестабилизирует system_server и
-# роняет его watchdog'ом). Переинжект — ТОЛЬКО когда цель сменила pid (рестарт), по pid-маркеру,
-# который load.bin (root) пишет после успешного инжекта. Так нет ни постоянного ptrace, ни стекания.
+# НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
+#   • system_server и launcher: frida-inject -e ВОЗВРАЩАЕТ управление. Ставим по ТОЧНОМУ -p pid и пишем
+#     pid-маркер ТОЛЬКО ЕСЛИ frida-inject не сообщил об ошибке (нет 'not found'/'unable to find'/…). Если
+#     инъекция не удалась (гонка на буте — процесс ещё поднимается) → маркер НЕ трогаем → следующая
+#     итерация (10с) повторит с уже готовым процессом. Раньше маркер писался безусловно в фоне, поэтому
+#     разовый промах ('Process not found') НЕ повторялся и launcherdock молча не грузился после ребута.
+#   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление) → запускаем в ФОН,
+#     маркер оптимистично (агент логирует '[swk] … installed' в свой файл ДО зависа — путь стабилен).
 
 logs() { log -p e -t VOYAH "$1"; }
 
@@ -17,32 +22,56 @@ n=$(ps -ef | grep 'local/bin/load.bin' | grep -v grep | wc -l)
 
 FI=/data/local/bin/frida-inject
 VD=/data/local/bin/vd_bypass.js
-KM=/data/local/bin/keymng2.js
-VDMARK=/data/local/tmp/voyah_vd.pid     # pid system_server, куда уже поставлен хук
-KMMARK=/data/local/tmp/voyah_km.pid     # pid keymanager, куда уже поставлен хук
+SWK=/data/local/bin/steeringwheelkeys.js
+LNCH=/data/local/bin/launcherdock.js
+VDMARK=/data/local/tmp/voyah_vd.pid          # pid system_server, куда поставлен vd_bypass
+SWK_KM_MARK=/data/local/tmp/voyah_swk_km.pid # pid keymanager, куда поставлен steeringwheelkeys
+LNCH_MARK=/data/local/tmp/voyah_lnch.pid     # pid лаунчера, куда поставлен launcherdock
+
+# Инъекция в цель, которая ВОЗВРАЩАЕТ управление. Маркер пишем ТОЛЬКО при успехе.
+#   $1=pid  $2=script  $3=logfile  $4=markerfile
+inject_ret() {
+    TRY="$3.try"
+    : > "$TRY"
+    timeout 30 "$FI" -p "$1" -s "$2" -e > "$TRY" 2>&1
+    cat "$TRY" >> "$3"
+    # Ошибки самого frida-inject (агент пишет свои сообщения через console.log/Log — их НЕ матчим).
+    if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$TRY"; then
+        logs "inject FAIL pid=$1 $2 (retry next loop)"
+        return 1
+    fi
+    echo "$1" > "$4"
+    logs "inject OK pid=$1 $2"
+    return 0
+}
 
 logs "voyah load.bin start"
 
 while [ 1 ]; do
-    # VD-хук в system_server: переинжект только если маркер != текущий pid (рестарт/первый раз)
+    # 1) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
     SS=$(pidof system_server)
     if [ -n "$SS" ] && [ -f "$VD" ]; then
-        MK=$(cat "$VDMARK" 2>/dev/null)
-        if [ "$MK" != "$SS" ]; then
-            logs "inject vd_bypass -> system_server $SS (eternalize)"
-            "$FI" -p "$SS" -s "$VD" -e >> /data/local/tmp/voyah_vd_bypass.txt 2>&1
-            [ $? -eq 0 ] && echo "$SS" > "$VDMARK"
+        if [ "$(cat "$VDMARK" 2>/dev/null)" != "$SS" ]; then
+            inject_ret "$SS" "$VD" /data/local/tmp/voyah_vd_bypass.txt "$VDMARK"
         fi
     fi
 
-    # Кнопка-звёздочка в keymanager: аналогично по pid keymanager
+    # 2) Переопределение дока — инъекция в процесс лаунчера (возвращает управление → verify-before-mark).
+    #    По -p pid (точнее -n, устойчивее к гонке имени на буте). При промахе повтор на след. итерации.
+    LP=$(pidof com.qinggan.app.launcher)
+    if [ -n "$LP" ] && [ -f "$LNCH" ]; then
+        if [ "$(cat "$LNCH_MARK" 2>/dev/null)" != "$LP" ]; then
+            inject_ret "$LP" "$LNCH" /data/local/tmp/voyah_lnch.txt "$LNCH_MARK"
+        fi
+    fi
+
+    # 3) Кнопки руля в keymanager (в фон — здесь frida-inject -e зависает; маркер оптимистично)
     KMP=$(pidof com.qinggan.keymanager.service)
-    if [ -n "$KMP" ] && [ -f "$KM" ]; then
-        MK=$(cat "$KMMARK" 2>/dev/null)
-        if [ "$MK" != "$KMP" ]; then
-            logs "inject keymng2 -> keymanager $KMP (eternalize)"
-            "$FI" -n com.qinggan.keymanager.service -s "$KM" -e >> /data/local/tmp/voyah_keymng.txt 2>&1
-            echo "$KMP" > "$KMMARK"
+    if [ -n "$KMP" ] && [ -f "$SWK" ]; then
+        if [ "$(cat "$SWK_KM_MARK" 2>/dev/null)" != "$KMP" ]; then
+            logs "inject steeringwheelkeys -> keymanager $KMP (eternalize,bg)"
+            "$FI" -n com.qinggan.keymanager.service -s "$SWK" -e >> /data/local/tmp/voyah_swk.txt 2>&1 &
+            echo "$KMP" > "$SWK_KM_MARK"
         fi
     fi
 

@@ -3,6 +3,14 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Чтение метаданных ЛЮБОЙ активной медиа-сессии (сторонние плееры) через MediaSessionManager.
+         signature|privileged → нужен privapp-whitelist (см. privapp-permissions-ru.big.town.anative.xml). -->
+    <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
+    <!-- Перенос приложения между сплитом/фриформом БЕЗ убийства процесса: завершаем задачу приложения
+         (removeTask), а не force-stop процесса — плейбек в foreground-сервисе выживает (музыка не глохнет).
+         REAL_GET_TASKS — перечислить задачи всех приложений; REMOVE_TASKS — завершить чужую задачу. -->
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+    <uses-permission android:name="android.permission.REMOVE_TASKS" />
     <uses-permission android:name="android.permission.REBOOT" />
     <uses-permission android:name="android.permission.MANAGE_APP_OPS_MODES" />
     <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES" />
@@ -161,6 +169,12 @@
             />
 
         <service
+            android:name=".NowPlayingService"
+            android:enabled="true"
+            android:exported="false"
+            />
+
+        <service
             android:name=".BackButtonService"
             android:enabled="true"
             android:exported="true"
@@ -215,6 +229,13 @@
             android:resizeableActivity="true"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density" />
+
+        <!-- «Сейчас играет» — снимок трека + обложка для наших поверхностей (читает RestoreMode/VoyahTune) -->
+        <provider
+            android:name=".NowPlayingProvider"
+            android:authorities="ru.big.town.anative.nowplaying"
+            android:exported="true"
+            android:grantUriPermissions="true" />
 
         <!-- Шеринг лог-файла (кнопка «Выгрузить логи») -->
         <provider

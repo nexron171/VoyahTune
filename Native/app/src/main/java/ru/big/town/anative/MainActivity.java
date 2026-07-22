@@ -82,6 +82,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public static byte[][] arraysStr2arraysBytes(String[] cmds) {
+        if (cmds == null) {   // неизвестное имя режима (несовпадение ключа) → пустой набор, а не NPE
+            Log.w("$$$ MAIN arraysStr2arraysBytes $$$", "cmds=null (неизвестный режим?) → пустой набор");
+            return new byte[0][];
+        }
         int indexCmd = 0;
         byte[][] cmdsBytes = new byte[cmds.length][10];
         for (String cmd : cmds) {
@@ -124,7 +128,12 @@ public class MainActivity extends AppCompatActivity {
 
     public static byte[][] getEnergyCanCommand(String mode) {
         Bundle energyMode = new Bundle();
-        energyMode.putStringArray("Smart", new String[]{"68 08 03 00 00 f0 2c 14 18 00"});
+        // Интеллектуальный режим: тег радио в UI = "SMART" (в верхнем регистре, см. activity_advance.xml),
+        // а сохранённое значение попадает сюда как есть → ключ ДОЛЖЕН быть "SMART". "Smart" — алиас на
+        // случай иного написания/легаси (Bundle-ключи регистрозависимы; раньше был только "Smart" → NPE).
+        String[] smart = new String[]{"68 08 03 00 00 f0 2c 14 18 00"};
+        energyMode.putStringArray("SMART", smart);
+        energyMode.putStringArray("Smart", smart);
         energyMode.putStringArray("EV", new String[]{"68 08 03 00 00 f0 2c 24 18 00"});
         energyMode.putStringArray("REV", new String[]{"68 08 03 00 00 f0 2c 34 18 00"});
         energyMode.putStringArray("SREV", new String[]{"68 08 03 00 00 f0 2c 44 18 00"});
@@ -298,12 +307,15 @@ public class MainActivity extends AppCompatActivity {
                 // cols 14,15 — команды кнопок на руле (короткое/долгое нажатие)
                 if (cursor.getColumnCount() > 14) customCommandStarButton1 = cursor.getString(14);
                 if (cursor.getColumnCount() > 15) customCommandStarButton2 = cursor.getString(15);
-                applyModeSideEffects(context, debugMode, wiperColdMode);
-                saveModesCache(context, debugMode, wiperColdMode);
+                // col 18 — «Пауза музыки при открытии двери водителя»: второй потребитель сигнала двери
+                boolean pauseMediaOnDoor = cursor.getColumnCount() > 18 && cursor.getInt(18) == 1;
+                applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
+                saveModesCache(context, debugMode, wiperColdMode, pauseMediaOnDoor);
                 Log.i(MODES_LOG, "FRESH: driveEnabled=" + driveEnabled
                         + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
                         + " disablePedestrianSound=" + disablePedestrianSound
-                        + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode);
+                        + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
+                        + " pauseMediaOnDoor=" + pauseMediaOnDoor);
                 return 2;
             } else {
                 Log.w(MODES_LOG, "Content provider not ready or missing columns"
@@ -329,7 +341,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Сохраняет успешно прочитанный снимок настроек в NativePrefs (кэш на случай «глухого» пробуждения). */
-    private static void saveModesCache(Context context, boolean debugMode, boolean wiperColdMode) {
+    private static void saveModesCache(Context context, boolean debugMode, boolean wiperColdMode, boolean pauseMediaOnDoor) {
         nativePrefs(context).edit()
                 .putString("cacheDriveMode", driveMode)
                 .putString("cacheEnergy", energy)
@@ -342,6 +354,7 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheDisablePedestrianSound", disablePedestrianSound)
                 .putBoolean("cacheDebugMode", debugMode)
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
+                .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
                 .putBoolean("cacheValid", true)
                 .apply();
     }
@@ -364,18 +377,20 @@ public class MainActivity extends AppCompatActivity {
         disablePedestrianSound = p.getBoolean("cacheDisablePedestrianSound", false);
         boolean debugMode     = p.getBoolean("cacheDebugMode", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
-        applyModeSideEffects(context, debugMode, wiperColdMode);
+        boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
+        applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
         Log.i(MODES_LOG, "CACHE: driveEnabled=" + driveEnabled
                 + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound
-                + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode);
+                + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
+                + " pauseMediaOnDoor=" + pauseMediaOnDoor);
         return true;
     }
 
-    /** Побочные эффекты настроек, не зависящие от отправки CAN: режим отладки и сервис дворников. */
-    private static void applyModeSideEffects(Context context, boolean debugMode, boolean wiperColdMode) {
+    /** Побочные эффекты настроек, не зависящие от отправки CAN: режим отладки и сервис-реактор двери водителя. */
+    private static void applyModeSideEffects(Context context, boolean debugMode, boolean wiperColdMode, boolean pauseMediaOnDoor) {
         CanSender.setDebugMode(debugMode);
-        applyWiperColdMode(context, wiperColdMode);
+        applyDoorReactor(context, wiperColdMode, pauseMediaOnDoor);
     }
 
     // Power Hold (leave car) — быстрая активация с главного экрана. Две CAN-команды активации.
@@ -432,17 +447,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Старт/стоп {@link WiperColdService} по настройке «Сервисный режим дворников в
-     * холодную погоду». Флаг дублируем в NativePrefs («wiperCold»), чтобы
-     * {@link SetModesService} мог синхронно узнать состояние на power on/boot.
+     * Старт/стоп {@link WiperColdService} — сервиса-реактора на открытие двери водителя. У него теперь
+     * два независимых потребителя сигнала двери: «Сервисный режим дворников» ({@code wiperCold}) и
+     * «Пауза музыки при открытии двери» ({@code pauseMediaOnDoor}). Оба флага дублируем в NativePrefs —
+     * сам сервис читает их и гейтит соответствующее действие; {@link SetModesService} по {@code wiperCold}
+     * решает про power-on reset дворников. Сервис живёт, пока включён хотя бы один потребитель.
      */
-    public static void applyWiperColdMode(Context context, boolean enabled) {
+    public static void applyDoorReactor(Context context, boolean wiperEnabled, boolean pauseMediaOnDoor) {
         if (context == null) return;
-        Log.i("$$$ WiperCold $$$", "applyWiperColdMode: enabled=" + enabled);
+        Log.i("$$$ DoorReactor $$$", "applyDoorReactor: wiper=" + wiperEnabled + " pauseMedia=" + pauseMediaOnDoor);
         context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
-                .edit().putBoolean("wiperCold", enabled).apply();
+                .edit().putBoolean("wiperCold", wiperEnabled)
+                       .putBoolean("pauseMediaOnDoor", pauseMediaOnDoor).apply();
         Intent intent = new Intent(context, WiperColdService.class);
-        if (enabled) {
+        if (wiperEnabled || pauseMediaOnDoor) {
             context.startForegroundService(intent);
         } else {
             // НЕ сбрасываем wiperServiceActive: если дворники по нашей оценке в сервисном
@@ -468,6 +486,71 @@ public class MainActivity extends AppCompatActivity {
     }
     public static void setDriveMode(String driveMode){
         setCanValues(1, getDriveModeCanCommand(driveMode), "drive mode: " + driveMode);
+    }
+
+    // Провайдер настроек RestoreMode — источник истины режимов (его читает loadModes/ApplyEngine и UI VoyahTune).
+    private static final Uri MODES_PROVIDER_URI =
+            Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
+
+    /**
+     * Текущий СОХРАНЁННЫЙ режим (тот, что восстанавливается на пробуждении и показан в UI VoyahTune).
+     * Читаем из провайдера RestoreMode (col 0=driveMode, col 1=energy); фолбэк — статик Native.
+     * Нужно кнопке руля, чтобы циклировать ОТНОСИТЕЛЬНО реального режима (правильный первый клик).
+     * @param isEnergy true → энергорежим, иначе режим вождения.
+     */
+    public static String currentSavedMode(Context context, boolean isEnergy) {
+        Cursor c = null;
+        try {
+            c = context.getContentResolver().query(MODES_PROVIDER_URI, null, null, null, null);
+            if (c != null && c.getCount() != 0 && c.getColumnCount() > (isEnergy ? 1 : 0)) {
+                c.moveToFirst();
+                String v = c.getString(isEnergy ? 1 : 0);
+                if (v != null && !v.isEmpty()) return v;
+            }
+        } catch (Exception e) {
+            Log.w(MODES_LOG, "currentSavedMode: " + e.getMessage());
+        } finally {
+            if (c != null) c.close();
+        }
+        return isEnergy ? energy : driveMode;
+    }
+
+    /**
+     * Сохранить «последний активированный» режим как ИСТОЧНИК ИСТИНЫ: пишем в pref RestoreMode через
+     * провайдер (переживёт пробуждение + попадёт в UI VoyahTune), плюс освежаем статик Native и его кэш
+     * (fallback «глухого» пробуждения). Вызывает кнопка руля (SetModesReceiverDynamic.cycleMode); после
+     * снятия value-ID на голове — синк внешней смены режима (см. TripStatsService).
+     * @param isEnergy true → энергорежим (pref "energy"), иначе режим вождения (pref "driveMode").
+     */
+    public static void persistSavedMode(Context context, boolean isEnergy, String mode) {
+        if (context == null || mode == null || mode.isEmpty()) return;
+        boolean written = false;
+        try {
+            android.content.ContentValues cv = new android.content.ContentValues();
+            cv.put(isEnergy ? "energy" : "driveMode", mode);
+            // update() провайдера возвращает число записанных ключей (>0 = успех). Провайдер может быть на
+            // миг недоступен (перезапуск/переустановка) → ловим исключение и НЕ считаем запись успешной.
+            written = context.getContentResolver().update(MODES_PROVIDER_URI, cv, null, null) > 0;
+        } catch (Exception e) {
+            Log.w(MODES_LOG, "persistSavedMode provider: " + e.getMessage());
+        }
+        // Статик — состояние текущей сессии (совпадает с только что отправленным в CAN режимом), обновляем всегда.
+        if (isEnergy) energy = mode; else driveMode = mode;
+        if (written) {
+            // Провайдер (источник истины) записан → синхронно освежаем кэш, чтобы «глухое» пробуждение
+            // (провайдер недоступен) восстановило именно этот режим и кэш НЕ расходился с провайдером.
+            // cacheValid НЕ трогаем: его выставляет только ПОЛНЫЙ снимок saveModesCache; частичный — нельзя.
+            try {
+                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
+                        .putString(isEnergy ? "cacheEnergy" : "cacheDriveMode", mode).apply();
+            } catch (Exception ignored) {}
+            Log.i(MODES_LOG, "persistSavedMode " + (isEnergy ? "energy" : "drive") + "=" + mode + " (provider ok)");
+        } else {
+            // Не записали в источник истины → кэш НЕ трогаем (иначе разъедется с провайдером и на
+            // пробуждении provider-first всё равно вернёт старое). Режим применён в CAN, но не переживёт сон.
+            Log.w(MODES_LOG, "persistSavedMode " + (isEnergy ? "energy" : "drive") + "=" + mode
+                    + " — провайдер НЕ записан, режим не переживёт пробуждение");
+        }
     }
 
     public void onButtonClick(View v) {
