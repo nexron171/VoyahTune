@@ -1042,19 +1042,68 @@ public class AdvanceActivity extends AppCompatActivity {
     public void onPickSteerDvrShort(View v)  { pickSteerAction("steerDvrShort",  steerDvrShortBtn); }
     public void onPickSteerDvrLong(View v)   { pickSteerAction("steerDvrLong",   steerDvrLongBtn); }
 
-    /** Диалог выбора действия для слота; сохраняет id в prefs, обновляет подпись кнопки. */
+    /** Диалог выбора действия для слота; сохраняет id в prefs, обновляет подпись кнопки. Помимо статических
+     *  действий (STEER_ACTIONS) есть два динамических: «Открыть сплит…» и «Открыть приложение…» — они
+     *  открывают под-пикер и сохраняют id вида «split:&lt;index&gt;» / «app:&lt;pkg&gt;». */
     private void pickSteerAction(String key, Button btn) {
-        final CharSequence[] labels = new CharSequence[STEER_ACTIONS.length];
-        for (int i = 0; i < STEER_ACTIONS.length; i++) labels[i] = STEER_ACTIONS[i][1];
+        final int nStatic = STEER_ACTIONS.length;
+        final CharSequence[] labels = new CharSequence[nStatic + 2];
+        for (int i = 0; i < nStatic; i++) labels[i] = STEER_ACTIONS[i][1];
+        labels[nStatic]     = "Открыть сплит…";
+        labels[nStatic + 1] = "Открыть приложение…";
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
                 .setTitle("Действие")
                 .setItems(labels, (d, which) -> {
-                    prefs.edit().putString(key, STEER_ACTIONS[which][0]).apply();
+                    if (which < nStatic) {
+                        prefs.edit().putString(key, STEER_ACTIONS[which][0]).apply();
+                        setSteerButtonText(btn, key);
+                        pushSteerConfig();
+                    } else if (which == nStatic) {
+                        pickSteerSplit(key, btn);
+                    } else {
+                        pickSteerApp(key, btn);
+                    }
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /** Под-пикер «Открыть сплит»: список готовых пресетов → id «split:&lt;index&gt;». */
+    private void pickSteerSplit(String key, Button btn) {
+        final java.util.List<SplitStore.Preset> all = SplitStore.load(prefs);
+        final java.util.List<Integer> readyIdx = new java.util.ArrayList<>();
+        final java.util.List<CharSequence> labels = new java.util.ArrayList<>();
+        for (int i = 0; i < all.size(); i++) {
+            SplitStore.Preset ps = all.get(i);
+            if (ps.ready()) {
+                readyIdx.add(i);
+                labels.add((ps.ll.isEmpty() ? ps.l : ps.ll) + "  /  " + (ps.rl.isEmpty() ? ps.r : ps.rl));
+            }
+        }
+        if (readyIdx.isEmpty()) {
+            com.google.android.material.snackbar.Snackbar.make(findViewById(R.id.main),
+                    "Нет готовых сплитов — сначала настройте сплит в «Приложения и разделение экрана»",
+                    com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
+            return;
+        }
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+                .setTitle("Открыть сплит")
+                .setItems(labels.toArray(new CharSequence[0]), (d, which) -> {
+                    prefs.edit().putString(key, "split:" + readyIdx.get(which)).apply();
                     setSteerButtonText(btn, key);
                     pushSteerConfig();
                 })
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    /** Под-пикер «Открыть приложение»: список приложений → id «app:&lt;pkg&gt;». */
+    private void pickSteerApp(String key, Button btn) {
+        showAppPicker("Открыть приложение", (pkg, label) -> {
+            prefs.edit().putString(key, "app:" + pkg).apply();
+            setSteerButtonText(btn, key);
+            pushSteerConfig();
+        });
     }
 
     private void refreshSteerButtons() {
@@ -1066,21 +1115,63 @@ public class AdvanceActivity extends AppCompatActivity {
 
     private void setSteerButtonText(Button b, String key) {
         if (b == null) return;
-        String id = prefs.getString(key, "none");
-        String label = "Не менять";
-        for (String[] a : STEER_ACTIONS) if (a[0].equals(id)) { label = a[1]; break; }
-        b.setText(label);
+        b.setText(steerActionLabel(prefs.getString(key, "none")));
+    }
+
+    /** Человекочитаемая подпись действия: статические — из STEER_ACTIONS; «split:N» — из пресета сплита;
+     *  «app:pkg» — имя приложения. */
+    private String steerActionLabel(String id) {
+        if (id == null || id.isEmpty()) return "Не менять";
+        for (String[] a : STEER_ACTIONS) if (a[0].equals(id)) return a[1];
+        if (id.startsWith("split:")) {
+            try {
+                int n = Integer.parseInt(id.substring("split:".length()));
+                java.util.List<SplitStore.Preset> all = SplitStore.load(prefs);
+                if (n >= 0 && n < all.size()) {
+                    SplitStore.Preset ps = all.get(n);
+                    return "Сплит: " + (ps.ll.isEmpty() ? ps.l : ps.ll) + " / " + (ps.rl.isEmpty() ? ps.r : ps.rl);
+                }
+            } catch (Exception ignored) {}
+            return "Сплит (не найден)";
+        }
+        if (id.startsWith("app:")) {
+            String pkg = id.substring("app:".length());
+            try {
+                android.content.pm.PackageManager pm = getPackageManager();
+                return "Приложение: " + pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
+            } catch (Exception e) { return "Приложение: " + pkg; }
+        }
+        return "Не менять";
     }
 
     /** Зеркалим выбор действий кнопок в Native (он пишет их в Settings.Global — оттуда читает keymng2.js). */
     private void pushSteerConfig() {
         Intent i = new Intent("ru.big.town.anative.STEER_CONFIG");
         i.setClassName("ru.big.town.anative", "ru.big.town.anative.SetModesReceiverDynamic");
-        i.putExtra("steerStarShort", prefs.getString("steerStarShort", "none"));
-        i.putExtra("steerStarLong",  prefs.getString("steerStarLong",  "none"));
-        i.putExtra("steerDvrShort",  prefs.getString("steerDvrShort",  "none"));
-        i.putExtra("steerDvrLong",   prefs.getString("steerDvrLong",   "none"));
+        i.putExtra("steerStarShort", resolveSteerAction(prefs.getString("steerStarShort", "none")));
+        i.putExtra("steerStarLong",  resolveSteerAction(prefs.getString("steerStarLong",  "none")));
+        i.putExtra("steerDvrShort",  resolveSteerAction(prefs.getString("steerDvrShort",  "none")));
+        i.putExtra("steerDvrLong",   resolveSteerAction(prefs.getString("steerDvrLong",   "none")));
         sendBroadcast(i);
+    }
+
+    /** Резолвит id действия для Native: «split:N» → self-contained «split:L,R,ratio,lDpi,rDpi» (Native не
+     *  имеет доступа к пресетам). Остальное (app:pkg / energy: / drive: / open_voyahtune / none) — как есть.
+     *  Невалидный/удалённый пресет → «none». */
+    private String resolveSteerAction(String id) {
+        if (id != null && id.startsWith("split:")) {
+            try {
+                int n = Integer.parseInt(id.substring("split:".length()));
+                java.util.List<SplitStore.Preset> all = SplitStore.load(prefs);
+                if (n >= 0 && n < all.size() && all.get(n).ready()) {
+                    SplitStore.Preset ps = all.get(n);
+                    return "split:" + ps.l + "," + ps.r + "," + ps.ratio + ","
+                            + AppDpiStore.get(prefs, ps.l) + "," + AppDpiStore.get(prefs, ps.r);
+                }
+            } catch (Exception ignored) {}
+            return "none";
+        }
+        return id;
     }
 
     /** Зеркалим выбор «Системного дока» в Native (он пишет voyahtune_dock* в Settings.Global — оттуда

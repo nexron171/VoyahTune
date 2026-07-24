@@ -191,25 +191,29 @@ Java.perform(function () {
             try {
                 var pkg = win.getOwningPackage();
                 if (ffBlacklisted(pkg)) return;
-                var displayId = win.getDisplayContent().getDisplayId();
+                var dc = win.getDisplayContent();
+                if (!dc) return;                                  // окно без displayContent (транзиентное) — пропуск
+                var displayId = dc.getDisplayId();
                 if (displayId !== 0 && displayId !== 1) return;   // только два ФИЗИЧЕСКИХ экрана (не наш VD/прочие)
                 var wt = win.getAttrs().type.value;
                 if (wt === 2011 || wt === 2012 || wt === 2038 || wt === 2032) return;  // статус/навбар/оверлеи
                 if (win.getWindowingMode() == 5) return;                    // настоящий freeform не трогаем
-                displayFrames = win.getDisplayFrames(displayFrames);
+                var df = win.getDisplayFrames(displayFrames);
+                var wf = win.getWindowFrames();
+                if (!df || !wf) return;                           // нечего мутировать — чистый пропуск (без порчи рамки)
                 // Пассажирский экран (display 1) на этой голове ПОЛНОСТЬЮ идентичен главному (1920×720, док
                 // 145dp) → те же bounds, что и display 0. Guard выше уже пропускает оба физических экрана.
                 var b = Rect.$new(FF.left, FF.top, FF.right, FF.bottom);
-                var wf = win.getWindowFrames();
-                displayFrames.mStable.value = b;
+                df.mStable.value = b;
                 wf.mStableFrame.value = b;  wf.mParentFrame.value = b;  wf.mDisplayFrame.value = b;
                 wf.mContentFrame.value = b; wf.mVisibleFrame.value = b; wf.mDecorFrame.value = b;
-                win.computeFrame(displayFrames);
+                win.computeFrame(df);
             } catch (e) {
-                // Несовместимая прошивка (нет поля/метода WindowFrames) → НАВСЕГДА выключаем фичу, чтобы не
-                // мутировать рамку частично на каждый layout-pass. WM жив (оригинал уже отработал выше).
-                FF.on = false;
-                Log.e("VDBYPASS", "freeform layout disabled (incompatible WM): " + e);
+                // Ошибка на КОНКРЕТНОМ окне (напр. нестандартное окно без ожидаемых полей WindowFrames) →
+                // пропускаем ТОЛЬКО его. НЕ выключаем freeform глобально: раньше FF.on=false здесь убивал
+                // окна ВСЕХ приложений из-за одного проблемного окна (freeform «ломался» до перезагрузки).
+                // WM жив (оригинал уже отработал). Лог троттлим — один раз, чтобы не спамить каждый layout-pass.
+                if (!FF._warned) { FF._warned = true; Log.e("VDBYPASS", "freeform layout skip (window, once): " + e); }
             }
         };
         installed.push("DisplayPolicy.layoutWindowLw(fake-freeform)");

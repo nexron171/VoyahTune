@@ -78,24 +78,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // глитчем (чёрное окно). closeActiveSplit force-stop'ит панели → приложение стартует заново; если
         // сплит был — запускаем с задержкой (teardown асинхронный), иначе сразу. Только full.
         if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            final String pkg = intent.getStringExtra("pkg");
-            if (pkg != null && !pkg.isEmpty()) {
-                boolean hadSplit = SplitHostActivity.closeActiveSplit();
-                final Context app = context.getApplicationContext();
-                Intent li = app.getPackageManager().getLaunchIntentForPackage(pkg);
-                if (li != null) {
-                    li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    final Intent fli = li;
-                    if (hadSplit) {
-                        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                            try { app.startActivity(fli); } catch (Exception e) { Log.w(TAG, "OPEN_FREEFORM delayed: " + e.getMessage()); }
-                        }, 500);
-                    } else {
-                        try { app.startActivity(fli); } catch (Exception e) { Log.w(TAG, "OPEN_FREEFORM: " + e.getMessage()); }
-                    }
-                    Log.i(TAG, "OPEN_FREEFORM pkg=" + pkg + " hadSplit=" + hadSplit);
-                }
-            }
+            openFreeformApp(context, intent.getStringExtra("pkg"));
         }
 
         // Открытие СПЛИТА, назначенного слоту дока, по долгому нажатию (launcherdock.js шлёт номер слота).
@@ -236,6 +219,24 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             cycleMode(ctx, action.substring("energy:".length()), true);
         } else if (action.startsWith("drive:")) {
             cycleMode(ctx, action.substring("drive:".length()), false);
+        } else if (action.startsWith("app:")) {
+            // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.
+            openFreeformApp(ctx, action.substring("app:".length()));
+            Log.i(TAG, "STEER_ACTION → приложение " + action.substring("app:".length()));
+        } else if (action.startsWith("split:")) {
+            // Открыть пресет сплита. Резолвленная строка от VoyahTune: split:<L>,<R>,<ratio>,<lDpi>,<rDpi>.
+            String[] p = action.substring("split:".length()).split(",");
+            if (p.length >= 3) {
+                try {
+                    int ratio = Integer.parseInt(p[2].trim());
+                    int lDpi  = p.length > 3 ? Integer.parseInt(p[3].trim()) : 0;
+                    int rDpi  = p.length > 4 ? Integer.parseInt(p[4].trim()) : 0;
+                    SplitHostActivity.launchSplit(ctx.getApplicationContext(), p[0].trim(), p[1].trim(), ratio, lDpi, rDpi);
+                    Log.i(TAG, "STEER_ACTION → сплит " + p[0] + "/" + p[1] + " ratio=" + ratio);
+                } catch (Exception e) {
+                    Log.w(TAG, "STEER_ACTION split parse: " + e.getMessage());
+                }
+            }
         } else if ("open_voyahtune".equals(action)) {
             try {
                 Intent i = new Intent();
@@ -249,6 +250,27 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         } else {
             Log.i(TAG, "STEER_ACTION неизвестно: " + action);
         }
+    }
+
+    /** Открыть приложение freeform-окном на display 0: закрываем активный VD-сплит (иначе его панели
+     *  «уехали» бы с VD с глитчем), затем стартуем приложение обычным launch-интентом (системный хук
+     *  vd_bypass ужмёт окно). Общий путь для OPEN_FREEFORM (клик слота дока) и действия кнопки руля «app:». */
+    static void openFreeformApp(Context context, String pkg) {
+        if (pkg == null || pkg.isEmpty()) return;
+        boolean hadSplit = SplitHostActivity.closeActiveSplit();
+        final Context app = context.getApplicationContext();
+        Intent li = app.getPackageManager().getLaunchIntentForPackage(pkg);
+        if (li == null) { Log.w(TAG, "openFreeformApp: нет launch intent для " + pkg); return; }
+        li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        final Intent fli = li;
+        if (hadSplit) {
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                try { app.startActivity(fli); } catch (Exception e) { Log.w(TAG, "openFreeformApp delayed: " + e.getMessage()); }
+            }, 500);
+        } else {
+            try { app.startActivity(fli); } catch (Exception e) { Log.w(TAG, "openFreeformApp: " + e.getMessage()); }
+        }
+        Log.i(TAG, "openFreeformApp pkg=" + pkg + " hadSplit=" + hadSplit);
     }
 
     /**
