@@ -27,7 +27,7 @@ Java.perform(function () {
     // Слот → штатный pkg, который родной лаунчер умеет подсвечивать (oversea, главный экран).
     // ВНИМАНИЕ: значения версионно-хрупкие, подтвердить на живой голове H97C.
     var STOCK_SLOT_PKG = { 1: "com.qinggan.bluetoothphone", 2: "com.qinggan.app.music" };
-    var NAV_MAIN   = "com.qinggan.launcher.navigation.NavigationBarMain";
+    var NAV_MAIN   = "com.qinggan.launcher.navigation.NavigationBarMain"; // класс навбара в ОД-прошивках
     var RELOAD_ACT = "ru.big.town.anative.DOCK_RELOAD";
     var OUR_PKG    = "ru.big.town.anative";           // наш VD-хост (SplitHostActivity) для подсветки
     var RESTORE_PKG = "ru.big.town.restoremode";      // VoyahTune (UI) — открывается долгим тапом по «меню»
@@ -39,6 +39,14 @@ Java.perform(function () {
     var BitmapConfig   = Java.use("android.graphics.Bitmap$Config");
     var BitmapDrawable = Java.use("android.graphics.drawable.BitmapDrawable");
     var Canvas         = Java.use("android.graphics.Canvas");
+
+    try {
+        Java.use(NAV_MAIN);
+        console.log("OD firmware");
+    } catch (e) {
+        NAV_MAIN   = "com.qinggan.mainlauncher.navigation.NavigationBar";  // класс навбара в ПИ-прошивках
+        console.log("PI firmware");
+    }
 
     // Кэш иконочного конфига (для проактивной перерисовки). Клик читает Settings.Global живьём.
     var cache = { dock1: "none", dock2: "none" };
