@@ -485,16 +485,14 @@ public class TripStatsService extends Service {
     // → pref RestoreMode). Тогда: пробуждение восстановит реальный последний режим, а кнопка руля циклирует
     // относительно него (без «клика в пустоту»).
     //
-    // ⚠️ ИНЕРТНО, пока не сняты value-ID на голове. КАК ДОСНЯТЬ (≈2 мин, в машине):
-    //   1) включить захват логов (Режим отладки);
-    //   2) сменить режим ВОЖДЕНИЯ и ЭНЕРГОрежим через ШТАТНОЕ меню машины, по одному значению;
-    //   3) в логе TripStats смотреть строки "VSTATE idXXXX = YY" — запомнить id (стабильный) и state
-    //      для каждого режима;
-    //   4) вписать ID-константы ниже и заполнить switch state→имя (имена — ровно как сохранённые значения
-    //      режимов: вождение ECO/COMFORT/SPORT/OUTING/SNOW/INDIVIDUAL; энергия SMART/EV/REV/SREV —
-    //      SMART в верхнем регистре, как тег радио). После этого синк оживает без иных правок.
-    private static final int DRIVE_MODE_VSTATE_ID  = -1;   // TODO(head): value-ID режима вождения
-    private static final int ENERGY_MODE_VSTATE_ID = -1;   // TODO(head): value-ID энергорежима
+    // Value-ID сняты на голове H97C (2026-07). ВАЖНО про режим вождения: берём сигнал ВЫБРАННОГО ПУНКТА
+    // меню DRIVING_MODE_SET (id 545), а НЕ DRIVING_MODE_SET_FB (id 787) — последний это параметр «режим
+    // управления» (эко/стандарт/спорт), которым «Собственный» тоже прикидывается (у Собственного управление
+    // может стоять на Спорт → FB=3=Спорт, неразличимо). DRIVING_MODE_SET различает: Собственный=5, Снег=6.
+    // (id785=ASC_MODE_SET_FB подвеска — тоже следует за режимом, но может меняться отдельно, не берём.)
+    // Энергорежим — IVI_SOC_MODESET (id 957). Оба приходят в наш code=36 колбэк как (id, state).
+    private static final int DRIVE_MODE_VSTATE_ID  = 545;  // DRIVING_MODE_SET (выбранный пункт режима вождения)
+    private static final int ENERGY_MODE_VSTATE_ID = 957;  // IVI_SOC_MODESET (энергорежим / power mode)
 
     // Guard от «пожарного шланга»: пишем pref только на РЕАЛЬНУЮ смену state (VehicleState может повторяться).
     private static int lastDriveState = Integer.MIN_VALUE, lastEnergyState = Integer.MIN_VALUE;
@@ -518,20 +516,28 @@ public class TripStatsService extends Service {
         }
     }
 
-    /** state → имя режима вождения. TODO(head): заполнить по разведке (см. блок выше). */
+    /** DRIVING_MODE_SET (id545) → тег выбранного режима вождения (снято на голове H97C, подтверждено таймингом).
+     *  Собственный=5 и Снег=6 — отличимы (в отличие от FB-параметра управления). Неизвестное → не синкать. */
     private static String driveModeFromState(int state) {
         switch (state) {
-            // case 0: return "ECO"; case 1: return "COMFORT"; case 2: return "SPORT";
-            // case 3: return "OUTING"; case 4: return "SNOW"; case 5: return "INDIVIDUAL";
+            case 1: return "ECO";
+            case 2: return "COMFORT";
+            case 3: return "SPORT";
+            case 4: return "OUTING";       // Загород
+            case 5: return "INDIVIDUAL";   // Собственный
+            case 6: return "SNOW";         // Снег
             default: return null;
         }
     }
 
-    /** state → имя энергорежима. TODO(head): заполнить по разведке (см. блок выше). */
+    /** IVI_SOC_MODESET (id957) → тег энергорежима (снято на голове H97C).
+     *  Неизвестное значение (в т.ч. SMART/Intelligent, которого нет на 3-кнопочной машине) → фолбэк на REV (fuel). */
     private static String energyModeFromState(int state) {
         switch (state) {
-            // case 0: return "SMART"; case 1: return "EV"; case 2: return "REV"; case 3: return "SREV";
-            default: return null;
+            case 2: return "EV";     // Электро
+            case 3: return "REV";    // Гибрид (fuel)
+            case 4: return "SREV";   // Топливо (save)
+            default: return "REV";   // фолбэк на fuel
         }
     }
 

@@ -536,6 +536,15 @@ public class MainActivity extends AppCompatActivity {
         }
         // Статик — состояние текущей сессии (совпадает с только что отправленным в CAN режимом), обновляем всегда.
         if (isEnergy) energy = mode; else driveMode = mode;
+        // Уведомить UI VoyahTune, чтобы селектор режима следил за текущим в реальном времени — даже когда
+        // режим сменили штатным меню машины или кнопкой руля при ОТКРЫТОМ экране «Настройки автомобиля».
+        try {
+            Intent bi = new Intent("ru.big.town.anative.MODE_SYNCED");
+            bi.setPackage("ru.big.town.restoremode");
+            bi.putExtra("isEnergy", isEnergy);
+            bi.putExtra("mode", mode);
+            context.sendBroadcast(bi);
+        } catch (Exception ignored) {}
         if (written) {
             // Провайдер (источник истины) записан → синхронно освежаем кэш, чтобы «глухое» пробуждение
             // (провайдер недоступен) восстановило именно этот режим и кэш НЕ расходился с провайдером.

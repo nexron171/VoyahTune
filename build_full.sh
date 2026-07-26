@@ -1,11 +1,11 @@
 #!/bin/sh
-# Собрать FULL-флейвор обоих проектов (release, debug-подпись) и разложить в Releases/v3.1.
+# Собрать FULL-флейвор обоих проектов (release, debug-подпись) и разложить в Releases/v3.2.
 # FULL = вся функциональность: сплит/док/VirtualDisplay + «Кнопки на руле» + не-root логика.
 # Frida-обвязку (vd_bypass.js/load.bin/init.logcat.sh/keymng2.js) кладём/обновляем вручную —
 # этот скрипт собирает только APK.
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-OUT="$ROOT/Releases/v3.1"
+OUT="$ROOT/Releases/v3.2"
 mkdir -p "$OUT"
 
 echo "== Native: assembleFullRelease =="

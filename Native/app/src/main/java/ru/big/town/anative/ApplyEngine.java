@@ -40,10 +40,15 @@ public final class ApplyEngine {
     private static final int  READY_MAX_ATTEMPTS     = 8;
     private static final int  PROVIDER_ONLY_ATTEMPTS = 2;
     private static final long READY_RETRY_MS         = 2500;
-    // Параметры wake-цикла — как у проверенного временем worker(7, 3500): 8 проходов с паузой
-    // 3.5 с (авто может сбрасывать режим, пока его системы поднимаются после пробуждения).
-    private static final int  WAKE_REPEAT = 8;
-    private static final long WAKE_PAUSE  = 3500;
+    // Параметры wake-цикла: НУЖНО набрать WAKE_REPEAT УСПЕШНЫХ проходов (авто может сбрасывать режим,
+    // пока его системы поднимаются после пробуждения) с паузой WAKE_PAUSE между отправками.
+    // 3 успешных прохода с паузой 5 с: отправили → 5 с → отправили → 5 с → отправили.
+    private static final int  WAKE_REPEAT = 3;
+    private static final long WAKE_PAUSE  = 5000;
+    // На пробуждении CAN-сервис/HAL поднимается не сразу — первые проходы падают (res=-1). Ждём готовности
+    // CAN до этого дедлайна (первого успешного прохода), иначе фикс. окно заканчивалось ДО готовности CAN
+    // и режим не применялся («нестабильно»).
+    private static final long WAKE_CAN_DEADLINE_MS = 120_000;
 
     private static Handler bg;
     // Токен для дедупликации отложенного дебаунс-раннабла.
@@ -142,11 +147,31 @@ public final class ApplyEngine {
             return;
         }
 
-        // 2) Несколько проходов отправки — на случай, что авто сбросит режим после пробуждения.
-        for (int i = 0; i < repeat; i++) {
+        // 2) Отправляем ПОКА не наберём `repeat` УСПЕШНЫХ проходов (CAN готов) ИЛИ не выйдет дедлайн.
+        //    Раньше было фикс. `repeat` проходов независимо от результата: на пробуждении CAN-сервис/HAL
+        //    ещё поднимался, все проходы падали (res=-1) в отведённые ~28 с → режим не применялся. Теперь
+        //    неуспешные проходы (CAN не готов) НЕ засчитываются и мы ждём его готовности до дедлайна, а
+        //    после первого успеха добиваем `repeat` успешных для устойчивости к сбросу режима авто.
+        long deadline = SystemClock.uptimeMillis() + WAKE_CAN_DEADLINE_MS;
+        int okPasses = 0, tries = 0;
+        while (true) {
             boolean ok = MainActivity.runCmds();
-            if (!ok) Log.w(TAG, "runCycle: some CAN sends failed on pass " + (i + 1) + "/" + repeat);
-            if (i < repeat - 1) sleep(pause);
+            tries++;
+            if (ok) {
+                okPasses++;
+            } else {
+                Log.w(TAG, "runCycle: CAN не готов, проход " + tries + " не прошёл (успешных=" + okPasses + ")");
+            }
+            if (okPasses >= repeat) break;                             // набрали нужное число успешных
+            if (SystemClock.uptimeMillis() >= deadline) break;         // CAN так и не поднялся вовремя
+            sleep(pause);
+        }
+        if (okPasses == 0) {
+            Log.e(TAG, "runCycle: CAN не поднялся за " + (WAKE_CAN_DEADLINE_MS / 1000) + "с — режим НЕ применён");
+        } else if (okPasses < repeat) {
+            Log.w(TAG, "runCycle: применено частично — успешных проходов " + okPasses + "/" + repeat + " (tries=" + tries + ")");
+        } else {
+            Log.i(TAG, "runCycle: режим применён, успешных проходов " + okPasses + "/" + repeat + " (tries=" + tries + ")");
         }
 
         // 3) Кастомные команды пользователя (unlock/wake и т.п.).

@@ -1,9 +1,9 @@
 #!/bin/sh
-# Собрать LIGHT-флейвор обоих проектов (release, debug-подпись) и разложить в Releases/v3.1-light.
+# Собрать LIGHT-флейвор обоих проектов (release, debug-подпись) и разложить в Releases/v3.2-light.
 # LIGHT = только не-root функциональность (без сплита/дока/VirtualDisplay/Frida/«Кнопок на руле»).
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-OUT="$ROOT/Releases/v3.1-light"
+OUT="$ROOT/Releases/v3.2-light"
 mkdir -p "$OUT"
 
 echo "== Native: assembleLightRelease =="

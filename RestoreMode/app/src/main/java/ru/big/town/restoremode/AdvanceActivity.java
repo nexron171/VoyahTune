@@ -114,6 +114,19 @@ public class AdvanceActivity extends AppCompatActivity {
         }
     };
 
+    // Реал-тайм слежение селектора за текущим режимом в машине: Native шлёт MODE_SYNCED при смене режима
+    // (штатным меню/кнопкой руля/применением) → двигаем нужный radio, даже если экран настроек открыт.
+    private final BroadcastReceiver modeSyncReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String mode = intent.getStringExtra("mode");
+            if (mode == null || mode.isEmpty()) return;
+            boolean isEnergy = intent.getBooleanExtra("isEnergy", false);
+            RadioGroup g = findViewById(isEnergy ? R.id.energy_modes_group : R.id.drive_modes_group);
+            if (g != null) checkRadioByTag(g, mode);
+        }
+    };
+
     // Примеры команд: {команда, описание}
     private static final String[][] EXAMPLE_COMMANDS = {
             {"64 08 80 00 00 00 00 00 00 03", "обогрев руля вкл"},
@@ -1354,6 +1367,7 @@ public class AdvanceActivity extends AppCompatActivity {
         super.onResume();
         IntentFilter filter = new IntentFilter("ru.big.town.anative.LUX_UPDATE");
         registerReceiver(luxReceiver, filter, RECEIVER_EXPORTED);
+        registerReceiver(modeSyncReceiver, new IntentFilter("ru.big.town.anative.MODE_SYNCED"), RECEIVER_EXPORTED);
         Intent req = new Intent("ru.big.town.anative.REQUEST_LUX_UPDATE");
         req.setPackage("ru.big.town.anative");
         sendBroadcast(req);
@@ -1362,9 +1376,7 @@ public class AdvanceActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        try {
-            unregisterReceiver(luxReceiver);
-        } catch (Exception ignored) {
-        }
+        try { unregisterReceiver(luxReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(modeSyncReceiver); } catch (Exception ignored) {}
     }
 }
