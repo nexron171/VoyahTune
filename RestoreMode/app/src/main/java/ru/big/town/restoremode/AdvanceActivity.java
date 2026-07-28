@@ -903,6 +903,21 @@ public class AdvanceActivity extends AppCompatActivity {
                 public void onNothingSelected(android.widget.AdapterView<?> parent) { }
             });
 
+            // Изменяемая пропорция. Снятие галки сбрасывает и сохранённую вручную долю — иначе пресет
+            // остался бы с «кривым» соотношением, которое из фиксированного списка уже не выставить.
+            Switch resizable = row.findViewById(R.id.splitResizableSwitch);
+            if (resizable != null) {
+                resizable.setChecked(ps.resizable);
+                resizable.setOnCheckedChangeListener((b, checked) -> {
+                    java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
+                    if (idx < l2.size()) {
+                        l2.get(idx).resizable = checked;
+                        if (!checked) l2.get(idx).split = 0f;
+                        SplitStore.save(prefs, l2);
+                    }
+                });
+            }
+
             del.setOnClickListener(v -> {
                 java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
                 if (idx < l2.size()) { l2.remove(idx); SplitStore.save(prefs, l2); renderSplitPresets(); }

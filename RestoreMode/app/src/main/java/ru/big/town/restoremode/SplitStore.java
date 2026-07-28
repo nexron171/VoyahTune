@@ -18,7 +18,23 @@ public class SplitStore {
     public static class Preset {
         public String l = "", ll = "", r = "", rl = "";
         public int ratio = 1;
+        /** Разрешено тянуть делитель и менять пропорцию прямо в сплите. По умолчанию выключено. */
+        public boolean resizable = false;
+        /** Доля левого окна 0..1, выставленная рукой. 0 = не задана, берём фиксированную ratio. */
+        public float split = 0f;
         public boolean ready() { return !l.isEmpty() && !r.isEmpty(); }
+    }
+
+    /** Доля левого окна для пресета: сохранённая рукой, иначе из фиксированной пропорции. */
+    public static float leftFraction(Preset ps) {
+        if (ps.split > 0.05f && ps.split < 0.95f) return ps.split;
+        switch (ps.ratio) {
+            case 0:  return 3f / 7f;   // 3:4
+            case 2:  return 4f / 7f;   // 4:3
+            case 3:  return 5f / 7f;   // 5:2
+            case 4:  return 2f / 7f;   // 2:5
+            default: return 0.5f;      // 1:1
+        }
     }
 
     static List<Preset> load(SharedPreferences p) {
@@ -33,6 +49,8 @@ public class SplitStore {
                 ps.r  = o.optString("r", "");
                 ps.rl = o.optString("rl", "");
                 ps.ratio = o.optInt("ratio", 1);
+                ps.resizable = o.optBoolean("resizable", false);
+                ps.split = (float) o.optDouble("split", 0d);
                 out.add(ps);
             }
         } catch (Exception ignored) {
@@ -50,6 +68,8 @@ public class SplitStore {
                 o.put("r", ps.r);
                 o.put("rl", ps.rl);
                 o.put("ratio", ps.ratio);
+                o.put("resizable", ps.resizable);
+                o.put("split", ps.split);
                 a.put(o);
             }
         } catch (Exception ignored) {

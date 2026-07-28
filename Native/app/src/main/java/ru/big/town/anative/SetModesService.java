@@ -144,9 +144,16 @@ public class SetModesService extends Service {
                     String right = (d != null) ? d.getString("right") : null;
                     int lDpi = (d != null) ? d.getInt("leftDpi", 0) : 0;
                     int rDpi = (d != null) ? d.getInt("rightDpi", 0) : 0;
+                    // Изменяемая пропорция: разрешение тянуть делитель, стартовая доля левого окна и
+                    // индекс пресета (по нему хост вернёт новое значение в RestoreMode).
+                    boolean resizable = (d != null) && d.getBoolean("resizable", false);
+                    float split = (d != null) ? d.getFloat("split", 0f) : 0f;
+                    int presetIdx = (d != null) ? d.getInt("presetIdx", -1) : -1;
                     Log.i(TAG, "handleMessage() MSG_SPLIT_LAUNCH_VD left=" + left + " right=" + right
-                            + " ratio=" + msg.arg1 + " lDpi=" + lDpi + " rDpi=" + rDpi);
-                    launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi);
+                            + " ratio=" + msg.arg1 + " lDpi=" + lDpi + " rDpi=" + rDpi
+                            + " resizable=" + resizable + " split=" + split + " preset=" + presetIdx);
+                    SplitHostActivity.launchSplit(getApplicationContext(), left, right, msg.arg1,
+                            lDpi, rDpi, resizable, split, presetIdx);
                     break;
                 }
 

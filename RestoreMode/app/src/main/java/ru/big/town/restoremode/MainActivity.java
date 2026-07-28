@@ -122,6 +122,25 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    /**
+     * Пользователь перетащил делитель в сплите — Native присылает новую долю левого окна. Пресеты
+     * живут здесь (единственный источник истины), поэтому сохраняем именно тут, а не в Native.
+     */
+    static final String ACTION_SPLIT_RATIO_SAVE = "ru.big.town.restoremode.SPLIT_RATIO_SAVE";
+    private final BroadcastReceiver splitRatioReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int idx = intent.getIntExtra("presetIdx", -1);
+            float split = intent.getFloatExtra("split", 0f);
+            if (idx < 0 || split <= 0.05f || split >= 0.95f) return;
+            java.util.List<SplitStore.Preset> all = SplitStore.load(sharedPreferences);
+            if (idx >= all.size() || !all.get(idx).resizable) return;   // тумблер могли выключить
+            all.get(idx).split = split;
+            SplitStore.save(sharedPreferences, all);
+            Log.i(TAG, "пропорция пресета " + idx + " сохранена: " + split);
+        }
+    };
+
     private final Runnable tripTick = new Runnable() {
         @Override
         public void run() {
@@ -563,6 +582,7 @@ public class MainActivity extends AppCompatActivity {
         uiHandler.removeCallbacks(tripTick);
         uiHandler.post(tripTick);
         registerReceiver(batteryHeatReceiver, new IntentFilter(ACTION_BATTERY_HEAT_UPDATE), RECEIVER_EXPORTED);
+        registerReceiver(splitRatioReceiver, new IntentFilter(ACTION_SPLIT_RATIO_SAVE), RECEIVER_EXPORTED);
         Intent bhReq = new Intent(ACTION_REQUEST_BATTERY_HEAT);
         bhReq.setPackage("ru.big.town.anative");
         sendBroadcast(bhReq);
@@ -729,6 +749,16 @@ public class MainActivity extends AppCompatActivity {
         sendSplitVd(preset);
     }
 
+    /** Индекс пресета в сохранённом списке — по нему Native вернёт выставленную рукой пропорцию. */
+    private int presetIndex(SplitStore.Preset preset) {
+        java.util.List<SplitStore.Preset> all = SplitStore.load(sharedPreferences);
+        for (int i = 0; i < all.size(); i++) {
+            SplitStore.Preset p = all.get(i);
+            if (p.l.equals(preset.l) && p.r.equals(preset.r) && p.ratio == preset.ratio) return i;
+        }
+        return -1;
+    }
+
     /** Запуск сплита на VirtualDisplay: пакеты + соотношение + per-app DPI (из {@link AppDpiStore}). */
     private void sendSplitVd(SplitStore.Preset preset) {
         if (preset.l == null || preset.l.isEmpty() || preset.r == null || preset.r.isEmpty()) return;
@@ -741,6 +771,11 @@ public class MainActivity extends AppCompatActivity {
             b.putString("right", preset.r);
             b.putInt("leftDpi", lDpi);
             b.putInt("rightDpi", rDpi);
+            // Изменяемая пропорция: доля левого окна + индекс пресета, чтобы Native вернул новое
+            // значение обратно (SPLIT_RATIO_SAVE) и оно пережило перезапуск сплита.
+            b.putBoolean("resizable", preset.resizable);
+            b.putFloat("split", SplitStore.leftFraction(preset));
+            b.putInt("presetIdx", presetIndex(preset));
             m.setData(b);
             m.replyTo = GlobalVars.clientMessenger;
             GlobalVars.serviceMessenger.send(m);
@@ -756,6 +791,7 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         try { unregisterReceiver(tripReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(batteryHeatReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(splitRatioReceiver); } catch (Exception ignored) {}
         uiHandler.removeCallbacks(tripTick);
     }
 
