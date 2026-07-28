@@ -144,8 +144,9 @@ public class WiperColdService extends Service {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
-            // DEBUG: логируем каждый код колбэка один раз — видно, приходят ли события вообще
-            if (seenCodes.add(code)) Log.i(TAG, "CB code first-seen: " + code);
+            // DEBUG: логируем каждый код колбэка один раз — видно, приходят ли события вообще.
+            // Только при включённом захвате логов: иначе seenCodes копит все коды CanBus впустую.
+            if (NativeLog.get().isRunning() && seenCodes.add(code)) Log.i(TAG, "CB code first-seen: " + code);
             switch (code) {
                 case CB_onDoorStatusChanged: { // 1
                     data.enforceInterface(CANBUS_CB_DESCRIPTOR);
@@ -177,6 +178,14 @@ public class WiperColdService extends Service {
                     return true;
                 }
                 default:
+                    // Прочие oneway-колбэки CanBus (скорость/одометр/десятки сигналов) ТИХО поглощаем:
+                    // иначе на КАЖДЫЙ Binder отдаёт UNKNOWN_TRANSACTION и фреймворк спамит в logcat
+                    // "oneway function results will be dropped …" (~14 строк/сек — забивает кольцевой лог,
+                    // вымывает реальную диагностику). Так же сделано в TripStatsService. Спец-коды (dump/
+                    // interface и пр. вне диапазона вызовов) — в super.
+                    if (code >= IBinder.FIRST_CALL_TRANSACTION && code <= IBinder.LAST_CALL_TRANSACTION) {
+                        return true;
+                    }
                     return super.onTransact(code, data, reply, flags);
             }
         }
