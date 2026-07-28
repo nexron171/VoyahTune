@@ -3,7 +3,13 @@
 # LIGHT ничего не инжектит и не трогает init.logcat.sh/Frida — чистим только priv-app + whitelist + оба APK.
 adb root
 adb wait-for-device
-adb shell mount -o rw,remount /
+adb root
+# /system записываемым: снимаем verity (идемпотентно) + overlay-remount + сырой remount. Полный
+# ребут-цикл здесь не нужен (после install verity уже снята; если её вернул OTA — сначала прогнать
+# install.sh, он снимет verity и перезагрузит).
+adb disable-verity >/dev/null 2>&1
+adb remount >/dev/null 2>&1
+adb shell 'mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null'
 
 # --- Whitelist + Native из /system/priv-app (+ снять /data-оверлей обновления) ---
 adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"

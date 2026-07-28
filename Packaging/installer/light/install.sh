@@ -8,6 +8,42 @@ adb root
 adb wait-for-device
 adb root
 
+# --- Гарантируем ЗАПИСЫВАЕМЫЙ /system --------------------------------------------------------
+# Light тоже пишет в /system (priv-app + whitelist привилегий), поэтому подготовка нужна ровно та же,
+# что и в full. Без неё на стоковой/после-OTA голове dm-verity держит /system read-only → push даёт
+# "I/O error" и установка падает. disable-verity вступает в силу ТОЛЬКО после РЕБУТА. Делаем
+# ИДЕМПОТЕНТНО: если /system уже записываем (готовая голова) — ребута НЕ будет; иначе снимаем verity,
+# ОДИН раз перезагружаемся и продолжаем. adb remount = OverlayFS поверх read-only/динамических
+# разделов (устойчивее сырого mount -o rw,remount). При невозможности — прерываемся, НЕ трогая /system.
+system_is_writable() {
+    adb remount >/dev/null 2>&1
+    adb shell 'mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null' >/dev/null 2>&1
+    [ "$(adb shell 'touch /system/.ovw_rwtest 2>/dev/null && rm -f /system/.ovw_rwtest && echo RW || echo RO' | tr -d '\r')" = "RW" ]
+}
+
+echo "=== Готовим /system к записи (verity → overlay) ==="
+adb disable-verity 2>&1 | sed 's/^/  /'
+if ! system_is_writable; then
+    echo "  /system ещё read-only → перезагрузка ОДИН раз (применяем disable-verity)..."
+    adb reboot
+    adb wait-for-device
+    i=0
+    while [ $i -lt 60 ]; do
+        [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+        sleep 5; i=$((i + 1))
+    done
+    sleep 3
+    adb root >/dev/null 2>&1; adb wait-for-device; adb root >/dev/null 2>&1
+fi
+if ! system_is_writable; then
+    echo "!!! /system ОСТАЁТСЯ read-only — установка прервана (в /system ничего не тронуто)."
+    echo "    Причины: заблокирован загрузчик (disable-verity не срабатывает) / прошивка с EROFS"
+    echo "    (несжимаемая read-only ФС) / verity не снимается на этой сборке."
+    echo "    Проверьте вручную: adb disable-verity ; adb reboot ; adb root ; adb remount ; adb shell mount | grep system"
+    exit 1
+fi
+echo "  /system записываем — продолжаем."
+
 BACKUP_DIR="backup"
 mkdir -p "$BACKUP_DIR"
 
@@ -33,7 +69,7 @@ backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml 
 # (autoLight / wiperCold / floatingBack) тоже сохраняются.
 # Полная чистка протухшего состояния Native (лечение краха zygote "data_de/null") вынесена в remove.sh.
 echo "=== Native.apk в /system/priv-app (нужны привилегированные пермишены для CAN-функций) ==="
-adb shell mount -o rw,remount /
+# /system уже сделан записываемым выше (verity, overlay) — отдельный remount не нужен.
 adb shell mkdir -p /system/priv-app/Native
 adb shell chmod 755 /system/priv-app/Native
 adb push native.apk /system/priv-app/Native/Native.apk
