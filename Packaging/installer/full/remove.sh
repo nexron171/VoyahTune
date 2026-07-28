@@ -22,15 +22,15 @@ adb shell "chmod 644 /system/etc/init.logcat.sh"
 
 # --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null
-adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
+adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
 
 # --- Убрать наши Frida-файлы (или вернуть бэкап, если что-то было до нас) ---
 if [ -f backup/load.bin ]; then adb push backup/load.bin /data/local/bin/load.bin; else adb shell "rm -f /data/local/bin/load.bin"; fi
 adb shell "rm -f /data/local/bin/vd_bypass.js"
-adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/keymng2.js"   # keymng2 — легаси до объединения хуков руля
+adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"   # keymng2 — легаси до объединения хуков руля
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
 # Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
-adb shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid"
+adb shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid"
 # Опционально: почистить конфиг дока в Settings.Global (иначе останется до следующей установки)
 adb shell settings delete global voyahtune_dock1 2>/dev/null
 adb shell settings delete global voyahtune_dock2 2>/dev/null

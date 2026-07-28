@@ -455,6 +455,9 @@ public class AdvanceActivity extends AppCompatActivity {
             });
         }
 
+        // Раздел «Другое»: пароль инженерного меню на сегодня.
+        showEngineeringPassword();
+
         // Положение плавающей кнопки: 0 лево, 1 верх, 2 право
         RadioGroup sideGroup = findViewById(R.id.floatingBackSideGroup);
         if (sideGroup != null) {
@@ -557,6 +560,52 @@ public class AdvanceActivity extends AppCompatActivity {
             GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_SET_THEME, mode, 0));
         } catch (RemoteException e) {
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * Пароль инженерного меню меняется каждые сутки и считается из даты: год (ГГГГ) и месяц-день
+     * (ММДД) складываются ПОСИМВОЛЬНО, БЕЗ переноса разряда, результаты склеиваются подряд.
+     * Например для 28.07.2026: 2+0=2, 0+7=7, 2+2=4, 6+8=14 → «27414». Из-за отсутствия переноса
+     * длина плавает: 4 знака, если все суммы однозначные, иначе 5-6.
+     *
+     * Дату берём по ПЕКИНСКОМУ времени: смена пароля происходит в тамошнюю полночь (19:00 МСК).
+     */
+    static String engineeringPassword(java.util.Calendar beijingNow) {
+        String year = String.format(java.util.Locale.US, "%04d", beijingNow.get(java.util.Calendar.YEAR));
+        String monthDay = String.format(java.util.Locale.US, "%02d%02d",
+                beijingNow.get(java.util.Calendar.MONTH) + 1, beijingNow.get(java.util.Calendar.DAY_OF_MONTH));
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 4; i++) {
+            sb.append((year.charAt(i) - '0') + (monthDay.charAt(i) - '0'));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Показать пароль на сегодня. Считаем от даты САМОЙ машины — если её часы уехали, пароль всё
+     * равно совпадёт с тем, что ждёт голова. Дату, от которой считали, показываем рядом, чтобы
+     * было видно, что она правдоподобна.
+     */
+    private void showEngineeringPassword() {
+        TextView pass = findViewById(R.id.textEngPassword);
+        TextView date = findViewById(R.id.textEngPasswordDate);
+        if (pass == null) return;
+        try {
+            java.util.Calendar beijing = java.util.Calendar.getInstance(
+                    java.util.TimeZone.getTimeZone("Asia/Shanghai"));
+            pass.setText(engineeringPassword(beijing));
+            if (date != null) {
+                // Показываем ИМЕННО пекинскую дату: пароль считается от неё, и после 19:00 МСК она уже
+                // «завтрашняя». Подписываем явно, иначе выглядит как ошибка.
+                date.setText(String.format(java.util.Locale.US, "дата расчёта: %02d.%02d.%04d по Пекину",
+                        beijing.get(java.util.Calendar.DAY_OF_MONTH),
+                        beijing.get(java.util.Calendar.MONTH) + 1,
+                        beijing.get(java.util.Calendar.YEAR)));
+            }
+        } catch (Exception e) {
+            pass.setText("—");
+            if (date != null) date.setText("не удалось определить дату машины");
         }
     }
 

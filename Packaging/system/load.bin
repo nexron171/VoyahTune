@@ -3,7 +3,8 @@
 # Держит хуки через watchdog-цикл:
 #   1) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
 #   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
-#   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain).
+#   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
+#   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами.
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
 #   • system_server и launcher: frida-inject -e ВОЗВРАЩАЕТ управление. Ставим по ТОЧНОМУ -p pid и пишем
@@ -24,9 +25,11 @@ FI=/data/local/bin/frida-inject
 VD=/data/local/bin/vd_bypass.js
 SWK=/data/local/bin/steeringwheelkeys.js
 LNCH=/data/local/bin/launcherdock.js
+MD=/data/local/bin/multidisplay.js
 VDMARK=/data/local/tmp/voyah_vd.pid          # pid system_server, куда поставлен vd_bypass
 SWK_KM_MARK=/data/local/tmp/voyah_swk_km.pid # pid keymanager, куда поставлен steeringwheelkeys
 LNCH_MARK=/data/local/tmp/voyah_lnch.pid     # pid лаунчера, куда поставлен launcherdock
+MD_MARK=/data/local/tmp/voyah_md.pid         # pid systemservice, куда поставлен multidisplay
 
 # Инъекция в цель, которая ВОЗВРАЩАЕТ управление. Маркер пишем ТОЛЬКО при успехе.
 #   $1=pid  $2=script  $3=logfile  $4=markerfile
@@ -72,6 +75,15 @@ while [ 1 ]; do
             logs "inject steeringwheelkeys -> keymanager $KMP (eternalize,bg)"
             "$FI" -n com.qinggan.keymanager.service -s "$SWK" -e >> /data/local/tmp/voyah_swk.txt 2>&1 &
             echo "$KMP" > "$SWK_KM_MARK"
+        fi
+    fi
+
+    # 4) Перенос приложений между экранами — инъекция в systemservice (возвращает управление →
+    #    verify-before-mark, как system_server и лаунчер).
+    MDP=$(pidof com.qinggan.systemservice)
+    if [ -n "$MDP" ] && [ -f "$MD" ]; then
+        if [ "$(cat "$MD_MARK" 2>/dev/null)" != "$MDP" ]; then
+            inject_ret "$MDP" "$MD" /data/local/tmp/voyah_md.txt "$MD_MARK"
         fi
     fi
 

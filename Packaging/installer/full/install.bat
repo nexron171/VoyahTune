@@ -50,6 +50,7 @@ echo === Бэкап перезаписываемых файлов в %BACKUP_DIR
 call :backup_pull /data/local/bin/load.bin               load.bin
 call :backup_pull /data/local/bin/steeringwheelkeys.js   steeringwheelkeys.js
 call :backup_pull /data/local/bin/launcherdock.js        launcherdock.js
+call :backup_pull /data/local/bin/multidisplay.js        multidisplay.js
 call :backup_pull /data/local/bin/vd_bypass.js           vd_bypass.js
 call :backup_pull /data/local/bin/frida-inject           frida-inject
 call :backup_pull /system/etc/init.logcat.sh             init.logcat.sh
@@ -63,10 +64,11 @@ adb.exe shell "mkdir -p /data/local/bin"
 adb.exe push load.bin              /data/local/bin/load.bin
 adb.exe push steeringwheelkeys.js  /data/local/bin/steeringwheelkeys.js
 adb.exe push launcherdock.js       /data/local/bin/launcherdock.js
+adb.exe push multidisplay.js       /data/local/bin/multidisplay.js
 adb.exe push vd_bypass.js          /data/local/bin/vd_bypass.js
 adb.exe push frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject
 adb.exe shell "chmod 755 /data/local/bin/frida-inject /data/local/bin/load.bin"
-adb.exe shell "chmod 644 /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/vd_bypass.js"
+adb.exe shell "chmod 644 /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/vd_bypass.js /data/local/bin/multidisplay.js"
 
 echo === Boot-хук: наш init.logcat.sh (setenforce 0 + запуск load.bin) ===
 REM /system уже сделан записываемым выше (verity, overlay) - отдельный remount не нужен.

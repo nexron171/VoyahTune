@@ -1689,6 +1689,51 @@
             android:textSize="26dp"
             app:cornerRadius="20dp" />
 
+        <!-- Инженерное меню: пароль пересчитывается ежесуточно от даты. Считаем от даты САМОЙ
+             машины (по пекинскому времени — в 00:00 там пароль и меняется), поэтому значение
+             совпадает с тем, что ждёт голова, даже если её дата уехала. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="Инженерное меню"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
+        <TextView
+            android:id="@+id/textEngPasswordHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Пароль меняется каждые сутки в 00:00 по пекинскому времени — это 19:00 МСК, то есть вечером пароль уже «завтрашний». Считается от часов этой машины, поэтому если они врут — пароль не подойдёт."
+            android:textColor="#888888"
+            android:textSize="20px" />
+
+        <TextView
+            android:id="@+id/textEngPassword"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="—"
+            android:textColor="#FFFFFF"
+            android:textSize="44px" />
+
+        <TextView
+            android:id="@+id/textEngPasswordDate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#888888"
+            android:textSize="20px" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Если дата машины неверна — пароль не подойдёт: сначала поправь дату. При вводе пароля в машине должен работать интернет.\n\nСтарые прошивки принимают постоянные пароли (с учётом регистра): HelloNewVoyah2022, hellovoyah, hellomotor, TBoxOff."
+            android:textColor="#888888"
+            android:textSize="20px" />
+
     </LinearLayout>
     </ScrollView>
 

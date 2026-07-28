@@ -63,6 +63,7 @@ echo "=== Бэкап перезаписываемых файлов в $BACKUP_DI
 backup_pull /data/local/bin/load.bin               load.bin
 backup_pull /data/local/bin/steeringwheelkeys.js   steeringwheelkeys.js
 backup_pull /data/local/bin/launcherdock.js        launcherdock.js
+backup_pull /data/local/bin/multidisplay.js        multidisplay.js
 backup_pull /data/local/bin/vd_bypass.js           vd_bypass.js
 backup_pull /data/local/bin/frida-inject           frida-inject
 backup_pull /system/etc/init.logcat.sh             init.logcat.sh
@@ -76,10 +77,11 @@ adb shell "mkdir -p /data/local/bin"
 adb push load.bin              /data/local/bin/load.bin
 adb push steeringwheelkeys.js  /data/local/bin/steeringwheelkeys.js
 adb push launcherdock.js       /data/local/bin/launcherdock.js
+adb push multidisplay.js       /data/local/bin/multidisplay.js
 adb push vd_bypass.js          /data/local/bin/vd_bypass.js
 adb push frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject
 adb shell "chmod 755 /data/local/bin/frida-inject /data/local/bin/load.bin"
-adb shell "chmod 644 /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/vd_bypass.js"
+adb shell "chmod 644 /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/vd_bypass.js /data/local/bin/multidisplay.js"
 
 echo "=== Boot-хук: наш init.logcat.sh (setenforce 0 + запуск load.bin) ==="
 # /system уже сделан записываемым выше (verity → overlay); отдельный remount не нужен.
