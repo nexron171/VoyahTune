@@ -78,7 +78,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // глитчем (чёрное окно). closeActiveSplit force-stop'ит панели → приложение стартует заново; если
         // сплит был — запускаем с задержкой (teardown асинхронный), иначе сразу. Только full.
         if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            openFreeformApp(context, intent.getStringExtra("pkg"));
+            // display: на каком экране открыть. Отсутствует → 0 (водительский), т.е. прежнее поведение.
+            openFreeformApp(context, intent.getStringExtra("pkg"), intent.getIntExtra("display", 0));
         }
 
         // Открытие СПЛИТА, назначенного слоту дока, по долгому нажатию (launcherdock.js шлёт номер слота).
@@ -252,10 +253,18 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
     }
 
-    /** Открыть приложение freeform-окном на display 0: закрываем активный VD-сплит (иначе его панели
-     *  «уехали» бы с VD с глитчем), затем стартуем приложение обычным launch-интентом (системный хук
-     *  vd_bypass ужмёт окно). Общий путь для OPEN_FREEFORM (клик слота дока) и действия кнопки руля «app:». */
+    /** Открыть приложение freeform-окном на указанном физическом экране: закрываем активный VD-сплит
+     *  (иначе его панели «уехали» бы с VD с глитчем), затем стартуем приложение обычным launch-интентом
+     *  (системный хук vd_bypass ужмёт окно). Общий путь для OPEN_FREEFORM (клик слота дока) и действия
+     *  кнопки руля «app:». */
     static void openFreeformApp(Context context, String pkg) {
+        openFreeformApp(context, pkg, 0);
+    }
+
+    /** displayId: 0 — водительский экран, 1 — пассажирский. Без явного setLaunchDisplayId startActivity
+     *  всегда уходит на дисплей по умолчанию (0), поэтому запуск, инициированный с пассажирского экрана,
+     *  открывался бы на водительском. */
+    static void openFreeformApp(Context context, String pkg, int displayId) {
         if (pkg == null || pkg.isEmpty()) return;
         boolean hadSplit = SplitHostActivity.closeActiveSplit();
         final Context app = context.getApplicationContext();
@@ -263,14 +272,22 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         if (li == null) { Log.w(TAG, "openFreeformApp: нет launch intent для " + pkg); return; }
         li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         final Intent fli = li;
+        final android.os.Bundle opts;
+        if (displayId != 0) {
+            android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
+            o.setLaunchDisplayId(displayId);
+            opts = o.toBundle();
+        } else {
+            opts = null;   // дисплей по умолчанию — прежнее поведение, без лишних опций
+        }
         if (hadSplit) {
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                try { app.startActivity(fli); } catch (Exception e) { Log.w(TAG, "openFreeformApp delayed: " + e.getMessage()); }
+                try { app.startActivity(fli, opts); } catch (Exception e) { Log.w(TAG, "openFreeformApp delayed: " + e.getMessage()); }
             }, 500);
         } else {
-            try { app.startActivity(fli); } catch (Exception e) { Log.w(TAG, "openFreeformApp: " + e.getMessage()); }
+            try { app.startActivity(fli, opts); } catch (Exception e) { Log.w(TAG, "openFreeformApp: " + e.getMessage()); }
         }
-        Log.i(TAG, "openFreeformApp pkg=" + pkg + " hadSplit=" + hadSplit);
+        Log.i(TAG, "openFreeformApp pkg=" + pkg + " display=" + displayId + " hadSplit=" + hadSplit);
     }
 
     /**
