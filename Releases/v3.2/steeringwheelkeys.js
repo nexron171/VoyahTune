@@ -38,6 +38,18 @@ Java.perform(function () {
         } catch (e) { return "none"; }
     }
 
+    // Маршрут медиа-кнопок. Решение принимает Native (NowPlayingService видит активную медиа-сессию через
+    // MediaSessionManager+MEDIA_CONTENT_CONTROL — у keymanager этой привилегии нет) и кладёт в Settings.Global:
+    //   "dispatch" → сторонний плеер (Яндекс/Spotify/…): перехватываем и шлём медиа-эвент сами;
+    //   иначе ("native"/нет ключа/старт/ошибка) → отдаём штатной маршрутизации прошивки (BT/AVRCP, штатный
+    //   плеер и его прокси). Дефолт — "native" (заводское поведение), чтобы не ломать штатные кнопки.
+    function mediaRoute() {
+        try {
+            var v = SettingsGlobal.getString(ctx().getContentResolver(), "voyahtune_mediaRoute");
+            return (v === null) ? "native" : v.toString();
+        } catch (e) { return "native"; }
+    }
+
     // Отдаём исполнение Native — explicit broadcast STEER_ACTION с id (напр. "energy:EV,REV").
     function doAction(id) {
         if (id === "none") return;
@@ -94,10 +106,16 @@ Java.perform(function () {
 
         Reader.onKeyEvent.implementation = function (ke) {
             var code = ke.getKeyCode();
-            // Медиа-кнопки: на DOWN шлём стандартный медиа-эвент, гасим штатную QG-маршрутизацию.
+            // Медиа-кнопки: роутим по решению Native (voyahtune_mediaRoute). "dispatch" (сторонний плеер) →
+            // на DOWN шлём стандартный медиа-эвент и гасим штатную маршрутизацию. Иначе — passthrough в
+            // штатную маршрутизацию прошивки (BT/AVRCP/штатный плеер/старт/по умолчанию), чтобы не ломать
+            // кнопки, которые работали до установки.
             if (MEDIA_MAP.hasOwnProperty(code)) {
-                if (ke.getAction() == 0 && ke.getRepeatCount() == 0) dispatchMedia(MEDIA_MAP[code]);
-                return true;
+                if (mediaRoute() === "dispatch") {
+                    if (ke.getAction() == 0 && ke.getRepeatCount() == 0) dispatchMedia(MEDIA_MAP[code]);
+                    return true;
+                }
+                return this.onKeyEvent(ke);   // native passthrough
             }
             // Кнопки-действия (звезда/DVR) — таймерное короткое/долгое.
             var h = (code == STAR) ? star : (code == DVR) ? dvr : null;

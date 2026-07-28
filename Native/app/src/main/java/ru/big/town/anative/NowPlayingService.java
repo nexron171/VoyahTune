@@ -54,6 +54,19 @@ public class NowPlayingService extends Service {
 
     private static final String ART_FILE_NAME = "nowplaying_art.png";
 
+    // Маршрутизация медиа-кнопок руля. Решение принимает Native (здесь), потому что определить активную
+    // медиа-сессию можно только через MediaSessionManager с MEDIA_CONTENT_CONTROL, а у процесса
+    // keymanager (где живёт хук steeringwheelkeys.js) этой привилегии нет. Native знает топ-сессию (её же
+    // он показывает как «сейчас играет») и публикует в Settings.Global строку-решение; хук читает её
+    // синхронно при нажатии и роутит:
+    //   "native"   → отдать клавишу штатной маршрутизации прошивки (BT/AVRCP, штатный плеер и его прокси,
+    //                нет сессии, старт до готовности, нет привилегии) — стоковое поведение;
+    //   "dispatch" → сторонний плеер (Яндекс/Spotify/…) → хук сам шлёт медиа-эвент в активную сессию.
+    // Дефолт при отсутствии ключа — passthrough (см. хук), т.е. заводское поведение.
+    static final String MEDIA_ROUTE_KEY = "voyahtune_mediaRoute";
+    private static final String ROUTE_NATIVE   = "native";
+    private static final String ROUTE_DISPATCH = "dispatch";
+
     // Текущий снимок — читает NowPlayingProvider (тот же процесс). volatile: пишет наш handler-тред,
     // читает binder-тред провайдера.
     static volatile String sTitle = "";
@@ -76,6 +89,7 @@ public class NowPlayingService extends Service {
     private MediaSessionManager msm;
     private MediaController current;                 // сессия, за которой сейчас следим
     private MediaController.Callback controllerCallback;
+    private String lastMediaRoute = null;            // последнее записанное решение (пишем только на смену)
 
     private final MediaSessionManager.OnActiveSessionsChangedListener sessionsListener =
             controllers -> { if (handler != null) handler.post(() -> onSessionsChanged(controllers)); };
@@ -147,7 +161,39 @@ public class NowPlayingService extends Service {
             current.registerCallback(controllerCallback, handler);
             Log.i(TAG, "следим за сессией: " + current.getPackageName());
         }
+        publishMediaRoute();   // топ-сессия сменилась → обновить маршрут медиа-кнопок руля
         publish("sessions-changed");
+    }
+
+    /**
+     * Публикует в {@link #MEDIA_ROUTE_KEY} решение о маршрутизации медиа-кнопок руля по ТЕКУЩЕЙ топ-сессии
+     * (её же читает {@code dispatchMediaKeyEvent}). Пишем ТОЛЬКО на смену решения — иначе долбили бы
+     * Settings.Global (playback-колбэки идут десятками в секунду). Нет сессии / OEM-пакет → штатная
+     * маршрутизация; сторонний плеер → перехват.
+     */
+    private void publishMediaRoute() {
+        String pkg = (current != null) ? nz(current.getPackageName()) : "";
+        String route = (pkg.isEmpty() || isOemMediaPackage(pkg)) ? ROUTE_NATIVE : ROUTE_DISPATCH;
+        if (route.equals(lastMediaRoute)) return;   // без изменений — не трогаем Settings.Global
+        lastMediaRoute = route;
+        try {
+            android.provider.Settings.Global.putString(getContentResolver(), MEDIA_ROUTE_KEY, route);
+            Log.i(TAG, "mediaRoute → " + route + " (pkg=" + (pkg.isEmpty() ? "none" : pkg) + ")");
+        } catch (Exception e) {
+            // Нет WRITE_SECURE_SETTINGS (enforce-ROM без whitelist) → ключ не появится → хук по умолчанию
+            // passthrough (стоковое поведение). Безопасная деградация.
+            Log.w(TAG, "publishMediaRoute: " + e.getMessage());
+        }
+    }
+
+    /**
+     * OEM/системная медиа-сессия, которую корректно рулит штатная маршрутизация прошивки: Bluetooth/AVRCP
+     * (телефон), штатный плеер {@code com.qinggan.media} и его прокси/зеркала. Всё остальное — сторонние
+     * приложения (Яндекс.Музыка/Spotify/…), которыми штатная маршрутизация может не управлять, поэтому их
+     * перехватываем и шлём сами.
+     */
+    private static boolean isOemMediaPackage(String pkg) {
+        return pkg.startsWith("com.android.") || pkg.startsWith("com.qinggan.") || pkg.equals("android");
     }
 
     /** Кандидат: первый ИГРАЮЩИЙ; если никто не играет — первый из списка (он в порядке приоритета). */
@@ -278,6 +324,10 @@ public class NowPlayingService extends Service {
         Log.i(TAG, "onDestroy()");
         try { unregisterReceiver(requestReceiver); } catch (Exception ignored) {}
         try { if (msm != null) msm.removeOnActiveSessionsChangedListener(sessionsListener); } catch (Exception ignored) {}
+        // Сервис уходит → трекер сессий мёртв. Сбрасываем маршрут в безопасный passthrough, чтобы застрявшее
+        // "dispatch" не роняло медиа-кнопки, если сторонний плеер к тому моменту уже остановлен.
+        try { android.provider.Settings.Global.putString(getContentResolver(), MEDIA_ROUTE_KEY, ROUTE_NATIVE); }
+        catch (Exception ignored) {}
         detachCurrent();
         super.onDestroy();
     }
