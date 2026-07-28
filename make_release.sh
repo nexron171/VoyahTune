@@ -124,10 +124,12 @@ if [ "$DO_FULL" = 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------------------------
-# LIGHT: не-root набор — без инжекта, frida, load.bin и boot-хука. Только Unix-установщик
-# (Windows-набор для light исторически не выпускался; если понадобится — добавить в
-# Packaging/installer/light/ install.bat/remove.bat и скопировать tools/).
+# LIGHT: не-root набор — без инжекта, frida, load.bin и boot-хука.
+# Инструменты берём НЕ целиком: нужен только adb (его требуют .bat на Windows; на Unix .sh
+# рассчитывает на системный adb). frida-inject в light не кладём — он весит 53M и здесь не нужен.
 # ---------------------------------------------------------------------------------------------
+LIGHT_TOOLS="adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
+
 if [ "$DO_LIGHT" = 1 ]; then
     OUT="$BUILD/VoyahTune-$VERSION-light"
     echo ""
@@ -136,6 +138,10 @@ if [ "$DO_LIGHT" = 1 ]; then
 
     if [ "$DO_BUILD" = 1 ]; then build_apks light "$OUT"; else require_apks "$OUT"; fi
 
+    for t in $LIGHT_TOOLS; do
+        [ -f "$COMMON/tools/$t" ] || { echo "Нет $COMMON/tools/$t" >&2; exit 1; }
+        cp "$COMMON/tools/$t" "$OUT/"
+    done
     cp "$COMMON/system/privapp-permissions-ru.big.town.anative.xml" "$OUT/"
     for f in "$COMMON/installer/light/"*; do
         copy_stamped "$f" "$OUT/$(basename "$f")"

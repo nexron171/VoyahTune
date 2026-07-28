@@ -101,6 +101,22 @@ Java.perform(function () {
     // viewId слота дока → номер слота (1/2). Заполняется в updateIcons, читается в долгом тапе слота
     // (устойчиво к нескольким инстансам навбара — ключ по id вью, а не по последнему инстансу).
     var slotByViewId = {};
+    // Пакет приложения переднего плана — обновляется в updateSelectedApp, читается в dismiss.
+    var fgPkg = "";
+
+    // Штатные пакеты, которым МОЖНО скрывать док: их окна оконный режим не ужимает (они честно
+    // разворачиваются на весь экран), поэтому прятать док для них — правильное штатное поведение.
+    // ВАЖНО: список должен соответствовать блэклисту ffBlacklisted в vd_bypass.js — если там
+    // появится новый префикс, добавить и сюда, иначе док зависнет поверх полноэкранного окна.
+    var STOCK_PREFIX = ["com.android", "com.qinggan", "com.pateo", "com.baidu", "com.huawei",
+                        "com.iflytek", "com.iland", "com.mega", "com.qti", "com.qualcomm",
+                        "com.tencent", "com.nng.igo.primong", "com.bz.CA08", "ru.big.town"];
+    function isStockPkg(pkg) {
+        if (!pkg) return true;                                   // неизвестно → считаем штатным (не мешаем)
+        if (pkg === "com.android.settings" || pkg === "com.android.documentsui") return false;
+        for (var i = 0; i < STOCK_PREFIX.length; i++) if (pkg.indexOf(STOCK_PREFIX[i]) === 0) return true;
+        return false;
+    }
 
     function ctx() {
         try { var app = ActivityThread.currentApplication(); if (app !== null) return app.getApplicationContext(); } catch (e) {}
@@ -345,6 +361,8 @@ Java.perform(function () {
         //    правильную кнопку. Для нашего VD-хоста (SplitHostActivity) чекаем слот 2 напрямую.
         var origUpdateSelectedApp = NavigationBarMain.updateSelectedApp;
         NavigationBarMain.updateSelectedApp.implementation = function (packageName, activityName) {
+            // Запоминаем приложение переднего плана — по нему решаем, можно ли прятать док (см. dismiss).
+            try { if (packageName) fgPkg = "" + packageName; } catch (e) {}
             // Пассажирский бар (общий класс на ПИ) — отдаём штатное поведение без изменений.
             if (!isDriverBar(this)) return origUpdateSelectedApp.call(this, packageName, activityName);
             try {
@@ -383,22 +401,49 @@ Java.perform(function () {
             this.onClick(view);
         };
 
-        // 4) ПОДАВЛЕНИЕ ПЛАВАЮЩЕЙ HOME: лаунчер показывает плавающую home-кнопку, когда стороннее
-        //    приложение считается «третьим float-app на весь экран». Freeform всегда on → приложение это
-        //    обычное окно на display 0, плавающая home не нужна → всегда false. Классы версионно-хрупкие
-        //    (на этой прошивке LauncherModel.isThirdShowFloatApp может отсутствовать) → try/catch пропускает.
-        //    На практике плавающая Home и так не всплывает во freeform-окне — хук как страховка.
-        //    ⚠️ ЕДИНСТВЕННЫЕ хуки здесь, которые НЕ гейтятся по экрану: предикат берёт имя компонента, а не
-        //    инстанс бара, поэтому действует глобально (в т.ч. на пассажирский бар). По нашему же замечанию
-        //    выше он не несущий. Если пассажирский док чудит и после гарда isDriverBar — снимать первым.
-        try {
-            var LM = Java.use("com.qinggan.app.launcher.LauncherModel");
-            LM.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) { return false; };
-        } catch (e) { console.log("[dock] LauncherModel.isThirdShowFloatApp skip: " + e); }
-        try {
-            var TAU = Java.use("com.qinggan.launcher.base.drag.ThirdAppUtil");
-            TAU.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) { return false; };
-        } catch (e) { console.log("[dock] ThirdAppUtil.isThirdShowFloatApp skip: " + e); }
+        // 4) ДОК НЕ ДОЛЖЕН САМ УЕЗЖАТЬ ИЗ-ПОД СТОРОННЕГО ОКНА.
+        //    При переносе приложения между экранами система вызывает dismiss() у навбара, и док
+        //    анимированно скрывается. Для стороннего приложения это тупик: наш оконный режим оставляет
+        //    полосу дока свободной, окно её не перекрывает — но самого дока уже нет, и свернуть
+        //    приложение или уйти на главный экран нечем.
+        //
+        //    Гасим dismiss ТОЛЬКО когда впереди СТОРОННЕЕ приложение и оконный режим включён. Для
+        //    штатных пакетов (их окна разворачиваются на весь экран, оконный режим их не ужимает)
+        //    скрытие дока — правильное поведение, его не трогаем: иначе док завис бы поверх
+        //    полноэкранного штатного плеера. Аварийно отключить целиком:
+        //      settings put global voyahtune_dockpin 0
+        //
+        //    Хукаем ДВА класса: систему устраивает дёрнуть как сам бар, так и его контроллер.
+        function pinDock(clsName, label) {
+            try {
+                var C = Java.use(clsName);
+                var origDismiss = C.dismiss;
+                C.dismiss.implementation = function () {
+                    try {
+                        if (cfg("dockpin") !== "0" && cfg("freeform") !== "0" && !isStockPkg(fgPkg)) {
+                            try { Java.use("android.util.Log").i("voyahdock", "dismiss blocked (" + label + ") fg=" + fgPkg); } catch (ee) {}
+                            return;                      // док остаётся на месте
+                        }
+                    } catch (e) {}
+                    return origDismiss.call(this);
+                };
+                console.log("[dock] dismiss pinned on " + label);
+            } catch (e) { console.log("[dock] dismiss hook skip " + label + ": " + e); }
+        }
+        pinDock(NAV_MAIN, "bar");
+        pinDock(NAV_MAIN.replace(/\.[^.]+$/, ".NavigationBarController"), "controller");
+
+        // 5) ПЛАВАЮЩАЯ HOME — НЕ ТРОГАЕМ. Раньше здесь стояло подавление: isThirdShowFloatApp → false
+        //    в LauncherModel и ThirdAppUtil, по соображению «freeform всегда on, значит приложение это
+        //    обычное окно рядом с доком, и плавающая кнопка не нужна».
+        //
+        //    Подавление УБРАНО: эта кнопка — штатный аварийный выход. Когда окно всё-таки оказывается
+        //    на весь экран (например, приложение перенесли между экранами системным жестом — тогда
+        //    раскладку задаёт система, а не наш layoutWindowLw), док закрыт, и плавающая Home остаётся
+        //    ЕДИНСТВЕННЫМ способом свернуть приложение. Подавив её, мы запирали пользователя в окне.
+        //
+        //    По собственному же прежнему замечанию хук был «страховкой» и не нёс нагрузки: во freeform-окне
+        //    кнопка и так не всплывает. Так что снятие подавления в обычном сценарии ничего не меняет.
 
         // Приёмник reload: Native шлёт DOCK_RELOAD после записи voyahtune_dock* → перечитать + перерисовать.
         // ВАЖНО: BroadcastReceiver.onReceive — АБСТРАКТНЫЙ метод. Shorthand-форма registerClass

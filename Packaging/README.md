@@ -25,15 +25,15 @@ Releases/dist/VoyahTune-3.2.2-light.zip
 
 | Папка | Что | Куда идёт |
 |---|---|---|
-| `tools/` | `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll`, `frida-inject-16.2.1-android-arm64` | только full |
-| `inject/` | Frida-скрипты: `vd_bypass.js`, `launcherdock.js`, `steeringwheelkeys.js` | только full |
+| `tools/` | `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll`, `frida-inject-16.2.1-android-arm64` | full — целиком; light — только adb-трио (frida там не нужна) |
+| `inject/` | Frida-скрипты: `vd_bypass.js`, `launcherdock.js`, `steeringwheelkeys.js`, `multidisplay.js` | только full |
 | `system/` | `load.bin`, `init.logcat.sh`, `init.logcat.original.sh`, `privapp-permissions-…xml` | full целиком; в light — только `privapp-permissions` |
 | `installer/full/` | `install.sh`, `install.bat`, `remove.sh`, `remove.bat` | full |
-| `installer/light/` | `install.sh`, `remove.sh` | light |
+| `installer/light/` | `install.sh`, `install.bat`, `remove.sh`, `remove.bat` | light |
 
 Light — не-root набор: без инжекта, frida, `load.bin` и boot-хука, поэтому у него **свои**, более короткие
-установщики. Windows-набор для light исторически не выпускался; если понадобится — положить сюда
-`install.bat`/`remove.bat` и добавить копирование `tools/` в light-ветку `make_release.sh`.
+установщики. `.bat` требуют `adb.exe` рядом с собой, поэтому adb кладётся и в light (список файлов —
+`LIGHT_TOOLS` в `make_release.sh`); на Unix `.sh` рассчитывают на системный adb.
 
 ## Версия в установщиках
 

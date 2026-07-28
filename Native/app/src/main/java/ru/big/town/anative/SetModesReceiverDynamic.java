@@ -261,9 +261,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         openFreeformApp(context, pkg, 0);
     }
 
-    /** displayId: 0 — водительский экран, 1 — пассажирский. Без явного setLaunchDisplayId startActivity
-     *  всегда уходит на дисплей по умолчанию (0), поэтому запуск, инициированный с пассажирского экрана,
-     *  открывался бы на водительском. */
+    /**
+     * displayId: 0 — водительский экран, 1 — пассажирский.
+     *
+     * Целевой экран задаём ВСЕГДА, в том числе 0. Без явного setLaunchDisplayId startActivity с
+     * FLAG_ACTIVITY_NEW_TASK находит УЖЕ СУЩЕСТВУЮЩУЮ задачу приложения и поднимает её НА ТОМ ЭКРАНЕ,
+     * ГДЕ ОНА ЖИВЁТ, а не на дисплее по умолчанию. Из-за этого, если приложение открыто на пассажирском
+     * экране, клик по его иконке в доке главного визуально «ничего не делал»: задача поднималась на
+     * пассажирском. Сворачивание там же не помогало — задача никуда с display 1 не девалась.
+     */
     static void openFreeformApp(Context context, String pkg, int displayId) {
         if (pkg == null || pkg.isEmpty()) return;
         boolean hadSplit = SplitHostActivity.closeActiveSplit();
@@ -273,12 +279,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         final Intent fli = li;
         final android.os.Bundle opts;
-        if (displayId != 0) {
+        {
             android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
             o.setLaunchDisplayId(displayId);
             opts = o.toBundle();
-        } else {
-            opts = null;   // дисплей по умолчанию — прежнее поведение, без лишних опций
         }
         if (hadSplit) {
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {

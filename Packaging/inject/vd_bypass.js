@@ -153,6 +153,19 @@ Java.perform(function () {
         return d;
     }
 
+    // Разовая заметка о ПРОПУЩЕННОМ окне (диагностика). layoutWindowLw — горячий путь, поэтому пишем
+    // не чаще одного раза на комбинацию pkg+экран+режим и не больше 20 записей за жизнь процесса.
+    // Нужна, чтобы понять, в каком windowing mode оказывается приложение после переноса между экранами
+    // системным жестом: если наш кламп его пропускает, окно занимает весь экран и закрывает док.
+    var ffSeen = {}, ffSeenN = 0;
+    function ffNote(why, pkg, displayId, mode) {
+        if (ffSeenN >= 20) return;
+        var k = why + "|" + pkg + "|" + displayId + "|" + mode;
+        if (ffSeen[k]) return;
+        ffSeen[k] = 1; ffSeenN++;
+        Log.i("VDBYPASS", "ff " + why + " pkg=" + pkg + " display=" + displayId + " mode=" + mode);
+    }
+
     refreshFreeformCfg();
 
     // reload-ресивер: Native шлёт WIN_RELOAD при смене флага/bounds/DPI → перечитать кэш.
@@ -197,7 +210,8 @@ Java.perform(function () {
                 if (displayId !== 0 && displayId !== 1) return;   // только два ФИЗИЧЕСКИХ экрана (не наш VD/прочие)
                 var wt = win.getAttrs().type.value;
                 if (wt === 2011 || wt === 2012 || wt === 2038 || wt === 2032) return;  // статус/навбар/оверлеи
-                if (win.getWindowingMode() == 5) return;                    // настоящий freeform не трогаем
+                var wmode = win.getWindowingMode();
+                if (wmode == 5) { ffNote("skip-freeform", pkg, displayId, wmode); return; }  // настоящий freeform не трогаем
                 var df = win.getDisplayFrames(displayFrames);
                 var wf = win.getWindowFrames();
                 if (!df || !wf) return;                           // нечего мутировать — чистый пропуск (без порчи рамки)
