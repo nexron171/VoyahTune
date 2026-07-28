@@ -21,7 +21,7 @@ adb.exe shell "chmod 644 /system/etc/init.logcat.sh"
 
 REM --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb.exe shell "pkill -f /data/local/bin/load.bin"
-adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys' | grep -v grep | awk '{print $2}' | xargs kill -9"
+adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock' | grep -v grep | awk '{print $2}' | xargs kill -9"
 
 REM --- Убрать наши Frida-файлы (или вернуть бэкап, если что-то было до нас) ---
 if exist "backup\load.bin" (
@@ -30,14 +30,19 @@ if exist "backup\load.bin" (
     adb.exe shell "rm -f /data/local/bin/load.bin"
 )
 adb.exe shell "rm -f /data/local/bin/vd_bypass.js"
-adb.exe shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/keymng2.js"
+adb.exe shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/keymng2.js"
 if exist "backup\frida-inject" (
     adb.exe push backup\frida-inject /data/local/bin/frida-inject
 ) else (
     adb.exe shell "rm -f /data/local/bin/frida-inject"
 )
 REM Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
-adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_km.pid"
+adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid"
+REM Опционально: почистить конфиг дока в Settings.Global (иначе останется до следующей установки)
+adb.exe shell settings delete global voyahtune_dock1 2>nul
+adb.exe shell settings delete global voyahtune_dock2 2>nul
+adb.exe shell settings delete global voyahtune_dock1Dpi 2>nul
+adb.exe shell settings delete global voyahtune_dock2Dpi 2>nul
 
 REM --- Whitelist + Native из /system/priv-app (+ снять /data-оверлей обновления) ---
 adb.exe shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"
