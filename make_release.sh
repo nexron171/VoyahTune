@@ -1,31 +1,38 @@
 #!/bin/sh
 # Сборка релиза Open Voyah: собирает APK обоих флейворов и раскладывает готовые папки релиза.
 #
-#   ./make_release.sh 3.2.2              → Releases/v3.2.2 и Releases/v3.2.2-light
-#   ./make_release.sh 3.2.2 --full-only  → только Releases/v3.2.2
-#   ./make_release.sh 3.2.2 --light-only → только Releases/v3.2.2-light
+#   ./make_release.sh 3.2.2              → Releases/build/v3.2.2{,-light} + Releases/dist/*.zip
+#   ./make_release.sh 3.2.2 --full-only  → только full
+#   ./make_release.sh 3.2.2 --light-only → только light
 #   ./make_release.sh 3.2.2 --no-build   → не пересобирать APK, только переразложить файлы
-#                                          (APK берутся из уже существующей папки релиза)
+#                                          (APK берутся из уже существующей папки сборки)
+#   ./make_release.sh 3.2.2 --no-zip     → не паковать архивы
 #
-# Источник всего, кроме APK — Releases/_common/ (см. Releases/_common/README.md).
+# Источник всего, кроме APK — Packaging/ (см. Packaging/README.md). Он В GIT.
+# Releases/ — ТОЛЬКО вывод и целиком в .gitignore: сборки в Releases/build/, готовые к
+# раздаче архивы в Releases/dist/. В репозитории релизы больше не хранятся.
 # Папка релиза остаётся ПЛОСКОЙ: install.sh ищет файлы рядом с собой, его править не нужно.
 # Заменяет собой прежние build_full.sh / build_light.sh (там версия была зашита в код).
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-COMMON="$ROOT/Releases/_common"
+COMMON="$ROOT/Packaging"
+BUILD="$ROOT/Releases/build"
+DIST="$ROOT/Releases/dist"
 
 VERSION=""
 DO_FULL=1
 DO_LIGHT=1
 DO_BUILD=1
+DO_ZIP=1
 
 for arg in "$@"; do
     case "$arg" in
         --full-only)  DO_LIGHT=0 ;;
         --light-only) DO_FULL=0 ;;
         --no-build)   DO_BUILD=0 ;;
-        -h|--help)    sed -n '2,14p' "$0"; exit 0 ;;
+        --no-zip)     DO_ZIP=0 ;;
+        -h|--help)    sed -n '2,16p' "$0"; exit 0 ;;
         -*)           echo "Неизвестный флаг: $arg" >&2; exit 1 ;;
         *)            VERSION="$arg" ;;
     esac
@@ -39,9 +46,22 @@ fi
 VERSION="${VERSION#v}"
 
 if [ ! -d "$COMMON" ]; then
-    echo "Нет $COMMON — общая папка релизов отсутствует." >&2
+    echo "Нет $COMMON — папка-источник комплекта релиза отсутствует." >&2
     exit 1
 fi
+
+# Упаковать папку релиза в архив для раздачи. Архив содержит одну папку верхнего уровня
+# (VoyahTune-<версия>), чтобы у пользователя при распаковке не разъезжались файлы по Загрузкам.
+make_zip() {
+    dir="$1"; name="$2"
+    [ "$DO_ZIP" = 1 ] || return 0
+    command -v zip >/dev/null || { echo "  zip не найден — архив пропущен"; return 0; }
+    mkdir -p "$DIST"
+    rm -f "$DIST/$name.zip"
+    # -q тихо, -r рекурсивно; пакуем ИМЕНЕМ папки, поэтому идём в родителя.
+    (cd "$(dirname "$dir")" && zip -qr "$DIST/$name.zip" "$(basename "$dir")")
+    echo "  архив → Releases/dist/$name.zip ($(du -h "$DIST/$name.zip" | cut -f1))"
+}
 
 # Скопировать файл и проставить версию вместо плейсхолдера @VERSION@ (он есть в шапке установщиков).
 copy_stamped() {
@@ -85,9 +105,9 @@ require_apks() {
 # FULL: полный набор — инжект-скрипты, boot-обвязка, frida, Windows-инструменты.
 # ---------------------------------------------------------------------------------------------
 if [ "$DO_FULL" = 1 ]; then
-    OUT="$ROOT/Releases/v$VERSION"
+    OUT="$BUILD/VoyahTune-$VERSION"
     echo ""
-    echo "########## FULL → Releases/v$VERSION ##########"
+    echo "########## FULL → Releases/build/VoyahTune-$VERSION ##########"
     mkdir -p "$OUT"
 
     if [ "$DO_BUILD" = 1 ]; then build_apks full "$OUT"; else require_apks "$OUT"; fi
@@ -100,17 +120,18 @@ if [ "$DO_FULL" = 1 ]; then
     done
 
     echo "FULL готов → $OUT"
+    make_zip "$OUT" "VoyahTune-$VERSION"
 fi
 
 # ---------------------------------------------------------------------------------------------
 # LIGHT: не-root набор — без инжекта, frida, load.bin и boot-хука. Только Unix-установщик
 # (Windows-набор для light исторически не выпускался; если понадобится — добавить в
-# _common/installer/light/ install.bat/remove.bat и скопировать tools/).
+# Packaging/installer/light/ install.bat/remove.bat и скопировать tools/).
 # ---------------------------------------------------------------------------------------------
 if [ "$DO_LIGHT" = 1 ]; then
-    OUT="$ROOT/Releases/v$VERSION-light"
+    OUT="$BUILD/VoyahTune-$VERSION-light"
     echo ""
-    echo "########## LIGHT → Releases/v$VERSION-light ##########"
+    echo "########## LIGHT → Releases/build/VoyahTune-$VERSION-light ##########"
     mkdir -p "$OUT"
 
     if [ "$DO_BUILD" = 1 ]; then build_apks light "$OUT"; else require_apks "$OUT"; fi
@@ -121,11 +142,12 @@ if [ "$DO_LIGHT" = 1 ]; then
     done
 
     echo "LIGHT готов → $OUT"
+    make_zip "$OUT" "VoyahTune-$VERSION-light"
 fi
 
 echo ""
 echo "=== Состав релиза ==="
-[ "$DO_FULL" = 1 ]  && ls -1 "$ROOT/Releases/v$VERSION"
-[ "$DO_LIGHT" = 1 ] && { echo "--- light:"; ls -1 "$ROOT/Releases/v$VERSION-light"; }
+[ "$DO_FULL" = 1 ]  && ls -1 "$BUILD/VoyahTune-$VERSION"
+[ "$DO_LIGHT" = 1 ] && { echo "--- light:"; ls -1 "$BUILD/VoyahTune-$VERSION-light"; }
 echo ""
 echo "Не забыть: описание версии в hownews.md."

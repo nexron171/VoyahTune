@@ -80,3 +80,8 @@ app/release/output.json
 .idea/codeStyles/
 tmp
 CONTEXT.md
+
+# Релизы — сборочный вывод, в репозитории не хранятся.
+# Источник комплекта (инжект-скрипты, установщики, boot-обвязка, tools) — в Packaging/.
+# Собрать: ./make_release.sh <версия>
+/Releases/
