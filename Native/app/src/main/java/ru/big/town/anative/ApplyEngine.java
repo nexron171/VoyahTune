@@ -60,6 +60,20 @@ public final class ApplyEngine {
     // давала бы второй полный цикл — и кастомные команды пользователя ушли бы дважды.
     private static volatile long lastCycleEndUptime = -1;
 
+    // req3-гейт внешнего синка режима. Внешний синк (TripStatsService.maybeSyncMode) должен ИГНОРИРОВАТЬ
+    // «эхо» текущего режима машины, пока в этом цикле пробуждения не восстановлен СОХРАНЁННЫЙ режим.
+    // На старте авто рапортует свой дефолт (ЭКО/Электро) ДО применения сохранённого режима — без гейта
+    // этот дефолт затирал источник истины (провайдер RestoreMode + кэш), и восстановление применяло
+    // именно его («всегда ЭКО/Электро на пробуждении»). Снимаем гейт после первого УСПЕШНОГО прохода
+    // restore; сбрасываем при каждом новом цикле применения (scheduleApply) и на засыпании.
+    private static volatile boolean restoreDoneThisCycle = false;
+
+    /** true → в этом цикле пробуждения сохранённый режим уже восстановлён (можно принимать внешние смены режима). */
+    public static boolean isRestoreDoneThisCycle() { return restoreDoneThisCycle; }
+
+    /** Новый цикл пробуждения/засыпания: до следующего успешного restore внешний синк режима заглушён. */
+    public static void resetRestoreGate() { restoreDoneThisCycle = false; }
+
     private ApplyEngine() {}
 
     private static synchronized Handler bg() {
@@ -76,6 +90,10 @@ public final class ApplyEngine {
      * сворачиваются в один цикл; триггеры, пришедшие во время идущего цикла, им же и покрыты.
      */
     public static void scheduleApply(String reason) {
+        // Новый цикл применения → заглушаем внешний синк режима, пока restore не восстановит сохранённый
+        // режим (иначе дефолт-эхо машины на пробуждении перезапишет источник истины). Синхронно и ДО
+        // дебаунса: на пробуждении WAIT_FOR_VHAL приходит раньше готовности VHAL → раньше любого VehicleState.
+        restoreDoneThisCycle = false;
         final long scheduledAt = SystemClock.uptimeMillis();
         Log.i(TAG, "scheduleApply: " + reason);
         Handler h = bg();
@@ -173,6 +191,10 @@ public final class ApplyEngine {
         } else {
             Log.i(TAG, "runCycle: режим применён, успешных проходов " + okPasses + "/" + repeat + " (tries=" + tries + ")");
         }
+        // Сохранённый режим восстановлен (хотя бы один успешный проход) → снимаем гейт: теперь внешние
+        // смены режима (штатное меню машины) синкаются в источник истины. До этого — «эхо» дефолта машины
+        // на старте игнорируется (см. restoreDoneThisCycle и TripStatsService.maybeSyncMode).
+        if (okPasses > 0) restoreDoneThisCycle = true;
 
         // 3) Кастомные команды пользователя (unlock/wake и т.п.).
         for (int i = 0; i < MainActivity.customCommandCount; i++) {

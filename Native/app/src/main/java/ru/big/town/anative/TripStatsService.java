@@ -499,6 +499,17 @@ public class TripStatsService extends Service {
 
     private void maybeSyncMode(int id, int state) {
         if (id < 0) return;                                // -1 = «нет id» в parcel; не коллизимся с сентинелом
+        // ГЕЙТ: пока в этом цикле пробуждения не восстановлен сохранённый режим — НЕ трогаем источник истины.
+        // На старте авто рапортует свой дефолт (ЭКО/Электро) ДО того как ApplyEngine применил сохранённый
+        // режим; синк этого дефолта перезаписал бы провайдер+кэш и восстановление применяло бы дефолт (баг
+        // «всегда ЭКО/Электро на пробуждении»). Реальные внешние смены (штатное меню) приходят уже awake,
+        // после restore, и проходят гейт. Гейт снимает ApplyEngine после первого успешного restore-прохода.
+        if (!ApplyEngine.isRestoreDoneThisCycle()) {
+            if (NativeLog.get().isRunning()) {
+                Log.i(TAG, "maybeSyncMode: restore этого цикла ещё не выполнен — пропуск (id=" + id + " state=" + state + ")");
+            }
+            return;
+        }
         try {
             if (id == DRIVE_MODE_VSTATE_ID) {
                 if (state == lastDriveState) return;

@@ -646,6 +646,11 @@ public class SetModesService extends Service {
                         // Автозапуск VoyahTune: если включён — открыть RestoreMode
                         maybeAutoLaunchRestoreMode();
                     } else {
+                        // Засыпание/выключение → следующее пробуждение должно СНАЧАЛА восстановить
+                        // сохранённый режим, а не подхватить дефолт машины. Заранее глушим внешний синк
+                        // режима (страховка к сбросу в scheduleApply — на случай «тёплого» процесса, где
+                        // CAN-эхо может прийти раньше wake-триггера). См. ApplyEngine.restoreDoneThisCycle.
+                        if (isSleepOrShutdownState(state)) ApplyEngine.resetRestoreGate();
                         Log.i(TAG, "onStateChanged() ignored state: " + state);
                     }
                 }
@@ -657,6 +662,13 @@ public class SetModesService extends Service {
                 || state == CarPowerManager.CarPowerStateListener.SUSPEND_EXIT // 3
                 || state == CarPowerManager.CarPowerStateListener.WAIT_FOR_VHAL // 1
                 || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_CANCELLED; // 8
+    }
+
+    /** Состояния «уход в сон / выключение» — момент сбросить req3-гейт внешнего синка режима. */
+    private static boolean isSleepOrShutdownState(int state) {
+        return state == CarPowerManager.CarPowerStateListener.SUSPEND_ENTER     // 2
+                || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_ENTER    // 5
+                || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_PREPARE; // 7
     }
 
     private static String powerStateName(int state) {
