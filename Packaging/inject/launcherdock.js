@@ -101,21 +101,45 @@ Java.perform(function () {
     // viewId слота дока → номер слота (1/2). Заполняется в updateIcons, читается в долгом тапе слота
     // (устойчиво к нескольким инстансам навбара — ключ по id вью, а не по последнему инстансу).
     var slotByViewId = {};
-    // Пакет приложения переднего плана — обновляется в updateSelectedApp, читается в dismiss.
-    var fgPkg = "";
+    // Приложение переднего плана ПО ЭКРАНАМ. Раньше это была одна переменная fgPkg, и она врала:
+    // запись шла ДО гейта isDriverBar, поэтому на ПИ (общий класс навбара) пассажирский бар перетирал
+    // значение водительского, а на ОД пассажирский бар не хукается вовсе. Решения по доку принимались
+    // по чужому экрану.
+    var fgByScreen = { 0: { pkg: "", act: "" }, 1: { pkg: "", act: "" } };
 
     // Штатные пакеты, которым МОЖНО скрывать док: их окна оконный режим не ужимает (они честно
     // разворачиваются на весь экран), поэтому прятать док для них — правильное штатное поведение.
     // ВАЖНО: список должен соответствовать блэклисту ffBlacklisted в vd_bypass.js — если там
     // появится новый префикс, добавить и сюда, иначе док зависнет поверх полноэкранного окна.
+    // ИСКЛЮЧЕНИЕ — ru.big.town: наши окна тоже полноэкранные, но часть из них сама резервирует полосу
+    // под родной док, поэтому решение по ним принимает не этот список, а dockKept() по имени активити.
     var STOCK_PREFIX = ["com.android", "com.qinggan", "com.pateo", "com.baidu", "com.huawei",
                         "com.iflytek", "com.iland", "com.mega", "com.qti", "com.qualcomm",
-                        "com.tencent", "com.nng.igo.primong", "com.bz.CA08", "ru.big.town"];
+                        "com.tencent", "com.nng.igo.primong", "com.bz.CA08"];
     function isStockPkg(pkg) {
         if (!pkg) return true;                                   // неизвестно → считаем штатным (не мешаем)
         if (pkg === "com.android.settings" || pkg === "com.android.documentsui") return false;
         for (var i = 0; i < STOCK_PREFIX.length; i++) if (pkg.indexOf(STOCK_PREFIX[i]) === 0) return true;
         return false;
+    }
+
+    // Наши активити, которые САМИ отступают на полосу родного дока (их контент туда не залезает).
+    // Под ними док обязан остаться — иначе получается пустая чёрная полоса. Остальные наши экраны
+    // отступа не делают, им док прятать нужно, иначе он накроет их левый край.
+    function ourInsetActivity(act) {
+        act = "" + (act || "");
+        return act.indexOf("SplitHostActivity") >= 0
+            || act.indexOf("restoremode.MainActivity") >= 0
+            || act.indexOf("AdvanceActivity") >= 0;
+    }
+
+    // ЕДИНОЕ условие «док должен остаться под этим окном». Одно на всех потребителей — раньше их было
+    // три с разными предикатами, и они противоречили друг другу.
+    function dockKept(pkg, act) {
+        if (cfg("dockpin") === "0" || cfg("freeform") === "0") return false;
+        if (!pkg) return false;                                  // неизвестно → не мешаем штатному
+        if (pkg.indexOf("ru.big.town") === 0) return ourInsetActivity(act);
+        return !isStockPkg(pkg);
     }
 
     function ctx() {
@@ -361,8 +385,17 @@ Java.perform(function () {
         //    правильную кнопку. Для нашего VD-хоста (SplitHostActivity) чекаем слот 2 напрямую.
         var origUpdateSelectedApp = NavigationBarMain.updateSelectedApp;
         NavigationBarMain.updateSelectedApp.implementation = function (packageName, activityName) {
-            // Запоминаем приложение переднего плана — по нему решаем, можно ли прятать док (см. dismiss).
-            try { if (packageName) fgPkg = "" + packageName; } catch (e) {}
+            // Запоминаем приложение переднего плана ДЛЯ СВОЕГО ЭКРАНА (см. dockKept/dismiss).
+            try {
+                var sid = screenIdOf(this);
+                if (sid === 0 || sid === 1) {
+                    fgByScreen[sid].pkg = "" + (packageName || "");
+                    fgByScreen[sid].act = "" + (activityName || "");
+                } else if (!SHARED_NAV) {   // ОД: этот класс — только водительский бар
+                    fgByScreen[0].pkg = "" + (packageName || "");
+                    fgByScreen[0].act = "" + (activityName || "");
+                }
+            } catch (e) {}
             // Пассажирский бар (общий класс на ПИ) — отдаём штатное поведение без изменений.
             if (!isDriverBar(this)) return origUpdateSelectedApp.call(this, packageName, activityName);
             try {
@@ -419,9 +452,16 @@ Java.perform(function () {
                 var C = Java.use(clsName);
                 var origDismiss = C.dismiss;
                 C.dismiss.implementation = function () {
+                    var sid = 0;
+                    try { sid = (screenIdOf(this) === 1) ? 1 : 0; } catch (e) {}
+                    var fg = fgByScreen[sid];
+                    // Разведочный лог ДО решения: без него «хук не встал» неотличимо от «условие не
+                    // сработало». console.log после -e мёртв, поэтому только android.util.Log.
+                    try { Java.use("android.util.Log").i("voyahdock",
+                            "dismiss ENTER " + label + " screen=" + sid + " fg=" + fg.pkg + " act=" + fg.act); } catch (ee) {}
                     try {
-                        if (cfg("dockpin") !== "0" && cfg("freeform") !== "0" && !isStockPkg(fgPkg)) {
-                            try { Java.use("android.util.Log").i("voyahdock", "dismiss blocked (" + label + ") fg=" + fgPkg); } catch (ee) {}
+                        if (dockKept(fg.pkg, fg.act)) {
+                            try { Java.use("android.util.Log").i("voyahdock", "dismiss BLOCKED " + label); } catch (ee) {}
                             return;                      // док остаётся на месте
                         }
                     } catch (e) {}
@@ -433,17 +473,52 @@ Java.perform(function () {
         pinDock(NAV_MAIN, "bar");
         pinDock(NAV_MAIN.replace(/\.[^.]+$/, ".NavigationBarController"), "controller");
 
-        // 5) ПЛАВАЮЩАЯ HOME — НЕ ТРОГАЕМ. Раньше здесь стояло подавление: isThirdShowFloatApp → false
-        //    в LauncherModel и ThirdAppUtil, по соображению «freeform всегда on, значит приложение это
-        //    обычное окно рядом с доком, и плавающая кнопка не нужна».
+        // 5) ПЛАВАЮЩАЯ HOME — подавление ВОЗВРАЩЕНО.
+        //    Снимать его было ошибкой. Обоснование при снятии («во freeform-окне кнопка и так не
+        //    всплывает») оказалось ложным: наш оконный режим НЕ переводит окно в настоящий freeform —
+        //    vd_bypass.js настоящий freeform (windowing mode 5) наоборот пропускает, а обычному
+        //    полноэкранному окну лишь переписывает рамки уже ПОСЛЕ раскладки. Для лаунчера приложение
+        //    остаётся «сторонним на весь экран», поэтому предикат истинен всегда — и кнопка вылезала
+        //    постоянно, даже когда док на месте и она не нужна.
         //
-        //    Подавление УБРАНО: эта кнопка — штатный аварийный выход. Когда окно всё-таки оказывается
-        //    на весь экран (например, приложение перенесли между экранами системным жестом — тогда
-        //    раскладку задаёт система, а не наш layoutWindowLw), док закрыт, и плавающая Home остаётся
-        //    ЕДИНСТВЕННЫМ способом свернуть приложение. Подавив её, мы запирали пользователя в окне.
-        //
-        //    По собственному же прежнему замечанию хук был «страховкой» и не нёс нагрузки: во freeform-окне
-        //    кнопка и так не всплывает. Так что снятие подавления в обычном сценарии ничего не меняет.
+        //    Аварийно вернуть штатное поведение: settings put global voyahtune_floathome 0
+        try {
+            var floatHomeOff = function () { return cfg("floathome") !== "0"; };
+            var LM = Java.use("com.qinggan.app.launcher.LauncherModel");
+            LM.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
+                return floatHomeOff() ? false : this.isThirdShowFloatApp(cn);
+            };
+            console.log("[dock] floating home suppressed (LauncherModel)");
+        } catch (e) { console.log("[dock] LauncherModel.isThirdShowFloatApp skip: " + e); }
+        try {
+            var TAU = Java.use("com.qinggan.launcher.base.drag.ThirdAppUtil");
+            TAU.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
+                return cfg("floathome") !== "0" ? false : this.isThirdShowFloatApp(cn);
+            };
+            console.log("[dock] floating home suppressed (ThirdAppUtil)");
+        } catch (e) { console.log("[dock] ThirdAppUtil.isThirdShowFloatApp skip: " + e); }
+
+        // 6) РАЗВЕДКА пути скрытия дока при переносе окна между экранами.
+        //    Симптом «перенёс жестом на водительский — док пропал» блокировкой dismiss НЕ лечится,
+        //    значит док прячет другой путь. Наиболее вероятный кандидат — оркестрация переноса в самом
+        //    лаунчере (LauncherModel.onMoveStart), которая гасит навбары по своей бухгалтерии.
+        //    Исходников лаунчера у нас нет, поэтому пока НЕ подменяем — только логируем факт и аргументы,
+        //    чтобы подтвердить путь на живой голове (logcat -s voyahdock), а уже потом чинить.
+        try {
+            var LM2 = Java.use("com.qinggan.app.launcher.LauncherModel");
+            var Log2 = Java.use("android.util.Log");
+            LM2.onMoveStart.overloads.forEach(function (ov) {
+                ov.implementation = function () {
+                    try {
+                        var a = [];
+                        for (var i = 0; i < arguments.length; i++) a.push("" + arguments[i]);
+                        Log2.i("voyahdock", "onMoveStart(" + a.join(", ") + ")");
+                    } catch (e) {}
+                    return ov.apply(this, arguments);        // оригинал ВЫЗЫВАЕМ — это разведка, не правка
+                };
+            });
+            console.log("[dock] onMoveStart traced");
+        } catch (e) { console.log("[dock] onMoveStart trace skip: " + e); }
 
         // Приёмник reload: Native шлёт DOCK_RELOAD после записи voyahtune_dock* → перечитать + перерисовать.
         // ВАЖНО: BroadcastReceiver.onReceive — АБСТРАКТНЫЙ метод. Shorthand-форма registerClass

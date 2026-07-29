@@ -144,25 +144,62 @@ public class NowPlayingService extends Service {
     // Выбор активной сессии + подписка на её изменения
     // -------------------------------------------------------------------------
 
+    /**
+     * ВАЖНО: следим за playback ВСЕХ активных сессий, а не только выбранной.
+     *
+     * OnActiveSessionsChangedListener приходит на создание/уничтожение сессии и на setActive, но НЕ на
+     * смену того, кто реально играет. Раньше мы подписывались только на выбранную сессию, поэтому
+     * сценарий «играет Bluetooth → пользователь запускает Spotify» ломался: сессия Spotify появлялась
+     * (колбэк был), но играть ещё не начинала, поэтому топ-сессией оставался BT. Когда Spotify начинал
+     * играть, состав сессий не менялся — колбэка не было, current навсегда оставался на BT, а
+     * voyahtune_mediaRoute залипал в "native". Кнопки руля уходили в штатный маршрут к мёртвой сессии:
+     * первое нажатие ещё ставило паузу, дальше не работало ничего.
+     */
+    private final java.util.List<MediaController> watched = new java.util.ArrayList<>();
+    private final java.util.List<MediaController.Callback> watchedCbs = new java.util.ArrayList<>();
+
     private void onSessionsChanged(List<MediaController> controllers) {
-        MediaController pick = pickController(controllers);
-        if (sameController(pick, current)) {
-            publish("sessions-same");   // тот же плеер — метаданные могли обновиться
-            return;
+        detachAll();
+        if (controllers != null) {
+            for (MediaController c : controllers) {
+                MediaController.Callback cb = new MediaController.Callback() {
+                    @Override public void onMetadataChanged(MediaMetadata metadata) { repick("metadata"); }
+                    @Override public void onPlaybackStateChanged(PlaybackState state) { repick("playback"); }
+                    @Override public void onSessionDestroyed() { handler.post(() -> onSessionsChanged(safeSessions())); }
+                };
+                try { c.registerCallback(cb, handler); watched.add(c); watchedCbs.add(cb); } catch (Exception ignored) {}
+            }
         }
-        detachCurrent();
-        current = pick;
-        if (current != null) {
-            controllerCallback = new MediaController.Callback() {
-                @Override public void onMetadataChanged(MediaMetadata metadata) { publish("metadata"); }
-                @Override public void onPlaybackStateChanged(PlaybackState state) { publish("playback"); }
-                @Override public void onSessionDestroyed() { handler.post(() -> onSessionsChanged(safeSessions())); }
-            };
-            current.registerCallback(controllerCallback, handler);
-            Log.i(TAG, "следим за сессией: " + current.getPackageName());
-        }
-        publishMediaRoute();   // топ-сессия сменилась → обновить маршрут медиа-кнопок руля
+        current = pickController(controllers);
+        Log.i(TAG, "сессий: " + (controllers == null ? 0 : controllers.size())
+                + ", топ: " + (current != null ? current.getPackageName() : "нет"));
+        publishMediaRoute();
         publish("sessions-changed");
+    }
+
+    /**
+     * Перевыбор топ-сессии по СВЕЖЕМУ списку. Дёргается из playback/metadata-колбэков любой сессии —
+     * именно здесь ловится «BT замолчал, заиграл Spotify», чего listener состава сессий не видит.
+     * publishMediaRoute внутри дедуплицирует запись, так что Settings.Global не долбится.
+     */
+    private void repick(String reason) {
+        MediaController pick = pickController(safeSessions());
+        if (!sameController(pick, current)) {
+            current = pick;
+            Log.i(TAG, "топ-сессия сменилась (" + reason + "): "
+                    + (current != null ? current.getPackageName() : "нет"));
+        }
+        publishMediaRoute();
+        publish(reason);
+    }
+
+    private void detachAll() {
+        for (int i = 0; i < watched.size(); i++) {
+            try { watched.get(i).unregisterCallback(watchedCbs.get(i)); } catch (Exception ignored) {}
+        }
+        watched.clear();
+        watchedCbs.clear();
+        controllerCallback = null;
     }
 
     /**
@@ -215,11 +252,9 @@ public class NowPlayingService extends Service {
         try { return a.getSessionToken().equals(b.getSessionToken()); } catch (Exception e) { return false; }
     }
 
+    /** Снять подписки со всех отслеживаемых сессий (следим за всеми, а не только за выбранной). */
     private void detachCurrent() {
-        if (current != null && controllerCallback != null) {
-            try { current.unregisterCallback(controllerCallback); } catch (Exception ignored) {}
-        }
-        controllerCallback = null;
+        detachAll();
     }
 
     // -------------------------------------------------------------------------

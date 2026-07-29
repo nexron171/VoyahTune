@@ -152,8 +152,7 @@ public class SetModesService extends Service {
                     Log.i(TAG, "handleMessage() MSG_SPLIT_LAUNCH_VD left=" + left + " right=" + right
                             + " ratio=" + msg.arg1 + " lDpi=" + lDpi + " rDpi=" + rDpi
                             + " resizable=" + resizable + " split=" + split + " preset=" + presetIdx);
-                    SplitHostActivity.launchSplit(getApplicationContext(), left, right, msg.arg1,
-                            lDpi, rDpi, resizable, split, presetIdx);
+                    launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi, resizable, split, presetIdx);
                     break;
                 }
 
@@ -392,6 +391,16 @@ public class SetModesService extends Service {
      * freeform-настройки нужны, чтобы приложения на VD были resizable.
      */
     private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi) {
+        launchVirtualSplit(leftPkg, rightPkg, ratio, leftDpi, rightDpi, false, 0f, -1);
+    }
+
+    /**
+     * ВНИМАНИЕ: пустой rightPkg — это ШТАТНЫЙ одиночный режим (ярлык приложения с главного экрана
+     * VoyahTune), а не ошибка. Именно поэтому запуск идёт здесь, а не через
+     * SplitHostActivity.launchSplit — тот пустой правый пакет отвергает и ярлыки молча не открывались.
+     */
+    private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi,
+                                    boolean resizable, float split, int presetIdx) {
         if (leftPkg == null || leftPkg.isEmpty()) return; // rightPkg пуст = одиночный полноэкранный режим
         if (rightPkg == null) rightPkg = "";
         try {
@@ -408,6 +417,9 @@ public class SetModesService extends Service {
             i.putExtra(SplitHostActivity.EXTRA_RATIO, ratio);
             i.putExtra(SplitHostActivity.EXTRA_LEFT_DPI, leftDpi);
             i.putExtra(SplitHostActivity.EXTRA_RIGHT_DPI, rightDpi);
+            i.putExtra(SplitHostActivity.EXTRA_RESIZABLE, resizable);
+            i.putExtra(SplitHostActivity.EXTRA_SPLIT, split);
+            i.putExtra(SplitHostActivity.EXTRA_PRESET_IDX, presetIdx);
             startActivity(i);
             Log.i(TAG, "launchVirtualSplit host started");
         } catch (Exception e) {
