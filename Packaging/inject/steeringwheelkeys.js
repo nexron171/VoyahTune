@@ -12,8 +12,6 @@
 // Native из UI «Кнопки на руле»), исполняет их Native через explicit-broadcast STEER_ACTION →
 // SetModesReceiverDynamic.handleSteerAction. Оба слота кнопки "none" → НЕ перехватываем (штатно).
 Java.perform(function () {
-    var STAR = 3090;   // кнопка-звёздочка
-    var DVR  = 173;    // кнопка видеорегистратора (DVR)
     var LONG_MS = 600;
     // Медиа-кнопки руля: QG-код → стандартный медиа keycode (85=PLAY_PAUSE, 87=NEXT, 88=PREV).
     // Снято живым тестом на голове H97C: code 6=play/pause, 3=next, 4=prev.
@@ -101,8 +99,19 @@ Java.perform(function () {
 
     try {
         var Reader = Java.use("com.qinggan.keymanager.service.engine.KeyManagerReader");
-        var star = pressHandler("steerStarShort", "steerStarLong");
-        var dvr  = pressHandler("steerDvrShort",  "steerDvrLong");
+        var BUTTON_MAP = {
+            3090 : "STAR",
+            173 : "DVR",
+            130 : "VOICE",
+            128 : "PHONE"
+        };
+
+        var HANDLER_MAP = {
+            "STAR" : pressHandler("steerStarShort", "steerStarLong"),
+            "DVR" : pressHandler("steerDvrShort",  "steerDvrLong"),
+            "VOICE" : pressHandler("steerVoiceShort",  "steerVoiceLong"),
+            "PHONE" : pressHandler("steerPhoneShort",  "steerPhoneLong")
+        };
 
         Reader.onKeyEvent.implementation = function (ke) {
             var code = ke.getKeyCode();
@@ -117,15 +126,18 @@ Java.perform(function () {
                 }
                 return this.onKeyEvent(ke);   // native passthrough
             }
-            // Кнопки-действия (звезда/DVR) — таймерное короткое/долгое.
-            var h = (code == STAR) ? star : (code == DVR) ? dvr : null;
-            if (h === null) return this.onKeyEvent(ke);        // не наша кнопка → штатно
-            if (h.passthrough()) return this.onKeyEvent(ke);   // не настроено → штатно
-            if (ke.getAction() == 0) h.down(ke.getRepeatCount());
-            else if (ke.getAction() == 1) h.up();
+            if (BUTTON_MAP.hasOwnProperty(code)) {
+                var actionCode = BUTTON_MAP[code];
+                var h = HANDLER_MAP[actionCode];
+                // Кнопки-действия (звезда/DVR) — таймерное короткое/долгое.
+                if (h === null) return this.onKeyEvent(ke);        // не наша кнопка → штатно
+                if (h.passthrough()) return this.onKeyEvent(ke);   // не настроено → штатно
+                if (ke.getAction() == 0) h.down(ke.getRepeatCount());
+                else if (ke.getAction() == 1) h.up();
+            }
             return true;                                        // гасим штатное действие кнопки
         };
-        console.log("[swk] keymanager hooks installed: STAR=" + STAR + " DVR=" + DVR + " media=3/4/6 (LONG_MS=" + LONG_MS + ")");
+        console.log("[swk] keymanager hooks installed: STAR DVR VOICE PHONE media=3/4/6 (LONG_MS=" + LONG_MS + ")");
     } catch (e) {
         // Если класс не найден (скрипт заинжектили не в keymanager) — просто ничего не делаем.
         console.log("[swk] KeyManagerReader not found (not keymanager?): " + e);

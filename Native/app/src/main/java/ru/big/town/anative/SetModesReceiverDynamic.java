@@ -46,10 +46,11 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         // Зеркалим конфиг кнопок руля в Settings.Global (оттуда читает keymng2.js). Только full.
         if ("ru.big.town.anative.STEER_CONFIG".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            mirrorSteer(context, intent, "steerStarShort");
-            mirrorSteer(context, intent, "steerStarLong");
-            mirrorSteer(context, intent, "steerDvrShort");
-            mirrorSteer(context, intent, "steerDvrLong");
+            String[] steerButtons = {"Star", "Dvr", "Voice", "Phone"};
+            for (String steerButton : steerButtons) {
+                mirrorSteer(context, intent, "steer" + steerButton + "Short");
+                mirrorSteer(context, intent, "steer" + steerButton + "Long");
+            }
             Log.i(TAG, "STEER_CONFIG зеркалирован в Settings.Global");
         }
 
