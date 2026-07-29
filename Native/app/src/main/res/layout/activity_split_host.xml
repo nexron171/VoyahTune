@@ -2,12 +2,14 @@
 <!-- Хост сплита: два окна (VirtualDisplay). Отступы (статус-бар + левый родной док) задаются в коде
      по window insets. Ресайз делителем ВРЕМЕННО отключён — делитель только визуальный + двойной тап
      по нему меняет окна местами. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Корень — FrameLayout (а не LinearLayout): поверх панелей во время перетаскивания делителя
+     кладётся оверлей-маска. В горизонтальном LinearLayout такой оверлей стал бы ещё одной колонкой
+     и расплющил бы сами панели. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/splitHostRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000"
-    android:orientation="horizontal">
+    android:background="#000000">
 
     <LinearLayout
         android:id="@+id/splitPanes"
@@ -59,4 +61,4 @@
 
     </LinearLayout>
 
-</LinearLayout>
+</FrameLayout>

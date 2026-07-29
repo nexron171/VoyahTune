@@ -582,7 +582,14 @@ public class SplitHostActivity extends Activity {
         previewFraction(currentFraction());
     }
 
-    /** Двигаем ТОЛЬКО картинки оверлея: настоящие панели и поверхности не трогаем. */
+    /**
+     * Превью пропорции. Настоящие панели и поверхности НЕ трогаем (иначе полетят vd.resize) — двигаем
+     * картинки оверлея И САМ ДЕЛИТЕЛЬ.
+     *
+     * Делитель обязателен: без него рукоятка остаётся там, куда её поставили неизменные веса, и ресайз
+     * выглядит намертво залипшим — палец едет, а на экране ничего не происходит. Сдвигаем через
+     * translationX: это не вызывает layout, а значит не будит surfaceChanged.
+     */
     private void previewFraction(float f) {
         if (maskOverlay == null) return;
         View panes = findViewById(R.id.splitPanes);
@@ -590,6 +597,7 @@ public class SplitHostActivity extends Activity {
         int usable = panes.getWidth() - divider.getWidth();
         if (usable <= 0) return;
         int lw = Math.round(usable * f);
+        divider.setTranslationX(lw - left.container.getWidth());   // рукоятка едет за пальцем
         setLp(maskLeft,  lw, 0);
         setLp(maskRight, usable - lw, lw + divider.getWidth());
     }
@@ -608,6 +616,9 @@ public class SplitHostActivity extends Activity {
      */
     private void endResize(final float f) {
         dragging = false;
+        // Сдвиг делителя был визуальным (translationX) — снимаем его, дальше позицию задаёт вес.
+        View divider = findViewById(R.id.splitDivider);
+        if (divider != null) divider.setTranslationX(0f);
         applyFraction(f);                                    // ЕДИНСТВЕННАЯ смена веса за весь жест
         resizeUntil = System.currentTimeMillis() + MASK_HOLD_MS + 4000;   // + запас надзирателю
         saveFraction(f);
@@ -650,10 +661,12 @@ public class SplitHostActivity extends Activity {
         maskRight = newMaskImage();
         maskOverlay.addView(maskLeft);
         maskOverlay.addView(maskRight);
+        // Кладём в КОРЕНЬ (FrameLayout), а не в splitPanes: тот горизонтальный LinearLayout, и оверлей
+        // стал бы в нём ещё одной колонкой, отобрав ширину у самих панелей.
         // SurfaceView здесь в обычном z-порядке (setZOrderOnTop не вызывается нигде), поэтому обычная
         // вьюха поверх него в иерархии перекрывает поверхность штатно.
-        ((ViewGroup) findViewById(R.id.splitPanes)).addView(maskOverlay,
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+        ((ViewGroup) findViewById(R.id.splitHostRoot)).addView(maskOverlay,
+                new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT));
         maskOverlay.setVisibility(View.GONE);
     }
