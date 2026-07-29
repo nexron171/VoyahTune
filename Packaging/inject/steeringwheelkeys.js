@@ -89,10 +89,21 @@ Java.perform(function () {
                     longFired = true; timer = null;
                     doAction(longA);                  // долгое — СРАЗУ по порогу, не дожидаясь UP
                 }, LONG_MS);
+                if (action(shortSlot) === "none") {
+                    return false; // сигнализируем что на коротком нужно штатное поведение
+                }
+                return true;
             },
             up: function () {
                 if (timer !== null) { clearTimeout(timer); timer = null; }
-                if (!longFired) doAction(action(shortSlot));   // короткое — на отпускании, если долгого не было
+                if (!longFired) {
+                    if (action(shortSlot) === "none") {
+                        return false; // сигнализируем что на коротком нужно штатное поведение
+                    } else {
+                        doAction(action(shortSlot));   // короткое — на отпускании, если долгого не было}
+                    }
+                }
+                return true;
             }
         };
     }
@@ -132,10 +143,19 @@ Java.perform(function () {
                 // Кнопки-действия (звезда/DVR) — таймерное короткое/долгое.
                 if (h === null) return this.onKeyEvent(ke);        // не наша кнопка → штатно
                 if (h.passthrough()) return this.onKeyEvent(ke);   // не настроено → штатно
-                if (ke.getAction() == 0) h.down(ke.getRepeatCount());
-                else if (ke.getAction() == 1) h.up();
+                if (ke.getAction() == 0) {
+                    if (h.down(ke.getRepeatCount()) === false) {
+                        return this.onKeyEvent(ke); // вызываем штатное действие кнопки
+                    }
+                }
+                else if (ke.getAction() == 1) {
+                    if (h.up() === false) {
+                        return this.onKeyEvent(ke); // вызываем штатное действие кнопки
+                    }
+                }
+                return true; // гасим штатное действие кнопки
             }
-            return true;                                        // гасим штатное действие кнопки
+            return this.onKeyEvent(ke);     // штатное действие кнопки
         };
         console.log("[swk] keymanager hooks installed: STAR DVR VOICE PHONE media=3/4/6 (LONG_MS=" + LONG_MS + ")");
     } catch (e) {
