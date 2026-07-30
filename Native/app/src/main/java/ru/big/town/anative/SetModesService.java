@@ -155,10 +155,12 @@ public class SetModesService extends Service {
                     boolean resizable = (d != null) && d.getBoolean("resizable", false);
                     float split = (d != null) ? d.getFloat("split", 0f) : 0f;
                     int presetIdx = (d != null) ? d.getInt("presetIdx", -1) : -1;
+                    String presetId = (d != null) ? d.getString("presetId", "") : "";
                     Log.i(TAG, "handleMessage() MSG_SPLIT_LAUNCH_VD left=" + left + " right=" + right
                             + " ratio=" + msg.arg1 + " lDpi=" + lDpi + " rDpi=" + rDpi
-                            + " resizable=" + resizable + " split=" + split + " preset=" + presetIdx);
-                    launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi, resizable, split, presetIdx);
+                            + " resizable=" + resizable + " split=" + split + " preset=" + presetIdx
+                            + " presetId=" + presetId);
+                    launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi, resizable, split, presetIdx, presetId);
                     break;
                 }
 
@@ -397,7 +399,7 @@ public class SetModesService extends Service {
      * freeform-настройки нужны, чтобы приложения на VD были resizable.
      */
     private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi) {
-        launchVirtualSplit(leftPkg, rightPkg, ratio, leftDpi, rightDpi, false, 0f, -1);
+        launchVirtualSplit(leftPkg, rightPkg, ratio, leftDpi, rightDpi, false, 0f, -1, "");
     }
 
     /**
@@ -406,7 +408,7 @@ public class SetModesService extends Service {
      * SplitHostActivity.launchSplit — тот пустой правый пакет отвергает и ярлыки молча не открывались.
      */
     private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi,
-                                    boolean resizable, float split, int presetIdx) {
+                                    boolean resizable, float split, int presetIdx, String presetId) {
         if (leftPkg == null || leftPkg.isEmpty()) return; // rightPkg пуст = одиночный полноэкранный режим
         if (rightPkg == null) rightPkg = "";
         try {
@@ -426,6 +428,7 @@ public class SetModesService extends Service {
             i.putExtra(SplitHostActivity.EXTRA_RESIZABLE, resizable);
             i.putExtra(SplitHostActivity.EXTRA_SPLIT, split);
             i.putExtra(SplitHostActivity.EXTRA_PRESET_IDX, presetIdx);
+            i.putExtra(SplitHostActivity.EXTRA_PRESET_ID, presetId);
             startActivity(i);
             Log.i(TAG, "launchVirtualSplit host started");
         } catch (Exception e) {

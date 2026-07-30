@@ -20,7 +20,10 @@ Java.perform(function () {
         ourUid = Java.use("android.app.ActivityThread").currentActivityThread()
                  .getSystemContext().getPackageManager().getPackageUid(OUR_PKG, 0);
     } catch (e) {
-        ourUid = 10060;
+        // Fail closed: фиксированный UID после переустановки может принадлежать совсем другому пакету.
+        // При -1 все UID-scoped bypass ниже штатно откажут, вместо выдачи системных прав постороннему app.
+        ourUid = -1;
+        Log.e("VDBYPASS", "package uid resolve failed; privileged UID hooks disabled: " + e);
     }
     var installed = [];
 
@@ -28,7 +31,7 @@ Java.perform(function () {
     try {
         var IMS = Java.use("com.android.server.input.InputManagerService");
         IMS.checkInjectEventsPermission.implementation = function (pid, uid) {
-            if (uid === ourUid) return true;
+            if (ourUid >= 0 && uid === ourUid) return true;
             return this.checkInjectEventsPermission(pid, uid);
         };
         installed.push("IMS.checkInjectEventsPermission");
@@ -42,7 +45,7 @@ Java.perform(function () {
         BS.checkCallingPermission.overload('java.lang.String', 'java.lang.String').implementation = function (permission, func) {
             if ((permission === "android.permission.ADD_TRUSTED_DISPLAY"
                  || permission === "android.permission.INTERNAL_SYSTEM_WINDOW")
-                && Binder.getCallingUid() === ourUid) {
+                && ourUid >= 0 && Binder.getCallingUid() === ourUid) {
                 return true;
             }
             return this.checkCallingPermission(permission, func);
@@ -56,7 +59,7 @@ Java.perform(function () {
     try {
         var ASS = Java.use("com.android.server.wm.ActivityStackSupervisor");
         ASS.isCallerAllowedToLaunchOnDisplay.implementation = function (pid, uid, displayId, aInfo) {
-            if (uid === ourUid) return true;
+            if (ourUid >= 0 && uid === ourUid) return true;
             return this.isCallerAllowedToLaunchOnDisplay(pid, uid, displayId, aInfo);
         };
         installed.push("ASS.isCallerAllowedToLaunchOnDisplay");

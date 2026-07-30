@@ -51,6 +51,7 @@
     <permission
         android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE"
         android:protectionLevel="signature" />
+    <uses-permission android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
 
     <queries>
         <provider android:authorities="ru.big.town.restoremode.restoremodecontentprovider" />
@@ -132,6 +133,12 @@
             android:name=".SetModesReceiverDynamic"
             android:enabled="true"
             android:exported="true"></receiver>
+
+        <receiver
+            android:name=".SetModesConfigReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
 
         <!-- БЕЗ directBootAware: он делал пакет PARTIALLY_DIRECT_BOOT_AWARE и ломал создание
              DE-каталога (/data/user_de/0/...) при boot-скане /system priv-app на этой ROM →

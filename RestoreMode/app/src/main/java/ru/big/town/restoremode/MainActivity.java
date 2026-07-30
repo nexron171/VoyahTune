@@ -123,25 +123,6 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    /**
-     * Пользователь перетащил делитель в сплите — Native присылает новую долю левого окна. Пресеты
-     * живут здесь (единственный источник истины), поэтому сохраняем именно тут, а не в Native.
-     */
-    static final String ACTION_SPLIT_RATIO_SAVE = "ru.big.town.restoremode.SPLIT_RATIO_SAVE";
-    private final BroadcastReceiver splitRatioReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            int idx = intent.getIntExtra("presetIdx", -1);
-            float split = intent.getFloatExtra("split", 0f);
-            if (idx < 0 || split <= 0.05f || split >= 0.95f) return;
-            java.util.List<SplitStore.Preset> all = SplitStore.load(sharedPreferences);
-            if (idx >= all.size() || !all.get(idx).resizable) return;   // тумблер могли выключить
-            all.get(idx).split = split;
-            SplitStore.save(sharedPreferences, all);
-            Log.i(TAG, "пропорция пресета " + idx + " сохранена: " + split);
-        }
-    };
-
     private final Runnable tripTick = new Runnable() {
         @Override
         public void run() {
@@ -596,7 +577,6 @@ public class MainActivity extends AppCompatActivity {
         uiHandler.removeCallbacks(tripTick);
         uiHandler.post(tripTick);
         registerReceiver(batteryHeatReceiver, new IntentFilter(ACTION_BATTERY_HEAT_UPDATE), RECEIVER_EXPORTED);
-        registerReceiver(splitRatioReceiver, new IntentFilter(ACTION_SPLIT_RATIO_SAVE), RECEIVER_EXPORTED);
         Intent bhReq = new Intent(ACTION_REQUEST_BATTERY_HEAT);
         bhReq.setPackage("ru.big.town.anative");
         sendBroadcast(bhReq);
@@ -794,6 +774,7 @@ public class MainActivity extends AppCompatActivity {
             b.putBoolean("resizable", preset.resizable);
             b.putFloat("split", SplitStore.leftFraction(preset));
             b.putInt("presetIdx", presetIndex(preset));
+            b.putString("presetId", preset.id);
             m.setData(b);
             m.replyTo = GlobalVars.clientMessenger;
             GlobalVars.serviceMessenger.send(m);
@@ -809,7 +790,6 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         try { unregisterReceiver(tripReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(batteryHeatReceiver); } catch (Exception ignored) {}
-        try { unregisterReceiver(splitRatioReceiver); } catch (Exception ignored) {}
         uiHandler.removeCallbacks(tripTick);
     }
 

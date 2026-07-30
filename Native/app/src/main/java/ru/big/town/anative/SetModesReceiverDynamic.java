@@ -19,7 +19,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         Log.i(TAG, "onReceive DYN enter by intent" + receivedIntent);
 
-        if ( "android.intent.action.KEYCODE_SWC_USER_DEFINE".equals(receivedIntent)) {
+        // Это системный implicit-broadcast. Явный вызов экспортированного компонента не должен
+        // превращать Native в публичную кнопку изменения режима автомобиля.
+        if ("android.intent.action.KEYCODE_SWC_USER_DEFINE".equals(receivedIntent)
+                && intent.getComponent() == null) {
             Log.i(TAG, "android.intent.action.KEYCODE_SWC_USER_DEFINE");
             Log.i(TAG, "GlobalVars.buttonDriveMode: " +
                     GlobalVars.buttonDriveMode);
@@ -44,43 +47,18 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // остаётся ТОЛЬКО под сплит ДВУХ приложений (запускается из SetModesService по пресетам). Мёртвый
         // обработчик LAUNCH_ON_VD удалён.
 
-        // Зеркалим конфиг кнопок руля в Settings.Global (оттуда читает keymng2.js). Только full.
-        if ("ru.big.town.anative.STEER_CONFIG".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            String[] steerButtons = {"Star", "Dvr", "Voice", "Phone"};
-            for (String steerButton : steerButtons) {
-                mirrorSteer(context, intent, "steer" + steerButton + "Short");
-                mirrorSteer(context, intent, "steer" + steerButton + "Long");
-            }
-            Log.i(TAG, "STEER_CONFIG зеркалирован в Settings.Global");
-        }
-
-        // Зеркалим конфиг «Системного дока» в Settings.Global (оттуда читает launcherdock.js в процессе
-        // лаунчера) и шлём DOCK_RELOAD, чтобы хук перечитал и перерисовал иконки. Только full.
-        if ("ru.big.town.anative.DOCK_CONFIG".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            mirrorDock(context, intent, 1);
-            mirrorDock(context, intent, 2);
-            Intent r = new Intent("ru.big.town.anative.DOCK_RELOAD");
-            r.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
-            context.sendBroadcast(r);   // implicit — ловит dynamic-receiver, зарегистрированный launcherdock.js
-            sendWinReload(context);     // обновить кэш freeform (в т.ч. per-app DPI) в system_server (vd_bypass.js)
-            Log.i(TAG, "DOCK_CONFIG зеркалирован в Settings.Global + DOCK_RELOAD");
-        }
-
-        // Конфиг «оконного режима» (фейк-freeform): флаг on/off + bounds → Settings.Global, затем WIN_RELOAD
-        // (system_server перечитает кэш в vd_bypass.js). Только full.
-        if ("ru.big.town.anative.FREEFORM_CONFIG".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            mirrorFreeform(context, intent);
-            sendWinReload(context);
-            Log.i(TAG, "FREEFORM_CONFIG зеркалирован + WIN_RELOAD");
-        }
-
         // Открытие приложения из дока во freeform (launcherdock делегирует СЮДА, чтобы мы закрыли активный
         // VD-сплит и запустили приложение ЧИСТО на display 0). Иначе приложение-панель «уехало» бы с VD с
         // глитчем (чёрное окно). closeActiveSplit force-stop'ит панели → приложение стартует заново; если
         // сплит был — запускаем с задержкой (teardown асинхронный), иначе сразу. Только full.
         if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && BuildConfig.IS_FULL) {
             // display: на каком экране открыть. Отсутствует → 0 (водительский), т.е. прежнее поведение.
-            openFreeformApp(context, intent.getStringExtra("pkg"), intent.getIntExtra("display", 0));
+            String pkg = intent.getStringExtra("pkg");
+            if (isConfiguredDockPackage(context, pkg)) {
+                openFreeformApp(context, pkg, intent.getIntExtra("display", 0));
+            } else {
+                Log.w(TAG, "OPEN_FREEFORM отклонён: пакет не назначен доку: " + pkg);
+            }
         }
 
         // Открытие СПЛИТА, назначенного слоту дока, по долгому нажатию (launcherdock.js шлёт номер слота).
@@ -100,7 +78,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     boolean rsz = "1".equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitResizable"));
                     float frac = parseFloatSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitFraction"), 0f);
                     int pIdx = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitPresetIdx"), -1);
-                    SplitHostActivity.launchSplit(context.getApplicationContext(), l, r, ratio, lDpi, rDpi, rsz, frac, pIdx);
+                    String pId = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitPresetId");
+                    SplitHostActivity.launchSplit(context.getApplicationContext(), l, r, ratio, lDpi, rDpi,
+                            rsz, frac, pIdx, pId);
                     Log.i(TAG, "OPEN_DOCK_SPLIT slot=" + slot + " " + l + "/" + r + " ratio=" + ratio);
                 } else {
                     Log.i(TAG, "OPEN_DOCK_SPLIT slot=" + slot + " — сплит не назначен");
@@ -111,7 +91,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // Исполнение действия кнопки руля (шлёт keymng2.js / хук DVR). Пока — переключение энергорежима
         // с циклированием по набору режимов. Только full.
         if ("ru.big.town.anative.STEER_ACTION".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            handleSteerAction(context, intent.getStringExtra("action"));
+            String action = intent.getStringExtra("action");
+            if (isConfiguredSteerAction(context, action)) handleSteerAction(context, action);
+            else Log.w(TAG, "STEER_ACTION отклонён: действие не настроено: " + action);
         }
 //        if (receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES")) {
 //            repeat = 3;
@@ -136,7 +118,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     }
 
     /** Записать выбор действия слота в Settings.Global под ключом voyahtune_<slot> (нужен WRITE_SECURE_SETTINGS). */
-    private static void mirrorSteer(Context ctx, Intent intent, String key) {
+    static void mirrorSteer(Context ctx, Intent intent, String key) {
         String v = intent.getStringExtra(key);
         if (v == null) v = "none";
         try {
@@ -148,7 +130,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
     /** Записать выбор слота дока в Settings.Global: voyahtune_dock&lt;slot&gt; (pkg) + voyahtune_dock&lt;slot&gt;Dpi (int).
      *  Нужен WRITE_SECURE_SETTINGS (уже в privapp-whitelist, раз mirrorSteer работает). Читает launcherdock.js. */
-    private static void mirrorDock(Context ctx, Intent intent, int slot) {
+    static void mirrorDock(Context ctx, Intent intent, int slot) {
         String pkg = intent.getStringExtra("dock" + slot);
         if (pkg == null || pkg.isEmpty()) pkg = "none";
         int dpi = intent.getIntExtra("dock" + slot + "Dpi", 0);
@@ -176,6 +158,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                         String.valueOf(intent.getFloatExtra("dock" + slot + "SplitFraction", 0f)));
                 android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitPresetIdx",
                         String.valueOf(intent.getIntExtra("dock" + slot + "SplitPresetIdx", -1)));
+                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitPresetId",
+                        nz(intent.getStringExtra("dock" + slot + "SplitPresetId")));
             }
         } catch (Exception e) {
             Log.w(TAG, "mirrorDock " + slot + ": " + e.getMessage());
@@ -194,9 +178,31 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         catch (Exception e) { return def; }
     }
 
+    /** Публичный launcher bridge принимает только пакет, уже записанный защищённым config-receiver. */
+    private static boolean isConfiguredDockPackage(Context ctx, String pkg) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        android.content.ContentResolver cr = ctx.getContentResolver();
+        return pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock1"))
+                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock2"));
+    }
+
+    /** STEER_ACTION должен совпадать с одним из значений, зеркалированных из подписанного RestoreMode. */
+    private static boolean isConfiguredSteerAction(Context ctx, String action) {
+        if (action == null || action.isEmpty() || "none".equals(action)) return false;
+        android.content.ContentResolver cr = ctx.getContentResolver();
+        String[] buttons = {"Star", "Dvr", "Voice", "Phone"};
+        for (String button : buttons) {
+            if (action.equals(android.provider.Settings.Global.getString(cr,
+                    "voyahtune_steer" + button + "Short"))) return true;
+            if (action.equals(android.provider.Settings.Global.getString(cr,
+                    "voyahtune_steer" + button + "Long"))) return true;
+        }
+        return false;
+    }
+
     /** Флаг + bounds «оконного режима» → Settings.Global (читает vd_bypass.js в system_server).
      *  extras: on(boolean, опц.), left/top/right/bottom(int, опц., пишем только >=0). */
-    private static void mirrorFreeform(Context ctx, Intent intent) {
+    static void mirrorFreeform(Context ctx, Intent intent) {
         try {
             if (intent.hasExtra("on")) {
                 android.provider.Settings.Global.putString(ctx.getContentResolver(),
@@ -213,7 +219,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
     /** Разбудить system_server-хук freeform: перечитать кэш (флаг/bounds/DPI). Ресивер в vd_bypass.js
      *  гейтит пермишеном WRITE_SECURE_SETTINGS — доставить может только наш Native (он его держит). */
-    private static void sendWinReload(Context ctx) {
+    static void sendWinReload(Context ctx) {
         try {
             Intent w = new Intent("ru.big.town.anative.WIN_RELOAD");
             w.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
@@ -240,14 +246,18 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             openFreeformApp(ctx, action.substring("app:".length()));
             Log.i(TAG, "STEER_ACTION → приложение " + action.substring("app:".length()));
         } else if (action.startsWith("split:")) {
-            // Открыть пресет сплита. Резолвленная строка от VoyahTune: split:<L>,<R>,<ratio>,<lDpi>,<rDpi>.
+            // Backward-compatible строка: split:<L>,<R>,<ratio>,<lDpi>,<rDpi>[,<resizable>,<fraction>,<presetId>].
             String[] p = action.substring("split:".length()).split(",");
             if (p.length >= 3) {
                 try {
                     int ratio = Integer.parseInt(p[2].trim());
                     int lDpi  = p.length > 3 ? Integer.parseInt(p[3].trim()) : 0;
                     int rDpi  = p.length > 4 ? Integer.parseInt(p[4].trim()) : 0;
-                    SplitHostActivity.launchSplit(ctx.getApplicationContext(), p[0].trim(), p[1].trim(), ratio, lDpi, rDpi);
+                    boolean resizable = p.length > 5 && "1".equals(p[5].trim());
+                    float fraction = p.length > 6 ? parseFloatSafe(p[6], 0f) : 0f;
+                    String presetId = p.length > 7 ? p[7].trim() : "";
+                    SplitHostActivity.launchSplit(ctx.getApplicationContext(), p[0].trim(), p[1].trim(),
+                            ratio, lDpi, rDpi, resizable, fraction, -1, presetId);
                     Log.i(TAG, "STEER_ACTION → сплит " + p[0] + "/" + p[1] + " ratio=" + ratio);
                 } catch (Exception e) {
                     Log.w(TAG, "STEER_ACTION split parse: " + e.getMessage());

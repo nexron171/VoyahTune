@@ -33,8 +33,9 @@ import java.lang.reflect.Method;
  * VirtualDisplay, картинка которого рендерится в свой SurfaceView. Даёт то, чего не может
  * freeform:
  *  - per-app DPI: плотность задаётся на каждый VirtualDisplay ({@code createVirtualDisplay(...,densityDpi,...)});
- *  - живой ресайз пропорций: тянем разделитель → меняем веса SurfaceView → {@code vd.resize(w,h,dpi)}
- *    без перезапуска приложений.
+ *  - ресайз пропорций: во время жеста двигаем безопасное превью, на отпускании один раз меняем веса
+ *    SurfaceView → {@code vd.resize(w,h,dpi)}. Activity стороннего приложения при этом может штатно
+ *    пересоздаться из-за configuration change.
  *
  * ⚠️ Доставка ВВОДА (касаний) в VirtualDisplay требует INJECT_EVENTS — это ЧИСТЫЙ signature
  * пермишен, которого у Native фактически НЕТ (голова на release-keys, подпись dev-ключом; whitelist
@@ -57,6 +58,7 @@ public class SplitHostActivity extends Activity {
     public static final String EXTRA_RESIZABLE  = "resizable";
     public static final String EXTRA_SPLIT      = "split";
     public static final String EXTRA_PRESET_IDX = "presetIdx";
+    public static final String EXTRA_PRESET_ID  = "presetId";
 
     // Флаги VirtualDisplay. TRUSTED(1<<10) обязателен, чтобы на дисплей можно было запускать
     // чужие активити и (в перспективе) роутить ввод; требует ADD_TRUSTED_DISPLAY (privapp whitelist).
@@ -79,6 +81,7 @@ public class SplitHostActivity extends Activity {
         String pkg;
         int dpi;            // 0 = дефолт дисплея (приходит из per-app настройки RestoreMode)
         int w, h;
+        long resizeVersion; // успешные vd.resize; нужен для снятия маски после реального layout обеих панелей
         boolean launched;
         long launchedAt;    // когда стартовали приложение — надзирателю нужно дать ему подняться
         int restarts;       // сколько раз надзиратель уже перезапускал панель за эту сессию сплита
@@ -101,8 +104,8 @@ public class SplitHostActivity extends Activity {
         }
     };
 
-    // ВРЕМЕННО: ресайз делителем отключён (порча текстуры/рассинхрон приложений при живом ресайзе VD).
-    // Делитель — только визуальный + двойной тап меняет окна местами.
+    // Для фиксированного пресета делитель только визуальный; resizable-пресет коммитит размер один раз
+    // на отпускании. Двойной тап в обоих режимах меняет окна местами.
     private final Pane left  = new Pane("L");
     private final Pane right = new Pane("R");
 
@@ -135,6 +138,7 @@ public class SplitHostActivity extends Activity {
         int ratio  = in.getIntExtra(EXTRA_RATIO, 1);
         resizable  = in.getBooleanExtra(EXTRA_RESIZABLE, false);
         presetIdx  = in.getIntExtra(EXTRA_PRESET_IDX, -1);
+        presetId   = in.getStringExtra(EXTRA_PRESET_ID);
         float startSplit = in.getFloatExtra(EXTRA_SPLIT, 0f);
 
         left.container  = findViewById(R.id.splitPaneLeft);
@@ -165,7 +169,8 @@ public class SplitHostActivity extends Activity {
 
         Log.i(TAG, "onCreate single=" + single + " left=" + left.pkg + " right=" + right.pkg
                 + " ratio=" + ratio + " lDpi=" + left.dpi + " rDpi=" + right.dpi
-                + " defaultDpi=" + defaultDpi);
+                + " defaultDpi=" + defaultDpi + " resizable=" + resizable
+                + " split=" + startSplit + " presetId=" + presetId);
     }
 
     /**
@@ -269,6 +274,7 @@ public class SplitHostActivity extends Activity {
                     // драга сюда не заходим (веса панелей не меняем, двигаем только оверлей-маску).
                     try {
                         pane.vd.resize(width, height, effectiveDpi(pane));
+                        pane.resizeVersion++;
                     } catch (Exception e) {
                         Log.w(TAG, "resize " + pane.side + " failed: " + e.getMessage());
                     }
@@ -467,9 +473,10 @@ public class SplitHostActivity extends Activity {
     // -------------------------------------------------------------------------
 
     private void injectTouch(Pane pane, MotionEvent ev) {
+        MotionEvent copy = null;
         try {
             int displayId = pane.vd.getDisplay().getDisplayId();
-            MotionEvent copy = MotionEvent.obtain(ev);
+            copy = MotionEvent.obtain(ev);
             // MotionEvent.setDisplayId(int) — hidden
             Method setDisplayId = MotionEvent.class.getMethod("setDisplayId", int.class);
             setDisplayId.invoke(copy, displayId);
@@ -477,13 +484,14 @@ public class SplitHostActivity extends Activity {
             Object im = getSystemService("input");
             Method inject = im.getClass().getMethod("injectInputEvent", InputEvent.class, int.class);
             inject.invoke(im, copy, 0);
-            copy.recycle();
         } catch (Exception e) {
             if (!touchWarned) {
                 touchWarned = true;
                 Log.w(TAG, "injectTouch недоступен (нет INJECT_EVENTS у Native): " + e.getMessage()
                         + " — ввод в VD требует root+Frida-в-system_server или роутинга WM для trusted-дисплея");
             }
+        } finally {
+            if (copy != null) copy.recycle();
         }
     }
 
@@ -497,8 +505,13 @@ public class SplitHostActivity extends Activity {
         // Двойной тап по handle-бару — поменять окна местами (работает всегда).
         final GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override
+            public boolean onDown(MotionEvent e) { return true; }
+
+            @Override
             public boolean onDoubleTap(MotionEvent e) {
-                if (!dragging) swapApps();
+                cancelResizeGesture();
+                swapApps();
+                doubleTapConsumed = true;
                 return true;
             }
         });
@@ -506,7 +519,8 @@ public class SplitHostActivity extends Activity {
         final View grip = findViewById(R.id.splitHandleGrip);
 
         // Диагностика: без неё «делитель мёртв» неотличимо от «resizable не доехал до хоста».
-        Log.i(TAG, "setupDivider: resizable=" + resizable + " presetIdx=" + presetIdx);
+        Log.i(TAG, "setupDivider: resizable=" + resizable + " presetIdx=" + presetIdx
+                + " presetId=" + presetId);
 
         if (!resizable) {   // пропорция зафиксирована пресетом — делитель только визуальный + свап
             divider.setOnTouchListener((v, e) -> {
@@ -530,8 +544,10 @@ public class SplitHostActivity extends Activity {
                 gd.onTouchEvent(e);
                 switch (e.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
+                        if (doubleTapConsumed) { doubleTapConsumed = false; return true; }
                         startX = e.getRawX();
                         startFraction = currentFraction();
+                        lastDragFraction = startFraction;
                         gripPressed(grip, true);          // видимый щуп — рукоятка «загорается»
                         Log.i(TAG, "драг начат: fraction=" + startFraction);
                         // beginResize (снимки/оверлей) НЕ должен ронять жест: если PixelCopy/overlay
@@ -541,14 +557,22 @@ public class SplitHostActivity extends Activity {
                         moveDivider(startFraction);       // сразу поставить в текущую позицию
                         return true;
                     case MotionEvent.ACTION_MOVE:
+                        if (resizeState != ResizeState.DRAGGING) return true;
                         float f = fractionForDx(startFraction, e.getRawX() - startX);
+                        lastDragFraction = f;
                         moveDivider(f);                   // делитель едет НЕЗАВИСИМО от маски
                         try { previewFraction(f); } catch (Throwable t) { Log.w(TAG, "preview: " + t); }
                         return true;
                     case MotionEvent.ACTION_UP:
+                        gripPressed(grip, false);
+                        if (resizeState == ResizeState.DRAGGING) {
+                            lastDragFraction = fractionForDx(startFraction, e.getRawX() - startX);
+                            endResize(lastDragFraction);
+                        }
+                        return true;
                     case MotionEvent.ACTION_CANCEL:
                         gripPressed(grip, false);
-                        endResize(fractionForDx(startFraction, e.getRawX() - startX));
+                        cancelResizeGesture();
                         return true;
                 }
                 return false;
@@ -593,7 +617,13 @@ public class SplitHostActivity extends Activity {
 
     private boolean resizable = false;
     private int presetIdx = -1;
-    private boolean dragging = false;
+    private String presetId = "";
+    private enum ResizeState { IDLE, DRAGGING, SETTLING }
+    private ResizeState resizeState = ResizeState.IDLE;
+    private boolean dragging = false; // совместимость с watchdog; true только в DRAGGING
+    private boolean doubleTapConsumed = false;
+    private float lastDragFraction = 0.5f;
+    private int resizeGeneration = 0;
     private long resizeUntil = 0L;          // до этого момента надзиратель панелей молчит
     private android.widget.FrameLayout maskOverlay;
     private android.widget.ImageView maskLeft, maskRight;
@@ -615,11 +645,16 @@ public class SplitHostActivity extends Activity {
 
     /** Снять размытые снимки обеих панелей и показать оверлей вместо живых окон. */
     private void beginResize() {
+        resizeGeneration++;                 // инвалидировать callbacks прошлого жеста
+        resizeState = ResizeState.DRAGGING;
         dragging = true;
         resizeUntil = System.currentTimeMillis() + 60_000;  // надзиратель молчит, пока тянем
         ensureMaskOverlay();
-        captureBlurred(left,  maskLeft);
-        captureBlurred(right, maskRight);
+        if (maskOverlay != null) maskOverlay.animate().cancel();
+        if (maskLeft != null) maskLeft.setImageDrawable(null);
+        if (maskRight != null) maskRight.setImageDrawable(null);
+        captureBlurred(left,  maskLeft, resizeGeneration);
+        captureBlurred(right, maskRight, resizeGeneration);
         maskOverlay.setVisibility(View.VISIBLE);
         maskOverlay.setAlpha(1f);
         previewFraction(currentFraction());
@@ -655,41 +690,77 @@ public class SplitHostActivity extends Activity {
 
     /**
      * Отпустили делитель: один раз меняем пропорцию, ждём, пока приложения отрисуются в новом
-     * размере, и уводим маску кроссфейдом. Если приложение ресайз не пережило — пересоздаём панель.
+     * размере, и уводим маску кроссфейдом. Если приложение не пережило конфигурацию, его поднимет
+     * общий watchdog после полноценного grace-периода.
      */
     private void endResize(final float f) {
+        if (resizeState != ResizeState.DRAGGING) return;
         dragging = false;
+        resizeState = ResizeState.SETTLING;
+        final int generation = resizeGeneration;
+        final long leftVersion = left.resizeVersion;
+        final long rightVersion = right.resizeVersion;
         // Сдвиг делителя был визуальным (translationX) — снимаем его, дальше позицию задаёт вес.
         View divider = findViewById(R.id.splitDivider);
         if (divider != null) divider.setTranslationX(0f);
         applyFraction(f);                                    // ЕДИНСТВЕННАЯ смена веса за весь жест
-        resizeUntil = System.currentTimeMillis() + MASK_HOLD_MS + 4000;   // + запас надзирателю
+        // Activity приложения может пересоздаваться после display configuration change. Даём тот же
+        // grace, что при первоначальном запуске, и не пытаемся объявить её мёртвой через 630 ms.
+        long now = System.currentTimeMillis();
+        left.launchedAt = now;
+        right.launchedAt = now;
+        resizeUntil = now + WATCH_GRACE_MS;
         saveFraction(f);
-        maskOverlay.postDelayed(() -> {
-            if (maskOverlay == null) return;
-            maskOverlay.animate().alpha(0f).setDuration(180).withEndAction(() -> {
-                if (maskOverlay != null) maskOverlay.setVisibility(View.GONE);
-                // Приложение могло не пережить смену конфигурации — тогда поднимаем панель заново.
-                recreateIfDead(left);
-                recreateIfDead(right);
-            }).start();
-        }, MASK_HOLD_MS);
+        waitForSurfaceResize(generation, leftVersion, rightVersion, 0);
     }
 
-    private void recreateIfDead(Pane pane) {
-        if (pane.vd == null || !pane.launched) return;
-        if (paneAppAlive(pane)) return;
-        Log.i(TAG, "после ресайза " + pane.pkg + " (" + pane.side + ") не выжило → пересоздаём панель");
-        recreatePane(pane);
+    /** Ждём, пока оба SurfaceView действительно вызовут vd.resize; затем даём приложениям кадр и гасим маску. */
+    private void waitForSurfaceResize(int generation, long leftBefore, long rightBefore, int attempt) {
+        View root = findViewById(R.id.splitHostRoot);
+        if (root == null) return;
+        boolean resized = left.resizeVersion > leftBefore && right.resizeVersion > rightBefore;
+        if (!resized && attempt < 20) {
+            root.postDelayed(() -> waitForSurfaceResize(generation, leftBefore, rightBefore, attempt + 1), 50);
+            return;
+        }
+        root.postDelayed(() -> finishResizeVisual(generation), MASK_HOLD_MS);
+    }
+
+    private void finishResizeVisual(int generation) {
+        if (generation != resizeGeneration || resizeState != ResizeState.SETTLING) return;
+        Runnable done = () -> {
+            if (generation != resizeGeneration) return;
+            if (maskOverlay != null) maskOverlay.setVisibility(View.GONE);
+            resizeState = ResizeState.IDLE;
+        };
+        if (maskOverlay == null) { done.run(); return; }
+        maskOverlay.animate().cancel();
+        maskOverlay.animate().alpha(0f).setDuration(180).withEndAction(done).start();
+    }
+
+    /** CANCEL и двойной тап не должны менять пропорцию или сохранять случайную rawX. */
+    private void cancelResizeGesture() {
+        resizeGeneration++;
+        dragging = false;
+        resizeState = ResizeState.IDLE;
+        View divider = findViewById(R.id.splitDivider);
+        if (divider != null) divider.setTranslationX(0f);
+        if (maskOverlay != null) {
+            maskOverlay.animate().cancel();
+            maskOverlay.setVisibility(View.GONE);
+        }
+        resizeUntil = 0L;
     }
 
     /** Вернуть выставленную пропорцию в пресет RestoreMode (единственный источник истины). */
     private void saveFraction(float f) {
-        if (presetIdx < 0) return;
+        if (presetIdx < 0 && (presetId == null || presetId.isEmpty())) return;
         try {
             Intent i = new Intent("ru.big.town.restoremode.SPLIT_RATIO_SAVE");
-            i.setPackage("ru.big.town.restoremode");
+            i.setClassName("ru.big.town.restoremode",
+                    "ru.big.town.restoremode.SplitRatioSaveReceiver");
             i.putExtra("presetIdx", presetIdx);
+            i.putExtra("presetId", presetId == null ? "" : presetId);
             i.putExtra("split", f);
             i.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             sendBroadcast(i);
@@ -733,14 +804,22 @@ public class SplitHostActivity extends Activity {
      *
      * RenderEffect.createBlurEffect тут недоступен — это API 31, а голова на API 30.
      */
-    private void captureBlurred(final Pane pane, final android.widget.ImageView target) {
+    private void captureBlurred(final Pane pane, final android.widget.ImageView target, final int generation) {
         if (pane.view == null || pane.view.getWidth() <= 0) return;
         final int w = Math.max(16, pane.view.getWidth() / 8);
         final int h = Math.max(16, pane.view.getHeight() / 8);
         try {
             final Bitmap small = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
             PixelCopy.request(pane.view, small, res -> {
-                if (res != PixelCopy.SUCCESS) { Log.w(TAG, "PixelCopy " + pane.side + " = " + res); return; }
+                if (res != PixelCopy.SUCCESS) {
+                    small.recycle();
+                    Log.w(TAG, "PixelCopy " + pane.side + " = " + res);
+                    return;
+                }
+                if (generation != resizeGeneration || resizeState != ResizeState.DRAGGING) {
+                    small.recycle();
+                    return;
+                }
                 boxBlur(small, 3);
                 target.setImageBitmap(small);
             }, new android.os.Handler(android.os.Looper.getMainLooper()));
@@ -837,6 +916,7 @@ public class SplitHostActivity extends Activity {
     @Override
     protected void onDestroy() {
         watchHandler.removeCallbacks(watchTick);
+        cancelResizeGesture();
         if (sCurrent == this) sCurrent = null;
         releasePane(left);
         releasePane(right);
@@ -847,7 +927,7 @@ public class SplitHostActivity extends Activity {
      *  по долгому нажатию на слот дока). Дублирует {@code SetModesService.launchVirtualSplit}: включает
      *  freeform-настройки (resizable) и стартует хост с extras. Пустой left/right → no-op. */
     public static void launchSplit(android.content.Context ctx, String left, String right, int ratio, int leftDpi, int rightDpi) {
-        launchSplit(ctx, left, right, ratio, leftDpi, rightDpi, false, 0f, -1);
+        launchSplit(ctx, left, right, ratio, leftDpi, rightDpi, false, 0f, -1, "");
     }
 
     /** @param resizable разрешить менять пропорцию перетаскиванием делителя
@@ -855,6 +935,12 @@ public class SplitHostActivity extends Activity {
      *  @param presetIdx индекс пресета в RestoreMode — по нему туда вернётся новая пропорция */
     public static void launchSplit(android.content.Context ctx, String left, String right, int ratio,
                                    int leftDpi, int rightDpi, boolean resizable, float split, int presetIdx) {
+        launchSplit(ctx, left, right, ratio, leftDpi, rightDpi, resizable, split, presetIdx, "");
+    }
+
+    public static void launchSplit(android.content.Context ctx, String left, String right, int ratio,
+                                   int leftDpi, int rightDpi, boolean resizable, float split,
+                                   int presetIdx, String presetId) {
         if (left == null || left.isEmpty() || right == null || right.isEmpty()) {
             Log.w(TAG, "launchSplit: пустой пакет — пропуск");
             return;
@@ -876,6 +962,7 @@ public class SplitHostActivity extends Activity {
             i.putExtra(EXTRA_RESIZABLE, resizable);
             i.putExtra(EXTRA_SPLIT, split);
             i.putExtra(EXTRA_PRESET_IDX, presetIdx);
+            i.putExtra(EXTRA_PRESET_ID, presetId);
             ctx.startActivity(i);
             Log.i(TAG, "launchSplit host started " + left + "/" + right);
         } catch (Exception e) {

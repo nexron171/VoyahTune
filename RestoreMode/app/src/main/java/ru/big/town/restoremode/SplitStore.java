@@ -7,6 +7,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /** Пресеты «Разделения экрана» в DrivePreferences ("splitPresets", JSON-массив). */
 public class SplitStore {
@@ -16,6 +17,8 @@ public class SplitStore {
     static final String[] RATIO_LABELS = {"3:4", "1:1", "4:3", "5:2", "2:5"};
 
     public static class Preset {
+        /** Стабильный id для межпроцессного сохранения. Индекс списка меняется при удалении пресетов. */
+        public String id = UUID.randomUUID().toString();
         public String l = "", ll = "", r = "", rl = "";
         public int ratio = 1;
         /** Разрешено тянуть делитель и менять пропорцию прямо в сплите. По умолчанию выключено. */
@@ -39,11 +42,15 @@ public class SplitStore {
 
     static List<Preset> load(SharedPreferences p) {
         List<Preset> out = new ArrayList<>();
+        boolean migratedIds = false;
         try {
             JSONArray a = new JSONArray(p.getString(KEY, "[]"));
             for (int i = 0; i < a.length(); i++) {
                 JSONObject o = a.getJSONObject(i);
                 Preset ps = new Preset();
+                String storedId = o.optString("id", "");
+                if (!storedId.isEmpty()) ps.id = storedId;
+                else migratedIds = true;
                 ps.l  = o.optString("l", "");
                 ps.ll = o.optString("ll", "");
                 ps.r  = o.optString("r", "");
@@ -55,6 +62,9 @@ public class SplitStore {
             }
         } catch (Exception ignored) {
         }
+        // Одноразовая миграция старых пресетов: id должен пережить следующий load, иначе Native
+        // вернёт результат resize уже в другой случайно сгенерированный id.
+        if (migratedIds) save(p, out);
         return out;
     }
 
@@ -63,6 +73,7 @@ public class SplitStore {
         try {
             for (Preset ps : list) {
                 JSONObject o = new JSONObject();
+                o.put("id", ps.id);
                 o.put("l", ps.l);
                 o.put("ll", ps.ll);
                 o.put("r", ps.r);

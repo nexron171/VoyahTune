@@ -859,8 +859,14 @@ public class AdvanceActivity extends AppCompatActivity {
     public void onAddSplitPreset(View v) {
         java.util.List<SplitStore.Preset> list = SplitStore.load(prefs);
         list.add(new SplitStore.Preset());
-        SplitStore.save(prefs, list);
+        saveSplitPresets(list);
         renderSplitPresets();
+    }
+
+    /** Пресеты зеркалятся в dock/steering Settings.Global, поэтому одной записи JSON недостаточно. */
+    private void saveSplitPresets(java.util.List<SplitStore.Preset> list) {
+        SplitStore.save(prefs, list);
+        SplitConfigSync.pushAll(this, prefs);
     }
 
     private void renderSplitPresets() {
@@ -884,11 +890,11 @@ public class AdvanceActivity extends AppCompatActivity {
 
             lb.setOnClickListener(v -> showAppPicker("Приложение слева", (pkg, label) -> {
                 java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
-                if (idx < l2.size()) { l2.get(idx).l = pkg; l2.get(idx).ll = label; SplitStore.save(prefs, l2); renderSplitPresets(); }
+                if (idx < l2.size()) { l2.get(idx).l = pkg; l2.get(idx).ll = label; saveSplitPresets(l2); renderSplitPresets(); }
             }));
             rb.setOnClickListener(v -> showAppPicker("Приложение справа", (pkg, label) -> {
                 java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
-                if (idx < l2.size()) { l2.get(idx).r = pkg; l2.get(idx).rl = label; SplitStore.save(prefs, l2); renderSplitPresets(); }
+                if (idx < l2.size()) { l2.get(idx).r = pkg; l2.get(idx).rl = label; saveSplitPresets(l2); renderSplitPresets(); }
             }));
 
             android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<>(
@@ -900,7 +906,11 @@ public class AdvanceActivity extends AppCompatActivity {
                 @Override
                 public void onItemSelected(android.widget.AdapterView<?> parent, View view, int pos, long id) {
                     java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
-                    if (idx < l2.size() && l2.get(idx).ratio != pos) { l2.get(idx).ratio = pos; SplitStore.save(prefs, l2); }
+                    if (idx < l2.size() && l2.get(idx).ratio != pos) {
+                        l2.get(idx).ratio = pos;
+                        l2.get(idx).split = 0f;
+                        saveSplitPresets(l2);
+                    }
                 }
                 @Override
                 public void onNothingSelected(android.widget.AdapterView<?> parent) { }
@@ -916,14 +926,14 @@ public class AdvanceActivity extends AppCompatActivity {
                     if (idx < l2.size()) {
                         l2.get(idx).resizable = checked;
                         if (!checked) l2.get(idx).split = 0f;
-                        SplitStore.save(prefs, l2);
+                        saveSplitPresets(l2);
                     }
                 });
             }
 
             del.setOnClickListener(v -> {
                 java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
-                if (idx < l2.size()) { l2.remove(idx); SplitStore.save(prefs, l2); renderSplitPresets(); }
+                if (idx < l2.size()) { l2.remove(idx); saveSplitPresets(l2); renderSplitPresets(); }
             });
 
             splitPresetsContainer.addView(row);
@@ -1226,73 +1236,13 @@ public class AdvanceActivity extends AppCompatActivity {
 
     /** Зеркалим выбор действий кнопок в Native (он пишет их в Settings.Global — оттуда читает keymng2.js). */
     private void pushSteerConfig() {
-        Intent i = new Intent("ru.big.town.anative.STEER_CONFIG");
-        i.setClassName("ru.big.town.anative", "ru.big.town.anative.SetModesReceiverDynamic");
-        i.putExtra("steerStarShort", resolveSteerAction(prefs.getString("steerStarShort", "none")));
-        i.putExtra("steerStarLong",  resolveSteerAction(prefs.getString("steerStarLong",  "none")));
-        i.putExtra("steerDvrShort",  resolveSteerAction(prefs.getString("steerDvrShort",  "none")));
-        i.putExtra("steerDvrLong",   resolveSteerAction(prefs.getString("steerDvrLong",   "none")));
-        sendBroadcast(i);
-    }
-
-    /** Резолвит id действия для Native: «split:N» → self-contained «split:L,R,ratio,lDpi,rDpi» (Native не
-     *  имеет доступа к пресетам). Остальное (app:pkg / energy: / drive: / open_voyahtune / none) — как есть.
-     *  Невалидный/удалённый пресет → «none». */
-    private String resolveSteerAction(String id) {
-        if (id != null && id.startsWith("split:")) {
-            try {
-                int n = Integer.parseInt(id.substring("split:".length()));
-                java.util.List<SplitStore.Preset> all = SplitStore.load(prefs);
-                if (n >= 0 && n < all.size() && all.get(n).ready()) {
-                    SplitStore.Preset ps = all.get(n);
-                    return "split:" + ps.l + "," + ps.r + "," + ps.ratio + ","
-                            + AppDpiStore.get(prefs, ps.l) + "," + AppDpiStore.get(prefs, ps.r);
-                }
-            } catch (Exception ignored) {}
-            return "none";
-        }
-        return id;
+        SplitConfigSync.pushSteering(this, prefs);
     }
 
     /** Зеркалим выбор «Системного дока» в Native (он пишет voyahtune_dock* в Settings.Global — оттуда
      *  читает launcherdock.js в процессе лаунчера и перерисовывает иконки/перехватывает клик). */
     private void pushDockConfig() {
-        String p1 = prefs.getString("dockOverride1", "");
-        String p2 = prefs.getString("dockOverride2", "");
-        Intent i = new Intent("ru.big.town.anative.DOCK_CONFIG");
-        i.setClassName("ru.big.town.anative", "ru.big.town.anative.SetModesReceiverDynamic");
-        i.putExtra("dock1", p1.isEmpty() ? "none" : p1);
-        i.putExtra("dock2", p2.isEmpty() ? "none" : p2);
-        i.putExtra("dock1Dpi", p1.isEmpty() ? 0 : AppDpiStore.get(prefs, p1));
-        i.putExtra("dock2Dpi", p2.isEmpty() ? 0 : AppDpiStore.get(prefs, p2));
-        addDockSplitExtras(i, 1, p1);
-        addDockSplitExtras(i, 2, p2);
-        sendBroadcast(i);
-    }
-
-    /** Резолвит назначенный слоту сплит (по индексу пресета) и кладёт его в DOCK_CONFIG-интент.
-     *  dock&lt;slot&gt;HasSplit=false, если приложение слота не выбрано, назначения нет, индекс вне диапазона
-     *  или пресет неполный. Native зеркалит эти extras в Settings.Global — оттуда читает launcherdock.js
-     *  (флаг HasSplit) и обработчик OPEN_DOCK_SPLIT (детали сплита). */
-    private void addDockSplitExtras(Intent i, int slot, String slotPkg) {
-        int idx = slotPkg.isEmpty() ? -1 : prefs.getInt("dockOverride" + slot + "Split", -1);
-        java.util.List<SplitStore.Preset> all = SplitStore.load(prefs);
-        if (idx >= 0 && idx < all.size() && all.get(idx).ready()) {
-            SplitStore.Preset ps = all.get(idx);
-            i.putExtra("dock" + slot + "HasSplit", true);
-            i.putExtra("dock" + slot + "SplitL", ps.l);
-            i.putExtra("dock" + slot + "SplitR", ps.r);
-            i.putExtra("dock" + slot + "SplitRatio", ps.ratio);
-            i.putExtra("dock" + slot + "SplitLDpi", AppDpiStore.get(prefs, ps.l));
-            i.putExtra("dock" + slot + "SplitRDpi", AppDpiStore.get(prefs, ps.r));
-            // Изменяемая пропорция должна доезжать и до сплита, открытого долгим тапом по доку:
-            // раньше этот путь её терял, и делитель там был мёртвым независимо от настройки пресета.
-            i.putExtra("dock" + slot + "SplitResizable", ps.resizable);
-            i.putExtra("dock" + slot + "SplitFraction", SplitStore.leftFraction(ps));
-            i.putExtra("dock" + slot + "SplitPresetIdx", idx);
-        } else {
-            i.putExtra("dock" + slot + "HasSplit", false);
-        }
+        SplitConfigSync.pushDock(this, prefs);
     }
 
 

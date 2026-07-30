@@ -37,6 +37,17 @@
             android:name=".LoggingActivity"
             android:exported="false" />
 
+        <!-- Native возвращает сюда результат drag. Signature-permission не позволяет сторонним
+             приложениям подменять пропорции пресетов. -->
+        <receiver
+            android:name=".SplitRatioSaveReceiver"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE">
+            <intent-filter>
+                <action android:name="ru.big.town.restoremode.SPLIT_RATIO_SAVE" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name=".RestoreModeContentProvider"
             android:authorities="ru.big.town.restoremode.restoremodecontentprovider"
