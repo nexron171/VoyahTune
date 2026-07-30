@@ -40,6 +40,7 @@ public class SetModesService extends Service {
     static final int MSG_AUTO_LIGHT_DISABLE         = 11; // выключить автосвет
     static final int MSG_LEAVE_CAR                  = 20; // быстрая активация leave car / power hold
     static final int MSG_APPLY_PEDESTRIAN           = 21; // применить звук пешеходов (arg1: 1=заглушить)
+    static final int MSG_APPLY_FORCED_EV           = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int MSG_REBOOT                     = 22; // перезагрузка системы (голова)
     static final int MSG_WASH_MODE                  = 23; // активация режима мойки
     static final int MSG_FLOATING_BACK              = 24; // плавающая кнопка «Назад» (arg1: 1=вкл)
@@ -125,6 +126,11 @@ public class SetModesService extends Service {
                 case MSG_APPLY_PEDESTRIAN:
                     Log.i(TAG, "handleMessage() MSG_APPLY_PEDESTRIAN arg1=" + msg.arg1);
                     MainActivity.sendPedestrianSoundCommand(msg.arg1 == 1);
+                    break;
+
+                case MSG_APPLY_FORCED_EV:
+                    Log.i(TAG, "handleMessage() MSG_APPLY_FORCED_EV arg1=" + msg.arg1);
+                    MainActivity.sendForcedEvCommand(msg.arg1 == 1);
                     break;
 
                 case MSG_REBOOT:

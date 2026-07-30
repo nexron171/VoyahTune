@@ -388,6 +388,34 @@
 
             </LinearLayout>
 
+            <!-- Виджет Forced EV на главном (по умолчанию скрыт) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Forced EV"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowForcedEv"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
             <!-- Сохранять историю поездок (отдельно от таймера) -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -980,6 +1008,69 @@
                         android:textColor="@color/radio_button_text_color_selector" />
 
                 </RadioGroup>
+
+                <!-- Форсированный электрорежим -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginTop="18dp"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Forced EV"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                </LinearLayout>
+
+                <RadioGroup
+                    android:id="@+id/forcedEvGroup"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="wrap_content"
+                    android:layout_height="70dp"
+                    android:layout_gravity="start"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal"
+                    android:layout_marginHorizontal="6dp">
+
+                    <RadioButton
+                        android:id="@+id/forcedEvOff"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="260dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="OFF"
+                        android:text="Выключен"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/forcedEvOn"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="260dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="ON"
+                        android:text="Включён"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginTop="6dp"
+                    android:text="Удерживает электротягу, не давая запуститься генератору. Выключение возвращает энергорежим в «Электро», а не в тот, что был выбран до включения."
+                    android:textColor="#888888"
+                    android:textSize="20px" />
 
             </LinearLayout>
 

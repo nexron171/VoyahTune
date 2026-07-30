@@ -59,6 +59,7 @@ public class MainActivity extends AppCompatActivity {
     static final int MSG_APPLY_PEDESTRIAN   = 21;
     static final int MSG_WASH_MODE          = 23;
     static final int MSG_SPLIT_LAUNCH_VD    = 34; // сплит/одиночное приложение на VirtualDisplay (per-app DPI)
+    static final int MSG_APPLY_FORCED_EV    = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int REQUEST_CODE           = 1;
     private Intent resultIntent=null;
     private Intent resultIntentStarButton=null;
@@ -74,14 +75,14 @@ public class MainActivity extends AppCompatActivity {
     static final String ACTION_TRIP_RESET = "ru.big.town.anative.TRIP_RESET";
     private TextView tripTimer, tripStatus;
     // Карточки главного экрана, скрываемые настройками раздела «Главный экран»
-    private View tripCard, cardPowerHold, cardWashMode, cardAutoLight, cardPedestrian;
+    private View tripCard, cardPowerHold, cardWashMode, cardAutoLight, cardPedestrian, cardForcedEv;
     private boolean tripActive = false, tripInDrive = false;
     private long tripAccumMs = 0L, tripDriveStartElapsed = 0L;
     private String lastTripsJson = "[]"; // снимок лога для экрана истории
 
     // Тоггл-карточки на главном (автосвет / звук пешеходов): нейтральные, состояние — капсула-тег
-    private TextView autoLightBadge, pedestrianBadge;
-    private boolean autoLightOn, pedestrianOn;
+    private TextView autoLightBadge, pedestrianBadge, forcedEvBadge;
+    private boolean autoLightOn, pedestrianOn, forcedEvOn;
 
     // -------- Виджет «Прогрев батареи» --------
     static final String ACTION_BATTERY_HEAT_UPDATE   = "ru.big.town.anative.BATTERY_HEAT_UPDATE";
@@ -375,6 +376,7 @@ public class MainActivity extends AppCompatActivity {
     private void initToggleCards() {
         autoLightBadge  = findViewById(R.id.autoLightBadge);
         pedestrianBadge = findViewById(R.id.pedestrianBadge);
+        forcedEvBadge   = findViewById(R.id.forcedEvBadge);
         refreshToggles();
     }
 
@@ -397,10 +399,20 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "card pedestrianSound on=" + pedestrianOn);
     }
 
+    /** Клик по карточке «Forced EV» (вкл = удерживаем электротягу). */
+    public void onCardForcedEv(View v) {
+        forcedEvOn = !forcedEvOn;
+        editor.putBoolean("forcedEv", forcedEvOn).apply();
+        sendMessageToService(MSG_APPLY_FORCED_EV, forcedEvOn ? 1 : 0);
+        updateToggleVisuals();
+        Log.i(TAG, "card forcedEv on=" + forcedEvOn);
+    }
+
     /** Перечитать состояние из prefs (напр. после «Дополнительно») и обновить вид. */
     private void refreshToggles() {
         autoLightOn  = sharedPreferences.getBoolean("autoLight", false);
         pedestrianOn = !sharedPreferences.getBoolean("disablePedestrianSound", false);
+        forcedEvOn   = sharedPreferences.getBoolean("forcedEv", false);
         updateToggleVisuals();
     }
 
@@ -408,6 +420,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateToggleVisuals() {
         applyBadge(autoLightBadge, autoLightOn);
         applyBadge(pedestrianBadge, pedestrianOn);
+        applyBadge(forcedEvBadge, forcedEvOn);
     }
 
     private void applyBadge(TextView badge, boolean on) {
@@ -453,6 +466,7 @@ public class MainActivity extends AppCompatActivity {
         cardWashMode   = findViewById(R.id.cardWashMode);
         cardAutoLight  = findViewById(R.id.cardAutoLight);
         cardPedestrian = findViewById(R.id.cardPedestrian);
+        cardForcedEv   = findViewById(R.id.cardForcedEv);
         cardBatteryHeat   = findViewById(R.id.cardBatteryHeat);
         batteryHeatIcon   = findViewById(R.id.batteryHeatIcon);
         batteryHeatState  = findViewById(R.id.batteryHeatState);
@@ -598,6 +612,10 @@ public class MainActivity extends AppCompatActivity {
         setCardVisible(cardWashMode,   "showWashMode");
         setCardVisible(cardAutoLight,  "showAutoLight");
         setCardVisible(cardPedestrian, "showPedestrian");
+        // Forced EV по умолчанию СКРЫТ — в отличие от остальных карточек (у них дефолт true).
+        if (cardForcedEv != null) {
+            cardForcedEv.setVisibility(sharedPreferences.getBoolean("showForcedEv", false) ? View.VISIBLE : View.GONE);
+        }
         setCardVisible(cardBatteryHeat, "showBatteryHeat");
         // Кнопка «История поездок» в виджете — только если история включена.
         View histBtn = findViewById(R.id.buttonTripHistory);

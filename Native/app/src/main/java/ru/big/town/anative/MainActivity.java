@@ -28,6 +28,8 @@ public class MainActivity extends AppCompatActivity {
     private static boolean recycleEnabled = false;
     private static boolean energyEnabled  = false;
     private static boolean disablePedestrianSound = false;
+    /** Форсированный электрорежим (колонка 19 провайдера RestoreMode). */
+    private static boolean forcedEv = false;
 
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
@@ -206,6 +208,24 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    //------------- Метод получения команд CAN «Форсированный EV»  ---------------------------------
+    /**
+     * Принудительный электрорежим: держит машину на электротяге, не давая запуститься генератору.
+     * Это НЕ то же самое, что режим энергии «Электро» — тот лишь выбирает приоритет, а этот форсирует.
+     * Байты из Docs/CAN-команды.odt («Форсе EV»); та же группа сообщений 0x68, что и режим энергии.
+     */
+    public static byte[][] getForcedEvCanCommand(boolean on) {
+        Log.i("$$$ MainActivity getForcedEvCanCommand $$$", "forced EV " + (on ? "ON" : "OFF"));
+        return arraysStr2arraysBytes(new String[]{
+                on ? "68 08 02 00 00 f0 2c 54 08 00"
+                   : "68 08 02 00 00 f0 2c 24 08 00"});
+    }
+
+    /** Немедленно применить форсированный EV (тоггл с главного экрана / из настроек). */
+    public static void sendForcedEvCommand(boolean on) {
+        setCanValues(1, getForcedEvCanCommand(on), "forced EV " + (on ? "on" : "off"));
+    }
+
     //------------- Методы получения команд CAN управления фарами  ----------------------------------
     public static void setHeadlights(boolean on){
         Log.i("$$$ MainActivity setHeadlights $$$", "sending CAN: headlights " + (on ? "ON" : "OFF"));
@@ -300,6 +320,7 @@ public class MainActivity extends AppCompatActivity {
                 energyEnabled  = cursor.getColumnCount() > 8 && cursor.getInt(8) == 1;
                 // col 11 — «Отключить звук для пешеходов» (1=отключить, fallback=false)
                 disablePedestrianSound = cursor.getColumnCount() > 11 && cursor.getInt(11) == 1;
+                forcedEv = cursor.getColumnCount() > 19 && cursor.getInt(19) == 1;
                 // col 12 — «Режим отладки»: эмуляция CAN в логи вместо реальной отправки
                 boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
                 // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
@@ -352,6 +373,7 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheRecycleEnabled", recycleEnabled)
                 .putBoolean("cacheEnergyEnabled", energyEnabled)
                 .putBoolean("cacheDisablePedestrianSound", disablePedestrianSound)
+                .putBoolean("cacheForcedEv", forcedEv)
                 .putBoolean("cacheDebugMode", debugMode)
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
@@ -375,6 +397,7 @@ public class MainActivity extends AppCompatActivity {
         recycleEnabled     = p.getBoolean("cacheRecycleEnabled", false);
         energyEnabled      = p.getBoolean("cacheEnergyEnabled", false);
         disablePedestrianSound = p.getBoolean("cacheDisablePedestrianSound", false);
+        forcedEv = p.getBoolean("cacheForcedEv", false);
         boolean debugMode     = p.getBoolean("cacheDebugMode", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
@@ -482,6 +505,12 @@ public class MainActivity extends AppCompatActivity {
         // «Отключить звук для пешеходов» — бинарное состояние, применяем всегда
         ok &= setCanValues(1, getPedestrianSoundCanCommand(disablePedestrianSound),
                 "pedestrian sound mode " + (disablePedestrianSound ? "off" : "on"));
+        // Форсированный EV применяем ТОЛЬКО когда он включён — и обязательно ПОСЛЕ команды энергии,
+        // чтобы он её перекрыл. Команду «выкл» здесь не шлём намеренно: её байты (…2c 24 08 00)
+        // содержат значение энергии «Электро», т.е. отправка на каждом применении переводила бы
+        // энергорежим в электро и затирала выбор пользователя (Авто/Топливо/Сохранение).
+        // Выключение уходит явным действием пользователя — см. sendForcedEvCommand(false).
+        if (forcedEv) ok &= setCanValues(1, getForcedEvCanCommand(true), "forced EV on");
         return ok;
     }
     public static void setDriveMode(String driveMode){

@@ -87,6 +87,7 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_GRANT_INSTALL      = 26;
     static final int MSG_CLOSE_ALL          = 27;
     static final int MSG_SET_THEME          = 28;
+    static final int MSG_APPLY_FORCED_EV    = 35;
 
     // Кнопка «Применить» (верхняя панель) — блокировка + прогресс на время цикла отправки
     private Button buttonApplyAdvance;
@@ -366,6 +367,7 @@ public class AdvanceActivity extends AppCompatActivity {
         bindShowSwitch(R.id.switchShowAutoLight, "showAutoLight");
         bindShowSwitch(R.id.switchShowPedestrian, "showPedestrian");
         bindShowSwitch(R.id.switchShowBatteryHeat, "showBatteryHeat");
+        bindShowSwitch(R.id.switchShowForcedEv,   "showForcedEv");
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
         Switch switchSaveHistory = findViewById(R.id.switchSaveTripHistory);
@@ -391,6 +393,7 @@ public class AdvanceActivity extends AppCompatActivity {
         initModeEnableToggles();
         initCheckBox34();
         initPedestrianSoundGroup();
+        initForcedEvGroup();
 
         // Автоматический прогрев батареи: при <10°C на улице Native включит прогрев.
         // Флаг читает Native из ContentProvider (колонка 17), broadcast не нужен.
@@ -1304,6 +1307,36 @@ public class AdvanceActivity extends AppCompatActivity {
             prefs.edit().putBoolean("disablePedestrianSound", off).apply();
             Log.i("$$$ Advance pedestrian $$$", off ? "DISABLED (muted)" : "ENABLED");
         });
+    }
+
+    /**
+     * Сегмент-контрол «Forced EV». В отличие от звука пешеходов команду шлём СРАЗУ при переключении:
+     * это режим тяги, пользователь ждёт немедленного эффекта, а не после «Применить».
+     */
+    private void initForcedEvGroup() {
+        RadioGroup group = findViewById(R.id.forcedEvGroup);
+        if (group == null) return;
+        boolean on = prefs.getBoolean("forcedEv", false);
+        group.check(on ? R.id.forcedEvOn : R.id.forcedEvOff);
+        group.setOnCheckedChangeListener((g, checkedId) -> {
+            boolean enabled = (checkedId == R.id.forcedEvOn);
+            prefs.edit().putBoolean("forcedEv", enabled).apply();
+            sendForcedEv(enabled);
+            Log.i("$$$ Advance forcedEV $$$", enabled ? "ON" : "OFF");
+        });
+    }
+
+    /** Немедленно применить форсированный EV через SetModesService. */
+    private void sendForcedEv(boolean on) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+            Log.w("$$$ Advance forcedEV $$$", "SetModesService не забинден");
+            return;
+        }
+        try {
+            GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_APPLY_FORCED_EV, on ? 1 : 0, 0));
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
     }
 
     // -------------------------------------------------------------------------

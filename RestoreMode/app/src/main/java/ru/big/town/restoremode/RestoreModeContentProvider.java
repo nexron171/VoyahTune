@@ -23,6 +23,7 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  int lightSensorThreshold=3;
     private  int lightSensorThresholdOff=5;
     private  boolean disablePedestrianSound=false;
+    private  boolean forcedEv=false;
     private  boolean debugMode=false;
     private  boolean wiperColdMode=false;
     private  String customCommandStarButton1="";
@@ -72,6 +73,7 @@ public class RestoreModeContentProvider extends ContentProvider {
         lightSensorThreshold    = sharedPreferences.getInt("lightSensorThreshold",    3);
         lightSensorThresholdOff = sharedPreferences.getInt("lightSensorThresholdOff", 5);
         disablePedestrianSound  = sharedPreferences.getBoolean("disablePedestrianSound", false);
+        forcedEv                = sharedPreferences.getBoolean("forcedEv", false);
         debugMode               = sharedPreferences.getBoolean("debugMode",              false);
         wiperColdMode           = sharedPreferences.getBoolean("wiperColdMode",          false);
         customCommandStarButton1 = sharedPreferences.getString("customCommandStarButton1", "");
@@ -100,6 +102,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "autoLaunchOnWake",        // 16
                 "batteryHeatAuto",         // 17
                 "pauseMediaOnDoor",        // 18
+                "forcedEv",                // 19 — форсированный электрорежим
         });
 
         cursor.addRow(new Object[]{
@@ -118,6 +121,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 autoLaunchOnWake ? 1 : 0,
                 batteryHeatAuto ? 1 : 0,
                 pauseMediaOnDoor ? 1 : 0,
+                forcedEv ? 1 : 0,
         });
        return cursor;
 
