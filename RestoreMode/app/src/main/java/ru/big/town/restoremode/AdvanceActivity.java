@@ -1282,6 +1282,11 @@ public class AdvanceActivity extends AppCompatActivity {
             i.putExtra("dock" + slot + "SplitRatio", ps.ratio);
             i.putExtra("dock" + slot + "SplitLDpi", AppDpiStore.get(prefs, ps.l));
             i.putExtra("dock" + slot + "SplitRDpi", AppDpiStore.get(prefs, ps.r));
+            // Изменяемая пропорция должна доезжать и до сплита, открытого долгим тапом по доку:
+            // раньше этот путь её терял, и делитель там был мёртвым независимо от настройки пресета.
+            i.putExtra("dock" + slot + "SplitResizable", ps.resizable);
+            i.putExtra("dock" + slot + "SplitFraction", SplitStore.leftFraction(ps));
+            i.putExtra("dock" + slot + "SplitPresetIdx", idx);
         } else {
             i.putExtra("dock" + slot + "HasSplit", false);
         }

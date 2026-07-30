@@ -503,8 +503,23 @@ public class SplitHostActivity extends Activity {
             }
         });
 
+        final View grip = findViewById(R.id.splitHandleGrip);
+
+        // Диагностика: без неё «делитель мёртв» неотличимо от «resizable не доехал до хоста».
+        Log.i(TAG, "setupDivider: resizable=" + resizable + " presetIdx=" + presetIdx);
+
         if (!resizable) {   // пропорция зафиксирована пресетом — делитель только визуальный + свап
-            divider.setOnTouchListener((v, e) -> { gd.onTouchEvent(e); return true; });
+            divider.setOnTouchListener((v, e) -> {
+                if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                    gripPressed(grip, true);      // видимый щуп: рукоятка реагирует на касание
+                    Log.i(TAG, "делитель нажат, но пропорция зафиксирована (resizable=false)");
+                } else if (e.getActionMasked() == MotionEvent.ACTION_UP
+                        || e.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                    gripPressed(grip, false);
+                }
+                gd.onTouchEvent(e);
+                return true;
+            });
             return;
         }
 
@@ -517,19 +532,47 @@ public class SplitHostActivity extends Activity {
                     case MotionEvent.ACTION_DOWN:
                         startX = e.getRawX();
                         startFraction = currentFraction();
-                        beginResize();
+                        gripPressed(grip, true);          // видимый щуп — рукоятка «загорается»
+                        Log.i(TAG, "драг начат: fraction=" + startFraction);
+                        // beginResize (снимки/оверлей) НЕ должен ронять жест: если PixelCopy/overlay
+                        // бросит, делитель всё равно обязан ездить. Поэтому маска — в try, а движение
+                        // делителя ниже от неё не зависит.
+                        try { beginResize(); } catch (Throwable t) { Log.w(TAG, "beginResize: " + t); }
+                        moveDivider(startFraction);       // сразу поставить в текущую позицию
                         return true;
                     case MotionEvent.ACTION_MOVE:
-                        if (dragging) previewFraction(fractionForDx(startFraction, e.getRawX() - startX));
+                        float f = fractionForDx(startFraction, e.getRawX() - startX);
+                        moveDivider(f);                   // делитель едет НЕЗАВИСИМО от маски
+                        try { previewFraction(f); } catch (Throwable t) { Log.w(TAG, "preview: " + t); }
                         return true;
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
-                        if (dragging) endResize(fractionForDx(startFraction, e.getRawX() - startX));
+                        gripPressed(grip, false);
+                        endResize(fractionForDx(startFraction, e.getRawX() - startX));
                         return true;
                 }
                 return false;
             }
         });
+    }
+
+    /** Сдвиг делителя за пальцем через translationX (не вызывает layout → не будит surfaceChanged). */
+    private void moveDivider(float f) {
+        View panes = findViewById(R.id.splitPanes);
+        View divider = findViewById(R.id.splitDivider);
+        if (panes == null || divider == null) return;
+        int usable = panes.getWidth() - divider.getWidth();
+        if (usable <= 0) return;
+        divider.setTranslationX(Math.round(usable * f) - left.container.getWidth());
+    }
+
+    /** Видимая индикация нажатия рукоятки (неразрушающе — масштабом, drawable не трогаем). Это и щуп
+     *  «касание дошло до делителя»: если при нажатии рукоятка не увеличивается — касания сюда не доходят. */
+    private void gripPressed(View grip, boolean pressed) {
+        if (grip == null) return;
+        float s = pressed ? 1.6f : 1f;
+        grip.setScaleX(s);
+        grip.setScaleY(s);
     }
 
     // -------------------------------------------------------------------------
@@ -597,7 +640,7 @@ public class SplitHostActivity extends Activity {
         int usable = panes.getWidth() - divider.getWidth();
         if (usable <= 0) return;
         int lw = Math.round(usable * f);
-        divider.setTranslationX(lw - left.container.getWidth());   // рукоятка едет за пальцем
+        // Сам делитель двигает moveDivider() (owns translationX) — здесь только картинки маски.
         setLp(maskLeft,  lw, 0);
         setLp(maskRight, usable - lw, lw + divider.getWidth());
     }

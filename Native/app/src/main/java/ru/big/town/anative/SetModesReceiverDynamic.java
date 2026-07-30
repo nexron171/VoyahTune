@@ -97,7 +97,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     int ratio = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitRatio"), 1);
                     int lDpi  = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitLDpi"), 0);
                     int rDpi  = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitRDpi"), 0);
-                    SplitHostActivity.launchSplit(context.getApplicationContext(), l, r, ratio, lDpi, rDpi);
+                    boolean rsz = "1".equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitResizable"));
+                    float frac = parseFloatSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitFraction"), 0f);
+                    int pIdx = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitPresetIdx"), -1);
+                    SplitHostActivity.launchSplit(context.getApplicationContext(), l, r, ratio, lDpi, rDpi, rsz, frac, pIdx);
                     Log.i(TAG, "OPEN_DOCK_SPLIT slot=" + slot + " " + l + "/" + r + " ratio=" + ratio);
                 } else {
                     Log.i(TAG, "OPEN_DOCK_SPLIT slot=" + slot + " — сплит не назначен");
@@ -167,6 +170,12 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitRatio", String.valueOf(intent.getIntExtra("dock" + slot + "SplitRatio", 1)));
                 android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitLDpi", String.valueOf(intent.getIntExtra("dock" + slot + "SplitLDpi", 0)));
                 android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitRDpi", String.valueOf(intent.getIntExtra("dock" + slot + "SplitRDpi", 0)));
+                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitResizable",
+                        intent.getBooleanExtra("dock" + slot + "SplitResizable", false) ? "1" : "0");
+                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitFraction",
+                        String.valueOf(intent.getFloatExtra("dock" + slot + "SplitFraction", 0f)));
+                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitPresetIdx",
+                        String.valueOf(intent.getIntExtra("dock" + slot + "SplitPresetIdx", -1)));
             }
         } catch (Exception e) {
             Log.w(TAG, "mirrorDock " + slot + ": " + e.getMessage());
@@ -177,6 +186,11 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
     private static int parseIntSafe(String s, int def) {
         try { return (s == null || s.isEmpty()) ? def : Integer.parseInt(s.trim()); }
+        catch (Exception e) { return def; }
+    }
+
+    private static float parseFloatSafe(String s, float def) {
+        try { return (s == null || s.isEmpty()) ? def : Float.parseFloat(s.trim()); }
         catch (Exception e) { return def; }
     }
 
