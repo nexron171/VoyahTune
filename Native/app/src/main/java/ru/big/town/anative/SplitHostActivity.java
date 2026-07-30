@@ -627,6 +627,7 @@ public class SplitHostActivity extends Activity {
     private long resizeUntil = 0L;          // до этого момента надзиратель панелей молчит
     private android.widget.FrameLayout maskOverlay;
     private android.widget.ImageView maskLeft, maskRight;
+    private View maskDivider, maskGrip;
 
     private static final float MIN_PANE_DP = 260f;   // уже этого приложения начинают падать честно
     private static final long  MASK_HOLD_MS = 450;   // сколько ждём новый кадр перед снятием маски
@@ -664,6 +665,7 @@ public class SplitHostActivity extends Activity {
         dragging = true;
         resizeUntil = System.currentTimeMillis() + 60_000;  // надзиратель молчит, пока тянем
         ensureMaskOverlay();
+        gripPressed(maskGrip, true);
         if (maskOverlay != null) maskOverlay.animate().cancel();
         if (maskLeft != null) maskLeft.setImageDrawable(null);
         if (maskRight != null) maskRight.setImageDrawable(null);
@@ -689,12 +691,15 @@ public class SplitHostActivity extends Activity {
         int usable = panes.getWidth() - divider.getWidth();
         if (usable <= 0) return;
         int lw = Math.round(usable * f);
-        // Сам делитель двигает moveDivider() (owns translationX) — здесь только картинки маски.
+        // Preview обязан сам рисовать непрозрачный divider. Настоящий divider находится под этим
+        // оверлеем; прозрачный зазор между maskLeft/maskRight показывал бы старые SurfaceView.
         setLp(maskLeft,  lw, 0);
         setLp(maskRight, usable - lw, lw + divider.getWidth());
+        setLp(maskDivider, divider.getWidth(), lw);
     }
 
     private void setLp(View v, int w, int leftMargin) {
+        if (v == null) return;
         android.widget.FrameLayout.LayoutParams lp =
                 (android.widget.FrameLayout.LayoutParams) v.getLayoutParams();
         lp.width = w;
@@ -711,6 +716,7 @@ public class SplitHostActivity extends Activity {
         if (resizeState != ResizeState.DRAGGING) return;
         dragging = false;
         resizeState = ResizeState.SETTLING;
+        gripPressed(maskGrip, false);
         final int generation = resizeGeneration;
         final long leftVersion = left.resizeVersion;
         final long rightVersion = right.resizeVersion;
@@ -757,6 +763,7 @@ public class SplitHostActivity extends Activity {
         resizeGeneration++;
         dragging = false;
         resizeState = ResizeState.IDLE;
+        gripPressed(maskGrip, false);
         View divider = findViewById(R.id.splitDivider);
         if (divider != null) divider.setTranslationX(0f);
         if (maskOverlay != null) {
@@ -781,14 +788,39 @@ public class SplitHostActivity extends Activity {
         } catch (Exception e) { Log.w(TAG, "saveFraction: " + e.getMessage()); }
     }
 
-    /** Оверлей поверх панелей: две картинки, которые тянутся вместо живых окон. */
+    /**
+     * Оверлей поверх панелей: две картинки + собственный непрозрачный divider с grip.
+     *
+     * SurfaceView живёт в отдельном Surface-слое. Поэтому нельзя оставлять между картинками
+     * прозрачную щель и рассчитывать, что перемещённый divider из нижней view-иерархии её закроет:
+     * через щель композитор показывает старые буферы приложений. Оверлей полностью непрозрачен ещё
+     * до завершения асинхронного PixelCopy, а divider рисуется в том же верхнем слое, что и preview.
+     */
     private void ensureMaskOverlay() {
         if (maskOverlay != null) return;
         maskOverlay = new android.widget.FrameLayout(this);
+        maskOverlay.setBackgroundColor(android.graphics.Color.BLACK);
+        maskOverlay.setClickable(false);
         maskLeft  = newMaskImage();
         maskRight = newMaskImage();
+        android.widget.FrameLayout divider = new android.widget.FrameLayout(this);
+        divider.setBackgroundColor(android.graphics.Color.BLACK);
+        divider.setLayoutParams(new android.widget.FrameLayout.LayoutParams(0,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+        maskDivider = divider;
+
+        maskGrip = new View(this);
+        float density = getResources().getDisplayMetrics().density;
+        android.widget.FrameLayout.LayoutParams gripLp = new android.widget.FrameLayout.LayoutParams(
+                Math.round(7f * density), Math.round(80f * density));
+        gripLp.gravity = android.view.Gravity.CENTER;
+        maskGrip.setLayoutParams(gripLp);
+        maskGrip.setBackgroundResource(R.drawable.split_handle_grip);
+        divider.addView(maskGrip);
+
         maskOverlay.addView(maskLeft);
         maskOverlay.addView(maskRight);
+        maskOverlay.addView(maskDivider); // последним: divider/grip всегда поверх снимков
         // Кладём в КОРЕНЬ (FrameLayout), а не в splitPanes: тот горизонтальный LinearLayout, и оверлей
         // стал бы в нём ещё одной колонкой, отобрав ширину у самих панелей.
         // SurfaceView здесь в обычном z-порядке (setZOrderOnTop не вызывается нигде), поэтому обычная
