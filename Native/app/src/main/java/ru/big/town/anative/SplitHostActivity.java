@@ -631,16 +631,30 @@ public class SplitHostActivity extends Activity {
     private static final float MIN_PANE_DP = 260f;   // уже этого приложения начинают падать честно
     private static final long  MASK_HOLD_MS = 450;   // сколько ждём новый кадр перед снятием маски
 
-    /** Доля левого окна для смещения пальца, с ограничением минимальной ширины панели. */
+    /**
+     * Доля левого окна для смещения пальца, с ограничением минимальной ЛОГИЧЕСКОЙ ширины обеих VD.
+     * Пиксельный минимум у панелей разный: 260dp при 320dpi — это 520px, а не 260px физического
+     * экрана. Старый clamp использовал density хоста и позволял загнать VD с пользовательским DPI
+     * в телефонный/compat-размер, где Activity начинала letterbox'иться маленьким прямоугольником.
+     */
     private float fractionForDx(float startFraction, float dx) {
         View panes = findViewById(R.id.splitPanes);
         View divider = findViewById(R.id.splitDivider);
         int usable = panes.getWidth() - divider.getWidth();
         if (usable <= 0) return startFraction;
-        float min = MIN_PANE_DP * getResources().getDisplayMetrics().density / usable;
-        if (min > 0.45f) min = 0.45f;                       // на узком экране не запираем ползунок
+
+        float leftMin = MIN_PANE_DP * effectiveDpi(left) / 160f / usable;
+        float rightMin = MIN_PANE_DP * effectiveDpi(right) / 160f / usable;
+        // Если выбранные DPI физически не оставляют 260dp обеим панелям, сохраняем их пропорцию,
+        // но оставляем хотя бы 10% общего диапазона для движения делителя.
+        float minSum = leftMin + rightMin;
+        if (minSum > 0.90f) {
+            float scale = 0.90f / minSum;
+            leftMin *= scale;
+            rightMin *= scale;
+        }
         float f = startFraction + dx / usable;
-        return Math.max(min, Math.min(1f - min, f));
+        return Math.max(leftMin, Math.min(1f - rightMin, f));
     }
 
     /** Снять размытые снимки обеих панелей и показать оверлей вместо живых окон. */

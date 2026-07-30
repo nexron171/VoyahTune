@@ -138,8 +138,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             android.content.ContentResolver cr = ctx.getContentResolver();
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot, pkg);
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "Dpi", String.valueOf(dpi));
-            // Per-package DPI для freeform-хука: vd_bypass.ensureActivityConfiguration читает voyahtune_dpi_<pkg>.
-            if (!"none".equals(pkg) && dpi > 0) {
+            // Per-package DPI для freeform-хука: 0 тоже обязательно зеркалируем. Иначе после выбора
+            // «Авто» в Settings.Global навсегда оставалось старое ненулевое значение для пакета.
+            if (!"none".equals(pkg)) {
                 android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
             }
             // Сплит, открываемый долгим нажатием на слот дока. Флаг HasSplit читает launcherdock.js

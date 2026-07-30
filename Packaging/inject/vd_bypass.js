@@ -236,14 +236,24 @@ Java.perform(function () {
         installed.push("DisplayPolicy.layoutWindowLw(fake-freeform)");
     } catch (e) { Log.e("VDBYPASS", "layoutWindowLw hook fail: " + e); }
 
-    // 7) Кастомный DPI не-системному приложению (voyahtune_dpi_<pkg>). Тоже opt-in + try/catch.
+    // 7) Кастомный DPI не-системному приложению на ФИЗИЧЕСКИХ дисплеях.
+    //
+    // VirtualDisplay сюда принципиально не попадает: его density задаёт createVirtualDisplay/resize.
+    // Старый код делал tc.setTo(task.getConfiguration()), то есть записывал в REQUESTED override всю
+    // уже разрешённую конфигурацию (bounds/appBounds/screenWidthDp/screenHeightDp). После resize VD это
+    // «замораживало» размер task на одном из промежуточных значений: сам display и Surface уже росли,
+    // а Activity продолжала рисовать узкий прямоугольник. На физических дисплеях также меняем только
+    // одно действительно запрошенное поле — densityDpi; resolved Configuration копировать нельзя.
     try {
         var ARc = Java.use("com.android.server.wm.ActivityRecord");
         var Task = Java.use("com.android.server.wm.Task");
+        var Configuration = Java.use("android.content.res.Configuration");
         ARc.ensureActivityConfiguration.overload('int', 'boolean', 'boolean').implementation = function (g, p, iv) {
             var result = this.ensureActivityConfiguration(g, p, iv);
             if (!FF.on) return result;
             try {
+                var displayId = this.getDisplayId();
+                if (displayId !== 0 && displayId !== 1) return result;
                 var pkg = this.packageName.value;
                 if (ffBlacklisted(pkg)) return result;
                 var dpi = ffDpiFor(pkg);
@@ -251,18 +261,15 @@ Java.perform(function () {
                 var taskF = this.getClass().getDeclaredField("task");
                 taskF.setAccessible(true);
                 var task = Java.cast(taskF.get(this), Task);
-                var tc = task.getRequestedOverrideConfiguration();
-                tc.setTo(task.getConfiguration());
-                tc.densityDpi.value = dpi; tc.orientation.value = 2;
+                var current = task.getRequestedOverrideConfiguration();
+                if (current.densityDpi.value === dpi) return result;
+                var tc = Configuration.$new(current);
+                tc.densityDpi.value = dpi;
                 task.onRequestedOverrideConfigurationChanged(tc);
-                var ac = this.getRequestedOverrideConfiguration();
-                ac.setTo(this.getConfiguration());
-                ac.densityDpi.value = dpi; ac.orientation.value = 2;
-                this.onConfigurationChanged(ac);
             } catch (e) { /* не роняем WM */ }
             return result;
         };
-        installed.push("ActivityRecord.ensureActivityConfiguration(dpi)");
+        installed.push("ActivityRecord.ensureActivityConfiguration(physical-dpi-only)");
     } catch (e) { Log.e("VDBYPASS", "ensureActivityConfiguration hook fail: " + e); }
 
     // Маркер пишет load.bin (root), а не мы: система (uid system) не может писать в /data/local/tmp (EACCES).
