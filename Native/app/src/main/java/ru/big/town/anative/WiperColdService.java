@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -84,9 +85,19 @@ public class WiperColdService extends Service {
     private static final String PREF_WIPER_ENABLED  = "wiperCold";
     private static final String PREF_MEDIA_PAUSE    = "pauseMediaOnDoor";
 
-    // Пауза музыки при открытии двери водителя — плавное затухание громкости, затем KEYCODE_MEDIA_PAUSE.
+    // Пауза музыки при открытии двери водителя. Команду отправляем сразу, fade идёт параллельно, а
+    // нулевую громкость держим дольше типичного 1–1.5-секундного буфера wireless CarPlay/AndroidAuto.
     private static final int  FADE_STEPS = 12;      // шагов затухания
     private static final long FADE_TOTAL_MS = 500;  // общая длительность затухания
+    private static final long REMOTE_AUDIO_DRAIN_MS = 2_200L;
+
+    // Native не может вызвать оригинальный Qinggan KeyManagerReader напрямую. В full-сборке это
+    // действие принимает защищённый runtime-receiver в steeringwheelkeys.js; если инжект отсутствует
+    // (включая light), ordered-broadcast completion делает безопасный стандартный fallback.
+    private static final String MEDIA_PROXY_ACTION = "ru.big.town.anative.MEDIA_KEY_PROXY";
+    private static final String KEYMANAGER_PACKAGE = "com.qinggan.keymanager.service";
+    private static final int MEDIA_PROXY_ACK = -1;
+    private static final int MEDIA_PROXY_UNHANDLED = 0;
 
     // Одна команда-переключатель (toggle): включает и выключает сервисный режим
     private static final String WIPER_TOGGLE_FRAME = "65 08 00 00 c1 c0 00 00 40 00";
@@ -123,6 +134,9 @@ public class WiperColdService extends Service {
     private static final long POWER_ON_RESET_SUPPRESS_MS = 10_000L;
 
     private Handler timerHandler;
+
+    private final DoorPauseRunState mediaPauseState = new DoorPauseRunState();
+    private AudioManager mediaFadeAudioManager = null;
 
     private IBinder canBusBinder = null;
     private boolean canBusBound  = false;
@@ -419,63 +433,149 @@ public class WiperColdService extends Service {
     // -------------------------------------------------------------------------
 
     /**
-     * Плавно приглушает медиа-громкость до нуля за {@link #FADE_TOTAL_MS}, затем ставит активную
-     * медиа-сессию на паузу ({@code KEYCODE_MEDIA_PAUSE}) и возвращает исходный уровень громкости
-     * (на паузе он не слышен, зато следующее воспроизведение стартует на нормальной громкости).
-     *
-     * <p>Затухание через {@link AudioManager#setStreamVolume} по {@code STREAM_MUSIC} — best-effort:
-     * на голове с car-audio (CarAudioManager, аудио-зоны) смена stream-громкости может не влиять на
-     * реальный выход; в этом случае fade будет незаметен, но сама ПАУЗА отработает в любом случае
-     * (dispatchMediaKeyEvent пермишенов не требует). Пауза, а не toggle, — открытие двери именно
-     * останавливает музыку, а не переключает play/pause.
+     * Отправляет PAUSE_ONLY сразу, параллельно гасит громкость за {@link #FADE_TOTAL_MS} и возвращает
+     * её лишь после {@link #REMOTE_AUDIO_DRAIN_MS}. Это скрывает уже буферизованный wireless-звук, но
+     * не откладывает саму команду паузы. За один door-open команда отправляется ровно один раз.
      */
     private void pauseActiveMediaWithFade() {
         final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
-        if (am == null) { return; }
-        // Уже идёт затухание (дверь дёрнули повторно за <1с) — не запускаем второй ramp, чтобы не
-        // захватить промежуточную (низкую) громкость как «исходную» и не оставить звук приглушённым.
-        // Просто ещё раз шлём паузу.
-        if (mediaFading) { dispatchMediaPause(am); return; }
-        int startVol;
-        try {
-            startVol = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-        } catch (Exception e) {
-            Log.w(TAG, "pauseActiveMedia: getStreamVolume: " + e.getMessage());
-            dispatchMediaPause(am);
+        // Не запускаем второй ramp и не повторяем команду: повторный PLAY_PAUSE после задержки мог бы
+        // снова запустить уже остановившийся bridge-плеер.
+        if (mediaPauseState.isBusy()) {
+            Log.i(TAG, "pauseActiveMediaWithFade: duplicate suppressed");
             return;
         }
-        Log.i(TAG, "pauseActiveMediaWithFade: startVol=" + startVol + " (дверь водителя открыта)");
-        if (startVol <= 0) { dispatchMediaPause(am); return; }
 
-        mediaFading = true;
-        final int startVolF = startVol;
-        final long stepMs = Math.max(30, FADE_TOTAL_MS / FADE_STEPS);
-        for (int i = 1; i <= FADE_STEPS; i++) {
-            final int target = Math.round(startVolF * (float) (FADE_STEPS - i) / FADE_STEPS);
-            timerHandler.postDelayed(() -> {
-                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, target), 0); } catch (Exception ignored) {}
-            }, stepMs * i);
+        int startVol;
+        try {
+            startVol = am == null ? -1 : am.getStreamVolume(AudioManager.STREAM_MUSIC);
+        } catch (Exception e) {
+            Log.w(TAG, "pauseActiveMedia: getStreamVolume: " + e.getMessage());
+            startVol = -1;
         }
-        // После затухания: пауза + вернуть исходную громкость (на паузе не слышна).
+
+        Log.i(TAG, "pauseActiveMediaWithFade: startVol=" + startVol + " (дверь водителя открыта)");
+        final int generation = mediaPauseState.begin(startVol);
+        if (generation == DoorPauseRunState.REJECTED_GENERATION) return;
+        mediaFadeAudioManager = am;
+
+        // Главное исправление AutoKit: команда уходит в t=0 по тому же keymanager-пути, по которому
+        // работает физическая кнопка, а не после fade через глобальный PAUSE=127.
+        dispatchDoorPause(am);
+
+        if (am == null || startVol <= 0) {
+            // Даже без ramp держим debounce до конца remote drain window: быстрый повтор 85 до
+            // обновления bridge-state мог бы снова включить уже остановленное воспроизведение.
+            timerHandler.postDelayed(() -> finishMediaFade(generation, false),
+                    REMOTE_AUDIO_DRAIN_MS);
+            return;
+        }
+
+        final int startVolF = startVol;
+        for (int i = 1; i <= FADE_STEPS; i++) {
+            final int target = DoorPauseTimeline.fadeStepVolume(startVolF, i, FADE_STEPS);
+            timerHandler.postDelayed(() -> {
+                if (!mediaPauseState.isCurrent(generation)) return;
+                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0); }
+                catch (Exception ignored) {}
+            }, DoorPauseTimeline.fadeStepDelayMs(i, FADE_STEPS, FADE_TOTAL_MS));
+        }
+
+        // Не возвращаем громкость сразу после fade: удалённый CP/AA endpoint может ещё 1–1.5 с
+        // выдавать уже буферизованный звук после принятия pause.
         timerHandler.postDelayed(() -> {
-            dispatchMediaPause(am);
-            try { am.setStreamVolume(AudioManager.STREAM_MUSIC, startVolF, 0); } catch (Exception ignored) {}
-            mediaFading = false;
-            Log.i(TAG, "pauseActiveMediaWithFade: пауза отправлена, громкость возвращена=" + startVolF);
-        }, stepMs * FADE_STEPS + 80);
+            if (!mediaPauseState.isCurrent(generation)) return;
+            finishMediaFade(generation, true);
+        }, DoorPauseTimeline.restoreDelayMs(FADE_TOTAL_MS, REMOTE_AUDIO_DRAIN_MS));
     }
 
-    private volatile boolean mediaFading = false;
+    private void finishMediaFade(int generation, boolean restore) {
+        if (!mediaPauseState.isCurrent(generation)) return;
+        int restoreVolume = mediaPauseState.finishAndTakeRestoreVolume(generation);
+        if (restore && mediaFadeAudioManager != null && restoreVolume >= 0) {
+            try {
+                mediaFadeAudioManager.setStreamVolume(
+                        AudioManager.STREAM_MUSIC, restoreVolume, 0);
+            } catch (Exception e) {
+                Log.w(TAG, "finishMediaFade: restore volume: " + e.getMessage());
+            }
+            Log.i(TAG, "pauseActiveMediaWithFade: volume restored=" + restoreVolume
+                    + " after " + REMOTE_AUDIO_DRAIN_MS + "ms drain window");
+        }
+        mediaFadeAudioManager = null;
+    }
 
-    /** Отправляет KEYCODE_MEDIA_PAUSE (down+up) активной медиа-сессии. Пермишен не нужен. */
-    private void dispatchMediaPause(AudioManager am) {
+    /** Выбирает ровно одну семантическую команду; direct/noop уже полностью обработаны роутером. */
+    private void dispatchDoorPause(AudioManager am) {
+        MediaControlRouter.Result result = MediaControlRouter.dispatch(
+                this, MediaControlPolicy.Command.PAUSE_ONLY);
+        Log.i(TAG, "dispatchDoorPause: route=" + result.route + " key=" + result.keyCode
+                + " pkg=" + result.packageName + " stateClass=" + result.playbackClass);
+
+        if (MediaControlRouter.ROUTE_DIRECT.equals(result.route)
+                || MediaControlRouter.ROUTE_NOOP.equals(result.route)) {
+            return;
+        }
+
+        boolean musicActive = false;
+        try { musicActive = am != null && am.isMusicActive(); }
+        catch (Exception e) { Log.w(TAG, "dispatchDoorPause: isMusicActive: " + e.getMessage()); }
+
+        if (MediaControlRouter.ROUTE_KEYMANAGER.equals(result.route)) {
+            int keyCode = MediaControlPolicy.pauseKeyWithAudioEvidence(
+                    result.keyCode, musicActive);
+            if (keyCode != result.keyCode) {
+                Log.i(TAG, "dispatchDoorPause: active music stream confirms safe PLAY_PAUSE fallback");
+            }
+            sendMediaProxy(keyCode, false, am);
+            return;
+        }
+        if (MediaControlRouter.ROUTE_NATIVE.equals(result.route)) {
+            // NATIVE_QG is returned for a confirmed active OEM/Bluetooth target. Recreate QG6 in
+            // keymanager; the completion fallback uses standard 85 if the hook is unavailable.
+            sendMediaProxy(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, true, am);
+        }
+    }
+
+    private void sendMediaProxy(int keyCode, boolean nativeQinggan, AudioManager fallbackAudioManager) {
+        if (keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                && keyCode != KeyEvent.KEYCODE_MEDIA_NEXT
+                && keyCode != KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                && keyCode != KeyEvent.KEYCODE_MEDIA_PAUSE) {
+            Log.w(TAG, "sendMediaProxy: rejected key=" + keyCode);
+            return;
+        }
+        Intent intent = new Intent(MEDIA_PROXY_ACTION);
+        intent.setPackage(KEYMANAGER_PACKAGE);
+        intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+        intent.putExtra("keyCode", keyCode);
+        intent.putExtra("nativeQG", nativeQinggan);
         try {
-            long t = SystemClock.uptimeMillis();
-            am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE, 0));
-            am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_UP,   KeyEvent.KEYCODE_MEDIA_PAUSE, 0));
-            Log.i(TAG, "dispatchMediaPause: KEYCODE_MEDIA_PAUSE отправлен");
+            sendOrderedBroadcast(intent, null, new BroadcastReceiver() {
+                @Override public void onReceive(Context context, Intent deliveredIntent) {
+                    if (getResultCode() == MEDIA_PROXY_ACK) return;
+                    Log.w(TAG, "sendMediaProxy: hook unavailable, standard fallback key=" + keyCode);
+                    dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+                }
+            }, timerHandler, MEDIA_PROXY_UNHANDLED, null, null);
         } catch (Exception e) {
-            Log.w(TAG, "dispatchMediaPause: " + e.getMessage());
+            Log.w(TAG, "sendMediaProxy: " + e.getMessage());
+            dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+        }
+    }
+
+    /** Last-resort standard key path for light builds or a missing runtime hook. */
+    private void dispatchGlobalMediaKey(AudioManager supplied, int keyCode) {
+        try {
+            AudioManager am = supplied != null
+                    ? supplied : (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            long t = SystemClock.uptimeMillis();
+            am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_DOWN, keyCode, 0));
+            am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_UP, keyCode, 0));
+            Log.i(TAG, "dispatchGlobalMediaKey: key=" + keyCode);
+        } catch (Exception e) {
+            Log.w(TAG, "dispatchGlobalMediaKey: " + e.getMessage());
         }
     }
 
@@ -523,7 +623,17 @@ public class WiperColdService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
-        timerHandler.removeCallbacks(safetyRunnable);
+        int restoreVolume = mediaPauseState.cancelAndTakeRestoreVolume();
+        if (mediaFadeAudioManager != null && restoreVolume >= 0) {
+            try {
+                mediaFadeAudioManager.setStreamVolume(
+                        AudioManager.STREAM_MUSIC, restoreVolume, 0);
+            } catch (Exception e) {
+                Log.w(TAG, "onDestroy: restore media volume: " + e.getMessage());
+            }
+        }
+        mediaFadeAudioManager = null;
+        if (timerHandler != null) timerHandler.removeCallbacksAndMessages(null);
         if (canBusBound) {
             removeCanBusCallback();
             try {

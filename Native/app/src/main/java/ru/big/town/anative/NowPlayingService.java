@@ -54,11 +54,10 @@ public class NowPlayingService extends Service {
 
     private static final String ART_FILE_NAME = "nowplaying_art.png";
 
-    // Маршрутизация медиа-кнопок руля. Решение принимает Native (здесь), потому что определить активную
-    // медиа-сессию можно только через MediaSessionManager с MEDIA_CONTENT_CONTROL, а у процесса
-    // keymanager (где живёт хук steeringwheelkeys.js) этой привилегии нет. Native знает топ-сессию (её же
-    // он показывает как «сейчас играет») и публикует в Settings.Global строку-решение; хук читает её
-    // синхронно при нажатии и роутит:
+    // Legacy-маршрут для совместимости со старыми версиями steeringwheelkeys.js. Новый хук на каждое
+    // initial DOWN синхронно вызывает NowPlayingProvider.media_command: там берётся СВЕЖИЙ список сессий,
+    // выбирается конкретная цель и команда доставляется ровно одним путём. Старый Settings.Global ключ
+    // продолжаем публиковать, чтобы обновление APK отдельно от Packaging не ломало кнопки:
     //   "native"   → отдать клавишу штатной маршрутизации прошивки (BT/AVRCP, штатный плеер и его прокси,
     //                нет сессии, старт до готовности, нет привилегии) — стоковое поведение;
     //   "dispatch" → сторонний плеер (Яндекс/Spotify/…) → хук сам шлёт медиа-эвент в активную сессию.
@@ -162,15 +161,24 @@ public class NowPlayingService extends Service {
         detachAll();
         if (controllers != null) {
             for (MediaController c : controllers) {
+                final MediaController watchedController = c;
                 MediaController.Callback cb = new MediaController.Callback() {
+                    private boolean wasActive = MediaControlRouter.isActiveState(
+                            safePlaybackState(watchedController));
+
                     @Override public void onMetadataChanged(MediaMetadata metadata) { repick("metadata"); }
-                    @Override public void onPlaybackStateChanged(PlaybackState state) { repick("playback"); }
+                    @Override public void onPlaybackStateChanged(PlaybackState state) {
+                        boolean active = MediaControlRouter.isActiveState(state);
+                        if (active && !wasActive) MediaControlRouter.notePlaying(watchedController);
+                        wasActive = active;
+                        repick("playback");
+                    }
                     @Override public void onSessionDestroyed() { handler.post(() -> onSessionsChanged(safeSessions())); }
                 };
                 try { c.registerCallback(cb, handler); watched.add(c); watchedCbs.add(cb); } catch (Exception ignored) {}
             }
         }
-        current = pickController(controllers);
+        current = MediaControlRouter.selectController(controllers);
         Log.i(TAG, "сессий: " + (controllers == null ? 0 : controllers.size())
                 + ", топ: " + (current != null ? current.getPackageName() : "нет"));
         publishMediaRoute();
@@ -183,7 +191,7 @@ public class NowPlayingService extends Service {
      * publishMediaRoute внутри дедуплицирует запись, так что Settings.Global не долбится.
      */
     private void repick(String reason) {
-        MediaController pick = pickController(safeSessions());
+        MediaController pick = MediaControlRouter.selectController(safeSessions());
         if (!sameController(pick, current)) {
             current = pick;
             Log.i(TAG, "топ-сессия сменилась (" + reason + "): "
@@ -212,9 +220,9 @@ public class NowPlayingService extends Service {
         String pkg = (current != null) ? nz(current.getPackageName()) : "";
         String route = (pkg.isEmpty() || isOemMediaPackage(pkg)) ? ROUTE_NATIVE : ROUTE_DISPATCH;
         if (route.equals(lastMediaRoute)) return;   // без изменений — не трогаем Settings.Global
-        lastMediaRoute = route;
         try {
             android.provider.Settings.Global.putString(getContentResolver(), MEDIA_ROUTE_KEY, route);
+            lastMediaRoute = route;
             Log.i(TAG, "mediaRoute → " + route + " (pkg=" + (pkg.isEmpty() ? "none" : pkg) + ")");
         } catch (Exception e) {
             // Нет WRITE_SECURE_SETTINGS (enforce-ROM без whitelist) → ключ не появится → хук по умолчанию
@@ -233,18 +241,13 @@ public class NowPlayingService extends Service {
         return pkg.startsWith("com.android.") || pkg.startsWith("com.qinggan.") || pkg.equals("android");
     }
 
-    /** Кандидат: первый ИГРАЮЩИЙ; если никто не играет — первый из списка (он в порядке приоритета). */
-    private MediaController pickController(List<MediaController> controllers) {
-        if (controllers == null || controllers.isEmpty()) return null;
-        for (MediaController c : controllers) {
-            PlaybackState ps = c.getPlaybackState();
-            if (ps != null && ps.getState() == PlaybackState.STATE_PLAYING) return c;
-        }
-        return controllers.get(0);
-    }
-
     private List<MediaController> safeSessions() {
         try { return msm.getActiveSessions(null); } catch (Exception e) { return null; }
+    }
+
+    private static PlaybackState safePlaybackState(MediaController controller) {
+        try { return controller == null ? null : controller.getPlaybackState(); }
+        catch (Exception e) { return null; }
     }
 
     private boolean sameController(MediaController a, MediaController b) {

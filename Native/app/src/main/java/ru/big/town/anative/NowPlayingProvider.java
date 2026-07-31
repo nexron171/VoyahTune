@@ -5,7 +5,11 @@ import android.content.ContentValues;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
+import android.os.Binder;
+import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
+import android.os.Process;
+import android.util.Log;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -25,6 +29,12 @@ import java.io.FileNotFoundException;
  * Exported=true (читает RestoreMode, отдельный /data-процесс). Данные не чувствительны (метаданные трека).
  */
 public class NowPlayingProvider extends ContentProvider {
+
+    private static final String TAG = "$$$ NowPlayingProvider $$$";
+    private static final String KEYMANAGER_PACKAGE = "com.qinggan.keymanager.service";
+
+    /** Synchronous command API used by the steering-wheel hook on the initial key DOWN only. */
+    public static final String METHOD_MEDIA_COMMAND = "media_command";
 
     public static final String AUTHORITY = "ru.big.town.anative.nowplaying";
     public static final Uri CONTENT_URI  = Uri.parse("content://" + AUTHORITY);
@@ -77,6 +87,58 @@ public class NowPlayingProvider extends ContentProvider {
     public String getType(Uri uri) {
         return uri != null && "art".equals(uri.getLastPathSegment())
                 ? "image/png" : "vnd.android.cursor.item/nowplaying";
+    }
+
+    /**
+     * Resolves and executes one media command against a fresh active-session snapshot.
+     *
+     * <p>The provider stays publicly readable for the existing now-playing consumers, therefore the
+     * mutating {@code call()} entry point has its own strict caller check. Calling-package validation
+     * happens before clearing Binder identity; the clear is required so MediaSessionManager checks
+     * Native's privileged identity rather than keymanager's identity.</p>
+     */
+    @Override
+    public Bundle call(String method, String arg, Bundle extras) {
+        if (!METHOD_MEDIA_COMMAND.equals(method)) return super.call(method, arg, extras);
+        enforceMediaCommandCaller();
+
+        MediaControlPolicy.Command command = parseCommand(arg);
+        if (command == null) {
+            Bundle result = new Bundle();
+            result.putString("route", MediaControlRouter.ROUTE_NATIVE);
+            result.putInt("keyCode", 0);
+            result.putString("package", "");
+            result.putInt("playbackClass", MediaControlPolicy.STATE_UNKNOWN);
+            return result;
+        }
+
+        long identity = Binder.clearCallingIdentity();
+        try {
+            return MediaControlRouter.dispatch(getContext(), command).toBundle();
+        } finally {
+            Binder.restoreCallingIdentity(identity);
+        }
+    }
+
+    private void enforceMediaCommandCaller() {
+        if (Binder.getCallingUid() == Process.myUid()) return;
+        String caller = null;
+        try {
+            caller = getCallingPackage();
+        } catch (SecurityException e) {
+            Log.w(TAG, "media_command: invalid calling package: " + e.getMessage());
+        }
+        if (!KEYMANAGER_PACKAGE.equals(caller)) {
+            throw new SecurityException("media_command is not allowed for " + caller);
+        }
+    }
+
+    private static MediaControlPolicy.Command parseCommand(String arg) {
+        if ("play_pause".equals(arg)) return MediaControlPolicy.Command.PLAY_PAUSE;
+        if ("pause_only".equals(arg)) return MediaControlPolicy.Command.PAUSE_ONLY;
+        if ("next".equals(arg)) return MediaControlPolicy.Command.NEXT;
+        if ("previous".equals(arg)) return MediaControlPolicy.Command.PREVIOUS;
+        return null;
     }
 
     @Override public Uri insert(Uri uri, ContentValues values) { return null; }
