@@ -678,8 +678,10 @@ public class SetModesService extends Service {
                         // Засыпание/выключение → следующее пробуждение должно СНАЧАЛА восстановить
                         // сохранённый режим, а не подхватить дефолт машины. Заранее глушим внешний синк
                         // режима (страховка к сбросу в scheduleApply — на случай «тёплого» процесса, где
-                        // CAN-эхо может прийти раньше wake-триггера). См. ApplyEngine.restoreDoneThisCycle.
-                        if (isSleepOrShutdownState(state)) ApplyEngine.resetRestoreGate();
+                        // CAN-эхо может прийти раньше wake-триггера). См. ApplyEngine/ModeSyncPolicy.
+                        if (isSleepOrShutdownState(state)) {
+                            ApplyEngine.resetRestoreGate("power state " + powerStateName(state));
+                        }
                         Log.i(TAG, "onStateChanged() ignored state: " + state);
                     }
                 }
@@ -817,6 +819,7 @@ public class SetModesService extends Service {
             filter.addAction("android.intent.action.KEYCODE_SWC_USER_DEFINE");
             filter.addAction("com.android.server.jobscheduler.GARAGE_MODE_OFF");
             filter.addAction("android.intent.action.SCREEN_ON");
+            filter.addAction("android.intent.action.SCREEN_OFF");
             getApplicationContext().registerReceiver(setModesReceiverDynamic, filter, RECEIVER_EXPORTED);
             receiverRegistered = true;
         }

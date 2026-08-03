@@ -332,6 +332,7 @@ public class MainActivity extends AppCompatActivity {
                 boolean pauseMediaOnDoor = cursor.getColumnCount() > 18 && cursor.getInt(18) == 1;
                 applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
                 saveModesCache(context, debugMode, wiperColdMode, pauseMediaOnDoor);
+                ApplyEngine.noteLoadedModes(driveMode, energy, driveEnabled, energyEnabled);
                 Log.i(MODES_LOG, "FRESH: driveEnabled=" + driveEnabled
                         + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
                         + " disablePedestrianSound=" + disablePedestrianSound
@@ -402,6 +403,7 @@ public class MainActivity extends AppCompatActivity {
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
         applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
+        ApplyEngine.noteLoadedModes(driveMode, energy, driveEnabled, energyEnabled);
         Log.i(MODES_LOG, "CACHE: driveEnabled=" + driveEnabled
                 + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound
@@ -544,6 +546,12 @@ public class MainActivity extends AppCompatActivity {
         return isEnergy ? energy : driveMode;
     }
 
+    /** Быстрая проверка уже загруженного snapshot без повторного запроса к provider на каждый VState. */
+    static boolean isLoadedMode(boolean isEnergy, String mode) {
+        if (mode == null) return false;
+        return mode.equals(isEnergy ? energy : driveMode);
+    }
+
     /**
      * Сохранить «последний активированный» режим как ИСТОЧНИК ИСТИНЫ: пишем в pref RestoreMode через
      * провайдер (переживёт пробуждение + попадёт в UI VoyahTune), плюс освежаем статик Native и его кэш
@@ -565,6 +573,7 @@ public class MainActivity extends AppCompatActivity {
         }
         // Статик — состояние текущей сессии (совпадает с только что отправленным в CAN режимом), обновляем всегда.
         if (isEnergy) energy = mode; else driveMode = mode;
+        ApplyEngine.noteSavedMode(isEnergy, mode);
         // Уведомить UI VoyahTune, чтобы селектор режима следил за текущим в реальном времени — даже когда
         // режим сменили штатным меню машины или кнопкой руля при ОТКРЫТОМ экране «Настройки автомобиля».
         try {

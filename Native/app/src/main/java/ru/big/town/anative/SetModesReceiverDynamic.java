@@ -102,6 +102,13 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 //            repeat = 7;
 //            isButton = false;
 //        }
+        // SCREEN_OFF приходит раньше suspend/wake CAN-эхо и закрывает sync заранее. Это страховка
+        // для прошивок, где CarPowerListener периодически пропускает SUSPEND_ENTER.
+        if (Intent.ACTION_SCREEN_OFF.equals(receivedIntent)) {
+            ApplyEngine.resetRestoreGate("SCREEN_OFF");
+            Log.i(TAG, "onReceive SCREEN_OFF — mode sync gate reset");
+        }
+
         // Fallback-триггер пробуждения через броадкасты. Держим его активным всегда (даже если
         // power-listener работает): при рестарте CarService слушатель может «протухнуть», а этот
         // путь остаётся. Возможные дубли с power-listener гасит дебаунс в ApplyEngine.
@@ -333,16 +340,22 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      * активированный» (MainActivity.persistSavedMode → pref RestoreMode) → переживёт пробуждение + в UI.
      */
     private static void cycleMode(Context ctx, String csv, boolean energy) {
-        String[] modes = csv.split(",");
-        if (modes.length == 0) return;
-        String cur = MainActivity.currentSavedMode(ctx, energy);
-        int idx = -1;
-        for (int i = 0; i < modes.length; i++) if (modes[i].equals(cur)) { idx = i; break; }
-        String next = modes[idx >= 0 ? (idx + 1) % modes.length : 0];
-        byte[][] cmd = energy ? MainActivity.getEnergyCanCommand(next) : MainActivity.getDriveModeCanCommand(next);
-        MainActivity.setCanValues(1, cmd, (energy ? "steer energy → " : "steer drive → ") + next);
-        MainActivity.persistSavedMode(ctx, energy, next);
-        Log.i(TAG, "STEER_ACTION " + (energy ? "energy" : "drive") + ": набор=" + csv + " тек=" + cur + " → " + next);
+        final Context app = ctx.getApplicationContext();
+        // Пользовательский выбор должен идти ПОСЛЕ уже запущенного wake-restore, а не параллельно с ним:
+        // иначе restore успевал отправить старый snapshot поверх только что выбранного режима.
+        ApplyEngine.postExclusive("steer " + (energy ? "energy" : "drive"), () -> {
+            String[] modes = csv.split(",");
+            if (modes.length == 0) return;
+            String cur = MainActivity.currentSavedMode(app, energy);
+            int idx = -1;
+            for (int i = 0; i < modes.length; i++) if (modes[i].equals(cur)) { idx = i; break; }
+            String next = modes[idx >= 0 ? (idx + 1) % modes.length : 0];
+            byte[][] cmd = energy ? MainActivity.getEnergyCanCommand(next) : MainActivity.getDriveModeCanCommand(next);
+            MainActivity.setCanValues(1, cmd, (energy ? "steer energy → " : "steer drive → ") + next);
+            MainActivity.persistSavedMode(app, energy, next);
+            Log.i(TAG, "STEER_ACTION " + (energy ? "energy" : "drive") + ": набор=" + csv
+                    + " тек=" + cur + " → " + next);
+        });
     }
 
 }

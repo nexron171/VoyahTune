@@ -199,6 +199,9 @@ public class TripStatsService extends Service {
             canBusBinder = service;
             canBusBound  = true;
             Log.i(TAG, "CanBusService connected");
+            // Закрываем sync ДО регистрации callback: первый snapshot после (ре)коннекта часто содержит
+            // системный wake-дефолт. Одновременно просим восстановить сохранённый snapshot.
+            ApplyEngine.scheduleApply("CanBus connected");
             addCanBusCallback();
         }
 
@@ -494,34 +497,32 @@ public class TripStatsService extends Service {
     private static final int DRIVE_MODE_VSTATE_ID  = 545;  // DRIVING_MODE_SET (выбранный пункт режима вождения)
     private static final int ENERGY_MODE_VSTATE_ID = 957;  // IVI_SOC_MODESET (энергорежим / power mode)
 
-    // Guard от «пожарного шланга»: пишем pref только на РЕАЛЬНУЮ смену state (VehicleState может повторяться).
-    private static int lastDriveState = Integer.MIN_VALUE, lastEnergyState = Integer.MIN_VALUE;
-
     private void maybeSyncMode(int id, int state) {
         if (id < 0) return;                                // -1 = «нет id» в parcel; не коллизимся с сентинелом
-        // ГЕЙТ: пока в этом цикле пробуждения не восстановлен сохранённый режим — НЕ трогаем источник истины.
-        // На старте авто рапортует свой дефолт (ЭКО/Электро) ДО того как ApplyEngine применил сохранённый
-        // режим; синк этого дефолта перезаписал бы провайдер+кэш и восстановление применяло бы дефолт (баг
-        // «всегда ЭКО/Электро на пробуждении»). Реальные внешние смены (штатное меню) приходят уже awake,
-        // после restore, и проходят гейт. Гейт снимает ApplyEngine после первого успешного restore-прохода.
-        if (!ApplyEngine.isRestoreDoneThisCycle()) {
-            if (NativeLog.get().isRunning()) {
-                Log.i(TAG, "maybeSyncMode: restore этого цикла ещё не выполнен — пропуск (id=" + id + " state=" + state + ")");
-            }
-            return;
-        }
         try {
+            final boolean energy;
+            final String mode;
             if (id == DRIVE_MODE_VSTATE_ID) {
-                if (state == lastDriveState) return;
-                lastDriveState = state;
-                String m = driveModeFromState(state);
-                if (m != null) MainActivity.persistSavedMode(getApplicationContext(), false, m);
+                energy = false;
+                mode = driveModeFromState(state);
             } else if (id == ENERGY_MODE_VSTATE_ID) {
-                if (state == lastEnergyState) return;
-                lastEnergyState = state;
-                String m = energyModeFromState(state);
-                if (m != null) MainActivity.persistSavedMode(getApplicationContext(), true, m);
+                energy = true;
+                mode = energyModeFromState(state);
+            } else return;
+
+            // Неизвестный/переходный state нельзя угадывать и тем более сохранять как пользовательский.
+            if (mode == null) {
+                if (NativeLog.get().isRunning()) {
+                    Log.i(TAG, "maybeSyncMode: unknown state ignored id=" + id + " state=" + state);
+                }
+                return;
             }
+            // Во время restore+settle policy либо игнорирует ожидаемое эхо, либо сама запускает
+            // корректирующее применение при ECO/другом несовпадении. Provider здесь остаётся неизменным.
+            if (!ApplyEngine.shouldPersistModeFeedback(energy, mode)) return;
+            // VState может повторяться часто. После первой записи статик MainActivity уже совпадает — no-op.
+            if (MainActivity.isLoadedMode(energy, mode)) return;
+            MainActivity.persistSavedMode(getApplicationContext(), energy, mode);
         } catch (Exception e) {
             Log.w(TAG, "maybeSyncMode: " + e.getMessage());
         }
@@ -542,13 +543,14 @@ public class TripStatsService extends Service {
     }
 
     /** IVI_SOC_MODESET (id957) → тег энергорежима (снято на голове H97C).
-     *  Неизвестное значение (в т.ч. SMART/Intelligent, которого нет на 3-кнопочной машине) → фолбэк на REV (fuel). */
+     *  Неизвестное/переходное значение не синкаем: угадывание раньше безусловно превращало его в REV.
+     *  SMART намеренно не угадываем без подтверждённого state на конкретной комплектации. */
     private static String energyModeFromState(int state) {
         switch (state) {
             case 2: return "EV";     // Электро
             case 3: return "REV";    // Гибрид (fuel)
             case 4: return "SREV";   // Топливо (save)
-            default: return "REV";   // фолбэк на fuel
+            default: return null;
         }
     }
 

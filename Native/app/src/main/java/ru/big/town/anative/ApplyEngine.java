@@ -59,20 +59,59 @@ public final class ApplyEngine {
     // Без этого пачка wake-состояний, растянутая дольше дебаунса (WAIT_FOR_VHAL → … → ON),
     // давала бы второй полный цикл — и кастомные команды пользователя ушли бы дважды.
     private static volatile long lastCycleEndUptime = -1;
+    // Последний УСПЕШНЫЙ цикл нужен дедупликатору: если wake-триггер пришёл во время уже идущего
+    // восстановления, новое поколение может безопасно считать себя покрытым только успешным циклом.
+    private static volatile long lastSuccessfulCycleEndUptime = -1;
 
-    // req3-гейт внешнего синка режима. Внешний синк (TripStatsService.maybeSyncMode) должен ИГНОРИРОВАТЬ
-    // «эхо» текущего режима машины, пока в этом цикле пробуждения не восстановлен СОХРАНЁННЫЙ режим.
-    // На старте авто рапортует свой дефолт (ЭКО/Электро) ДО применения сохранённого режима — без гейта
-    // этот дефолт затирал источник истины (провайдер RestoreMode + кэш), и восстановление применяло
-    // именно его («всегда ЭКО/Электро на пробуждении»). Снимаем гейт после первого УСПЕШНОГО прохода
-    // restore; сбрасываем при каждом новом цикле применения (scheduleApply) и на засыпании.
-    private static volatile boolean restoreDoneThisCycle = false;
+    // Boolean «CAN один раз успешно отправлен» оказался недостаточен: OEM способен ещё раз выставить
+    // дефолт после успешной команды. Policy держит источник истины закрытым на restore+settle, различает
+    // поколения конкурирующих wake-триггеров и просит корректирующий цикл при несовпадении feedback.
+    private static final ModeSyncPolicy MODE_SYNC_POLICY = new ModeSyncPolicy();
 
-    /** true → в этом цикле пробуждения сохранённый режим уже восстановлён (можно принимать внешние смены режима). */
-    public static boolean isRestoreDoneThisCycle() { return restoreDoneThisCycle; }
+    private static long beginRestoreGate(String reason) {
+        long generation = MODE_SYNC_POLICY.beginRestore();
+        Log.i(TAG, "mode sync gate CLOSED gen=" + generation + " reason=" + reason);
+        return generation;
+    }
 
-    /** Новый цикл пробуждения/засыпания: до следующего успешного restore внешний синк режима заглушён. */
-    public static void resetRestoreGate() { restoreDoneThisCycle = false; }
+    /** Засыпание/потеря CAN: внешний feedback закрыт до следующего успешного restore+settle. */
+    public static void resetRestoreGate() {
+        resetRestoreGate("external reset");
+    }
+
+    public static void resetRestoreGate(String reason) {
+        long generation = MODE_SYNC_POLICY.freeze();
+        Log.i(TAG, "mode sync gate FROZEN gen=" + generation + " reason=" + reason);
+    }
+
+    /** Полный снимок источника истины, прочитанный MainActivity из provider/cache. */
+    static void noteLoadedModes(String drive, String energy,
+                                boolean driveEnabled, boolean energyEnabled) {
+        MODE_SYNC_POLICY.updateExpected(drive, energy, driveEnabled, energyEnabled);
+    }
+
+    /** Явно сохранённый режим (руль или уже разрешённая внешняя смена) сразу становится ожидаемым. */
+    static void noteSavedMode(boolean energy, String mode) {
+        MODE_SYNC_POLICY.updateExpectedMode(energy, mode);
+    }
+
+    /**
+     * Решение для VehicleState: во время wake feedback только подтверждает/оспаривает restore и никогда
+     * не перезаписывает provider. Несовпадение запускает коалесцированный корректирующий цикл.
+     */
+    static boolean shouldPersistModeFeedback(boolean energy, String observedMode) {
+        ModeSyncPolicy.Decision decision = MODE_SYNC_POLICY.evaluate(
+                energy, observedMode, SystemClock.uptimeMillis());
+        if (decision == ModeSyncPolicy.Decision.CORRECT) {
+            String kind = energy ? "energy" : "drive";
+            Log.w(TAG, "wake feedback conflicts with saved " + kind + " mode: " + observedMode
+                    + " — restoring source of truth again");
+            scheduleApply("wake " + kind + " drift " + observedMode);
+            return false;
+        }
+        if (decision == ModeSyncPolicy.Decision.IGNORE) return false;
+        return true;
+    }
 
     private ApplyEngine() {}
 
@@ -90,20 +129,27 @@ public final class ApplyEngine {
      * сворачиваются в один цикл; триггеры, пришедшие во время идущего цикла, им же и покрыты.
      */
     public static void scheduleApply(String reason) {
-        // Новый цикл применения → заглушаем внешний синк режима, пока restore не восстановит сохранённый
-        // режим (иначе дефолт-эхо машины на пробуждении перезапишет источник истины). Синхронно и ДО
-        // дебаунса: на пробуждении WAIT_FOR_VHAL приходит раньше готовности VHAL → раньше любого VehicleState.
-        restoreDoneThisCycle = false;
+        // Закрываем синхронно и ДО дебаунса: WAIT_FOR_VHAL/CanBus reconnect должны опередить первый
+        // VehicleState с системным ECO. Поколение не даст старому циклу открыть более новый guard.
+        final long generation = beginRestoreGate("schedule: " + reason);
         final long scheduledAt = SystemClock.uptimeMillis();
         Log.i(TAG, "scheduleApply: " + reason);
         Handler h = bg();
         h.removeCallbacksAndMessages(DEBOUNCE_TOKEN);
         h.postAtTime(() -> {
-            if (scheduledAt <= lastCycleEndUptime) {
-                Log.i(TAG, "apply skipped (covered by previous cycle): " + reason);
-                return;
+            long coveredAt = lastCycleEndUptime;
+            if (scheduledAt <= coveredAt) {
+                long successfulAt = lastSuccessfulCycleEndUptime;
+                if (successfulAt >= scheduledAt) {
+                    MODE_SYNC_POLICY.completeRestore(generation, successfulAt);
+                    Log.i(TAG, "apply skipped (covered by successful previous cycle): " + reason);
+                    return;
+                }
+                // Неуспешная отправка не покрывает wake-триггер: CAN мог подняться сразу после её
+                // дедлайна. Выполняем новый цикл вместо вечного закрытого gate без повторной попытки.
+                Log.i(TAG, "previous cycle did not restore modes — retrying: " + reason);
             }
-            applyInternal(WAKE_REPEAT, WAKE_PAUSE, null);
+            applyInternal(WAKE_REPEAT, WAKE_PAUSE, null, generation);
         }, DEBOUNCE_TOKEN, scheduledAt + DEBOUNCE_MS);
     }
 
@@ -113,7 +159,8 @@ public final class ApplyEngine {
      * разблокировки кнопки на клиенте.
      */
     public static void applyNow(int repeat, long pause, Runnable onDone) {
-        bg().post(() -> applyInternal(repeat, pause, onDone));
+        final long generation = beginRestoreGate("manual apply");
+        bg().post(() -> applyInternal(repeat, pause, onDone, generation));
     }
 
     /**
@@ -132,22 +179,33 @@ public final class ApplyEngine {
     }
 
     // Выполняется строго на bg-потоке — сериализация даёт single-flight без флагов/локов.
-    private static void applyInternal(int repeat, long pause, Runnable onDone) {
+    private static void applyInternal(int repeat, long pause, Runnable onDone, long generation) {
+        boolean restored = false;
         try {
-            runCycle(repeat, pause);
+            restored = runCycle(repeat, pause);
         } catch (Throwable t) {
             Log.e(TAG, "runCycle failed: " + t.getMessage(), t);
         } finally {
-            lastCycleEndUptime = SystemClock.uptimeMillis();
+            long endedAt = SystemClock.uptimeMillis();
+            if (restored) lastSuccessfulCycleEndUptime = endedAt;
+            lastCycleEndUptime = endedAt;
+            if (restored) {
+                if (MODE_SYNC_POLICY.completeRestore(generation, endedAt)) {
+                    Log.i(TAG, "mode sync gate SETTLING gen=" + generation + " for "
+                            + ModeSyncPolicy.POST_RESTORE_SETTLE_MS + "ms");
+                } else {
+                    Log.i(TAG, "restore gen=" + generation + " covered a newer wake trigger; gate stays closed");
+                }
+            }
             if (onDone != null) onDone.run();
         }
     }
 
-    private static void runCycle(int repeat, long pause) {
+    private static boolean runCycle(int repeat, long pause) {
         Context ctx = GlobalVars.SAVE_CONTEXT;
         if (ctx == null) {
             Log.w(TAG, "runCycle: no context, skip");
-            return;
+            return false;
         }
 
         // 1) Дожидаемся готовности настроек (2=провайдер, 1=кэш, 0=нет данных).
@@ -162,7 +220,7 @@ public final class ApplyEngine {
         }
         if (status == 0) {
             Log.e(TAG, "runCycle: no settings (provider+cache empty) — nothing to apply");
-            return;
+            return false;
         }
 
         // 2) Отправляем ПОКА не наберём `repeat` УСПЕШНЫХ проходов (CAN готов) ИЛИ не выйдет дедлайн.
@@ -191,17 +249,13 @@ public final class ApplyEngine {
         } else {
             Log.i(TAG, "runCycle: режим применён, успешных проходов " + okPasses + "/" + repeat + " (tries=" + tries + ")");
         }
-        // Сохранённый режим восстановлен (хотя бы один успешный проход) → снимаем гейт: теперь внешние
-        // смены режима (штатное меню машины) синкаются в источник истины. До этого — «эхо» дефолта машины
-        // на старте игнорируется (см. restoreDoneThisCycle и TripStatsService.maybeSyncMode).
-        if (okPasses > 0) restoreDoneThisCycle = true;
-
         // 3) Кастомные команды пользователя (unlock/wake и т.п.).
         for (int i = 0; i < MainActivity.customCommandCount; i++) {
             MainActivity.setCanValues(1, MainActivity.getCustomCommand(), "custom command (unlock/wake)");
             sleep(pause);
         }
         Log.i(TAG, "runCycle: done (source=" + (status == 2 ? "provider" : "cache") + ")");
+        return okPasses > 0;
     }
 
     private static void sleep(long ms) {
