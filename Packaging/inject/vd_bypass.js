@@ -221,10 +221,21 @@ Java.perform(function () {
                 // Пассажирский экран (display 1) на этой голове ПОЛНОСТЬЮ идентичен главному (1920×720, док
                 // 145dp) → те же bounds, что и display 0. Guard выше уже пропускает оба физических экрана.
                 var b = Rect.$new(FF.left, FF.top, FF.right, FF.bottom);
-                df.mStable.value = b;
-                wf.mStableFrame.value = b;  wf.mParentFrame.value = b;  wf.mDisplayFrame.value = b;
-                wf.mContentFrame.value = b; wf.mVisibleFrame.value = b; wf.mDecorFrame.value = b;
-                win.computeFrame(df);
+                // DisplayFrames принадлежит всему display/layout-проходу, а не только этому окну.
+                // Раньше мы заменяли mStable и оставляли уменьшенный Rect там навсегда: следующие окна
+                // (включая Launcher/док) могли получить геометрию стороннего приложения. Сохраняем
+                // значение и обязательно возвращаем его после computeFrame; WindowFrames самого окна
+                // остаются уменьшенными.
+                var stable = df.mStable.value;
+                var savedStable = Rect.$new(stable);
+                try {
+                    stable.set(b);
+                    wf.mStableFrame.value.set(b);  wf.mParentFrame.value.set(b);  wf.mDisplayFrame.value.set(b);
+                    wf.mContentFrame.value.set(b); wf.mVisibleFrame.value.set(b); wf.mDecorFrame.value.set(b);
+                    win.computeFrame(df);
+                } finally {
+                    stable.set(savedStable);
+                }
             } catch (e) {
                 // Ошибка на КОНКРЕТНОМ окне (напр. нестандартное окно без ожидаемых полей WindowFrames) →
                 // пропускаем ТОЛЬКО его. НЕ выключаем freeform глобально: раньше FF.on=false здесь убивал

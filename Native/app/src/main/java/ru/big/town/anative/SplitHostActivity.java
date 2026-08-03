@@ -1009,6 +1009,7 @@ public class SplitHostActivity extends Activity {
             i.putExtra(EXTRA_SPLIT, split);
             i.putExtra(EXTRA_PRESET_IDX, presetIdx);
             i.putExtra(EXTRA_PRESET_ID, presetId);
+            DockLaunchGuard.arm(ctx, 0, "ru.big.town.anative");
             ctx.startActivity(i);
             Log.i(TAG, "launchSplit host started " + left + "/" + right);
         } catch (Exception e) {

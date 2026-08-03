@@ -269,7 +269,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 Intent i = new Intent();
                 i.setClassName("ru.big.town.restoremode", "ru.big.town.restoremode.MainActivity");
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                ctx.startActivity(i);
+                DockLaunchGuard.arm(ctx, 0, "ru.big.town.restoremode");
+                android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
+                o.setLaunchDisplayId(0);
+                ctx.startActivity(i, o.toBundle());
                 Log.i(TAG, "STEER_ACTION → открыть VoyahTune");
             } catch (Exception e) {
                 Log.w(TAG, "open VoyahTune failed: " + e.getMessage());
@@ -298,11 +301,14 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      */
     static void openFreeformApp(Context context, String pkg, int displayId) {
         if (pkg == null || pkg.isEmpty()) return;
-        boolean hadSplit = SplitHostActivity.closeActiveSplit();
         final Context app = context.getApplicationContext();
         Intent li = app.getPackageManager().getLaunchIntentForPackage(pkg);
         if (li == null) { Log.w(TAG, "openFreeformApp: нет launch intent для " + pkg); return; }
         li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        // Ставим guard ДО teardown сплита: finish SplitHost тоже может запустить dismiss дока раньше,
+        // чем Launcher успеет записать в foreground-кэш пакет нового приложения.
+        DockLaunchGuard.arm(app, displayId, pkg);
+        boolean hadSplit = SplitHostActivity.closeActiveSplit();
         final Intent fli = li;
         final android.os.Bundle opts;
         {

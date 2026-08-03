@@ -36,6 +36,7 @@ Java.perform(function () {
 
     var ActivityThread = Java.use("android.app.ActivityThread");
     var SettingsGlobal = Java.use("android.provider.Settings$Global");
+    var SystemClock    = Java.use("android.os.SystemClock");
     var Intent         = Java.use("android.content.Intent");
     var Bitmap         = Java.use("android.graphics.Bitmap");
     var BitmapConfig   = Java.use("android.graphics.Bitmap$Config");
@@ -140,6 +141,32 @@ Java.perform(function () {
         if (!pkg) return false;                                  // неизвестно → не мешаем штатному
         if (pkg.indexOf("ru.big.town") === 0) return ourInsetActivity(act);
         return !isStockPkg(pkg);
+    }
+
+    // Native публикует guard одной строкой "elapsedDeadline|package" непосредственно перед
+    // startActivity. Это закрывает окно гонки dismiss → updateSelectedApp при запуске со звёздочки:
+    // foreground-кэш в этот момент ещё закономерно содержит Launcher/старое приложение.
+    function pendingDockLaunch(screenId) {
+        if (cfg("dockpin") === "0" || cfg("freeform") === "0") return null;
+        try {
+            var raw = cfg("dockLaunchGuard" + screenId);
+            if (raw === "none") return null;
+            var sep = raw.indexOf("|");
+            if (sep <= 0 || sep >= raw.length - 1) return null;
+            var deadline = parseInt(raw.substring(0, sep), 10);
+            var now = Number(SystemClock.elapsedRealtime());
+            var remaining = deadline - now;
+            // Верхний предел делает persisted Settings-запись безопасной после reboot, когда
+            // elapsedRealtime снова начинается с нуля. Штатный guard держится 5 секунд.
+            if (isNaN(deadline) || remaining <= 0 || remaining > 10000) return null;
+            var pkg = raw.substring(sep + 1);
+            // Guard не должен удержать док поверх полноэкранного штатного приложения, которому
+            // штатный dismiss как раз нужен. Для наших двух inset-экранов activity заранее известна.
+            var keep = (pkg === OUR_PKG || pkg === RESTORE_PKG)
+                    || (pkg.indexOf("ru.big.town") !== 0 && !isStockPkg(pkg));
+            if (!keep) return null;
+            return { pkg: pkg, remaining: remaining };
+        } catch (e) { return null; }
     }
 
     function ctx() {
@@ -455,11 +482,18 @@ Java.perform(function () {
                     var sid = 0;
                     try { sid = (screenIdOf(this) === 1) ? 1 : 0; } catch (e) {}
                     var fg = fgByScreen[sid];
+                    var pending = pendingDockLaunch(sid);
                     // Разведочный лог ДО решения: без него «хук не встал» неотличимо от «условие не
                     // сработало». console.log после -e мёртв, поэтому только android.util.Log.
                     try { Java.use("android.util.Log").i("voyahdock",
-                            "dismiss ENTER " + label + " screen=" + sid + " fg=" + fg.pkg + " act=" + fg.act); } catch (ee) {}
+                            "dismiss ENTER " + label + " screen=" + sid + " fg=" + fg.pkg + " act=" + fg.act
+                            + (pending ? " pending=" + pending.pkg + "/" + Math.ceil(pending.remaining) + "ms" : "")); } catch (ee) {}
                     try {
+                        if (pending !== null) {
+                            try { Java.use("android.util.Log").i("voyahdock", "dismiss BLOCKED " + label
+                                    + " pending launch " + pending.pkg); } catch (ee) {}
+                            return;
+                        }
                         if (dockKept(fg.pkg, fg.act)) {
                             try { Java.use("android.util.Log").i("voyahdock", "dismiss BLOCKED " + label); } catch (ee) {}
                             return;                      // док остаётся на месте

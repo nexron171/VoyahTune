@@ -429,6 +429,7 @@ public class SetModesService extends Service {
             i.putExtra(SplitHostActivity.EXTRA_SPLIT, split);
             i.putExtra(SplitHostActivity.EXTRA_PRESET_IDX, presetIdx);
             i.putExtra(SplitHostActivity.EXTRA_PRESET_ID, presetId);
+            DockLaunchGuard.arm(this, 0, "ru.big.town.anative");
             startActivity(i);
             Log.i(TAG, "launchVirtualSplit host started");
         } catch (Exception e) {
