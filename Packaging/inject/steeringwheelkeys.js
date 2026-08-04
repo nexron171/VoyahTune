@@ -37,6 +37,8 @@ Java.perform(function () {
     var Uri = Java.use("android.net.Uri");
     var KeyEvent = Java.use("android.view.KeyEvent");
     var AudioManager = Java.use("android.media.AudioManager");
+    var Log = Java.use("android.util.Log");
+    var TAG = "steeringwheelkeys.js"
 
     function ctx() {
         try { var app = ActivityThread.currentApplication(); if (app !== null) return app.getApplicationContext(); } catch (e) {}
@@ -272,6 +274,7 @@ Java.perform(function () {
                 catch (e) { console.log("[swk] retain KeyManagerReader err: " + e); }
             }
             var code = ke.getKeyCode();
+            Log.i(TAG, "key press: " + code + " action: " + ke.getAction())
             // Решение вычисляем один раз на initial DOWN и держим до UP. direct/noop уже обработаны
             // Native; keymanager отправляет одну стандартную пару здесь; native получает настоящие
             // физические DOWN/repeat/UP через оригинальную реализацию.

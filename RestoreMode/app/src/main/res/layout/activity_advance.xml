@@ -1970,6 +1970,126 @@
 
             </LinearLayout>
 
+
+            <!-- Кнопка-voice -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Кнопка голосового помощника"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical"
+                android:background="@drawable/layout_category_bg"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Короткое нажатие"
+                    android:textColor="#aaaaaa"
+                    android:textSize="20px" />
+
+                <Button
+                    android:id="@+id/steerVoiceShortBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="64dp"
+                    android:layout_marginTop="6dp"
+                    android:backgroundTint="#373f4a"
+                    android:onClick="onPickSteerVoiceShort"
+                    android:text="Не менять"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22dp"
+                    android:singleLine="true"
+                    app:cornerRadius="20dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Долгое нажатие"
+                    android:textColor="#aaaaaa"
+                    android:textSize="20px" />
+
+                <Button
+                    android:id="@+id/steerVoiceLongBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="64dp"
+                    android:layout_marginTop="6dp"
+                    android:backgroundTint="#373f4a"
+                    android:onClick="onPickSteerVoiceLong"
+                    android:text="Не менять"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22dp"
+                    android:singleLine="true"
+                    app:cornerRadius="20dp" />
+
+            </LinearLayout>
+
+
+            <!-- Кнопка-phone -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Кнопка трубка"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical"
+                android:background="@drawable/layout_category_bg"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Короткое нажатие"
+                    android:textColor="#aaaaaa"
+                    android:textSize="20px" />
+
+                <Button
+                    android:id="@+id/steerPhoneShortBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="64dp"
+                    android:layout_marginTop="6dp"
+                    android:backgroundTint="#373f4a"
+                    android:onClick="onPickSteerPhoneShort"
+                    android:text="Не менять"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22dp"
+                    android:singleLine="true"
+                    app:cornerRadius="20dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Долгое нажатие"
+                    android:textColor="#aaaaaa"
+                    android:textSize="20px" />
+
+                <Button
+                    android:id="@+id/steerPhoneLongBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="64dp"
+                    android:layout_marginTop="6dp"
+                    android:backgroundTint="#373f4a"
+                    android:onClick="onPickSteerPhoneLong"
+                    android:text="Не менять"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22dp"
+                    android:singleLine="true"
+                    app:cornerRadius="20dp" />
+
+            </LinearLayout>
+
         </LinearLayout>
     </ScrollView>
     <!-- конец pageSteeringButtons -->

@@ -66,7 +66,7 @@ public class AdvanceActivity extends AppCompatActivity {
     };
 
     // Кнопки на руле — 4 кнопки-пикера действий (звёздочка/DVR × короткое/долгое). Поля/логика ниже.
-    private Button steerStarShortBtn, steerStarLongBtn, steerDvrShortBtn, steerDvrLongBtn;
+    private Button steerStarShortBtn, steerStarLongBtn, steerDvrShortBtn, steerDvrLongBtn, steerVoiceShortBtn, steerVoiceLongBtn, steerPhoneShortBtn, steerPhoneLongBtn;
 
     // DrivePreferences — единый источник настроек
     private SharedPreferences prefs;
@@ -1123,14 +1123,22 @@ public class AdvanceActivity extends AppCompatActivity {
         steerStarLongBtn  = findViewById(R.id.steerStarLongBtn);
         steerDvrShortBtn  = findViewById(R.id.steerDvrShortBtn);
         steerDvrLongBtn   = findViewById(R.id.steerDvrLongBtn);
+        steerVoiceShortBtn  = findViewById(R.id.steerVoiceShortBtn);
+        steerVoiceLongBtn   = findViewById(R.id.steerVoiceLongBtn);
+        steerPhoneShortBtn  = findViewById(R.id.steerPhoneShortBtn);
+        steerPhoneLongBtn   = findViewById(R.id.steerPhoneLongBtn);
         refreshSteerButtons();
         pushSteerConfig();   // синхронизируем выбор в Native при открытии раздела
     }
 
     public void onPickSteerStarShort(View v) { pickSteerAction("steerStarShort", steerStarShortBtn); }
     public void onPickSteerStarLong(View v)  { pickSteerAction("steerStarLong",  steerStarLongBtn); }
+    public void onPickSteerVoiceShort(View v) { pickSteerAction("steerVoiceShort", steerVoiceShortBtn); }
+    public void onPickSteerVoiceLong(View v)  { pickSteerAction("steerVoiceLong",  steerVoiceLongBtn); }
     public void onPickSteerDvrShort(View v)  { pickSteerAction("steerDvrShort",  steerDvrShortBtn); }
     public void onPickSteerDvrLong(View v)   { pickSteerAction("steerDvrLong",   steerDvrLongBtn); }
+    public void onPickSteerPhoneShort(View v) { pickSteerAction("steerPhoneShort", steerPhoneShortBtn); }
+    public void onPickSteerPhoneLong(View v)  { pickSteerAction("steerPhoneLong",  steerPhoneLongBtn); }
 
     /** Диалог выбора действия для слота; сохраняет id в prefs, обновляет подпись кнопки. Помимо статических
      *  действий (STEER_ACTIONS) есть два динамических: «Открыть сплит…» и «Открыть приложение…» — они
@@ -1201,6 +1209,10 @@ public class AdvanceActivity extends AppCompatActivity {
         setSteerButtonText(steerStarLongBtn,  "steerStarLong");
         setSteerButtonText(steerDvrShortBtn,  "steerDvrShort");
         setSteerButtonText(steerDvrLongBtn,   "steerDvrLong");
+        setSteerButtonText(steerVoiceShortBtn,  "steerVoiceShort");
+        setSteerButtonText(steerVoiceLongBtn,   "steerVoiceLong");
+        setSteerButtonText(steerPhoneShortBtn,  "steerPhoneShort");
+        setSteerButtonText(steerPhoneLongBtn,   "steerPhoneLong");
     }
 
     private void setSteerButtonText(Button b, String key) {
