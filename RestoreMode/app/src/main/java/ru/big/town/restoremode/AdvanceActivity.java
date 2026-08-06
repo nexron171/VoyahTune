@@ -122,9 +122,40 @@ public class AdvanceActivity extends AppCompatActivity {
         public void onReceive(Context context, Intent intent) {
             String mode = intent.getStringExtra("mode");
             if (mode == null || mode.isEmpty()) return;
-            boolean isEnergy = intent.getBooleanExtra("isEnergy", false);
-            RadioGroup g = findViewById(isEnergy ? R.id.energy_modes_group : R.id.drive_modes_group);
+            String modeKey = intent.getStringExtra("modeKey");
+            if (modeKey == null) {
+                modeKey = intent.getBooleanExtra("isEnergy", false) ? "energy" : "driveMode";
+            }
+            int groupId = "energy".equals(modeKey) ? R.id.energy_modes_group
+                    : "recycle".equals(modeKey) ? R.id.recycle_modes_group
+                    : R.id.drive_modes_group;
+            RadioGroup g = findViewById(groupId);
             if (g != null) checkRadioByTag(g, mode);
+        }
+    };
+
+    // Кнопка руля может переключить бинарные настройки, пока этот экран открыт. Обновляем контролы
+    // без повторной отправки CAN-команды из их OnCheckedChangeListener.
+    private boolean syncingSettingUi;
+    private final BroadcastReceiver settingSyncReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String key = intent.getStringExtra("key");
+            if (key == null || !intent.hasExtra("value")) return;
+            boolean value = intent.getBooleanExtra("value", false);
+            prefs.edit().putBoolean(key, value).apply();
+            syncingSettingUi = true;
+            try {
+                if ("forcedEv".equals(key)) {
+                    RadioGroup group = findViewById(R.id.forcedEvGroup);
+                    if (group != null) group.check(value ? R.id.forcedEvOn : R.id.forcedEvOff);
+                } else if ("disablePedestrianSound".equals(key)) {
+                    RadioGroup group = findViewById(R.id.pedestrianSoundGroup);
+                    if (group != null) group.check(value ? R.id.pedestrianSoundOn : R.id.pedestrianSoundOff);
+                }
+            } finally {
+                syncingSettingUi = false;
+            }
         }
     };
 
@@ -1077,10 +1108,9 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     // -------------------------------------------------------------------------
-    // Кнопки на руле — назначение действий на короткое/долгое нажатие (звёздочка + DVR).
-    // Действие читает Frida-хук (keymng2.js для звёздочки; system_server для DVR). Дефолт "none" =
-    // «Не менять» → штатное системное поведение (хук пропускает). ЧТОБЫ ДОБАВИТЬ ДЕЙСТВИЕ: одна
-    // строка в STEER_ACTIONS ниже {id, ярлык} + обработка этого id в хуке. 4 слота хранят id в prefs.
+    // Кнопки на руле — назначение действий на короткое/долгое нажатие.
+    // Дефолт "none" = «Не менять» → штатное системное поведение (Frida-хук пропускает кнопку).
+    // Идентификатор выбранного действия хранится в prefs и исполняется Native через STEER_ACTION.
     // -------------------------------------------------------------------------
 
     // {id, ярлык}. Для energy:<режимы> последовательное нажатие циклирует режимы по кругу
@@ -1116,6 +1146,14 @@ public class AdvanceActivity extends AppCompatActivity {
             {"drive:OUTING,SNOW",        "Режим езды: Outing → Snow"},
             {"drive:OUTING,INDIVIDUAL",  "Режим езды: Outing → Indiv"},
             {"drive:SNOW,INDIVIDUAL",    "Режим езды: Snow → Indiv"},
+            {"recycle:LOW",              "Рекуперация: Низкая"},
+            {"recycle:MEDIUM",           "Рекуперация: Стандартная"},
+            {"recycle:HIGH",             "Рекуперация: Высокая"},
+            {"recycle:LOW,MEDIUM",       "Рекуперация: Низкая → Стандартная"},
+            {"recycle:LOW,HIGH",         "Рекуперация: Низкая → Высокая"},
+            {"recycle:MEDIUM,HIGH",      "Рекуперация: Стандартная → Высокая"},
+            {"toggle_forced_ev",         "Force EV: вкл/выкл"},
+            {"toggle_pedestrian_sound",  "Звук пешеходов: вкл/выкл"},
     };
 
     private void initSteeringButtons() {
@@ -1265,6 +1303,7 @@ public class AdvanceActivity extends AppCompatActivity {
         boolean disabled = prefs.getBoolean("disablePedestrianSound", false);
         group.check(disabled ? R.id.pedestrianSoundOn : R.id.pedestrianSoundOff);
         group.setOnCheckedChangeListener((g, checkedId) -> {
+            if (syncingSettingUi) return;
             boolean off = (checkedId == R.id.pedestrianSoundOn);
             prefs.edit().putBoolean("disablePedestrianSound", off).apply();
             Log.i("$$$ Advance pedestrian $$$", off ? "DISABLED (muted)" : "ENABLED");
@@ -1281,6 +1320,7 @@ public class AdvanceActivity extends AppCompatActivity {
         boolean on = prefs.getBoolean("forcedEv", false);
         group.check(on ? R.id.forcedEvOn : R.id.forcedEvOff);
         group.setOnCheckedChangeListener((g, checkedId) -> {
+            if (syncingSettingUi) return;
             boolean enabled = (checkedId == R.id.forcedEvOn);
             prefs.edit().putBoolean("forcedEv", enabled).apply();
             sendForcedEv(enabled);
@@ -1432,6 +1472,8 @@ public class AdvanceActivity extends AppCompatActivity {
         IntentFilter filter = new IntentFilter("ru.big.town.anative.LUX_UPDATE");
         registerReceiver(luxReceiver, filter, RECEIVER_EXPORTED);
         registerReceiver(modeSyncReceiver, new IntentFilter("ru.big.town.anative.MODE_SYNCED"), RECEIVER_EXPORTED);
+        registerReceiver(settingSyncReceiver, new IntentFilter("ru.big.town.anative.SETTING_SYNCED"),
+                "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", null, RECEIVER_EXPORTED);
         Intent req = new Intent("ru.big.town.anative.REQUEST_LUX_UPDATE");
         req.setPackage("ru.big.town.anative");
         sendBroadcast(req);
@@ -1442,5 +1484,6 @@ public class AdvanceActivity extends AppCompatActivity {
         super.onPause();
         try { unregisterReceiver(luxReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(modeSyncReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(settingSyncReceiver); } catch (Exception ignored) {}
     }
 }

@@ -525,17 +525,24 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Текущий СОХРАНЁННЫЙ режим (тот, что восстанавливается на пробуждении и показан в UI VoyahTune).
-     * Читаем из провайдера RestoreMode (col 0=driveMode, col 1=energy); фолбэк — статик Native.
+     * Читаем из провайдера RestoreMode; фолбэк — статик Native.
      * Нужно кнопке руля, чтобы циклировать ОТНОСИТЕЛЬНО реального режима (правильный первый клик).
      * @param isEnergy true → энергорежим, иначе режим вождения.
      */
     public static String currentSavedMode(Context context, boolean isEnergy) {
+        return currentSavedMode(context, isEnergy ? "energy" : "driveMode");
+    }
+
+    /** Вариант для driveMode/energy/recycle; нужен назначаемой кнопке рекуперации. */
+    public static String currentSavedMode(Context context, String modeKey) {
+        int column = modeColumn(modeKey);
+        if (column < 0) return null;
         Cursor c = null;
         try {
             c = context.getContentResolver().query(MODES_PROVIDER_URI, null, null, null, null);
-            if (c != null && c.getCount() != 0 && c.getColumnCount() > (isEnergy ? 1 : 0)) {
+            if (c != null && c.getCount() != 0 && c.getColumnCount() > column) {
                 c.moveToFirst();
-                String v = c.getString(isEnergy ? 1 : 0);
+                String v = c.getString(column);
                 if (v != null && !v.isEmpty()) return v;
             }
         } catch (Exception e) {
@@ -543,7 +550,7 @@ public class MainActivity extends AppCompatActivity {
         } finally {
             if (c != null) c.close();
         }
-        return isEnergy ? energy : driveMode;
+        return "energy".equals(modeKey) ? energy : "recycle".equals(modeKey) ? recycle : driveMode;
     }
 
     /** Быстрая проверка уже загруженного snapshot без повторного запроса к provider на каждый VState. */
@@ -560,11 +567,17 @@ public class MainActivity extends AppCompatActivity {
      * @param isEnergy true → энергорежим (pref "energy"), иначе режим вождения (pref "driveMode").
      */
     public static void persistSavedMode(Context context, boolean isEnergy, String mode) {
+        persistSavedMode(context, isEnergy ? "energy" : "driveMode", mode);
+    }
+
+    /** Сохраняет driveMode/energy/recycle после явного действия пользователя. */
+    public static void persistSavedMode(Context context, String modeKey, String mode) {
         if (context == null || mode == null || mode.isEmpty()) return;
+        if (modeColumn(modeKey) < 0) return;
         boolean written = false;
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
-            cv.put(isEnergy ? "energy" : "driveMode", mode);
+            cv.put(modeKey, mode);
             // update() провайдера возвращает число записанных ключей (>0 = успех). Провайдер может быть на
             // миг недоступен (перезапуск/переустановка) → ловим исключение и НЕ считаем запись успешной.
             written = context.getContentResolver().update(MODES_PROVIDER_URI, cv, null, null) > 0;
@@ -572,14 +585,17 @@ public class MainActivity extends AppCompatActivity {
             Log.w(MODES_LOG, "persistSavedMode provider: " + e.getMessage());
         }
         // Статик — состояние текущей сессии (совпадает с только что отправленным в CAN режимом), обновляем всегда.
-        if (isEnergy) energy = mode; else driveMode = mode;
-        ApplyEngine.noteSavedMode(isEnergy, mode);
+        if ("energy".equals(modeKey)) energy = mode;
+        else if ("recycle".equals(modeKey)) recycle = mode;
+        else driveMode = mode;
+        if (!"recycle".equals(modeKey)) ApplyEngine.noteSavedMode("energy".equals(modeKey), mode);
         // Уведомить UI VoyahTune, чтобы селектор режима следил за текущим в реальном времени — даже когда
         // режим сменили штатным меню машины или кнопкой руля при ОТКРЫТОМ экране «Настройки автомобиля».
         try {
             Intent bi = new Intent("ru.big.town.anative.MODE_SYNCED");
             bi.setPackage("ru.big.town.restoremode");
-            bi.putExtra("isEnergy", isEnergy);
+            bi.putExtra("isEnergy", "energy".equals(modeKey));
+            bi.putExtra("modeKey", modeKey);
             bi.putExtra("mode", mode);
             context.sendBroadcast(bi);
         } catch (Exception ignored) {}
@@ -589,14 +605,77 @@ public class MainActivity extends AppCompatActivity {
             // cacheValid НЕ трогаем: его выставляет только ПОЛНЫЙ снимок saveModesCache; частичный — нельзя.
             try {
                 context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
-                        .putString(isEnergy ? "cacheEnergy" : "cacheDriveMode", mode).apply();
+                        .putString(modeCacheKey(modeKey), mode).apply();
             } catch (Exception ignored) {}
-            Log.i(MODES_LOG, "persistSavedMode " + (isEnergy ? "energy" : "drive") + "=" + mode + " (provider ok)");
+            Log.i(MODES_LOG, "persistSavedMode " + modeKey + "=" + mode + " (provider ok)");
         } else {
             // Не записали в источник истины → кэш НЕ трогаем (иначе разъедется с провайдером и на
             // пробуждении provider-first всё равно вернёт старое). Режим применён в CAN, но не переживёт сон.
-            Log.w(MODES_LOG, "persistSavedMode " + (isEnergy ? "energy" : "drive") + "=" + mode
+            Log.w(MODES_LOG, "persistSavedMode " + modeKey + "=" + mode
                     + " — провайдер НЕ записан, режим не переживёт пробуждение");
+        }
+    }
+
+    private static int modeColumn(String modeKey) {
+        if ("driveMode".equals(modeKey)) return 0;
+        if ("energy".equals(modeKey)) return 1;
+        if ("recycle".equals(modeKey)) return 2;
+        return -1;
+    }
+
+    private static String modeCacheKey(String modeKey) {
+        if ("energy".equals(modeKey)) return "cacheEnergy";
+        if ("recycle".equals(modeKey)) return "cacheRecycle";
+        return "cacheDriveMode";
+    }
+
+    /** Прочитать сохранённое состояние бинарного действия кнопки руля. */
+    public static boolean currentSavedToggle(Context context, String key) {
+        int column = "disablePedestrianSound".equals(key) ? 11 : "forcedEv".equals(key) ? 19 : -1;
+        if (column < 0) return false;
+        Cursor c = null;
+        try {
+            c = context.getContentResolver().query(MODES_PROVIDER_URI, null, null, null, null);
+            if (c != null && c.getCount() != 0 && c.getColumnCount() > column) {
+                c.moveToFirst();
+                return c.getInt(column) == 1;
+            }
+        } catch (Exception e) {
+            Log.w(MODES_LOG, "currentSavedToggle " + key + ": " + e.getMessage());
+        } finally {
+            if (c != null) c.close();
+        }
+        return "forcedEv".equals(key) ? forcedEv : disablePedestrianSound;
+    }
+
+    /** Сохранить бинарное действие и синхронизировать открытый UI VoyahTune. */
+    public static void persistSavedToggle(Context context, String key, boolean value) {
+        if (context == null || (!"forcedEv".equals(key) && !"disablePedestrianSound".equals(key))) return;
+        boolean written = false;
+        try {
+            android.content.ContentValues cv = new android.content.ContentValues();
+            cv.put(key, value);
+            written = context.getContentResolver().update(MODES_PROVIDER_URI, cv, null, null) > 0;
+        } catch (Exception e) {
+            Log.w(MODES_LOG, "persistSavedToggle provider " + key + ": " + e.getMessage());
+        }
+        if ("forcedEv".equals(key)) forcedEv = value; else disablePedestrianSound = value;
+        try {
+            Intent bi = new Intent("ru.big.town.anative.SETTING_SYNCED");
+            bi.setPackage("ru.big.town.restoremode");
+            bi.putExtra("key", key);
+            bi.putExtra("value", value);
+            context.sendBroadcast(bi);
+        } catch (Exception ignored) {}
+        if (written) {
+            try {
+                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
+                        .putBoolean("forcedEv".equals(key) ? "cacheForcedEv" : "cacheDisablePedestrianSound", value)
+                        .apply();
+            } catch (Exception ignored) {}
+            Log.i(MODES_LOG, "persistSavedToggle " + key + "=" + value + " (provider ok)");
+        } else {
+            Log.w(MODES_LOG, "persistSavedToggle " + key + "=" + value + " — провайдер НЕ записан");
         }
     }
 

@@ -128,7 +128,7 @@ public class RestoreModeContentProvider extends ContentProvider {
     }
 
     /**
-     * Разрешаем записывать ТОЛЬКО режимы (driveMode/energy/recycle) в prefs DrivePreferences — это тот же
+     * Разрешаем записывать режимы и бинарные настройки, доступные с кнопок руля, в prefs DrivePreferences — тот же
      * источник истины, что читают query() и UI VoyahTune, и что восстанавливает Native на пробуждении.
      * Нужно, чтобы смена режима кнопкой руля (и внешняя смена) синхронизировала «последний активированный»
      * режим сюда → он переживёт пробуждение и отразится в настройках. Пишет Native (см.
@@ -144,6 +144,12 @@ public class RestoreModeContentProvider extends ContentProvider {
             if (values.containsKey(key)) {
                 String v = values.getAsString(key);
                 if (v != null && !v.isEmpty()) { e.putString(key, v); n++; Log.i("$$$", "provider UPDATE " + key + "=" + v); }
+            }
+        }
+        for (String key : new String[]{"forcedEv", "disablePedestrianSound"}) {
+            if (values.containsKey(key)) {
+                Boolean v = values.getAsBoolean(key);
+                if (v != null) { e.putBoolean(key, v); n++; Log.i("$$$", "provider UPDATE " + key + "=" + v); }
             }
         }
         if (n > 0) e.apply();

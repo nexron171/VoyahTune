@@ -88,8 +88,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
-        // Исполнение действия кнопки руля (шлёт keymng2.js / хук DVR). Пока — переключение энергорежима
-        // с циклированием по набору режимов. Только full.
+        // Исполнение назначенного действия кнопки руля. Только full.
         if ("ru.big.town.anative.STEER_ACTION".equals(receivedIntent) && BuildConfig.IS_FULL) {
             String action = intent.getStringExtra("action");
             if (isConfiguredSteerAction(context, action)) handleSteerAction(context, action);
@@ -240,15 +239,22 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      * истины — pref RestoreMode, его же восстанавливает ApplyEngine и показывает UI); если текущего нет в
      * наборе — первый. Одиночный набор → всегда этот режим. Новый режим СОХРАНЯЕМ как «последний
      * активированный» → переживёт пробуждение и попадёт в настройки VoyahTune.
-     *   energy:&lt;режимы&gt; — режим энергии (getEnergyCanCommand);
-     *   drive:&lt;режимы&gt;  — режим вождения (getDriveModeCanCommand).
+     *   energy:&lt;режимы&gt;  — режим энергии;
+     *   drive:&lt;режимы&gt;   — режим вождения;
+     *   recycle:&lt;режимы&gt; — уровень рекуперации.
      */
     private static void handleSteerAction(Context ctx, String action) {
         if (action == null || action.isEmpty()) return;
         if (action.startsWith("energy:")) {
-            cycleMode(ctx, action.substring("energy:".length()), true);
+            cycleMode(ctx, action.substring("energy:".length()), "energy");
         } else if (action.startsWith("drive:")) {
-            cycleMode(ctx, action.substring("drive:".length()), false);
+            cycleMode(ctx, action.substring("drive:".length()), "driveMode");
+        } else if (action.startsWith("recycle:")) {
+            cycleMode(ctx, action.substring("recycle:".length()), "recycle");
+        } else if ("toggle_forced_ev".equals(action)) {
+            toggleSetting(ctx, "forcedEv");
+        } else if ("toggle_pedestrian_sound".equals(action)) {
+            toggleSetting(ctx, "disablePedestrianSound");
         } else if (action.startsWith("app:")) {
             // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.
             openFreeformApp(ctx, action.substring("app:".length()));
@@ -339,22 +345,40 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      * первый клик уводит в sport, а не «в пустоту» обратно в comfort. Новый режим сохраняем как «последний
      * активированный» (MainActivity.persistSavedMode → pref RestoreMode) → переживёт пробуждение + в UI.
      */
-    private static void cycleMode(Context ctx, String csv, boolean energy) {
+    private static void cycleMode(Context ctx, String csv, String modeKey) {
         final Context app = ctx.getApplicationContext();
         // Пользовательский выбор должен идти ПОСЛЕ уже запущенного wake-restore, а не параллельно с ним:
         // иначе restore успевал отправить старый snapshot поверх только что выбранного режима.
-        ApplyEngine.postExclusive("steer " + (energy ? "energy" : "drive"), () -> {
-            String[] modes = csv.split(",");
-            if (modes.length == 0) return;
-            String cur = MainActivity.currentSavedMode(app, energy);
-            int idx = -1;
-            for (int i = 0; i < modes.length; i++) if (modes[i].equals(cur)) { idx = i; break; }
-            String next = modes[idx >= 0 ? (idx + 1) % modes.length : 0];
-            byte[][] cmd = energy ? MainActivity.getEnergyCanCommand(next) : MainActivity.getDriveModeCanCommand(next);
-            MainActivity.setCanValues(1, cmd, (energy ? "steer energy → " : "steer drive → ") + next);
-            MainActivity.persistSavedMode(app, energy, next);
-            Log.i(TAG, "STEER_ACTION " + (energy ? "energy" : "drive") + ": набор=" + csv
+        ApplyEngine.postExclusive("steer " + modeKey, () -> {
+            String cur = MainActivity.currentSavedMode(app, modeKey);
+            String next = SteeringActionPolicy.nextMode(csv, cur);
+            if (next == null) return;
+            byte[][] cmd = "energy".equals(modeKey) ? MainActivity.getEnergyCanCommand(next)
+                    : "recycle".equals(modeKey) ? MainActivity.getRecEnergyCanCommand(next)
+                    : MainActivity.getDriveModeCanCommand(next);
+            MainActivity.setCanValues(1, cmd, "steer " + modeKey + " → " + next);
+            MainActivity.persistSavedMode(app, modeKey, next);
+            Log.i(TAG, "STEER_ACTION " + modeKey + ": набор=" + csv
                     + " тек=" + cur + " → " + next);
+        });
+    }
+
+    /** Переключить бинарную настройку относительно сохранённого значения, применить CAN и сохранить новый state. */
+    private static void toggleSetting(Context ctx, String key) {
+        final Context app = ctx.getApplicationContext();
+        ApplyEngine.postExclusive("steer " + key, () -> {
+            boolean current = MainActivity.currentSavedToggle(app, key);
+            boolean next = !current;
+            if ("forcedEv".equals(key)) {
+                MainActivity.sendForcedEvCommand(next);
+            } else if ("disablePedestrianSound".equals(key)) {
+                // В pref хранится инвертированная семантика: true = звук выключен.
+                MainActivity.sendPedestrianSoundCommand(next);
+            } else {
+                return;
+            }
+            MainActivity.persistSavedToggle(app, key, next);
+            Log.i(TAG, "STEER_ACTION " + key + ": " + current + " → " + next);
         });
     }
 

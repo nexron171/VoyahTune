@@ -123,6 +123,21 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    // Синхронизация карточек, когда Force EV или звук пешеходов переключены кнопкой руля.
+    private final BroadcastReceiver settingSyncReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String key = intent.getStringExtra("key");
+            if (key == null || !intent.hasExtra("value")) return;
+            boolean value = intent.getBooleanExtra("value", false);
+            editor.putBoolean(key, value).apply();
+            if ("forcedEv".equals(key)) forcedEvOn = value;
+            else if ("disablePedestrianSound".equals(key)) pedestrianOn = !value;
+            else return;
+            updateToggleVisuals();
+        }
+    };
+
     private final Runnable tripTick = new Runnable() {
         @Override
         public void run() {
@@ -577,6 +592,8 @@ public class MainActivity extends AppCompatActivity {
         uiHandler.removeCallbacks(tripTick);
         uiHandler.post(tripTick);
         registerReceiver(batteryHeatReceiver, new IntentFilter(ACTION_BATTERY_HEAT_UPDATE), RECEIVER_EXPORTED);
+        registerReceiver(settingSyncReceiver, new IntentFilter("ru.big.town.anative.SETTING_SYNCED"),
+                "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", null, RECEIVER_EXPORTED);
         Intent bhReq = new Intent(ACTION_REQUEST_BATTERY_HEAT);
         bhReq.setPackage("ru.big.town.anative");
         sendBroadcast(bhReq);
@@ -790,6 +807,7 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         try { unregisterReceiver(tripReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(batteryHeatReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(settingSyncReceiver); } catch (Exception ignored) {}
         uiHandler.removeCallbacks(tripTick);
     }
 
