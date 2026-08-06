@@ -38,11 +38,20 @@ if exist "backup\frida-inject" (
 )
 REM Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
 adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid"
-REM Опционально: почистить конфиг дока в Settings.Global (иначе останется до следующей установки)
+REM Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка
+REM не подхватила старые назначения до первой синхронизации из RestoreMode.
 adb.exe shell settings delete global voyahtune_dock1 2>nul
 adb.exe shell settings delete global voyahtune_dock2 2>nul
 adb.exe shell settings delete global voyahtune_dock1Dpi 2>nul
 adb.exe shell settings delete global voyahtune_dock2Dpi 2>nul
+adb.exe shell settings delete global voyahtune_steerStarShort 2>nul
+adb.exe shell settings delete global voyahtune_steerStarLong 2>nul
+adb.exe shell settings delete global voyahtune_steerDvrShort 2>nul
+adb.exe shell settings delete global voyahtune_steerDvrLong 2>nul
+adb.exe shell settings delete global voyahtune_steerVoiceShort 2>nul
+adb.exe shell settings delete global voyahtune_steerVoiceLong 2>nul
+adb.exe shell settings delete global voyahtune_steerPhoneShort 2>nul
+adb.exe shell settings delete global voyahtune_steerPhoneLong 2>nul
 
 REM --- Whitelist + Native из /system/priv-app (+ снять /data-оверлей обновления) ---
 adb.exe shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"

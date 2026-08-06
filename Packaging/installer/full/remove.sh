@@ -31,11 +31,20 @@ adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdo
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
 # Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
 adb shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid"
-# Опционально: почистить конфиг дока в Settings.Global (иначе останется до следующей установки)
+# Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка
+# не подхватила старые назначения до первой синхронизации из RestoreMode.
 adb shell settings delete global voyahtune_dock1 2>/dev/null
 adb shell settings delete global voyahtune_dock2 2>/dev/null
 adb shell settings delete global voyahtune_dock1Dpi 2>/dev/null
 adb shell settings delete global voyahtune_dock2Dpi 2>/dev/null
+adb shell settings delete global voyahtune_steerStarShort 2>/dev/null
+adb shell settings delete global voyahtune_steerStarLong 2>/dev/null
+adb shell settings delete global voyahtune_steerDvrShort 2>/dev/null
+adb shell settings delete global voyahtune_steerDvrLong 2>/dev/null
+adb shell settings delete global voyahtune_steerVoiceShort 2>/dev/null
+adb shell settings delete global voyahtune_steerVoiceLong 2>/dev/null
+adb shell settings delete global voyahtune_steerPhoneShort 2>/dev/null
+adb shell settings delete global voyahtune_steerPhoneLong 2>/dev/null
 
 # --- Whitelist + Native из /system/priv-app (+ снять /data-оверлей обновления) ---
 adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"

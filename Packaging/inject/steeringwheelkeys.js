@@ -216,10 +216,10 @@ Java.perform(function () {
         }
     }
 
-    // Таймерный обработчик короткого/долгого для ОДНОЙ кнопки — держит своё состояние (звёздочка и
-    // DVR не мешают друг другу). Значения слотов читаются живьём в момент нажатия/отпускания.
+    // Таймерный обработчик короткого/долгого для ОДНОЙ кнопки — каждый экземпляр держит своё состояние,
+    // поэтому STAR/DVR/VOICE/PHONE не мешают друг другу. Значения читаются в момент нажатия/отпускания.
     function pressHandler(shortSlot, longSlot) {
-        var longFired = false, timer = null;
+        var longFired = false, nativeLongFallback = false, timer = null;
         return {
             passthrough: function () {   // оба слота "none" → перехватывать не нужно
                 return action(shortSlot) === "none" && action(longSlot) === "none";
@@ -227,10 +227,18 @@ Java.perform(function () {
             down: function (repeatCount) {
                 if (repeatCount > 0) return;          // игнор автоповтора удержания
                 longFired = false;
+                nativeLongFallback = false;
                 if (timer !== null) clearTimeout(timer);
                 var longA = action(longSlot);
                 timer = setTimeout(function () {      // порог удержания
-                    longFired = true; timer = null;
+                    timer = null;
+                    if (longA === "none") {
+                        // Пользователь оставил длинное нажатие штатным. DOWN до решения short/long
+                        // был поглощён, поэтому на физическом UP вернём KeyManager полную пару.
+                        nativeLongFallback = true;
+                        return;
+                    }
+                    longFired = true;
                     doAction(longA);                  // долгое — СРАЗУ по порогу, не дожидаясь UP
                 }, LONG_MS);
                 // DOWN держим до решения short/long. Иначе short=none+long=custom отдавал бы OEM
@@ -239,6 +247,10 @@ Java.perform(function () {
             },
             up: function () {
                 if (timer !== null) { clearTimeout(timer); timer = null; }
+                if (nativeLongFallback) {
+                    nativeLongFallback = false;
+                    return false; // long="none": replay штатной пары DOWN+UP
+                }
                 if (!longFired) {
                     if (action(shortSlot) === "none") {
                         return false; // на UP нужно replay штатной пары DOWN+UP
@@ -297,7 +309,7 @@ Java.perform(function () {
             if (BUTTON_MAP.hasOwnProperty(code)) {
                 var actionCode = BUTTON_MAP[code];
                 var h = HANDLER_MAP[actionCode];
-                // Кнопки-действия (звезда/DVR) — таймерное короткое/долгое.
+                // Кнопки-действия (STAR/DVR/VOICE/PHONE) — таймерное короткое/долгое.
                 if (h === null) return readerOnKeyEvent.call(this, ke);        // не наша кнопка → штатно
                 if (h.passthrough()) return readerOnKeyEvent.call(this, ke);   // не настроено → штатно
                 if (ke.getAction() == 0) {
@@ -305,13 +317,17 @@ Java.perform(function () {
                 }
                 else if (ke.getAction() == 1) {
                     if (h.up() === false) {
-                        // Короткое штатное действие было отложено до UP, чтобы long мог безопасно
+                        // Штатное действие было отложено до UP, чтобы custom short/long мог безопасно
                         // поглотить обе половины. Replay делаем полной парой через original overload.
+                        // У синтетического DOWN восстанавливаем исходный eventTime=downTime: так
+                        // штатный KeyManager видит реальную длительность физического удержания.
                         try {
-                            readerOnKeyEvent.call(this, KeyEvent.changeAction(ke, 0));
+                            var replayDown = KeyEvent.changeAction(
+                                KeyEvent.changeTimeRepeat(ke, ke.getDownTime(), 0), 0);
+                            readerOnKeyEvent.call(this, replayDown);
                             return readerOnKeyEvent.call(this, ke);
                         } catch (e) {
-                            console.log("[swk] native short replay err: " + e);
+                            console.log("[swk] native action replay err: " + e);
                             return true;
                         }
                     }
