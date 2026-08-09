@@ -103,9 +103,15 @@ public class TripStatsService extends Service {
     private Handler timerHandler;
 
     private IBinder canBusBinder = null;
-    private boolean canBusBound  = false;
+    // bindService(true) registers a binding reference even while the remote process is down.
+    // Keep that lifecycle separate from the momentary binder connection so safety-poll never
+    // stacks another bindService reference after onServiceDisconnected.
+    private boolean canBusBindingRequested = false;
+    private boolean canBusConnected = false;
     private boolean canBusCallbackAdded   = false;
-    private long    lastCanBusBindAttempt = 0L;
+    private long    lastCanBusBindAttempt = -BIND_RETRY_MS;
+    private volatile boolean destroyed = false;
+    private final Runnable canBusRebindRunnable = this::ensureCanBusBound;
 
     // Состояние текущей поездки
     private boolean tripActive = false;     // был ли первый Drive в этом цикле
@@ -124,6 +130,10 @@ public class TripStatsService extends Service {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
+            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
+                    && code <= IBinder.LAST_CALL_TRANSACTION) {
+                return true;
+            }
             if (code == CB_onGearStatusChanged) {
                 data.enforceInterface(CANBUS_CB_DESCRIPTOR);
                 int gearVal = -1;
@@ -196,8 +206,14 @@ public class TripStatsService extends Service {
     private final ServiceConnection canBusConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
+            if (destroyed) return;
+            timerHandler.removeCallbacks(canBusRebindRunnable);
+            canBusBindingRequested = true;
             canBusBinder = service;
-            canBusBound  = true;
+            canBusConnected = true;
+            // A reconnect gives us a new remote registration table even though the local
+            // ServiceConnection/bind reference stayed alive.
+            canBusCallbackAdded = false;
             Log.i(TAG, "CanBusService connected");
             // Закрываем sync ДО регистрации callback: первый snapshot после (ре)коннекта часто содержит
             // системный wake-дефолт. Одновременно просим восстановить сохранённый snapshot.
@@ -207,14 +223,23 @@ public class TripStatsService extends Service {
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            canBusBinder = null;
-            canBusBound  = false;
-            canBusCallbackAdded = false;
+            markCanBusDisconnected();
+            Log.w(TAG, "CanBusService disconnected — waiting for automatic reconnect");
+        }
+
+        @Override
+        public void onBindingDied(ComponentName name) {
+            restartCanBusBinding("binding died");
+        }
+
+        @Override
+        public void onNullBinding(ComponentName name) {
+            restartCanBusBinding("null binding");
         }
     };
 
     private void ensureCanBusBound() {
-        if (canBusBound) return;
+        if (destroyed || canBusBindingRequested) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
         lastCanBusBindAttempt = now;
@@ -222,14 +247,51 @@ public class TripStatsService extends Service {
             Intent intent = new Intent(CANBUS_ACTION);
             intent.setPackage(CANBUS_PACKAGE);
             boolean ok = bindService(intent, canBusConnection, Context.BIND_AUTO_CREATE);
+            canBusBindingRequested = ok;
             Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
+            if (!ok) scheduleCanBusRebind();
         } catch (Exception e) {
+            canBusBindingRequested = false;
             Log.e(TAG, "ensureCanBusBound: " + e.getMessage(), e);
+            scheduleCanBusRebind();
         }
     }
 
+    private void markCanBusDisconnected() {
+        canBusBinder = null;
+        canBusConnected = false;
+        canBusCallbackAdded = false;
+    }
+
+    private void restartCanBusBinding(String reason) {
+        Log.w(TAG, "CanBusService " + reason + " — replacing binding");
+        releaseCanBusBinding(reason);
+        scheduleCanBusRebind();
+    }
+
+    private void scheduleCanBusRebind() {
+        if (destroyed) return;
+        lastCanBusBindAttempt = SystemClock.elapsedRealtime();
+        timerHandler.removeCallbacks(canBusRebindRunnable);
+        timerHandler.postDelayed(canBusRebindRunnable, BIND_RETRY_MS);
+    }
+
+    private void releaseCanBusBinding(String reason) {
+        timerHandler.removeCallbacks(canBusRebindRunnable);
+        if (canBusConnected) removeCanBusCallback();
+        if (canBusBindingRequested) {
+            try {
+                unbindService(canBusConnection);
+            } catch (Exception e) {
+                Log.w(TAG, reason + ": unbindService failed: " + e.getMessage());
+            }
+        }
+        canBusBindingRequested = false;
+        markCanBusDisconnected();
+    }
+
     private void addCanBusCallback() {
-        if (!canBusBound || canBusBinder == null || canBusCallbackAdded) return;
+        if (!canBusConnected || canBusBinder == null || canBusCallbackAdded) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -249,7 +311,7 @@ public class TripStatsService extends Service {
     }
 
     private void removeCanBusCallback() {
-        if (!canBusBound || canBusBinder == null || !canBusCallbackAdded) return;
+        if (!canBusConnected || canBusBinder == null || !canBusCallbackAdded) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -519,10 +581,9 @@ public class TripStatsService extends Service {
             }
             // Во время restore+settle policy либо игнорирует ожидаемое эхо, либо сама запускает
             // корректирующее применение при ECO/другом несовпадении. Provider здесь остаётся неизменным.
-            if (!ApplyEngine.shouldPersistModeFeedback(energy, mode)) return;
-            // VState может повторяться часто. После первой записи статик MainActivity уже совпадает — no-op.
-            if (MainActivity.isLoadedMode(energy, mode)) return;
-            MainActivity.persistSavedMode(getApplicationContext(), energy, mode);
+            // Проверка policy и запись выполняются под одним restore-lock: shutdown/reset не может
+            // вклиниться между ACCEPT и persist и сохранить wake-дефолт как новый source of truth.
+            ApplyEngine.persistModeFeedbackIfAllowed(getApplicationContext(), energy, mode);
         } catch (Exception e) {
             Log.w(TAG, "maybeSyncMode: " + e.getMessage());
         }
@@ -601,13 +662,12 @@ public class TripStatsService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        destroyed = true;
         try { unregisterReceiver(requestReceiver); } catch (Exception ignored) {}
         timerHandler.removeCallbacks(safetyRunnable);
-        if (canBusBound) {
-            removeCanBusCallback();
-            try { unbindService(canBusConnection); } catch (Exception ignored) {}
-            canBusBound = false;
-        }
+        releaseCanBusBinding("onDestroy");
+        // В Binder callbacks используются анонимные Runnable, которые нельзя снять по имени.
+        timerHandler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
 

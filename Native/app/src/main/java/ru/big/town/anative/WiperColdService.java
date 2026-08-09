@@ -139,9 +139,14 @@ public class WiperColdService extends Service {
     private AudioManager mediaFadeAudioManager = null;
 
     private IBinder canBusBinder = null;
-    private boolean canBusBound  = false;
+    private boolean canBusBindingRequested = false;
+    private boolean canBusConnected = false;
     private boolean canBusCallbackAdded   = false;
-    private long    lastCanBusBindAttempt = 0L;
+    private long    lastCanBusBindAttempt = -BIND_RETRY_MS;
+    private volatile boolean destroyed = false;
+    private final Runnable canBusRebindRunnable = this::ensureCanBusBound;
+    private boolean wiperTogglePending = false;
+    private Boolean queuedWiperTarget = null;
 
     // Последнее наблюдаемое состояние водительской двери: -1 неизвестно, 0 закрыта, 1 открыта
     private int  lastFLDoor = -1;
@@ -158,6 +163,10 @@ public class WiperColdService extends Service {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
+            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
+                    && code <= IBinder.LAST_CALL_TRANSACTION) {
+                return true;
+            }
             // DEBUG: логируем каждый код колбэка один раз — видно, приходят ли события вообще.
             // Только при включённом захвате логов: иначе seenCodes копит все коды CanBus впустую.
             if (NativeLog.get().isRunning() && seenCodes.add(code)) Log.i(TAG, "CB code first-seen: " + code);
@@ -177,7 +186,9 @@ public class WiperColdService extends Service {
                     // Порядок: bonnet(0) fL(1) fR(2) loadSpace(3) rL(4) rR(5) +4 замка(6-9)
                     Log.i(TAG, "onDoorStatusChanged RAW=" + Arrays.toString(doors) + " → fL(idx1)=" + fl);
                     final int fFl = fl;
-                    timerHandler.post(() -> onDoorState(fFl));
+                    timerHandler.post(() -> {
+                        if (!destroyed) onDoorState(fFl);
+                    });
                     return true;
                 }
                 case CB_onGearStatusChanged: { // 12 — передача (parcel: presence, ordinal, value)
@@ -188,7 +199,9 @@ public class WiperColdService extends Service {
                         gearVal = data.readInt();  // value: Parking=0,Reverse=1,Neutral=2,Drive=3,Battery=4,Unknown=-1
                     }
                     final int fVal = gearVal;
-                    timerHandler.post(() -> onGearState(fVal));
+                    timerHandler.post(() -> {
+                        if (!destroyed) onGearState(fVal);
+                    });
                     return true;
                 }
                 default:
@@ -212,8 +225,12 @@ public class WiperColdService extends Service {
     private final ServiceConnection canBusConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
+            if (destroyed) return;
+            timerHandler.removeCallbacks(canBusRebindRunnable);
+            canBusBindingRequested = true;
             canBusBinder = service;
-            canBusBound  = true;
+            canBusConnected = true;
+            canBusCallbackAdded = false;
             Log.i(TAG, "CanBusService connected, alive=" + service.isBinderAlive());
             addCanBusCallback();
             seedFromSyncReads();
@@ -221,15 +238,23 @@ public class WiperColdService extends Service {
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            canBusBinder = null;
-            canBusBound  = false;
-            canBusCallbackAdded = false;
-            Log.w(TAG, "CanBusService disconnected — will rebind on next poll");
+            markCanBusDisconnected();
+            Log.w(TAG, "CanBusService disconnected — waiting for automatic reconnect");
+        }
+
+        @Override
+        public void onBindingDied(ComponentName name) {
+            restartCanBusBinding("binding died");
+        }
+
+        @Override
+        public void onNullBinding(ComponentName name) {
+            restartCanBusBinding("null binding");
         }
     };
 
     private void ensureCanBusBound() {
-        if (canBusBound) return;
+        if (destroyed || canBusBindingRequested) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
         lastCanBusBindAttempt = now;
@@ -237,14 +262,51 @@ public class WiperColdService extends Service {
             Intent intent = new Intent(CANBUS_ACTION);
             intent.setPackage(CANBUS_PACKAGE);
             boolean ok = bindService(intent, canBusConnection, Context.BIND_AUTO_CREATE);
+            canBusBindingRequested = ok;
             Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
+            if (!ok) scheduleCanBusRebind();
         } catch (Exception e) {
+            canBusBindingRequested = false;
             Log.e(TAG, "ensureCanBusBound: exception: " + e.getMessage(), e);
+            scheduleCanBusRebind();
         }
     }
 
+    private void markCanBusDisconnected() {
+        canBusBinder = null;
+        canBusConnected = false;
+        canBusCallbackAdded = false;
+    }
+
+    private void restartCanBusBinding(String reason) {
+        Log.w(TAG, "CanBusService " + reason + " — replacing binding");
+        releaseCanBusBinding(reason);
+        scheduleCanBusRebind();
+    }
+
+    private void scheduleCanBusRebind() {
+        if (destroyed) return;
+        lastCanBusBindAttempt = SystemClock.elapsedRealtime();
+        timerHandler.removeCallbacks(canBusRebindRunnable);
+        timerHandler.postDelayed(canBusRebindRunnable, BIND_RETRY_MS);
+    }
+
+    private void releaseCanBusBinding(String reason) {
+        timerHandler.removeCallbacks(canBusRebindRunnable);
+        if (canBusConnected) removeCanBusCallback();
+        if (canBusBindingRequested) {
+            try {
+                unbindService(canBusConnection);
+            } catch (Exception e) {
+                Log.w(TAG, reason + ": unbindService failed: " + e.getMessage());
+            }
+        }
+        canBusBindingRequested = false;
+        markCanBusDisconnected();
+    }
+
     private void addCanBusCallback() {
-        if (!canBusBound || canBusBinder == null || canBusCallbackAdded) return;
+        if (!canBusConnected || canBusBinder == null || canBusCallbackAdded) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -264,7 +326,7 @@ public class WiperColdService extends Service {
     }
 
     private void removeCanBusCallback() {
-        if (!canBusBound || canBusBinder == null || !canBusCallbackAdded) return;
+        if (!canBusConnected || canBusBinder == null || !canBusCallbackAdded) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -294,7 +356,7 @@ public class WiperColdService extends Service {
 
     /** Синхронно читает статус водительской двери (TX=2, DoorStatus.fLDoor). -1 при ошибке. */
     private int readDriverDoor() {
-        if (!canBusBound || canBusBinder == null) return -1;
+        if (!canBusConnected || canBusBinder == null) return -1;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -363,8 +425,7 @@ public class WiperColdService extends Service {
         }
         Log.i(TAG, "★ условие выполнено (" + source + "): дверь водителя открыта"
                 + " → включаем сервисный режим дворников");
-        sendToggle("wiper service ON (driver door open)");
-        setServiceActive(true);
+        requestServiceActive(true, "wiper service ON (driver door open)");
     }
 
     /**
@@ -396,18 +457,47 @@ public class WiperColdService extends Service {
         if (isServiceActive()) {
             lastPowerOnResetElapsed = SystemClock.elapsedRealtime();
             Log.i(TAG, reason + " → возвращаем дворники в обычный режим (toggle)");
-            sendToggle("wiper service OFF (" + reason + ")");
-            setServiceActive(false);
+            requestServiceActive(false, "wiper service OFF (" + reason + ")");
         } else {
             Log.i(TAG, reason + " → сервисный режим не активен, команду не шлём");
         }
     }
 
-    private void sendToggle(String label) {
-        byte[] frame = MainActivity.parseHexBinary(WIPER_TOGGLE_FRAME);
-        Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME
-                + " debugMode=" + CanSender.isDebugMode());
-        CanSender.send(CAN_CMD_NUM, frame, label);
+    private void requestServiceActive(boolean targetActive, String label) {
+        if (wiperTogglePending) {
+            queuedWiperTarget = targetActive;
+            Log.i(TAG, "wiper toggle coalesced, target=" + targetActive);
+            return;
+        }
+        if (isServiceActive() == targetActive) return;
+        wiperTogglePending = true;
+        ApplyEngine.postWakeAction(label, () -> {
+            byte[] frame = MainActivity.parseHexBinary(WIPER_TOGGLE_FRAME);
+            Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME
+                    + " debugMode=" + CanSender.isDebugMode());
+            return CanSender.send(CAN_CMD_NUM, frame, label);
+        }, result -> {
+            if (!destroyed) {
+                timerHandler.post(() -> finishWiperToggle(
+                        targetActive, label,
+                        result == ApplyEngine.WakeActionResult.SUCCESS));
+            }
+        });
+    }
+
+    private void finishWiperToggle(boolean targetActive, String label, boolean sent) {
+        if (destroyed) return;
+        wiperTogglePending = false;
+        if (sent) {
+            setServiceActive(targetActive);
+        } else {
+            Log.w(TAG, "wiper toggle failed/cancelled: " + label);
+        }
+        Boolean queued = queuedWiperTarget;
+        queuedWiperTarget = null;
+        if (queued != null && queued != isServiceActive()) {
+            requestServiceActive(queued, "wiper coalesced target " + queued);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -623,6 +713,7 @@ public class WiperColdService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        destroyed = true;
         int restoreVolume = mediaPauseState.cancelAndTakeRestoreVolume();
         if (mediaFadeAudioManager != null && restoreVolume >= 0) {
             try {
@@ -633,16 +724,8 @@ public class WiperColdService extends Service {
             }
         }
         mediaFadeAudioManager = null;
+        releaseCanBusBinding("onDestroy");
         if (timerHandler != null) timerHandler.removeCallbacksAndMessages(null);
-        if (canBusBound) {
-            removeCanBusCallback();
-            try {
-                unbindService(canBusConnection);
-            } catch (Exception e) {
-                Log.w(TAG, "onDestroy: unbindService failed: " + e.getMessage());
-            }
-            canBusBound = false;
-        }
         super.onDestroy();
     }
 

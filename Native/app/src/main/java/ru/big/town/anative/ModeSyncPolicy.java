@@ -11,6 +11,7 @@ package ru.big.town.anative;
 final class ModeSyncPolicy {
     static final long POST_RESTORE_SETTLE_MS = 20_000L;
     static final long CORRECTION_COOLDOWN_MS = 3_000L;
+    static final int MAX_CORRECTIONS_PER_WAKE = 1;
 
     enum Decision {
         /** Stable awake state: feedback may be persisted as an external user selection. */
@@ -24,16 +25,30 @@ final class ModeSyncPolicy {
     private long generation;
     private boolean restoreCompleted;
     private boolean correctionAllowed;
+    private boolean wakeActive;
     private long acceptAfterUptime = Long.MAX_VALUE;
     private long lastCorrectionUptime = Long.MIN_VALUE;
+    private int correctionsThisWake;
 
     private String expectedDrive;
     private String expectedEnergy;
     private boolean driveEnabled;
     private boolean energyEnabled;
 
-    /** Starts a new guarded restore generation while retaining the last known saved snapshot. */
+    /**
+     * Starts a new guarded restore generation while retaining the last known saved snapshot.
+     *
+     * <p>Several wake signals (and a correction requested by feedback) may create several restore
+     * generations during one physical wake. The correction budget is intentionally reset only
+     * after {@link #freeze()}, not on every such generation, otherwise each correction would give
+     * itself a fresh budget and conflicting OEM feedback could create an endless restore storm.</p>
+     */
     synchronized long beginRestore() {
+        if (!wakeActive) {
+            wakeActive = true;
+            correctionsThisWake = 0;
+            lastCorrectionUptime = Long.MIN_VALUE;
+        }
         generation++;
         restoreCompleted = false;
         correctionAllowed = true;
@@ -46,8 +61,46 @@ final class ModeSyncPolicy {
         generation++;
         restoreCompleted = false;
         correctionAllowed = false;
+        wakeActive = false;
         acceptAfterUptime = Long.MAX_VALUE;
         return generation;
+    }
+
+    /**
+     * Invalidates an automatic restore superseded by an explicit user command.
+     *
+     * <p>This is deliberately not {@link #freeze()}: the physical wake and its correction budget
+     * continue. Feedback stays closed while the command is queued/running; its matching terminal
+     * calls {@link #completeUserCommand(long, long)} to start the normal settling delay. If sleep
+     * wins the race, that stale terminal cannot reopen the frozen gate.</p>
+     */
+    synchronized long cancelRestore() {
+        generation++;
+        restoreCompleted = false;
+        correctionAllowed = false;
+        acceptAfterUptime = Long.MAX_VALUE;
+        return generation;
+    }
+
+    /** Starts settle after the matching explicit command terminates, without creating corrections. */
+    synchronized boolean completeUserCommand(long commandGeneration, long nowUptime) {
+        if (commandGeneration != generation || !wakeActive) return false;
+        restoreCompleted = true;
+        correctionAllowed = false;
+        acceptAfterUptime = saturatedAdd(nowUptime, POST_RESTORE_SETTLE_MS);
+        return true;
+    }
+
+    /** Captures the feedback-gate generation for a lock-free persistence handoff. */
+    synchronized long currentGeneration() {
+        return generation;
+    }
+
+    /** Pure revalidation immediately before potentially blocking provider persistence. */
+    synchronized boolean canPersist(long candidateGeneration, long nowUptime) {
+        return candidateGeneration == generation
+                && restoreCompleted
+                && nowUptime >= acceptAfterUptime;
     }
 
     /** Refreshes the source-of-truth snapshot loaded from RestoreMode/provider or Native cache. */
@@ -74,6 +127,15 @@ final class ModeSyncPolicy {
         return true;
     }
 
+    /** A bounded restore window failed: keep feedback read-only and suppress correction recursion. */
+    synchronized boolean failRestore(long failedGeneration) {
+        if (failedGeneration != generation) return false;
+        restoreCompleted = false;
+        correctionAllowed = false;
+        acceptAfterUptime = Long.MAX_VALUE;
+        return true;
+    }
+
     synchronized Decision evaluate(boolean energy, String observedMode, long nowUptime) {
         if (!valid(observedMode)) return Decision.IGNORE;
         if (restoreCompleted && nowUptime >= acceptAfterUptime) return Decision.ACCEPT;
@@ -84,9 +146,12 @@ final class ModeSyncPolicy {
             return Decision.IGNORE;
         }
 
+        if (correctionsThisWake >= MAX_CORRECTIONS_PER_WAKE) return Decision.IGNORE;
+
         if (lastCorrectionUptime == Long.MIN_VALUE
                 || nowUptime - lastCorrectionUptime >= CORRECTION_COOLDOWN_MS) {
             lastCorrectionUptime = nowUptime;
+            correctionsThisWake++;
             return Decision.CORRECT;
         }
         return Decision.IGNORE;

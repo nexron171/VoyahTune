@@ -12,14 +12,71 @@
 #     инъекция не удалась (гонка на буте — процесс ещё поднимается) → маркер НЕ трогаем → следующая
 #     итерация (10с) повторит с уже готовым процессом. Раньше маркер писался безусловно в фоне, поэтому
 #     разовый промах ('Process not found') НЕ повторялся и launcherdock молча не грузился после ребута.
-#   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление) → запускаем в ФОН,
-#     маркер оптимистично (агент логирует '[swk] … installed' в свой файл ДО зависа — путь стабилен).
+#   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление). Запускаем одну
+#     фоновую попытку на PID под timeout; успех подтверждаем exit-code либо точным лог-маркером агента.
 
 logs() { log -p e -t VOYAH "$1"; }
 
-# один экземпляр (грепаем ИМЕННО наш путь)
-n=$(ps -ef | grep 'local/bin/load.bin' | grep -v grep | wc -l)
-[ "$n" -ge 2 ] && exit 0
+# Atomic owner lock without a mkdir/pid publication gap and without relying on `flock`
+# being present in the target ROM. A new path avoids a takeover race with the legacy
+# directory lock: the legacy path is only inspected, never removed before v2 is owned.
+LEGACY_LOAD_LOCK=/data/local/tmp/voyah_load.lock
+LOAD_LOCK=/data/local/tmp/voyah_load.v2.lock
+
+loader_pid_is_live() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    kill -0 "$1" 2>/dev/null \
+        && tr '\000' ' ' < "/proc/$1/cmdline" 2>/dev/null \
+            | grep -q 'local/bin/load.bin'
+}
+
+legacy_load_owner() {
+    if [ -d "$LEGACY_LOAD_LOCK" ] && [ ! -L "$LEGACY_LOAD_LOCK" ]; then
+        cat "$LEGACY_LOAD_LOCK/pid" 2>/dev/null
+    elif [ -L "$LEGACY_LOAD_LOCK" ]; then
+        readlink "$LEGACY_LOAD_LOCK" 2>/dev/null
+    fi
+}
+
+LEGACY_LOAD_OWNER=$(legacy_load_owner)
+loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
+
+while [ 1 ]; do
+    if ln -s "$$" "$LOAD_LOCK" 2>/dev/null; then
+        LOAD_LOCK_OWNER=$$
+        break
+    fi
+
+    LOAD_LOCK_OWNER=$(readlink "$LOAD_LOCK" 2>/dev/null)
+    loader_pid_is_live "$LOAD_LOCK_OWNER" && exit 0
+
+    # Remove only the stale owner we inspected; if another loader won the race,
+    # its different PID target is left intact.
+    if [ -L "$LOAD_LOCK" ]; then
+        [ "$(readlink "$LOAD_LOCK" 2>/dev/null)" = "$LOAD_LOCK_OWNER" ] \
+            && rm -f "$LOAD_LOCK"
+    elif [ -e "$LOAD_LOCK" ]; then
+        # Миграция с legacy regular-file lock.
+        rm -f "$LOAD_LOCK"
+    fi
+done
+
+cleanup_load_lock() {
+    [ "$(readlink "$LOAD_LOCK" 2>/dev/null)" = "$$" ] && rm -f "$LOAD_LOCK"
+}
+
+# У trapped signal default termination заменяется handler'ом, поэтому handler обязан вызвать exit.
+trap 'cleanup_load_lock' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# An old loader could have acquired the legacy directory during an in-place update.
+# Recheck after winning v2; EXIT cleanup releases only our own v2 symlink.
+LEGACY_LOAD_OWNER=$(legacy_load_owner)
+loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
 
 FI=/data/local/bin/frida-inject
 VD=/data/local/bin/vd_bypass.js
@@ -28,6 +85,8 @@ LNCH=/data/local/bin/launcherdock.js
 MD=/data/local/bin/multidisplay.js
 VDMARK=/data/local/tmp/voyah_vd.pid          # pid system_server, куда поставлен vd_bypass
 SWK_KM_MARK=/data/local/tmp/voyah_swk_km.pid # pid keymanager, куда поставлен steeringwheelkeys
+SWK_KM_BUSY=/data/local/tmp/voyah_swk_km.busy # symlink: targetPid|startUptime|token
+SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
 LNCH_MARK=/data/local/tmp/voyah_lnch.pid     # pid лаунчера, куда поставлен launcherdock
 MD_MARK=/data/local/tmp/voyah_md.pid         # pid systemservice, куда поставлен multidisplay
 
@@ -36,8 +95,13 @@ MD_MARK=/data/local/tmp/voyah_md.pid         # pid systemservice, куда по�
 inject_ret() {
     TRY="$3.try"
     : > "$TRY"
-    timeout 30 "$FI" -p "$1" -s "$2" -e > "$TRY" 2>&1
+    timeout -k 5 30 "$FI" -p "$1" -s "$2" -e > "$TRY" 2>&1
+    RC=$?
     cat "$TRY" >> "$3"
+    if [ "$RC" -ne 0 ]; then
+        logs "inject FAIL pid=$1 $2 rc=$RC (retry next loop)"
+        return 1
+    fi
     # Ошибки самого frida-inject (агент пишет свои сообщения через console.log/Log — их НЕ матчим).
     if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$TRY"; then
         logs "inject FAIL pid=$1 $2 (retry next loop)"
@@ -46,6 +110,99 @@ inject_ret() {
     echo "$1" > "$4"
     logs "inject OK pid=$1 $2"
     return 0
+}
+
+# Монотонные секунды с boot; после reboot старый timestamp автоматически выглядит протухшим.
+uptime_seconds() {
+    UPTIME_NOW=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+    case "$UPTIME_NOW" in
+        ''|*[!0-9]*) date +%s ;;
+        *) echo "$UPTIME_NOW" ;;
+    esac
+}
+
+# `timeout` uses a clock that may pause in suspend on some Toybox builds, while /proc/uptime can
+# advance across suspend. Before expiring a TTL record, verify that its actual injector child is
+# gone; otherwise a long sleep could create a second injection while the first still has time left.
+keymanager_inject_is_live() {
+    for KM_INJECT_PID in $(pidof frida-inject 2>/dev/null); do
+        KM_INJECT_CMD=$(tr '\000' ' ' < "/proc/$KM_INJECT_PID/cmdline" 2>/dev/null)
+        case "$KM_INJECT_CMD" in
+            *"-p $1 "*"steeringwheelkeys.js"*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# keymanager на части прошивок не возвращает управление после успешного -e. Busy-symlink создаётся
+# атомарно и представляет ГЛОБАЛЬНУЮ single-flight попытку (не только попытку на конкретный target PID).
+# Если worker был убит до cleanup, TTL освобождает stale busy после гарантированного TERM->KILL окна.
+inject_keymanager_bg() {
+    KM_TARGET_PID="$1"
+    while [ 1 ]; do
+        KM_NOW=$(uptime_seconds)
+        KM_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
+
+        if [ -L "$SWK_KM_BUSY" ]; then
+            KM_BUSY_TARGET=${KM_BUSY_RECORD%%|*}
+            KM_BUSY_REST=${KM_BUSY_RECORD#*|}
+            KM_BUSY_STARTED=${KM_BUSY_REST%%|*}
+            case "$KM_NOW" in
+                ''|*[!0-9]*) KM_BUSY_AGE=$SWK_KM_BUSY_TTL ;;
+                *)
+                    case "$KM_BUSY_STARTED" in
+                        ''|*[!0-9]*) KM_BUSY_AGE=$SWK_KM_BUSY_TTL ;;
+                        *) KM_BUSY_AGE=$((KM_NOW - KM_BUSY_STARTED)) ;;
+                    esac
+                    ;;
+            esac
+            if [ "$KM_BUSY_AGE" -ge 0 ] && [ "$KM_BUSY_AGE" -lt "$SWK_KM_BUSY_TTL" ]; then
+                return 0
+            fi
+            if keymanager_inject_is_live "$KM_BUSY_TARGET"; then
+                logs "keep keymanager injection busy: live injector pid target=$KM_BUSY_TARGET"
+                return 0
+            fi
+            logs "clear stale keymanager injection busy age=${KM_BUSY_AGE}s record=$KM_BUSY_RECORD"
+            # Один loader владеет owner-lock; conditional read защищает от cleanup завершившегося worker.
+            [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" = "$KM_BUSY_RECORD" ] \
+                && rm -f "$SWK_KM_BUSY"
+            continue
+        elif [ -e "$SWK_KM_BUSY" ]; then
+            # Миграция с legacy regular-file busy (там лежал только target PID).
+            logs "clear legacy keymanager injection busy"
+            rm -f "$SWK_KM_BUSY"
+            continue
+        fi
+
+        KM_TOKEN="$$.$KM_NOW.$KM_TARGET_PID"
+        KM_RECORD="$KM_TARGET_PID|$KM_NOW|$KM_TOKEN"
+        if ln -s "$KM_RECORD" "$SWK_KM_BUSY" 2>/dev/null; then
+            break
+        fi
+    done
+
+    logs "inject steeringwheelkeys -> keymanager $KM_TARGET_PID (eternalize,bounded-bg)"
+    (
+        # Не наследуем loader traps: worker живёт не дольше timeout+KILL и сам чистит busy.
+        trap - 0 HUP INT TERM
+        KM_TRY="/data/local/tmp/voyah_swk.$KM_TOKEN.try"
+        : > "$KM_TRY"
+        timeout -k 5 30 "$FI" -p "$KM_TARGET_PID" -s "$SWK" -e > "$KM_TRY" 2>&1
+        KM_RC=$?
+        cat "$KM_TRY" >> /data/local/tmp/voyah_swk.txt
+        if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$KM_TRY"; then
+            logs "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (retry next loop)"
+        elif [ "$KM_RC" -eq 0 ] || grep -qF '[swk] keymanager hooks installed:' "$KM_TRY"; then
+            echo "$KM_TARGET_PID" > "$SWK_KM_MARK"
+            logs "inject OK keymanager pid=$KM_TARGET_PID"
+        else
+            logs "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (retry next loop)"
+        fi
+        rm -f "$KM_TRY"
+        [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" = "$KM_RECORD" ] \
+            && rm -f "$SWK_KM_BUSY"
+    ) &
 }
 
 logs "voyah load.bin start"
@@ -68,13 +225,12 @@ while [ 1 ]; do
         fi
     fi
 
-    # 3) Кнопки руля в keymanager (в фон — здесь frida-inject -e зависает; маркер оптимистично)
-    KMP=$(pidof com.qinggan.keymanager.service)
+    # 3) Кнопки руля в keymanager: фоновая, но bounded/verified попытка (см. inject_keymanager_bg).
+    KMP=$(pidof com.qinggan.keymanager.service 2>/dev/null)
+    KMP=${KMP%% *}
     if [ -n "$KMP" ] && [ -f "$SWK" ]; then
         if [ "$(cat "$SWK_KM_MARK" 2>/dev/null)" != "$KMP" ]; then
-            logs "inject steeringwheelkeys -> keymanager $KMP (eternalize,bg)"
-            "$FI" -n com.qinggan.keymanager.service -s "$SWK" -e >> /data/local/tmp/voyah_swk.txt 2>&1 &
-            echo "$KMP" > "$SWK_KM_MARK"
+            inject_keymanager_bg "$KMP"
         fi
     fi
 

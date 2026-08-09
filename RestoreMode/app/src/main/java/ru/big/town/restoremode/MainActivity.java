@@ -322,22 +322,44 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private boolean bindingRequested = false;
+    private boolean connectionReported = false;
+    private boolean destroyed = false;
+    private static final long BIND_RETRY_MS = 5_000L;
+    private final Runnable messengerRebindRunnable = this::bindToMessengerService;
+
     private ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
+            if (destroyed) return;
+            uiHandler.removeCallbacks(messengerRebindRunnable);
+            bindingRequested = true;
             Log.i(TAG, "onServiceConnected()");
-            GlobalVars.serviceMessenger = new Messenger(service);
-            GlobalVars.isBound = true;
+            if (!connectionReported) {
+                connectionReported = true;
+                GlobalVars.clientConnected(new Messenger(service));
+            }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            GlobalVars.serviceMessenger = null;
-            GlobalVars.isBound = false;
+            clearReportedConnection();
+        }
+
+        @Override
+        public void onBindingDied(ComponentName name) {
+            restartMessengerBinding("binding died");
+        }
+
+        @Override
+        public void onNullBinding(ComponentName name) {
+            restartMessengerBinding("null binding");
         }
     };
 
     private void bindToMessengerService() {
+        if (destroyed || bindingRequested) return;
+        uiHandler.removeCallbacks(messengerRebindRunnable);
         Log.i(TAG, "bindToMessengerService() begin");
 
         Intent intent = new Intent();
@@ -345,9 +367,46 @@ public class MainActivity extends AppCompatActivity {
                 "ru.big.town.anative",
                 "ru.big.town.anative.SetModesService"
         ));
-        bindService(intent, connection, Context.BIND_AUTO_CREATE);
-        Log.i(TAG, "bindToMessengerService() end");
+        try {
+            bindingRequested = bindService(intent, connection, Context.BIND_AUTO_CREATE);
+            Log.i(TAG, "bindToMessengerService() end, requested=" + bindingRequested);
+            if (!bindingRequested) scheduleMessengerRebind();
+        } catch (RuntimeException e) {
+            bindingRequested = false;
+            Log.w(TAG, "bindToMessengerService() failed: " + e.getMessage());
+            scheduleMessengerRebind();
+        }
+    }
 
+    private void clearReportedConnection() {
+        if (!connectionReported) return;
+        connectionReported = false;
+        GlobalVars.clientDisconnected();
+    }
+
+    private void restartMessengerBinding(String reason) {
+        Log.w(TAG, "SetModesService " + reason + " — replacing binding");
+        releaseMessengerBinding(reason);
+        scheduleMessengerRebind();
+    }
+
+    private void scheduleMessengerRebind() {
+        if (destroyed) return;
+        uiHandler.removeCallbacks(messengerRebindRunnable);
+        uiHandler.postDelayed(messengerRebindRunnable, BIND_RETRY_MS);
+    }
+
+    private void releaseMessengerBinding(String reason) {
+        uiHandler.removeCallbacks(messengerRebindRunnable);
+        clearReportedConnection();
+        if (bindingRequested) {
+            try {
+                unbindService(connection);
+            } catch (RuntimeException e) {
+                Log.w(TAG, reason + ": unbindService failed: " + e.getMessage());
+            }
+        }
+        bindingRequested = false;
     }
 
     public boolean sendMessageToService(int message) {
@@ -813,11 +872,9 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        destroyed = true;
         uiHandler.removeCallbacks(tripTick);
-        if (GlobalVars.isBound) {
-            unbindService(connection);
-            GlobalVars.isBound = false;
-        }
+        releaseMessengerBinding("onDestroy");
+        super.onDestroy();
     }
 }

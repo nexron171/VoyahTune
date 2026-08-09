@@ -11,17 +11,13 @@ public class SetModesReceiverStatic extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        //String receivedIntent = intent.getAction();
-
-        //if (Intent.ACTION_BOOT_COMPLETED.equals(receivedIntent)) {
-            //context.startService(new Intent(context, SetModesService.class));
-            context.startForegroundService(new Intent(context, SetModesService.class));
-            Log.i(TAG, "onReceive ACTION_BOOT_COMPLETED");
-        //}
-
-        //if (Intent.ACTION_BOOT_COMPLETED.equals(receivedIntent)) worker(repeat);
-        // TODO: This method is called when the BroadcastReceiver is receiving
-        // an Intent broadcast.
-        //throw new UnsupportedOperationException("Not yet implemented");
+        String action = intent == null ? null : intent.getAction();
+        if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
+                && !"com.qinggan.intent.QINGGAN_BOOT_COMPLETE".equals(action)) {
+            Log.w(TAG, "ignored unexpected action: " + action);
+            return;
+        }
+        context.startForegroundService(new Intent(context, SetModesService.class));
+        Log.i(TAG, "onReceive boot action: " + action);
     }
 }

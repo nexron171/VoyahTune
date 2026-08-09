@@ -116,10 +116,16 @@ Java.perform(function () {
     //  (mStableFrame/mParentFrame/mDisplayFrame/mContentFrame/mVisibleFrame/mDecorFrame),
     //  DisplayFrames.mStable, поле ActivityRecord.task/packageName, сигнатуры layoutWindowLw/ensureActivityConfiguration.
     // ============================================================================================
-    var FF = { on: true, left: 145, top: 45, right: 1920, bottom: 720, dpi: {} };
-    var Rect = Java.use('android.graphics.Rect');
+    // На SCREEN_OFF полностью снимаем два hot replacements. Поэтому sleep/wake storm до отложенного
+    // reattach вообще не пересекает Java<->Frida bridge, а не просто делает JS fast-path.
+    var FF = { on: true, screenOn: true, hookEpoch: 0,
+               lastScreenTransitionAt: 0, rapidScreenTransitions: 0,
+               left: 145, top: 45, right: 1920, bottom: 720, dpi: {} };
     var SettingsGlobal = Java.use('android.provider.Settings$Global');
     var ATh = Java.use('android.app.ActivityThread');
+    var ffLayoutMethod = null, ffLayoutImplementation = null, ffLayoutAttached = false;
+    var ffConfigMethod = null, ffConfigImplementation = null, ffConfigAttached = false;
+    var ffTraversalService = null, ffTraversalMethod = null, ffTraversalWarned = false;
 
     function ffCr() {
         try { return ATh.currentActivityThread().getSystemContext().getContentResolver(); } catch (e) { return null; }
@@ -156,6 +162,55 @@ Java.perform(function () {
         return d;
     }
 
+    // One-shot replay after delayed reattach. WindowManagerInternal's implementation takes
+    // mGlobalLock itself and only schedules a traversal; unlike a global Configuration update,
+    // this is safe and bounded during wake. Task requested density overrides survive sleep.
+    function resolveFreeformTraversalRequester() {
+        try {
+            var LocalServices = Java.use("com.android.server.LocalServices");
+            var names = [
+                "com.android.server.wm.WindowManagerInternal", // Android 10+
+                "android.view.WindowManagerInternal"           // older vendor branches
+            ];
+            for (var i = 0; i < names.length; i++) {
+                try {
+                    var Wmi = Java.use(names[i]);
+                    var service = LocalServices.getService(Wmi.class);
+                    if (service === null) continue;
+                    var method = Wmi.requestTraversalFromDisplayManager.overload();
+                    ffTraversalService = Java.retain(Java.cast(service, Wmi));
+                    ffTraversalMethod = method;
+                    return;
+                } catch (ignored) {}
+            }
+        } catch (e) {
+            Log.w("VDBYPASS", "WindowManagerInternal lookup failed: " + e);
+        }
+    }
+
+    function requestFreeformTraversalOnce(reason) {
+        // Injection can happen before WMS publishes its LocalService; retry lazily at reattach.
+        if (ffTraversalService === null || ffTraversalMethod === null) {
+            resolveFreeformTraversalRequester();
+        }
+        if (ffTraversalService === null || ffTraversalMethod === null) {
+            if (!ffTraversalWarned) {
+                ffTraversalWarned = true;
+                Log.w("VDBYPASS", "freeform traversal replay unavailable");
+            }
+            return;
+        }
+        try {
+            ffTraversalMethod.call(ffTraversalService);
+            Log.i("VDBYPASS", "freeform traversal requested: " + reason);
+        } catch (e) {
+            if (!ffTraversalWarned) {
+                ffTraversalWarned = true;
+                Log.w("VDBYPASS", "freeform traversal request failed: " + e);
+            }
+        }
+    }
+
     // Разовая заметка о ПРОПУЩЕННОМ окне (диагностика). layoutWindowLw — горячий путь, поэтому пишем
     // не чаще одного раза на комбинацию pkg+экран+режим и не больше 20 записей за жизнь процесса.
     // Нужна, чтобы понять, в каком windowing mode оказывается приложение после переноса между экранами
@@ -170,6 +225,7 @@ Java.perform(function () {
     }
 
     refreshFreeformCfg();
+    resolveFreeformTraversalRequester();
 
     // reload-ресивер: Native шлёт WIN_RELOAD при смене флага/bounds/DPI → перечитать кэш.
     try {
@@ -184,7 +240,15 @@ Java.perform(function () {
                 onReceive: {
                     returnType: "void",
                     argumentTypes: ["android.content.Context", "android.content.Intent"],
-                    implementation: function (c, i) { refreshFreeformCfg(); }
+                    implementation: function (c, i) {
+                        refreshFreeformCfg();
+                        if (!FF.on) {
+                            ++FF.hookEpoch;
+                            detachFreeformHotHooks("config off");
+                        } else if (FF.screenOn) {
+                            scheduleFreeformHotAttach(0, "config reload");
+                        }
+                    }
                 }
             }
         });
@@ -201,9 +265,10 @@ Java.perform(function () {
     //    (фейк-freeform). Наш VD/прочие дисплеи не трогаем. Горячий путь → fast-path по флагу.
     try {
         var DP = Java.use("com.android.server.wm.DisplayPolicy");
-        DP.layoutWindowLw.implementation = function (win, attached, displayFrames) {
-            this.layoutWindowLw(win, attached, displayFrames);   // оригинал раскладывает окно
-            if (!FF.on) return;                                   // fast-path: фича выключена
+        ffLayoutMethod = DP.layoutWindowLw;
+        ffLayoutImplementation = function (win, attached, displayFrames) {
+            ffLayoutMethod.call(this, win, attached, displayFrames); // оригинал раскладывает окно
+            if (!FF.on) return;
             try {
                 var pkg = win.getOwningPackage();
                 if (ffBlacklisted(pkg)) return;
@@ -220,21 +285,26 @@ Java.perform(function () {
                 if (!df || !wf) return;                           // нечего мутировать — чистый пропуск (без порчи рамки)
                 // Пассажирский экран (display 1) на этой голове ПОЛНОСТЬЮ идентичен главному (1920×720, док
                 // 145dp) → те же bounds, что и display 0. Guard выше уже пропускает оба физических экрана.
-                var b = Rect.$new(FF.left, FF.top, FF.right, FF.bottom);
                 // DisplayFrames принадлежит всему display/layout-проходу, а не только этому окну.
                 // Раньше мы заменяли mStable и оставляли уменьшенный Rect там навсегда: следующие окна
                 // (включая Launcher/док) могли получить геометрию стороннего приложения. Сохраняем
                 // значение и обязательно возвращаем его после computeFrame; WindowFrames самого окна
                 // остаются уменьшенными.
                 var stable = df.mStable.value;
-                var savedStable = Rect.$new(stable);
+                // Не создаём Rect на каждом layout: этот метод вызывается сотни раз на screen-on.
+                var savedLeft = stable.left.value, savedTop = stable.top.value;
+                var savedRight = stable.right.value, savedBottom = stable.bottom.value;
                 try {
-                    stable.set(b);
-                    wf.mStableFrame.value.set(b);  wf.mParentFrame.value.set(b);  wf.mDisplayFrame.value.set(b);
-                    wf.mContentFrame.value.set(b); wf.mVisibleFrame.value.set(b); wf.mDecorFrame.value.set(b);
+                    stable.set(FF.left, FF.top, FF.right, FF.bottom);
+                    wf.mStableFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
+                    wf.mParentFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
+                    wf.mDisplayFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
+                    wf.mContentFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
+                    wf.mVisibleFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
+                    wf.mDecorFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
                     win.computeFrame(df);
                 } finally {
-                    stable.set(savedStable);
+                    stable.set(savedLeft, savedTop, savedRight, savedBottom);
                 }
             } catch (e) {
                 // Ошибка на КОНКРЕТНОМ окне (напр. нестандартное окно без ожидаемых полей WindowFrames) →
@@ -244,7 +314,7 @@ Java.perform(function () {
                 if (!FF._warned) { FF._warned = true; Log.e("VDBYPASS", "freeform layout skip (window, once): " + e); }
             }
         };
-        installed.push("DisplayPolicy.layoutWindowLw(fake-freeform)");
+        installed.push("DisplayPolicy.layoutWindowLw(detachable-freeform)");
     } catch (e) { Log.e("VDBYPASS", "layoutWindowLw hook fail: " + e); }
 
     // 7) Кастомный DPI не-системному приложению на ФИЗИЧЕСКИХ дисплеях.
@@ -259,8 +329,12 @@ Java.perform(function () {
         var ARc = Java.use("com.android.server.wm.ActivityRecord");
         var Task = Java.use("com.android.server.wm.Task");
         var Configuration = Java.use("android.content.res.Configuration");
-        ARc.ensureActivityConfiguration.overload('int', 'boolean', 'boolean').implementation = function (g, p, iv) {
-            var result = this.ensureActivityConfiguration(g, p, iv);
+        // Поле одно и то же для всех ActivityRecord: reflection lookup на каждом config-pass не нужен.
+        var taskF = ARc.class.getDeclaredField("task");
+        taskF.setAccessible(true);
+        ffConfigMethod = ARc.ensureActivityConfiguration.overload('int', 'boolean', 'boolean');
+        ffConfigImplementation = function (g, p, iv) {
+            var result = ffConfigMethod.call(this, g, p, iv);
             if (!FF.on) return result;
             try {
                 var displayId = this.getDisplayId();
@@ -269,8 +343,6 @@ Java.perform(function () {
                 if (ffBlacklisted(pkg)) return result;
                 var dpi = ffDpiFor(pkg);
                 if (!(dpi > 0)) return result;   // DPI не задан/невалиден (в т.ч. undefined из гонки кэша) → не трогаем
-                var taskF = this.getClass().getDeclaredField("task");
-                taskF.setAccessible(true);
                 var task = Java.cast(taskF.get(this), Task);
                 var current = task.getRequestedOverrideConfiguration();
                 if (current.densityDpi.value === dpi) return result;
@@ -280,8 +352,129 @@ Java.perform(function () {
             } catch (e) { /* не роняем WM */ }
             return result;
         };
-        installed.push("ActivityRecord.ensureActivityConfiguration(physical-dpi-only)");
+        installed.push("ActivityRecord.ensureActivityConfiguration(detachable-dpi)");
     } catch (e) { Log.e("VDBYPASS", "ensureActivityConfiguration hook fail: " + e); }
+
+    function detachFreeformHotHooks(reason) {
+        var changed = false;
+        if (ffLayoutAttached && ffLayoutMethod !== null) {
+            try {
+                ffLayoutMethod.implementation = null;
+                ffLayoutAttached = false;
+                changed = true;
+            } catch (e) { Log.e("VDBYPASS", "layout detach fail: " + e); }
+        }
+        if (ffConfigAttached && ffConfigMethod !== null) {
+            try {
+                ffConfigMethod.implementation = null;
+                ffConfigAttached = false;
+                changed = true;
+            } catch (e) { Log.e("VDBYPASS", "config detach fail: " + e); }
+        }
+        if (changed) Log.i("VDBYPASS", "freeform hot hooks DETACHED: " + reason);
+    }
+
+    function attachFreeformHotHooks(reason) {
+        if (!FF.on || !FF.screenOn) return;
+        var changed = false;
+        if (!ffLayoutAttached && ffLayoutMethod !== null && ffLayoutImplementation !== null) {
+            try {
+                ffLayoutMethod.implementation = ffLayoutImplementation;
+                ffLayoutAttached = true;
+                changed = true;
+            } catch (e) { Log.e("VDBYPASS", "layout attach fail: " + e); }
+        }
+        if (!ffConfigAttached && ffConfigMethod !== null && ffConfigImplementation !== null) {
+            try {
+                ffConfigMethod.implementation = ffConfigImplementation;
+                ffConfigAttached = true;
+                changed = true;
+            } catch (e) { Log.e("VDBYPASS", "config attach fail: " + e); }
+        }
+        if (changed) {
+            Log.i("VDBYPASS", "freeform hot hooks ATTACHED: " + reason);
+            requestFreeformTraversalOnce(reason);
+        }
+    }
+
+    function scheduleFreeformHotAttach(delayMs, reason) {
+        FF.screenOn = true;
+        var epoch = ++FF.hookEpoch;
+        // Даже если SCREEN_OFF был пропущен, SCREEN_ON сначала снимает replacements синхронно.
+        detachFreeformHotHooks(reason + " stabilization");
+        setTimeout(function () {
+            if (FF.hookEpoch === epoch && FF.screenOn && FF.on) {
+                attachFreeformHotHooks(reason);
+            }
+        }, delayMs);
+    }
+
+    function noteFreeformScreenTransition() {
+        var now = Date.now();
+        if (FF.lastScreenTransitionAt > 0
+                && now >= FF.lastScreenTransitionAt
+                && now - FF.lastScreenTransitionAt < 30000) {
+            FF.rapidScreenTransitions++;
+        } else {
+            FF.rapidScreenTransitions = 0;
+        }
+        FF.lastScreenTransitionAt = now;
+        // Начиная со второго быстрого off/on держим hooks снятыми дольше. Это гасит именно
+        // proximity-сценарий 5–7 циклов, но обычное одиночное пробуждение сохраняет задержку 1с.
+        return FF.rapidScreenTransitions >= 2 ? 5000 : 1000;
+    }
+
+    function ffScreenIsInteractive() {
+        try {
+            var PowerManager = Java.use("android.os.PowerManager");
+            var power = Java.cast(ATh.currentActivityThread().getSystemContext()
+                    .getSystemService("power"), PowerManager);
+            return power.isInteractive();
+        } catch (e) {
+            Log.w("VDBYPASS", "isInteractive unavailable, assume screen on: " + e);
+            return true;
+        }
+    }
+
+    try {
+        var ScreenReceiver = Java.registerClass({
+            name: "ru.big.town.vd.ScreenStateReceiver",
+            superClass: Java.use("android.content.BroadcastReceiver"),
+            methods: {
+                onReceive: {
+                    returnType: "void",
+                    argumentTypes: ["android.content.Context", "android.content.Intent"],
+                    implementation: function (c, i) {
+                        var action = i.getAction();
+                        if (action === "android.intent.action.SCREEN_OFF") {
+                            noteFreeformScreenTransition();
+                            FF.screenOn = false;
+                            ++FF.hookEpoch; // отменить pending attach от предыдущего SCREEN_ON
+                            detachFreeformHotHooks("SCREEN_OFF");
+                        } else if (action === "android.intent.action.SCREEN_ON") {
+                            var attachDelay = noteFreeformScreenTransition();
+                            scheduleFreeformHotAttach(attachDelay,
+                                    "SCREEN_ON +" + attachDelay + "ms");
+                        }
+                    }
+                }
+            }
+        });
+        var ScreenFilter = Java.use("android.content.IntentFilter");
+        var sf = ScreenFilter.$new("android.intent.action.SCREEN_ON");
+        sf.addAction("android.intent.action.SCREEN_OFF");
+        ATh.currentActivityThread().getSystemContext().registerReceiver(ScreenReceiver.$new(), sf);
+        installed.push("screen hot-hook attach/detach");
+    } catch (e) { Log.e("VDBYPASS", "screen hot-hook controller fail: " + e); }
+
+    FF.screenOn = ffScreenIsInteractive();
+    if (FF.screenOn) {
+        // Инъекция часто совпадает с boot/wake: тот же короткий стабилизационный интервал.
+        scheduleFreeformHotAttach(1000, "initial +1s");
+    } else {
+        ++FF.hookEpoch;
+        detachFreeformHotHooks("initial screen off");
+    }
 
     // Маркер пишет load.bin (root), а не мы: система (uid system) не может писать в /data/local/tmp (EACCES).
     Log.i("VDBYPASS", "hooks installed [" + installed.join(", ") + "] uid=" + ourUid);

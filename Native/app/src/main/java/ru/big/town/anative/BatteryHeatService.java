@@ -66,8 +66,13 @@ public class BatteryHeatService extends Service {
     private static final long BIND_RETRY_MS = 5_000L;
     // Через это время после коннекта форсируем queryVehicleState (снимок статусов).
     private static final long FORCE_QUERY_MS = 6_000L;
+    // Полный query вызывает snapshot всем CanBus callbacks; делаем его только при реально протухших данных.
+    private static final long SNAPSHOT_STALE_MS = 5 * 60_000L;
+    // Даже при неполном snapshot не повторяем тяжёлый full query чаще этого интервала.
+    private static final long FULL_QUERY_MIN_INTERVAL_MS = 5 * 60_000L;
     // Анти-спам активации: не пытаемся включать прогрев чаще, чем раз в эти мс.
     private static final long ACTIVATE_REARM_MS = 5 * 60_000L;
+    private static final long ACTIVATE_FAILURE_RETRY_MS = 30_000L;
 
     // ICanBusService
     private static final String CANBUS_DESCRIPTOR    = "com.qinggan.canbus.ICanBusService";
@@ -90,6 +95,17 @@ public class BatteryHeatService extends Service {
     private static final int ID_PREHEAT_FAIL_STATE = 1265; // причина отказа прогрева (те же коды, что fail)
     private static final int ID_BMS_STATE          = 958;  // 9 = PREHEAT
 
+    // Логические поля snapshot; оба fail-ID считаются одним полем-источником причины отказа.
+    private static final int FIELD_SWITCH       = 0;
+    private static final int FIELD_STATUS       = 1;
+    private static final int FIELD_FAIL         = 2;
+    private static final int FIELD_AUTO_CTRL    = 3;
+    private static final int FIELD_AUTO_INFO    = 4;
+    private static final int FIELD_PREHEAT_SET  = 5;
+    private static final int FIELD_BMS_STATE    = 6;
+    private static final int VEHICLE_FIELD_COUNT = 7;
+    private static final int ALL_VEHICLE_FIELDS_MASK = (1 << VEHICLE_FIELD_COUNT) - 1;
+
     // AirCondition: индекс поля airTempOutCar в parcel (0-based). До него: 11 int, 3 float, далее int'ы.
     private static final int AC_OUTCAR_INDEX = 35;
 
@@ -109,13 +125,22 @@ public class BatteryHeatService extends Service {
     private volatile int bmsState      = UNKNOWN;
 
     private long lastActivateElapsed = Long.MIN_VALUE / 2;
+    private long lastActivateAttemptElapsed = Long.MIN_VALUE / 2;
+    private boolean activationPending = false;
 
     // CanBusService bind-инфраструктура
     private IBinder canBusBinder = null;
-    private boolean canBusBound  = false;
+    private boolean canBusBindingRequested = false;
+    private boolean canBusConnected = false;
     private boolean canBusCallbackAdded   = false;
-    private long    lastCanBusBindAttempt = 0L;
-    private boolean forceQueryScheduled   = false;
+    private long    lastCanBusBindAttempt = -BIND_RETRY_MS;
+    private volatile boolean destroyed = false;
+    private int vehicleFieldsSeenMask = 0;
+    private final long[] vehicleFieldUpdatedElapsed = new long[VEHICLE_FIELD_COUNT];
+    private long lastFullQueryAttemptElapsed = Long.MIN_VALUE / 2;
+
+    private final Runnable forceQueryRunnable = this::queryVehicleState;
+    private final Runnable canBusRebindRunnable = this::ensureCanBusBound;
 
     // -------------------------------------------------------------------------
     // ICanBusServiceCallback — stub (сервис вызывает onTransact ONEWAY)
@@ -125,13 +150,24 @@ public class BatteryHeatService extends Service {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
+            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
+                    && code <= IBinder.LAST_CALL_TRANSACTION) {
+                return true;
+            }
             if (code == CB_onVehicleStateChanged) {
                 data.enforceInterface(CANBUS_CB_DESCRIPTOR);
                 int id = -1;
                 if (data.readInt() != 0) { data.readInt(); id = data.readInt(); }
                 int state = data.readInt();
-                final int fId = id, fState = state;
-                handler.post(() -> onVehicleState(fId, fState));
+                // Full VehicleState snapshot содержит сотни ID. До этого каждый из них создавал
+                // Runnable в main queue, хотя сервис использует только восемь ID (<2% snapshot).
+                // Фильтруем прямо на Binder thread после дешёвого parse.
+                if (isBatteryVehicleStateId(id)) {
+                    final int fId = id, fState = state;
+                    handler.post(() -> {
+                        if (!destroyed) onVehicleState(fId, fState);
+                    });
+                }
                 return true;
             }
             if (code == CB_onAirConditionChanged) {
@@ -146,7 +182,9 @@ public class BatteryHeatService extends Service {
                     }
                 }
                 final int t = outCar;
-                handler.post(() -> onAmbientTemp(t));
+                handler.post(() -> {
+                    if (!destroyed) onAmbientTemp(t);
+                });
                 return true;
             }
             // Прочие oneway-колбэки CanBus тихо поглощаем — иначе Binder спамит
@@ -158,6 +196,22 @@ public class BatteryHeatService extends Service {
         }
     };
 
+    private static boolean isBatteryVehicleStateId(int id) {
+        switch (id) {
+            case ID_TEP_CONTROL_SWITCH:
+            case ID_TEP_CONTROL_STATUS:
+            case ID_TEP_CONTROL_FAIL:
+            case ID_AUTO_CTRL:
+            case ID_AUTO_CTRL_INFO:
+            case ID_DRIVER_PREHEAT_SET:
+            case ID_PREHEAT_FAIL_STATE:
+            case ID_BMS_STATE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // CanBusService bind
     // -------------------------------------------------------------------------
@@ -165,27 +219,41 @@ public class BatteryHeatService extends Service {
     private final ServiceConnection canBusConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
+            if (destroyed) return;
+            handler.removeCallbacks(canBusRebindRunnable);
+            canBusBindingRequested = true;
             canBusBinder = service;
-            canBusBound  = true;
+            canBusConnected = true;
+            canBusCallbackAdded = false;
+            resetVehicleSnapshotTracking();
+            // Safety-poll не должен обогнать обязательный delayed query на свежем соединении.
+            lastFullQueryAttemptElapsed = SystemClock.elapsedRealtime();
             Log.i(TAG, "CanBusService connected, alive=" + service.isBinderAlive());
             addCanBusCallback();
-            if (!forceQueryScheduled) {
-                forceQueryScheduled = true;
-                handler.postDelayed(BatteryHeatService.this::queryVehicleState, FORCE_QUERY_MS);
-            }
+            // Each reconnect has a fresh remote callback/cache lifecycle.
+            handler.removeCallbacks(forceQueryRunnable);
+            handler.postDelayed(forceQueryRunnable, FORCE_QUERY_MS);
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            canBusBinder = null;
-            canBusBound  = false;
-            canBusCallbackAdded = false;
-            Log.w(TAG, "CanBusService disconnected — will rebind on next poll");
+            markCanBusDisconnected();
+            Log.w(TAG, "CanBusService disconnected — waiting for automatic reconnect");
+        }
+
+        @Override
+        public void onBindingDied(ComponentName name) {
+            restartCanBusBinding("binding died");
+        }
+
+        @Override
+        public void onNullBinding(ComponentName name) {
+            restartCanBusBinding("null binding");
         }
     };
 
     private void ensureCanBusBound() {
-        if (canBusBound) return;
+        if (destroyed || canBusBindingRequested) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
         lastCanBusBindAttempt = now;
@@ -193,14 +261,52 @@ public class BatteryHeatService extends Service {
             Intent intent = new Intent(CANBUS_ACTION);
             intent.setPackage(CANBUS_PACKAGE);
             boolean ok = bindService(intent, canBusConnection, Context.BIND_AUTO_CREATE);
+            canBusBindingRequested = ok;
             Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
+            if (!ok) scheduleCanBusRebind();
         } catch (Exception e) {
+            canBusBindingRequested = false;
             Log.e(TAG, "ensureCanBusBound: exception: " + e.getMessage(), e);
+            scheduleCanBusRebind();
         }
     }
 
+    private void markCanBusDisconnected() {
+        canBusBinder = null;
+        canBusConnected = false;
+        canBusCallbackAdded = false;
+        handler.removeCallbacks(forceQueryRunnable);
+    }
+
+    private void restartCanBusBinding(String reason) {
+        Log.w(TAG, "CanBusService " + reason + " — replacing binding");
+        releaseCanBusBinding(reason);
+        scheduleCanBusRebind();
+    }
+
+    private void scheduleCanBusRebind() {
+        if (destroyed) return;
+        lastCanBusBindAttempt = SystemClock.elapsedRealtime();
+        handler.removeCallbacks(canBusRebindRunnable);
+        handler.postDelayed(canBusRebindRunnable, BIND_RETRY_MS);
+    }
+
+    private void releaseCanBusBinding(String reason) {
+        handler.removeCallbacks(canBusRebindRunnable);
+        if (canBusConnected) removeCanBusCallback();
+        if (canBusBindingRequested) {
+            try {
+                unbindService(canBusConnection);
+            } catch (Exception e) {
+                Log.w(TAG, reason + ": unbindService failed: " + e.getMessage());
+            }
+        }
+        canBusBindingRequested = false;
+        markCanBusDisconnected();
+    }
+
     private void addCanBusCallback() {
-        if (!canBusBound || canBusBinder == null || canBusCallbackAdded) return;
+        if (!canBusConnected || canBusBinder == null || canBusCallbackAdded) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -220,7 +326,7 @@ public class BatteryHeatService extends Service {
     }
 
     private void removeCanBusCallback() {
-        if (!canBusBound || canBusBinder == null || !canBusCallbackAdded) return;
+        if (!canBusConnected || canBusBinder == null || !canBusCallbackAdded) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -239,14 +345,16 @@ public class BatteryHeatService extends Service {
 
     /** Форсирует ре-броадкаст всех кэшированных VehicleState — снимок статусов на коннекте. */
     private void queryVehicleState() {
-        if (!canBusBound || canBusBinder == null) return;
+        if (!canBusConnected || canBusBinder == null) return;
+        lastFullQueryAttemptElapsed = SystemClock.elapsedRealtime();
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(CANBUS_DESCRIPTOR);
             canBusBinder.transact(TX_queryVehicleState, data, reply, 0);
             reply.readException();
-            Log.i(TAG, "queryVehicleState: OK");
+            Log.i(TAG, "queryVehicleState: OK fields="
+                    + Integer.bitCount(vehicleFieldsSeenMask) + "/" + VEHICLE_FIELD_COUNT);
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "queryVehicleState: error: " + e.getMessage());
         } finally {
@@ -260,20 +368,45 @@ public class BatteryHeatService extends Service {
     // -------------------------------------------------------------------------
 
     private void onVehicleState(int id, int state) {
+        final int field;
         switch (id) {
-            case ID_TEP_CONTROL_SWITCH: switchState   = state; break;
-            case ID_TEP_CONTROL_STATUS: controlStatus = state; break;
-            case ID_TEP_CONTROL_FAIL:   failReason    = state; break;
-            case ID_AUTO_CTRL:          autoCtrl      = state; break;
-            case ID_AUTO_CTRL_INFO:     autoCtrlInfo  = state; break;
-            case ID_DRIVER_PREHEAT_SET: preheatSet    = state; break;
+            case ID_TEP_CONTROL_SWITCH:
+                switchState = state;
+                field = FIELD_SWITCH;
+                break;
+            case ID_TEP_CONTROL_STATUS:
+                controlStatus = state;
+                field = FIELD_STATUS;
+                break;
+            case ID_TEP_CONTROL_FAIL:
+                failReason = state;
+                field = FIELD_FAIL;
+                break;
+            case ID_AUTO_CTRL:
+                autoCtrl = state;
+                field = FIELD_AUTO_CTRL;
+                break;
+            case ID_AUTO_CTRL_INFO:
+                autoCtrlInfo = state;
+                field = FIELD_AUTO_INFO;
+                break;
+            case ID_DRIVER_PREHEAT_SET:
+                preheatSet = state;
+                field = FIELD_PREHEAT_SET;
+                break;
             case ID_PREHEAT_FAIL_STATE:
                 // Резервный источник причины отказа, если основной (1296) не приходит.
                 if (failReason == UNKNOWN || failReason == 0) failReason = state;
+                field = FIELD_FAIL;
                 break;
-            case ID_BMS_STATE:          bmsState      = state; break;
+            case ID_BMS_STATE:
+                bmsState = state;
+                field = FIELD_BMS_STATE;
+                break;
             default: return; // не наш сигнал
         }
+        vehicleFieldsSeenMask |= 1 << field;
+        vehicleFieldUpdatedElapsed[field] = SystemClock.elapsedRealtime();
         Log.i(TAG, "vehicleState id=" + id + " state=" + state);
         broadcastUpdate();
     }
@@ -303,15 +436,61 @@ public class BatteryHeatService extends Service {
         if (controlStatus == 1) return; // уже греется
         long now = SystemClock.elapsedRealtime();
         if (now - lastActivateElapsed < ACTIVATE_REARM_MS) return;
-        lastActivateElapsed = now;
+        if (now - lastActivateAttemptElapsed < ACTIVATE_FAILURE_RETRY_MS) return;
+        if (activationPending) return;
         Log.i(TAG, "AUTO прогрев: " + src + " ambient=" + ambientTemp + "°C < " + AUTO_TEMP_THRESHOLD_C);
-        activate("auto <" + AUTO_TEMP_THRESHOLD_C + "°C");
+        activate("auto <" + AUTO_TEMP_THRESHOLD_C + "°C", false);
     }
 
     /** Активация прогрева. Реальную CAN-команду задаёт пользователь в {@link MainActivity#sendBatteryHeatCommand()}. */
-    private void activate(String reason) {
+    private void activate(String reason, boolean explicitUserAction) {
+        if (activationPending) {
+            Log.i(TAG, "activate battery heat coalesced — " + reason);
+            return;
+        }
+        activationPending = true;
         Log.i(TAG, "★ activate battery heat — " + reason);
-        MainActivity.sendBatteryHeatCommand();
+        if (explicitUserAction) {
+            ApplyEngine.postIndependentUserCommand("battery heat " + reason, () -> {
+                final long attemptedAt = SystemClock.elapsedRealtime();
+                boolean sent = false;
+                try {
+                    sent = MainActivity.sendBatteryHeatCommand();
+                } finally {
+                    final ApplyEngine.WakeActionResult result = sent
+                            ? ApplyEngine.WakeActionResult.SUCCESS
+                            : ApplyEngine.WakeActionResult.FAILED;
+                    if (!destroyed) {
+                        handler.post(() -> finishActivation(result, attemptedAt));
+                    }
+                }
+            });
+        } else {
+            final long[] attemptedAt = {0L};
+            ApplyEngine.postWakeAction("battery heat " + reason, () -> {
+                attemptedAt[0] = SystemClock.elapsedRealtime();
+                return MainActivity.sendBatteryHeatCommand();
+            }, result -> {
+                final long attempt = attemptedAt[0];
+                if (!destroyed) {
+                    handler.post(() -> finishActivation(result, attempt));
+                }
+            });
+        }
+    }
+
+    private void finishActivation(ApplyEngine.WakeActionResult result, long attemptedAt) {
+        if (destroyed) return;
+        activationPending = false;
+        if (result == ApplyEngine.WakeActionResult.SKIPPED) return;
+
+        lastActivateAttemptElapsed = attemptedAt;
+        if (result == ApplyEngine.WakeActionResult.SUCCESS) {
+            lastActivateElapsed = attemptedAt;
+        } else {
+            Log.w(TAG, "battery heat CAN failed; retry is allowed after "
+                    + ACTIVATE_FAILURE_RETRY_MS + "ms");
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -364,8 +543,7 @@ public class BatteryHeatService extends Service {
             String a = intent.getAction();
             if (ACTION_BATTERY_HEAT_ACTIVATE.equals(a)) {
                 // Ручная активация из виджета (в один клик).
-                lastActivateElapsed = SystemClock.elapsedRealtime();
-                activate("manual (виджет)");
+                activate("manual (виджет)", true);
             } else {
                 // ACTION_REQUEST_BATTERY_HEAT → отдать текущий снимок
                 broadcastUpdate();
@@ -412,13 +590,12 @@ public class BatteryHeatService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        destroyed = true;
         try { unregisterReceiver(uiReceiver); } catch (Exception ignored) {}
         handler.removeCallbacks(pollRunnable);
-        if (canBusBound) {
-            removeCanBusCallback();
-            try { unbindService(canBusConnection); } catch (Exception ignored) {}
-            canBusBound = false;
-        }
+        handler.removeCallbacks(forceQueryRunnable);
+        releaseCanBusBinding("onDestroy");
+        handler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
 
@@ -427,12 +604,31 @@ public class BatteryHeatService extends Service {
         public void run() {
             ensureCanBusBound();
             addCanBusCallback();   // no-op если уже добавлен
-            queryVehicleState();   // страховка: освежаем снимок статусов
+            long now = SystemClock.elapsedRealtime();
+            if (isVehicleSnapshotStale(now)
+                    && now - lastFullQueryAttemptElapsed >= FULL_QUERY_MIN_INTERVAL_MS) {
+                queryVehicleState();
+            }
             maybeAutoActivate("poll");
             broadcastUpdate();
             handler.postDelayed(this, POLL_MS);
         }
     };
+
+    private void resetVehicleSnapshotTracking() {
+        vehicleFieldsSeenMask = 0;
+        for (int i = 0; i < vehicleFieldUpdatedElapsed.length; i++) {
+            vehicleFieldUpdatedElapsed[i] = Long.MIN_VALUE / 2;
+        }
+    }
+
+    private boolean isVehicleSnapshotStale(long now) {
+        if (vehicleFieldsSeenMask != ALL_VEHICLE_FIELDS_MASK) return true;
+        for (long updatedAt : vehicleFieldUpdatedElapsed) {
+            if (now - updatedAt >= SNAPSHOT_STALE_MS) return true;
+        }
+        return false;
+    }
 
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(

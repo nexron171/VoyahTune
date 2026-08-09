@@ -12,10 +12,24 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     public static volatile int repeat = 7;
     public static volatile boolean isButton = false;
     static final String TAG = "$$$ SetModesReceiverDynamic $$$";
+    private final Runnable sleepCallback;
+    private final Runnable wakeCallback;
+
+    /** Нужен framework для manifest-declared explicit bridge от launcher/steering hooks. */
+    public SetModesReceiverDynamic() {
+        this(null, null);
+    }
+
+    /** Экземпляр, который SetModesService регистрирует для системных screen broadcasts. */
+    SetModesReceiverDynamic(Runnable sleepCallback, Runnable wakeCallback) {
+        this.sleepCallback = sleepCallback;
+        this.wakeCallback = wakeCallback;
+    }
 
     @Override
     public void onReceive(Context context, Intent intent) {
         String receivedIntent = intent.getAction();
+        boolean explicitComponent = intent.getComponent() != null;
 
         Log.i(TAG, "onReceive DYN enter by intent" + receivedIntent);
 
@@ -103,18 +117,28 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 //        }
         // SCREEN_OFF приходит раньше suspend/wake CAN-эхо и закрывает sync заранее. Это страховка
         // для прошивок, где CarPowerListener периодически пропускает SUSPEND_ENTER.
-        if (Intent.ACTION_SCREEN_OFF.equals(receivedIntent)) {
+        if (Intent.ACTION_SCREEN_OFF.equals(receivedIntent) && !explicitComponent) {
             ApplyEngine.resetRestoreGate("SCREEN_OFF");
+            if (sleepCallback != null) sleepCallback.run();
             Log.i(TAG, "onReceive SCREEN_OFF — mode sync gate reset");
         }
 
         // Fallback-триггер пробуждения через броадкасты. Держим его активным всегда (даже если
         // power-listener работает): при рестарте CarService слушатель может «протухнуть», а этот
         // путь остаётся. Возможные дубли с power-listener гасит дебаунс в ApplyEngine.
-        if (Intent.ACTION_SCREEN_ON.equals(receivedIntent) ||
-                "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent)) {
+        if (!explicitComponent && (Intent.ACTION_SCREEN_ON.equals(receivedIntent) ||
+                "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent))) {
             Log.i(TAG, "onReceive ACTION_SCREEN_ON or GARAGE_MODE_OFF");
             ApplyEngine.scheduleApply(receivedIntent);
+            if (Intent.ACTION_SCREEN_ON.equals(receivedIntent) && wakeCallback != null) {
+                wakeCallback.run();
+            }
+        }
+
+        if (explicitComponent && (Intent.ACTION_SCREEN_ON.equals(receivedIntent)
+                || Intent.ACTION_SCREEN_OFF.equals(receivedIntent)
+                || "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent))) {
+            Log.w(TAG, "ignored explicit power broadcast: " + receivedIntent);
         }
 
                 //throw new UnsupportedOperationException("Not yet implemented");
@@ -349,14 +373,17 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         final Context app = ctx.getApplicationContext();
         // Пользовательский выбор должен идти ПОСЛЕ уже запущенного wake-restore, а не параллельно с ним:
         // иначе restore успевал отправить старый snapshot поверх только что выбранного режима.
-        ApplyEngine.postExclusive("steer " + modeKey, () -> {
+        ApplyEngine.postUserCommand("steer " + modeKey, () -> {
             String cur = MainActivity.currentSavedMode(app, modeKey);
             String next = SteeringActionPolicy.nextMode(csv, cur);
             if (next == null) return;
             byte[][] cmd = "energy".equals(modeKey) ? MainActivity.getEnergyCanCommand(next)
                     : "recycle".equals(modeKey) ? MainActivity.getRecEnergyCanCommand(next)
                     : MainActivity.getDriveModeCanCommand(next);
-            MainActivity.setCanValues(1, cmd, "steer " + modeKey + " → " + next);
+            if (!MainActivity.setCanValues(1, cmd, "steer " + modeKey + " → " + next)) {
+                Log.w(TAG, "STEER_ACTION " + modeKey + ": CAN failed, selection not persisted");
+                return;
+            }
             MainActivity.persistSavedMode(app, modeKey, next);
             Log.i(TAG, "STEER_ACTION " + modeKey + ": набор=" + csv
                     + " тек=" + cur + " → " + next);
@@ -366,15 +393,20 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     /** Переключить бинарную настройку относительно сохранённого значения, применить CAN и сохранить новый state. */
     private static void toggleSetting(Context ctx, String key) {
         final Context app = ctx.getApplicationContext();
-        ApplyEngine.postExclusive("steer " + key, () -> {
+        ApplyEngine.postUserCommand("steer " + key, () -> {
             boolean current = MainActivity.currentSavedToggle(app, key);
             boolean next = !current;
+            boolean sent;
             if ("forcedEv".equals(key)) {
-                MainActivity.sendForcedEvCommand(next);
+                sent = MainActivity.sendForcedEvCommand(next);
             } else if ("disablePedestrianSound".equals(key)) {
                 // В pref хранится инвертированная семантика: true = звук выключен.
-                MainActivity.sendPedestrianSoundCommand(next);
+                sent = MainActivity.sendPedestrianSoundCommand(next);
             } else {
+                return;
+            }
+            if (!sent) {
+                Log.w(TAG, "STEER_ACTION " + key + ": CAN failed, toggle not persisted");
                 return;
             }
             MainActivity.persistSavedToggle(app, key, next);

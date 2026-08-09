@@ -89,6 +89,7 @@ public class NowPlayingService extends Service {
     private MediaController current;                 // сессия, за которой сейчас следим
     private MediaController.Callback controllerCallback;
     private String lastMediaRoute = null;            // последнее записанное решение (пишем только на смену)
+    private Bitmap lastWrittenArt;                   // тот же Bitmap не кодируем в PNG на каждый playback callback
 
     private final MediaSessionManager.OnActiveSessionsChangedListener sessionsListener =
             controllers -> { if (handler != null) handler.post(() -> onSessionsChanged(controllers)); };
@@ -320,10 +321,18 @@ public class NowPlayingService extends Service {
         if (bmp == null) bmp = md.getBitmap(MediaMetadata.METADATA_KEY_ART);
         if (bmp == null) bmp = md.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
         File f = artFile(this);
-        if (bmp == null) { if (f.exists()) f.delete(); return false; }
+        if (bmp == null) {
+            lastWrittenArt = null;
+            if (f.exists()) f.delete();
+            return false;
+        }
+        // PlaybackState может приходить много раз в секунду с тем же объектом MediaMetadata/Bitmap.
+        // PNG-compress + перезапись файла нужны только при реальной смене обложки.
+        if (bmp == lastWrittenArt && f.exists() && f.length() > 0L) return true;
         try (FileOutputStream fos = new FileOutputStream(f)) {
-            bmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
-            return true;
+            boolean written = bmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
+            if (written) lastWrittenArt = bmp;
+            return written;
         } catch (Exception e) {
             Log.w(TAG, "writeArt: " + e.getMessage());
             return false;

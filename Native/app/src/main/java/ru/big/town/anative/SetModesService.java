@@ -16,8 +16,10 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
+import android.os.PowerManager;
 import android.car.hardware.power.CarPowerManager;
 import android.os.RemoteException;
 import android.os.SystemClock;
@@ -93,12 +95,12 @@ public class SetModesService extends Service {
 
                 case MSG_LEAVE_CAR:
                     Log.i(TAG, "handleMessage() MSG_LEAVE_CAR");
-                    MainActivity.sendLeaveCarCommand();
+                    ApplyEngine.postUserCommand("leave car", MainActivity::sendLeaveCarCommand);
                     break;
 
                 case MSG_WASH_MODE:
                     Log.i(TAG, "handleMessage() MSG_WASH_MODE");
-                    MainActivity.sendWashModeCommand();
+                    ApplyEngine.postUserCommand("wash mode", MainActivity::sendWashModeCommand);
                     break;
 
                 case MSG_FLOATING_BACK:
@@ -125,12 +127,16 @@ public class SetModesService extends Service {
 
                 case MSG_APPLY_PEDESTRIAN:
                     Log.i(TAG, "handleMessage() MSG_APPLY_PEDESTRIAN arg1=" + msg.arg1);
-                    MainActivity.sendPedestrianSoundCommand(msg.arg1 == 1);
+                    final boolean pedestrianDisabled = msg.arg1 == 1;
+                    ApplyEngine.postUserCommand("pedestrian sound",
+                            () -> MainActivity.sendPedestrianSoundCommand(pedestrianDisabled));
                     break;
 
                 case MSG_APPLY_FORCED_EV:
                     Log.i(TAG, "handleMessage() MSG_APPLY_FORCED_EV arg1=" + msg.arg1);
-                    MainActivity.sendForcedEvCommand(msg.arg1 == 1);
+                    final boolean forcedEvEnabled = msg.arg1 == 1;
+                    ApplyEngine.postUserCommand("forced EV",
+                            () -> MainActivity.sendForcedEvCommand(forcedEvEnabled));
                     break;
 
                 case MSG_REBOOT:
@@ -247,8 +253,8 @@ public class SetModesService extends Service {
         }
         Log.i(TAG, "reassertFloatingBack: сервис не подключён → форс-переустановка a11y");
         writeFloatingBackA11y(false);
-        new android.os.Handler(android.os.Looper.getMainLooper())
-                .postDelayed(() -> writeFloatingBackA11y(true), 800);
+        mainHandler.removeCallbacks(floatingBackEnableRunnable);
+        mainHandler.postDelayed(floatingBackEnableRunnable, 800);
     }
 
     // Автозапуск RestoreMode: дебаунс, чтобы серия wake-состояний подряд не открывала окно повторно.
@@ -290,7 +296,11 @@ public class SetModesService extends Service {
         try {
             Intent i = new Intent();
             i.setClassName(RESTOREMODE_PKG, RESTOREMODE_MAIN);
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            // Direct start + fullScreenIntent — два fallback-пути одной операции. Reuse гарантирует,
+            // что второй delivery не создаст ещё один MainActivity/bind поверх уже открытого.
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
             // Прямой запуск (Native — priv-app с START_ACTIVITIES_FROM_BACKGROUND).
             try { startActivity(i); } catch (Exception ignored) {}
@@ -631,13 +641,100 @@ public class SetModesService extends Service {
     private final String CHANNEL_ID = "screen_monitor_channel";
     private Car mCar;
     private CarPropertyManager mCarPropertyManager;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean startupInitialized = false;
+    private boolean wakeSessionActive = false;
+    private boolean serviceDestroyed = false;
+    private boolean screenOffObserved = false;
+    private boolean pendingPhysicalWake = false;
+
+    private final Runnable startNowPlayingRunnable = () -> {
+        try {
+            startNowPlayingService();
+        } catch (Exception e) {
+            Log.w(TAG, "startNowPlayingService: " + e.getMessage());
+        }
+    };
+    private final Runnable reassertFloatingBackRunnable = this::reassertFloatingBack;
+    private final Runnable autoLaunchRunnable = this::maybeAutoLaunchRestoreMode;
+    private final Runnable floatingBackEnableRunnable = () -> writeFloatingBackA11y(true);
+
+    /** Один набор недебаунсированных side-effects на физический wake, а не на каждый power state. */
+    private boolean beginWakeSession() {
+        if (wakeSessionActive) return false;
+        wakeSessionActive = true;
+        return true;
+    }
+
+    private void endWakeSession() {
+        wakeSessionActive = false;
+    }
+
+    private void scheduleAncillaryWakeTasks() {
+        // Повторный startService для уже живого сервиса безвреден, зато поднимет его снова, если
+        // система убила NowPlaying между физическими wake. Named runnable гасит дубли внутри wake.
+        mainHandler.removeCallbacks(startNowPlayingRunnable);
+        mainHandler.postDelayed(startNowPlayingRunnable, 6000);
+        mainHandler.removeCallbacks(reassertFloatingBackRunnable);
+        mainHandler.postDelayed(reassertFloatingBackRunnable, 3000);
+        mainHandler.removeCallbacks(autoLaunchRunnable);
+        mainHandler.postDelayed(autoLaunchRunnable, 5000);
+    }
+
+    private void cancelAncillaryWakeTasks() {
+        mainHandler.removeCallbacks(startNowPlayingRunnable);
+        mainHandler.removeCallbacks(reassertFloatingBackRunnable);
+        mainHandler.removeCallbacks(autoLaunchRunnable);
+        mainHandler.removeCallbacks(floatingBackEnableRunnable);
+    }
+
+    private void runWakeSideEffects(String source) {
+        if (serviceDestroyed) return;
+        if (beginWakeSession()) {
+            resetWiperColdOnPowerOn();
+            forwardPowerOnToTripStats();
+            scheduleAncillaryWakeTasks();
+            Log.i(TAG, "wake side-effects started by " + source);
+        } else {
+            Log.i(TAG, "wake side-effects coalesced for " + source);
+        }
+    }
+
+    private void handleScreenOffFallback() {
+        screenOffObserved = true;
+        pendingPhysicalWake = false;
+        endWakeSession();
+        cancelAncillaryWakeTasks();
+    }
+
+    private void handleScreenOnFallback() {
+        screenOffObserved = false;
+        // SCREEN_ON сам по себе бывает обычным включением дисплея и не является границей поездки.
+        // Выполняем физические side-effects только если до него реально пришёл CarPower wake.
+        if (pendingPhysicalWake) {
+            pendingPhysicalWake = false;
+            runWakeSideEffects("deferred CarPower wake");
+        }
+    }
+
+    private boolean isScreenInteractive() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            return pm != null && pm.isInteractive();
+        } catch (Throwable ignored) {
+            return !screenOffObserved;
+        }
+    }
 
     @Override
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        screenOffObserved = !isScreenInteractive();
         initializeCarPowerManager();
-        setModesReceiverDynamic = new SetModesReceiverDynamic();
+        setModesReceiverDynamic = new SetModesReceiverDynamic(
+                this::handleScreenOffFallback,
+                this::handleScreenOnFallback);
         // Приёмник запроса снимка логов + восстановление захвата регистрируем в onCreate
         // (срабатывает и при простом bind, не только при startService).
         try {
@@ -658,34 +755,39 @@ public class SetModesService extends Service {
             new CarPowerManager.CarPowerStateListener() {
                 @Override
                 public void onStateChanged(int state) {
-                    Log.i(TAG, "Power state changed: " + state + " (" + powerStateName(state) + ")");
-                    // Раньше применялось ТОЛЬКО на STATE_ON(6). Но при выходе из сна железо часто
-                    // рапортует WAIT_FOR_VHAL(1)/SUSPEND_EXIT(3)/SHUTDOWN_CANCELLED(8), а ON может не
-                    // прийти — из-за этого настройки не применялись до ручного «Применить».
-                    // Теперь реагируем на любое «пробуждение к активному состоянию» (с дебаунсом в
-                    // ApplyEngine, чтобы несколько состояний подряд не привели к дублю).
-                    if (isWakeState(state)) {
-                        ApplyEngine.scheduleApply("power state " + powerStateName(state));
-                        // Сервисный режим дворников: на пробуждении возвращаем дворники в обычный режим
-                        resetWiperColdOnPowerOn();
-                        // Статистика поездок: пробуждение — граница новой поездки
-                        forwardPowerOnToTripStats();
-                        // Плавающая кнопка «Назад»: подстрахуемся, что она включена после пробуждения
-                        reassertFloatingBack();
-                        // Автозапуск VoyahTune: если включён — открыть RestoreMode
-                        maybeAutoLaunchRestoreMode();
-                    } else {
-                        // Засыпание/выключение → следующее пробуждение должно СНАЧАЛА восстановить
-                        // сохранённый режим, а не подхватить дефолт машины. Заранее глушим внешний синк
-                        // режима (страховка к сбросу в scheduleApply — на случай «тёплого» процесса, где
-                        // CAN-эхо может прийти раньше wake-триггера). См. ApplyEngine/ModeSyncPolicy.
-                        if (isSleepOrShutdownState(state)) {
-                            ApplyEngine.resetRestoreGate("power state " + powerStateName(state));
-                        }
-                        Log.i(TAG, "onStateChanged() ignored state: " + state);
-                    }
+                    // android.car invokes this listener directly from a Binder thread. Marshal the
+                    // whole transition to main so SCREEN_OFF/onDestroy cannot interleave halfway
+                    // through schedule/cancel and leave delayed tasks armed in sleep.
+                    mainHandler.post(() -> handlePowerStateChanged(state));
                 }
             };
+
+    private void handlePowerStateChanged(int state) {
+        if (serviceDestroyed) return;
+        Log.i(TAG, "Power state changed: " + state + " (" + powerStateName(state) + ")");
+        if (isWakeState(state)) {
+            ApplyEngine.scheduleApply("power state " + powerStateName(state));
+            if (isScreenInteractive()
+                    || state == CarPowerManager.CarPowerStateListener.ON
+                    || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_CANCELLED) {
+                screenOffObserved = false;
+                pendingPhysicalWake = false;
+                runWakeSideEffects(powerStateName(state));
+            } else {
+                pendingPhysicalWake = true;
+                Log.i(TAG, "physical wake side-effects deferred until SCREEN_ON");
+            }
+            return;
+        }
+        if (isSleepOrShutdownState(state)) {
+            screenOffObserved = true;
+            pendingPhysicalWake = false;
+            endWakeSession();
+            cancelAncillaryWakeTasks();
+            ApplyEngine.resetRestoreGate("power state " + powerStateName(state));
+        }
+        Log.i(TAG, "onStateChanged() ignored state: " + state);
+    }
 
     /** Состояния питания, трактуемые как «пробуждение → нужно применить настройки». */
     private static boolean isWakeState(int state) {
@@ -747,6 +849,12 @@ public class SetModesService extends Service {
             // CarService «тихо умирал» — пробуждения переставали ловиться.
             mCar = Car.createCar(this, null, Car.CAR_WAIT_TIMEOUT_WAIT_FOREVER,
                     (car, ready) -> {
+                        // disconnect() и lifecycle callback могут пересечься при teardown. Не даём
+                        // позднему ready снова зарегистрировать listener уже уничтоженного сервиса.
+                        if (serviceDestroyed) {
+                            Log.i(TAG, "Car lifecycle ignored after service destroy, ready=" + ready);
+                            return;
+                        }
                         Log.i(TAG, "Car lifecycle: ready=" + ready);
                         if (ready) {
                             try {
@@ -824,32 +932,20 @@ public class SetModesService extends Service {
             receiverRegistered = true;
         }
 
-        // Первый вызов после старта сервиса (в т.ч. рестарт по START_STICKY после kill во сне) —
-        // применяем настройки. ApplyEngine сам дождётся готовности провайдера/кэша.
-        ApplyEngine.scheduleApply("service start");
-        Log.i(TAG, "onStartCommand() first run!");
-
-        // Восстанавливаем состояние автосвета
-        restoreAutoLightState();
-        // Восстанавливаем сервис «сервисного режима дворников»
-        restoreWiperColdState();
-        // Учёт поездок работает всегда
-        startTripStatsService();
-        // Статус ВВБ для виджета + авто-прогрев по уличной температуре
-        startBatteryHeatService();
-        // Ридер «сейчас играет» — стартуем с задержкой и в try, чтобы НИКАК не влиять на критичное
-        // применение режима на старте (оно уже запланировано выше). Изолируем от старта.
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            try { startNowPlayingService(); }
-            catch (Exception e) { Log.w(TAG, "startNowPlayingService: " + e.getMessage()); }
-        }, 6000);
-        // Плавающая кнопка «Назад»: восстановить после загрузки/рестарта сервиса
-        // (с задержкой — даём системе поднять a11y-подсистему).
-        new android.os.Handler(android.os.Looper.getMainLooper())
-                .postDelayed(this::reassertFloatingBack, 3000);
-        // Автозапуск VoyahTune на загрузке (если включён) — с задержкой, чтобы оболочка поднялась.
-        new android.os.Handler(android.os.Looper.getMainLooper())
-                .postDelayed(this::maybeAutoLaunchRestoreMode, 5000);
+        // BOOT_COMPLETED и QINGGAN_BOOT_COMPLETE оба стартуют этот же экземпляр сервиса. Инициализация
+        // зависимостей и delayed-задач нужна один раз; повторный onStartCommand не должен плодить bind/UI.
+        if (!startupInitialized) {
+            startupInitialized = true;
+            ApplyEngine.scheduleApply("service start");
+            restoreAutoLightState();
+            restoreWiperColdState();
+            startTripStatsService();
+            startBatteryHeatService();
+            scheduleAncillaryWakeTasks();
+            Log.i(TAG, "onStartCommand(): startup initialized");
+        } else {
+            Log.i(TAG, "onStartCommand(): already initialized");
+        }
         //if(action.equals("ru.big.town.anative.APPLY_DRIVE_MODES")){
         //  Log.i(TAG, "onStartCommand() Intent is ru.big.town.anative.APPLY_DRIVE_MODES!");
         //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
@@ -879,6 +975,11 @@ public class SetModesService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        serviceDestroyed = true;
+        pendingPhysicalWake = false;
+        endWakeSession();
+        cancelAncillaryWakeTasks();
+        mainHandler.removeCallbacksAndMessages(null);
         if (receiverRegistered) {
             try {
                 getApplicationContext().unregisterReceiver(setModesReceiverDynamic);
@@ -902,9 +1003,11 @@ public class SetModesService extends Service {
                 Log.w(TAG, "clearListener() failed: " + e.getMessage());
             }
         }
+        GlobalVars.mCarPowerManager = null;
 
         if (mCar != null) {
             mCar.disconnect();
+            mCar = null;
         }
         super.onDestroy();
     }
@@ -930,7 +1033,7 @@ public class SetModesService extends Service {
                         repeat, pause, mode, msg_arg1));
         if (GlobalVars.SAVE_CONTEXT == null || mode != MSG_APPLY_DRIVE_MODES_STAR_BUTTON) return;
 
-        ApplyEngine.postExclusive("star button " + msg_arg1, () -> {
+        ApplyEngine.postUserCommand("star button " + msg_arg1, () -> {
             MainActivity.loadModes(GlobalVars.SAVE_CONTEXT);
             Log.i(TAG, " Run customCommandStarButton");
             if (msg_arg1 == 1) MainActivity.setCanValues(1, MainActivity.getCustomCommandStarButton1(), "star button command 1");

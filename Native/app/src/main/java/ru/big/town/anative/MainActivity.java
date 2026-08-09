@@ -94,7 +94,9 @@ public class MainActivity extends AppCompatActivity {
             cmdsBytes[indexCmd] = parseHexBinary(cmd);
             indexCmd++;
         }
-        printBytesArrayToLog("$$$  MAIN arraysStr2arraysBytes $$$", cmdsBytes);
+        // Не логируем каждый разобранный frame: один wake-restore создаёт десятки таких строк,
+        // а серия proximity wake/sleep превращала форматирование и logd I/O в отдельный усилитель
+        // нагрузки. В debug-режиме фактически отправляемые кадры уже логирует CanSender.
         return cmdsBytes;
     }
     //-------------- Вспомогательная шляпа не паримся ---------------------
@@ -222,21 +224,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Немедленно применить форсированный EV (тоггл с главного экрана / из настроек). */
-    public static void sendForcedEvCommand(boolean on) {
-        setCanValues(1, getForcedEvCanCommand(on), "forced EV " + (on ? "on" : "off"));
+    public static boolean sendForcedEvCommand(boolean on) {
+        return setCanValues(1, getForcedEvCanCommand(on), "forced EV " + (on ? "on" : "off"));
     }
 
     //------------- Методы получения команд CAN управления фарами  ----------------------------------
-    public static void setHeadlights(boolean on){
+    public static boolean setHeadlights(boolean on){
         Log.i("$$$ MainActivity setHeadlights $$$", "sending CAN: headlights " + (on ? "ON" : "OFF"));
         if (on) {
-            setCanValues(1, arraysStr2arraysBytes(new String[]{
+            return setCanValues(1, arraysStr2arraysBytes(new String[]{
                     "1f 08 00 10 ff f8 00 04 02 7f",
                     "6f 08 08 00 80 11 43 04 00 40",
                     "76 08 04 00 00 00 00 00 00 00"
             }), "headlights: ON (low beam / manual)");
         } else {
-            setCanValues(1, arraysStr2arraysBytes(new String[]{
+            return setCanValues(1, arraysStr2arraysBytes(new String[]{
                     "6f 08 08 00 80 11 43 00 00 40",
                     "1f 08 00 00 ff f9 00 04 02 7f",
                     "76 08 00 00 00 00 00 00 00 00"
@@ -256,7 +258,9 @@ public class MainActivity extends AppCompatActivity {
             startService(serviceIntent);
         }
 
-        runCmds();
+        // Открытие Native остаётся ручным recovery-path при пропущенном power/screen callback. Движок
+        // дедебаунсит этот триггер с service-start и не создаёт параллельную прямую CAN-отправку.
+        ApplyEngine.scheduleApply("Native activity opened");
         //binding = ActivityMainBinding.inflate(getLayoutInflater());
         //setContentView(binding.getRoot());
         setContentView(R.layout.activity_main);
@@ -277,6 +281,15 @@ public class MainActivity extends AppCompatActivity {
         // Отправка идёт через CanSender: в режиме отладки команды логируются (эмуляция) с меткой,
         // иначе уходят в шину через cis_can_control_bytes.
         return CanSender.send(cmdNum, cmds, label);
+    }
+
+    /** Restore-команда обязательна: пустой набор нельзя засчитать как успешный CAN pass. */
+    private static boolean sendRequiredCanValues(int cmdNum, byte[][] cmds, String label) {
+        if (cmds == null || cmds.length == 0) {
+            Log.e("$$$ MainActivity runCmds $$$", "No CAN frames for required " + label);
+            return false;
+        }
+        return setCanValues(cmdNum, cmds, label);
     }
 
     private static final String MODES_LOG = "$$$ MainActivity loadModes";
@@ -423,8 +436,8 @@ public class MainActivity extends AppCompatActivity {
             "6c 08 00 3e 64 21 c7 00 00 00",
             "77 08 00 00 00 00 00 1f 00 00",
     };
-    public static void sendLeaveCarCommand() {
-        setCanValues(1, arraysStr2arraysBytes(LEAVE_CAR_FRAMES), "leave car (power hold)");
+    public static boolean sendLeaveCarCommand() {
+        return setCanValues(1, arraysStr2arraysBytes(LEAVE_CAR_FRAMES), "leave car (power hold)");
     }
 
     // Режим мойки — машина засыпает и не реагирует на открытие дверей. Последовательность CAN-команд.
@@ -438,8 +451,8 @@ public class MainActivity extends AppCompatActivity {
             "6f 08 04 00 80 11 43 00 00 40",
             "76 08 00 00 00 00 00 00 00 00",
     };
-    public static void sendWashModeCommand() {
-        setCanValues(1, arraysStr2arraysBytes(WASH_MODE_FRAMES), "wash mode");
+    public static boolean sendWashModeCommand() {
+        return setCanValues(1, arraysStr2arraysBytes(WASH_MODE_FRAMES), "wash mode");
     }
 
     // ------------------------------------------------------------------------
@@ -456,18 +469,18 @@ public class MainActivity extends AppCompatActivity {
      * температуре и ручной клик в виджете). Шлёт {@link #BATTERY_HEAT_FRAMES} в шину;
      * пустой массив (если когда-нибудь очистят) — безопасный no-op с логом.
      */
-    public static void sendBatteryHeatCommand() {
+    public static boolean sendBatteryHeatCommand() {
         if (BATTERY_HEAT_FRAMES.length == 0) {
             Log.w("$$$ MainActivity batteryHeat $$$",
                     "sendBatteryHeatCommand: CAN-команда прогрева ещё не задана (заглушка BATTERY_HEAT_FRAMES)");
-            return;
+            return false;
         }
-        setCanValues(1, arraysStr2arraysBytes(BATTERY_HEAT_FRAMES), "battery preheat");
+        return setCanValues(1, arraysStr2arraysBytes(BATTERY_HEAT_FRAMES), "battery preheat");
     }
 
     /** Немедленно применить звук пешеходов (тоггл с главного экрана). disabled=true → заглушить. */
-    public static void sendPedestrianSoundCommand(boolean disabled) {
-        setCanValues(1, getPedestrianSoundCanCommand(disabled),
+    public static boolean sendPedestrianSoundCommand(boolean disabled) {
+        return setCanValues(1, getPedestrianSoundCanCommand(disabled),
                 "pedestrian sound " + (disabled ? "off" : "on"));
     }
 
@@ -500,20 +513,24 @@ public class MainActivity extends AppCompatActivity {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound);
-        boolean ok = true;
-        if (energyEnabled)  ok &= setCanValues(1, getEnergyCanCommand(energy),        "energy mode: " + energy);
-        if (driveEnabled)   ok &= setCanValues(1, getDriveModeCanCommand(driveMode),  "drive mode: " + driveMode);
-        if (recycleEnabled) ok &= setCanValues(1, getRecEnergyCanCommand(recycle),    "recuperation level: " + recycle);
+        // CAN ещё не готов на раннем wake — прекращаем проход на ПЕРВОЙ ошибке. Иначе один retry
+        // всё равно открывал HAL для всех 5–7 кадров и за 120с создавал сотни бесполезных ioctl.
+        if (energyEnabled && !sendRequiredCanValues(1, getEnergyCanCommand(energy),
+                "energy mode: " + energy)) return false;
+        if (driveEnabled && !sendRequiredCanValues(1, getDriveModeCanCommand(driveMode),
+                "drive mode: " + driveMode)) return false;
+        if (recycleEnabled && !sendRequiredCanValues(1, getRecEnergyCanCommand(recycle),
+                "recuperation level: " + recycle)) return false;
         // «Отключить звук для пешеходов» — бинарное состояние, применяем всегда
-        ok &= setCanValues(1, getPedestrianSoundCanCommand(disablePedestrianSound),
-                "pedestrian sound mode " + (disablePedestrianSound ? "off" : "on"));
+        if (!sendRequiredCanValues(1, getPedestrianSoundCanCommand(disablePedestrianSound),
+                "pedestrian sound mode " + (disablePedestrianSound ? "off" : "on"))) return false;
         // Форсированный EV применяем ТОЛЬКО когда он включён — и обязательно ПОСЛЕ команды энергии,
         // чтобы он её перекрыл. Команду «выкл» здесь не шлём намеренно: её байты (…2c 24 08 00)
         // содержат значение энергии «Электро», т.е. отправка на каждом применении переводила бы
         // энергорежим в электро и затирала выбор пользователя (Авто/Топливо/Сохранение).
         // Выключение уходит явным действием пользователя — см. sendForcedEvCommand(false).
-        if (forcedEv) ok &= setCanValues(1, getForcedEvCanCommand(true), "forced EV on");
-        return ok;
+        if (forcedEv && !sendRequiredCanValues(1, getForcedEvCanCommand(true), "forced EV on")) return false;
+        return true;
     }
     public static void setDriveMode(String driveMode){
         setCanValues(1, getDriveModeCanCommand(driveMode), "drive mode: " + driveMode);

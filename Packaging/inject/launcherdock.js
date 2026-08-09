@@ -97,6 +97,7 @@ Java.perform(function () {
     var originalBg = {};
     // Удержанные Drawable (иначе GC уберёт background).
     var retained = [];
+    var MAX_RETAINED_DRAWABLES = 64;
     // Последний нажатый слот (для корректной подсветки нашего VD-хоста в updateSelectedApp).
     var lastSlot = 0;
     // viewId слота дока → номер слота (1/2). Заполняется в updateIcons, читается в долгом тапе слота
@@ -198,7 +199,17 @@ Java.perform(function () {
     }
 
     function retainDrawable(obj) {
-        try { var r = Java.retain(obj); retained.push(r); return r; } catch (e) { return obj; }
+        try {
+            var r = Java.retain(obj);
+            retained.push(r);
+            // updateTheme может вызываться много раз за жизнь launcher. Старые background уже давно
+            // заменены; освобождаем их global refs с большим запасом для живых navbar instances.
+            while (retained.length > MAX_RETAINED_DRAWABLES) {
+                var old = retained.shift();
+                try { old.$dispose(); } catch (ignored) {}
+            }
+            return r;
+        } catch (e) { return obj; }
     }
 
     // Drawable иконки приложения: pm.getApplicationIcon → рисуем на Bitmap → масштаб 50x50 → BitmapDrawable.

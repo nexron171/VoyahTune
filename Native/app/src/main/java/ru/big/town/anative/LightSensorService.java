@@ -123,14 +123,17 @@ public class LightSensorService extends Service {
 
     private Handler timerHandler;
     private IBinder carSignalBinder = null;
-    private boolean carSignalBound  = false;
+    private boolean carSignalBindingRequested = false;
+    private boolean carSignalConnected = false;
     private boolean callbackRegistered = false;
-    private long    lastBindAttempt = 0L;
+    private long    lastBindAttempt = -BIND_RETRY_MS;
+    private final Runnable carSignalRebindRunnable = this::ensureBound;
 
     // Текущая зафиксированная цель: true = ближний свет, false = авторежим
     private boolean headlightsOn = false;
     private boolean everSent     = false;
     private boolean forceInitScheduled = false;
+    private long    commitSequence = 0L;
     private int     pendingSensorLevel = -1;
     private long    lastCommitElapsed  = 0L;
 
@@ -143,9 +146,12 @@ public class LightSensorService extends Service {
 
     // CanBusService — подписка на LightStatus (autoLamp)
     private IBinder canBusBinder = null;
-    private boolean canBusBound  = false;
+    private boolean canBusBindingRequested = false;
+    private boolean canBusConnected = false;
     private boolean canBusCallbackAdded   = false;
-    private long    lastCanBusBindAttempt = 0L;
+    private long    lastCanBusBindAttempt = -BIND_RETRY_MS;
+    private volatile boolean destroyed = false;
+    private final Runnable canBusRebindRunnable = this::ensureCanBusBound;
     // Последние значимые поля LightStatus — фильтр шума от поворотников/стопа
     private int lastAutoLamp   = -1;
     private int lastDippedBeam = -1;
@@ -159,12 +165,17 @@ public class LightSensorService extends Service {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
+            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
+                    && code <= IBinder.LAST_CALL_TRANSACTION) {
+                return true;
+            }
             if (code == CB_onLightSensorChanged) {
                 data.enforceInterface(CALLBACK_DESCRIPTOR);
                 final int level = data.readInt();
                 // Уходим с binder-потока на main и дебаунсим: реагируем только
                 // когда значение «устоялось» SENSOR_DEBOUNCE_MS — гасим дребезг.
                 timerHandler.post(() -> {
+                    if (destroyed) return;
                     pendingSensorLevel = level;
                     timerHandler.removeCallbacks(sensorDebounceRunnable);
                     timerHandler.postDelayed(sensorDebounceRunnable, SENSOR_DEBOUNCE_MS);
@@ -188,6 +199,10 @@ public class LightSensorService extends Service {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
+            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
+                    && code <= IBinder.LAST_CALL_TRANSACTION) {
+                return true;
+            }
             if (code == CB_onLightStatusChanged) {
                 data.enforceInterface(CANBUS_CB_DESCRIPTOR);
                 // readInt() = флаг наличия объекта, затем 17 int-полей LightStatus
@@ -201,7 +216,9 @@ public class LightSensorService extends Service {
                     }
                 }
                 final int fAuto = autoLamp, fDipped = dippedBeam, fHead = headLight;
-                timerHandler.post(() -> onLightStatusChanged(fAuto, fDipped, fHead));
+                timerHandler.post(() -> {
+                    if (!destroyed) onLightStatusChanged(fAuto, fDipped, fHead);
+                });
                 return true;
             }
             if (code == CB_onGearStatusChanged) {
@@ -210,7 +227,9 @@ public class LightSensorService extends Service {
                 int gearVal = -1;
                 if (data.readInt() != 0) { data.readInt(); gearVal = data.readInt(); }
                 final int g = gearVal;
-                timerHandler.post(() -> onGear(g));
+                timerHandler.post(() -> {
+                    if (!destroyed) onGear(g);
+                });
                 return true;
             }
             if (code == CB_onVehicleStateChanged) {
@@ -221,7 +240,9 @@ public class LightSensorService extends Service {
                 int state = data.readInt();
                 if (id == RSM_LIGHT_SW_REASON) {
                     final int r = state;
-                    timerHandler.post(() -> onLightSwReason(r));
+                    timerHandler.post(() -> {
+                        if (!destroyed) onLightSwReason(r);
+                    });
                 }
                 return true;
             }
@@ -241,8 +262,12 @@ public class LightSensorService extends Service {
     private final ServiceConnection carSignalConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
+            if (destroyed) return;
+            timerHandler.removeCallbacks(carSignalRebindRunnable);
+            carSignalBindingRequested = true;
             carSignalBinder = service;
-            carSignalBound  = true;
+            carSignalConnected = true;
+            callbackRegistered = false;
             Log.i(TAG, "CarSignalService connected, alive=" + service.isBinderAlive());
             registerCallback();
             // Подписки готовы — один раз через FORCE_INIT_MS принудительно
@@ -255,15 +280,23 @@ public class LightSensorService extends Service {
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            carSignalBinder = null;
-            carSignalBound  = false;
-            callbackRegistered = false;
-            Log.w(TAG, "CarSignalService disconnected — will rebind on next poll");
+            markCarSignalDisconnected();
+            Log.w(TAG, "CarSignalService disconnected — waiting for automatic reconnect");
+        }
+
+        @Override
+        public void onBindingDied(ComponentName name) {
+            restartCarSignalBinding("binding died");
+        }
+
+        @Override
+        public void onNullBinding(ComponentName name) {
+            restartCarSignalBinding("null binding");
         }
     };
 
     private void ensureBound() {
-        if (carSignalBound) return;
+        if (destroyed || carSignalBindingRequested) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastBindAttempt < BIND_RETRY_MS) return;
         lastBindAttempt = now;
@@ -271,10 +304,47 @@ public class LightSensorService extends Service {
             Intent intent = new Intent(CAR_SIGNAL_ACTION);
             intent.setPackage(CAR_SIGNAL_PACKAGE);
             boolean ok = bindService(intent, carSignalConnection, Context.BIND_AUTO_CREATE);
+            carSignalBindingRequested = ok;
             Log.i(TAG, "ensureBound: bindService returned " + ok);
+            if (!ok) scheduleCarSignalRebind();
         } catch (Exception e) {
+            carSignalBindingRequested = false;
             Log.e(TAG, "ensureBound: exception: " + e.getMessage(), e);
+            scheduleCarSignalRebind();
         }
+    }
+
+    private void markCarSignalDisconnected() {
+        carSignalBinder = null;
+        carSignalConnected = false;
+        callbackRegistered = false;
+    }
+
+    private void restartCarSignalBinding(String reason) {
+        Log.w(TAG, "CarSignalService " + reason + " — replacing binding");
+        releaseCarSignalBinding(reason);
+        scheduleCarSignalRebind();
+    }
+
+    private void scheduleCarSignalRebind() {
+        if (destroyed) return;
+        lastBindAttempt = SystemClock.elapsedRealtime();
+        timerHandler.removeCallbacks(carSignalRebindRunnable);
+        timerHandler.postDelayed(carSignalRebindRunnable, BIND_RETRY_MS);
+    }
+
+    private void releaseCarSignalBinding(String reason) {
+        timerHandler.removeCallbacks(carSignalRebindRunnable);
+        if (carSignalConnected) unregisterCallback();
+        if (carSignalBindingRequested) {
+            try {
+                unbindService(carSignalConnection);
+            } catch (Exception e) {
+                Log.w(TAG, reason + ": CarSignal unbindService failed: " + e.getMessage());
+            }
+        }
+        carSignalBindingRequested = false;
+        markCarSignalDisconnected();
     }
 
     // -------------------------------------------------------------------------
@@ -284,23 +354,35 @@ public class LightSensorService extends Service {
     private final ServiceConnection canBusConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
+            if (destroyed) return;
+            timerHandler.removeCallbacks(canBusRebindRunnable);
+            canBusBindingRequested = true;
             canBusBinder = service;
-            canBusBound  = true;
+            canBusConnected = true;
+            canBusCallbackAdded = false;
             Log.i(TAG, "CanBusService connected, alive=" + service.isBinderAlive());
             addCanBusCallback();
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            canBusBinder = null;
-            canBusBound  = false;
-            canBusCallbackAdded = false;
-            Log.w(TAG, "CanBusService disconnected — will rebind on next poll");
+            markCanBusDisconnected();
+            Log.w(TAG, "CanBusService disconnected — waiting for automatic reconnect");
+        }
+
+        @Override
+        public void onBindingDied(ComponentName name) {
+            restartCanBusBinding("binding died");
+        }
+
+        @Override
+        public void onNullBinding(ComponentName name) {
+            restartCanBusBinding("null binding");
         }
     };
 
     private void ensureCanBusBound() {
-        if (canBusBound) return;
+        if (destroyed || canBusBindingRequested) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
         lastCanBusBindAttempt = now;
@@ -308,15 +390,52 @@ public class LightSensorService extends Service {
             Intent intent = new Intent(CANBUS_ACTION);
             intent.setPackage(CANBUS_PACKAGE);
             boolean ok = bindService(intent, canBusConnection, Context.BIND_AUTO_CREATE);
+            canBusBindingRequested = ok;
             Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
+            if (!ok) scheduleCanBusRebind();
         } catch (Exception e) {
+            canBusBindingRequested = false;
             Log.e(TAG, "ensureCanBusBound: exception: " + e.getMessage(), e);
+            scheduleCanBusRebind();
         }
+    }
+
+    private void markCanBusDisconnected() {
+        canBusBinder = null;
+        canBusConnected = false;
+        canBusCallbackAdded = false;
+    }
+
+    private void restartCanBusBinding(String reason) {
+        Log.w(TAG, "CanBusService " + reason + " — replacing binding");
+        releaseCanBusBinding(reason);
+        scheduleCanBusRebind();
+    }
+
+    private void scheduleCanBusRebind() {
+        if (destroyed) return;
+        lastCanBusBindAttempt = SystemClock.elapsedRealtime();
+        timerHandler.removeCallbacks(canBusRebindRunnable);
+        timerHandler.postDelayed(canBusRebindRunnable, BIND_RETRY_MS);
+    }
+
+    private void releaseCanBusBinding(String reason) {
+        timerHandler.removeCallbacks(canBusRebindRunnable);
+        if (canBusConnected) removeCanBusCallback();
+        if (canBusBindingRequested) {
+            try {
+                unbindService(canBusConnection);
+            } catch (Exception e) {
+                Log.w(TAG, reason + ": CanBus unbindService failed: " + e.getMessage());
+            }
+        }
+        canBusBindingRequested = false;
+        markCanBusDisconnected();
     }
 
     /** Регистрирует canBusCallbackBinder в CanBusService (TX=28, addCallback). */
     private void addCanBusCallback() {
-        if (!canBusBound || canBusBinder == null || canBusCallbackAdded) return;
+        if (!canBusConnected || canBusBinder == null || canBusCallbackAdded) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -336,7 +455,7 @@ public class LightSensorService extends Service {
     }
 
     private void removeCanBusCallback() {
-        if (!canBusBound || canBusBinder == null || !canBusCallbackAdded) return;
+        if (!canBusConnected || canBusBinder == null || !canBusCallbackAdded) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -356,7 +475,7 @@ public class LightSensorService extends Service {
 
     /** Регистрирует наш callbackBinder в CarSignalService (TX=46, writeStrongBinder). */
     private void registerCallback() {
-        if (!carSignalBound || carSignalBinder == null || callbackRegistered) return;
+        if (!carSignalConnected || carSignalBinder == null || callbackRegistered) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -375,7 +494,7 @@ public class LightSensorService extends Service {
     }
 
     private void unregisterCallback() {
-        if (!carSignalBound || carSignalBinder == null || !callbackRegistered) return;
+        if (!carSignalConnected || carSignalBinder == null || !callbackRegistered) return;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -395,7 +514,7 @@ public class LightSensorService extends Service {
 
     /** Синхронно читает уровень датчика (TX=36). -1 при ошибке. */
     private int readSensorLevel() {
-        if (!carSignalBound || carSignalBinder == null) return -1;
+        if (!carSignalConnected || carSignalBinder == null) return -1;
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -453,31 +572,19 @@ public class LightSensorService extends Service {
 
     @Override
     public void onDestroy() {
-        Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn + " bound=" + carSignalBound);
+        Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn
+                + " carSignalConnected=" + carSignalConnected
+                + " canBusConnected=" + canBusConnected);
+        destroyed = true;
         try { unregisterReceiver(requestReceiver); } catch (Exception ignored) {}
         timerHandler.removeCallbacks(safetyRunnable);
         timerHandler.removeCallbacks(forceInitRunnable);
         timerHandler.removeCallbacks(sensorDebounceRunnable);
         timerHandler.removeCallbacks(canbusReassertRunnable);
         timerHandler.removeCallbacks(driveFallbackRunnable);
-        if (carSignalBound) {
-            unregisterCallback();
-            try {
-                unbindService(carSignalConnection);
-            } catch (Exception e) {
-                Log.w(TAG, "onDestroy: unbindService failed: " + e.getMessage());
-            }
-            carSignalBound = false;
-        }
-        if (canBusBound) {
-            removeCanBusCallback();
-            try {
-                unbindService(canBusConnection);
-            } catch (Exception e) {
-                Log.w(TAG, "onDestroy: canbus unbindService failed: " + e.getMessage());
-            }
-            canBusBound = false;
-        }
+        releaseCarSignalBinding("onDestroy");
+        releaseCanBusBinding("onDestroy");
+        timerHandler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
 
@@ -515,8 +622,9 @@ public class LightSensorService extends Service {
             if (level >= 0) {
                 onSensorLevel(level, "poll");
             } else {
-                Log.w(TAG, "poll: sensor unavailable (bound=" + carSignalBound + ")");
+                Log.w(TAG, "poll: sensor unavailable (connected=" + carSignalConnected + ")");
             }
+            if (!everSent) applyTarget("poll-retry");
             timerHandler.postDelayed(this, SAFETY_POLL_MS);
         }
     };
@@ -553,10 +661,27 @@ public class LightSensorService extends Service {
 
     private void commit(boolean targetOn, String reason) {
         Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "авто") + ") — " + reason);
+        final long sequence = ++commitSequence;
         headlightsOn      = targetOn;
         everSent          = true;
         lastCommitElapsed = SystemClock.elapsedRealtime();
-        MainActivity.setHeadlights(targetOn);
+        ApplyEngine.postWakeAction("auto light " + (targetOn ? "on" : "auto"),
+                () -> MainActivity.setHeadlights(targetOn),
+                result -> {
+                    if (result != ApplyEngine.WakeActionResult.SUCCESS) {
+                        invalidateCommit(sequence);
+                    }
+                });
+    }
+
+    private void invalidateCommit(long sequence) {
+        if (destroyed) return;
+        timerHandler.post(() -> {
+            if (!destroyed && commitSequence == sequence) {
+                everSent = false;
+                Log.w(TAG, "auto-light commit was cancelled/failed; safety poll will retry");
+            }
+        });
     }
 
     /**

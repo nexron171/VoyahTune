@@ -21,6 +21,8 @@ adb.exe shell "chmod 644 /system/etc/init.logcat.sh"
 
 REM --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb.exe shell "pkill -f /data/local/bin/load.bin"
+adb.exe shell "rm -f /data/local/tmp/voyah_load.v2.lock"
+adb.exe shell "rm -rf /data/local/tmp/voyah_load.lock"
 adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay' | grep -v grep | awk '{print $2}' | xargs kill -9"
 
 REM --- Убрать наши Frida-файлы (или вернуть бэкап, если что-то было до нас) ---
@@ -37,7 +39,7 @@ if exist "backup\frida-inject" (
     adb.exe shell "rm -f /data/local/bin/frida-inject"
 )
 REM Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
-adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid"
+adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_swk.*.try /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid"
 REM Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка
 REM не подхватила старые назначения до первой синхронизации из RestoreMode.
 adb.exe shell settings delete global voyahtune_dock1 2>nul
