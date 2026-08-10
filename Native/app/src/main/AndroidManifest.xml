@@ -57,6 +57,7 @@
         <provider android:authorities="ru.big.town.restoremode.restoremodecontentprovider" />
         <package android:name="com.qinggan.carsignal.service" />
         <package android:name="com.qinggan.canbus.service" />
+        <package android:name="com.qinggan.app.vehiclesetting" />
     </queries>
 
     <uses-permission android:name="android.permission.CAR_POWER" />
@@ -174,6 +175,12 @@
             android:enabled="true"
             android:exported="false"
             />
+
+        <!-- Read-mostly Apollo PLC/TLC bridge. Active TX58 remains full/profile/master/gear gated. -->
+        <service
+            android:name=".ApolloTlcService"
+            android:enabled="true"
+            android:exported="false" />
 
         <service
             android:name=".NowPlayingService"

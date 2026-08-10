@@ -53,6 +53,9 @@ public class SetModesService extends Service {
     static final int MSG_LOGGING_ENABLE             = 32; // вкл/выкл захват логов в файл (arg1: 1=вкл)
     static final int MSG_LOGGING_SHARE              = 33; // «Выгрузить логи» → share лог-файла
     static final int MSG_SPLIT_LAUNCH_VD            = 34; // сплит на VirtualDisplay (data left/right, arg1=ratio, data leftDpi/rightDpi)
+    static final int MSG_APOLLO_TLC_QUERY           = 36; // запрос read-only снимка PLC/TLC
+    static final int MSG_APOLLO_TLC_SET             = 37; // PLC_SWITCH (arg1: 1=вкл, 0=выкл)
+    static final int MSG_APOLLO_MASTER_SET          = 38; // Apollo master (arg1: 1=вкл, 0=выкл)
     static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
     static final String ACTION_LOG_UPDATE  = "ru.big.town.anative.LOG_UPDATE";
     static final String ACTION_LOGGING_SET   = "ru.big.town.anative.LOGGING_SET";   // extra "on" bool
@@ -178,6 +181,23 @@ public class SetModesService extends Service {
                 case MSG_LOGGING_SHARE:
                     Log.i(TAG, "handleMessage() MSG_LOGGING_SHARE");
                     shareLogFile();
+                    break;
+
+                case MSG_APOLLO_TLC_QUERY:
+                    Log.i(TAG, "handleMessage() MSG_APOLLO_TLC_QUERY");
+                    ApolloTlcService.requestQuery(SetModesService.this);
+                    break;
+
+                case MSG_APOLLO_TLC_SET:
+                    Log.i(TAG, "handleMessage() MSG_APOLLO_TLC_SET arg1=" + msg.arg1);
+                    ApolloTlcService.requestTlcSet(SetModesService.this, msg.arg1 == 1,
+                            msg.arg1 == 0 || msg.arg1 == 1);
+                    break;
+
+                case MSG_APOLLO_MASTER_SET:
+                    Log.i(TAG, "handleMessage() MSG_APOLLO_MASTER_SET arg1=" + msg.arg1);
+                    ApolloTlcService.requestMasterSet(SetModesService.this, msg.arg1 == 1,
+                            msg.arg1 == 0 || msg.arg1 == 1);
                     break;
 
                 default:
@@ -604,6 +624,11 @@ public class SetModesService extends Service {
         startForegroundService(intent);
     }
 
+    /** Starts the read-mostly, fail-closed Apollo PLC/TLC bridge for both full and light reports. */
+    private void startApolloTlcService() {
+        ApolloTlcService.ensureStarted(this);
+    }
+
     /** Стартует NowPlayingService (ридер метаданных активной медиа-сессии для наших поверхностей). */
     private void startNowPlayingService() {
         Intent intent = new Intent(this, NowPlayingService.class);
@@ -941,6 +966,7 @@ public class SetModesService extends Service {
             restoreWiperColdState();
             startTripStatsService();
             startBatteryHeatService();
+            startApolloTlcService();
             scheduleAncillaryWakeTasks();
             Log.i(TAG, "onStartCommand(): startup initialized");
         } else {

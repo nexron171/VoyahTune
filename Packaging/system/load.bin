@@ -5,6 +5,7 @@
 #   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
 #   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
 #   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами.
+#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — опциональный Apollo/ADAS master-gate.
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
 #   • system_server и launcher: frida-inject -e ВОЗВРАЩАЕТ управление. Ставим по ТОЧНОМУ -p pid и пишем
@@ -83,12 +84,33 @@ VD=/data/local/bin/vd_bypass.js
 SWK=/data/local/bin/steeringwheelkeys.js
 LNCH=/data/local/bin/launcherdock.js
 MD=/data/local/bin/multidisplay.js
+APOLLO=/data/local/bin/apollo_tech.js
 VDMARK=/data/local/tmp/voyah_vd.pid          # pid system_server, куда поставлен vd_bypass
 SWK_KM_MARK=/data/local/tmp/voyah_swk_km.pid # pid keymanager, куда поставлен steeringwheelkeys
 SWK_KM_BUSY=/data/local/tmp/voyah_swk_km.busy # symlink: targetPid|startUptime|token
 SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
 LNCH_MARK=/data/local/tmp/voyah_lnch.pid     # pid лаунчера, куда поставлен launcherdock
 MD_MARK=/data/local/tmp/voyah_md.pid         # pid systemservice, куда поставлен multidisplay
+APOLLO_MARK=/data/local/tmp/voyah_apollo.pid # pid+starttime vehiclesetting, куда поставлен Apollo hook
+APOLLO_DOWN_MARK=/data/local/tmp/voyah_apollo.down
+APOLLO_LOG=/data/local/tmp/voyah_apollo.txt
+APOLLO_TARGET=com.qinggan.app.vehiclesetting
+APOLLO_READY_MARKER='[apollo] hook ready'
+
+reset_apollo_liveness() {
+    # Оба сброса независимы: отказ первого не должен мешать попытке обнулить heartbeat. Heartbeat
+    # пишем первым, чтобы даже при отказе profile-write потребитель перестал доверять stale profile=1.
+    APOLLO_RESET_OK=1
+    settings put global open_voyah_apollo_profile_heartbeat 0 >/dev/null 2>&1 \
+        || APOLLO_RESET_OK=0
+    settings put global open_voyah_apollo_profile_supported 0 >/dev/null 2>&1 \
+        || APOLLO_RESET_OK=0
+    APOLLO_RESET_HEARTBEAT=$(settings get global open_voyah_apollo_profile_heartbeat 2>/dev/null)
+    APOLLO_RESET_PROFILE=$(settings get global open_voyah_apollo_profile_supported 2>/dev/null)
+    [ "$APOLLO_RESET_HEARTBEAT" = "0" ] || APOLLO_RESET_OK=0
+    [ "$APOLLO_RESET_PROFILE" = "0" ] || APOLLO_RESET_OK=0
+    [ "$APOLLO_RESET_OK" -eq 1 ]
+}
 
 # Инъекция в цель, которая ВОЗВРАЩАЕТ управление. Маркер пишем ТОЛЬКО при успехе.
 #   $1=pid  $2=script  $3=logfile  $4=markerfile
@@ -119,6 +141,94 @@ uptime_seconds() {
         ''|*[!0-9]*) date +%s ;;
         *) echo "$UPTIME_NOW" ;;
     esac
+}
+
+# Точная идентичность процесса: проверяем cmdline (не только число PID) и добавляем starttime из
+# /proc/<pid>/stat. Это исключает ложный «уже установлен» при повторном использовании старого PID.
+target_identity() {
+    IDENT_PID="$1"
+    IDENT_NAME="$2"
+    case "$IDENT_PID" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    kill -0 "$IDENT_PID" 2>/dev/null || return 1
+    IDENT_CMD=$(tr '\000' '\n' < "/proc/$IDENT_PID/cmdline" 2>/dev/null | sed -n '1p')
+    [ "$IDENT_CMD" = "$IDENT_NAME" ] || return 1
+    IDENT_START=$(awk '{print $22}' "/proc/$IDENT_PID/stat" 2>/dev/null)
+    case "$IDENT_START" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    echo "$IDENT_PID|$IDENT_START"
+}
+
+# Apollo требует не просто успешный exit frida-inject, а точный marker самого агента. Идентичность
+# цели проверяется до и после attach; marker публикуется атомарным mv только для того же живого процесса.
+#   $1=pid $2=target-name $3=script $4=logfile $5=markerfile $6=agent-ready-marker
+inject_verified_marker() {
+    VERIFIED_PID="$1"
+    VERIFIED_TARGET="$2"
+    VERIFIED_SCRIPT="$3"
+    VERIFIED_LOG="$4"
+    VERIFIED_MARK="$5"
+    VERIFIED_READY="$6"
+    VERIFIED_TRY="$VERIFIED_LOG.try"
+
+    VERIFIED_BEFORE=$(target_identity "$VERIFIED_PID" "$VERIFIED_TARGET") || {
+        logs "inject SKIP target changed pid=$VERIFIED_PID $VERIFIED_TARGET"
+        return 1
+    }
+
+    : > "$VERIFIED_TRY"
+    # На VehicleSetting `frida-inject -e` может не завершиться после успешной eternalize. Два pinned
+    # SHA-256 на проверенной голове занимают несколько секунд; 30s достаточно, а точный ready-marker
+    # агента является критерием успеха даже после штатного timeout/TERM обвязки.
+    timeout -k 5 30 "$FI" -p "$VERIFIED_PID" -s "$VERIFIED_SCRIPT" -e > "$VERIFIED_TRY" 2>&1
+    VERIFIED_RC=$?
+    if [ -f "$VERIFIED_LOG" ]; then
+        VERIFIED_LOG_SIZE=$(wc -c < "$VERIFIED_LOG" 2>/dev/null)
+    else
+        VERIFIED_LOG_SIZE=0
+    fi
+    case "$VERIFIED_LOG_SIZE" in
+        ''|*[!0-9]*) VERIFIED_LOG_SIZE=0 ;;
+    esac
+    if [ "$VERIFIED_LOG_SIZE" -ge 1048576 ]; then
+        mv -f "$VERIFIED_LOG" "$VERIFIED_LOG.1"
+    fi
+    {
+        echo "event=inject_attempt target=$VERIFIED_TARGET identity=$VERIFIED_BEFORE rc=$VERIFIED_RC"
+        cat "$VERIFIED_TRY"
+    } >> "$VERIFIED_LOG"
+
+    if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$VERIFIED_TRY"; then
+        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT engine-error (retry next loop)"
+        return 1
+    fi
+    if ! grep -qF "$VERIFIED_READY" "$VERIFIED_TRY"; then
+        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT agent-marker-missing (retry next loop)"
+        return 1
+    fi
+    if [ "$VERIFIED_RC" -ne 0 ]; then
+        logs "inject READY pid=$VERIFIED_PID $VERIFIED_SCRIPT rc=$VERIFIED_RC marker-confirmed"
+    fi
+
+    VERIFIED_AFTER=$(target_identity "$VERIFIED_PID" "$VERIFIED_TARGET") || {
+        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-exited (retry next loop)"
+        return 1
+    }
+    if [ "$VERIFIED_AFTER" != "$VERIFIED_BEFORE" ]; then
+        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-changed (retry next loop)"
+        return 1
+    fi
+
+    VERIFIED_MARK_TMP="$VERIFIED_MARK.$$"
+    if ! echo "$VERIFIED_AFTER" > "$VERIFIED_MARK_TMP" || ! mv -f "$VERIFIED_MARK_TMP" "$VERIFIED_MARK"; then
+        rm -f "$VERIFIED_MARK_TMP"
+        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT marker-write (retry next loop)"
+        return 1
+    fi
+    logs "inject OK pid=$VERIFIED_PID $VERIFIED_SCRIPT marker=$VERIFIED_AFTER"
+    return 0
 }
 
 # `timeout` uses a clock that may pause in suspend on some Toybox builds, while /proc/uptime can
@@ -240,6 +350,42 @@ while [ 1 ]; do
     if [ -n "$MDP" ] && [ -f "$MD" ]; then
         if [ "$(cat "$MD_MARK" 2>/dev/null)" != "$MDP" ]; then
             inject_ret "$MDP" "$MD" /data/local/tmp/voyah_md.txt "$MD_MARK"
+        fi
+    fi
+
+    # 5) Apollo/ADAS в VehicleSetting. Для safety-sensitive hook проверяем точный cmdline+starttime,
+    #    exact marker агента и лишь затем атомарно публикуем marker успешной инъекции.
+    APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
+    APOLLO_PID=${APOLLO_PID%% *}
+    if [ -z "$APOLLO_PID" ]; then
+        # Eternalized agent умер вместе с target: немедленно закрываем Global gate, не ждём TTL Native.
+        # Down-marker ограничивает idempotent Settings writes, но создаётся лишь после их успеха.
+        if [ ! -f "$APOLLO_DOWN_MARK" ] || [ -f "$APOLLO_MARK" ]; then
+            if reset_apollo_liveness; then
+                echo 1 > "$APOLLO_DOWN_MARK"
+            else
+                logs "apollo target gone: liveness reset FAIL (retry next loop)"
+            fi
+        fi
+        if [ -f "$APOLLO_MARK" ] && [ -f "$APOLLO_DOWN_MARK" ]; then
+            rm -f "$APOLLO_MARK"
+            logs "apollo target gone: liveness reset"
+        fi
+    else
+        rm -f "$APOLLO_DOWN_MARK"
+        APOLLO_ID=$(target_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null)
+        if [ -n "$APOLLO_ID" ] && [ "$(cat "$APOLLO_MARK" 2>/dev/null)" != "$APOLLO_ID" ]; then
+            # Новая process identity: сначала fail-closed, затем attach. Старый identity этим не
+            # затрагивается; process-level sentinel в JS защищает от duplicate hook при потере marker.
+            if reset_apollo_liveness; then
+                rm -f "$APOLLO_MARK"
+                if [ -f "$APOLLO" ]; then
+                    inject_verified_marker "$APOLLO_PID" "$APOLLO_TARGET" "$APOLLO" \
+                        "$APOLLO_LOG" "$APOLLO_MARK" "$APOLLO_READY_MARKER"
+                fi
+            else
+                logs "apollo new identity: liveness reset FAIL (attach deferred)"
+            fi
         fi
     fi
 

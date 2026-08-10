@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      The pinned CanBusService checks this name before TX58 but does not define it itself.
+      Native owns a signature-level definition so only this signing identity can obtain it.
+      Keep this full-only: light never binds CanBusService and must not claim the vendor name.
+
+      Installation preflight must reject another existing owner of the same permission (notably
+      legacy ru.kachalin.voyahtweaks, which declared it as normal) before writing the system APK.
+    -->
+    <permission
+        android:name="com.qinggan.permission.WRITE_CANBUS"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.qinggan.permission.WRITE_CANBUS" />
+
+</manifest>

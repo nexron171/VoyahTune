@@ -22,6 +22,21 @@ adb.exe disable-verity >nul 2>nul
 adb.exe remount >nul 2>nul
 adb.exe shell "mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null"
 
+REM До любых удалений переводим master в 0 и проверяем фактическое значение.
+adb.exe shell settings put global open_voyah_apollo_master 0
+if errorlevel 1 (
+    echo !!! Не удалось выключить Apollo master - удаление прервано до выгрузки hook.
+    exit /b 1
+)
+set APOLLO_MASTER_STATE=
+for /f "delims=" %%i in ('adb.exe shell settings get global open_voyah_apollo_master 2^>nul') do set APOLLO_MASTER_STATE=%%i
+if not "%APOLLO_MASTER_STATE%"=="0" (
+    echo !!! Apollo master не подтвердил состояние 0 - удаление прервано до выгрузки hook.
+    exit /b 1
+)
+REM Живой hook получает короткое окно на один best-effort штатный subscription resync.
+timeout /t 3 /nobreak >nul
+
 echo === Откат DNS-overlay ===
 call "%YDNS_HELPER%" restore
 if errorlevel 1 (
@@ -43,7 +58,9 @@ REM --- Остановить наши живые Frida-хуки и load.bin (д�
 adb.exe shell "pkill -f /data/local/bin/load.bin"
 adb.exe shell "rm -f /data/local/tmp/voyah_load.v2.lock"
 adb.exe shell "rm -rf /data/local/tmp/voyah_load.lock"
-adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay' | grep -v grep | awk '{print $2}' | xargs kill -9"
+adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech' | grep -v grep | awk '{print $2}' | xargs kill -9"
+REM Eternalized agent живёт в target без frida-inject; force-stop выгружает его до финального reboot.
+adb.exe shell "am force-stop com.qinggan.app.vehiclesetting"
 
 REM --- Убрать наши Frida-файлы (или вернуть бэкап, если что-то было до нас) ---
 if exist "backup\load.bin" (
@@ -53,13 +70,43 @@ if exist "backup\load.bin" (
 )
 adb.exe shell "rm -f /data/local/bin/vd_bypass.js"
 adb.exe shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"
+REM Apollo-файл имеет симметричный backup: восстанавливаем прежний либо подтверждённое отсутствие.
+if exist "backup\apollo_tech.js" (
+    adb.exe push backup\apollo_tech.js /data/local/bin/apollo_tech.js.new
+    if errorlevel 1 (
+        adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new" 1>nul 2>nul
+        echo !!! Не удалось восстановить backup\apollo_tech.js - удаление прервано.
+        exit /b 1
+    )
+    adb.exe shell "chmod 644 /data/local/bin/apollo_tech.js.new && mv -f /data/local/bin/apollo_tech.js.new /data/local/bin/apollo_tech.js"
+    if errorlevel 1 (
+        adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new" 1>nul 2>nul
+        echo !!! Не удалось завершить восстановление apollo_tech.js - удаление прервано.
+        exit /b 1
+    )
+) else (
+    if exist "backup\apollo_tech.js.absent" (
+        adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
+        if errorlevel 1 (
+            echo !!! Не удалось вернуть подтверждённо отсутствовавший apollo_tech.js - удаление прервано.
+            exit /b 1
+        )
+    ) else (
+        echo Backup metadata для apollo_tech.js нет - неизвестный существующий файл оставлен без изменений
+        adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new"
+        if errorlevel 1 (
+            echo !!! Не удалось удалить временный apollo_tech.js.new - удаление прервано.
+            exit /b 1
+        )
+    )
+)
 if exist "backup\frida-inject" (
     adb.exe push backup\frida-inject /data/local/bin/frida-inject
 ) else (
     adb.exe shell "rm -f /data/local/bin/frida-inject"
 )
 REM Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
-adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_swk.*.try /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid"
+adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_swk.*.try /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"
 REM Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка
 REM не подхватила старые назначения до первой синхронизации из RestoreMode.
 adb.exe shell settings delete global voyahtune_dock1 2>nul
@@ -74,6 +121,11 @@ adb.exe shell settings delete global voyahtune_steerVoiceShort 2>nul
 adb.exe shell settings delete global voyahtune_steerVoiceLong 2>nul
 adb.exe shell settings delete global voyahtune_steerPhoneShort 2>nul
 adb.exe shell settings delete global voyahtune_steerPhoneLong 2>nul
+adb.exe shell settings delete global open_voyah_apollo_master 2>nul
+adb.exe shell settings delete global open_voyah_apollo_asc 2>nul
+adb.exe shell settings delete global open_voyah_apollo_sdb 2>nul
+adb.exe shell settings delete global open_voyah_apollo_profile_supported 2>nul
+adb.exe shell settings delete global open_voyah_apollo_profile_heartbeat 2>nul
 
 REM --- Whitelist + Native из /system/priv-app (+ снять /data-оверлей обновления) ---
 adb.exe shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"

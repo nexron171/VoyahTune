@@ -2,7 +2,8 @@
 # Установка Open Voyah v@VERSION@. Запускать из папки релиза (бэкапы падают в ./backup).
 # Ставит: Native (priv-app) + RestoreMode, whitelist привилегий, freeform, и Frida-обвязку —
 #   1) кнопки руля (steeringwheelkeys.js в keymanager: звёздочка 3090 и DVR 173, один onKeyEvent),
-#   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS).
+#   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS),
+#   3) Apollo/ADAS master-gate (apollo_tech.js в com.qinggan.app.vehiclesetting).
 # Boot-хук = наш /system/etc/init.logcat.sh, который крутит load.bin (watchdog инъекций).
 if [ ! -f ./dns-overlay.sh ]; then
     echo "!!! Не найден ./dns-overlay.sh — установка прервана до изменения устройства."
@@ -26,6 +27,54 @@ fi
 adb root
 adb wait-for-device
 adb root
+
+# Update не наследует stale ON: до disable-verity и любых /system mutations принудительно переводим
+# Apollo master в безопасный 0 и проверяем фактически сохранённое значение.
+echo "=== Preflight безопасного состояния Apollo master ==="
+if ! adb shell settings put global open_voyah_apollo_master 0; then
+    echo "!!! Не удалось выключить Apollo master — установка прервана до записи в /system."
+    exit 1
+fi
+APOLLO_INSTALL_MASTER_STATE=$(adb shell settings get global open_voyah_apollo_master 2>/dev/null \
+    | tr -d '\r')
+if [ "$APOLLO_INSTALL_MASTER_STATE" != "0" ]; then
+    echo "!!! Apollo master не подтвердил состояние 0 — установка прервана до записи в /system."
+    exit 1
+fi
+echo "  Apollo master=0 подтверждён."
+
+# Native full self-owns the signature permission needed by its fail-closed CAN writer. Android keeps
+# the first installed declaration: an old VoyahTweaks owner would silently make our Native incompatible.
+# Check before disable-verity/remount/touch, so a conflict leaves /system unchanged.
+echo "=== Preflight владельца com.qinggan.permission.WRITE_CANBUS ==="
+CANBUS_PERMISSION_DUMP=$(adb shell dumpsys package permissions 2>/dev/null)
+if [ $? -ne 0 ]; then
+    echo "!!! PackageManager permissions недоступны — установка прервана до записи в /system."
+    exit 1
+fi
+case "$CANBUS_PERMISSION_DUMP" in
+    *"Permission [com.qinggan.permission.WRITE_CANBUS]"*)
+        CANBUS_PERMISSION_OWNER=$(printf '%s\n' "$CANBUS_PERMISSION_DUMP" | awk '
+            /Permission \[com\.qinggan\.permission\.WRITE_CANBUS\]/ { in_block=1; next }
+            in_block && /Permission \[/ { exit }
+            in_block && /sourcePackage=/ {
+                sub(/^.*sourcePackage=/, ""); gsub(/[[:space:]]/, ""); print; exit
+            }')
+        if [ "$CANBUS_PERMISSION_OWNER" != "ru.big.town.anative" ]; then
+            if [ -n "$CANBUS_PERMISSION_OWNER" ]; then
+                echo "!!! com.qinggan.permission.WRITE_CANBUS уже принадлежит $CANBUS_PERMISSION_OWNER."
+            else
+                echo "!!! Владелец com.qinggan.permission.WRITE_CANBUS не определён однозначно."
+            fi
+            echo "    Удалите несовместимый пакет и повторите full install; /system ещё не изменялся."
+            exit 1
+        fi
+        echo "  Permission уже принадлежит ru.big.town.anative — совместимое обновление."
+        ;;
+    *)
+        echo "  Permission ещё не объявлен — его создаст full Native."
+        ;;
+esac
 
 # --- Гарантируем ЗАПИСЫВАЕМЫЙ /system --------------------------------------------------------
 # Без этого на стоковой/после-OTA голове dm-verity держит /system read-only → push в /system даёт
@@ -78,12 +127,51 @@ backup_pull() {
     fi
 }
 
+# Одноразовый симметричный backup для нового файла: запоминаем и исходное отсутствие. Без .absent
+# повторная установка приняла бы нашу предыдущую версию за заводской «оригинал».
+backup_pull_with_absent() {
+    if [ -f "$BACKUP_DIR/$2" ] || [ -f "$BACKUP_DIR/$2.absent" ]; then
+        echo "Backup: исходное состояние $2 уже сохранено — пропуск"
+        return
+    fi
+    REMOTE_STATE=$(adb shell "if [ -e '$1' ]; then echo PRESENT; else echo ABSENT; fi" 2>/dev/null | tr -d '\r')
+    case "$REMOTE_STATE" in
+        PRESENT)
+            rm -f "$BACKUP_DIR/$2.new"
+            if adb pull "$1" "$BACKUP_DIR/$2.new" >/dev/null 2>&1 \
+                    && mv -f "$BACKUP_DIR/$2.new" "$BACKUP_DIR/$2"; then
+                echo "Backup: $1 -> $BACKUP_DIR/$2"
+                return 0
+            fi
+            rm -f "$BACKUP_DIR/$2.new"
+            echo "!!! Не удалось сохранить существующий $1"
+            return 1
+            ;;
+        ABSENT)
+            if : > "$BACKUP_DIR/$2.absent"; then
+                echo "Backup: $1 изначально отсутствует -> $BACKUP_DIR/$2.absent"
+                return 0
+            fi
+            echo "!!! Не удалось создать $BACKUP_DIR/$2.absent"
+            return 1
+            ;;
+        *)
+            echo "!!! Не удалось определить исходное состояние $1"
+            return 1
+            ;;
+    esac
+}
+
 echo "=== Бэкап перезаписываемых файлов в $BACKUP_DIR/ ==="
 backup_pull /data/local/bin/load.bin               load.bin
 backup_pull /data/local/bin/steeringwheelkeys.js   steeringwheelkeys.js
 backup_pull /data/local/bin/launcherdock.js        launcherdock.js
 backup_pull /data/local/bin/multidisplay.js        multidisplay.js
 backup_pull /data/local/bin/vd_bypass.js           vd_bypass.js
+if ! backup_pull_with_absent /data/local/bin/apollo_tech.js apollo_tech.js; then
+    echo "!!! Apollo backup не создан — установка прервана до перезаписи файла."
+    exit 1
+fi
 backup_pull /data/local/bin/frida-inject           frida-inject
 backup_pull /system/etc/init.logcat.sh             init.logcat.sh
 backup_pull /system/priv-app/Native/Native.apk     Native.apk
@@ -91,16 +179,26 @@ backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml 
 
 # ВАЖНО: всё в /data/local/bin — оно доступно рано при загрузке (когда выполняется init.logcat.sh).
 # /sdcard монтируется позже, поэтому load.bin ТАМ держать нельзя (не запустится на буте).
-echo "=== Frida-инфраструктура (кнопка на руле + VirtualDisplay-сплит) ==="
+echo "=== Frida-инфраструктура (руль + VirtualDisplay + Apollo/ADAS) ==="
 adb shell "mkdir -p /data/local/bin"
 adb push load.bin              /data/local/bin/load.bin
 adb push steeringwheelkeys.js  /data/local/bin/steeringwheelkeys.js
 adb push launcherdock.js       /data/local/bin/launcherdock.js
 adb push multidisplay.js       /data/local/bin/multidisplay.js
 adb push vd_bypass.js          /data/local/bin/vd_bypass.js
+# Не даём живому watchdog увидеть частично переданный safety-sensitive hook.
+if ! adb push apollo_tech.js /data/local/bin/apollo_tech.js.new; then
+    echo "!!! Не удалось передать apollo_tech.js — установка прервана."
+    exit 1
+fi
+if ! adb shell "chmod 644 /data/local/bin/apollo_tech.js.new && mv -f /data/local/bin/apollo_tech.js.new /data/local/bin/apollo_tech.js"; then
+    adb shell "rm -f /data/local/bin/apollo_tech.js.new"
+    echo "!!! Не удалось атомарно установить apollo_tech.js — установка прервана."
+    exit 1
+fi
 adb push frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject
 adb shell "chmod 755 /data/local/bin/frida-inject /data/local/bin/load.bin"
-adb shell "chmod 644 /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/vd_bypass.js /data/local/bin/multidisplay.js"
+adb shell "chmod 644 /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/vd_bypass.js /data/local/bin/multidisplay.js /data/local/bin/apollo_tech.js"
 
 echo "=== Boot-хук: наш init.logcat.sh (setenforce 0 + запуск load.bin) ==="
 # /system уже сделан записываемым выше (verity → overlay); отдельный remount не нужен.

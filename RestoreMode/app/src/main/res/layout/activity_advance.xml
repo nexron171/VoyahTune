@@ -82,6 +82,19 @@
             android:textColor="#FFFFFF"
             android:textSize="26px" />
 
+        <!-- Раздел: Apollo Tech -->
+        <TextView
+            android:id="@+id/navApolloTech"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Apollo Tech"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
         <!-- Раздел: Собственные команды -->
         <TextView
             android:id="@+id/navCustomCommands"
@@ -1466,6 +1479,188 @@
         </LinearLayout>
     </ScrollView>
     <!-- конец pageSplitScreen -->
+
+    <!-- Раздел: Apollo Tech. Управление только через подтверждённое Native-состояние, без prefs. -->
+    <ScrollView
+        android:id="@+id/pageApolloTech"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="28dp"
+            android:paddingVertical="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Настройки интеллектуальных помощников водителя."
+                android:textColor="#FFFFFF"
+                android:textSize="24px" />
+
+            <TextView
+                android:id="@+id/textApolloFullOnly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/layout_category_bg"
+                android:padding="16dp"
+                android:text="Apollo Tech доступен только в полной сборке (full). В облегчённой сборке (light) показано описание, но управление отключено."
+                android:textColor="#ffb36b"
+                android:textSize="22px"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/apolloControls"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/layout_category_bg"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="12dp"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Основной переключатель Apollo Tech"
+                            android:textColor="#FFFFFF"
+                            android:textSize="27px" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="Разрешает пакет функций Baidu Apollo. Новое положение показывается только после подтверждения Native. Если состояние прочитать нельзя, используйте отдельную кнопку принудительного выключения."
+                            android:textColor="#aaaaaa"
+                            android:textSize="20px" />
+
+                    </LinearLayout>
+
+                    <Switch
+                        android:id="@+id/switchApolloMaster"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp"
+                        android:enabled="false"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/buttonApolloForceOff"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:backgroundTint="#a33a3a"
+                    android:enabled="false"
+                    android:text="Принудительно выключить Apollo"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="21px"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/layout_category_bg"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="12dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="TLC — помощь при перестроении"
+                            android:textColor="#FFFFFF"
+                            android:textSize="27px" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="Включает автоматическое перестроение при активном интеллектуальном круизе, включённом поворотнике и наличии условий для перестроения. Изменять настройку можно только на стоянке в положении P."
+                            android:textColor="#aaaaaa"
+                            android:textSize="20px" />
+
+                    </LinearLayout>
+
+                    <Switch
+                        android:id="@+id/switchApolloTlc"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp"
+                        android:enabled="false"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="Статус"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <TextView
+                android:id="@+id/textApolloStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/layout_category_bg"
+                android:padding="16dp"
+                android:text="Состояние ещё не получено. Переключатели заблокированы."
+                android:textColor="#FFFFFF"
+                android:textSize="22px" />
+
+            <TextView
+                android:id="@+id/textApolloDiagnostics"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="20dp"
+                android:background="@drawable/layout_category_bg"
+                android:fontFamily="monospace"
+                android:padding="16dp"
+                android:text="Диагностика: CAN (автомобильная шина) — неизвестно; профиль — неизвестно; селектор передач — неизвестно; состояния TLC и ANP — неизвестно."
+                android:textColor="#aaaaaa"
+                android:textIsSelectable="true"
+                android:textSize="19px"
+                android:visibility="gone" />
+
+        </LinearLayout>
+    </ScrollView>
+    <!-- конец pageApolloTech -->
 
     <!-- Раздел: Другое -->
     <ScrollView
