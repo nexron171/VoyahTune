@@ -58,6 +58,7 @@ public class SetModesService extends Service {
     static final int MSG_APOLLO_MASTER_SET          = 38; // Apollo master (arg1: 1=вкл, 0=выкл)
     static final int MSG_APOLLO_GLA_SET             = 39; // распознавание светофоров
     static final int MSG_APOLLO_GLA_SOUND_SET       = 40; // звук при зелёном сигнале
+    static final int MSG_APOLLO_TSR_SET             = 41; // распознавание дорожных знаков
     static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
     static final String ACTION_LOG_UPDATE  = "ru.big.town.anative.LOG_UPDATE";
     static final String ACTION_LOGGING_SET   = "ru.big.town.anative.LOGGING_SET";   // extra "on" bool
@@ -209,6 +210,11 @@ public class SetModesService extends Service {
 
                 case MSG_APOLLO_GLA_SOUND_SET:
                     ApolloTlcService.requestGlaSoundSet(SetModesService.this, msg.arg1 == 1,
+                            msg.arg1 == 0 || msg.arg1 == 1);
+                    break;
+
+                case MSG_APOLLO_TSR_SET:
+                    ApolloTlcService.requestTsrSet(SetModesService.this, msg.arg1 == 1,
                             msg.arg1 == 0 || msg.arg1 == 1);
                     break;
 

@@ -41,6 +41,7 @@ final class ApolloTlcPolicy {
 
     /** Ordinal and stable value from the allow-listed VehicleSetting.apk VehicleState enum. */
     enum Signal {
+        TSR_SWITCH(208, 277),
         PLC_FUNCTION_STATUS(904, 1121),
         PLC_SWITCH(918, 1135),
         ANP_SWITCH(919, 1136),
@@ -125,6 +126,11 @@ final class ApolloTlcPolicy {
 
     static int requestedPlcState(boolean enabled) {
         return enabled ? MODULE_ON : MODULE_OFF;
+    }
+
+    /** TSR uses the inverse OEM encoding: 1=enabled, 2=disabled. */
+    static int requestedTsrState(boolean enabled) {
+        return enabled ? MODULE_OFF : MODULE_ON;
     }
 
     /** Generated AIDL encodes boolean callback registration results as exactly 0 or 1. */

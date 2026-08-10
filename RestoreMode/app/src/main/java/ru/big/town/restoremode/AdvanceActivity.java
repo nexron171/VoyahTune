@@ -98,6 +98,7 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_APOLLO_SET_MASTER  = 38;
     static final int MSG_APOLLO_SET_GLA     = 39;
     static final int MSG_APOLLO_SET_GLA_SOUND = 40;
+    static final int MSG_APOLLO_SET_TSR     = 41;
 
     private static final String ACTION_APOLLO_TLC_UPDATE =
             "ru.big.town.anative.APOLLO_TLC_UPDATE";
@@ -110,7 +111,8 @@ public class AdvanceActivity extends AppCompatActivity {
 
     // Apollo Tech всегда отображает только подтверждённое Native состояние. Значения не сохраняются
     // в RestoreMode prefs: при каждом открытии раздела выполняется read-only запрос к автомобилю.
-    private Switch switchApolloMaster, switchApolloTlc, switchApolloTrafficLights;
+    private Switch switchApolloMaster, switchApolloTlc, switchApolloTrafficLights,
+            switchApolloTrafficSigns;
     private RadioGroup apolloGreenSoundGroup;
     private Button buttonApolloForceOff;
     private TextView textApolloStatus, textApolloDiagnostics, textApolloFullOnly;
@@ -132,6 +134,7 @@ public class AdvanceActivity extends AppCompatActivity {
     private int apolloGear = -1;
     private int apolloGlaSwitch = APOLLO_UNKNOWN;
     private int apolloGlaLightChangeSwitch = APOLLO_UNKNOWN;
+    private int apolloTsrSwitch = APOLLO_UNKNOWN;
     private String apolloError = "";
 
     private final BroadcastReceiver apolloReceiver = new BroadcastReceiver() {
@@ -154,6 +157,7 @@ public class AdvanceActivity extends AppCompatActivity {
             apolloGlaSwitch = intent.getIntExtra("glaSwitch", APOLLO_UNKNOWN);
             apolloGlaLightChangeSwitch = intent.getIntExtra(
                     "glaLightChangeSwitch", APOLLO_UNKNOWN);
+            apolloTsrSwitch = intent.getIntExtra("tsrSwitch", APOLLO_UNKNOWN);
             String error = intent.getStringExtra("error");
             apolloError = error == null ? "" : error;
             updateApolloUi();
@@ -1243,6 +1247,7 @@ public class AdvanceActivity extends AppCompatActivity {
         switchApolloMaster = findViewById(R.id.switchApolloMaster);
         switchApolloTlc = findViewById(R.id.switchApolloTlc);
         switchApolloTrafficLights = findViewById(R.id.switchApolloTrafficLights);
+        switchApolloTrafficSigns = findViewById(R.id.switchApolloTrafficSigns);
         apolloGreenSoundGroup = findViewById(R.id.apolloGreenSoundGroup);
         apolloGreenSoundContainer = findViewById(R.id.apolloGreenSoundContainer);
         buttonApolloForceOff = findViewById(R.id.buttonApolloForceOff);
@@ -1264,6 +1269,10 @@ public class AdvanceActivity extends AppCompatActivity {
             if (switchApolloTrafficLights != null) {
                 switchApolloTrafficLights.setChecked(false);
                 switchApolloTrafficLights.setEnabled(false);
+            }
+            if (switchApolloTrafficSigns != null) {
+                switchApolloTrafficSigns.setChecked(false);
+                switchApolloTrafficSigns.setEnabled(false);
             }
             if (apolloGreenSoundGroup != null) {
                 apolloGreenSoundGroup.clearCheck();
@@ -1306,6 +1315,17 @@ public class AdvanceActivity extends AppCompatActivity {
                 }
                 updateApolloUi();
                 sendApolloCommand(MSG_APOLLO_SET_GLA, checked);
+            });
+        }
+        if (switchApolloTrafficSigns != null) {
+            switchApolloTrafficSigns.setOnCheckedChangeListener((button, checked) -> {
+                if (syncingApolloUi) return;
+                if (!canChangeApolloTrafficSigns()) {
+                    updateApolloUi();
+                    return;
+                }
+                updateApolloUi();
+                sendApolloCommand(MSG_APOLLO_SET_TSR, checked);
             });
         }
         if (apolloGreenSoundGroup != null) {
@@ -1404,6 +1424,13 @@ public class AdvanceActivity extends AppCompatActivity {
                 || apolloGlaLightChangeSwitch == 2);
     }
 
+    private boolean canChangeApolloTrafficSigns() {
+        return BuildConfig.IS_FULL && apolloHasState && isApolloServiceReady()
+                && apolloCanConnected && apolloProfileSupported && apolloDirectTlcMode
+                && (apolloTsrSwitch == 1 || apolloTsrSwitch == 2)
+                && !apolloPending;
+    }
+
     private boolean isApolloPlcStatusValid() {
         // В штатном binding 7 означает unavailable. Integer.MIN_VALUE — общий sentinel Native,
         // когда VehicleState ещё не прочитан; pinned Native принимает только диапазон 0..7.
@@ -1443,6 +1470,12 @@ public class AdvanceActivity extends AppCompatActivity {
                 switchApolloTrafficLights.setChecked(
                         apolloHasState && apolloGlaSwitch == 2);
                 switchApolloTrafficLights.setEnabled(canChangeApolloTrafficLights());
+            }
+            if (switchApolloTrafficSigns != null) {
+                // TSR has the inverse OEM encoding: 1=enabled, 2=disabled.
+                switchApolloTrafficSigns.setChecked(
+                        apolloHasState && apolloTsrSwitch == 1);
+                switchApolloTrafficSigns.setEnabled(canChangeApolloTrafficSigns());
             }
             if (apolloGreenSoundGroup != null) {
                 if (apolloGlaLightChangeSwitch == 1) {
@@ -1492,6 +1525,9 @@ public class AdvanceActivity extends AppCompatActivity {
                 || (apolloGlaLightChangeSwitch != 1
                 && apolloGlaLightChangeSwitch != 2)) {
             return "Не удалось определить состояние распознавания светофоров.";
+        }
+        if (apolloTsrSwitch != 1 && apolloTsrSwitch != 2) {
+            return "Не удалось определить состояние распознавания дорожных знаков.";
         }
         if (apolloGear != 0) {
             return "Изменять TLC можно только на стоянке в положении P.";

@@ -61,6 +61,7 @@ public final class ApolloTlcService extends Service {
     public static final String EXTRA_PLC_CAPABILITY_SA = "plcCapabilitySa";
     public static final String EXTRA_GLA_SWITCH = "glaSwitch";
     public static final String EXTRA_GLA_LIGHT_CHANGE_SWITCH = "glaLightChangeSwitch";
+    public static final String EXTRA_TSR_SWITCH = "tsrSwitch";
     public static final String EXTRA_ERROR = "error";
 
     public static final String GLOBAL_MASTER_KEY = "open_voyah_apollo_master";
@@ -79,6 +80,8 @@ public final class ApolloTlcService extends Service {
             "ru.big.town.anative.internal.APOLLO_GLA_SET";
     private static final String ACTION_INTERNAL_GLA_SOUND_SET =
             "ru.big.town.anative.internal.APOLLO_GLA_SOUND_SET";
+    private static final String ACTION_INTERNAL_TSR_SET =
+            "ru.big.town.anative.internal.APOLLO_TSR_SET";
     private static final String EXTRA_ENABLED = "enabled";
     private static final String EXTRA_ARGUMENT_VALID = "argumentValid";
 
@@ -140,6 +143,7 @@ public final class ApolloTlcService extends Service {
     private int plcCapabilitySa = ApolloTlcPolicy.UNKNOWN;
     private int glaSwitch = ApolloTlcPolicy.UNKNOWN;
     private int glaLightChangeSwitch = ApolloTlcPolicy.UNKNOWN;
+    private int tsrSwitch = ApolloTlcPolicy.UNKNOWN;
 
     private boolean pending;
     private int pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
@@ -254,6 +258,10 @@ public final class ApolloTlcService extends Service {
         start(context, ACTION_INTERNAL_GLA_SOUND_SET, enabled, argumentValid);
     }
 
+    public static void requestTsrSet(Context context, boolean enabled, boolean argumentValid) {
+        start(context, ACTION_INTERNAL_TSR_SET, enabled, argumentValid);
+    }
+
     public static void ensureStarted(Context context) {
         start(context, null, false, true);
     }
@@ -317,6 +325,9 @@ public final class ApolloTlcService extends Service {
         } else if (ACTION_INTERNAL_GLA_SOUND_SET.equals(action)) {
             boolean valid = intent.getBooleanExtra(EXTRA_ARGUMENT_VALID, false);
             handleGlaSoundSet(intent.getBooleanExtra(EXTRA_ENABLED, false), valid);
+        } else if (ACTION_INTERNAL_TSR_SET.equals(action)) {
+            boolean valid = intent.getBooleanExtra(EXTRA_ARGUMENT_VALID, false);
+            handleTsrSet(intent.getBooleanExtra(EXTRA_ENABLED, false), valid);
         } else {
             handleQuery();
         }
@@ -449,22 +460,28 @@ public final class ApolloTlcService extends Service {
             return;
         }
 
-        queueSignalWrite(ApolloTlcPolicy.Signal.PLC_SWITCH, enabled, "PLC_SWITCH");
+        queueSignalWrite(ApolloTlcPolicy.Signal.PLC_SWITCH,
+                ApolloTlcPolicy.requestedPlcState(enabled), "PLC_SWITCH");
     }
 
     private void handleGlaSet(boolean enabled, boolean argumentValid) {
-        handleTrafficLightSet(
-                ApolloTlcPolicy.Signal.GLA_SWITCH, enabled, argumentValid, false);
+        handleIndependentSwitchSet(ApolloTlcPolicy.Signal.GLA_SWITCH,
+                ApolloTlcPolicy.requestedPlcState(enabled), argumentValid, false);
     }
 
     private void handleGlaSoundSet(boolean enabled, boolean argumentValid) {
-        handleTrafficLightSet(
-                ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH,
-                enabled, argumentValid, true);
+        handleIndependentSwitchSet(ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH,
+                ApolloTlcPolicy.requestedPlcState(enabled), argumentValid, true);
     }
 
-    private void handleTrafficLightSet(ApolloTlcPolicy.Signal signal, boolean enabled,
-                                       boolean argumentValid, boolean requiresRecognition) {
+    private void handleTsrSet(boolean enabled, boolean argumentValid) {
+        handleIndependentSwitchSet(ApolloTlcPolicy.Signal.TSR_SWITCH,
+                ApolloTlcPolicy.requestedTsrState(enabled), argumentValid, false);
+    }
+
+    private void handleIndependentSwitchSet(ApolloTlcPolicy.Signal signal, int desiredState,
+                                            boolean argumentValid,
+                                            boolean requiresRecognition) {
         if (!argumentValid) {
             lastError = "invalid_argument";
             publishState();
@@ -502,12 +519,11 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        queueSignalWrite(signal, enabled, signal.name());
+        queueSignalWrite(signal, desiredState, signal.name());
     }
 
-    private void queueSignalWrite(ApolloTlcPolicy.Signal signal, boolean enabled,
+    private void queueSignalWrite(ApolloTlcPolicy.Signal signal, int desiredState,
                                   String logName) {
-        int desiredState = ApolloTlcPolicy.requestedPlcState(enabled);
         int generation = ++writeGeneration;
         pending = true;
         pendingSignal = signal;
@@ -590,6 +606,8 @@ public final class ApolloTlcService extends Service {
                 return glaSwitch;
             case GLA_LIGHT_CHANGE_SWITCH:
                 return glaLightChangeSwitch;
+            case TSR_SWITCH:
+                return tsrSwitch;
             default:
                 return ApolloTlcPolicy.UNKNOWN;
         }
@@ -621,6 +639,7 @@ public final class ApolloTlcService extends Service {
             glaSwitch = getVehicleState(ApolloTlcPolicy.Signal.GLA_SWITCH);
             glaLightChangeSwitch = getVehicleState(
                     ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH);
+            tsrSwitch = getVehicleState(ApolloTlcPolicy.Signal.TSR_SWITCH);
             GearReading reading = getGearStatus();
             if (!reading.valid) {
                 failRuntimeProfileClosed("profile_gear_parcel_mismatch");
@@ -630,7 +649,8 @@ public final class ApolloTlcService extends Service {
             }
             gear = reading.value;
             Log.i(TAG, reason + ": gear=" + gear + " plc=" + plcSwitch
-                    + " gla=" + glaSwitch + " glaSound=" + glaLightChangeSwitch);
+                    + " gla=" + glaSwitch + " glaSound=" + glaLightChangeSwitch
+                    + " tsr=" + tsrSwitch);
             return true;
         } catch (RemoteException | RuntimeException e) {
             invalidateCanSnapshot();
@@ -677,6 +697,7 @@ public final class ApolloTlcService extends Service {
         plcCapabilitySa = ApolloTlcPolicy.UNKNOWN;
         glaSwitch = ApolloTlcPolicy.UNKNOWN;
         glaLightChangeSwitch = ApolloTlcPolicy.UNKNOWN;
+        tsrSwitch = ApolloTlcPolicy.UNKNOWN;
     }
 
     private void setCachedState(ApolloTlcPolicy.Signal signal, int state) {
@@ -695,6 +716,9 @@ public final class ApolloTlcService extends Service {
                 break;
             case GLA_LIGHT_CHANGE_SWITCH:
                 glaLightChangeSwitch = state;
+                break;
+            case TSR_SWITCH:
+                tsrSwitch = state;
                 break;
             case TLC_FUNC_ENABLE:
                 tlcCapability = state;
@@ -1293,6 +1317,7 @@ public final class ApolloTlcService extends Service {
         update.putExtra(EXTRA_PLC_CAPABILITY_SA, plcCapabilitySa);
         update.putExtra(EXTRA_GLA_SWITCH, glaSwitch);
         update.putExtra(EXTRA_GLA_LIGHT_CHANGE_SWITCH, glaLightChangeSwitch);
+        update.putExtra(EXTRA_TSR_SWITCH, tsrSwitch);
         update.putExtra(EXTRA_ERROR, reportedError(directTlcSupported));
         update.setPackage(RESTOREMODE_PACKAGE);
         sendBroadcast(update, BIND_PERMISSION);

@@ -14,6 +14,8 @@ public class ApolloTlcPolicyTest {
 
     @Test
     public void pinnedSignalMappingMatchesAllowListedProfile() {
+        assertEquals(208, ApolloTlcPolicy.Signal.TSR_SWITCH.ordinal);
+        assertEquals(277, ApolloTlcPolicy.Signal.TSR_SWITCH.id);
         assertEquals(904, ApolloTlcPolicy.Signal.PLC_FUNCTION_STATUS.ordinal);
         assertEquals(1121, ApolloTlcPolicy.Signal.PLC_FUNCTION_STATUS.id);
         assertEquals(918, ApolloTlcPolicy.Signal.PLC_SWITCH.ordinal);
@@ -120,6 +122,8 @@ public class ApolloTlcPolicyTest {
     public void requestMapsToOemModuleValues() {
         assertEquals(2, ApolloTlcPolicy.requestedPlcState(true));
         assertEquals(1, ApolloTlcPolicy.requestedPlcState(false));
+        assertEquals(1, ApolloTlcPolicy.requestedTsrState(true));
+        assertEquals(2, ApolloTlcPolicy.requestedTsrState(false));
     }
 
     @Test
