@@ -1,5 +1,18 @@
 @echo off
+chcp 65001 >nul
+cd /d "%~dp0" || exit /b 1
 REM Удаление Open Voyah v@VERSION@ — полный откат к состоянию ДО установки нашего приложения.
+set "YDNS_HELPER=%~dp0dns-overlay.bat"
+if not exist "%YDNS_HELPER%" (
+    echo !!! Не найден dns-overlay.bat - удаление прервано до изменения устройства.
+    exit /b 1
+)
+call "%YDNS_HELPER%" prepare
+if errorlevel 1 (
+    echo !!! DNS-overlay helper не готов - удаление прервано до изменения устройства.
+    exit /b 1
+)
+
 adb.exe root
 adb.exe wait-for-device
 adb.exe root
@@ -8,6 +21,13 @@ REM ребут-цикл здесь не нужен (после install verity у
 adb.exe disable-verity >nul 2>nul
 adb.exe remount >nul 2>nul
 adb.exe shell "mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null"
+
+echo === Откат DNS-overlay ===
+call "%YDNS_HELPER%" restore
+if errorlevel 1 (
+    echo !!! Не удалось восстановить/отключить DNS-overlay - остальные компоненты не удалялись.
+    exit /b 1
+)
 
 REM --- Boot-хук: вернуть исходный init.logcat.sh (из backup если есть, иначе чистый оригинал) ---
 if exist "backup\init.logcat.sh" (
@@ -71,5 +91,11 @@ adb.exe shell settings delete global force_resizable_activities
 REM Примечание: persist.app.feature.leavecar (power hold) НЕ откатываем — штатная функция авто.
 
 adb.exe reboot
+if errorlevel 1 (
+    echo !!! Откат подготовлен, но ADB не смог перезагрузить ГУ. Выполните reboot вручную.
+    pause
+    exit /b 1
+)
 echo "Press any key..."
 pause
+exit /b 0

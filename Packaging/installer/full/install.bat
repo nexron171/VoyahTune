@@ -1,9 +1,22 @@
 @echo off
+chcp 65001 >nul
+cd /d "%~dp0" || exit /b 1
 REM Установка Open Voyah v@VERSION@. Запускать из папки релиза (бэкапы падают в .\backup).
 REM Ставит: Native (priv-app) + RestoreMode, whitelist привилегий, freeform, и Frida-обвязку —
 REM   1) кнопки руля (steeringwheelkeys.js в keymanager: звёздочка 3090 и DVR 173, один onKeyEvent),
 REM   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS).
 REM Boot-хук = наш /system/etc/init.logcat.sh, который крутит load.bin (watchdog инъекций).
+set "YDNS_HELPER=%~dp0dns-overlay.bat"
+if not exist "%YDNS_HELPER%" (
+    echo !!! Не найден dns-overlay.bat - установка прервана до изменения устройства.
+    exit /b 1
+)
+call "%YDNS_HELPER%" prepare-install
+if errorlevel 1 (
+    echo !!! Комплект DNS-overlay неполон - установка прервана до изменения устройства.
+    exit /b 1
+)
+
 adb.exe root
 adb.exe wait-for-device
 adb.exe root
@@ -102,9 +115,69 @@ adb.exe shell settings put global enable_freeform_support 1
 adb.exe shell settings put global force_resizable_activities 1
 
 adb.exe install -r -g restore_mode.apk
+if errorlevel 1 (
+    echo !!! RestoreMode не установлен - исправьте ошибку и повторите installer до перезагрузки.
+    exit /b 1
+)
+
+echo === DNS для доступа через T-Box ===
+set "YDNS_STATUS_FILE=%TEMP%\open_voyah_ydns_%RANDOM%_%RANDOM%.tmp"
+call "%YDNS_HELPER%" status > "%YDNS_STATUS_FILE%"
+if errorlevel 1 (
+    del "%YDNS_STATUS_FILE%" >nul 2>nul
+    echo !!! Не удалось определить текущее состояние DNS-overlay - финальная перезагрузка отменена.
+    exit /b 1
+)
+set "YDNS_CURRENT="
+set /p "YDNS_CURRENT=" < "%YDNS_STATUS_FILE%"
+del "%YDNS_STATUS_FILE%" >nul 2>nul
+if not defined YDNS_CURRENT (
+    echo !!! DNS-overlay helper вернул пустое состояние - финальная перезагрузка отменена.
+    exit /b 1
+)
+echo Текущее состояние DNS-overlay: %YDNS_CURRENT%
+set "YDNS_REQUEST="
+call "%YDNS_HELPER%" select "%YDNS_CURRENT%"
+if errorlevel 1 (
+    echo !!! Не удалось получить выбор DNS-overlay - финальная перезагрузка отменена.
+    exit /b 1
+)
+if not defined YDNS_REQUEST set "YDNS_REQUEST=keep"
+if /i "%YDNS_REQUEST%"=="on" goto :ovw_ydns_on
+if /i "%YDNS_REQUEST%"=="off" goto :ovw_ydns_off
+if /i "%YDNS_REQUEST%"=="keep" goto :ovw_ydns_keep
+echo !!! Неизвестный выбор DNS-overlay: %YDNS_REQUEST%
+exit /b 1
+
+:ovw_ydns_on
+call "%YDNS_HELPER%" install
+if errorlevel 1 (
+    echo !!! Установка DNS-overlay завершилась ошибкой - финальная перезагрузка отменена.
+    exit /b 1
+)
+goto :ovw_ydns_done
+
+:ovw_ydns_off
+call "%YDNS_HELPER%" disable
+if errorlevel 1 (
+    echo !!! Отключение DNS-overlay завершилось ошибкой - финальная перезагрузка отменена.
+    exit /b 1
+)
+goto :ovw_ydns_done
+
+:ovw_ydns_keep
+echo DNS-overlay: оставляем текущее состояние без изменений.
+
+:ovw_ydns_done
 adb.exe reboot
+if errorlevel 1 (
+    echo !!! Изменения подготовлены, но ADB не смог перезагрузить ГУ. Выполните reboot вручную.
+    pause
+    exit /b 1
+)
 echo "Press any key..."
 pause
+exit /b 0
 goto :eof
 
 REM Гарантирует rw на /system: adb remount (overlay) + сырой remount, затем ПРОБНЫЙ push в /system.

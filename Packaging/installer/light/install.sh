@@ -4,6 +4,25 @@
 # поездки, Power Hold, режим мойки, звук пешеходов, плавающая кнопка «Назад», установка приложений,
 # ярлыки приложений (обычный запуск). БЕЗ сплита/дока/VirtualDisplay, БЕЗ Frida и любой root-инъекции,
 # БЕЗ раздела «Кнопки на руле». init.logcat.sh системы НЕ трогаем.
+if [ ! -f ./dns-overlay.sh ]; then
+    echo "!!! Не найден ./dns-overlay.sh — установка прервана до изменения устройства."
+    exit 1
+fi
+. ./dns-overlay.sh || {
+    echo "!!! Не удалось загрузить ./dns-overlay.sh — установка прервана."
+    exit 1
+}
+for ydns_required in ydns_prepare_helper ydns_query_state choose_yandex_dns install_yandex_dns disable_yandex_dns; do
+    if ! command -v "$ydns_required" >/dev/null 2>&1; then
+        echo "!!! dns-overlay.sh не содержит $ydns_required — установка прервана."
+        exit 1
+    fi
+done
+if ! ydns_prepare_helper; then
+    echo "!!! Не удалось подготовить DNS-overlay helper — установка прервана."
+    exit 1
+fi
+
 adb root
 adb wait-for-device
 adb root
@@ -87,6 +106,50 @@ if [ "$LEAVECAR" != "true" ]; then
     adb shell setprop persist.app.feature.leavecar true
 fi
 
-adb install -r -g restore_mode.apk
+if ! adb install -r -g restore_mode.apk; then
+    echo "!!! RestoreMode не установлен — исправьте ошибку и повторите installer до перезагрузки."
+    exit 1
+fi
+
+echo "=== DNS для доступа через T-Box ==="
+if ! YDNS_CURRENT="$(ydns_query_state)"; then
+    echo "!!! Не удалось определить текущее состояние DNS-overlay — финальная перезагрузка отменена."
+    exit 1
+fi
+case "$YDNS_CURRENT" in
+    on|off|external|broken) ;;
+    *)
+        echo "!!! DNS-overlay helper вернул неизвестное состояние: $YDNS_CURRENT"
+        exit 1
+        ;;
+esac
+echo "Текущее состояние DNS-overlay: $YDNS_CURRENT"
+YDNS_REQUEST=
+if ! choose_yandex_dns "$YDNS_CURRENT"; then
+    echo "!!! Не удалось получить выбор DNS-overlay — финальная перезагрузка отменена."
+    exit 1
+fi
+case "${YDNS_REQUEST:-keep}" in
+    on)
+        install_yandex_dns || {
+            echo "!!! Установка DNS-overlay завершилась ошибкой — финальная перезагрузка отменена."
+            exit 1
+        }
+        ;;
+    off)
+        disable_yandex_dns || {
+            echo "!!! Отключение DNS-overlay завершилось ошибкой — финальная перезагрузка отменена."
+            exit 1
+        }
+        ;;
+    keep)
+        echo "DNS-overlay: оставляем текущее состояние без изменений."
+        ;;
+    *)
+        echo "!!! Неизвестный выбор DNS-overlay: ${YDNS_REQUEST:-<пусто>}"
+        exit 1
+        ;;
+esac
+
 # Ребут нужен, чтобы менеджер пакетов перечитал privapp-whitelist для /system/priv-app.
 adb reboot

@@ -19,6 +19,11 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 COMMON="$ROOT/Packaging"
 BUILD="$ROOT/Releases/build"
 DIST="$ROOT/Releases/dist"
+DNS_OVERLAY_NAME="framework-res__config_ethernet_interfaces_yandexdns.apk"
+DNS_OVERLAY="$COMMON/vendor-overlay/$DNS_OVERLAY_NAME"
+DNS_OVERLAY_SHA256="c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d"
+COMMON_INSTALLER="$COMMON/installer/common"
+COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat select-yandex-dns.ps1 dns-overlay-device.sh"
 
 VERSION=""
 DO_FULL=1
@@ -49,6 +54,69 @@ if [ ! -d "$COMMON" ]; then
     echo "Нет $COMMON — папка-источник комплекта релиза отсутствует." >&2
     exit 1
 fi
+
+# SHA-256 для зафиксированных бинарных артефактов. GNU/Linux обычно предоставляет sha256sum,
+# macOS — shasum; если нет ни одного, продолжать сборку с непроверенным APK нельзя.
+sha256_file() {
+    file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+    else
+        echo "Не найден ни sha256sum, ни shasum — невозможно проверить $file." >&2
+        return 1
+    fi
+}
+
+# Проверяем общие готовые артефакты ДО запуска Gradle и создания содержимого релиза.
+verify_common_release_assets() {
+    if [ ! -f "$DNS_OVERLAY" ]; then
+        echo "Нет $DNS_OVERLAY — добавьте зафиксированный DNS RRO APK." >&2
+        exit 1
+    fi
+
+    actual_sha256="$(sha256_file "$DNS_OVERLAY")"
+    if [ "$actual_sha256" != "$DNS_OVERLAY_SHA256" ]; then
+        echo "Неверный SHA-256 у $DNS_OVERLAY:" >&2
+        echo "  ожидался: $DNS_OVERLAY_SHA256" >&2
+        echo "  получен:  $actual_sha256" >&2
+        exit 1
+    fi
+
+    if [ ! -d "$COMMON_INSTALLER" ]; then
+        echo "Нет $COMMON_INSTALLER — отсутствуют общие helper-файлы установщика." >&2
+        exit 1
+    fi
+
+    for helper in $COMMON_INSTALLER_FILES; do
+        if [ ! -f "$COMMON_INSTALLER/$helper" ]; then
+            echo "Нет обязательного helper-файла $COMMON_INSTALLER/$helper." >&2
+            exit 1
+        fi
+    done
+
+    # Hash намеренно продублирован в host/device helpers, которые работают уже вне build tree.
+    # Не позволяем обновить prebuilt только в одном месте и собрать заведомо нерабочий релиз.
+    for helper in dns-overlay.sh dns-overlay.bat dns-overlay-device.sh; do
+        hash_mentions="$(grep -F -c "$DNS_OVERLAY_SHA256" "$COMMON_INSTALLER/$helper" || true)"
+        if [ "$hash_mentions" -ne 1 ]; then
+            echo "В $COMMON_INSTALLER/$helper должен быть ровно один актуальный DNS RRO SHA-256." >&2
+            exit 1
+        fi
+    done
+}
+
+# Общие для full/light файлы попадают в плоский корень релиза.
+copy_common_release_assets() {
+    out="$1"
+    cp -p "$DNS_OVERLAY" "$out/$DNS_OVERLAY_NAME"
+    for helper in $COMMON_INSTALLER_FILES; do
+        cp -p "$COMMON_INSTALLER/$helper" "$out/$helper"
+    done
+}
+
+verify_common_release_assets
 
 # Упаковать папку релиза в архив для раздачи. Архив содержит одну папку верхнего уровня
 # (VoyahTune-<версия>), чтобы у пользователя при распаковке не разъезжались файлы по Загрузкам.
@@ -116,6 +184,7 @@ if [ "$DO_FULL" = 1 ]; then
     cp "$COMMON/tools/"*                                    "$OUT/"
     cp "$COMMON/inject/"*.js                                "$OUT/"
     cp "$COMMON/system/"*                                   "$OUT/"
+    copy_common_release_assets "$OUT"
     for f in "$COMMON/installer/full/"*; do
         copy_stamped "$f" "$OUT/$(basename "$f")"
     done
@@ -144,6 +213,7 @@ if [ "$DO_LIGHT" = 1 ]; then
         cp "$COMMON/tools/$t" "$OUT/"
     done
     cp "$COMMON/system/privapp-permissions-ru.big.town.anative.xml" "$OUT/"
+    copy_common_release_assets "$OUT"
     for f in "$COMMON/installer/light/"*; do
         copy_stamped "$f" "$OUT/$(basename "$f")"
     done

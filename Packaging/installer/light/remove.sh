@@ -1,6 +1,25 @@
 #!/bin/sh
 # Удаление Open Voyah v@VERSION@-LIGHT — полный откат к состоянию ДО установки.
 # LIGHT ничего не инжектит и не трогает init.logcat.sh/Frida — чистим только priv-app + whitelist + оба APK.
+if [ ! -f ./dns-overlay.sh ]; then
+    echo "!!! Не найден ./dns-overlay.sh — удаление прервано до изменения устройства."
+    exit 1
+fi
+. ./dns-overlay.sh || {
+    echo "!!! Не удалось загрузить ./dns-overlay.sh — удаление прервано."
+    exit 1
+}
+for ydns_required in ydns_prepare_helper restore_yandex_dns; do
+    if ! command -v "$ydns_required" >/dev/null 2>&1; then
+        echo "!!! dns-overlay.sh не содержит $ydns_required — удаление прервано."
+        exit 1
+    fi
+done
+if ! ydns_prepare_helper restore; then
+    echo "!!! Не удалось подготовить DNS-overlay helper — удаление прервано."
+    exit 1
+fi
+
 adb root
 adb wait-for-device
 adb root
@@ -10,6 +29,12 @@ adb root
 adb disable-verity >/dev/null 2>&1
 adb remount >/dev/null 2>&1
 adb shell 'mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null'
+
+echo "=== Откат DNS-overlay ==="
+if ! restore_yandex_dns; then
+    echo "!!! Не удалось восстановить/отключить DNS-overlay — остальные компоненты не удалялись."
+    exit 1
+fi
 
 # --- Whitelist + Native из /system/priv-app (+ снять /data-оверлей обновления) ---
 adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"
