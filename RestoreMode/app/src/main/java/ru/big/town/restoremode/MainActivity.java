@@ -302,8 +302,8 @@ public class MainActivity extends AppCompatActivity {
             Log.i("onActivityResult", String.format(
                     "customCommand=%s count=%d", customCommand, customCommandCount));
 
-            editor.putString("StarButton", StarButton);
-            editor.putInt("StarButtonCount", StarButtonCount);
+            editor.putString("customCommand", customCommand);
+            editor.putInt("customCommandCount", customCommandCount);
             editor.apply();
         }
     }
@@ -543,8 +543,8 @@ public class MainActivity extends AppCompatActivity {
             resultIntent = new Intent(this, AdvanceActivity.class);
         }
 
-        resultIntent.putExtra("StarButton", StarButton);
-        resultIntent.putExtra("StarButtonCount", StarButtonCount);
+        resultIntent.putExtra("customCommand", customCommand);
+        resultIntent.putExtra("customCommandCount", customCommandCount);
     }
     public void initIntentStarButton(){
         if(resultIntentStarButton==null){
@@ -631,7 +631,7 @@ public class MainActivity extends AppCompatActivity {
     public void onButtonClickAdvance(View v){
         getModes();
         initIntent();
-        Log.i("$$$ Main onButtonClickAdvance $$$", String.format("%s %d", StarButton, StarButtonCount));
+        Log.i("$$$ Main onButtonClickAdvance $$$", String.format("%s %d", customCommand, customCommandCount));
         startActivityForResult(resultIntent,REQUEST_CODE);
     }
     public void onButtonClickAdvanceStarButton(View v){

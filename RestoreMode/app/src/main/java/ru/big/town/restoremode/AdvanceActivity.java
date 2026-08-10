@@ -30,6 +30,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import androidx.activity.EdgeToEdge;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
@@ -53,17 +54,18 @@ public class AdvanceActivity extends AppCompatActivity {
     private final List<ImageButton> deleteButtons = new ArrayList<>();
 
     // Навигация: 0 главный экран, 1 настройки автомобиля (+комфорт), 2 приложения и разделение экрана,
-    //            3 (комфорт — удалён, слит в 1), 4 команды (скрыт), 5 кнопки на руле, 6 другое
+    //            3 (комфорт — удалён, слит в 1), 4 команды, 5 кнопки на руле, 6 другое
     private TextView navMainScreen, navCustomCommands, navDriveModes, navSplitScreen, navSteeringButtons, navOther;
     private View pageMainScreen, pageCustomCommands, pageDriveModes, pageSplitScreen, pageSteeringButtons, pageOther;
     // Заголовок раздела в верхней панели (на одной строке с «Применить»)
     private TextView sectionTitle;
     // Индекс 3 (Комфорт) больше не используется — раздел удалён, его настройки слиты в «Настройки
-    // автомобиля» (1). Индекс 4 (Собственные команды) скрыт из навигации, страница/данные сохранены.
+    // автомобиля» (1). Индекс 4 (Собственные команды) показывается отдельной настройкой.
     private static final String[] SECTION_TITLES = {
             "Главный экран", "Настройки автомобиля", "Приложения и разделение экрана", "Комфорт",
             "Собственные команды", "Кнопки на руле", "Другое"
     };
+    private static final String PREF_SHOW_CUSTOM_COMMANDS = "showCustomCommands";
 
     // Кнопки на руле — 4 кнопки-пикера действий (звёздочка/DVR × короткое/долгое). Поля/логика ниже.
     private Button steerStarShortBtn, steerStarLongBtn, steerDvrShortBtn, steerDvrLongBtn, steerVoiceShortBtn, steerVoiceLongBtn, steerPhoneShortBtn, steerPhoneLongBtn;
@@ -172,11 +174,29 @@ public class AdvanceActivity extends AppCompatActivity {
     };
 
     public void onButtonClickFinish(View v){
+        finishWithCustomCommands();
+    }
+
+    private void finishWithCustomCommands() {
+        if (!saveCustomCommands()) return;
         Intent intent = new Intent();
         intent.putExtra("customCommand", canCommandsEditor.getText().toString());
         intent.putExtra("customCommandCount", pickerCustomCommandCount.getValue());
         setResult(RESULT_OK, intent);
         finish();
+    }
+
+    /** Сохраняет команды только после успешной проверки формата редактором. */
+    private boolean saveCustomCommands() {
+        if (buttonBack != null && !buttonBack.isEnabled()) {
+            Log.w("$$$ Advance commands $$$", "Команды не сохранены: неверный формат");
+            return false;
+        }
+        prefs.edit()
+                .putString("customCommand", canCommandsEditor.getText().toString())
+                .putInt("customCommandCount", pickerCustomCommandCount.getValue())
+                .apply();
+        return true;
     }
 
     public void onButtonClickClean(View v){
@@ -264,6 +284,14 @@ public class AdvanceActivity extends AppCompatActivity {
         pickerCustomCommandCount.setMinValue(1);
         pickerCustomCommandCount.setTextColor(0xffffffff);
         pickerCustomCommandCount.setTextSize(40f);
+
+        // Системная и плавающая кнопки «Назад» сохраняют данные так же, как кнопка в интерфейсе.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                finishWithCustomCommands();
+            }
+        });
 
         Intent intent = getIntent();
         if (intent != null) {
@@ -377,13 +405,14 @@ public class AdvanceActivity extends AppCompatActivity {
         navMainScreen.setOnClickListener(v -> setSection(0));
         navDriveModes.setOnClickListener(v -> setSection(1));
         navSplitScreen.setOnClickListener(v -> setSection(2));
+        navCustomCommands.setOnClickListener(v -> setSection(4));
         navSteeringButtons.setOnClickListener(v -> setSection(5));
         navOther.setOnClickListener(v -> setSection(6));
         setSection(0);
 
-        // «Собственные команды» (4) скрыты из навигации по решению пользователя. Страница и данные
-        // (rawCanCodes) остаются — кастомная команда по-прежнему прокидывается через customCommand.
-        if (navCustomCommands != null) navCustomCommands.setVisibility(View.GONE);
+        // «Собственные команды» (4) по умолчанию скрыты. Пункт можно включить в разделе «Другое».
+        navCustomCommands.setVisibility(
+                prefs.getBoolean(PREF_SHOW_CUSTOM_COMMANDS, false) ? View.VISIBLE : View.GONE);
 
         // LIGHT: скрываем разделы «Приложения и разделение экрана» (2) и «Кнопки на руле» (5) — split/VD и Frida-руль.
         if (!BuildConfig.IS_FULL) {
@@ -457,6 +486,14 @@ public class AdvanceActivity extends AppCompatActivity {
         switchDebugMode.setChecked(prefs.getBoolean("debugMode", false));
         switchDebugMode.setOnCheckedChangeListener((b, checked) ->
                 prefs.edit().putBoolean("debugMode", checked).apply());
+
+        // Раздел «Другое»: показывать скрытый по умолчанию раздел «Собственные команды».
+        Switch switchShowCustomCommands = findViewById(R.id.switchShowCustomCommands);
+        switchShowCustomCommands.setChecked(prefs.getBoolean(PREF_SHOW_CUSTOM_COMMANDS, false));
+        switchShowCustomCommands.setOnCheckedChangeListener((b, checked) -> {
+            prefs.edit().putBoolean(PREF_SHOW_CUSTOM_COMMANDS, checked).apply();
+            navCustomCommands.setVisibility(checked ? View.VISIBLE : View.GONE);
+        });
 
         // Раздел «Другое»: «Автозапуск VoyahTune» (по умолчанию выключено) —
         // при пробуждении Native откроет RestoreMode. Настройку дублируем в Native (NativePrefs).
@@ -541,6 +578,8 @@ public class AdvanceActivity extends AppCompatActivity {
      */
     public void onButtonClickApply(View v) {
         if (applying) return;
+        // ApplyEngine перечитывает команды через ContentProvider, поэтому сохраняем их до сообщения.
+        if (!saveCustomCommands()) return;
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
             Log.w("$$$ Advance apply $$$", "SetModesService не забинден");
             return;
@@ -1089,7 +1128,7 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     /** Переключение разделов (0 главный экран, 1 настройки автомобиля, 2 приложения и разделение экрана,
-     *  4 команды [скрыт], 5 кнопки на руле, 6 другое). Индекс 3 (Комфорт) удалён. */
+     *  4 собственные команды, 5 кнопки на руле, 6 другое). Индекс 3 (Комфорт) удалён. */
     private void setSection(int index) {
         if (sectionTitle != null && index >= 0 && index < SECTION_TITLES.length)
             sectionTitle.setText(SECTION_TITLES[index]);
