@@ -132,7 +132,8 @@ Java.perform(function () {
         act = "" + (act || "");
         return act.indexOf("SplitHostActivity") >= 0
             || act.indexOf("restoremode.MainActivity") >= 0
-            || act.indexOf("AdvanceActivity") >= 0;
+            || act.indexOf("AdvanceActivity") >= 0
+            || act.indexOf("TripHistoryActivity") >= 0;
     }
 
     // ЕДИНОЕ условие «док должен остаться под этим окном». Одно на всех потребителей — раньше их было

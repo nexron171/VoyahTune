@@ -13,7 +13,11 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -40,11 +44,43 @@ public class TripHistoryActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        EdgeToEdge.enable(this);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         setContentView(R.layout.activity_trip_history);
+        applyWindowInsets();
         tripLogContainer = findViewById(R.id.tripLogContainer);
         // Снимок из интента (если передали) — чтобы список был сразу
         renderTripLog(getIntent().getStringExtra("tripsJson"));
+    }
+
+    /**
+     * Родной док головы висит поверх окна слева и не попадает в system bar insets.
+     * Резервируем его полосу и добавляем системные insets к штатным отступам layout.
+     */
+    private void applyWindowInsets() {
+        final View root = findViewById(R.id.tripHistoryRoot);
+        if (root == null) return;
+
+        final int nativeDock = Math.round(getResources().getDisplayMetrics().density * 145f);
+        final int baseLeft = root.getPaddingLeft();
+        final int baseTop = root.getPaddingTop();
+        final int baseRight = root.getPaddingRight();
+        final int baseBottom = root.getPaddingBottom();
+
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets sb = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            int top = sb.top;
+            if (top == 0) {
+                int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+                if (id > 0) top = getResources().getDimensionPixelSize(id);
+            }
+            v.setPadding(
+                    baseLeft + nativeDock + sb.left,
+                    baseTop + top,
+                    baseRight + sb.right,
+                    baseBottom + sb.bottom);
+            return insets;
+        });
     }
 
     public void onButtonBackHistory(View v) {
