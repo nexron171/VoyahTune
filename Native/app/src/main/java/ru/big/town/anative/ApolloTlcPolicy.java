@@ -29,6 +29,7 @@ final class ApolloTlcPolicy {
     static final String ERROR_WRITE_PERMISSION_MISSING = "write_permission_missing";
     static final String ERROR_NOT_PARKING = "gear_not_parking";
     static final String ERROR_INVALID_PLC_SWITCH = "invalid_plc_switch";
+    static final String ERROR_INVALID_SWITCH_STATE = "invalid_switch_state";
     static final String ERROR_INVALID_PLC_STATUS = "invalid_plc_status";
     static final String ERROR_PLC_STATUS = "plc_status_error";
     static final String ERROR_INVALID_ANP_SWITCH = "invalid_anp_switch";
@@ -43,6 +44,8 @@ final class ApolloTlcPolicy {
         PLC_FUNCTION_STATUS(904, 1121),
         PLC_SWITCH(918, 1135),
         ANP_SWITCH(919, 1136),
+        GLA_SWITCH(932, 1149),
+        GLA_LIGHT_CHANGE_SWITCH(933, 1150),
         TLC_FUNC_ENABLE(953, 1170),
         PLC_FUNC_ENABLE_SA(962, 1179);
 
@@ -158,6 +161,18 @@ final class ApolloTlcPolicy {
     /** The direct path needs only the current PLC_SWITCH value for state/readback integrity. */
     static String operationalSnapshotError(Snapshot snapshot) {
         if (!isModuleState(snapshot.plcSwitch)) return ERROR_INVALID_PLC_SWITCH;
+        return ERROR_NONE;
+    }
+
+    /** Shared OEM-parity gates for the two traffic-light states; stock UI allows them outside P. */
+    static String directSwitchBlockReason(boolean fullBuild, boolean supported,
+                                          boolean canConnected, boolean pending,
+                                          int currentState) {
+        if (!fullBuild) return ERROR_UNSUPPORTED_LIGHT;
+        if (!supported) return ERROR_PROFILE_UNSUPPORTED;
+        if (!canConnected) return ERROR_CAN_DISCONNECTED;
+        if (pending) return ERROR_WRITE_PENDING;
+        if (!isModuleState(currentState)) return ERROR_INVALID_SWITCH_STATE;
         return ERROR_NONE;
     }
 

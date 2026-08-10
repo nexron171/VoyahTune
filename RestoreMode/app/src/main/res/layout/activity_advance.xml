@@ -1622,6 +1622,102 @@
 
                 </LinearLayout>
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/layout_category_bg"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Распознавание светофоров"
+                                android:textColor="#FFFFFF"
+                                android:textSize="27px" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Распознаёт сигналы светофоров и показывает подсказки водителю."
+                                android:textColor="#aaaaaa"
+                                android:textSize="20px" />
+
+                        </LinearLayout>
+
+                        <Switch
+                            android:id="@+id/switchApolloTrafficLights"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:enabled="false"
+                            android:thumb="@drawable/switch_thumb"
+                            android:track="@drawable/switch_track" />
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/apolloGreenSoundContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Звуковой сигнал зеленого сигнала светофора"
+                            android:textColor="#FFFFFF"
+                            android:textSize="22px" />
+
+                        <RadioGroup
+                            android:id="@+id/apolloGreenSoundGroup"
+                            style="@style/radio_group_height_70_style"
+                            android:layout_width="wrap_content"
+                            android:layout_height="70dp"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/radio_group_height_70_bg"
+                            android:orientation="horizontal">
+
+                            <RadioButton
+                                android:id="@+id/apolloGreenSoundOff"
+                                style="@style/radio_button_height_70_style"
+                                android:layout_width="220dp"
+                                android:layout_height="match_parent"
+                                android:background="@drawable/radio_group_button_70_bg"
+                                android:text="Выключить"
+                                android:textColor="@color/radio_button_text_color_selector" />
+
+                            <RadioButton
+                                android:id="@+id/apolloGreenSoundOn"
+                                style="@style/radio_button_height_70_style"
+                                android:layout_width="220dp"
+                                android:layout_height="match_parent"
+                                android:background="@drawable/radio_group_button_70_bg"
+                                android:text="Включить"
+                                android:textColor="@color/radio_button_text_color_selector" />
+
+                        </RadioGroup>
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
             </LinearLayout>
 
             <TextView

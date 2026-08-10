@@ -20,6 +20,10 @@ public class ApolloTlcPolicyTest {
         assertEquals(1135, ApolloTlcPolicy.Signal.PLC_SWITCH.id);
         assertEquals(919, ApolloTlcPolicy.Signal.ANP_SWITCH.ordinal);
         assertEquals(1136, ApolloTlcPolicy.Signal.ANP_SWITCH.id);
+        assertEquals(932, ApolloTlcPolicy.Signal.GLA_SWITCH.ordinal);
+        assertEquals(1149, ApolloTlcPolicy.Signal.GLA_SWITCH.id);
+        assertEquals(933, ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH.ordinal);
+        assertEquals(1150, ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH.id);
         assertEquals(953, ApolloTlcPolicy.Signal.TLC_FUNC_ENABLE.ordinal);
         assertEquals(1170, ApolloTlcPolicy.Signal.TLC_FUNC_ENABLE.id);
         assertEquals(962, ApolloTlcPolicy.Signal.PLC_FUNC_ENABLE_SA.ordinal);
@@ -206,5 +210,15 @@ public class ApolloTlcPolicyTest {
         assertEquals("invalid_plc_switch", ApolloTlcPolicy.writeBlockReason(
                 true, true, true, true, false, false, 0,
                 new ApolloTlcPolicy.Snapshot(-1, -1, -1, -1, -1), true));
+    }
+
+    @Test
+    public void trafficLightSwitchDoesNotRequireParking() {
+        assertEquals("", ApolloTlcPolicy.directSwitchBlockReason(
+                true, true, true, false, 1));
+        assertEquals("write_pending", ApolloTlcPolicy.directSwitchBlockReason(
+                true, true, true, true, 1));
+        assertEquals("invalid_switch_state", ApolloTlcPolicy.directSwitchBlockReason(
+                true, true, true, false, -1));
     }
 }
