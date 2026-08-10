@@ -18,12 +18,10 @@ import android.os.RemoteException;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
+import dalvik.system.PathClassLoader;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.InputStream;
-import java.security.MessageDigest;
-import java.util.Locale;
+import java.lang.reflect.Method;
+import java.util.EnumMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -85,12 +83,6 @@ public final class ApolloTlcService extends Service {
     private static final String EXTRA_ENABLED = "enabled";
     private static final String EXTRA_ARGUMENT_VALID = "argumentValid";
 
-    private static final String VEHICLE_SETTING_PACKAGE = "com.qinggan.app.vehiclesetting";
-    private static final String ALLOWED_VEHICLE_SETTING_SHA256 =
-            "72f1c549e5cbfe22f65169898710d63c84981adcbbf7490c959f84fdeff621e6";
-    private static final String ALLOWED_CANBUS_SERVICE_SHA256 =
-            "96ac5182e795ad70c43c78f26b9cf29e76b59db67c2d5c09216ba1d8425c427c";
-
     private static final String CANBUS_DESCRIPTOR = "com.qinggan.canbus.ICanBusService";
     private static final String WRITE_CANBUS_PERMISSION =
             "com.qinggan.permission.WRITE_CANBUS";
@@ -131,6 +123,8 @@ public final class ApolloTlcService extends Service {
     private boolean runtimeProfileValid = true;
     private String vehicleSettingHashError = "profile_check_pending";
     private String canBusServiceHashError = "profile_check_pending";
+    private final EnumMap<ApolloTlcPolicy.Signal, Integer> runtimeSignalOrdinals =
+            new EnumMap<>(ApolloTlcPolicy.Signal.class);
     private String lastError = ApolloTlcPolicy.ERROR_NONE;
     /** Sticky until a Settings.Global master write succeeds; prevents false OFF confirmation. */
     private String masterPersistenceError = ApolloTlcPolicy.ERROR_NONE;
@@ -617,10 +611,11 @@ public final class ApolloTlcService extends Service {
         if (destroyed || !runtimeProfileValid) return;
         ApolloTlcPolicy.Signal signal = ApolloTlcPolicy.Signal.fromId(id);
         if (signal == null) return;
-        if (signal.ordinal != ordinal) {
+        Integer expectedOrdinal = runtimeSignalOrdinals.get(signal);
+        if (expectedOrdinal == null || expectedOrdinal != ordinal) {
             failRuntimeProfileClosed("profile_callback_mismatch");
             Log.e(TAG, "Pinned VehicleState mismatch for id=" + id
-                    + ": expected ordinal=" + signal.ordinal + " actual=" + ordinal);
+                    + ": expected ordinal=" + expectedOrdinal + " actual=" + ordinal);
             publishState();
             return;
         }
@@ -764,10 +759,14 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /** Presence marker + VehicleState.writeToParcel(ordinal, stable id). */
-    private static void writeVehicleState(Parcel data, ApolloTlcPolicy.Signal signal) {
+    /** Presence marker + runtime-resolved VehicleState.writeToParcel(ordinal, stable id). */
+    private void writeVehicleState(Parcel data, ApolloTlcPolicy.Signal signal) {
+        Integer ordinal = runtimeSignalOrdinals.get(signal);
+        if (ordinal == null) {
+            throw new IllegalStateException("VehicleState schema not resolved for " + signal);
+        }
         data.writeInt(1);
-        data.writeInt(signal.ordinal);
+        data.writeInt(ordinal);
         data.writeInt(signal.id);
     }
 
@@ -807,10 +806,7 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /**
-     * Re-hashes the APK backing a newly delivered Binder before the first descriptor/TX call.
-     * The initial large VehicleSetting hash is intentionally not repeated.
-     */
+    /** Re-resolves the installed VehicleState table before the first Binder transaction. */
     private void verifyConnectedCanBus(IBinder candidate) {
         if (destroyed || !BuildConfig.IS_FULL || !hashCheckComplete
                 || !vehicleSettingHashMatches) {
@@ -819,14 +815,12 @@ public final class ApolloTlcService extends Service {
         }
         final int generation = beginCanBusVerification(candidate);
         profileExecutor.execute(() -> {
-            ApkHashResult result = verifyInstalledApk(
-                    CANBUS_PACKAGE, ALLOWED_CANBUS_SERVICE_SHA256, "profile_canbus");
+            VehicleStateSchemaResult result = resolveVehicleStateSchema();
             handler.post(() -> {
                 if (!verificationResultCurrent(generation, candidate)) return;
                 canBusVerificationPending = false;
                 pendingCanBusBinder = null;
-                canBusServiceHashMatches = result.matches;
-                canBusServiceHashError = result.error;
+                applyVehicleStateSchema(result);
                 if (!result.matches) {
                     rejectCanBusVerification(result.error);
                     return;
@@ -872,7 +866,7 @@ public final class ApolloTlcService extends Service {
         publishState();
     }
 
-    /** Hashes only the small CanBusService APK, then creates a fresh binding on success. */
+    /** Re-resolves the runtime VehicleState schema, then creates a fresh binding on success. */
     private void revalidateCanBusAndBind(String reason) {
         if (destroyed || !BuildConfig.IS_FULL || !hashCheckComplete
                 || !vehicleSettingHashMatches || !hasWriteCanBusPermission()
@@ -888,14 +882,12 @@ public final class ApolloTlcService extends Service {
 
         final int generation = beginCanBusVerification(null);
         profileExecutor.execute(() -> {
-            ApkHashResult result = verifyInstalledApk(
-                    CANBUS_PACKAGE, ALLOWED_CANBUS_SERVICE_SHA256, "profile_canbus");
+            VehicleStateSchemaResult result = resolveVehicleStateSchema();
             handler.post(() -> {
                 if (!verificationResultCurrent(generation, null)) return;
                 canBusVerificationPending = false;
                 pendingCanBusBinder = null;
-                canBusServiceHashMatches = result.matches;
-                canBusServiceHashError = result.error;
+                applyVehicleStateSchema(result);
                 if (!result.matches) {
                     rejectCanBusVerification(result.error);
                     return;
@@ -913,6 +905,7 @@ public final class ApolloTlcService extends Service {
         pendingCanBusBinder = candidate;
         canBusServiceHashMatches = false;
         canBusServiceHashError = "profile_canbus_revalidation_pending";
+        runtimeSignalOrdinals.clear();
         canBusBinder = null;
         canBusConnected = false;
         callbackAdded = false;
@@ -935,6 +928,7 @@ public final class ApolloTlcService extends Service {
         pendingCanBusBinder = null;
         canBusServiceHashMatches = false;
         canBusServiceHashError = error;
+        runtimeSignalOrdinals.clear();
         canBusBinder = null;
         canBusConnected = false;
         callbackAdded = false;
@@ -983,6 +977,7 @@ public final class ApolloTlcService extends Service {
         pendingCanBusBinder = null;
         canBusServiceHashMatches = false;
         canBusServiceHashError = "profile_canbus_revalidation_pending";
+        runtimeSignalOrdinals.clear();
         canBusBinder = null;
         canBusConnected = false;
         callbackAdded = false;
@@ -1069,27 +1064,19 @@ public final class ApolloTlcService extends Service {
 
     private void startProfileCheck() {
         profileExecutor.execute(() -> {
-            ApkHashResult vehicleSetting = verifyInstalledApk(
-                    VEHICLE_SETTING_PACKAGE, ALLOWED_VEHICLE_SETTING_SHA256,
-                    "profile_vehicle_setting");
-            ApkHashResult canBusService = verifyInstalledApk(
-                    CANBUS_PACKAGE, ALLOWED_CANBUS_SERVICE_SHA256,
-                    "profile_canbus");
+            VehicleStateSchemaResult schema = resolveVehicleStateSchema();
             handler.post(() -> {
                 if (destroyed) return;
                 hashCheckComplete = true;
-                vehicleSettingHashMatches = vehicleSetting.matches;
-                canBusServiceHashMatches = canBusService.matches;
-                vehicleSettingHashError = vehicleSetting.error;
-                canBusServiceHashError = canBusService.error;
+                vehicleSettingHashMatches = true;
+                vehicleSettingHashError = ApolloTlcPolicy.ERROR_NONE;
+                applyVehicleStateSchema(schema);
                 if (BuildConfig.IS_FULL && !hasWriteCanBusPermission()) {
                     failWritePermissionClosed();
-                } else if ((!vehicleSetting.matches || !canBusService.matches)
-                        && BuildConfig.IS_FULL) {
-                    // A full build installed over a previously supported firmware must fail closed.
+                } else if (!schema.matches && BuildConfig.IS_FULL) {
                     masterForceDisabled = true;
                     writeMaster(false);
-                } else if (vehicleSetting.matches && canBusService.matches) {
+                } else if (schema.matches) {
                     // This release exposes only direct TLC. Keep the unrelated global Apollo
                     // entitlement switch off even when an older installation persisted it as ON.
                     forceMasterOff("direct TLC startup");
@@ -1104,49 +1091,63 @@ public final class ApolloTlcService extends Service {
         });
     }
 
-    private ApkHashResult verifyInstalledApk(String packageName, String expectedSha256,
-                                             String errorPrefix) {
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private VehicleStateSchemaResult resolveVehicleStateSchema() {
         try {
-            ApplicationInfo info = getPackageManager().getApplicationInfo(packageName, 0);
-            String digest = sha256(new File(info.sourceDir));
-            if (expectedSha256.equals(digest)) {
-                return new ApkHashResult(true, ApolloTlcPolicy.ERROR_NONE);
+            ApplicationInfo info = getPackageManager().getApplicationInfo(CANBUS_PACKAGE, 0);
+            ClassLoader loader = new PathClassLoader(info.sourceDir, getClassLoader());
+            Class enumClass = Class.forName(
+                    "com.qinggan.canbus.VehicleState", true, loader);
+            if (!enumClass.isEnum()) {
+                return VehicleStateSchemaResult.failed("profile_canbus_schema_mismatch");
             }
-            Log.e(TAG, packageName + " APK hash mismatch");
-            return new ApkHashResult(false, errorPrefix + "_hash_mismatch");
+            Method getValue = enumClass.getMethod("getValue");
+            EnumMap<ApolloTlcPolicy.Signal, Integer> ordinals =
+                    new EnumMap<>(ApolloTlcPolicy.Signal.class);
+            for (ApolloTlcPolicy.Signal signal : ApolloTlcPolicy.Signal.values()) {
+                Enum value = Enum.valueOf(enumClass, signal.name());
+                Object stableId = getValue.invoke(value);
+                if (!(stableId instanceof Integer) || ((Integer) stableId) != signal.id) {
+                    Log.e(TAG, "VehicleState id mismatch for " + signal.name());
+                    return VehicleStateSchemaResult.failed(
+                            "profile_canbus_schema_mismatch");
+                }
+                ordinals.put(signal, value.ordinal());
+            }
+            return new VehicleStateSchemaResult(
+                    true, ApolloTlcPolicy.ERROR_NONE, ordinals);
         } catch (PackageManager.NameNotFoundException e) {
-            Log.e(TAG, packageName + " APK not found");
-            return new ApkHashResult(false, errorPrefix + "_apk_not_found");
-        } catch (Exception e) {
-            Log.e(TAG, packageName + " APK hash failed", e);
-            return new ApkHashResult(false, errorPrefix + "_hash_failed");
+            Log.e(TAG, "CanBusService APK not found");
+            return VehicleStateSchemaResult.failed("profile_canbus_apk_not_found");
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.e(TAG, "Cannot resolve installed VehicleState schema", e);
+            return VehicleStateSchemaResult.failed("profile_canbus_schema_unavailable");
         }
     }
 
-    private static final class ApkHashResult {
+    private void applyVehicleStateSchema(VehicleStateSchemaResult result) {
+        canBusServiceHashMatches = result.matches;
+        canBusServiceHashError = result.error;
+        runtimeSignalOrdinals.clear();
+        if (result.matches) runtimeSignalOrdinals.putAll(result.ordinals);
+    }
+
+    private static final class VehicleStateSchemaResult {
         final boolean matches;
         final String error;
+        final EnumMap<ApolloTlcPolicy.Signal, Integer> ordinals;
 
-        ApkHashResult(boolean matches, String error) {
+        VehicleStateSchemaResult(boolean matches, String error,
+                                 EnumMap<ApolloTlcPolicy.Signal, Integer> ordinals) {
             this.matches = matches;
             this.error = error;
+            this.ordinals = ordinals;
         }
-    }
 
-    private static String sha256(File file) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] buffer = new byte[64 * 1024];
-        try (InputStream input = new FileInputStream(file)) {
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                digest.update(buffer, 0, count);
-            }
+        static VehicleStateSchemaResult failed(String error) {
+            return new VehicleStateSchemaResult(
+                    false, error, new EnumMap<>(ApolloTlcPolicy.Signal.class));
         }
-        StringBuilder result = new StringBuilder(64);
-        for (byte value : digest.digest()) {
-            result.append(String.format(Locale.US, "%02x", value & 0xff));
-        }
-        return result.toString();
     }
 
     private boolean hookProfileSupported() {

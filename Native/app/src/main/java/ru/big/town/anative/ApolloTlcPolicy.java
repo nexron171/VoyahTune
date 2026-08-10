@@ -39,22 +39,20 @@ final class ApolloTlcPolicy {
     static final String ERROR_ANP_MUST_BE_OFF = "anp_must_be_off";
     static final String ERROR_MASTER_NOT_USED_DIRECT = "master_not_used_direct_h97x";
 
-    /** Ordinal and stable value from the allow-listed VehicleSetting.apk VehicleState enum. */
+    /** Stable VehicleState IDs; ordinals are resolved from the installed CanBusService at runtime. */
     enum Signal {
-        TSR_SWITCH(208, 277),
-        PLC_FUNCTION_STATUS(904, 1121),
-        PLC_SWITCH(918, 1135),
-        ANP_SWITCH(919, 1136),
-        GLA_SWITCH(932, 1149),
-        GLA_LIGHT_CHANGE_SWITCH(933, 1150),
-        TLC_FUNC_ENABLE(953, 1170),
-        PLC_FUNC_ENABLE_SA(962, 1179);
+        TSR_SWITCH(277),
+        PLC_FUNCTION_STATUS(1121),
+        PLC_SWITCH(1135),
+        ANP_SWITCH(1136),
+        GLA_SWITCH(1149),
+        GLA_LIGHT_CHANGE_SWITCH(1150),
+        TLC_FUNC_ENABLE(1170),
+        PLC_FUNC_ENABLE_SA(1179);
 
-        final int ordinal;
         final int id;
 
-        Signal(int ordinal, int id) {
-            this.ordinal = ordinal;
+        Signal(int id) {
             this.id = id;
         }
 

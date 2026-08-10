@@ -14,21 +14,13 @@ public class ApolloTlcPolicyTest {
 
     @Test
     public void pinnedSignalMappingMatchesAllowListedProfile() {
-        assertEquals(208, ApolloTlcPolicy.Signal.TSR_SWITCH.ordinal);
         assertEquals(277, ApolloTlcPolicy.Signal.TSR_SWITCH.id);
-        assertEquals(904, ApolloTlcPolicy.Signal.PLC_FUNCTION_STATUS.ordinal);
         assertEquals(1121, ApolloTlcPolicy.Signal.PLC_FUNCTION_STATUS.id);
-        assertEquals(918, ApolloTlcPolicy.Signal.PLC_SWITCH.ordinal);
         assertEquals(1135, ApolloTlcPolicy.Signal.PLC_SWITCH.id);
-        assertEquals(919, ApolloTlcPolicy.Signal.ANP_SWITCH.ordinal);
         assertEquals(1136, ApolloTlcPolicy.Signal.ANP_SWITCH.id);
-        assertEquals(932, ApolloTlcPolicy.Signal.GLA_SWITCH.ordinal);
         assertEquals(1149, ApolloTlcPolicy.Signal.GLA_SWITCH.id);
-        assertEquals(933, ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH.ordinal);
         assertEquals(1150, ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH.id);
-        assertEquals(953, ApolloTlcPolicy.Signal.TLC_FUNC_ENABLE.ordinal);
         assertEquals(1170, ApolloTlcPolicy.Signal.TLC_FUNC_ENABLE.id);
-        assertEquals(962, ApolloTlcPolicy.Signal.PLC_FUNC_ENABLE_SA.ordinal);
         assertEquals(1179, ApolloTlcPolicy.Signal.PLC_FUNC_ENABLE_SA.id);
         assertEquals(ApolloTlcPolicy.Signal.PLC_SWITCH,
                 ApolloTlcPolicy.Signal.fromId(1135));
