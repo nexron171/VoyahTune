@@ -10,6 +10,7 @@ import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -28,11 +29,12 @@ import java.util.concurrent.Executors;
 /**
  * Fail-closed, profile-pinned bridge for the OEM triggered lane-change switch.
  *
- * <p>Only {@code PLC_SWITCH} is written and only through the OEM ICanBusService TX58. The
- * subscription capability states are read through TX57 and are never changed here. There are no
- * write retries, wake restores, raw CAN frames or TX77 calls. A successful Binder transaction is
- * not treated as ECU acknowledgement: every write remains pending until the mandatory delayed
- * TX57 readback has completed, while callback state is published as the live ECU observation.</p>
+ * <p>User switches are written through the OEM ICanBusService TX58. Enabling traffic-light
+ * recognition first emits one complete TX77 entitlement vector with only GLC and TLA enabled;
+ * every unrelated Apollo capability is explicitly disabled. There are no write retries, wake
+ * restores or raw CAN frames. A successful Binder transaction is not treated as ECU
+ * acknowledgement: every user-switch write remains pending until mandatory delayed TX57
+ * readback, while callback state is published as the live ECU observation.</p>
  */
 public final class ApolloTlcService extends Service {
     private static final String TAG = "$$$ ApolloTlcService $$$";
@@ -95,9 +97,11 @@ public final class ApolloTlcService extends Service {
     private static final int TX_REMOVE_CALLBACK = 29;
     private static final int TX_GET_VEHICLE_STATE = 57;
     private static final int TX_SET_VEHICLE_STATE = 58;
+    private static final int TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE = 77;
     private static final int CALLBACK_VEHICLE_STATE_CHANGED = 36;
 
     private static final long BIND_RETRY_MS = 5_000L;
+    private static final long ENTITLEMENT_SETTLE_MS = 1_000L;
     private static final long DELAYED_READBACK_MS = 3_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -460,22 +464,26 @@ public final class ApolloTlcService extends Service {
 
     private void handleGlaSet(boolean enabled, boolean argumentValid) {
         handleIndependentSwitchSet(ApolloTlcPolicy.Signal.GLA_SWITCH,
-                ApolloTlcPolicy.requestedPlcState(enabled), argumentValid, false);
+                ApolloTlcPolicy.requestedPlcState(enabled), argumentValid,
+                false, enabled);
     }
 
     private void handleGlaSoundSet(boolean enabled, boolean argumentValid) {
         handleIndependentSwitchSet(ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH,
-                ApolloTlcPolicy.requestedPlcState(enabled), argumentValid, true);
+                ApolloTlcPolicy.requestedPlcState(enabled), argumentValid,
+                true, false);
     }
 
     private void handleTsrSet(boolean enabled, boolean argumentValid) {
         handleIndependentSwitchSet(ApolloTlcPolicy.Signal.TSR_SWITCH,
-                ApolloTlcPolicy.requestedTsrState(enabled), argumentValid, false);
+                ApolloTlcPolicy.requestedTsrState(enabled), argumentValid,
+                false, false);
     }
 
     private void handleIndependentSwitchSet(ApolloTlcPolicy.Signal signal, int desiredState,
                                             boolean argumentValid,
-                                            boolean requiresRecognition) {
+                                            boolean requiresRecognition,
+                                            boolean enableTrafficLightEntitlements) {
         if (!argumentValid) {
             lastError = "invalid_argument";
             publishState();
@@ -513,26 +521,109 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        queueSignalWrite(signal, desiredState, signal.name());
+        if (enableTrafficLightEntitlements) {
+            queueTrafficLightRecognitionEnable(desiredState);
+        } else {
+            queueSignalWrite(signal, desiredState, signal.name());
+        }
+    }
+
+    /**
+     * Sends one complete 18-key entitlement vector before enabling GLA_SWITCH. TX77 returning
+     * zero means only that the OEM AsyncTask accepted the request, so TX58 is delayed long enough
+     * for command 126 to leave the head unit. Neither stage is retried automatically.
+     */
+    private void queueTrafficLightRecognitionEnable(int desiredState) {
+        int generation = beginPendingWrite(
+                ApolloTlcPolicy.Signal.GLA_SWITCH, desiredState);
+        if (!hasWriteCanBusPermission()) {
+            clearPendingWrite(generation);
+            failWritePermissionClosed();
+            publishState();
+            return;
+        }
+        if (!runtimeProfileValid || !canBusConnected || !callbackAdded
+                || canBusBinder == null) {
+            failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
+            return;
+        }
+        try {
+            int result = setSelectiveTrafficLightEntitlements(true);
+            if (result != 0) {
+                failPendingWrite(generation, "traffic_light_entitlement_rejected");
+                Log.e(TAG, "Selective traffic-light TX77 rejected; result=" + result);
+                return;
+            }
+            Log.i(TAG, "Selective traffic-light TX77 queued: GLC=2 TLA=2 others=1"
+                    + " generation=" + generation);
+        } catch (RemoteException | RuntimeException e) {
+            failPendingWrite(generation, "traffic_light_entitlement_tx_failed");
+            Log.e(TAG, "Selective traffic-light TX77 failed; no retry", e);
+            return;
+        }
+        handler.postDelayed(() -> continueTrafficLightRecognitionEnable(
+                        generation, desiredState),
+                ENTITLEMENT_SETTLE_MS);
+    }
+
+    private void continueTrafficLightRecognitionEnable(int generation, int desiredState) {
+        if (destroyed || generation != writeGeneration || !pending
+                || pendingSignal != ApolloTlcPolicy.Signal.GLA_SWITCH
+                || pendingDesiredState != desiredState) {
+            return;
+        }
+        if (!hasWriteCanBusPermission()) {
+            clearPendingWrite(generation);
+            failWritePermissionClosed();
+            publishState();
+            return;
+        }
+        if (!canBusConnected || !callbackAdded
+                || !refreshFromCan("traffic-light entitlement settle")) {
+            failPendingWrite(generation, ApolloTlcPolicy.ERROR_STATE_READ_FAILED);
+            return;
+        }
+        if (!ApolloTlcPolicy.isModuleState(glaSwitch)) {
+            failPendingWrite(generation, ApolloTlcPolicy.ERROR_INVALID_SWITCH_STATE);
+            return;
+        }
+        transmitPendingSignal(generation, ApolloTlcPolicy.Signal.GLA_SWITCH,
+                desiredState, "GLA_SWITCH");
     }
 
     private void queueSignalWrite(ApolloTlcPolicy.Signal signal, int desiredState,
                                   String logName) {
+        int generation = beginPendingWrite(signal, desiredState);
+        transmitPendingSignal(generation, signal, desiredState, logName);
+    }
+
+    private int beginPendingWrite(ApolloTlcPolicy.Signal signal, int desiredState) {
         int generation = ++writeGeneration;
         pending = true;
         pendingSignal = signal;
         pendingDesiredState = desiredState;
         lastError = ApolloTlcPolicy.ERROR_NONE;
         publishState();
+        return generation;
+    }
 
+    private void transmitPendingSignal(int generation, ApolloTlcPolicy.Signal signal,
+                                       int desiredState, String logName) {
+        if (destroyed || generation != writeGeneration || !pending
+                || pendingSignal != signal || pendingDesiredState != desiredState) {
+            return;
+        }
         // Re-check immediately before TX58 in case package permissions changed while this command
         // was being validated. No Binder write is attempted on an ungranted permission.
         if (!hasWriteCanBusPermission()) {
-            pending = false;
-            pendingSignal = null;
-            pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
+            clearPendingWrite(generation);
             failWritePermissionClosed();
             publishState();
+            return;
+        }
+        if (!runtimeProfileValid || !canBusConnected || !callbackAdded
+                || canBusBinder == null) {
+            failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
             return;
         }
 
@@ -541,12 +632,8 @@ public final class ApolloTlcService extends Service {
             Log.i(TAG, logName + " TX58 queued; desired=" + desiredState
                     + " generation=" + generation);
         } catch (RemoteException | RuntimeException e) {
-            pending = false;
-            pendingSignal = null;
-            pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-            lastError = "tx58_failed";
+            failPendingWrite(generation, "tx58_failed");
             Log.e(TAG, logName + " TX58 failed; no retry", e);
-            publishState();
             return;
         }
 
@@ -561,6 +648,20 @@ public final class ApolloTlcService extends Service {
         handler.postDelayed(() -> finishDelayedReadback(generation), DELAYED_READBACK_MS);
     }
 
+    private void failPendingWrite(int generation, String error) {
+        if (generation != writeGeneration) return;
+        clearPendingWrite(generation);
+        lastError = error;
+        publishState();
+    }
+
+    private void clearPendingWrite(int generation) {
+        if (generation != writeGeneration) return;
+        pending = false;
+        pendingSignal = null;
+        pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
+    }
+
     private void finishDelayedReadback(int generation) {
         if (generation != writeGeneration || destroyed) return;
         if (!runtimeProfileValid) {
@@ -572,6 +673,7 @@ public final class ApolloTlcService extends Service {
         }
         boolean readOk = canBusConnected && callbackAdded
                 && refreshFromCan("delayed readback");
+        boolean shouldDisableTrafficLightEntitlements = false;
         pending = false;
         if (!readOk) {
             if (runtimeProfileValid) {
@@ -581,9 +683,51 @@ public final class ApolloTlcService extends Service {
             lastError = "readback_mismatch";
         } else {
             lastError = ApolloTlcPolicy.ERROR_NONE;
+            shouldDisableTrafficLightEntitlements =
+                    pendingSignal == ApolloTlcPolicy.Signal.GLA_SWITCH
+                            && pendingDesiredState == ApolloTlcPolicy.MODULE_OFF;
         }
         pendingSignal = null;
         pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
+        if (shouldDisableTrafficLightEntitlements) {
+            disableTrafficLightEntitlements();
+        } else {
+            publishState();
+        }
+    }
+
+    /**
+     * GLA_SWITCH is already confirmed OFF before this method runs. The complete entitlement
+     * vector then clears GLC (Green Light Control) and TLA (Traffic Light Assist), while keeping
+     * every unrelated Apollo entitlement OFF as well. TX77 has no ECU acknowledgement and is not
+     * retried automatically.
+     */
+    private void disableTrafficLightEntitlements() {
+        if (!hasWriteCanBusPermission()) {
+            failWritePermissionClosed();
+            publishState();
+            return;
+        }
+        if (!runtimeProfileValid || !canBusConnected || !callbackAdded
+                || canBusBinder == null) {
+            lastError = ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
+            publishState();
+            return;
+        }
+        try {
+            int result = setSelectiveTrafficLightEntitlements(false);
+            if (result != 0) {
+                lastError = "traffic_light_entitlement_disable_rejected";
+                Log.e(TAG, "Traffic-light entitlement disable TX77 rejected; result=" + result);
+            } else {
+                lastError = ApolloTlcPolicy.ERROR_NONE;
+                Log.i(TAG, "Traffic-light entitlement disable TX77 queued:"
+                        + " GLC=1 TLA=1 others=1");
+            }
+        } catch (RemoteException | RuntimeException e) {
+            lastError = "traffic_light_entitlement_disable_tx_failed";
+            Log.e(TAG, "Traffic-light entitlement disable TX77 failed; no retry", e);
+        }
         publishState();
     }
 
@@ -753,6 +897,38 @@ public final class ApolloTlcService extends Service {
                 throw new RemoteException("TX58 rejected");
             }
             reply.readException();
+        } finally {
+            reply.recycle();
+            data.recycle();
+        }
+    }
+
+    /**
+     * OEM TX77 argument order is air-condition bundle first, vehicle bundle second.
+     * The vehicle bundle is intentionally complete because the vendor implementation starts its
+     * shared entitlement bit buffer at zero before applying supplied keys.
+     */
+    private int setSelectiveTrafficLightEntitlements(boolean enabled) throws RemoteException {
+        Bundle vehicleBundle = new Bundle();
+        for (ApolloTlcPolicy.Entitlement entitlement
+                : ApolloTlcPolicy.Entitlement.values()) {
+            vehicleBundle.putInt(
+                    entitlement.name(), entitlement.selectiveTrafficLightValue(enabled));
+        }
+
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+            data.writeInt(0); // air-condition bundle is null
+            data.writeInt(1); // vehicle bundle is present
+            vehicleBundle.writeToParcel(data, 0);
+            if (!canBusBinder.transact(
+                    TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE, data, reply, 0)) {
+                throw new RemoteException("TX77 rejected");
+            }
+            reply.readException();
+            return reply.readInt();
         } finally {
             reply.recycle();
             data.recycle();
@@ -1113,6 +1289,17 @@ public final class ApolloTlcService extends Service {
                             "profile_canbus_schema_mismatch");
                 }
                 ordinals.put(signal, value.ordinal());
+            }
+            for (ApolloTlcPolicy.Entitlement entitlement
+                    : ApolloTlcPolicy.Entitlement.values()) {
+                Enum value = Enum.valueOf(enumClass, entitlement.name());
+                Object stableId = getValue.invoke(value);
+                if (!(stableId instanceof Integer)
+                        || ((Integer) stableId) != entitlement.id) {
+                    Log.e(TAG, "VehicleState id mismatch for " + entitlement.name());
+                    return VehicleStateSchemaResult.failed(
+                            "profile_canbus_schema_mismatch");
+                }
             }
             return new VehicleStateSchemaResult(
                     true, ApolloTlcPolicy.ERROR_NONE, ordinals);

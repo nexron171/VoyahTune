@@ -1636,6 +1636,11 @@ public class AdvanceActivity extends AppCompatActivity {
                 return "Сначала выключите ANP (штатный навигационный пилот) штатными средствами.";
             case "traffic_light_recognition_disabled":
                 return "Сначала включите распознавание светофоров.";
+            case "traffic_light_entitlement_rejected":
+            case "traffic_light_entitlement_tx_failed":
+            case "traffic_light_entitlement_disable_rejected":
+            case "traffic_light_entitlement_disable_tx_failed":
+                return "Не удалось полностью изменить настройку светофоров. Попробуйте ещё раз.";
             case "tx58_failed":
                 return "Автомобиль не принял настройку. Попробуйте ещё раз.";
             case "invalid_argument":

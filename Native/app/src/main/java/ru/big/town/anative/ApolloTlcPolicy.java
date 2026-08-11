@@ -64,6 +64,47 @@ final class ApolloTlcPolicy {
         }
     }
 
+    /**
+     * Complete OEM ADAS entitlement vector used by Binder TX77.
+     *
+     * <p>The H97C/H97X CanBus implementation builds one shared 18-bit command from this vector.
+     * Omitting keys would therefore turn omitted bits into zero implicitly. For the selective
+     * traffic-light experiment every key is sent explicitly: only GLC (Green Light Control) and
+     * TLA (Traffic Light Assist) are enabled, while the other Apollo capabilities stay disabled.</p>
+     */
+    enum Entitlement {
+        RPA_FUNC_ENABLE(1166, false),
+        HPP_FUNC_ENABLE(1167, false),
+        GLC_FUNC_ENABLE(1168, true),
+        ISLC_FUNC_ENABLE(1169, false),
+        TLC_FUNC_ENABLE(1170, false),
+        NOA_FUNC_ENABLE(1171, false),
+        ELK_FUNC_ENABLE(1172, false),
+        ESA_FUNC_ENABLE(1173, false),
+        APA_FUNC_ENABLE_SA(1174, false),
+        RPA_FUNC_ENABLE_SA(1175, false),
+        HAVP_FUNC_ENABLE_SA(1176, false),
+        ACC_FUNC_ENABLE_SA(1177, false),
+        ICA_FUNC_ENABLE_SA(1178, false),
+        PLC_FUNC_ENABLE_SA(1179, false),
+        HANP_FUNC_ENABLE_SA(1180, false),
+        ISA_FUNC_ENABLE_SA(1181, false),
+        ISLC_FUNC_ENABLE_SA(1182, false),
+        TLA_FUNC_ENABLE_SA(1183, true);
+
+        final int id;
+        final boolean trafficLightRequired;
+
+        Entitlement(int id, boolean trafficLightRequired) {
+            this.id = id;
+            this.trafficLightRequired = trafficLightRequired;
+        }
+
+        int selectiveTrafficLightValue(boolean enabled) {
+            return enabled && trafficLightRequired ? MODULE_ON : MODULE_OFF;
+        }
+    }
+
     static final class Snapshot {
         final int plcSwitch;
         final int plcStatus;

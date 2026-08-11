@@ -28,6 +28,27 @@ public class ApolloTlcPolicyTest {
     }
 
     @Test
+    public void selectiveTrafficLightEntitlementVectorIsCompleteAndIsolated() {
+        ApolloTlcPolicy.Entitlement[] values = ApolloTlcPolicy.Entitlement.values();
+        assertEquals(18, values.length);
+        int enabled = 0;
+        for (int i = 0; i < values.length; i++) {
+            ApolloTlcPolicy.Entitlement entitlement = values[i];
+            assertEquals(1166 + i, entitlement.id);
+            int expected = entitlement == ApolloTlcPolicy.Entitlement.GLC_FUNC_ENABLE
+                    || entitlement == ApolloTlcPolicy.Entitlement.TLA_FUNC_ENABLE_SA
+                    ? ApolloTlcPolicy.MODULE_ON : ApolloTlcPolicy.MODULE_OFF;
+            assertEquals(expected, entitlement.selectiveTrafficLightValue(true));
+            assertEquals(ApolloTlcPolicy.MODULE_OFF,
+                    entitlement.selectiveTrafficLightValue(false));
+            if (entitlement.selectiveTrafficLightValue(true) == ApolloTlcPolicy.MODULE_ON) {
+                enabled++;
+            }
+        }
+        assertEquals(2, enabled);
+    }
+
+    @Test
     public void profileNeedsFullBothApkHashesHookAndRuntimeProfile() {
         assertTrue(ApolloTlcPolicy.profileSupported(
                 true, true, true, true, true, true, true));
