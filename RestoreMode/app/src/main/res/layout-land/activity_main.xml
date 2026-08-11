@@ -30,6 +30,15 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
+    <!-- Сплиты: сетка плиток (по пресетам из «Разделение экрана») -->
+    <GridLayout
+        android:id="@+id/splitTilesGrid"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:columnCount="6"
+        android:paddingHorizontal="10dp"
+        android:paddingBottom="10dp" />
+
     <!-- Верхний блок фиксированных виджетов: 5 колонок × 2 ряда (на весах внутри фикс. высоты) -->
     <GridLayout
         android:layout_width="match_parent"
@@ -437,15 +446,6 @@
             app:cornerRadius="20dp" />
 
     </LinearLayout>
-
-    <!-- Сплиты: сетка плиток (по пресетам из «Разделение экрана») -->
-    <GridLayout
-        android:id="@+id/splitTilesGrid"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:columnCount="5"
-        android:paddingHorizontal="10dp"
-        android:paddingBottom="10dp" />
 
     </LinearLayout>
     <!-- /внутренний контейнер общего скролла -->
