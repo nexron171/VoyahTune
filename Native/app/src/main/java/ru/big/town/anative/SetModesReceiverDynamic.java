@@ -279,6 +279,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             toggleSetting(ctx, "forcedEv");
         } else if ("toggle_pedestrian_sound".equals(action)) {
             toggleSetting(ctx, "disablePedestrianSound");
+        } else if ("toggle_headlights".equals(action)) {
+            toggleHeadlights(ctx);
         } else if (action.startsWith("app:")) {
             // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.
             openFreeformApp(ctx, action.substring("app:".length()));
@@ -411,6 +413,23 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
             MainActivity.persistSavedToggle(app, key, next);
             Log.i(TAG, "STEER_ACTION " + key + ": " + current + " → " + next);
+        });
+    }
+
+    /** Переключить фары теми же CAN-командами, которые использует автоматический свет. */
+    private static void toggleHeadlights(Context ctx) {
+        final Context app = ctx.getApplicationContext();
+        ApplyEngine.postUserCommand("steer headlights", () -> {
+            android.content.SharedPreferences prefs =
+                    app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+            boolean current = prefs.getBoolean("steerHeadlightsOn", false);
+            boolean next = !current;
+            if (!MainActivity.setHeadlights(next)) {
+                Log.w(TAG, "STEER_ACTION headlights: CAN failed, state not persisted");
+                return;
+            }
+            prefs.edit().putBoolean("steerHeadlightsOn", next).apply();
+            Log.i(TAG, "STEER_ACTION headlights: " + current + " → " + next);
         });
     }
 
