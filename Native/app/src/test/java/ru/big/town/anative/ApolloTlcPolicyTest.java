@@ -15,6 +15,8 @@ public class ApolloTlcPolicyTest {
     @Test
     public void pinnedSignalMappingMatchesAllowListedProfile() {
         assertEquals(277, ApolloTlcPolicy.Signal.TSR_SWITCH.id);
+        assertEquals(924, ApolloTlcPolicy.Signal.HUM_VCU_READY.id);
+        assertEquals(958, ApolloTlcPolicy.Signal.BMS_STATE.id);
         assertEquals(1121, ApolloTlcPolicy.Signal.PLC_FUNCTION_STATUS.id);
         assertEquals(1135, ApolloTlcPolicy.Signal.PLC_SWITCH.id);
         assertEquals(1136, ApolloTlcPolicy.Signal.ANP_SWITCH.id);
@@ -28,24 +30,58 @@ public class ApolloTlcPolicyTest {
     }
 
     @Test
-    public void selectiveTrafficLightEntitlementVectorIsCompleteAndIsolated() {
+    public void compositeEntitlementVectorPreservesIndependentFeatures() {
         ApolloTlcPolicy.Entitlement[] values = ApolloTlcPolicy.Entitlement.values();
         assertEquals(18, values.length);
-        int enabled = 0;
         for (int i = 0; i < values.length; i++) {
             ApolloTlcPolicy.Entitlement entitlement = values[i];
             assertEquals(1166 + i, entitlement.id);
-            int expected = entitlement == ApolloTlcPolicy.Entitlement.GLC_FUNC_ENABLE
-                    || entitlement == ApolloTlcPolicy.Entitlement.TLA_FUNC_ENABLE_SA
-                    ? ApolloTlcPolicy.MODULE_ON : ApolloTlcPolicy.MODULE_OFF;
-            assertEquals(expected, entitlement.selectiveTrafficLightValue(true));
-            assertEquals(ApolloTlcPolicy.MODULE_OFF,
-                    entitlement.selectiveTrafficLightValue(false));
-            if (entitlement.selectiveTrafficLightValue(true) == ApolloTlcPolicy.MODULE_ON) {
+        }
+        assertEquals(0, enabledEntitlementCount(false, false));
+        assertEquals(2, enabledEntitlementCount(true, false));
+        assertEquals(2, enabledEntitlementCount(false, true));
+        assertEquals(4, enabledEntitlementCount(true, true));
+
+        assertEquals(ApolloTlcPolicy.MODULE_ON,
+                ApolloTlcPolicy.Entitlement.TLC_FUNC_ENABLE.compositeValue(true, false));
+        assertEquals(ApolloTlcPolicy.MODULE_ON,
+                ApolloTlcPolicy.Entitlement.PLC_FUNC_ENABLE_SA.compositeValue(true, false));
+        assertEquals(ApolloTlcPolicy.MODULE_OFF,
+                ApolloTlcPolicy.Entitlement.GLC_FUNC_ENABLE.compositeValue(true, false));
+        assertEquals(ApolloTlcPolicy.MODULE_OFF,
+                ApolloTlcPolicy.Entitlement.TLA_FUNC_ENABLE_SA.compositeValue(true, false));
+        assertEquals(ApolloTlcPolicy.MODULE_OFF,
+                ApolloTlcPolicy.Entitlement.TLC_FUNC_ENABLE.compositeValue(false, true));
+        assertEquals(ApolloTlcPolicy.MODULE_OFF,
+                ApolloTlcPolicy.Entitlement.PLC_FUNC_ENABLE_SA.compositeValue(false, true));
+        assertEquals(ApolloTlcPolicy.MODULE_ON,
+                ApolloTlcPolicy.Entitlement.GLC_FUNC_ENABLE.compositeValue(false, true));
+        assertEquals(ApolloTlcPolicy.MODULE_ON,
+                ApolloTlcPolicy.Entitlement.TLA_FUNC_ENABLE_SA.compositeValue(false, true));
+        assertEquals(ApolloTlcPolicy.MODULE_OFF,
+                ApolloTlcPolicy.Entitlement.ACC_FUNC_ENABLE_SA.compositeValue(true, true));
+        assertEquals(ApolloTlcPolicy.MODULE_OFF,
+                ApolloTlcPolicy.Entitlement.ICA_FUNC_ENABLE_SA.compositeValue(true, true));
+    }
+
+    private static int enabledEntitlementCount(boolean tlc, boolean trafficLight) {
+        int enabled = 0;
+        for (ApolloTlcPolicy.Entitlement entitlement
+                : ApolloTlcPolicy.Entitlement.values()) {
+            if (entitlement.compositeValue(tlc, trafficLight)
+                    == ApolloTlcPolicy.MODULE_ON) {
                 enabled++;
             }
         }
-        assertEquals(2, enabled);
+        return enabled;
+    }
+
+    @Test
+    public void compositeVectorRequiresBothLiveSwitchStates() {
+        assertTrue(ApolloTlcPolicy.compositeSwitchStatesValid(1, 1));
+        assertTrue(ApolloTlcPolicy.compositeSwitchStatesValid(2, 2));
+        assertFalse(ApolloTlcPolicy.compositeSwitchStatesValid(-1, 2));
+        assertFalse(ApolloTlcPolicy.compositeSwitchStatesValid(2, 10));
     }
 
     @Test

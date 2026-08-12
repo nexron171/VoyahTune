@@ -4,9 +4,10 @@ package ru.big.town.anative;
  * Parcel-independent safety policy for the Apollo PLC/TLC bridge.
  *
  * <p>The OEM UI calls the user-facing triggered lane-change switch {@code PLC_SWITCH}.
- * {@code TLC_FUNC_ENABLE} and {@code PLC_FUNC_ENABLE_SA} are subscription capabilities and
- * are deliberately read-only here. Keeping this class free of Android types makes the pinned
- * profile and every write gate unit-testable on a host JVM.</p>
+ * Its entitlement pair is {@code TLC_FUNC_ENABLE}/{@code PLC_FUNC_ENABLE_SA}; the traffic-light
+ * pair is {@code GLC_FUNC_ENABLE}/{@code TLA_FUNC_ENABLE_SA}. Keeping this class free of Android
+ * types makes the complete composite entitlement vector and every write gate unit-testable on a
+ * host JVM.</p>
  */
 final class ApolloTlcPolicy {
     static final int UNKNOWN = -1;
@@ -42,6 +43,8 @@ final class ApolloTlcPolicy {
     /** Stable VehicleState IDs; ordinals are resolved from the installed CanBusService at runtime. */
     enum Signal {
         TSR_SWITCH(277),
+        HUM_VCU_READY(924),
+        BMS_STATE(958),
         PLC_FUNCTION_STATUS(1121),
         PLC_SWITCH(1135),
         ANP_SWITCH(1136),
@@ -68,40 +71,48 @@ final class ApolloTlcPolicy {
      * Complete OEM ADAS entitlement vector used by Binder TX77.
      *
      * <p>The H97C/H97X CanBus implementation builds one shared 18-bit command from this vector.
-     * Omitting keys would therefore turn omitted bits into zero implicitly. For the selective
-     * traffic-light experiment every key is sent explicitly: only GLC (Green Light Control) and
-     * TLA (Traffic Light Assist) are enabled, while the other Apollo capabilities stay disabled.</p>
+     * Omitting keys would therefore turn omitted bits into zero implicitly. Every key is sent:
+     * TLC and PLC follow the TLC switch, while GLC and TLA follow traffic-light recognition.
+     * Unrelated capabilities are not activated by this app.</p>
      */
     enum Entitlement {
-        RPA_FUNC_ENABLE(1166, false),
-        HPP_FUNC_ENABLE(1167, false),
-        GLC_FUNC_ENABLE(1168, true),
-        ISLC_FUNC_ENABLE(1169, false),
-        TLC_FUNC_ENABLE(1170, false),
-        NOA_FUNC_ENABLE(1171, false),
-        ELK_FUNC_ENABLE(1172, false),
-        ESA_FUNC_ENABLE(1173, false),
-        APA_FUNC_ENABLE_SA(1174, false),
-        RPA_FUNC_ENABLE_SA(1175, false),
-        HAVP_FUNC_ENABLE_SA(1176, false),
-        ACC_FUNC_ENABLE_SA(1177, false),
-        ICA_FUNC_ENABLE_SA(1178, false),
-        PLC_FUNC_ENABLE_SA(1179, false),
-        HANP_FUNC_ENABLE_SA(1180, false),
-        ISA_FUNC_ENABLE_SA(1181, false),
-        ISLC_FUNC_ENABLE_SA(1182, false),
-        TLA_FUNC_ENABLE_SA(1183, true);
+        RPA_FUNC_ENABLE(1166, Feature.NONE),
+        HPP_FUNC_ENABLE(1167, Feature.NONE),
+        GLC_FUNC_ENABLE(1168, Feature.TRAFFIC_LIGHT),
+        ISLC_FUNC_ENABLE(1169, Feature.NONE),
+        TLC_FUNC_ENABLE(1170, Feature.TLC),
+        NOA_FUNC_ENABLE(1171, Feature.NONE),
+        ELK_FUNC_ENABLE(1172, Feature.NONE),
+        ESA_FUNC_ENABLE(1173, Feature.NONE),
+        APA_FUNC_ENABLE_SA(1174, Feature.NONE),
+        RPA_FUNC_ENABLE_SA(1175, Feature.NONE),
+        HAVP_FUNC_ENABLE_SA(1176, Feature.NONE),
+        ACC_FUNC_ENABLE_SA(1177, Feature.NONE),
+        ICA_FUNC_ENABLE_SA(1178, Feature.NONE),
+        PLC_FUNC_ENABLE_SA(1179, Feature.TLC),
+        HANP_FUNC_ENABLE_SA(1180, Feature.NONE),
+        ISA_FUNC_ENABLE_SA(1181, Feature.NONE),
+        ISLC_FUNC_ENABLE_SA(1182, Feature.NONE),
+        TLA_FUNC_ENABLE_SA(1183, Feature.TRAFFIC_LIGHT);
 
-        final int id;
-        final boolean trafficLightRequired;
-
-        Entitlement(int id, boolean trafficLightRequired) {
-            this.id = id;
-            this.trafficLightRequired = trafficLightRequired;
+        enum Feature {
+            NONE,
+            TLC,
+            TRAFFIC_LIGHT
         }
 
-        int selectiveTrafficLightValue(boolean enabled) {
-            return enabled && trafficLightRequired ? MODULE_ON : MODULE_OFF;
+        final int id;
+        final Feature feature;
+
+        Entitlement(int id, Feature feature) {
+            this.id = id;
+            this.feature = feature;
+        }
+
+        int compositeValue(boolean tlcEnabled, boolean trafficLightEnabled) {
+            boolean enabled = (feature == Feature.TLC && tlcEnabled)
+                    || (feature == Feature.TRAFFIC_LIGHT && trafficLightEnabled);
+            return enabled ? MODULE_ON : MODULE_OFF;
         }
     }
 
@@ -186,6 +197,10 @@ final class ApolloTlcPolicy {
 
     static boolean isModuleState(int state) {
         return state == MODULE_OFF || state == MODULE_ON;
+    }
+
+    static boolean compositeSwitchStatesValid(int plcSwitch, int glaSwitch) {
+        return isModuleState(plcSwitch) && isModuleState(glaSwitch);
     }
 
     static boolean isPlcStatus(int state) {
