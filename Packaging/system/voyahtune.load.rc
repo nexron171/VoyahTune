@@ -4,7 +4,7 @@
 # disabled + property-триггер даёт property-gated ordering: сервис не стартует раньше, чем
 # voyahtune.setenforce.rc успеет выставить permissive, и не раньше boot_completed (когда
 # install.sh уже гарантированно наполнил /data/local/bin).
-service voyahtune_load /system/bin/sh /system/etc/init/voyahtune.load.sh
+service voyahtune_load /system/bin/sh /system/etc/init.voyahtune.load.sh
     class late_start
     user root
     group root

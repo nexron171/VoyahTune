@@ -45,8 +45,8 @@ if errorlevel 1 (
 )
 
 REM --- Boot-хук: убрать свои RC-сервисы (init.logcat.sh никогда не трогался - восстанавливать нечего) ---
-echo Remove voyahtune.*.rc/.sh из /system/etc/init
-adb.exe shell "rm -f /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc /system/etc/init/voyahtune.load.sh"
+echo Remove voyahtune.*.rc/.sh
+adb.exe shell "rm -f /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh"
 
 REM --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb.exe shell "pkill -f /data/local/bin/load.bin"
