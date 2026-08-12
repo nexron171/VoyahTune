@@ -29,12 +29,12 @@ import java.util.concurrent.Executors;
 /**
  * Fail-closed, profile-pinned bridge for the OEM triggered lane-change switch.
  *
- * <p>User switches are written through the OEM ICanBusService TX58. Enabling traffic-light
- * recognition first emits one complete TX77 entitlement vector with only GLC and TLA enabled;
- * every unrelated Apollo capability is explicitly disabled. There are no write retries, wake
- * restores or raw CAN frames. A successful Binder transaction is not treated as ECU
- * acknowledgement: every user-switch write remains pending until mandatory delayed TX57
- * readback, while callback state is published as the live ECU observation.</p>
+ * <p>User switches are written through the OEM ICanBusService TX58. TLC and traffic-light
+ * recognition share one complete TX77 entitlement vector, so every update preserves the other
+ * feature instead of clearing it. The vector is reasserted after CanBus reconnect and vehicle
+ * wake, but user switches themselves are never restored automatically. A successful Binder
+ * transaction is not treated as ECU acknowledgement: every user-switch write remains pending
+ * until mandatory delayed TX57 readback.</p>
  */
 public final class ApolloTlcService extends Service {
     private static final String TAG = "$$$ ApolloTlcService $$$";
@@ -102,6 +102,7 @@ public final class ApolloTlcService extends Service {
 
     private static final long BIND_RETRY_MS = 5_000L;
     private static final long ENTITLEMENT_SETTLE_MS = 1_000L;
+    private static final long ENTITLEMENT_WAKE_DEBOUNCE_MS = 5_000L;
     private static final long DELAYED_READBACK_MS = 3_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -151,9 +152,12 @@ public final class ApolloTlcService extends Service {
     private boolean masterForceDisabled;
     /** Prevents automatic retries if the full-only vendor permission is unexpectedly unavailable. */
     private boolean writePermissionFailureHandled;
+    private String entitlementReassertReason = "vehicle wake";
 
     private final Runnable rebindRunnable =
             () -> revalidateCanBusAndBind("scheduled rebind");
+    private final Runnable entitlementReassertRunnable =
+            () -> reassertCompositeEntitlements(entitlementReassertReason);
 
     private final BroadcastReceiver requestReceiver = new BroadcastReceiver() {
         @Override
@@ -448,6 +452,11 @@ public final class ApolloTlcService extends Service {
         }
         boolean directTlcMode = isDirectTlcSupported();
         ApolloTlcPolicy.Snapshot snapshot = snapshot();
+        if (enabled && !hasCompleteCompositeSwitchSnapshot()) {
+            lastError = "composite_switch_state_unknown";
+            publishState();
+            return;
+        }
         String blocked = ApolloTlcPolicy.writeBlockReason(
                 true, directTlcMode, canBusConnected && callbackAdded,
                 true, false, pending, gear, snapshot, enabled);
@@ -458,8 +467,15 @@ public final class ApolloTlcService extends Service {
             return;
         }
 
-        queueSignalWrite(ApolloTlcPolicy.Signal.PLC_SWITCH,
-                ApolloTlcPolicy.requestedPlcState(enabled), "PLC_SWITCH");
+        int desiredState = ApolloTlcPolicy.requestedPlcState(enabled);
+        if (enabled) {
+            queueEntitledFeatureEnable(
+                    ApolloTlcPolicy.Signal.PLC_SWITCH, desiredState, "PLC_SWITCH",
+                    true, glaSwitch == ApolloTlcPolicy.MODULE_ON);
+        } else {
+            queueSignalWrite(ApolloTlcPolicy.Signal.PLC_SWITCH,
+                    desiredState, "PLC_SWITCH");
+        }
     }
 
     private void handleGlaSet(boolean enabled, boolean argumentValid) {
@@ -522,20 +538,28 @@ public final class ApolloTlcService extends Service {
             return;
         }
         if (enableTrafficLightEntitlements) {
-            queueTrafficLightRecognitionEnable(desiredState);
+            if (!hasCompleteCompositeSwitchSnapshot()) {
+                lastError = "composite_switch_state_unknown";
+                publishState();
+                return;
+            }
+            queueEntitledFeatureEnable(
+                    ApolloTlcPolicy.Signal.GLA_SWITCH, desiredState, "GLA_SWITCH",
+                    plcSwitch == ApolloTlcPolicy.MODULE_ON, true);
         } else {
             queueSignalWrite(signal, desiredState, signal.name());
         }
     }
 
     /**
-     * Sends one complete 18-key entitlement vector before enabling GLA_SWITCH. TX77 returning
-     * zero means only that the OEM AsyncTask accepted the request, so TX58 is delayed long enough
-     * for command 126 to leave the head unit. Neither stage is retried automatically.
+     * Sends one complete 18-key entitlement vector before enabling a dependent user switch.
+     * TX77 returning zero means only that the OEM AsyncTask accepted the request, so TX58 is
+     * delayed long enough for command 126 to leave the head unit. Neither stage is retried.
      */
-    private void queueTrafficLightRecognitionEnable(int desiredState) {
-        int generation = beginPendingWrite(
-                ApolloTlcPolicy.Signal.GLA_SWITCH, desiredState);
+    private void queueEntitledFeatureEnable(ApolloTlcPolicy.Signal signal, int desiredState,
+                                            String logName, boolean tlcEnabled,
+                                            boolean trafficLightEnabled) {
+        int generation = beginPendingWrite(signal, desiredState);
         if (!hasWriteCanBusPermission()) {
             clearPendingWrite(generation);
             failWritePermissionClosed();
@@ -548,27 +572,29 @@ public final class ApolloTlcService extends Service {
             return;
         }
         try {
-            int result = setSelectiveTrafficLightEntitlements(true);
+            int result = setCompositeEntitlements(tlcEnabled, trafficLightEnabled);
             if (result != 0) {
-                failPendingWrite(generation, "traffic_light_entitlement_rejected");
-                Log.e(TAG, "Selective traffic-light TX77 rejected; result=" + result);
+                failPendingWrite(generation, "feature_entitlement_rejected");
+                Log.e(TAG, "Composite TX77 rejected; result=" + result);
                 return;
             }
-            Log.i(TAG, "Selective traffic-light TX77 queued: GLC=2 TLA=2 others=1"
+            Log.i(TAG, "Composite TX77 queued before " + logName
+                    + ": tlc=" + tlcEnabled + " trafficLight=" + trafficLightEnabled
                     + " generation=" + generation);
         } catch (RemoteException | RuntimeException e) {
-            failPendingWrite(generation, "traffic_light_entitlement_tx_failed");
-            Log.e(TAG, "Selective traffic-light TX77 failed; no retry", e);
+            failPendingWrite(generation, "feature_entitlement_tx_failed");
+            Log.e(TAG, "Composite TX77 failed; no retry", e);
             return;
         }
-        handler.postDelayed(() -> continueTrafficLightRecognitionEnable(
-                        generation, desiredState),
+        handler.postDelayed(() -> continueEntitledFeatureEnable(
+                        generation, signal, desiredState, logName),
                 ENTITLEMENT_SETTLE_MS);
     }
 
-    private void continueTrafficLightRecognitionEnable(int generation, int desiredState) {
+    private void continueEntitledFeatureEnable(int generation, ApolloTlcPolicy.Signal signal,
+                                               int desiredState, String logName) {
         if (destroyed || generation != writeGeneration || !pending
-                || pendingSignal != ApolloTlcPolicy.Signal.GLA_SWITCH
+                || pendingSignal != signal
                 || pendingDesiredState != desiredState) {
             return;
         }
@@ -579,16 +605,15 @@ public final class ApolloTlcService extends Service {
             return;
         }
         if (!canBusConnected || !callbackAdded
-                || !refreshFromCan("traffic-light entitlement settle")) {
+                || !refreshFromCan("entitlement settle")) {
             failPendingWrite(generation, ApolloTlcPolicy.ERROR_STATE_READ_FAILED);
             return;
         }
-        if (!ApolloTlcPolicy.isModuleState(glaSwitch)) {
+        if (!ApolloTlcPolicy.isModuleState(cachedState(signal))) {
             failPendingWrite(generation, ApolloTlcPolicy.ERROR_INVALID_SWITCH_STATE);
             return;
         }
-        transmitPendingSignal(generation, ApolloTlcPolicy.Signal.GLA_SWITCH,
-                desiredState, "GLA_SWITCH");
+        transmitPendingSignal(generation, signal, desiredState, logName);
     }
 
     private void queueSignalWrite(ApolloTlcPolicy.Signal signal, int desiredState,
@@ -673,7 +698,7 @@ public final class ApolloTlcService extends Service {
         }
         boolean readOk = canBusConnected && callbackAdded
                 && refreshFromCan("delayed readback");
-        boolean shouldDisableTrafficLightEntitlements = false;
+        boolean shouldUpdateCompositeEntitlements = false;
         pending = false;
         if (!readOk) {
             if (runtimeProfileValid) {
@@ -683,26 +708,25 @@ public final class ApolloTlcService extends Service {
             lastError = "readback_mismatch";
         } else {
             lastError = ApolloTlcPolicy.ERROR_NONE;
-            shouldDisableTrafficLightEntitlements =
-                    pendingSignal == ApolloTlcPolicy.Signal.GLA_SWITCH
-                            && pendingDesiredState == ApolloTlcPolicy.MODULE_OFF;
+            shouldUpdateCompositeEntitlements = pendingDesiredState == ApolloTlcPolicy.MODULE_OFF
+                    && (pendingSignal == ApolloTlcPolicy.Signal.GLA_SWITCH
+                    || pendingSignal == ApolloTlcPolicy.Signal.PLC_SWITCH);
         }
         pendingSignal = null;
         pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-        if (shouldDisableTrafficLightEntitlements) {
-            disableTrafficLightEntitlements();
+        if (shouldUpdateCompositeEntitlements) {
+            updateCompositeEntitlementsAfterConfirmedSwitchOff();
         } else {
             publishState();
         }
     }
 
     /**
-     * GLA_SWITCH is already confirmed OFF before this method runs. The complete entitlement
-     * vector then clears GLC (Green Light Control) and TLA (Traffic Light Assist), while keeping
-     * every unrelated Apollo entitlement OFF as well. TX77 has no ECU acknowledgement and is not
-     * retried automatically.
+     * The target user switch is already confirmed OFF. Rebuilding from both live switches clears
+     * only its entitlement pair while preserving the other feature. TX77 has no ECU
+     * acknowledgement and is not retried automatically.
      */
-    private void disableTrafficLightEntitlements() {
+    private void updateCompositeEntitlementsAfterConfirmedSwitchOff() {
         if (!hasWriteCanBusPermission()) {
             failWritePermissionClosed();
             publishState();
@@ -714,19 +738,26 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
+        if (!hasCompleteCompositeSwitchSnapshot()) {
+            lastError = "composite_switch_state_unknown";
+            publishState();
+            return;
+        }
         try {
-            int result = setSelectiveTrafficLightEntitlements(false);
+            boolean tlcEnabled = plcSwitch == ApolloTlcPolicy.MODULE_ON;
+            boolean trafficLightEnabled = glaSwitch == ApolloTlcPolicy.MODULE_ON;
+            int result = setCompositeEntitlements(tlcEnabled, trafficLightEnabled);
             if (result != 0) {
-                lastError = "traffic_light_entitlement_disable_rejected";
-                Log.e(TAG, "Traffic-light entitlement disable TX77 rejected; result=" + result);
+                lastError = "feature_entitlement_disable_rejected";
+                Log.e(TAG, "Composite disable TX77 rejected; result=" + result);
             } else {
                 lastError = ApolloTlcPolicy.ERROR_NONE;
-                Log.i(TAG, "Traffic-light entitlement disable TX77 queued:"
-                        + " GLC=1 TLA=1 others=1");
+                Log.i(TAG, "Composite TX77 queued after confirmed OFF: tlc=" + tlcEnabled
+                        + " trafficLight=" + trafficLightEnabled);
             }
         } catch (RemoteException | RuntimeException e) {
-            lastError = "traffic_light_entitlement_disable_tx_failed";
-            Log.e(TAG, "Traffic-light entitlement disable TX77 failed; no retry", e);
+            lastError = "feature_entitlement_disable_tx_failed";
+            Log.e(TAG, "Composite disable TX77 failed; no retry", e);
         }
         publishState();
     }
@@ -734,6 +765,10 @@ public final class ApolloTlcService extends Service {
     private ApolloTlcPolicy.Snapshot snapshot() {
         return new ApolloTlcPolicy.Snapshot(
                 plcSwitch, plcStatus, anpSwitch, tlcCapability, plcCapabilitySa);
+    }
+
+    private boolean hasCompleteCompositeSwitchSnapshot() {
+        return ApolloTlcPolicy.compositeSwitchStatesValid(plcSwitch, glaSwitch);
     }
 
     private int cachedState(ApolloTlcPolicy.Signal signal) {
@@ -764,6 +799,67 @@ public final class ApolloTlcService extends Service {
             return;
         }
         setCachedState(signal, state);
+        if ((signal == ApolloTlcPolicy.Signal.HUM_VCU_READY && state == 1)
+                || (signal == ApolloTlcPolicy.Signal.BMS_STATE && state == 3)) {
+            scheduleCompositeEntitlementReassert(signal.name());
+        }
+        publishState();
+    }
+
+    /** Coalesces the two OEM wake signals into one complete entitlement write. */
+    private void scheduleCompositeEntitlementReassert(String reason) {
+        if (destroyed || !BuildConfig.IS_FULL) return;
+        entitlementReassertReason = reason;
+        handler.removeCallbacks(entitlementReassertRunnable);
+        handler.postDelayed(entitlementReassertRunnable, ENTITLEMENT_WAKE_DEBOUNCE_MS);
+    }
+
+    /**
+     * Reasserts only permissions for user switches that the vehicle itself currently reports ON.
+     * This restores ECU capability state after sleep without automatically changing a switch.
+     */
+    private void reassertCompositeEntitlements(String reason) {
+        if (destroyed) return;
+        if (pending) {
+            handler.removeCallbacks(entitlementReassertRunnable);
+            handler.postDelayed(entitlementReassertRunnable, ENTITLEMENT_WAKE_DEBOUNCE_MS);
+            return;
+        }
+        if (!runtimeProfileValid || !canBusConnected
+                || !callbackAdded || canBusBinder == null || !hasWriteCanBusPermission()) {
+            return;
+        }
+        if (!refreshFromCan("entitlement reassert " + reason)) {
+            publishState();
+            return;
+        }
+        boolean tlcEnabled = plcSwitch == ApolloTlcPolicy.MODULE_ON;
+        boolean trafficLightEnabled = glaSwitch == ApolloTlcPolicy.MODULE_ON;
+        if (!hasCompleteCompositeSwitchSnapshot()) {
+            lastError = "composite_switch_state_unknown";
+            publishState();
+            return;
+        }
+        if (!tlcEnabled && !trafficLightEnabled) {
+            publishState();
+            return;
+        }
+        try {
+            int result = setCompositeEntitlements(tlcEnabled, trafficLightEnabled);
+            if (result == 0) {
+                lastError = ApolloTlcPolicy.ERROR_NONE;
+                Log.i(TAG, "Composite TX77 reassert queued after " + reason
+                        + ": tlc=" + tlcEnabled
+                        + " trafficLight=" + trafficLightEnabled);
+            } else {
+                lastError = "feature_entitlement_reassert_rejected";
+                Log.e(TAG, "Composite TX77 reassert rejected after " + reason
+                        + "; result=" + result);
+            }
+        } catch (RemoteException | RuntimeException e) {
+            lastError = "feature_entitlement_reassert_tx_failed";
+            Log.e(TAG, "Composite TX77 reassert failed after " + reason, e);
+        }
         publishState();
     }
 
@@ -865,6 +961,9 @@ public final class ApolloTlcService extends Service {
             case PLC_FUNC_ENABLE_SA:
                 plcCapabilitySa = state;
                 break;
+            case HUM_VCU_READY:
+            case BMS_STATE:
+                break;
         }
     }
 
@@ -908,12 +1007,14 @@ public final class ApolloTlcService extends Service {
      * The vehicle bundle is intentionally complete because the vendor implementation starts its
      * shared entitlement bit buffer at zero before applying supplied keys.
      */
-    private int setSelectiveTrafficLightEntitlements(boolean enabled) throws RemoteException {
+    private int setCompositeEntitlements(boolean tlcEnabled, boolean trafficLightEnabled)
+            throws RemoteException {
         Bundle vehicleBundle = new Bundle();
         for (ApolloTlcPolicy.Entitlement entitlement
                 : ApolloTlcPolicy.Entitlement.values()) {
             vehicleBundle.putInt(
-                    entitlement.name(), entitlement.selectiveTrafficLightValue(enabled));
+                    entitlement.name(),
+                    entitlement.compositeValue(tlcEnabled, trafficLightEnabled));
         }
 
         Parcel data = Parcel.obtain();
@@ -1034,9 +1135,13 @@ public final class ApolloTlcService extends Service {
         lastError = ApolloTlcPolicy.ERROR_NONE;
         Log.i(TAG, "CanBusService connected after current APK verification");
         addCanBusCallback();
-        if (callbackAdded && !refreshFromCan("connect")) {
-            if (runtimeProfileValid) {
-                lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
+        if (callbackAdded) {
+            if (!refreshFromCan("connect")) {
+                if (runtimeProfileValid) {
+                    lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
+                }
+            } else {
+                scheduleCompositeEntitlementReassert("CanBus reconnect");
             }
         }
         publishState();

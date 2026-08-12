@@ -1640,7 +1640,15 @@ public class AdvanceActivity extends AppCompatActivity {
             case "traffic_light_entitlement_tx_failed":
             case "traffic_light_entitlement_disable_rejected":
             case "traffic_light_entitlement_disable_tx_failed":
-                return "Не удалось полностью изменить настройку светофоров. Попробуйте ещё раз.";
+            case "feature_entitlement_rejected":
+            case "feature_entitlement_tx_failed":
+            case "feature_entitlement_disable_rejected":
+            case "feature_entitlement_disable_tx_failed":
+            case "feature_entitlement_reassert_rejected":
+            case "feature_entitlement_reassert_tx_failed":
+                return "Не удалось полностью изменить настройку. Попробуйте ещё раз.";
+            case "composite_switch_state_unknown":
+                return "Не удалось определить текущее состояние функций. Попробуйте ещё раз.";
             case "tx58_failed":
                 return "Автомобиль не принял настройку. Попробуйте ещё раз.";
             case "invalid_argument":
