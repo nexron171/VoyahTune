@@ -49,15 +49,9 @@ if ! restore_yandex_dns; then
     exit 1
 fi
 
-# --- Boot-хук: вернуть исходный init.logcat.sh (из backup если есть, иначе чистый оригинал) ---
-if [ -f backup/init.logcat.sh ]; then
-    echo "Restore init.logcat.sh из backup/"
-    adb push backup/init.logcat.sh /system/etc/init.logcat.sh
-else
-    echo "Restore чистого init.logcat.original.sh"
-    adb push init.logcat.original.sh /system/etc/init.logcat.sh
-fi
-adb shell "chmod 644 /system/etc/init.logcat.sh"
+# --- Boot-хук: убрать свои RC-сервисы (init.logcat.sh никогда не трогался — восстанавливать нечего) ---
+echo "Remove voyahtune.*.rc/.sh из /system/etc/init"
+adb shell "rm -f /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc /system/etc/init/voyahtune.load.sh"
 
 # --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null

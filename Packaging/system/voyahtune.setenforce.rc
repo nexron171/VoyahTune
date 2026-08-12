@@ -1,0 +1,5 @@
+# voyahtune.setenforce.rc — Open Voyah: перевод SELinux в permissive для рут-обвязки.
+# Раньше это делал init.logcat.sh (монки-патч штатного скрипта логирования). Вынесено в свой
+# независимый триггер, чтобы install.sh/remove.sh больше не трогали /system/etc/init.logcat.sh.
+on post-fs-data
+    exec - root root -- /system/bin/setenforce 0

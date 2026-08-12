@@ -44,15 +44,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM --- Boot-хук: вернуть исходный init.logcat.sh (из backup если есть, иначе чистый оригинал) ---
-if exist "backup\init.logcat.sh" (
-    echo Restore init.logcat.sh из backup\
-    adb.exe push backup\init.logcat.sh /system/etc/init.logcat.sh
-) else (
-    echo Restore чистого init.logcat.original.sh
-    adb.exe push init.logcat.original.sh /system/etc/init.logcat.sh
-)
-adb.exe shell "chmod 644 /system/etc/init.logcat.sh"
+REM --- Boot-хук: убрать свои RC-сервисы (init.logcat.sh никогда не трогался - восстанавливать нечего) ---
+echo Remove voyahtune.*.rc/.sh из /system/etc/init
+adb.exe shell "rm -f /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc /system/etc/init/voyahtune.load.sh"
 
 REM --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb.exe shell "pkill -f /data/local/bin/load.bin"

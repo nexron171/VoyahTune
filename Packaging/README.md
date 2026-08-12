@@ -32,7 +32,7 @@ ADB/`adb` (Android Debug Bridge) — служебный интерфейс уп�
 |---|---|---|
 | `tools/` | `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll`, `frida-inject-16.2.1-android-arm64` | full — целиком; light — только adb-трио (frida там не нужна) |
 | `inject/` | Frida-скрипты: `vd_bypass.js`, `launcherdock.js`, `steeringwheelkeys.js`, `multidisplay.js`, `apollo_tech.js` | только full |
-| `system/` | `load.bin`, `init.logcat.sh`, `init.logcat.original.sh`, `privapp-permissions-…xml` | full целиком; в light — только `privapp-permissions` |
+| `system/` | `load.bin`, `voyahtune.setenforce.rc`, `voyahtune.load.rc`, `voyahtune.load.sh`, `privapp-permissions-…xml` | full целиком; в light — только `privapp-permissions` |
 | `vendor-overlay/` | Зафиксированный DNS RRO APK и его provenance | APK — в full и light; README в релиз не копируется |
 | `installer/common/` | Четыре общих helper-файла для установки/отката DNS RRO | full и light, плоско рядом с основными установщиками |
 | `installer/full/` | `install.sh`, `install.bat`, `remove.sh`, `remove.bat` | full |
