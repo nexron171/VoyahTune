@@ -147,9 +147,9 @@ REM /system уже сделан записываемым выше (verity, overl
 adb.exe shell "mkdir -p /system/etc/init"
 adb.exe push voyahtune.setenforce.rc /system/etc/init/voyahtune.setenforce.rc
 adb.exe push voyahtune.load.rc       /system/etc/init/voyahtune.load.rc
-adb.exe push voyahtune.load.sh       /system/etc/init/voyahtune.load.sh
+adb.exe push voyahtune.load.sh       /system/etc/init.voyahtune.load.sh
 adb.exe shell "chmod 644 /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc"
-adb.exe shell "chmod 755 /system/etc/init/voyahtune.load.sh"
+adb.exe shell "chmod 755 /system/etc/init.voyahtune.load.sh"
 
 REM NB: install — это ОБНОВЛЕНИЕ и СОХРАНЯЕТ настройки (RestoreMode через -r, Native пушем APK
 REM в /system без сноса data). Полная чистка протухшего состояния Native вынесена в remove.bat.

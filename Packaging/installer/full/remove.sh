@@ -50,8 +50,8 @@ if ! restore_yandex_dns; then
 fi
 
 # --- Boot-хук: убрать свои RC-сервисы (init.logcat.sh никогда не трогался — восстанавливать нечего) ---
-echo "Remove voyahtune.*.rc/.sh из /system/etc/init"
-adb shell "rm -f /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc /system/etc/init/voyahtune.load.sh"
+echo "Remove voyahtune.*.rc/.sh"
+adb shell "rm -f /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh"
 
 # --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null

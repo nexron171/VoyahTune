@@ -205,9 +205,9 @@ echo "=== Boot-хук: свои RC-сервисы (setenforce 0 + запуск l
 adb shell "mkdir -p /system/etc/init"
 adb push voyahtune.setenforce.rc /system/etc/init/voyahtune.setenforce.rc
 adb push voyahtune.load.rc       /system/etc/init/voyahtune.load.rc
-adb push voyahtune.load.sh       /system/etc/init/voyahtune.load.sh
+adb push voyahtune.load.sh       /system/etc/init.voyahtune.load.sh
 adb shell "chmod 644 /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc"
-adb shell "chmod 755 /system/etc/init/voyahtune.load.sh"
+adb shell "chmod 755 /system/etc/init.voyahtune.load.sh"
 
 # NB: install.sh — это ОБНОВЛЕНИЕ и СОХРАНЯЕТ настройки. RestoreMode ставится через -r (его data
 # остаётся); Native обновляется пушем APK в /system БЕЗ сноса data, поэтому локальные тумблеры Native
