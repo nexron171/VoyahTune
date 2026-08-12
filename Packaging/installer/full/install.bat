@@ -6,7 +6,8 @@ REM Ставит: Native (priv-app) + RestoreMode, whitelist привилеги�
 REM   1) кнопки руля (steeringwheelkeys.js в keymanager: звёздочка 3090 и DVR 173, один onKeyEvent),
 REM   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS),
 REM   3) Apollo/ADAS master-gate (apollo_tech.js в com.qinggan.app.vehiclesetting).
-REM Boot-хук = наш /system/etc/init.logcat.sh, который крутит load.bin (watchdog инъекций).
+REM Boot-хук = свои RC-сервисы /system/etc/init/voyahtune.*.rc (setenforce 0 + load.bin watchdog);
+REM штатный /system/etc/init.logcat.sh больше не трогаем.
 set "YDNS_HELPER=%~dp0dns-overlay.bat"
 if not exist "%YDNS_HELPER%" (
     echo !!! Не найден dns-overlay.bat - установка прервана до изменения устройства.
@@ -113,7 +114,6 @@ if errorlevel 1 (
     exit /b 1
 )
 call :backup_pull /data/local/bin/frida-inject           frida-inject
-call :backup_pull /system/etc/init.logcat.sh             init.logcat.sh
 call :backup_pull /system/priv-app/Native/Native.apk     Native.apk
 call :backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml
 
@@ -142,10 +142,14 @@ adb.exe push frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject
 adb.exe shell "chmod 755 /data/local/bin/frida-inject /data/local/bin/load.bin"
 adb.exe shell "chmod 644 /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/vd_bypass.js /data/local/bin/multidisplay.js /data/local/bin/apollo_tech.js"
 
-echo === Boot-хук: наш init.logcat.sh (setenforce 0 + запуск load.bin) ===
+echo === Boot-хук: свои RC-сервисы (setenforce 0 + запуск load.bin), init.logcat.sh не трогаем ===
 REM /system уже сделан записываемым выше (verity, overlay) - отдельный remount не нужен.
-adb.exe push init.logcat.sh /system/etc/init.logcat.sh
-adb.exe shell "chmod 644 /system/etc/init.logcat.sh"
+adb.exe shell "mkdir -p /system/etc/init"
+adb.exe push voyahtune.setenforce.rc /system/etc/init/voyahtune.setenforce.rc
+adb.exe push voyahtune.load.rc       /system/etc/init/voyahtune.load.rc
+adb.exe push voyahtune.load.sh       /system/etc/init/voyahtune.load.sh
+adb.exe shell "chmod 644 /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc"
+adb.exe shell "chmod 755 /system/etc/init/voyahtune.load.sh"
 
 REM NB: install — это ОБНОВЛЕНИЕ и СОХРАНЯЕТ настройки (RestoreMode через -r, Native пушем APK
 REM в /system без сноса data). Полная чистка протухшего состояния Native вынесена в remove.bat.

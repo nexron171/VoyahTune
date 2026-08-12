@@ -4,7 +4,8 @@
 #   1) кнопки руля (steeringwheelkeys.js в keymanager: звёздочка 3090 и DVR 173, один onKeyEvent),
 #   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS),
 #   3) Apollo/ADAS master-gate (apollo_tech.js в com.qinggan.app.vehiclesetting).
-# Boot-хук = наш /system/etc/init.logcat.sh, который крутит load.bin (watchdog инъекций).
+# Boot-хук = свои RC-сервисы /system/etc/init/voyahtune.*.rc (setenforce 0 + load.bin watchdog);
+# штатный /system/etc/init.logcat.sh больше не трогаем.
 if [ ! -f ./dns-overlay.sh ]; then
     echo "!!! Не найден ./dns-overlay.sh — установка прервана до изменения устройства."
     exit 1
@@ -173,7 +174,6 @@ if ! backup_pull_with_absent /data/local/bin/apollo_tech.js apollo_tech.js; then
     exit 1
 fi
 backup_pull /data/local/bin/frida-inject           frida-inject
-backup_pull /system/etc/init.logcat.sh             init.logcat.sh
 backup_pull /system/priv-app/Native/Native.apk     Native.apk
 backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml
 
@@ -200,10 +200,14 @@ adb push frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject
 adb shell "chmod 755 /data/local/bin/frida-inject /data/local/bin/load.bin"
 adb shell "chmod 644 /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/vd_bypass.js /data/local/bin/multidisplay.js /data/local/bin/apollo_tech.js"
 
-echo "=== Boot-хук: наш init.logcat.sh (setenforce 0 + запуск load.bin) ==="
+echo "=== Boot-хук: свои RC-сервисы (setenforce 0 + запуск load.bin), init.logcat.sh не трогаем ==="
 # /system уже сделан записываемым выше (verity → overlay); отдельный remount не нужен.
-adb push init.logcat.sh /system/etc/init.logcat.sh
-adb shell "chmod 644 /system/etc/init.logcat.sh"
+adb shell "mkdir -p /system/etc/init"
+adb push voyahtune.setenforce.rc /system/etc/init/voyahtune.setenforce.rc
+adb push voyahtune.load.rc       /system/etc/init/voyahtune.load.rc
+adb push voyahtune.load.sh       /system/etc/init/voyahtune.load.sh
+adb shell "chmod 644 /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc"
+adb shell "chmod 755 /system/etc/init/voyahtune.load.sh"
 
 # NB: install.sh — это ОБНОВЛЕНИЕ и СОХРАНЯЕТ настройки. RestoreMode ставится через -r (его data
 # остаётся); Native обновляется пушем APK в /system БЕЗ сноса data, поэтому локальные тумблеры Native
