@@ -65,7 +65,6 @@ public class SetModesService extends Service {
     static final String ACTION_LOGGING_SHARE = "ru.big.town.anative.LOGGING_SHARE";
     static final String RESTOREMODE_PKG   = "ru.big.town.restoremode";
     static final String RESTOREMODE_MAIN  = "ru.big.town.restoremode.MainActivity";
-    static final String FLOATING_BACK_A11Y = "ru.big.town.anative/ru.big.town.anative.BackButtonService";
     static final String TAG = "$$$ SetModesService $$$";
 
     class IncomingHandler extends Handler {
@@ -230,40 +229,11 @@ public class SetModesService extends Service {
     }
 
     /**
-     * Вкл/выкл плавающую кнопку «Назад»: добавляем/убираем {@link BackButtonService} в
-     * ENABLED_ACCESSIBILITY_SERVICES (нужен WRITE_SECURE_SETTINGS — есть у Native как priv-app).
-     * Сам сервис по подключению рисует оверлей, по отключению — убирает.
+     * Вкл/выкл плавающую кнопку «Назад». Сам accessibility-сервис остаётся подключённым без оверлея,
+     * если он нужен системному действию, назначенному на кнопку руля.
      */
     private void setFloatingBackEnabled(boolean enable) {
-        prefs().edit().putBoolean("floatingBack", enable).apply();
-        writeFloatingBackA11y(enable);
-    }
-
-    /** Пишет наличие/отсутствие BackButtonService в ENABLED_ACCESSIBILITY_SERVICES (без правки prefs). */
-    private void writeFloatingBackA11y(boolean present) {
-        try {
-            android.content.ContentResolver cr = getContentResolver();
-            String current = android.provider.Settings.Secure.getString(
-                    cr, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<>();
-            if (current != null) {
-                for (String s : current.split(":")) if (!s.isEmpty()) set.add(s);
-            }
-            if (present) set.add(FLOATING_BACK_A11Y); else set.remove(FLOATING_BACK_A11Y);
-
-            StringBuilder sb = new StringBuilder();
-            for (String s : set) {
-                if (sb.length() > 0) sb.append(":");
-                sb.append(s);
-            }
-            android.provider.Settings.Secure.putString(
-                    cr, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, sb.toString());
-            android.provider.Settings.Secure.putInt(
-                    cr, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, set.isEmpty() ? 0 : 1);
-            Log.i(TAG, "floating back a11y " + (present ? "ON" : "OFF") + "; enabled_a11y='" + sb + "'");
-        } catch (Exception e) {
-            Log.e(TAG, "writeFloatingBackA11y failed: " + e.getMessage());
-        }
+        BackButtonService.setFloatingButtonEnabled(this, enable);
     }
 
     /** Сторона кнопки: 0 лево, 1 верх, 2 право. При смене оси (верх↔бок) сбрасываем смещение на центр. */
@@ -290,7 +260,7 @@ public class SetModesService extends Service {
             return;
         }
         Log.i(TAG, "reassertFloatingBack: сервис не подключён → форс-переустановка a11y");
-        writeFloatingBackA11y(false);
+        BackButtonService.disableForReconnect(this);
         mainHandler.removeCallbacks(floatingBackEnableRunnable);
         mainHandler.postDelayed(floatingBackEnableRunnable, 800);
     }
@@ -700,7 +670,8 @@ public class SetModesService extends Service {
     };
     private final Runnable reassertFloatingBackRunnable = this::reassertFloatingBack;
     private final Runnable autoLaunchRunnable = this::maybeAutoLaunchRestoreMode;
-    private final Runnable floatingBackEnableRunnable = () -> writeFloatingBackA11y(true);
+    private final Runnable floatingBackEnableRunnable = () ->
+            BackButtonService.setFloatingButtonEnabled(this, true);
 
     /** Один набор недебаунсированных side-effects на физический wake, а не на каждый power state. */
     private boolean beginWakeSession() {

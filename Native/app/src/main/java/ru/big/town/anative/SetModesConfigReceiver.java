@@ -18,10 +18,16 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
         String action = intent.getAction();
         if ("ru.big.town.anative.STEER_CONFIG".equals(action)) {
             String[] buttons = {"Star", "Dvr", "Voice", "Phone"};
+            boolean needsBackService = false;
             for (String button : buttons) {
-                SetModesReceiverDynamic.mirrorSteer(context, intent, "steer" + button + "Short");
-                SetModesReceiverDynamic.mirrorSteer(context, intent, "steer" + button + "Long");
+                String shortKey = "steer" + button + "Short";
+                String longKey = "steer" + button + "Long";
+                SetModesReceiverDynamic.mirrorSteer(context, intent, shortKey);
+                SetModesReceiverDynamic.mirrorSteer(context, intent, longKey);
+                needsBackService |= "system_back".equals(intent.getStringExtra(shortKey));
+                needsBackService |= "system_back".equals(intent.getStringExtra(longKey));
             }
+            BackButtonService.setSteeringBackEnabled(context, needsBackService);
             Log.i(TAG, "STEER_CONFIG зеркалирован");
         } else if ("ru.big.town.anative.DOCK_CONFIG".equals(action)) {
             SetModesReceiverDynamic.mirrorDock(context, intent, 1);

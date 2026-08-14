@@ -281,6 +281,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             toggleSetting(ctx, "disablePedestrianSound");
         } else if ("toggle_headlights".equals(action)) {
             toggleHeadlights(ctx);
+        } else if ("system_back".equals(action)) {
+            BackButtonService.performBack(ctx);
         } else if (action.startsWith("app:")) {
             // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.
             openFreeformApp(ctx, action.substring("app:".length()));

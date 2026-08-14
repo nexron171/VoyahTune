@@ -1717,6 +1717,7 @@ public class AdvanceActivity extends AppCompatActivity {
     static final String[][] STEER_ACTIONS = {
             {"none",               "Не менять"},
             {"open_voyahtune",     "Открыть VoyahTune"},
+            {"system_back",        "Системное действие: Назад"},
             {"energy:EV",          "Энергорежим: Electric"},
             {"energy:REV",         "Энергорежим: Fuel"},
             {"energy:SREV",        "Энергорежим: Save"},

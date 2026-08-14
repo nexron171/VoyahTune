@@ -6,6 +6,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -17,7 +19,8 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.ImageView;
 
 /**
- * Плавающая кнопка «Назад» поверх интерфейса. Реализована как сервис доступности, чтобы:
+ * Системное действие «Назад» и его опциональная плавающая кнопка. Реализованы одним сервисом
+ * доступности, чтобы:
  *  - рисовать оверлей через TYPE_ACCESSIBILITY_OVERLAY (не нужен SYSTEM_ALERT_WINDOW);
  *  - выполнять системное «назад» через performGlobalAction(GLOBAL_ACTION_BACK).
  * Положение (сторона слева/сверху/справа) + смещение вдоль стороны хранятся в NativePrefs
@@ -26,6 +29,10 @@ import android.widget.ImageView;
 public class BackButtonService extends AccessibilityService {
     static final String TAG = "$$$ BackButtonService $$$";
     static final int SIDE_LEFT = 0, SIDE_TOP = 1, SIDE_RIGHT = 2;
+    private static final String COMPONENT =
+            "ru.big.town.anative/ru.big.town.anative.BackButtonService";
+    private static final String PREF_FLOATING = "floatingBack";
+    private static final String PREF_STEERING = "steeringBack";
 
     private static BackButtonService instance;
 
@@ -42,8 +49,104 @@ public class BackButtonService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
-        Log.i(TAG, "onServiceConnected — показываем кнопку");
-        showButton();
+        if (prefs().getBoolean(PREF_FLOATING, false)) {
+            Log.i(TAG, "onServiceConnected — показываем кнопку");
+            showButton();
+        } else {
+            Log.i(TAG, "onServiceConnected — без оверлея (сервис нужен кнопке руля)");
+        }
+    }
+
+    /** Включает оверлей, не отключая accessibility-сервис, если он нужен действию кнопки руля. */
+    static void setFloatingButtonEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(PREF_FLOATING, enabled).apply();
+        syncAccessibility(context);
+        BackButtonService live = instance;
+        if (live != null) {
+            if (enabled) live.showButton(); else live.hideButton();
+        }
+    }
+
+    /** Держит accessibility-сервис подключённым, когда хотя бы один слот руля вызывает «Назад». */
+    static void setSteeringBackEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(PREF_STEERING, enabled).apply();
+        syncAccessibility(context);
+    }
+
+    /** Выполнить тот же GLOBAL_ACTION_BACK, что и тап по плавающей кнопке. */
+    static void performBack(Context context) {
+        BackButtonService live = instance;
+        if (live != null) {
+            live.performBackNow("steering wheel");
+            return;
+        }
+
+        // Обычно сервис уже подключён после STEER_CONFIG. На случай самого первого быстрого нажатия
+        // или убитого процесса форсируем rebind и коротко ждём подключения.
+        disableForReconnect(context);
+        Handler handler = new Handler(Looper.getMainLooper());
+        handler.postDelayed(() -> syncAccessibility(context), 150);
+        handler.postDelayed(() -> {
+            BackButtonService retry = instance;
+            if (retry != null) retry.performBackNow("steering wheel delayed");
+            else Log.w(TAG, "GLOBAL_ACTION_BACK пропущен: accessibility-сервис не подключён");
+        }, 700);
+    }
+
+    private void performBackNow(String source) {
+        boolean ok = performGlobalAction(GLOBAL_ACTION_BACK);
+        Log.i(TAG, "GLOBAL_ACTION_BACK (" + source + ") -> " + ok);
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getApplicationContext()
+                .getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+    }
+
+    /** Сервис нужен либо оверлею, либо назначенному на руль системному действию. */
+    private static void syncAccessibility(Context context) {
+        SharedPreferences prefs = prefs(context);
+        boolean present = prefs.getBoolean(PREF_FLOATING, false)
+                || prefs.getBoolean(PREF_STEERING, false);
+        writeAccessibility(context, present);
+    }
+
+    /** Кратко снять компонент для принудительного rebind, не меняя причины, по которым он нужен. */
+    static void disableForReconnect(Context context) {
+        writeAccessibility(context, false);
+    }
+
+    private static void writeAccessibility(Context context, boolean present) {
+        SharedPreferences prefs = prefs(context);
+        try {
+            android.content.ContentResolver cr = context.getContentResolver();
+            String current = android.provider.Settings.Secure.getString(
+                    cr, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<>();
+            if (current != null) {
+                for (String service : current.split(":")) {
+                    if (!service.isEmpty()) set.add(service);
+                }
+            }
+            if (present) set.add(COMPONENT); else set.remove(COMPONENT);
+
+            StringBuilder enabled = new StringBuilder();
+            for (String service : set) {
+                if (enabled.length() > 0) enabled.append(":");
+                enabled.append(service);
+            }
+            android.provider.Settings.Secure.putString(
+                    cr, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                    enabled.toString());
+            android.provider.Settings.Secure.putInt(
+                    cr, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED,
+                    set.isEmpty() ? 0 : 1);
+            Log.i(TAG, "back a11y " + (present ? "ON" : "OFF")
+                    + "; floating=" + prefs.getBoolean(PREF_FLOATING, false)
+                    + "; steering=" + prefs.getBoolean(PREF_STEERING, false));
+        } catch (Exception e) {
+            Log.e(TAG, "syncAccessibility failed: " + e.getMessage());
+        }
     }
 
     /** Живое обновление раскладки при смене стороны из настроек (тот же процесс). */
@@ -181,8 +284,7 @@ public class BackButtonService extends AccessibilityService {
                         prefs().edit().putInt("floatingBackOffset", offset).commit();
                         Log.i(TAG, "позиция сохранена offset=" + offset);
                     } else {
-                        boolean ok = performGlobalAction(GLOBAL_ACTION_BACK);
-                        Log.i(TAG, "GLOBAL_ACTION_BACK -> " + ok);
+                        performBackNow("floating button");
                     }
                     return true;
             }
