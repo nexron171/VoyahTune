@@ -112,7 +112,10 @@ copy_common_release_assets() {
     out="$1"
     cp -p "$DNS_OVERLAY" "$out/$DNS_OVERLAY_NAME"
     for helper in $COMMON_INSTALLER_FILES; do
-        cp -p "$COMMON_INSTALLER/$helper" "$out/$helper"
+        case "$helper" in
+            *.bat) copy_crlf "$COMMON_INSTALLER/$helper" "$out/$helper" ;;
+            *)     cp -p "$COMMON_INSTALLER/$helper" "$out/$helper" ;;
+        esac
     done
 }
 
@@ -131,13 +134,43 @@ make_zip() {
     echo "  архив → Releases/dist/$name.zip ($(du -h "$DIST/$name.zip" | cut -f1))"
 }
 
+# Скопировать Windows batch с обязательными CRLF. cmd.exe некорректно разбирает некоторые
+# LF-only .bat: в частности, может терять первый символ команды (echo -> cho, pause -> ause).
+# Нормализуем здесь, а не полагаемся на git checkout/autocrlf машины, где собирается релиз.
+copy_crlf() {
+    src="$1"; dst="$2"
+    cp -p "$src" "$dst"
+    LC_ALL=C awk '{ sub(/\r$/, ""); printf "%s\r\n", $0 }' "$src" > "$dst"
+}
+
 # Скопировать файл и проставить версию вместо плейсхолдера @VERSION@ (он есть в шапке установщиков).
 copy_stamped() {
     src="$1"; dst="$2"
     # cp -p одинаково работает с BSD cp (macOS) и GNU cp (Debian) и сохраняет права.
     # После копирования перенаправление только обнуляет содержимое, не меняя режим файла.
     cp -p "$src" "$dst"
-    sed "s/@VERSION@/$VERSION/g" "$src" > "$dst"
+    case "$dst" in
+        *.bat)
+            sed "s/@VERSION@/$VERSION/g" "$src" |
+                LC_ALL=C awk '{ sub(/\r$/, ""); printf "%s\r\n", $0 }' > "$dst"
+            ;;
+        *) sed "s/@VERSION@/$VERSION/g" "$src" > "$dst" ;;
+    esac
+}
+
+# Защита релизного архива: каждый физический перевод строки в .bat обязан быть CRLF.
+verify_windows_batch_files() {
+    out="$1"
+    for batch in "$out/"*.bat; do
+        [ -f "$batch" ] || continue
+        if ! LC_ALL=C awk '
+            { if (!sub(/\r$/, "")) exit 1 }
+            END { if (NR == 0) exit 1 }
+        ' "$batch"; then
+            echo "Некорректные переводы строк в $batch — .bat должен использовать CRLF." >&2
+            exit 1
+        fi
+    done
 }
 
 # Собрать APK одного флейвора и положить в папку релиза под финальными именами.
@@ -188,6 +221,7 @@ if [ "$DO_FULL" = 1 ]; then
     for f in "$COMMON/installer/full/"*; do
         copy_stamped "$f" "$OUT/$(basename "$f")"
     done
+    verify_windows_batch_files "$OUT"
 
     echo "FULL готов → $OUT"
     make_zip "$OUT" "VoyahTune-$VERSION"
@@ -217,6 +251,7 @@ if [ "$DO_LIGHT" = 1 ]; then
     for f in "$COMMON/installer/light/"*; do
         copy_stamped "$f" "$OUT/$(basename "$f")"
     done
+    verify_windows_batch_files "$OUT"
 
     echo "LIGHT готов → $OUT"
     make_zip "$OUT" "VoyahTune-$VERSION-light"
