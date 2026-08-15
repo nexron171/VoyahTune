@@ -49,6 +49,129 @@ if [ -z "$VERSION" ]; then
 fi
 # Версию принимаем и как «3.2.2», и как «v3.2.2» — нормализуем к виду без префикса.
 VERSION="${VERSION#v}"
+# Ниже готовая папка заменяется целиком, поэтому имя обязано быть одним безопасным path-компонентом.
+case "$VERSION" in
+    [A-Za-z0-9]*) ;;
+    *) echo "Недопустимая версия '$VERSION': первый символ должен быть латинской буквой или цифрой." >&2; exit 1 ;;
+esac
+case "$VERSION" in
+    *[!A-Za-z0-9._+-]*) echo "Недопустимая версия '$VERSION': разрешены A-Z, a-z, 0-9, '.', '_', '+', '-'." >&2; exit 1 ;;
+esac
+
+STAGING_DIR=""
+STAGED_OUT=""
+ZIP_STAGE_DIR=""
+ACTIVE_ZIP_TRACKED=0
+ACTIVE_ZIP_FINAL=""
+ACTIVE_ZIP_HAD_PREVIOUS=0
+ACTIVE_PUBLISH=0
+ACTIVE_PREVIOUS_ROOT=""
+ACTIVE_FINAL_OUT=""
+ACTIVE_HAD_PREVIOUS=0
+RELEASE_LOCK=""
+RELEASE_LOCK_HELD=0
+
+rollback_active_zip() {
+    [ "$ACTIVE_ZIP_TRACKED" = 1 ] || return 0
+
+    if [ "$ACTIVE_ZIP_HAD_PREVIOUS" = 1 ]; then
+        if [ -e "$ZIP_STAGE_DIR/previous.zip" ]; then
+            # previous.zip — отдельная rollback-копия; mv -f атомарно заменяет новый ZIP старым.
+            mv -f "$ZIP_STAGE_DIR/previous.zip" "$ACTIVE_ZIP_FINAL" || return 1
+        elif [ ! -e "$ACTIVE_ZIP_FINAL" ]; then
+            return 1
+        fi
+    elif [ -e "$ACTIVE_ZIP_FINAL" ]; then
+        rm -f "$ACTIVE_ZIP_FINAL" || return 1
+    fi
+
+    rm -rf "$ZIP_STAGE_DIR" || return 1
+    ZIP_STAGE_DIR=""
+    ACTIVE_ZIP_TRACKED=0
+    ACTIVE_ZIP_FINAL=""
+    ACTIVE_ZIP_HAD_PREVIOUS=0
+    return 0
+}
+
+rollback_active_release() {
+    [ "$ACTIVE_PUBLISH" = 1 ] || return 0
+
+    RELEASE_ROLLBACK_FAILED=0
+    rollback_active_zip || RELEASE_ROLLBACK_FAILED=1
+    RELEASE_FOLDER_ROLLBACK_OK=1
+
+    if [ "$ACTIVE_HAD_PREVIOUS" = 1 ]; then
+        if [ -e "$ACTIVE_PREVIOUS_ROOT/output" ]; then
+            if [ -e "$ACTIVE_FINAL_OUT" ]; then
+                rm -rf "$ACTIVE_FINAL_OUT" || RELEASE_FOLDER_ROLLBACK_OK=0
+            fi
+            if [ "$RELEASE_FOLDER_ROLLBACK_OK" = 1 ]; then
+                mv "$ACTIVE_PREVIOUS_ROOT/output" "$ACTIVE_FINAL_OUT" || RELEASE_FOLDER_ROLLBACK_OK=0
+            fi
+        elif [ ! -e "$ACTIVE_FINAL_OUT" ]; then
+            echo "Не найден ни текущий output, ни rollback в $ACTIVE_PREVIOUS_ROOT/output." >&2
+            RELEASE_FOLDER_ROLLBACK_OK=0
+        fi
+    elif [ -e "$ACTIVE_FINAL_OUT" ]; then
+        rm -rf "$ACTIVE_FINAL_OUT" || RELEASE_FOLDER_ROLLBACK_OK=0
+    fi
+
+    if [ "$RELEASE_FOLDER_ROLLBACK_OK" = 1 ]; then
+        rm -rf "$ACTIVE_PREVIOUS_ROOT" || RELEASE_FOLDER_ROLLBACK_OK=0
+    fi
+    [ "$RELEASE_FOLDER_ROLLBACK_OK" = 1 ] || RELEASE_ROLLBACK_FAILED=1
+    [ "$RELEASE_ROLLBACK_FAILED" = 0 ] || return 1
+
+    ACTIVE_PUBLISH=0
+    ACTIVE_PREVIOUS_ROOT=""
+    ACTIVE_FINAL_OUT=""
+    ACTIVE_HAD_PREVIOUS=0
+    return 0
+}
+
+cleanup_release_stage() {
+    preserve_zip_recovery=0
+    if [ "$ACTIVE_PUBLISH" = 1 ]; then
+        if ! rollback_active_release; then
+            preserve_zip_recovery=1
+            echo "Не удалось автоматически вернуть предыдущий release output: $ACTIVE_PREVIOUS_ROOT" >&2
+        fi
+    elif [ -n "$ACTIVE_PREVIOUS_ROOT" ] && [ -d "$ACTIVE_PREVIOUS_ROOT" ]; then
+        rm -rf "$ACTIVE_PREVIOUS_ROOT" || true
+    fi
+    if [ -n "$STAGING_DIR" ] && [ -d "$STAGING_DIR" ]; then
+        rm -rf "$STAGING_DIR" || true
+    fi
+    if [ "$preserve_zip_recovery" = 0 ] && [ -n "$ZIP_STAGE_DIR" ] && [ -d "$ZIP_STAGE_DIR" ]; then
+        rm -rf "$ZIP_STAGE_DIR" || true
+    elif [ "$preserve_zip_recovery" = 1 ] && [ -n "$ZIP_STAGE_DIR" ]; then
+        echo "ZIP recovery сохранён в $ZIP_STAGE_DIR; не удаляйте его до ручного восстановления." >&2
+    fi
+    if [ "$RELEASE_LOCK_HELD" = 1 ] && [ -n "$RELEASE_LOCK" ]; then
+        rmdir "$RELEASE_LOCK" 2>/dev/null || true
+    fi
+}
+
+handle_release_signal() {
+    trap - HUP INT TERM
+    exit 1
+}
+
+trap cleanup_release_stage EXIT
+trap handle_release_signal HUP INT TERM
+
+mkdir -p "$BUILD"
+RELEASE_LOCK="$BUILD/.release-$VERSION.lock"
+# Блокируем обработчики только на tiny critical section mkdir+ownership flag: иначе signal между
+# успешным mkdir и assignment оставит stale lock, а преждевременный cleanup мог бы тронуть чужой lock.
+trap '' HUP INT TERM
+if ! mkdir "$RELEASE_LOCK" 2>/dev/null; then
+    trap handle_release_signal HUP INT TERM
+    echo "Уже идёт сборка версии $VERSION (lock: $RELEASE_LOCK)." >&2
+    exit 1
+fi
+RELEASE_LOCK_HELD=1
+trap handle_release_signal HUP INT TERM
 
 if [ ! -d "$COMMON" ]; then
     echo "Нет $COMMON — папка-источник комплекта релиза отсутствует." >&2
@@ -126,11 +249,46 @@ verify_common_release_assets
 make_zip() {
     dir="$1"; name="$2"
     [ "$DO_ZIP" = 1 ] || return 0
-    command -v zip >/dev/null || { echo "  zip не найден — архив пропущен"; return 0; }
+    command -v zip >/dev/null || {
+        echo "zip не найден — без --no-zip нельзя согласованно обновить папку и архив." >&2
+        return 1
+    }
     mkdir -p "$DIST"
-    rm -f "$DIST/$name.zip"
+    ZIP_STAGE_DIR="$(mktemp -d "$DIST/.zip-stage.XXXXXX")" || return 1
+    zip_tmp="$ZIP_STAGE_DIR/$name.zip"
     # -q тихо, -r рекурсивно; пакуем ИМЕНЕМ папки, поэтому идём в родителя.
-    (cd "$(dirname "$dir")" && zip -qr "$DIST/$name.zip" "$(basename "$dir")")
+    if ! (cd "$(dirname "$dir")" && zip -qr "$zip_tmp" "$(basename "$dir")"); then
+        rm -rf "$ZIP_STAGE_DIR"
+        ZIP_STAGE_DIR=""
+        echo "Не удалось собрать архив $name.zip; предыдущий архив сохранён." >&2
+        return 1
+    fi
+    if command -v unzip >/dev/null 2>&1 && ! unzip -tq "$zip_tmp" >/dev/null; then
+        rm -rf "$ZIP_STAGE_DIR"
+        ZIP_STAGE_DIR=""
+        echo "Проверка нового архива $name.zip завершилась ошибкой; предыдущий архив сохранён." >&2
+        return 1
+    fi
+    ACTIVE_ZIP_FINAL="$DIST/$name.zip"
+    zip_had_previous=0
+    if [ -e "$ACTIVE_ZIP_FINAL" ]; then
+        zip_had_previous=1
+        # Не уносим рабочий ZIP с финального пути: новый архив заменит его одним atomic rename.
+        if ! cp -p "$ACTIVE_ZIP_FINAL" "$ZIP_STAGE_DIR/previous.zip"; then
+            ACTIVE_ZIP_FINAL=""
+            rm -rf "$ZIP_STAGE_DIR"
+            ZIP_STAGE_DIR=""
+            return 1
+        fi
+    fi
+    ACTIVE_ZIP_HAD_PREVIOUS="$zip_had_previous"
+    # Флаг включаем последним: signal до этой строки видит старый ZIP нетронутым.
+    ACTIVE_ZIP_TRACKED=1
+    if ! mv -f "$zip_tmp" "$ACTIVE_ZIP_FINAL"; then
+        rollback_active_zip || true
+        echo "Не удалось опубликовать архив $name.zip; предыдущий архив сохранён." >&2
+        return 1
+    fi
     echo "  архив → Releases/dist/$name.zip ($(du -h "$DIST/$name.zip" | cut -f1))"
 }
 
@@ -173,6 +331,21 @@ verify_windows_batch_files() {
     done
 }
 
+verify_release_payload() {
+    out="$1"
+    flavor="$2"
+    required="native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat select-yandex-dns.ps1 dns-overlay-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
+    if [ "$flavor" = full ]; then
+        required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
+    fi
+    for payload in $required; do
+        if [ ! -s "$out/$payload" ]; then
+            echo "Релиз $flavor неполон: отсутствует или пуст $out/$payload." >&2
+            exit 1
+        fi
+    done
+}
+
 # Собрать APK одного флейвора и положить в папку релиза под финальными именами.
 # $1 = full|light, $2 = папка релиза
 build_apks() {
@@ -196,12 +369,92 @@ build_apks() {
 require_apks() {
     out="$1"
     for f in native.apk restore_mode.apk; do
-        if [ ! -f "$out/$f" ]; then
+        if [ ! -s "$out/$f" ]; then
             echo "Нет $out/$f — с --no-build APK должны уже лежать в папке релиза." >&2
             exit 1
         fi
     done
 }
+
+# Каждый вариант собирается в новом каталоге. При --no-build из предыдущего output переносим только
+# два APK; stale scripts, backup/ и любые посторонние файлы в staging попасть не могут.
+prepare_release_dir() {
+    final_out="$1"
+    if [ "$DO_BUILD" != 1 ]; then
+        require_apks "$final_out"
+    fi
+    mkdir -p "$BUILD"
+    STAGING_DIR="$(mktemp -d "$BUILD/.release-stage.XXXXXX")" || exit 1
+    STAGED_OUT="$STAGING_DIR/$(basename "$final_out")"
+    mkdir "$STAGED_OUT"
+
+    if [ "$DO_BUILD" != 1 ]; then
+        for apk in native.apk restore_mode.apk; do
+            cp -p "$final_out/$apk" "$STAGED_OUT/$apk"
+            if ! cmp -s "$final_out/$apk" "$STAGED_OUT/$apk"; then
+                echo "Копия $apk в clean staging не совпала с исходным APK." >&2
+                exit 1
+            fi
+        done
+    fi
+}
+
+publish_release_dir() {
+    staged_out="$1"
+    final_out="$2"
+    previous_root="$(mktemp -d "$BUILD/.release-previous.XXXXXX")" || return 1
+    publish_had_previous=0
+    if [ -e "$final_out" ]; then
+        publish_had_previous=1
+    fi
+    ACTIVE_PREVIOUS_ROOT="$previous_root"
+    ACTIVE_FINAL_OUT="$final_out"
+    ACTIVE_HAD_PREVIOUS="$publish_had_previous"
+    # Флаг включаем последним: до него EXIT-cleanup не считает неизменённый final частью транзакции.
+    ACTIVE_PUBLISH=1
+    if [ "$publish_had_previous" = 1 ]; then
+        if ! mv "$final_out" "$previous_root/output"; then
+            ACTIVE_PUBLISH=0
+            ACTIVE_PREVIOUS_ROOT=""
+            ACTIVE_FINAL_OUT=""
+            ACTIVE_HAD_PREVIOUS=0
+            rm -rf "$previous_root"
+            return 1
+        fi
+    fi
+
+    if mv "$staged_out" "$final_out"; then
+        rm -rf "$STAGING_DIR"
+        STAGING_DIR=""
+        STAGED_OUT=""
+        return 0
+    fi
+
+    rollback_active_release || echo "Rollback output остался в $ACTIVE_PREVIOUS_ROOT/output." >&2
+    return 1
+}
+
+commit_release_dir() {
+    [ "$ACTIVE_PUBLISH" = 1 ] || return 1
+    # Одна assignment — commit point всей пары output+ZIP; после неё signal оставляет новые артефакты.
+    ACTIVE_PUBLISH=0
+    rm -rf "$ACTIVE_PREVIOUS_ROOT"
+    if [ -n "$ZIP_STAGE_DIR" ]; then
+        rm -rf "$ZIP_STAGE_DIR"
+    fi
+    ACTIVE_PREVIOUS_ROOT=""
+    ACTIVE_FINAL_OUT=""
+    ACTIVE_HAD_PREVIOUS=0
+    ZIP_STAGE_DIR=""
+    ACTIVE_ZIP_TRACKED=0
+    ACTIVE_ZIP_FINAL=""
+    ACTIVE_ZIP_HAD_PREVIOUS=0
+}
+
+if [ "$DO_BUILD" != 1 ]; then
+    [ "$DO_FULL" = 0 ] || require_apks "$BUILD/VoyahTune-$VERSION"
+    [ "$DO_LIGHT" = 0 ] || require_apks "$BUILD/VoyahTune-$VERSION-light"
+fi
 
 # ---------------------------------------------------------------------------------------------
 # FULL: полный набор — инжект-скрипты, boot-обвязка, frida, Windows-инструменты.
@@ -210,21 +463,24 @@ if [ "$DO_FULL" = 1 ]; then
     OUT="$BUILD/VoyahTune-$VERSION"
     echo ""
     echo "########## FULL → Releases/build/VoyahTune-$VERSION ##########"
-    mkdir -p "$OUT"
+    prepare_release_dir "$OUT"
+    STAGE="$STAGED_OUT"
 
-    if [ "$DO_BUILD" = 1 ]; then build_apks full "$OUT"; else require_apks "$OUT"; fi
+    if [ "$DO_BUILD" = 1 ]; then build_apks full "$STAGE"; fi
 
-    cp "$COMMON/tools/"*                                    "$OUT/"
-    cp "$COMMON/inject/"*.js                                "$OUT/"
-    cp "$COMMON/system/"*                                   "$OUT/"
-    copy_common_release_assets "$OUT"
+    cp "$COMMON/tools/"*                                    "$STAGE/"
+    cp "$COMMON/inject/"*.js                                "$STAGE/"
+    cp "$COMMON/system/"*                                   "$STAGE/"
+    copy_common_release_assets "$STAGE"
     for f in "$COMMON/installer/full/"*; do
-        copy_stamped "$f" "$OUT/$(basename "$f")"
+        copy_stamped "$f" "$STAGE/$(basename "$f")"
     done
-    verify_windows_batch_files "$OUT"
-
-    echo "FULL готов → $OUT"
+    verify_release_payload "$STAGE" full
+    verify_windows_batch_files "$STAGE"
+    publish_release_dir "$STAGE" "$OUT"
     make_zip "$OUT" "VoyahTune-$VERSION"
+    commit_release_dir
+    echo "FULL готов → $OUT"
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -238,23 +494,26 @@ if [ "$DO_LIGHT" = 1 ]; then
     OUT="$BUILD/VoyahTune-$VERSION-light"
     echo ""
     echo "########## LIGHT → Releases/build/VoyahTune-$VERSION-light ##########"
-    mkdir -p "$OUT"
+    prepare_release_dir "$OUT"
+    STAGE="$STAGED_OUT"
 
-    if [ "$DO_BUILD" = 1 ]; then build_apks light "$OUT"; else require_apks "$OUT"; fi
+    if [ "$DO_BUILD" = 1 ]; then build_apks light "$STAGE"; fi
 
     for t in $LIGHT_TOOLS; do
         [ -f "$COMMON/tools/$t" ] || { echo "Нет $COMMON/tools/$t" >&2; exit 1; }
-        cp "$COMMON/tools/$t" "$OUT/"
+        cp "$COMMON/tools/$t" "$STAGE/"
     done
-    cp "$COMMON/system/privapp-permissions-ru.big.town.anative.xml" "$OUT/"
-    copy_common_release_assets "$OUT"
+    cp "$COMMON/system/privapp-permissions-ru.big.town.anative.xml" "$STAGE/"
+    copy_common_release_assets "$STAGE"
     for f in "$COMMON/installer/light/"*; do
-        copy_stamped "$f" "$OUT/$(basename "$f")"
+        copy_stamped "$f" "$STAGE/$(basename "$f")"
     done
-    verify_windows_batch_files "$OUT"
-
-    echo "LIGHT готов → $OUT"
+    verify_release_payload "$STAGE" light
+    verify_windows_batch_files "$STAGE"
+    publish_release_dir "$STAGE" "$OUT"
     make_zip "$OUT" "VoyahTune-$VERSION-light"
+    commit_release_dir
+    echo "LIGHT готов → $OUT"
 fi
 
 echo ""

@@ -1,9 +1,15 @@
-# voyahtune.load.rc — Open Voyah: запуск Frida-оркестратора (load.bin) своим init-сервисом.
-# Раньше это делал init.logcat.sh (монки-патч штатного скрипта логирования). load.bin —
-# watchdog-цикл сам по себе, поэтому НЕ oneshot: init перезапустит сервис, если он упадёт.
+# voyahtune.load.rc — Open Voyah: атомарный boot-hook (permissive + Frida-оркестратор).
+# Раньше оба действия жили в init.logcat.sh (монки-патче штатного логирования). Одна RC-точка
+# активации не допускает частичной установки «setenforce без service» или наоборот.
+on post-fs-data
+    # Default init context is not allowed to change enforcing state on Android 11 policy.
+    exec u:r:su:s0 root root -- /system/bin/setenforce 0
+
+# load.bin — watchdog-цикл сам по себе, поэтому НЕ oneshot: init перезапустит сервис, если он упадёт.
 # disabled + property-триггер даёт property-gated ordering: сервис не стартует раньше, чем
-# voyahtune.setenforce.rc успеет выставить permissive, и не раньше boot_completed (когда
-# install.sh уже гарантированно наполнил /data/local/bin).
+# post-fs-data action выше успеет выставить permissive, и не раньше boot_completed (когда
+# install.sh уже гарантированно наполнил /data/local/bin). enable снимает постоянный disabled-флаг,
+# чтобы сервис участвовал и в последующих class_reset/class_start после suspend/resume.
 service voyahtune_load /system/bin/sh /system/etc/init.voyahtune.load.sh
     class late_start
     user root
@@ -12,4 +18,4 @@ service voyahtune_load /system/bin/sh /system/etc/init.voyahtune.load.sh
     disabled
 
 on property:sys.boot_completed=1
-    start voyahtune_load
+    enable voyahtune_load

@@ -32,7 +32,7 @@ ADB/`adb` (Android Debug Bridge) — служебный интерфейс уп�
 |---|---|---|
 | `tools/` | `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll`, `frida-inject-16.2.1-android-arm64` | full — целиком; light — только adb-трио (frida там не нужна) |
 | `inject/` | Frida-скрипты: `vd_bypass.js`, `launcherdock.js`, `steeringwheelkeys.js`, `multidisplay.js`, `apollo_tech.js` | только full |
-| `system/` | `load.bin`, `voyahtune.setenforce.rc`, `voyahtune.load.rc`, `voyahtune.load.sh`, `privapp-permissions-…xml` | full целиком; в light — только `privapp-permissions` |
+| `system/` | `load.bin`, атомарный composite `voyahtune.load.rc`, `voyahtune.load.sh`, переходный чистый `init.logcat.original.sh`, `privapp-permissions-…xml` | full целиком; в light — только `privapp-permissions` |
 | `vendor-overlay/` | Зафиксированный DNS RRO APK и его provenance | APK — в full и light; README в релиз не копируется |
 | `installer/common/` | Четыре общих helper-файла для установки/отката DNS RRO | full и light, плоско рядом с основными установщиками |
 | `installer/full/` | `install.sh`, `install.bat`, `remove.sh`, `remove.bat` | full |
@@ -43,6 +43,12 @@ Light — набор без Frida-инъекции, `load.bin` и загрузо
 разрешений всё равно требует команды `adb root` и записи
 в `/system`. `.bat` требуют `adb.exe` рядом с собой, поэтому adb кладётся и в light (список файлов —
 `LIGHT_TOOLS` в `make_release.sh`); на Unix `.sh` рассчитывают на системный adb.
+
+Full-установщик больше не заменяет штатный `/system/etc/init.logcat.sh`: загрузочная обвязка живёт в
+одном composite `voyahtune.load.rc`. `init.logcat.original.sh` остаётся в full-комплекте как безопасный
+переход с непосредственного предыдущего релиза, установившего файл с явным marker `init.logcat.sh Open
+Voyah`. Неизвестный OEM-файл миграция не перезаписывает; при наличии `backup/init.logcat.sh`
+приоритет имеет сохранённый с конкретной головы оригинал.
 
 ## Зафиксированный DNS RRO
 
