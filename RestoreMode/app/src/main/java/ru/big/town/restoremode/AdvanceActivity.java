@@ -1349,7 +1349,7 @@ public class AdvanceActivity extends AppCompatActivity {
         updateApolloUi();
     }
 
-    /** Read-only запрос при открытии Apollo Tech: Messenger query + явный broadcast-request. */
+    /** Read-only запрос при открытии Apollo Tech: Messenger основной, broadcast — fallback. */
     private void requestApolloState() {
         if (!BuildConfig.IS_FULL) {
             updateApolloUi();
@@ -1358,15 +1358,26 @@ public class AdvanceActivity extends AppCompatActivity {
         if (!apolloHasState && textApolloStatus != null) {
             textApolloStatus.setText("Запрашиваем состояние Apollo Tech у Native…");
         }
-        if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
+        boolean messengerReady = GlobalVars.isBound && GlobalVars.serviceMessenger != null;
+        boolean messengerDelivered = false;
+        if (messengerReady) {
             try {
                 GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_APOLLO_QUERY));
+                messengerDelivered = true;
             } catch (RemoteException e) {
                 Log.w("$$$ Advance Apollo $$$", "Не удалось отправить MSG_APOLLO_QUERY", e);
             }
         }
-        Intent request = new Intent(ACTION_REQUEST_APOLLO_TLC_UPDATE).setPackage(NATIVE_PACKAGE);
-        sendBroadcast(request);
+        if (shouldUseApolloBroadcastFallback(messengerReady, messengerDelivered)) {
+            Intent request = new Intent(ACTION_REQUEST_APOLLO_TLC_UPDATE)
+                    .setPackage(NATIVE_PACKAGE);
+            sendBroadcast(request);
+        }
+    }
+
+    static boolean shouldUseApolloBroadcastFallback(boolean messengerReady,
+                                                     boolean messengerDelivered) {
+        return !messengerReady || !messengerDelivered;
     }
 
     private void sendApolloCommand(int what, boolean enabled) {

@@ -1,6 +1,8 @@
-// apollo_tech.js — изолированный Apollo/ADAS hook для com.qinggan.app.vehiclesetting.
+// apollo_tech.js — explicit legacy/diagnostic Apollo hook для VehicleSetting.
 //
-// По умолчанию полностью пассивен. Fake-подписка и activation asyncQueryAdasSubData() разрешены
+// Direct-only режим по умолчанию не инжектит этот файл. Даже ручной attach fail-closed и не ставит
+// хуки без Settings.Global open_voyah_apollo_legacy_hook_enabled == 1.
+// Fake-подписка и activation asyncQueryAdasSubData() разрешены
 // одновременно только когда:
 //   • Settings.Global open_voyah_apollo_master == 1;
 //   • SHA-256 установленных VehicleSetting.apk и CanBusService.apk совпадают с pinned-профилем;
@@ -15,6 +17,7 @@ Java.perform(function () {
     "use strict";
 
     var TAG = "VoyahApollo";
+    var LEGACY_OPT_IN_KEY = "open_voyah_apollo_legacy_hook_enabled";
     var MASTER_KEY = "open_voyah_apollo_master";
     var ASC_KEY = "open_voyah_apollo_asc";
     var SDB_KEY = "open_voyah_apollo_sdb";
@@ -32,6 +35,8 @@ Java.perform(function () {
     var HEARTBEAT_INTERVAL_MS = 30000;
     var STOCK_RESYNC_RETRY_MS = 10000;
     var MAX_STOCK_RESYNC_ATTEMPTS = 3;
+    var HUM_VCU_READY_ID = 924;
+    var BMS_STATE_ID = 958;
 
     var Log = Java.use("android.util.Log");
     var ActivityThread = Java.use("android.app.ActivityThread");
@@ -114,10 +119,20 @@ Java.perform(function () {
         }
     }
 
+    function readLegacyOptIn() {
+        try {
+            return settingsGetInt.call(SettingsGlobal, resolver, LEGACY_OPT_IN_KEY, 0) === 1;
+        } catch (e) {
+            error("legacy_opt_in_read_failed", "fail_closed=1");
+            return null;
+        }
+    }
+
     var vehicleHashMatches = false;
     var canBusHashMatches = false;
     var canBusMetadataSnapshot = null;
     var diagnosticH97XProfile = false;
+    var legacy97CProfile = false;
 
     function sha256MatchesSource(sourceDir, expected, target) {
         var input = null;
@@ -259,6 +274,7 @@ Java.perform(function () {
                 && trackingBrand === H97X_TRACKING_BRAND;
             var vehicleSupported = stock97C || diagnosticH97X;
             diagnosticH97XProfile = diagnosticH97X;
+            legacy97CProfile = stock97C;
 
             var ascWritten = putIntSetting(ASC_KEY, asc);
             var sdbWritten = putIntSetting(SDB_KEY, sdb);
@@ -279,6 +295,7 @@ Java.perform(function () {
             };
         } catch (e) {
             diagnosticH97XProfile = false;
+            legacy97CProfile = false;
             putIntSetting(ASC_KEY, 0);
             putIntSetting(SDB_KEY, 0);
             putIntSetting(PROFILE_KEY, 0);
@@ -296,6 +313,16 @@ Java.perform(function () {
         return;
     }
 
+    // Defense in depth for manual/frida attach: direct-only must not hash APK or touch OEM classes.
+    if (readLegacyOptIn() !== true) {
+        clearPublishedGate("legacy_opt_in_disabled");
+        putIntSetting(MASTER_KEY, 0);
+        JavaSystem.setProperty(PROCESS_SENTINEL_KEY, "disabled_opt_in");
+        console.log(READY_MARKER);
+        info("hooks_disabled", "reason=legacy_opt_in");
+        return;
+    }
+
     // Сбрасываем stale gate до любых vendor-class/hook операций, затем pin-им оба installed APK.
     clearPublishedGate("attach_start");
     var hashMatches = verifyPinnedPackages();
@@ -310,20 +337,22 @@ Java.perform(function () {
     var BaiduProviderUtil;
     var AdasManager;
     var CanBusCallback;
+    var VehicleStateClass;
     var subscribeQuery;
     var managerInstance;
     var asyncQuery;
     var vehicleStateChanged;
+    var vehicleStateGetValue;
     var managerSingletonField;
     var managerSingletonGet;
 
     try {
-        // Сначала разрешаем все exact overload; частично установленный hook не допускается.
+        // Сначала разрешаем все exact overload, нужные в подтверждённом профиле;
+        // частично установленный hook не допускается.
         BaiduProviderUtil = Java.use(
             "com.qinggan.app.vehiclesetting.fragments.driveassistance.adas.BaiduProviderUtil");
         AdasManager = Java.use(
             "com.qinggan.app.vehiclesetting.fragments.driveassistance.adas.DriveAssistanceAdasStatusManager");
-        CanBusCallback = Java.use("com.qinggan.app.basevehiclesetting.canbustools.CanBusTool$3");
 
         subscribeQuery = BaiduProviderUtil.doQuerySubscribeInfo.overload("android.content.Context");
         managerInstance = AdasManager.instance.overload("android.content.Context");
@@ -331,8 +360,13 @@ Java.perform(function () {
         managerSingletonField = AdasManager.class.getDeclaredField("instance");
         managerSingletonField.setAccessible(true);
         managerSingletonGet = managerSingletonField.get.overload("java.lang.Object");
-        vehicleStateChanged = CanBusCallback.onVehicleStateChanged.overload(
-            "com.qinggan.canbus.VehicleState", "int");
+        if (legacy97CProfile) {
+            CanBusCallback = Java.use("com.qinggan.app.basevehiclesetting.canbustools.CanBusTool$3");
+            VehicleStateClass = Java.use("com.qinggan.canbus.VehicleState");
+            vehicleStateChanged = CanBusCallback.onVehicleStateChanged.overload(
+                "com.qinggan.canbus.VehicleState", "int");
+            vehicleStateGetValue = VehicleStateClass.getValue.overload();
+        }
     } catch (e) {
         clearPublishedGate("core_resolution_failed");
         console.log("[apollo] event=install_failed stage=resolve");
@@ -344,6 +378,12 @@ Java.perform(function () {
     var masterKnown = false;
     var persistedMaster = false;
     var wakeBlockedUntil = 0;
+    var wakeDispatchPending = false;
+    var pendingWakeName = "";
+    var pendingWakeValue = 0;
+    var trailingWakePending = false;
+    var trailingWakeName = "";
+    var trailingWakeValue = 0;
     var observer = null;
     var heartbeatTimer = null;
     var fakeMayBeApplied = false;
@@ -644,10 +684,18 @@ Java.perform(function () {
         return enabled === true;
     }
 
-    function handleWake(stateName, value) {
-        var eligible = (stateName === "HUM_VCU_READY" && value === 1)
+    function isEligibleWake(stateName, value) {
+        return (stateName === "HUM_VCU_READY" && value === 1)
             || (stateName === "BMS_STATE" && value === 3);
-        if (!eligible) return;
+    }
+
+    function isEligibleWakeId(stateId, value) {
+        return (stateId === HUM_VCU_READY_ID && value === 1)
+            || (stateId === BMS_STATE_ID && value === 3);
+    }
+
+    function handleWake(stateName, value) {
+        if (!isEligibleWake(stateName, value)) return;
 
         refreshValidatedGate("wake");
         if (diagnosticH97XProfile) {
@@ -679,6 +727,77 @@ Java.perform(function () {
         }
         putHeartbeat(now);
         runAsyncQuery("wake:" + stateName, false);
+    }
+
+    function resetPendingWake() {
+        wakeDispatchPending = false;
+        pendingWakeName = "";
+        pendingWakeValue = 0;
+        trailingWakePending = false;
+        trailingWakeName = "";
+        trailingWakeValue = 0;
+    }
+
+    function dispatchPendingWake() {
+        var wakeName = pendingWakeName;
+        var wakeValue = pendingWakeValue;
+        try {
+            handleWake(wakeName, wakeValue);
+        } catch (wakeError) {
+            error("wake_handler_failed", "fail_closed=1");
+        } finally {
+            // Один callback обрабатывается, один latest trailing сохраняется;
+            // более глубокая main queue при CAN burst не растёт.
+            if (trailingWakePending) {
+                pendingWakeName = trailingWakeName;
+                pendingWakeValue = trailingWakeValue;
+                trailingWakePending = false;
+                trailingWakeName = "";
+                trailingWakeValue = 0;
+                try {
+                    Java.scheduleOnMainThread(dispatchPendingWake);
+                } catch (trailingScheduleError) {
+                    resetPendingWake();
+                    error("wake_trailing_schedule_failed", "fail_closed=1");
+                }
+            } else {
+                resetPendingWake();
+            }
+        }
+    }
+
+    function scheduleEligibleWake(state, value) {
+        if (!legacy97CProfile) return;
+        if (state === null) return;
+        var wakeId;
+        try {
+            wakeId = vehicleStateGetValue.call(state);
+        } catch (idReadError) {
+            // Malformed unrelated callback must not cancel an already pending eligible wake.
+            error("wake_id_read_failed", "fail_closed=1");
+            return;
+        }
+        // Legacy generic hook всё ещё делает GumJS crossing на каждом callback.
+        // Числовой ID/value фильтр отсекает остальные CAN events до присвоения
+        // строкового имени, main Runnable и тяжёлой gate/hash/query работы.
+        if (!isEligibleWakeId(wakeId, value)) return;
+        var wakeName = wakeId === HUM_VCU_READY_ID ? "HUM_VCU_READY" : "BMS_STATE";
+        if (wakeDispatchPending) {
+            // Coalesce a burst into one latest trailing event without losing the second wake.
+            trailingWakeName = wakeName;
+            trailingWakeValue = value;
+            trailingWakePending = true;
+            return;
+        }
+        pendingWakeName = wakeName;
+        pendingWakeValue = value;
+        wakeDispatchPending = true;
+        try {
+            Java.scheduleOnMainThread(dispatchPendingWake);
+        } catch (scheduleError) {
+            resetPendingWake();
+            throw scheduleError;
+        }
     }
 
     var subscribeInstalled = false;
@@ -741,28 +860,27 @@ Java.perform(function () {
         subscribeInstalled = true;
 
         hookInstallStage = "vehicle_callback_hook";
-        vehicleStateChanged.implementation = function (state, value) {
-            try {
-                // OEM callback всегда получает исходный вызов первым и ровно один раз. Наша тяжёлая
-                // hash/profile/settings работа уходит в main queue и не задерживает binder callback.
-                return vehicleStateChanged.call(this, state, value);
-            } finally {
+        if (!legacy97CProfile) {
+            // Generic subscription wake path нужен только положительно
+            // опознанному legacy 97C. Direct H97X и unknown/error profile не хукаются.
+            info("vehicle_callback_skipped", diagnosticH97XProfile
+                ? "mode=direct_h97x" : "mode=unsupported");
+        } else {
+            vehicleStateChanged.implementation = function (state, value) {
                 try {
-                    var wakeName = state === null ? "" : ("" + state.toString());
-                    var wakeValue = value;
-                    Java.scheduleOnMainThread(function () {
-                        try {
-                            handleWake(wakeName, wakeValue);
-                        } catch (wakeError) {
-                            error("wake_handler_failed", "fail_closed=1");
-                        }
-                    });
-                } catch (scheduleError) {
-                    error("wake_schedule_failed", "fail_closed=1");
+                    // OEM callback всегда получает исходный вызов первым и ровно один раз.
+                    return vehicleStateChanged.call(this, state, value);
+                } finally {
+                    try {
+                        scheduleEligibleWake(state, value);
+                    } catch (scheduleError) {
+                        resetPendingWake();
+                        error("wake_schedule_failed", "fail_closed=1");
+                    }
                 }
-            }
-        };
-        callbackInstalled = true;
+            };
+            callbackInstalled = true;
+        }
 
         hookInstallStage = "observer_class";
         var ObserverClass = Java.registerClass({

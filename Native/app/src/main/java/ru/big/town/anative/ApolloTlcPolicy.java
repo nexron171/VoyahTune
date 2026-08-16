@@ -1,42 +1,30 @@
 package ru.big.town.anative;
 
 /**
- * Parcel-independent safety policy for the Apollo PLC/TLC bridge.
+ * Parcel-independent safety policy for the direct Apollo PLC/TLC bridge.
  *
  * <p>The OEM UI calls the user-facing triggered lane-change switch {@code PLC_SWITCH}.
  * Its entitlement pair is {@code TLC_FUNC_ENABLE}/{@code PLC_FUNC_ENABLE_SA}; the traffic-light
  * pair is {@code GLC_FUNC_ENABLE}/{@code TLA_FUNC_ENABLE_SA}. Keeping this class free of Android
- * types makes the complete composite entitlement vector and every write gate unit-testable on a
- * host JVM.</p>
+ * types makes the complete composite entitlement vector and active direct write gates
+ * unit-testable on a host JVM.</p>
  */
 final class ApolloTlcPolicy {
     static final int UNKNOWN = -1;
     static final int MODULE_OFF = 1;
     static final int MODULE_ON = 2;
-    static final int PLC_STATUS_ERROR = 7;
     static final int GEAR_PARKING = 0;
-    static final int PROFILE_MODE_UNSUPPORTED = 0;
-    static final int PROFILE_MODE_STOCK_97C = 1;
-    static final int PROFILE_MODE_DIRECT_H97X = 2;
-    static final long PROFILE_HEARTBEAT_MAX_AGE_MS = 90_000L;
 
     static final String ERROR_NONE = "";
     static final String ERROR_UNSUPPORTED_LIGHT = "unsupported_light";
     static final String ERROR_PROFILE_UNSUPPORTED = "profile_unsupported";
     static final String ERROR_CAN_DISCONNECTED = "can_disconnected";
-    static final String ERROR_MASTER_DISABLED = "master_disabled";
     static final String ERROR_WRITE_PENDING = "write_pending";
     static final String ERROR_STATE_READ_FAILED = "state_read_failed";
     static final String ERROR_WRITE_PERMISSION_MISSING = "write_permission_missing";
     static final String ERROR_NOT_PARKING = "gear_not_parking";
     static final String ERROR_INVALID_PLC_SWITCH = "invalid_plc_switch";
     static final String ERROR_INVALID_SWITCH_STATE = "invalid_switch_state";
-    static final String ERROR_INVALID_PLC_STATUS = "invalid_plc_status";
-    static final String ERROR_PLC_STATUS = "plc_status_error";
-    static final String ERROR_INVALID_ANP_SWITCH = "invalid_anp_switch";
-    static final String ERROR_INVALID_TLC_CAPABILITY = "invalid_tlc_capability";
-    static final String ERROR_INVALID_PLC_CAPABILITY = "invalid_plc_capability_sa";
-    static final String ERROR_CAPABILITY_DISABLED = "capability_disabled";
     static final String ERROR_ANP_MUST_BE_OFF = "anp_must_be_off";
     static final String ERROR_MASTER_NOT_USED_DIRECT = "master_not_used_direct_h97x";
 
@@ -60,10 +48,31 @@ final class ApolloTlcPolicy {
         }
 
         static Signal fromId(int id) {
-            for (Signal signal : values()) {
-                if (signal.id == id) return signal;
+            // Hot Binder callback path: avoid values(), which clones the enum array per event.
+            switch (id) {
+                case 277:
+                    return TSR_SWITCH;
+                case 924:
+                    return HUM_VCU_READY;
+                case 958:
+                    return BMS_STATE;
+                case 1121:
+                    return PLC_FUNCTION_STATUS;
+                case 1135:
+                    return PLC_SWITCH;
+                case 1136:
+                    return ANP_SWITCH;
+                case 1149:
+                    return GLA_SWITCH;
+                case 1150:
+                    return GLA_LIGHT_CHANGE_SWITCH;
+                case 1170:
+                    return TLC_FUNC_ENABLE;
+                case 1179:
+                    return PLC_FUNC_ENABLE_SA;
+                default:
+                    return null;
             }
-            return null;
         }
     }
 
@@ -116,57 +125,14 @@ final class ApolloTlcPolicy {
         }
     }
 
-    static final class Snapshot {
-        final int plcSwitch;
-        final int plcStatus;
-        final int anpSwitch;
-        final int tlcCapability;
-        final int plcCapabilitySa;
-
-        Snapshot(int plcSwitch, int plcStatus, int anpSwitch,
-                 int tlcCapability, int plcCapabilitySa) {
-            this.plcSwitch = plcSwitch;
-            this.plcStatus = plcStatus;
-            this.anpSwitch = anpSwitch;
-            this.tlcCapability = tlcCapability;
-            this.plcCapabilitySa = plcCapabilitySa;
-        }
-    }
-
     private ApolloTlcPolicy() {
     }
 
-    static boolean profileSupported(boolean fullBuild, boolean vehicleSettingHashMatches,
-                                    boolean canBusServiceHashMatches,
-                                    boolean hookProfileSupported, boolean heartbeatFresh,
-                                    boolean runtimeProfileValid,
-                                    boolean writePermissionGranted) {
-        return fullBuild && vehicleSettingHashMatches && canBusServiceHashMatches
-                && hookProfileSupported && heartbeatFresh && runtimeProfileValid
-                && writePermissionGranted;
-    }
-
-    static boolean binderProfilePinned(boolean fullBuild, boolean hashCheckComplete,
-                                       boolean vehicleSettingHashMatches,
-                                       boolean canBusServiceHashMatches,
+    static boolean binderProfilePinned(boolean fullBuild, boolean schemaCheckComplete,
+                                       boolean canBusSchemaMatches,
                                        boolean writePermissionGranted) {
-        return fullBuild && hashCheckComplete
-                && vehicleSettingHashMatches && canBusServiceHashMatches
+        return fullBuild && schemaCheckComplete && canBusSchemaMatches
                 && writePermissionGranted;
-    }
-
-    static boolean heartbeatFresh(long nowElapsed, long heartbeatElapsed) {
-        if (heartbeatElapsed <= 0L) return false;
-        long age = nowElapsed - heartbeatElapsed;
-        return age >= 0L && age <= PROFILE_HEARTBEAT_MAX_AGE_MS;
-    }
-
-    static boolean effectiveMaster(boolean fullBuild, boolean profileSupported,
-                                   boolean masterKnown, boolean persistedMaster,
-                                   boolean masterForceDisabled,
-                                   boolean writePermissionGranted) {
-        return fullBuild && profileSupported && masterKnown && persistedMaster
-                && !masterForceDisabled && writePermissionGranted;
     }
 
     /** Value bit paired with masterKnown; unknown must never look like a confirmed ON or OFF. */
@@ -195,6 +161,31 @@ final class ApolloTlcPolicy {
                 && binderIdentityMatches;
     }
 
+    static boolean epochCurrent(boolean destroyed, int activeEpoch, int eventEpoch) {
+        return !destroyed && activeEpoch == eventEpoch;
+    }
+
+    static boolean connectionEventCurrent(boolean destroyed,
+                                          int activeEpoch, int eventEpoch,
+                                          boolean connectionIdentityMatches) {
+        return epochCurrent(destroyed, activeEpoch, eventEpoch)
+                && connectionIdentityMatches;
+    }
+
+    static boolean callbackEventCurrent(boolean destroyed,
+                                        int activeEpoch, int eventEpoch,
+                                        boolean callbackRegistered) {
+        return epochCurrent(destroyed, activeEpoch, eventEpoch) && callbackRegistered;
+    }
+
+    static boolean writeSessionCurrent(boolean destroyed, boolean pending,
+                                       int activeWriteGeneration, int eventWriteGeneration,
+                                       int activeBindEpoch, int eventBindEpoch) {
+        return !destroyed && pending
+                && activeWriteGeneration == eventWriteGeneration
+                && activeBindEpoch == eventBindEpoch;
+    }
+
     static boolean isModuleState(int state) {
         return state == MODULE_OFF || state == MODULE_ON;
     }
@@ -203,25 +194,20 @@ final class ApolloTlcPolicy {
         return isModuleState(plcSwitch) && isModuleState(glaSwitch);
     }
 
-    static boolean isPlcStatus(int state) {
-        return state >= 0 && state <= PLC_STATUS_ERROR;
+    /** A confirmed switch-off rebuilds TX77 and therefore needs the independent peer switch. */
+    static boolean readbackNeedsPeerSwitch(Signal signal, int desiredState) {
+        return desiredState == MODULE_OFF
+                && (signal == Signal.PLC_SWITCH || signal == Signal.GLA_SWITCH);
     }
 
-    /** First fail-closed reason for a telemetry snapshot, or an empty string. */
-    static String snapshotError(Snapshot snapshot) {
-        if (!isModuleState(snapshot.plcSwitch)) return ERROR_INVALID_PLC_SWITCH;
-        if (!isPlcStatus(snapshot.plcStatus)) return ERROR_INVALID_PLC_STATUS;
-        if (snapshot.plcStatus == PLC_STATUS_ERROR) return ERROR_PLC_STATUS;
-        if (!isModuleState(snapshot.anpSwitch)) return ERROR_INVALID_ANP_SWITCH;
-        if (!isModuleState(snapshot.tlcCapability)) return ERROR_INVALID_TLC_CAPABILITY;
-        if (!isModuleState(snapshot.plcCapabilitySa)) return ERROR_INVALID_PLC_CAPABILITY;
-        return ERROR_NONE;
+    static boolean shouldScheduleWakeReassert(Signal signal, int previousState, int state) {
+        boolean eligible = (signal == Signal.HUM_VCU_READY && state == 1)
+                || (signal == Signal.BMS_STATE && state == 3);
+        return eligible && previousState != state;
     }
 
-    /** The direct path needs only the current PLC_SWITCH value for state/readback integrity. */
-    static String operationalSnapshotError(Snapshot snapshot) {
-        if (!isModuleState(snapshot.plcSwitch)) return ERROR_INVALID_PLC_SWITCH;
-        return ERROR_NONE;
+    static String directTlcStateError(int plcSwitch) {
+        return isModuleState(plcSwitch) ? ERROR_NONE : ERROR_INVALID_PLC_SWITCH;
     }
 
     /** Shared OEM-parity gates for the two traffic-light states; stock UI allows them outside P. */
@@ -236,43 +222,15 @@ final class ApolloTlcPolicy {
         return ERROR_NONE;
     }
 
-    /**
-     * Returns an empty string only when one guarded TX58 for PLC_SWITCH may be emitted.
-     * Enabling additionally requires both read-only subscription capabilities to be open.
-     */
-    static String writeBlockReason(boolean fullBuild, boolean profileSupported,
-                                   boolean canConnected, boolean directTlcMode,
-                                   boolean masterEnabled, boolean pending, int gear,
-                                   Snapshot snapshot, boolean requestedEnabled) {
+    /** Returns an empty string only when one direct TX58 for PLC_SWITCH may be emitted. */
+    static String directTlcBlockReason(boolean fullBuild, boolean profileSupported,
+                                       boolean canConnected, boolean pending,
+                                       int gear, int plcSwitch) {
         if (!fullBuild) return ERROR_UNSUPPORTED_LIGHT;
         if (!profileSupported) return ERROR_PROFILE_UNSUPPORTED;
         if (!canConnected) return ERROR_CAN_DISCONNECTED;
-        if (!directTlcMode && !masterEnabled) return ERROR_MASTER_DISABLED;
         if (pending) return ERROR_WRITE_PENDING;
         if (gear != GEAR_PARKING) return ERROR_NOT_PARKING;
-
-        String snapshotError = directTlcMode
-                ? operationalSnapshotError(snapshot) : snapshotError(snapshot);
-        if (!snapshotError.isEmpty()) return snapshotError;
-
-        if (!directTlcMode && requestedEnabled
-                && (snapshot.tlcCapability != MODULE_ON
-                || snapshot.plcCapabilitySa != MODULE_ON)) {
-            return ERROR_CAPABILITY_DISABLED;
-        }
-        return ERROR_NONE;
-    }
-
-    /** Master ON unlocks TX58, so it uses the same live transport/gear/telemetry gates. */
-    static String masterEnableBlockReason(boolean fullBuild, boolean profileSupported,
-                                          boolean canReady, boolean refreshSucceeded,
-                                          boolean pending, int gear, Snapshot snapshot) {
-        if (!fullBuild) return ERROR_UNSUPPORTED_LIGHT;
-        if (!profileSupported) return ERROR_PROFILE_UNSUPPORTED;
-        if (!canReady) return ERROR_CAN_DISCONNECTED;
-        if (!refreshSucceeded) return ERROR_STATE_READ_FAILED;
-        if (pending) return ERROR_WRITE_PENDING;
-        if (gear != GEAR_PARKING) return ERROR_NOT_PARKING;
-        return snapshotError(snapshot);
+        return directTlcStateError(plcSwitch);
     }
 }

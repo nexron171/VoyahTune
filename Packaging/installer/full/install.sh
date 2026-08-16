@@ -3,7 +3,7 @@
 # Ставит: Native (priv-app) + RestoreMode, whitelist привилегий, freeform, и Frida-обвязку —
 #   1) кнопки руля (steeringwheelkeys.js в keymanager: звёздочка 3090 и DVR 173, один onKeyEvent),
 #   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS),
-#   3) Apollo/ADAS master-gate (apollo_tech.js в com.qinggan.app.vehiclesetting).
+#   3) dormant legacy Apollo diagnostic (direct-only не инжектит VehicleSetting).
 # Boot-хук = свои RC-сервисы /system/etc/init/voyahtune.*.rc (setenforce 0 + load.bin watchdog).
 # Штатный /system/etc/init.logcat.sh не меняем, кроме узкой миграции нашего legacy-файла.
 if [ ! -f ./dns-overlay.sh ]; then
@@ -40,20 +40,26 @@ adb root
 adb wait-for-device
 adb root
 
-# Update не наследует stale ON: до disable-verity и любых /system mutations принудительно переводим
-# Apollo master в безопасный 0 и проверяем фактически сохранённое значение.
-echo "=== Preflight безопасного состояния Apollo master ==="
-if ! adb shell settings put global open_voyah_apollo_master 0; then
-    echo "!!! Не удалось выключить Apollo master — установка прервана до записи в /system."
-    exit 1
-fi
-APOLLO_INSTALL_MASTER_STATE=$(adb shell settings get global open_voyah_apollo_master 2>/dev/null \
-    | tr -d '\r')
-if [ "$APOLLO_INSTALL_MASTER_STATE" != "0" ]; then
-    echo "!!! Apollo master не подтвердил состояние 0 — установка прервана до записи в /system."
-    exit 1
-fi
-echo "  Apollo master=0 подтверждён."
+# Direct-only update не наследует legacy opt-in/stale gate. До disable-verity и любых
+# /system mutations принудительно пишем и читаем обратно все fail-closed ключи.
+echo "=== Preflight direct-only Apollo (VehicleSetting hook OFF) ==="
+for APOLLO_SAFE_KEY in \
+        open_voyah_apollo_legacy_hook_enabled \
+        open_voyah_apollo_master \
+        open_voyah_apollo_profile_supported \
+        open_voyah_apollo_profile_heartbeat; do
+    if ! adb shell settings put global "$APOLLO_SAFE_KEY" 0; then
+        echo "!!! Не удалось записать $APOLLO_SAFE_KEY=0 — установка прервана до записи в /system."
+        exit 1
+    fi
+    APOLLO_SAFE_STATE=$(adb shell settings get global "$APOLLO_SAFE_KEY" 2>/dev/null \
+        | tr -d '\r')
+    if [ "$APOLLO_SAFE_STATE" != "0" ]; then
+        echo "!!! $APOLLO_SAFE_KEY не подтвердил 0 — установка прервана до записи в /system."
+        exit 1
+    fi
+done
+echo "  Legacy opt-in, master, profile и heartbeat закрыты."
 
 # Native full self-owns the signature permission needed by its fail-closed CAN writer. Android keeps
 # the first installed declaration: an old VoyahTweaks owner would silently make our Native incompatible.
@@ -506,7 +512,7 @@ backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml 
 
 # ВАЖНО: всё в /data/local/bin доступно загрузочному RC-сервису.
 # /sdcard монтируется позже, поэтому load.bin ТАМ держать нельзя (не запустится на буте).
-echo "=== Frida-инфраструктура (руль + VirtualDisplay + Apollo/ADAS) ==="
+echo "=== Frida-инфраструктура (руль + VirtualDisplay + dormant Apollo diagnostic) ==="
 if ! adb shell "mkdir -p /data/local/bin"; then
     echo "!!! Не удалось подготовить /data/local/bin — установка прервана."
     exit 1

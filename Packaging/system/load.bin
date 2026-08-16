@@ -5,7 +5,7 @@
 #   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
 #   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
 #   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами.
-#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — опциональный Apollo/ADAS master-gate.
+#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — только explicit legacy-диагностика.
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
 #   • system_server и launcher: frida-inject -e ВОЗВРАЩАЕТ управление. Ставим по ТОЧНОМУ -p pid и пишем
@@ -91,11 +91,13 @@ SWK_KM_BUSY=/data/local/tmp/voyah_swk_km.busy # symlink: targetPid|startUptime|t
 SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
 LNCH_MARK=/data/local/tmp/voyah_lnch.pid     # pid лаунчера, куда поставлен launcherdock
 MD_MARK=/data/local/tmp/voyah_md.pid         # pid systemservice, куда поставлен multidisplay
-APOLLO_MARK=/data/local/tmp/voyah_apollo.pid # pid+starttime vehiclesetting, куда поставлен Apollo hook
+APOLLO_MARK=/data/local/tmp/voyah_apollo.pid # v2|boot_uuid|pid|starttime exact Apollo agent identity
 APOLLO_DOWN_MARK=/data/local/tmp/voyah_apollo.down
 APOLLO_LOG=/data/local/tmp/voyah_apollo.txt
 APOLLO_TARGET=com.qinggan.app.vehiclesetting
 APOLLO_READY_MARKER='[apollo] hook ready'
+APOLLO_LEGACY_OPT_IN_KEY=open_voyah_apollo_legacy_hook_enabled
+APOLLO_DISABLED_MARK=/data/local/tmp/voyah_apollo.disabled
 
 reset_apollo_liveness() {
     # Оба сброса независимы: отказ первого не должен мешать попытке обнулить heartbeat. Heartbeat
@@ -110,6 +112,34 @@ reset_apollo_liveness() {
     [ "$APOLLO_RESET_HEARTBEAT" = "0" ] || APOLLO_RESET_OK=0
     [ "$APOLLO_RESET_PROFILE" = "0" ] || APOLLO_RESET_OK=0
     [ "$APOLLO_RESET_OK" -eq 1 ]
+}
+
+# Direct-only релиз не использует VehicleSetting/Frida profile. При отсутствии
+# точного opt-in закрываем и master, и публикуемый legacy-profile. Если marker
+# доказывает, что агент живёт в текущей process identity, force-stop однократно
+# выгружает eternalized hook. Чужой/протухший PID процесс не затрагивает.
+disable_apollo_legacy_hook() {
+    APOLLO_DISABLE_OK=1
+    settings put global open_voyah_apollo_master 0 >/dev/null 2>&1 \
+        || APOLLO_DISABLE_OK=0
+    reset_apollo_liveness || APOLLO_DISABLE_OK=0
+    APOLLO_DISABLE_MASTER=$(settings get global open_voyah_apollo_master 2>/dev/null)
+    [ "$APOLLO_DISABLE_MASTER" = "0" ] || APOLLO_DISABLE_OK=0
+    [ "$APOLLO_DISABLE_OK" -eq 1 ] || return 1
+
+    APOLLO_DISABLE_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
+    APOLLO_DISABLE_PID=${APOLLO_DISABLE_PID%% *}
+    APOLLO_DISABLE_ID=$(target_identity "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)
+    APOLLO_ATTACHED_ID=$(cat "$APOLLO_MARK" 2>/dev/null)
+    if [ -n "$APOLLO_DISABLE_ID" ] && [ "$APOLLO_ATTACHED_ID" = "$APOLLO_DISABLE_ID" ]; then
+        am force-stop "$APOLLO_TARGET" >/dev/null 2>&1 || return 1
+        [ "$(target_identity "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)" != "$APOLLO_DISABLE_ID" ] \
+            || return 1
+    fi
+
+    rm -f "$APOLLO_MARK" || return 1
+    echo 1 > "$APOLLO_DISABLED_MARK" || return 1
+    return 0
 }
 
 # Инъекция в цель, которая ВОЗВРАЩАЕТ управление. Маркер пишем ТОЛЬКО при успехе.
@@ -145,6 +175,8 @@ uptime_seconds() {
 
 # Точная идентичность процесса: проверяем cmdline (не только число PID) и добавляем starttime из
 # /proc/<pid>/stat. Это исключает ложный «уже установлен» при повторном использовании старого PID.
+# Boot UUID обязателен: starttime отсчитывается заново после reboot, а marker в /data его переживает.
+# Prefix v2 не позволяет старому PID|starttime marker стать доказательством для force-stop.
 target_identity() {
     IDENT_PID="$1"
     IDENT_NAME="$2"
@@ -158,7 +190,11 @@ target_identity() {
     case "$IDENT_START" in
         ''|*[!0-9]*) return 1 ;;
     esac
-    echo "$IDENT_PID|$IDENT_START"
+    IDENT_BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+    case "$IDENT_BOOT" in
+        ''|*[!0-9a-fA-F-]*) return 1 ;;
+    esac
+    echo "v2|$IDENT_BOOT|$IDENT_PID|$IDENT_START"
 }
 
 # Apollo требует не просто успешный exit frida-inject, а точный marker самого агента. Идентичность
@@ -353,38 +389,61 @@ while [ 1 ]; do
         fi
     fi
 
-    # 5) Apollo/ADAS в VehicleSetting. Для safety-sensitive hook проверяем точный cmdline+starttime,
-    #    exact marker агента и лишь затем атомарно публикуем marker успешной инъекции.
-    APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
-    APOLLO_PID=${APOLLO_PID%% *}
-    if [ -z "$APOLLO_PID" ]; then
-        # Eternalized agent умер вместе с target: немедленно закрываем Global gate, не ждём TTL Native.
-        # Down-marker ограничивает idempotent Settings writes, но создаётся лишь после их успеха.
-        if [ ! -f "$APOLLO_DOWN_MARK" ] || [ -f "$APOLLO_MARK" ]; then
-            if reset_apollo_liveness; then
-                echo 1 > "$APOLLO_DOWN_MARK"
+    # 5) Direct-only по умолчанию не входит в VehicleSetting вообще. Legacy-агент
+    #    допускается только точным Settings.Global opt-in=1; null/ошибка/любое
+    #    другое значение fail-closed. Сам JS повторяет эту проверку.
+    APOLLO_LEGACY_OPT_IN=$(settings get global "$APOLLO_LEGACY_OPT_IN_KEY" 2>/dev/null)
+    if [ "$APOLLO_LEGACY_OPT_IN" != "1" ]; then
+        # Disabled-marker убирает повторные Settings writes, но не является
+        # доверенным gate: каждый poll дёшево проверяет фактические нули.
+        APOLLO_DISABLED_MASTER=$(settings get global open_voyah_apollo_master 2>/dev/null)
+        APOLLO_DISABLED_PROFILE=$(settings get global open_voyah_apollo_profile_supported 2>/dev/null)
+        APOLLO_DISABLED_HEARTBEAT=$(settings get global open_voyah_apollo_profile_heartbeat 2>/dev/null)
+        if [ ! -f "$APOLLO_DISABLED_MARK" ] || [ -f "$APOLLO_MARK" ] \
+                || [ "$APOLLO_DISABLED_MASTER" != "0" ] \
+                || [ "$APOLLO_DISABLED_PROFILE" != "0" ] \
+                || [ "$APOLLO_DISABLED_HEARTBEAT" != "0" ]; then
+            if disable_apollo_legacy_hook; then
+                rm -f "$APOLLO_DOWN_MARK"
+                logs "apollo direct-only: VehicleSetting injection disabled"
             else
-                logs "apollo target gone: liveness reset FAIL (retry next loop)"
+                logs "apollo direct-only: fail-closed cleanup FAIL (retry next loop)"
             fi
         fi
-        if [ -f "$APOLLO_MARK" ] && [ -f "$APOLLO_DOWN_MARK" ]; then
-            rm -f "$APOLLO_MARK"
-            logs "apollo target gone: liveness reset"
-        fi
     else
-        rm -f "$APOLLO_DOWN_MARK"
-        APOLLO_ID=$(target_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null)
-        if [ -n "$APOLLO_ID" ] && [ "$(cat "$APOLLO_MARK" 2>/dev/null)" != "$APOLLO_ID" ]; then
-            # Новая process identity: сначала fail-closed, затем attach. Старый identity этим не
-            # затрагивается; process-level sentinel в JS защищает от duplicate hook при потере marker.
-            if reset_apollo_liveness; then
-                rm -f "$APOLLO_MARK"
-                if [ -f "$APOLLO" ]; then
-                    inject_verified_marker "$APOLLO_PID" "$APOLLO_TARGET" "$APOLLO" \
-                        "$APOLLO_LOG" "$APOLLO_MARK" "$APOLLO_READY_MARKER"
+        rm -f "$APOLLO_DISABLED_MARK"
+        # Safety-sensitive legacy attach: exact boot+cmdline+starttime, agent marker, atomic PID marker.
+        APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
+        APOLLO_PID=${APOLLO_PID%% *}
+        if [ -z "$APOLLO_PID" ]; then
+            # Eternalized agent умер вместе с target: немедленно закрываем Global gate, не ждём TTL Native.
+            # Down-marker ограничивает idempotent Settings writes, но создаётся лишь после их успеха.
+            if [ ! -f "$APOLLO_DOWN_MARK" ] || [ -f "$APOLLO_MARK" ]; then
+                if reset_apollo_liveness; then
+                    echo 1 > "$APOLLO_DOWN_MARK"
+                else
+                    logs "apollo target gone: liveness reset FAIL (retry next loop)"
                 fi
-            else
-                logs "apollo new identity: liveness reset FAIL (attach deferred)"
+            fi
+            if [ -f "$APOLLO_MARK" ] && [ -f "$APOLLO_DOWN_MARK" ]; then
+                rm -f "$APOLLO_MARK"
+                logs "apollo target gone: liveness reset"
+            fi
+        else
+            rm -f "$APOLLO_DOWN_MARK"
+            APOLLO_ID=$(target_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null)
+            if [ -n "$APOLLO_ID" ] && [ "$(cat "$APOLLO_MARK" 2>/dev/null)" != "$APOLLO_ID" ]; then
+                # Новая process identity: сначала fail-closed, затем attach. Старый identity этим не
+                # затрагивается; process-level sentinel в JS защищает от duplicate hook при потере marker.
+                if reset_apollo_liveness; then
+                    rm -f "$APOLLO_MARK"
+                    if [ -f "$APOLLO" ]; then
+                        inject_verified_marker "$APOLLO_PID" "$APOLLO_TARGET" "$APOLLO" \
+                            "$APOLLO_LOG" "$APOLLO_MARK" "$APOLLO_READY_MARKER"
+                    fi
+                else
+                    logs "apollo new identity: liveness reset FAIL (attach deferred)"
+                fi
             fi
         fi
     fi

@@ -84,80 +84,54 @@ checksum, Android API 30, наличие ожидаемых адресов `172.
 Прошивки с `/vendor/overlay/config/config.xml` намеренно отклоняются: автоматически редактировать
 OEM-порядок RRO небезопасно.
 
-## Frida-перехват Apollo/ADAS (только full)
+## Apollo/ADAS: direct-only по умолчанию (только full)
 
-ADAS (Advanced Driver-Assistance Systems) — функции помощи водителю; Apollo здесь означает штатный
-контур подписки производителя в VehicleSetting, а не внешний сервис Apollo.io.
+`apollo_tech.js` остаётся в full-архиве как legacy/диагностический инструмент, но текущий
+direct-only режим не инжектит его в `com.qinggan.app.vehiclesetting`. Прямой H97X Binder-контур
+Native от VehicleSetting/Frida profile не зависит.
 
-`apollo_tech.js` подключается циклом процесса-наблюдателя `load.bin` к
-`com.qinggan.app.vehiclesetting`. По умолчанию он пассивен: отсутствующий либо равный `0` главный
-переключатель `Settings.Global open_voyah_apollo_master` сохраняет
-штатный запрос подписки и не инициирует дополнительных ADAS-запросов. Значение `1` включает подмену
-ответа подписки; синхронизация выполняется только штатным `asyncQueryAdasSubData()`.
+`load.bin` разрешает attach только при точном
+`Settings.Global open_voyah_apollo_legacy_hook_enabled=1`. Отсутствующее, нечитаемое, `0`
+или любое другое значение fail-closed: master, profile и heartbeat сбрасываются, attach не
+выполняется. Если PID-marker доказывает наличие нашего агента в точно той же process
+identity, переход `1` → `0` однократно выгружает его через `am force-stop`. Сам JS повторяет
+проверку opt-in до SHA-256 и разрешения OEM-классов. PID-marker v2 включает boot UUID;
+старый marker без UUID никогда не является основанием для `force-stop` после reboot.
 
-Перехват публикует диагностику профиля по принципу fail-closed («при ошибке выключено») в
-`open_voyah_apollo_asc`, `open_voyah_apollo_sdb` и `open_voyah_apollo_profile_supported`. ASC и SDB —
-точные имена штатных полей онлайн-конфигурации; их полные расшифровки в исходном приложении не указаны.
-Метка активности
-`open_voyah_apollo_profile_heartbeat` обновляется по монотонным часам каждые 30 секунд; потребитель
-считает значения протухшими через 90 секунд. До публикации профиля и любого запроса включения перехват
-проверяет точные SHA-256 (Secure Hash Algorithm 256, 256-битные контрольные суммы) установленных
-VehicleSetting и CanBusService; изменение APK закрывает защитный допуск. Диагностические логи:
-`logcat -s VoyahApollo VOYAH`, `/data/local/tmp/voyah_apollo.txt` и общий
-`/data/local/tmp/voyah_load.txt`. Процесс-наблюдатель считает подключение успешным только после точного
-маркера `[apollo] hook ready` (как для активного, так и для безопасного штатного режима без подмены);
-Apollo-лог ротируется в `.txt.1` при размере 1 MiB (мебибайт, 1 048 576 байт).
+При явном opt-in остаются legacy-gate: `open_voyah_apollo_master=1`, точные pinned SHA-256
+VehicleSetting/CanBusService и поддерживаемый профиль. На direct H97X generic `onVehicleStateChanged` не
+хукается даже в диагностическом режиме. На legacy 97C callback фильтруется до main queue
+только для `HUM_VCU_READY=1`/`BMS_STATE=3`; CAN burst ограничен текущим и одним latest
+trailing dispatch. Сам legacy generic hook всё ещё входит в GumJS на каждом callback;
+числовой фильтр убирает лишь строки, main Runnable и тяжёлую работу для нецелевых events.
 
-### Установка, первая диагностика и откат
+### Установка и диагностика
 
-1. Поставить автомобиль на `P` (Parking, стоянка), включить стояночный тормоз, обеспечить стабильное
-   питание 12 В и
-   убедиться, что `adb devices` показывает ровно одно устройство. До установки оставить главный
-   переключатель Apollo выключенным (`open_voyah_apollo_master=0`). Дорожная проверка для первичной
-   диагностики не нужна. Full-установщик также сам запишет `0`, проверит точное чтение обратно и при
-   любой ошибке остановится до `disable-verity` и записи в `/system`; stale-значение `1` от предыдущей
-   версии не сохраняется. Затем установщик проверит владельца разрешения
-   `com.qinggan.permission.WRITE_CANBUS`: допустимы отсутствие разрешения либо
-   `sourcePackage=ru.big.town.anative`. Старый `ru.kachalin.voyahtweaks` и любой иной владелец —
-   несовместимый совместно установленный пакет, при котором установка останавливается. CAN
-   (Controller Area Network) — внутренняя автомобильная шина; `WRITE_CANBUS` — имя разрешения на
-   запись через её штатный Android-сервис.
-2. Запустить full `install.sh` либо `install.bat` и сохранить созданную папку `backup/` целиком: в ней
-   хранится резервная копия исходного `apollo_tech.js` либо маркер его исходного отсутствия. Не
-   смешивать папки `backup/` от разных автомобилей или версий комплекта.
-3. После перезагрузки при значении главного переключателя `0` проверить
-   `open_voyah_apollo_profile_supported`, свежесть
-   `open_voyah_apollo_profile_heartbeat`, маркер `[apollo] hook ready` в
-   `/data/local/tmp/voyah_apollo.txt` и отсутствие `install_failed`/повторных подключений в логах. Только
-   затем разрешать главный переключатель через UI (user interface, интерфейс приложения); все проверки
-   выполнять на стоящем автомобиле. Команда
-   `adb shell dumpsys package ru.big.town.anative | grep -F 'com.qinggan.permission.WRITE_CANBUS: granted=true'`
-   должна найти строку `granted=true` («разрешено»), а
-   `adb shell dumpsys package permissions | grep -A 8 -F 'Permission [com.qinggan.permission.WRITE_CANBUS]'`
-   — показать `sourcePackage=ru.big.town.anative` и `prot=signature` (разрешение выдаётся только
-   приложению с совместимой цифровой подписью).
-4. Статическую проверку TLC выполнить в той же стояночной сессии: открыть Apollo Tech с выключенным
-   главным переключателем; убедиться, что CAN подключён, профиль совместим, селектор остаётся в `P`,
-   а значения PLC и ANP известны. TLC (Trigger Lane Change) — пользовательская функция запуска
-   перестроения; фактически записываемое штатное состояние называется `PLC_SWITCH`, причём полная
-   расшифровка PLC в исходном приложении не указана. Индикаторы TLC и `PLC-SA` — только читаемые
-   защитные допуски `TLC_FUNC_ENABLE` и `PLC_FUNC_ENABLE_SA`, а не записываемые переключатели. `SA` —
-   штатный суффикс допуска; его расшифровка в исходном приложении не указана. ANP — связанный штатный
-   переключатель; его полная расшифровка также не указана. После включения главного переключателя
-   дождаться значений `2` («разрешено» в штатной кодировке) одновременно для TLC и `PLC-SA`, а также
-   отсутствия ожидающей операции. Только на неподвижном автомобиле в `P` один раз изменить TLC через
-   UI (это одна запись `PLC_SWITCH`), подождать не менее 3 секунд до callback («обратного вызова») и
-   контрольного чтения, затем вернуть TLC/`PLC_SWITCH` в `OFF` («выключено»). ANP при восстановлении
-   обязан быть `OFF`; главный переключатель Apollo также выключить в этой же сессии.
-5. Для отката сначала выключить главный переключатель, затем запустить соответствующий full
-   `remove.sh`/`remove.bat` из той
-   же папки рядом с её `backup/`. Скрипт удаления проверяет фактический `0`, даёт живому перехвату
-   3 секунды на попытку штатного повторного запроса без ложного подтверждения и симметрично
-   восстанавливает либо удаляет Apollo-файл. В рабочем цикле повторный запрос ограничен максимум
-   тремя попытками до наблюдения непустого штатного ответа.
+1. Full-установщик до `disable-verity` и любых `/system` mutations записывает и читает обратно
+   `0` для legacy opt-in, master, profile и heartbeat. Любая ошибка останавливает установку до
+   записи в `/system`.
+2. После перезагрузки `open_voyah_apollo_legacy_hook_enabled`, master, profile и heartbeat должны
+   быть равны `0`; `/data/local/tmp/voyah_apollo.disabled` создан, а `voyah_apollo.pid` отсутствует.
+   `[apollo] hook ready` в direct-only режиме не ожидается: агент не загружался.
+3. Legacy-перехват включать только для отдельной стояночной диагностики:
 
-Эта процедура не включает дорожный тест. Функциональную проверку в движении допускается планировать
-только отдельно, на закрытой площадке или закрытом курсе и после успешной статической диагностики.
+   ```sh
+   adb shell settings put global open_voyah_apollo_legacy_hook_enabled 1
+   adb shell am force-stop com.qinggan.app.vehiclesetting
+   ```
+
+   После этого открыть VehicleSetting и проверять `logcat -s VoyahApollo VOYAH`,
+   `/data/local/tmp/voyah_apollo.txt` и `[apollo] hook ready`. Этот opt-in не нужен для direct TLC/GLA/TSR.
+4. Выключение legacy-диагностики:
+
+   ```sh
+   adb shell settings put global open_voyah_apollo_legacy_hook_enabled 0
+   ```
+
+   Watchdog закроет gate и выгрузит подтверждённый агент. Для отката запустить full
+   `remove.sh`/`remove.bat` из той же папки рядом с её `backup/`.
+
+Все первичные проверки выполняются на неподвижном автомобиле в `P` со стояночным тормозом.
 
 ## Версия в установщиках
 

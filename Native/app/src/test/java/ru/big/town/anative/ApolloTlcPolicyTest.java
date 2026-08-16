@@ -8,10 +8,6 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 public class ApolloTlcPolicyTest {
-    private static ApolloTlcPolicy.Snapshot valid(int anp) {
-        return new ApolloTlcPolicy.Snapshot(1, 0, anp, 2, 2);
-    }
-
     @Test
     public void pinnedSignalMappingMatchesAllowListedProfile() {
         assertEquals(277, ApolloTlcPolicy.Signal.TSR_SWITCH.id);
@@ -27,6 +23,44 @@ public class ApolloTlcPolicyTest {
         assertEquals(ApolloTlcPolicy.Signal.PLC_SWITCH,
                 ApolloTlcPolicy.Signal.fromId(1135));
         assertNull(ApolloTlcPolicy.Signal.fromId(9999));
+    }
+
+    @Test
+    public void irrelevantCanBurstNeverResolvesToApolloWork() {
+        for (int id = 2_000; id < 3_000; id++) {
+            assertNull(ApolloTlcPolicy.Signal.fromId(id));
+        }
+    }
+
+    @Test
+    public void targetedReadbackNeedsPeerOnlyBeforeCompositeDisable() {
+        assertTrue(ApolloTlcPolicy.readbackNeedsPeerSwitch(
+                ApolloTlcPolicy.Signal.PLC_SWITCH, ApolloTlcPolicy.MODULE_OFF));
+        assertTrue(ApolloTlcPolicy.readbackNeedsPeerSwitch(
+                ApolloTlcPolicy.Signal.GLA_SWITCH, ApolloTlcPolicy.MODULE_OFF));
+        assertFalse(ApolloTlcPolicy.readbackNeedsPeerSwitch(
+                ApolloTlcPolicy.Signal.PLC_SWITCH, ApolloTlcPolicy.MODULE_ON));
+        assertFalse(ApolloTlcPolicy.readbackNeedsPeerSwitch(
+                ApolloTlcPolicy.Signal.TSR_SWITCH, ApolloTlcPolicy.MODULE_OFF));
+        assertFalse(ApolloTlcPolicy.readbackNeedsPeerSwitch(
+                ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH,
+                ApolloTlcPolicy.MODULE_OFF));
+    }
+
+    @Test
+    public void wakeReassertIsEdgeTriggeredForEligibleWakeStates() {
+        assertTrue(ApolloTlcPolicy.shouldScheduleWakeReassert(
+                ApolloTlcPolicy.Signal.HUM_VCU_READY, ApolloTlcPolicy.UNKNOWN, 1));
+        assertFalse(ApolloTlcPolicy.shouldScheduleWakeReassert(
+                ApolloTlcPolicy.Signal.HUM_VCU_READY, 1, 1));
+        assertFalse(ApolloTlcPolicy.shouldScheduleWakeReassert(
+                ApolloTlcPolicy.Signal.HUM_VCU_READY, 1, 0));
+        assertTrue(ApolloTlcPolicy.shouldScheduleWakeReassert(
+                ApolloTlcPolicy.Signal.BMS_STATE, 2, 3));
+        assertFalse(ApolloTlcPolicy.shouldScheduleWakeReassert(
+                ApolloTlcPolicy.Signal.BMS_STATE, 3, 3));
+        assertFalse(ApolloTlcPolicy.shouldScheduleWakeReassert(
+                ApolloTlcPolicy.Signal.TSR_SWITCH, 0, 1));
     }
 
     @Test
@@ -85,86 +119,19 @@ public class ApolloTlcPolicyTest {
     }
 
     @Test
-    public void profileNeedsFullBothApkHashesHookAndRuntimeProfile() {
-        assertTrue(ApolloTlcPolicy.profileSupported(
-                true, true, true, true, true, true, true));
-        assertFalse(ApolloTlcPolicy.profileSupported(
-                false, true, true, true, true, true, true));
-        assertFalse(ApolloTlcPolicy.profileSupported(
-                true, false, true, true, true, true, true));
-        assertFalse(ApolloTlcPolicy.profileSupported(
-                true, true, false, true, true, true, true));
-        assertFalse(ApolloTlcPolicy.profileSupported(
-                true, true, true, false, true, true, true));
-        assertFalse(ApolloTlcPolicy.profileSupported(
-                true, true, true, true, false, true, true));
-        assertFalse(ApolloTlcPolicy.profileSupported(
-                true, true, true, true, true, false, true));
-        assertFalse(ApolloTlcPolicy.profileSupported(
-                true, true, true, true, true, true, false));
-    }
-
-    @Test
-    public void heartbeatRejectsMissingFutureAndStaleValues() {
-        long now = 1_000_000L;
-        assertFalse(ApolloTlcPolicy.heartbeatFresh(now, -1L));
-        assertFalse(ApolloTlcPolicy.heartbeatFresh(now, 0L));
-        assertFalse(ApolloTlcPolicy.heartbeatFresh(now, now + 1L));
-        assertTrue(ApolloTlcPolicy.heartbeatFresh(now, now));
-        assertTrue(ApolloTlcPolicy.heartbeatFresh(
-                now, now - ApolloTlcPolicy.PROFILE_HEARTBEAT_MAX_AGE_MS));
-        assertFalse(ApolloTlcPolicy.heartbeatFresh(
-                now, now - ApolloTlcPolicy.PROFILE_HEARTBEAT_MAX_AGE_MS - 1L));
-    }
-
-    @Test
-    public void masterIsNeverEffectiveWithoutSupportedFullProfile() {
-        assertTrue(ApolloTlcPolicy.effectiveMaster(true, true, true, true, false, true));
-        assertFalse(ApolloTlcPolicy.effectiveMaster(false, true, true, true, false, true));
-        assertFalse(ApolloTlcPolicy.effectiveMaster(true, false, true, true, false, true));
-        assertFalse(ApolloTlcPolicy.effectiveMaster(true, true, false, true, false, true));
-        assertFalse(ApolloTlcPolicy.effectiveMaster(true, true, true, false, false, true));
-        // A failed/ambiguous ON write leaves this in-memory fail-safe asserted even if an old
-        // persisted value still reads as 1.
-        assertFalse(ApolloTlcPolicy.effectiveMaster(true, true, true, true, true, true));
-        assertFalse(ApolloTlcPolicy.effectiveMaster(true, true, true, true, false, false));
-        // The value bit remains truthful only when its accompanying known bit is true.
+    public void reportedMasterValueRequiresKnownBit() {
         assertTrue(ApolloTlcPolicy.reportedMasterEnabled(true, true));
         assertFalse(ApolloTlcPolicy.reportedMasterEnabled(true, false));
         assertFalse(ApolloTlcPolicy.reportedMasterEnabled(false, true));
     }
 
     @Test
-    public void binderLifecycleRequiresFullAndBothCompletedHashPins() {
-        assertTrue(ApolloTlcPolicy.binderProfilePinned(true, true, true, true, true));
-        assertFalse(ApolloTlcPolicy.binderProfilePinned(false, true, true, true, true));
-        assertFalse(ApolloTlcPolicy.binderProfilePinned(true, false, true, true, true));
-        assertFalse(ApolloTlcPolicy.binderProfilePinned(true, true, false, true, true));
-        assertFalse(ApolloTlcPolicy.binderProfilePinned(true, true, true, false, true));
-        assertFalse(ApolloTlcPolicy.binderProfilePinned(true, true, true, true, false));
-    }
-
-    @Test
-    public void masterOnRequiresLiveReadCallbackParkingAndValidTelemetry() {
-        assertEquals("", ApolloTlcPolicy.masterEnableBlockReason(
-                true, true, true, true, false, 0, valid(1)));
-        assertEquals("can_disconnected", ApolloTlcPolicy.masterEnableBlockReason(
-                true, true, false, true, false, 0, valid(1)));
-        assertEquals("state_read_failed", ApolloTlcPolicy.masterEnableBlockReason(
-                true, true, true, false, false, 0, valid(1)));
-        assertEquals("write_pending", ApolloTlcPolicy.masterEnableBlockReason(
-                true, true, true, true, true, 0, valid(1)));
-        assertEquals("gear_not_parking", ApolloTlcPolicy.masterEnableBlockReason(
-                true, true, true, true, false, 3, valid(1)));
-        assertEquals("invalid_plc_switch", ApolloTlcPolicy.masterEnableBlockReason(
-                true, true, true, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(-1, 0, 1, 2, 2)));
-        assertEquals("invalid_tlc_capability", ApolloTlcPolicy.masterEnableBlockReason(
-                true, true, true, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(1, 0, 1, -1, -1)));
-        assertEquals("invalid_tlc_capability", ApolloTlcPolicy.masterEnableBlockReason(
-                true, true, true, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(1, 0, 1, 10, -1)));
+    public void binderLifecycleRequiresCompletedMatchingSchema() {
+        assertTrue(ApolloTlcPolicy.binderProfilePinned(true, true, true, true));
+        assertFalse(ApolloTlcPolicy.binderProfilePinned(false, true, true, true));
+        assertFalse(ApolloTlcPolicy.binderProfilePinned(true, false, true, true));
+        assertFalse(ApolloTlcPolicy.binderProfilePinned(true, true, false, true));
+        assertFalse(ApolloTlcPolicy.binderProfilePinned(true, true, true, false));
     }
 
     @Test
@@ -198,71 +165,67 @@ public class ApolloTlcPolicyTest {
     }
 
     @Test
+    public void staleConnectionAndCallbackEpochsAreRejected() {
+        assertTrue(ApolloTlcPolicy.connectionEventCurrent(
+                false, 7, 7, true));
+        assertFalse(ApolloTlcPolicy.connectionEventCurrent(
+                true, 7, 7, true));
+        assertFalse(ApolloTlcPolicy.connectionEventCurrent(
+                false, 8, 7, true));
+        assertFalse(ApolloTlcPolicy.connectionEventCurrent(
+                false, 7, 7, false));
+
+        assertTrue(ApolloTlcPolicy.callbackEventCurrent(
+                false, 11, 11, true));
+        assertFalse(ApolloTlcPolicy.callbackEventCurrent(
+                true, 11, 11, true));
+        assertFalse(ApolloTlcPolicy.callbackEventCurrent(
+                false, 12, 11, true));
+        assertFalse(ApolloTlcPolicy.callbackEventCurrent(
+                false, 11, 11, false));
+    }
+
+    @Test
+    public void writeSessionRequiresCurrentWriteAndBindingGenerations() {
+        assertTrue(ApolloTlcPolicy.writeSessionCurrent(
+                false, true, 4, 4, 9, 9));
+        assertFalse(ApolloTlcPolicy.writeSessionCurrent(
+                true, true, 4, 4, 9, 9));
+        assertFalse(ApolloTlcPolicy.writeSessionCurrent(
+                false, false, 4, 4, 9, 9));
+        assertFalse(ApolloTlcPolicy.writeSessionCurrent(
+                false, true, 5, 4, 9, 9));
+        assertFalse(ApolloTlcPolicy.writeSessionCurrent(
+                false, true, 4, 4, 10, 9));
+    }
+
+    @Test
     public void validEnablePassesAllGates() {
-        assertEquals("", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0, valid(2), true));
+        assertEquals("", ApolloTlcPolicy.directTlcBlockReason(
+                true, true, true, false, 0, ApolloTlcPolicy.MODULE_ON));
     }
 
     @Test
     public void everyTransportAndSafetyGateFailsClosed() {
-        ApolloTlcPolicy.Snapshot snapshot = valid(1);
-        assertEquals("unsupported_light", ApolloTlcPolicy.writeBlockReason(
-                false, true, true, false, true, false, 0, snapshot, true));
-        assertEquals("profile_unsupported", ApolloTlcPolicy.writeBlockReason(
-                true, false, true, false, true, false, 0, snapshot, true));
-        assertEquals("can_disconnected", ApolloTlcPolicy.writeBlockReason(
-                true, true, false, false, true, false, 0, snapshot, true));
-        assertEquals("master_disabled", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, false, false, 0, snapshot, true));
-        assertEquals("write_pending", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, true, 0, snapshot, true));
-        assertEquals("gear_not_parking", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 3, snapshot, true));
+        assertEquals("unsupported_light", ApolloTlcPolicy.directTlcBlockReason(
+                false, true, true, false, 0, ApolloTlcPolicy.MODULE_ON));
+        assertEquals("profile_unsupported", ApolloTlcPolicy.directTlcBlockReason(
+                true, false, true, false, 0, ApolloTlcPolicy.MODULE_ON));
+        assertEquals("can_disconnected", ApolloTlcPolicy.directTlcBlockReason(
+                true, true, false, false, 0, ApolloTlcPolicy.MODULE_ON));
+        assertEquals("write_pending", ApolloTlcPolicy.directTlcBlockReason(
+                true, true, true, true, 0, ApolloTlcPolicy.MODULE_ON));
+        assertEquals("gear_not_parking", ApolloTlcPolicy.directTlcBlockReason(
+                true, true, true, false, 3, ApolloTlcPolicy.MODULE_ON));
     }
 
     @Test
-    public void invalidAndErrorTelemetryBlocksWrite() {
-        assertEquals("invalid_plc_switch", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(-1, 0, 1, 2, 2), true));
-        assertEquals("plc_status_error", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(1, 7, 1, 2, 2), true));
-        assertEquals("invalid_anp_switch", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(1, 0, -1, 2, 2), true));
-        assertEquals("invalid_tlc_capability", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(1, 0, 1, -1, 2), true));
-        assertEquals("invalid_plc_capability_sa", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(1, 0, 1, 2, -1), true));
-    }
-
-    @Test
-    public void legacyEnableRequiresCapabilitiesButDisableDoesNotDependOnAnp() {
-        assertEquals("capability_disabled", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0,
-                new ApolloTlcPolicy.Snapshot(1, 0, 1, 1, 2), true));
-        assertEquals("", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0, valid(2), false));
-        assertEquals("", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, false, true, false, 0, valid(1), false));
-    }
-
-    @Test
-    public void directTlcNeedsNoMasterCapabilitiesStatusOrAnp() {
-        ApolloTlcPolicy.Snapshot h97x =
-                new ApolloTlcPolicy.Snapshot(1, -1, -1, -1, -1);
-        assertEquals("", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, true, false, false, 0, h97x, true));
-        assertEquals("", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, true, false, false, 0, h97x, false));
-        assertEquals("gear_not_parking", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, true, false, false, 3, h97x, true));
-        assertEquals("invalid_plc_switch", ApolloTlcPolicy.writeBlockReason(
-                true, true, true, true, false, false, 0,
-                new ApolloTlcPolicy.Snapshot(-1, -1, -1, -1, -1), true));
+    public void directTlcRejectsUnknownSwitchState() {
+        assertEquals("invalid_plc_switch", ApolloTlcPolicy.directTlcBlockReason(
+                true, true, true, false, 0, ApolloTlcPolicy.UNKNOWN));
+        assertEquals("invalid_plc_switch",
+                ApolloTlcPolicy.directTlcStateError(ApolloTlcPolicy.UNKNOWN));
+        assertEquals("", ApolloTlcPolicy.directTlcStateError(ApolloTlcPolicy.MODULE_OFF));
     }
 
     @Test

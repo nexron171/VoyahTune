@@ -43,6 +43,17 @@ if not "%APOLLO_MASTER_STATE%"=="0" (
     echo !!! Apollo master не подтвердил состояние 0 - удаление прервано до выгрузки hook.
     exit /b 1
 )
+adb.exe shell settings put global open_voyah_apollo_legacy_hook_enabled 0
+if errorlevel 1 (
+    echo !!! Не удалось закрыть legacy Apollo opt-in - удаление прервано до выгрузки hook.
+    exit /b 1
+)
+set APOLLO_LEGACY_OPT_IN_STATE=
+for /f "delims=" %%i in ('adb.exe shell settings get global open_voyah_apollo_legacy_hook_enabled 2^>nul') do set APOLLO_LEGACY_OPT_IN_STATE=%%i
+if not "%APOLLO_LEGACY_OPT_IN_STATE%"=="0" (
+    echo !!! Legacy Apollo opt-in не подтвердил 0 - удаление прервано.
+    exit /b 1
+)
 REM Живой hook получает короткое окно на один best-effort штатный subscription resync.
 timeout /t 3 /nobreak >nul
 
@@ -130,7 +141,7 @@ if exist "backup\frida-inject" (
     adb.exe shell "rm -f /data/local/bin/frida-inject"
 )
 REM Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
-adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_swk.*.try /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"
+adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_swk.*.try /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"
 REM Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка
 REM не подхватила старые назначения до первой синхронизации из RestoreMode.
 adb.exe shell settings delete global voyahtune_dock1 2>nul
@@ -146,6 +157,7 @@ adb.exe shell settings delete global voyahtune_steerVoiceLong 2>nul
 adb.exe shell settings delete global voyahtune_steerPhoneShort 2>nul
 adb.exe shell settings delete global voyahtune_steerPhoneLong 2>nul
 adb.exe shell settings delete global open_voyah_apollo_master 2>nul
+adb.exe shell settings delete global open_voyah_apollo_legacy_hook_enabled 2>nul
 adb.exe shell settings delete global open_voyah_apollo_asc 2>nul
 adb.exe shell settings delete global open_voyah_apollo_sdb 2>nul
 adb.exe shell settings delete global open_voyah_apollo_profile_supported 2>nul

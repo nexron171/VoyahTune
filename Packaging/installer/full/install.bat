@@ -5,7 +5,7 @@ REM Установка Open Voyah v@VERSION@. Запускать из папки
 REM Ставит: Native (priv-app) + RestoreMode, whitelist привилегий, freeform, и Frida-обвязку —
 REM   1) кнопки руля (steeringwheelkeys.js в keymanager: звёздочка 3090 и DVR 173, один onKeyEvent),
 REM   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS),
-REM   3) Apollo/ADAS master-gate (apollo_tech.js в com.qinggan.app.vehiclesetting).
+REM   3) dormant legacy Apollo diagnostic (direct-only не инжектит VehicleSetting).
 REM Boot-хук = свои RC-сервисы /system/etc/init/voyahtune.*.rc (setenforce 0 + load.bin watchdog).
 REM Штатный /system/etc/init.logcat.sh не меняем, кроме узкой миграции нашего legacy-файла.
 for %%F in (load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
@@ -17,20 +17,17 @@ adb.exe root
 adb.exe wait-for-device
 adb.exe root
 
-REM Update не наследует stale ON: до disable-verity и любых /system mutations принудительно ставим 0.
-echo === Preflight безопасного состояния Apollo master ===
-adb.exe shell settings put global open_voyah_apollo_master 0
-if errorlevel 1 (
-    echo !!! Не удалось выключить Apollo master - установка прервана до записи в /system.
-    exit /b 1
-)
-set APOLLO_INSTALL_MASTER_STATE=
-for /f "delims=" %%i in ('adb.exe shell settings get global open_voyah_apollo_master 2^>nul') do set APOLLO_INSTALL_MASTER_STATE=%%i
-if not "%APOLLO_INSTALL_MASTER_STATE%"=="0" (
-    echo !!! Apollo master не подтвердил состояние 0 - установка прервана до записи в /system.
-    exit /b 1
-)
-echo   Apollo master=0 подтверждён.
+REM Direct-only update не наследует legacy opt-in/stale gate.
+echo === Preflight direct-only Apollo ^(VehicleSetting hook OFF^) ===
+call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_master
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_profile_supported
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
+if errorlevel 1 exit /b 1
+echo   Legacy opt-in, master, profile и heartbeat закрыты.
 
 REM Native full сам объявляет signature-permission для fail-closed CAN writer. Проверяем первого
 REM владельца ДО disable-verity/remount: старый VoyahTweaks сделал бы новую установку несовместимой.
@@ -127,7 +124,7 @@ if errorlevel 1 exit /b 1
 
 REM ВАЖНО: всё в /data/local/bin доступно загрузочному RC-сервису.
 REM /sdcard монтируется позже, поэтому load.bin ТАМ держать нельзя (не запустится на буте).
-echo === Frida-инфраструктура (руль + VirtualDisplay + Apollo/ADAS) ===
+echo === Frida-инфраструктура (руль + VirtualDisplay + dormant Apollo diagnostic) ===
 adb.exe shell "mkdir -p /data/local/bin"
 if errorlevel 1 exit /b 1
 call :install_required_data_file load.bin /data/local/bin/load.bin 755
@@ -270,6 +267,20 @@ if errorlevel 1 (
 echo Installation complete.
 exit /b 0
 goto :eof
+
+:put_apollo_safe_key
+adb.exe shell settings put global %~1 0
+if errorlevel 1 (
+    echo !!! Не удалось записать %~1=0 - установка прервана до записи в /system.
+    exit /b 1
+)
+set "APOLLO_SAFE_STATE="
+for /f "delims=" %%i in ('adb.exe shell settings get global %~1 2^>nul') do set "APOLLO_SAFE_STATE=%%i"
+if not "%APOLLO_SAFE_STATE%"=="0" (
+    echo !!! %~1 не подтвердил 0 - установка прервана до записи в /system.
+    exit /b 1
+)
+exit /b 0
 
 REM Гарантирует rw на /system: adb remount (overlay) + сырой remount, затем ПРОБНЫЙ push в /system.
 REM RWSTATE=RW если пробная запись прошла (система записываема), иначе RO. Пробный файл сразу удаляем.
