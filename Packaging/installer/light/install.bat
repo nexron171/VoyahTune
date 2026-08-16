@@ -7,16 +7,6 @@ REM LIGHT = только не-root функциональность: режим�
 REM поездки, Power Hold, режим мойки, звук пешеходов, плавающая кнопка «Назад», установка приложений,
 REM ярлыки приложений (обычный запуск). БЕЗ сплита/дока/VirtualDisplay, БЕЗ Frida и любой root-инъекции,
 REM БЕЗ раздела «Кнопки на руле». init.logcat.sh системы НЕ трогаем.
-set "YDNS_HELPER=%~dp0dns-overlay.bat"
-if not exist "%YDNS_HELPER%" (
-    echo !!! Не найден dns-overlay.bat - установка прервана до изменения устройства.
-    exit /b 1
-)
-call "%YDNS_HELPER%" prepare-install
-if errorlevel 1 (
-    echo !!! Комплект DNS-overlay неполон - установка прервана до изменения устройства.
-    exit /b 1
-)
 
 adb.exe root
 adb.exe wait-for-device
@@ -42,10 +32,10 @@ adb.exe shell getprop sys.boot_completed 2>nul | findstr /b "1" >nul
 if not errorlevel 1 goto :booted_ovw
 set /a _bi+=1
 if %_bi% GEQ 60 goto :booted_ovw
-timeout /t 5 >nul
+timeout /t 5 /nobreak >nul
 goto :wait_boot_ovw
 :booted_ovw
-timeout /t 3 >nul
+timeout /t 3 /nobreak >nul
 adb.exe root
 adb.exe wait-for-device
 adb.exe root
@@ -96,7 +86,23 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo === DNS для доступа через T-Box ===
+echo === Опциональный DNS для доступа через T-Box ===
+set "YDNS_ANSWER=n"
+set /p "YDNS_ANSWER=Install Yandex DNS? y/n "
+REM Не подставляем ввод пользователя обратно в cmd-синтаксис.
+set YDNS_ANSWER 2>nul | findstr.exe /i /x /c:"YDNS_ANSWER=y" >nul
+if errorlevel 1 goto :ovw_ydns_skip
+
+set "YDNS_HELPER=%~dp0dns-overlay.bat"
+if not exist "%YDNS_HELPER%" (
+    echo !!! Не найден dns-overlay.bat - финальная перезагрузка отменена.
+    exit /b 1
+)
+call "%YDNS_HELPER%" prepare
+if errorlevel 1 (
+    echo !!! Комплект DNS-overlay неполон - финальная перезагрузка отменена.
+    exit /b 1
+)
 set "YDNS_STATUS_FILE=%TEMP%\open_voyah_ydns_%RANDOM%_%RANDOM%.tmp"
 call "%YDNS_HELPER%" status > "%YDNS_STATUS_FILE%"
 if errorlevel 1 (
@@ -111,21 +117,26 @@ if not defined YDNS_CURRENT (
     echo !!! DNS-overlay helper вернул пустое состояние - финальная перезагрузка отменена.
     exit /b 1
 )
-echo Текущее состояние DNS-overlay: %YDNS_CURRENT%
-set "YDNS_REQUEST="
-call "%YDNS_HELPER%" select "%YDNS_CURRENT%"
+REM Проверяем device output как данные до любой подстановки в cmd-строку.
+set YDNS_CURRENT 2>nul | findstr.exe /i /x /c:"YDNS_CURRENT=on" /c:"YDNS_CURRENT=off" /c:"YDNS_CURRENT=external" /c:"YDNS_CURRENT=broken" >nul
 if errorlevel 1 (
-    echo !!! Не удалось получить выбор DNS-overlay - финальная перезагрузка отменена.
+    echo !!! DNS-overlay helper вернул неизвестное состояние - финальная перезагрузка отменена.
     exit /b 1
 )
-if not defined YDNS_REQUEST set "YDNS_REQUEST=keep"
-if /i "%YDNS_REQUEST%"=="on" goto :ovw_ydns_on
-if /i "%YDNS_REQUEST%"=="off" goto :ovw_ydns_off
-if /i "%YDNS_REQUEST%"=="keep" goto :ovw_ydns_keep
-echo !!! Неизвестный выбор DNS-overlay: %YDNS_REQUEST%
+echo Текущее состояние DNS-overlay: %YDNS_CURRENT%
+if /i "%YDNS_CURRENT%"=="external" goto :ovw_ydns_keep
+if /i "%YDNS_CURRENT%"=="broken" goto :ovw_ydns_keep
+if /i "%YDNS_CURRENT%"=="on" goto :ovw_ydns_on
+if /i "%YDNS_CURRENT%"=="off" goto :ovw_ydns_on
+echo !!! Не удалось классифицировать состояние DNS-overlay - финальная перезагрузка отменена.
 exit /b 1
 
 :ovw_ydns_on
+call "%YDNS_HELPER%" prepare-install
+if errorlevel 1 (
+    echo !!! Комплект DNS-overlay не прошёл проверку - финальная перезагрузка отменена.
+    exit /b 1
+)
 call "%YDNS_HELPER%" install
 if errorlevel 1 (
     echo !!! Установка DNS-overlay завершилась ошибкой - финальная перезагрузка отменена.
@@ -133,16 +144,12 @@ if errorlevel 1 (
 )
 goto :ovw_ydns_done
 
-:ovw_ydns_off
-call "%YDNS_HELPER%" disable
-if errorlevel 1 (
-    echo !!! Отключение DNS-overlay завершилось ошибкой - финальная перезагрузка отменена.
-    exit /b 1
-)
+:ovw_ydns_keep
+echo DNS-overlay: состояние %YDNS_CURRENT% нельзя безопасно заменить; оставляем его без изменений.
 goto :ovw_ydns_done
 
-:ovw_ydns_keep
-echo DNS-overlay: оставляем текущее состояние без изменений.
+:ovw_ydns_skip
+echo Yandex DNS installation skipped; current DNS state is unchanged.
 
 :ovw_ydns_done
 REM Ребут нужен, чтобы менеджер пакетов перечитал privapp-whitelist для /system/priv-app.
@@ -152,8 +159,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo "Press any key..."
-pause
+echo Installation complete.
 exit /b 0
 goto :eof
 

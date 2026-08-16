@@ -1,6 +1,5 @@
 @echo off
 REM Windows host-side integration for the optional static Yandex DNS RRO.
-REM Intentionally no SETLOCAL: select mode returns YDNS_REQUEST to the calling installer.
 
 set "YDNS_MODE=%~1"
 set "YDNS_DIR=%~dp0"
@@ -11,14 +10,13 @@ set "YDNS_REMOTE_HELPER=/data/local/tmp/open_voyah_dns_overlay.sh"
 set "YDNS_REMOTE_APK=/data/local/tmp/open_voyah_yandex_dns.apk"
 set "YDNS_EXPECTED_SHA256=c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d"
 
-if /i "%YDNS_MODE%"=="select" goto :select
 if /i "%YDNS_MODE%"=="prepare" goto :prepare
 if /i "%YDNS_MODE%"=="prepare-install" goto :prepare_install
 if /i "%YDNS_MODE%"=="status" goto :status
 if /i "%YDNS_MODE%"=="install" goto :install
 if /i "%YDNS_MODE%"=="disable" goto :disable
 if /i "%YDNS_MODE%"=="restore" goto :restore
-echo Использование: dns-overlay.bat ^{prepare^|prepare-install^|status^|select^|install^|disable^|restore^} 1>&2
+echo Использование: dns-overlay.bat ^{prepare^|prepare-install^|status^|install^|disable^|restore^} 1>&2
 exit /b 2
 
 :check_common
@@ -49,7 +47,7 @@ if not exist "%YDNS_DIR%select-yandex-dns.ps1" (
 )
 where powershell.exe >nul 2>nul
 if errorlevel 1 (
-    echo !!! PowerShell не найден: нельзя проверить SHA-256 APK и показать меню со стрелками. 1>&2
+    echo !!! PowerShell не найден: нельзя проверить SHA-256 APK. 1>&2
     exit /b 1
 )
 set "YDNS_HASH_PATH=%YDNS_APK%"
@@ -75,34 +73,6 @@ call :push_helper
 if errorlevel 1 exit /b 1
 "%YDNS_ADB%" shell sh "%YDNS_REMOTE_HELPER%" status
 exit /b %errorlevel%
-
-:select
-set "YDNS_REQUEST="
-if not exist "%YDNS_DIR%select-yandex-dns.ps1" (
-    echo !!! Не найден select-yandex-dns.ps1 1>&2
-    exit /b 1
-)
-where powershell.exe >nul 2>nul
-if errorlevel 1 (
-    echo !!! PowerShell не найден: невозможно показать меню DNS-overlay. 1>&2
-    exit /b 1
-)
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%YDNS_DIR%select-yandex-dns.ps1" -Current "%~2"
-set "YDNS_SELECT_RC=%errorlevel%"
-if "%YDNS_SELECT_RC%"=="10" (
-    set "YDNS_REQUEST=on"
-    exit /b 0
-)
-if "%YDNS_SELECT_RC%"=="11" (
-    set "YDNS_REQUEST=off"
-    exit /b 0
-)
-if "%YDNS_SELECT_RC%"=="12" (
-    set "YDNS_REQUEST=keep"
-    exit /b 0
-)
-echo !!! Интерактивное меню завершилось с кодом %YDNS_SELECT_RC%. 1>&2
-exit /b 1
 
 :install
 call :push_helper
