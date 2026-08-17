@@ -1351,7 +1351,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
     /** Read-only запрос при открытии Apollo Tech: Messenger основной, broadcast — fallback. */
     private void requestApolloState() {
-        if (!BuildConfig.IS_FULL) {
+        if (!BuildConfig.HAS_DIRECT_APOLLO) {
             updateApolloUi();
             return;
         }
@@ -1381,7 +1381,8 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void sendApolloCommand(int what, boolean enabled) {
-        if (!BuildConfig.IS_FULL || !GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+        if (!BuildConfig.HAS_DIRECT_APOLLO
+                || !GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
             apolloError = "Сервис Native не готов";
             updateApolloUi();
             return;
@@ -1411,19 +1412,19 @@ public class AdvanceActivity extends AppCompatActivity {
 
     /** Separate emergency path: an unreadable master must never remove the ability to force OFF. */
     private boolean canForceApolloMasterOff() {
-        return BuildConfig.IS_FULL && apolloHasState && !apolloMasterKnown
+        return BuildConfig.HAS_DIRECT_APOLLO && apolloHasState && !apolloMasterKnown
                 && isApolloServiceReady();
     }
 
     private boolean canChangeApolloTlc(boolean desiredEnabled) {
-        return BuildConfig.IS_FULL && apolloHasState && isApolloServiceReady()
+        return BuildConfig.HAS_DIRECT_APOLLO && apolloHasState && isApolloServiceReady()
                 && apolloCanConnected && apolloProfileSupported && apolloDirectTlcMode
                 && (apolloPlcSwitch == 1 || apolloPlcSwitch == 2)
                 && !apolloPending && apolloGear == 0;
     }
 
     private boolean canChangeApolloTrafficLights() {
-        return BuildConfig.IS_FULL && apolloHasState && isApolloServiceReady()
+        return BuildConfig.HAS_DIRECT_APOLLO && apolloHasState && isApolloServiceReady()
                 && apolloCanConnected && apolloProfileSupported && apolloDirectTlcMode
                 && (apolloGlaSwitch == 1 || apolloGlaSwitch == 2)
                 && !apolloPending;
@@ -1436,7 +1437,7 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private boolean canChangeApolloTrafficSigns() {
-        return BuildConfig.IS_FULL && apolloHasState && isApolloServiceReady()
+        return BuildConfig.HAS_DIRECT_APOLLO && apolloHasState && isApolloServiceReady()
                 && apolloCanConnected && apolloProfileSupported && apolloDirectTlcMode
                 && (apolloTsrSwitch == 1 || apolloTsrSwitch == 2)
                 && !apolloPending;
@@ -1461,11 +1462,14 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void updateApolloUi() {
-        boolean full = BuildConfig.IS_FULL;
+        boolean directApolloAvailable = BuildConfig.HAS_DIRECT_APOLLO;
         if (textApolloFullOnly != null) {
-            textApolloFullOnly.setVisibility(full ? View.GONE : View.VISIBLE);
+            textApolloFullOnly.setVisibility(
+                    directApolloAvailable ? View.GONE : View.VISIBLE);
         }
-        if (apolloControls != null) apolloControls.setAlpha(full ? 1f : 0.45f);
+        if (apolloControls != null) {
+            apolloControls.setAlpha(directApolloAvailable ? 1f : 0.45f);
+        }
 
         syncingApolloUi = true;
         try {
@@ -1514,12 +1518,14 @@ public class AdvanceActivity extends AppCompatActivity {
                     apolloHasState && apolloGlaSwitch == 2 ? 1f : 0.45f);
         }
 
-        if (textApolloStatus != null) textApolloStatus.setText(buildApolloStatus(full));
+        if (textApolloStatus != null) {
+            textApolloStatus.setText(buildApolloStatus(directApolloAvailable));
+        }
         if (textApolloDiagnostics != null) textApolloDiagnostics.setText(buildApolloDiagnostics());
     }
 
-    private String buildApolloStatus(boolean full) {
-        if (!full) return "Функция недоступна в этой версии VoyahTune.";
+    private String buildApolloStatus(boolean directApolloAvailable) {
+        if (!directApolloAvailable) return "Функция недоступна в этой версии VoyahTune.";
         if (!apolloHasState) return "Получаем состояние автомобиля…";
         if (!apolloError.isEmpty()) return formatApolloError(apolloError);
         if (!isApolloServiceReady()) return "Нет связи с автомобилем.";
@@ -2086,7 +2092,7 @@ public class AdvanceActivity extends AppCompatActivity {
         registerReceiver(modeSyncReceiver, new IntentFilter("ru.big.town.anative.MODE_SYNCED"), RECEIVER_EXPORTED);
         registerReceiver(settingSyncReceiver, new IntentFilter("ru.big.town.anative.SETTING_SYNCED"),
                 "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", null, RECEIVER_EXPORTED);
-        if (BuildConfig.IS_FULL) {
+        if (BuildConfig.HAS_DIRECT_APOLLO) {
             registerReceiver(apolloReceiver, new IntentFilter(ACTION_APOLLO_TLC_UPDATE),
                     NATIVE_BIND_PERMISSION, null, RECEIVER_EXPORTED);
         }

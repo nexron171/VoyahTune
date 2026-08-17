@@ -1,6 +1,6 @@
 #!/bin/sh
 # Установка Open Voyah v@VERSION@-LIGHT. Запускать из папки релиза (бэкапы падают в ./backup).
-# LIGHT = только не-root функциональность: режимы вождения, автосвет, прогрев/статусы, дворники,
+# LIGHT = без Frida/root-инъекций: режимы вождения, прямой Binder Apollo, автосвет, прогрев/статусы, дворники,
 # поездки, Power Hold, режим мойки, звук пешеходов, плавающая кнопка «Назад», установка приложений,
 # ярлыки приложений (обычный запуск). БЕЗ сплита/дока/VirtualDisplay, БЕЗ Frida и любой root-инъекции,
 # БЕЗ раздела «Кнопки на руле». init.logcat.sh системы НЕ трогаем.
@@ -18,6 +18,13 @@ for ydns_required in ydns_prepare_helper ydns_query_state choose_yandex_dns inst
         exit 1
     fi
 done
+for LIGHT_REQUIRED_ASSET in native.apk restore_mode.apk \
+        privapp-permissions-ru.big.town.anative.xml; do
+    if [ ! -s "$LIGHT_REQUIRED_ASSET" ]; then
+        echo "!!! Отсутствует или пуст обязательный файл $LIGHT_REQUIRED_ASSET — устройство не изменялось."
+        exit 1
+    fi
+done
 if ! ydns_prepare_helper; then
     echo "!!! Не удалось подготовить DNS-overlay helper — установка прервана."
     exit 1
@@ -26,6 +33,59 @@ fi
 adb root
 adb wait-for-device
 adb root
+
+# Direct Apollo не использует legacy VehicleSetting hook. Закрываем старые opt-in/liveness ключи
+# до disable-verity и любых изменений /system, в том числе при переходе с full на light.
+echo "=== Preflight direct-only Apollo (VehicleSetting hook OFF) ==="
+for APOLLO_SAFE_KEY in \
+        open_voyah_apollo_legacy_hook_enabled \
+        open_voyah_apollo_master \
+        open_voyah_apollo_profile_supported \
+        open_voyah_apollo_profile_heartbeat; do
+    if ! adb shell settings put global "$APOLLO_SAFE_KEY" 0; then
+        echo "!!! Не удалось записать $APOLLO_SAFE_KEY=0 — установка прервана до записи в /system."
+        exit 1
+    fi
+    APOLLO_SAFE_STATE=$(adb shell settings get global "$APOLLO_SAFE_KEY" 2>/dev/null \
+        | tr -d '\r')
+    if [ "$APOLLO_SAFE_STATE" != "0" ]; then
+        echo "!!! $APOLLO_SAFE_KEY не подтвердил 0 — установка прервана до записи в /system."
+        exit 1
+    fi
+done
+echo "  Legacy opt-in, master, profile и heartbeat закрыты."
+
+# Оба флейвора Native владеют signature-разрешением прямой записи в CanBus. Чужой первый владелец
+# сделал бы установленный APK несовместимым, поэтому конфликт проверяется до изменения /system.
+echo "=== Preflight владельца com.qinggan.permission.WRITE_CANBUS ==="
+CANBUS_PERMISSION_DUMP=$(adb shell dumpsys package permissions 2>/dev/null)
+if [ $? -ne 0 ]; then
+    echo "!!! PackageManager permissions недоступны — установка прервана до записи в /system."
+    exit 1
+fi
+case "$CANBUS_PERMISSION_DUMP" in
+    *"Permission [com.qinggan.permission.WRITE_CANBUS]"*)
+        CANBUS_PERMISSION_OWNER=$(printf '%s\n' "$CANBUS_PERMISSION_DUMP" | awk '
+            /Permission \[com\.qinggan\.permission\.WRITE_CANBUS\]/ { in_block=1; next }
+            in_block && /Permission \[/ { exit }
+            in_block && /sourcePackage=/ {
+                sub(/^.*sourcePackage=/, ""); gsub(/[[:space:]]/, ""); print; exit
+            }')
+        if [ "$CANBUS_PERMISSION_OWNER" != "ru.big.town.anative" ]; then
+            if [ -n "$CANBUS_PERMISSION_OWNER" ]; then
+                echo "!!! com.qinggan.permission.WRITE_CANBUS уже принадлежит $CANBUS_PERMISSION_OWNER."
+            else
+                echo "!!! Владелец com.qinggan.permission.WRITE_CANBUS не определён однозначно."
+            fi
+            echo "    Удалите несовместимый пакет и повторите light install; /system ещё не изменялся."
+            exit 1
+        fi
+        echo "  Permission уже принадлежит ru.big.town.anative — совместимое обновление."
+        ;;
+    *)
+        echo "  Permission ещё не объявлен — его создаст Native."
+        ;;
+esac
 
 # --- Гарантируем ЗАПИСЫВАЕМЫЙ /system --------------------------------------------------------
 # Light тоже пишет в /system (priv-app + whitelist привилегий), поэтому подготовка нужна ровно та же,

@@ -61,7 +61,7 @@ for APOLLO_SAFE_KEY in \
 done
 echo "  Legacy opt-in, master, profile и heartbeat закрыты."
 
-# Native full self-owns the signature permission needed by its fail-closed CAN writer. Android keeps
+# Native in both flavors self-owns the signature permission needed by its fail-closed CAN writer. Android keeps
 # the first installed declaration: an old VoyahTweaks owner would silently make our Native incompatible.
 # Check before disable-verity/remount/touch, so a conflict leaves /system unchanged.
 echo "=== Preflight владельца com.qinggan.permission.WRITE_CANBUS ==="
@@ -90,7 +90,7 @@ case "$CANBUS_PERMISSION_DUMP" in
         echo "  Permission уже принадлежит ru.big.town.anative — совместимое обновление."
         ;;
     *)
-        echo "  Permission ещё не объявлен — его создаст full Native."
+        echo "  Permission ещё не объявлен — его создаст Native."
         ;;
 esac
 

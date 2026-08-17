@@ -485,12 +485,11 @@ public final class ApolloTlcService extends Service {
             if (requestReceiverFailed) {
                 lastError = "request_receiver_failed";
             }
-            if (!BuildConfig.IS_FULL) {
-                forceMasterOff("light startup");
+            if (!BuildConfig.HAS_DIRECT_APOLLO) {
+                forceMasterOff("direct Apollo disabled at build time");
             }
-            // Light is intentionally inert: no vendor class loading or qg.canbus transactions.
-            // Full binds only after the installed CanBus VehicleState schema matches.
-            if (BuildConfig.IS_FULL) {
+            // Direct Apollo binds only after the installed CanBus VehicleState schema matches.
+            if (BuildConfig.HAS_DIRECT_APOLLO) {
                 if (hasWriteCanBusPermission()) {
                     startSchemaCheck();
                 } else {
@@ -516,7 +515,9 @@ public final class ApolloTlcService extends Service {
                 || ACTION_INTERNAL_GLA_SOUND_SET.equals(action)
                 || ACTION_INTERNAL_TSR_SET.equals(action)) {
             postWorker(() -> {
-                if (!BuildConfig.IS_FULL) forceMasterOff("light command");
+                if (!BuildConfig.HAS_DIRECT_APOLLO) {
+                    forceMasterOff("direct Apollo disabled command");
+                }
                 if (ACTION_INTERNAL_SET.equals(action)) {
                     handleTlcSet(enabled, valid);
                 } else if (ACTION_INTERNAL_MASTER_SET.equals(action)) {
@@ -532,7 +533,7 @@ public final class ApolloTlcService extends Service {
         } else {
             enqueueQuery();
         }
-        return BuildConfig.IS_FULL ? START_STICKY : START_NOT_STICKY;
+        return BuildConfig.HAS_DIRECT_APOLLO ? START_STICKY : START_NOT_STICKY;
     }
 
     @Override
@@ -577,8 +578,8 @@ public final class ApolloTlcService extends Service {
     }
 
     private void handleQuery() {
-        if (!BuildConfig.IS_FULL) {
-            forceMasterOff("light query");
+        if (!BuildConfig.HAS_DIRECT_APOLLO) {
+            forceMasterOff("direct Apollo disabled query");
             invalidateCanSnapshot();
             publishState();
             return;
@@ -620,8 +621,8 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        if (!BuildConfig.IS_FULL) {
-            forceMasterOff("light master command");
+        if (!BuildConfig.HAS_DIRECT_APOLLO) {
+            forceMasterOff("direct Apollo disabled master command");
             lastError = ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
             publishState();
             return;
@@ -642,8 +643,8 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        if (!BuildConfig.IS_FULL) {
-            forceMasterOff("light TLC command");
+        if (!BuildConfig.HAS_DIRECT_APOLLO) {
+            forceMasterOff("direct Apollo disabled TLC command");
             lastError = ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
             publishState();
             return;
@@ -722,7 +723,7 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        if (!BuildConfig.IS_FULL) {
+        if (!BuildConfig.HAS_DIRECT_APOLLO) {
             lastError = ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
             publishState();
             return;
@@ -1088,7 +1089,7 @@ public final class ApolloTlcService extends Service {
 
     /** Coalesces the two OEM wake signals into one complete entitlement write. */
     private void scheduleCompositeEntitlementReassert(String reason) {
-        if (destroyed || !BuildConfig.IS_FULL) return;
+        if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO) return;
         entitlementReassertReason = reason;
         if (entitlementReassertScheduled) {
             wakeCoalesced.incrementAndGet();
@@ -1510,7 +1511,7 @@ public final class ApolloTlcService extends Service {
 
     /** Re-resolves the installed VehicleState table before the first Binder transaction. */
     private void verifyConnectedCanBus(IBinder candidate) {
-        if (destroyed || !BuildConfig.IS_FULL || !schemaCheckComplete) {
+        if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete) {
             rejectCanBusVerification("profile_canbus_schema_unavailable");
             return;
         }
@@ -1582,7 +1583,7 @@ public final class ApolloTlcService extends Service {
 
     /** Re-resolves the runtime VehicleState schema, then creates a fresh binding on success. */
     private void revalidateCanBusAndBind(String reason) {
-        if (destroyed || !BuildConfig.IS_FULL || !schemaCheckComplete
+        if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete
                 || !hasWriteCanBusPermission()
                 || canBusVerificationPending) {
             return;
@@ -1633,7 +1634,7 @@ public final class ApolloTlcService extends Service {
     private boolean verificationResultCurrent(int generation, IBinder candidate) {
         return canBusVerificationPending
                 && ApolloTlcPolicy.verificationResultCurrent(
-                BuildConfig.IS_FULL, destroyed,
+                BuildConfig.HAS_DIRECT_APOLLO, destroyed,
                 canBusVerificationGeneration, generation,
                 pendingCanBusBinder == candidate);
     }
@@ -1684,7 +1685,7 @@ public final class ApolloTlcService extends Service {
     }
 
     private void scheduleCanBusRebind() {
-        if (destroyed || !BuildConfig.IS_FULL || !schemaCheckComplete
+        if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete
                 || !hasWriteCanBusPermission()) return;
         handler.removeCallbacks(rebindRunnable);
         int exponent = Math.min(rebindAttempt, 4);
@@ -1840,9 +1841,9 @@ public final class ApolloTlcService extends Service {
                 if (destroyed) return;
                 schemaCheckComplete = true;
                 applyVehicleStateSchema(schema);
-                if (BuildConfig.IS_FULL && !hasWriteCanBusPermission()) {
+                if (BuildConfig.HAS_DIRECT_APOLLO && !hasWriteCanBusPermission()) {
                     failWritePermissionClosed();
-                } else if (!schema.matches && BuildConfig.IS_FULL) {
+                } else if (!schema.matches && BuildConfig.HAS_DIRECT_APOLLO) {
                     writeMaster(false);
                 } else if (schema.matches) {
                     // This release exposes only direct TLC. Keep the unrelated global Apollo
@@ -1952,15 +1953,15 @@ public final class ApolloTlcService extends Service {
 
     /** Direct TLC needs only the allow-listed OEM Binder ABI; it does not use the Frida profile. */
     private boolean isDirectTlcSupported() {
-        return BuildConfig.IS_FULL && schemaCheckComplete && canBusSchemaMatches
+        return BuildConfig.HAS_DIRECT_APOLLO && schemaCheckComplete && canBusSchemaMatches
                 && runtimeProfileValid && hasWriteCanBusPermission();
     }
 
     private boolean isBinderProfilePinned() {
-        boolean writePermissionGranted = BuildConfig.IS_FULL
+        boolean writePermissionGranted = BuildConfig.HAS_DIRECT_APOLLO
                 && hasWriteCanBusPermission();
         return ApolloTlcPolicy.binderProfilePinned(
-                BuildConfig.IS_FULL, schemaCheckComplete, canBusSchemaMatches,
+                BuildConfig.HAS_DIRECT_APOLLO, schemaCheckComplete, canBusSchemaMatches,
                 writePermissionGranted);
     }
 
@@ -2015,13 +2016,13 @@ public final class ApolloTlcService extends Service {
 
     private void forceMasterOff(String reason) {
         if (writeMaster(false)) {
-            Log.w(TAG, reason + ": light/fail-safe forces " + GLOBAL_MASTER_KEY + "=0");
+            Log.w(TAG, reason + ": direct-only fail-safe forces " + GLOBAL_MASTER_KEY + "=0");
         }
     }
 
     private String reportedError(boolean directTlcSupported) {
         if (!masterPersistenceError.isEmpty()) return masterPersistenceError;
-        if (!BuildConfig.IS_FULL) return ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
+        if (!BuildConfig.HAS_DIRECT_APOLLO) return ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
         if (!hasWriteCanBusPermission()) {
             return ApolloTlcPolicy.ERROR_WRITE_PERMISSION_MISSING;
         }

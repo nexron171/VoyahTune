@@ -33,6 +33,13 @@ adb.exe shell pm uninstall ru.big.town.restoremode
 adb.exe shell am force-stop ru.big.town.anative
 adb.exe shell "rm -rf /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative /data/data/ru.big.town.anative"
 
+adb.exe shell settings delete global open_voyah_apollo_master 2>nul
+adb.exe shell settings delete global open_voyah_apollo_legacy_hook_enabled 2>nul
+adb.exe shell settings delete global open_voyah_apollo_asc 2>nul
+adb.exe shell settings delete global open_voyah_apollo_sdb 2>nul
+adb.exe shell settings delete global open_voyah_apollo_profile_supported 2>nul
+adb.exe shell settings delete global open_voyah_apollo_profile_heartbeat 2>nul
+
 
 adb.exe reboot
 if errorlevel 1 (

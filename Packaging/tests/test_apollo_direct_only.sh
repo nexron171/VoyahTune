@@ -7,9 +7,18 @@ LOAD_BIN="$REPO_ROOT/Packaging/system/load.bin"
 APOLLO_JS="$REPO_ROOT/Packaging/inject/apollo_tech.js"
 INSTALL_SH="$REPO_ROOT/Packaging/installer/full/install.sh"
 INSTALL_BAT="$REPO_ROOT/Packaging/installer/full/install.bat"
+LIGHT_INSTALL_SH="$REPO_ROOT/Packaging/installer/light/install.sh"
+LIGHT_INSTALL_BAT="$REPO_ROOT/Packaging/installer/light/install.bat"
 REMOVE_SH="$REPO_ROOT/Packaging/installer/full/remove.sh"
 REMOVE_BAT="$REPO_ROOT/Packaging/installer/full/remove.bat"
+LIGHT_REMOVE_SH="$REPO_ROOT/Packaging/installer/light/remove.sh"
+LIGHT_REMOVE_BAT="$REPO_ROOT/Packaging/installer/light/remove.bat"
 README="$REPO_ROOT/Packaging/README.md"
+NATIVE_BUILD="$REPO_ROOT/Native/app/build.gradle.kts"
+RESTORE_BUILD="$REPO_ROOT/RestoreMode/app/build.gradle.kts"
+NATIVE_MANIFEST="$REPO_ROOT/Native/app/src/main/AndroidManifest.xml"
+NATIVE_SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloTlcService.java"
+RESTORE_ACTIVITY="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
 OPT_IN_KEY=open_voyah_apollo_legacy_hook_enabled
 
 fail() {
@@ -34,7 +43,7 @@ assert_before() {
 }
 
 # Host-side syntax checks for every changed POSIX shell entry point.
-for FILE in "$LOAD_BIN" "$INSTALL_SH" "$REMOVE_SH"; do
+for FILE in "$LOAD_BIN" "$INSTALL_SH" "$LIGHT_INSTALL_SH" "$REMOVE_SH" "$LIGHT_REMOVE_SH"; do
     sh -n "$FILE"
 done
 if command -v node >/dev/null 2>&1; then
@@ -92,20 +101,42 @@ require_fixed "$APOLLO_JS" 'trailingWakePending = true;'
 require_fixed "$APOLLO_JS" 'if (trailingWakePending) {'
 require_fixed "$APOLLO_JS" 'Java.scheduleOnMainThread(dispatchPendingWake);'
 
-# Install/update always closes opt-in and liveness before system mutation; removal closes
-# and deletes the key plus all loader markers on both host platforms.
-for FILE in "$INSTALL_SH" "$INSTALL_BAT"; do
+# Install/update always closes opt-in and liveness before system mutation in both flavors.
+for FILE in "$INSTALL_SH" "$INSTALL_BAT" "$LIGHT_INSTALL_SH" "$LIGHT_INSTALL_BAT"; do
     require_fixed "$FILE" "$OPT_IN_KEY"
     require_fixed "$FILE" 'open_voyah_apollo_profile_supported'
     require_fixed "$FILE" 'open_voyah_apollo_profile_heartbeat'
+    require_fixed "$FILE" 'com.qinggan.permission.WRITE_CANBUS'
 done
 assert_before "$INSTALL_SH" "$OPT_IN_KEY" 'adb disable-verity'
 assert_before "$INSTALL_BAT" "$OPT_IN_KEY" 'adb.exe disable-verity'
+assert_before "$LIGHT_INSTALL_SH" "$OPT_IN_KEY" 'adb disable-verity'
+assert_before "$LIGHT_INSTALL_BAT" "$OPT_IN_KEY" 'adb.exe disable-verity'
 for FILE in "$REMOVE_SH" "$REMOVE_BAT"; do
     require_fixed "$FILE" "$OPT_IN_KEY"
     require_fixed "$FILE" 'voyah_apollo.disabled'
 done
+for FILE in "$LIGHT_REMOVE_SH" "$LIGHT_REMOVE_BAT"; do
+    require_fixed "$FILE" "$OPT_IN_KEY"
+    require_fixed "$FILE" 'open_voyah_apollo_profile_supported'
+done
+
+# Direct Apollo and its signature permission are intentionally common to full and light; only
+# legacy Frida diagnostics remain full-only.
+for FILE in "$NATIVE_BUILD" "$RESTORE_BUILD"; do
+    DIRECT_APOLLO_FLAVORS=$(grep -F -c \
+        'buildConfigField("boolean", "HAS_DIRECT_APOLLO", "true")' "$FILE")
+    [ "$DIRECT_APOLLO_FLAVORS" -eq 2 ] \
+        || fail "$FILE must enable HAS_DIRECT_APOLLO in exactly full and light"
+done
+require_fixed "$NATIVE_MANIFEST" 'android:name="com.qinggan.permission.WRITE_CANBUS"'
+require_fixed "$NATIVE_SERVICE" 'BuildConfig.HAS_DIRECT_APOLLO'
+require_fixed "$RESTORE_ACTIVITY" 'BuildConfig.HAS_DIRECT_APOLLO'
+if grep -Fq 'BuildConfig.IS_FULL' "$NATIVE_SERVICE"; then
+    fail "ApolloTlcService must not couple direct Apollo to the full flavor"
+fi
 require_fixed "$README" "$OPT_IN_KEY=1"
 require_fixed "$README" 'generic `onVehicleStateChanged` не'
+require_fixed "$README" 'Прямой H97X Binder-контур Native доступен в full и light'
 
 echo "PASS: Apollo direct-only packaging guards"

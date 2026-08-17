@@ -26,7 +26,8 @@ Releases/dist/VoyahTune-3.2.2-light.zip
 ## Что где
 
 ADB/`adb` (Android Debug Bridge) — служебный интерфейс управления Android-устройством с компьютера.
-`full` — полный комплект с Frida-перехватами; `light` — сокращённый комплект без них.
+`full` — полный комплект с Frida-перехватами; `light` — сокращённый комплект без них. Прямой
+Binder-контур Apollo входит в оба варианта и Frida не использует.
 
 | Папка | Что | Куда идёт |
 |---|---|---|
@@ -83,11 +84,12 @@ checksum, Android API 30, наличие ожидаемых адресов `172.
 Прошивки с `/vendor/overlay/config/config.xml` намеренно отклоняются: автоматически редактировать
 OEM-порядок RRO небезопасно.
 
-## Apollo/ADAS: direct-only по умолчанию (только full)
+## Apollo/ADAS: прямой режим в full и light
 
-`apollo_tech.js` остаётся в full-архиве как legacy/диагностический инструмент, но текущий
-direct-only режим не инжектит его в `com.qinggan.app.vehiclesetting`. Прямой H97X Binder-контур
-Native от VehicleSetting/Frida profile не зависит.
+Прямой H97X Binder-контур Native доступен в full и light, от VehicleSetting/Frida profile не
+зависит и проверяет установленную схему CanBus до подключения. `apollo_tech.js` остаётся только в
+full-архиве как legacy/диагностический инструмент, но обычный direct-only режим не инжектит его в
+`com.qinggan.app.vehiclesetting`.
 
 `load.bin` разрешает attach только при точном
 `Settings.Global open_voyah_apollo_legacy_hook_enabled=1`. Отсутствующее, нечитаемое, `0`
@@ -106,13 +108,14 @@ trailing dispatch. Сам legacy generic hook всё ещё входит в GumJ
 
 ### Установка и диагностика
 
-1. Full-установщик до `disable-verity` и любых `/system` mutations записывает и читает обратно
-   `0` для legacy opt-in, master, profile и heartbeat. Любая ошибка останавливает установку до
-   записи в `/system`.
+1. Оба установщика до `disable-verity` и любых `/system` mutations записывают и читают обратно `0`
+   для legacy opt-in, master, profile и heartbeat, а также отклоняют чужого владельца
+   `com.qinggan.permission.WRITE_CANBUS`. Любая ошибка останавливает установку до записи в `/system`.
 2. После перезагрузки `open_voyah_apollo_legacy_hook_enabled`, master, profile и heartbeat должны
-   быть равны `0`; `/data/local/tmp/voyah_apollo.disabled` создан, а `voyah_apollo.pid` отсутствует.
-   `[apollo] hook ready` в direct-only режиме не ожидается: агент не загружался.
-3. Legacy-перехват включать только для отдельной стояночной диагностики:
+   быть равны `0`. В full `/data/local/tmp/voyah_apollo.disabled` создан, а `voyah_apollo.pid`
+   отсутствует; light вообще не устанавливает Apollo loader/Frida-файлы. `[apollo] hook ready` в
+   direct-only режиме не ожидается: агент не загружался.
+3. Legacy-перехват доступен только в full и включается только для отдельной стояночной диагностики:
 
    ```sh
    adb shell settings put global open_voyah_apollo_legacy_hook_enabled 1

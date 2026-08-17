@@ -1509,7 +1509,7 @@
                 android:layout_marginTop="14dp"
                 android:background="@drawable/layout_category_bg"
                 android:padding="16dp"
-                android:text="Apollo Tech доступен только в полной сборке (full). В облегчённой сборке (light) показано описание, но управление отключено."
+                android:text="Apollo Tech недоступен в этой сборке VoyahTune."
                 android:textColor="#ffb36b"
                 android:textSize="22px"
                 android:visibility="gone" />

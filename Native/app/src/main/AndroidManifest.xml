@@ -53,6 +53,17 @@
         android:protectionLevel="signature" />
     <uses-permission android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
 
+    <!--
+      Direct Apollo uses the pinned CanBus Binder ABI in both full and light. CanBusService checks
+      this vendor permission name before TX58 but does not define it itself, so Native owns a
+      signature-level definition. Installers reject any pre-existing foreign owner before writing
+      the system APK.
+    -->
+    <permission
+        android:name="com.qinggan.permission.WRITE_CANBUS"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.qinggan.permission.WRITE_CANBUS" />
+
     <queries>
         <provider android:authorities="ru.big.town.restoremode.restoremodecontentprovider" />
         <package android:name="com.qinggan.carsignal.service" />
@@ -176,7 +187,7 @@
             android:exported="false"
             />
 
-        <!-- Read-mostly Apollo PLC/TLC bridge. Active TX58 remains full/profile/master/gear gated. -->
+        <!-- Direct Apollo bridge. TX58 remains schema/permission/transport/safety gated. -->
         <service
             android:name=".ApolloTlcService"
             android:enabled="true"

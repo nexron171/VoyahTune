@@ -9,6 +9,41 @@ adb.exe root
 adb.exe wait-for-device
 adb.exe root
 
+echo === Preflight direct-only Apollo ^(VehicleSetting hook OFF^) ===
+call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_master
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_profile_supported
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
+if errorlevel 1 exit /b 1
+echo   Legacy opt-in, master, profile, and heartbeat are disabled.
+
+echo === Preflight owner check for com.qinggan.permission.WRITE_CANBUS ===
+adb.exe shell dumpsys package permissions >nul 2>nul
+if errorlevel 1 (
+    echo !!! PackageManager permissions are unavailable. Installation stopped before writing to /system.
+    exit /b 1
+)
+set CANBUS_PERMISSION_PRESENT=0
+adb.exe shell "dumpsys package permissions | grep -qF 'Permission [com.qinggan.permission.WRITE_CANBUS]'" >nul 2>nul
+if not errorlevel 1 set CANBUS_PERMISSION_PRESENT=1
+set CANBUS_PERMISSION_OWNER=
+if "%CANBUS_PERMISSION_PRESENT%"=="1" for /f "tokens=2 delims==" %%i in ('adb.exe shell "dumpsys package permissions ^| grep -A 8 -F 'Permission [com.qinggan.permission.WRITE_CANBUS]' ^| grep -m 1 'sourcePackage='" 2^>nul') do set CANBUS_PERMISSION_OWNER=%%i
+if "%CANBUS_PERMISSION_PRESENT%"=="0" goto :canbus_permission_ok
+if "%CANBUS_PERMISSION_OWNER%"=="ru.big.town.anative" goto :canbus_permission_ok
+if "%CANBUS_PERMISSION_OWNER%"=="" (
+    echo !!! The owner of com.qinggan.permission.WRITE_CANBUS could not be determined.
+) else (
+    echo !!! com.qinggan.permission.WRITE_CANBUS already belongs to %CANBUS_PERMISSION_OWNER%.
+)
+echo     Remove the incompatible package and repeat light install. /system is still unchanged.
+exit /b 1
+:canbus_permission_ok
+if "%CANBUS_PERMISSION_PRESENT%"=="0" echo   The permission is not declared yet. Native will create it.
+if "%CANBUS_PERMISSION_PRESENT%"=="1" echo   The permission belongs to ru.big.town.anative. This update is compatible.
+
 echo === Preparing writable /system ^(verity, overlay^) ===
 adb.exe disable-verity
 call :ensure_rw
@@ -77,6 +112,20 @@ echo Installation complete.
 echo Run install-yandex-dns.bat separately if Yandex DNS is required.
 exit /b 0
 goto :eof
+
+:put_apollo_safe_key
+adb.exe shell settings put global %~1 0
+if errorlevel 1 (
+    echo !!! Could not write %~1=0. Installation stopped before writing to /system.
+    exit /b 1
+)
+set "APOLLO_SAFE_STATE="
+for /f "delims=" %%i in ('adb.exe shell settings get global %~1 2^>nul') do set "APOLLO_SAFE_STATE=%%i"
+if not "%APOLLO_SAFE_STATE%"=="0" (
+    echo !!! %~1 did not confirm value 0. Installation stopped before writing to /system.
+    exit /b 1
+)
+exit /b 0
 
 :ensure_rw
 adb.exe remount >nul 2>nul

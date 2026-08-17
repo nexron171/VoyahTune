@@ -47,6 +47,14 @@ adb shell am force-stop ru.big.town.anative
 # а протухшие данные ломают СЛЕДУЮЩУЮ установку (краш zygote при монтировании data_de/null/…).
 adb shell "rm -rf /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative /data/data/ru.big.town.anative"
 
+# Light создаёт эти fail-closed ключи при установке прямого Apollo; полный откат удаляет их.
+adb shell settings delete global open_voyah_apollo_master 2>/dev/null
+adb shell settings delete global open_voyah_apollo_legacy_hook_enabled 2>/dev/null
+adb shell settings delete global open_voyah_apollo_asc 2>/dev/null
+adb shell settings delete global open_voyah_apollo_sdb 2>/dev/null
+adb shell settings delete global open_voyah_apollo_profile_supported 2>/dev/null
+adb shell settings delete global open_voyah_apollo_profile_heartbeat 2>/dev/null
+
 # Примечание: persist.app.feature.leavecar (power hold) НЕ откатываем — это штатная функция авто.
 
 adb reboot
