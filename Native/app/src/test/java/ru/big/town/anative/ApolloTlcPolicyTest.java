@@ -2,7 +2,6 @@ package ru.big.town.anative;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -11,8 +10,6 @@ public class ApolloTlcPolicyTest {
     @Test
     public void pinnedSignalMappingMatchesAllowListedProfile() {
         assertEquals(277, ApolloTlcPolicy.Signal.TSR_SWITCH.id);
-        assertEquals(924, ApolloTlcPolicy.Signal.HUM_VCU_READY.id);
-        assertEquals(958, ApolloTlcPolicy.Signal.BMS_STATE.id);
         assertEquals(1121, ApolloTlcPolicy.Signal.PLC_FUNCTION_STATUS.id);
         assertEquals(1135, ApolloTlcPolicy.Signal.PLC_SWITCH.id);
         assertEquals(1136, ApolloTlcPolicy.Signal.ANP_SWITCH.id);
@@ -20,47 +17,6 @@ public class ApolloTlcPolicyTest {
         assertEquals(1150, ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH.id);
         assertEquals(1170, ApolloTlcPolicy.Signal.TLC_FUNC_ENABLE.id);
         assertEquals(1179, ApolloTlcPolicy.Signal.PLC_FUNC_ENABLE_SA.id);
-        assertEquals(ApolloTlcPolicy.Signal.PLC_SWITCH,
-                ApolloTlcPolicy.Signal.fromId(1135));
-        assertNull(ApolloTlcPolicy.Signal.fromId(9999));
-    }
-
-    @Test
-    public void irrelevantCanBurstNeverResolvesToApolloWork() {
-        for (int id = 2_000; id < 3_000; id++) {
-            assertNull(ApolloTlcPolicy.Signal.fromId(id));
-        }
-    }
-
-    @Test
-    public void targetedReadbackNeedsPeerOnlyBeforeCompositeDisable() {
-        assertTrue(ApolloTlcPolicy.readbackNeedsPeerSwitch(
-                ApolloTlcPolicy.Signal.PLC_SWITCH, ApolloTlcPolicy.MODULE_OFF));
-        assertTrue(ApolloTlcPolicy.readbackNeedsPeerSwitch(
-                ApolloTlcPolicy.Signal.GLA_SWITCH, ApolloTlcPolicy.MODULE_OFF));
-        assertFalse(ApolloTlcPolicy.readbackNeedsPeerSwitch(
-                ApolloTlcPolicy.Signal.PLC_SWITCH, ApolloTlcPolicy.MODULE_ON));
-        assertFalse(ApolloTlcPolicy.readbackNeedsPeerSwitch(
-                ApolloTlcPolicy.Signal.TSR_SWITCH, ApolloTlcPolicy.MODULE_OFF));
-        assertFalse(ApolloTlcPolicy.readbackNeedsPeerSwitch(
-                ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH,
-                ApolloTlcPolicy.MODULE_OFF));
-    }
-
-    @Test
-    public void wakeReassertIsEdgeTriggeredForEligibleWakeStates() {
-        assertTrue(ApolloTlcPolicy.shouldScheduleWakeReassert(
-                ApolloTlcPolicy.Signal.HUM_VCU_READY, ApolloTlcPolicy.UNKNOWN, 1));
-        assertFalse(ApolloTlcPolicy.shouldScheduleWakeReassert(
-                ApolloTlcPolicy.Signal.HUM_VCU_READY, 1, 1));
-        assertFalse(ApolloTlcPolicy.shouldScheduleWakeReassert(
-                ApolloTlcPolicy.Signal.HUM_VCU_READY, 1, 0));
-        assertTrue(ApolloTlcPolicy.shouldScheduleWakeReassert(
-                ApolloTlcPolicy.Signal.BMS_STATE, 2, 3));
-        assertFalse(ApolloTlcPolicy.shouldScheduleWakeReassert(
-                ApolloTlcPolicy.Signal.BMS_STATE, 3, 3));
-        assertFalse(ApolloTlcPolicy.shouldScheduleWakeReassert(
-                ApolloTlcPolicy.Signal.TSR_SWITCH, 0, 1));
     }
 
     @Test
@@ -143,14 +99,6 @@ public class ApolloTlcPolicyTest {
     }
 
     @Test
-    public void callbackRegistrationRequiresExactTrueAidlBoolean() {
-        assertFalse(ApolloTlcPolicy.callbackRegistrationAccepted(0));
-        assertTrue(ApolloTlcPolicy.callbackRegistrationAccepted(1));
-        assertFalse(ApolloTlcPolicy.callbackRegistrationAccepted(-1));
-        assertFalse(ApolloTlcPolicy.callbackRegistrationAccepted(2));
-    }
-
-    @Test
     public void canBusVerificationRejectsStaleDestroyedAndDifferentBinderResults() {
         assertTrue(ApolloTlcPolicy.verificationResultCurrent(
                 true, false, 4, 4, true));
@@ -165,7 +113,7 @@ public class ApolloTlcPolicyTest {
     }
 
     @Test
-    public void staleConnectionAndCallbackEpochsAreRejected() {
+    public void staleConnectionEpochsAreRejected() {
         assertTrue(ApolloTlcPolicy.connectionEventCurrent(
                 false, 7, 7, true));
         assertFalse(ApolloTlcPolicy.connectionEventCurrent(
@@ -174,15 +122,6 @@ public class ApolloTlcPolicyTest {
                 false, 8, 7, true));
         assertFalse(ApolloTlcPolicy.connectionEventCurrent(
                 false, 7, 7, false));
-
-        assertTrue(ApolloTlcPolicy.callbackEventCurrent(
-                false, 11, 11, true));
-        assertFalse(ApolloTlcPolicy.callbackEventCurrent(
-                true, 11, 11, true));
-        assertFalse(ApolloTlcPolicy.callbackEventCurrent(
-                false, 12, 11, true));
-        assertFalse(ApolloTlcPolicy.callbackEventCurrent(
-                false, 11, 11, false));
     }
 
     @Test

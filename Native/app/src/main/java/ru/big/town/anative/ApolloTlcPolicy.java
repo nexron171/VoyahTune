@@ -31,8 +31,6 @@ final class ApolloTlcPolicy {
     /** Stable VehicleState IDs; ordinals are resolved from the installed CanBusService at runtime. */
     enum Signal {
         TSR_SWITCH(277),
-        HUM_VCU_READY(924),
-        BMS_STATE(958),
         PLC_FUNCTION_STATUS(1121),
         PLC_SWITCH(1135),
         ANP_SWITCH(1136),
@@ -47,33 +45,6 @@ final class ApolloTlcPolicy {
             this.id = id;
         }
 
-        static Signal fromId(int id) {
-            // Hot Binder callback path: avoid values(), which clones the enum array per event.
-            switch (id) {
-                case 277:
-                    return TSR_SWITCH;
-                case 924:
-                    return HUM_VCU_READY;
-                case 958:
-                    return BMS_STATE;
-                case 1121:
-                    return PLC_FUNCTION_STATUS;
-                case 1135:
-                    return PLC_SWITCH;
-                case 1136:
-                    return ANP_SWITCH;
-                case 1149:
-                    return GLA_SWITCH;
-                case 1150:
-                    return GLA_LIGHT_CHANGE_SWITCH;
-                case 1170:
-                    return TLC_FUNC_ENABLE;
-                case 1179:
-                    return PLC_FUNC_ENABLE_SA;
-                default:
-                    return null;
-            }
-        }
     }
 
     /**
@@ -149,11 +120,6 @@ final class ApolloTlcPolicy {
         return enabled ? MODULE_OFF : MODULE_ON;
     }
 
-    /** Generated AIDL encodes boolean callback registration results as exactly 0 or 1. */
-    static boolean callbackRegistrationAccepted(int binderResult) {
-        return binderResult == 1;
-    }
-
     static boolean verificationResultCurrent(boolean fullBuild, boolean destroyed,
                                              int activeGeneration, int resultGeneration,
                                              boolean binderIdentityMatches) {
@@ -172,12 +138,6 @@ final class ApolloTlcPolicy {
                 && connectionIdentityMatches;
     }
 
-    static boolean callbackEventCurrent(boolean destroyed,
-                                        int activeEpoch, int eventEpoch,
-                                        boolean callbackRegistered) {
-        return epochCurrent(destroyed, activeEpoch, eventEpoch) && callbackRegistered;
-    }
-
     static boolean writeSessionCurrent(boolean destroyed, boolean pending,
                                        int activeWriteGeneration, int eventWriteGeneration,
                                        int activeBindEpoch, int eventBindEpoch) {
@@ -192,18 +152,6 @@ final class ApolloTlcPolicy {
 
     static boolean compositeSwitchStatesValid(int plcSwitch, int glaSwitch) {
         return isModuleState(plcSwitch) && isModuleState(glaSwitch);
-    }
-
-    /** A confirmed switch-off rebuilds TX77 and therefore needs the independent peer switch. */
-    static boolean readbackNeedsPeerSwitch(Signal signal, int desiredState) {
-        return desiredState == MODULE_OFF
-                && (signal == Signal.PLC_SWITCH || signal == Signal.GLA_SWITCH);
-    }
-
-    static boolean shouldScheduleWakeReassert(Signal signal, int previousState, int state) {
-        boolean eligible = (signal == Signal.HUM_VCU_READY && state == 1)
-                || (signal == Signal.BMS_STATE && state == 3);
-        return eligible && previousState != state;
     }
 
     static String directTlcStateError(int plcSwitch) {

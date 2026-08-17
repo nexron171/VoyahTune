@@ -9,7 +9,6 @@ import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.os.Binder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -34,11 +33,10 @@ import java.util.concurrent.atomic.AtomicLongArray;
  * Fail-closed, schema-pinned bridge for the OEM triggered lane-change switch.
  *
  * <p>User switches are written through the OEM ICanBusService TX58. TLC and traffic-light
- * recognition share one complete TX77 entitlement vector, so every update preserves the other
- * feature instead of clearing it. The vector is reasserted after CanBus reconnect and vehicle
- * wake, but user switches themselves are never restored automatically. A successful Binder
- * transaction is not treated as ECU acknowledgement: every user-switch write remains pending
- * until mandatory delayed TX57 readback.</p>
+ * recognition share one complete TX77 entitlement vector, so every enable preserves the other
+ * feature instead of clearing it. Commands are deliberately fire-and-forget after a successful
+ * synchronous Binder call: this service neither registers a global CanBus callback nor performs
+ * delayed verification reads. A later explicit UI query refreshes the displayed state.</p>
  */
 public final class ApolloTlcService extends Service {
     private static final String TAG = "$$$ ApolloTlcService $$$";
@@ -88,39 +86,30 @@ public final class ApolloTlcService extends Service {
     private static final String CANBUS_DESCRIPTOR = "com.qinggan.canbus.ICanBusService";
     private static final String WRITE_CANBUS_PERMISSION =
             "com.qinggan.permission.WRITE_CANBUS";
-    private static final String CANBUS_CALLBACK_DESCRIPTOR =
-            "com.qinggan.canbus.ICanBusServiceCallback";
     private static final String CANBUS_ACTION = "com.qinggan.canbus.CanBusService";
     private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
     private static final int TX_GET_GEAR_STATUS = 6;
-    private static final int TX_ADD_CALLBACK = 28;
-    private static final int TX_REMOVE_CALLBACK = 29;
     private static final int TX_GET_VEHICLE_STATE = 57;
     private static final int TX_SET_VEHICLE_STATE = 58;
     private static final int TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE = 77;
-    private static final int CALLBACK_VEHICLE_STATE_CHANGED = 36;
 
     private static final long BIND_RETRY_MS = 5_000L;
     private static final long BIND_RETRY_MAX_MS = 60_000L;
     private static final long BIND_CONNECT_TIMEOUT_MS = 20_000L;
     private static final long ENTITLEMENT_SETTLE_MS = 1_000L;
-    private static final long ENTITLEMENT_WAKE_DEBOUNCE_MS = 5_000L;
-    private static final long DELAYED_READBACK_MS = 3_000L;
     private static final long METRICS_INTERVAL_MS = 30_000L;
     private static final int MAX_TRACKED_TRANSACTION =
             TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE;
     private static final int[] TRACKED_TRANSACTIONS = {
             TX_GET_GEAR_STATUS,
-            TX_ADD_CALLBACK,
-            TX_REMOVE_CALLBACK,
             TX_GET_VEHICLE_STATE,
             TX_SET_VEHICLE_STATE,
             TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE
     };
 
     /**
-     * Owns the complete mutable Apollo/CanBus state machine. Service lifecycle, UI requests,
-     * ServiceConnection callbacks and Binder callbacks only enqueue work here; no synchronous
+     * Owns the complete mutable Apollo/CanBus state machine. Service lifecycle, UI requests
+     * and ServiceConnection callbacks only enqueue work here; no synchronous
      * CanBus transaction is allowed to run on the process main thread.
      */
     private HandlerThread canBusWorkerThread;
@@ -132,14 +121,7 @@ public final class ApolloTlcService extends Service {
     });
 
     private final AtomicBoolean queryInFlight = new AtomicBoolean();
-    private final AtomicLong callbackTotal = new AtomicLong();
-    private final AtomicLong callbackRelevant = new AtomicLong();
-    private final AtomicLong callbackIgnored = new AtomicLong();
-    private final AtomicLong callbackPostRejected = new AtomicLong();
-    private final AtomicLong callbackMalformed = new AtomicLong();
-    private final AtomicLong callbackStale = new AtomicLong();
     private final AtomicLong queryCoalesced = new AtomicLong();
-    private final AtomicLong wakeCoalesced = new AtomicLong();
     private final AtomicLong bindTimeouts = new AtomicLong();
     private final AtomicLong workerDispatchMaxUs = new AtomicLong();
     private final AtomicLong descriptorCount = new AtomicLong();
@@ -153,11 +135,9 @@ public final class ApolloTlcService extends Service {
             new AtomicLongArray(MAX_TRACKED_TRANSACTION + 1);
 
     private IBinder canBusBinder;
-    private IBinder canBusCallback;
     private ServiceConnection canBusConnection;
     private boolean canBusBindingRequested;
     private boolean canBusConnected;
-    private boolean callbackAdded;
     private volatile boolean destroyed;
     private boolean requestReceiverRegistered;
     private boolean canBusVerificationPending;
@@ -165,8 +145,6 @@ public final class ApolloTlcService extends Service {
     private IBinder pendingCanBusBinder;
     private int bindEpoch;
     private int activeBindEpoch;
-    private int callbackEpoch;
-    private volatile int activeCallbackEpoch;
     private int rebindAttempt;
     private long metricsWindowStartedAtMs;
     private Runnable bindConnectWatchdog;
@@ -190,8 +168,6 @@ public final class ApolloTlcService extends Service {
     private int glaSwitch = ApolloTlcPolicy.UNKNOWN;
     private int glaLightChangeSwitch = ApolloTlcPolicy.UNKNOWN;
     private int tsrSwitch = ApolloTlcPolicy.UNKNOWN;
-    private int humVcuReady = ApolloTlcPolicy.UNKNOWN;
-    private int bmsState = ApolloTlcPolicy.UNKNOWN;
 
     private boolean pending;
     private int pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
@@ -200,16 +176,9 @@ public final class ApolloTlcService extends Service {
     private int writeGeneration;
     /** Prevents automatic retries if the full-only vendor permission is unexpectedly unavailable. */
     private boolean writePermissionFailureHandled;
-    private String entitlementReassertReason = "vehicle wake";
-    private boolean entitlementReassertScheduled;
 
     private final Runnable rebindRunnable = () -> runWorkerSafely(
             "scheduled rebind", () -> revalidateCanBusAndBind("scheduled rebind"));
-    private final Runnable entitlementReassertRunnable = () -> runWorkerSafely(
-            "entitlement reassert", () -> {
-                entitlementReassertScheduled = false;
-                reassertCompositeEntitlements(entitlementReassertReason);
-            });
     private final Runnable metricsRunnable = () -> runWorkerSafely(
             "metrics", this::logAndRescheduleMetrics);
 
@@ -221,73 +190,6 @@ public final class ApolloTlcService extends Service {
             }
         }
     };
-
-    private IBinder createCanBusCallback(final int registrationEpoch) {
-        return new Binder() {
-            @Override
-            protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
-                    throws RemoteException {
-                if (code == CALLBACK_VEHICLE_STATE_CHANGED) {
-                    callbackTotal.incrementAndGet();
-                    if (!ApolloTlcPolicy.epochCurrent(
-                            destroyed, activeCallbackEpoch, registrationEpoch)) {
-                        callbackStale.incrementAndGet();
-                        return true;
-                    }
-                    try {
-                        data.enforceInterface(CANBUS_CALLBACK_DESCRIPTOR);
-                        int ordinal = ApolloTlcPolicy.UNKNOWN;
-                        int id = ApolloTlcPolicy.UNKNOWN;
-                        if (data.readInt() != 0) {
-                            ordinal = data.readInt();
-                            id = data.readInt();
-                        }
-                        int state = data.readInt();
-                        ApolloTlcPolicy.Signal signal = ApolloTlcPolicy.Signal.fromId(id);
-                        if (signal == null) {
-                            callbackIgnored.incrementAndGet();
-                            return true;
-                        }
-                        callbackRelevant.incrementAndGet();
-                        final int callbackOrdinal = ordinal;
-                        final int callbackState = state;
-                        if (!postWorker(() -> {
-                            if (!ApolloTlcPolicy.callbackEventCurrent(
-                                    destroyed, activeCallbackEpoch,
-                                    registrationEpoch, callbackAdded)) {
-                                callbackStale.incrementAndGet();
-                                return;
-                            }
-                            onVehicleStateCallback(callbackOrdinal, signal, callbackState);
-                        })) {
-                            callbackPostRejected.incrementAndGet();
-                        }
-                    } catch (RuntimeException e) {
-                        callbackMalformed.incrementAndGet();
-                        Log.e(TAG, "Malformed VehicleState callback", e);
-                        if (!postWorker(() -> {
-                            if (!ApolloTlcPolicy.epochCurrent(
-                                    destroyed, activeCallbackEpoch, registrationEpoch)) {
-                                callbackStale.incrementAndGet();
-                                return;
-                            }
-                            failRuntimeProfileClosed("profile_callback_malformed");
-                            publishState();
-                        })) {
-                            callbackPostRejected.incrementAndGet();
-                        }
-                    }
-                    return true;
-                }
-                // The OEM callback is large and oneway. Quietly accept methods this bridge ignores.
-                if (code >= IBinder.FIRST_CALL_TRANSACTION
-                        && code <= IBinder.LAST_CALL_TRANSACTION) {
-                    return true;
-                }
-                return super.onTransact(code, data, reply, flags);
-            }
-        };
-    }
 
     private ServiceConnection createCanBusConnection(final int connectionEpoch) {
         return new ServiceConnection() {
@@ -605,11 +507,11 @@ public final class ApolloTlcService extends Service {
             return;
         }
         ensureCanBusBound();
-        if (canBusConnected && callbackAdded && !refreshFromCan("query")) {
+        if (canBusConnected && !refreshFromCan("query")) {
             if (runtimeProfileValid) {
                 lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
             }
-        } else if (!canBusConnected || !callbackAdded) {
+        } else if (!canBusConnected) {
             invalidateCanSnapshot();
         }
         publishState();
@@ -654,7 +556,7 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        if (!canBusConnected || !callbackAdded) {
+        if (!canBusConnected) {
             lastError = ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
             publishState();
             return;
@@ -676,7 +578,7 @@ public final class ApolloTlcService extends Service {
             return;
         }
         String blocked = ApolloTlcPolicy.directTlcBlockReason(
-                true, directTlcMode, canBusConnected && callbackAdded,
+                true, directTlcMode, canBusConnected,
                 pending, gear, plcSwitch);
         if (!blocked.isEmpty()) {
             lastError = blocked;
@@ -733,7 +635,7 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        if (!canBusConnected || !callbackAdded) {
+        if (!canBusConnected) {
             lastError = ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
             publishState();
             return;
@@ -745,7 +647,7 @@ public final class ApolloTlcService extends Service {
             return;
         }
         String blocked = ApolloTlcPolicy.directSwitchBlockReason(
-                true, isDirectTlcSupported(), canBusConnected && callbackAdded,
+                true, isDirectTlcSupported(), canBusConnected,
                 pending, cachedState(signal));
         if (blocked.isEmpty() && requiresRecognition
                 && glaSwitch != ApolloTlcPolicy.MODULE_ON) {
@@ -785,8 +687,7 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        if (!runtimeProfileValid || !canBusConnected || !callbackAdded
-                || canBusBinder == null) {
+        if (!runtimeProfileValid || !canBusConnected || canBusBinder == null) {
             failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
             return;
         }
@@ -829,13 +730,8 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        if (!canBusConnected || !callbackAdded
-                || !refreshCompositeSwitches("entitlement settle")) {
-            failPendingWrite(generation, ApolloTlcPolicy.ERROR_STATE_READ_FAILED);
-            return;
-        }
-        if (!ApolloTlcPolicy.isModuleState(cachedState(signal))) {
-            failPendingWrite(generation, ApolloTlcPolicy.ERROR_INVALID_SWITCH_STATE);
+        if (!canBusConnected || canBusBinder == null) {
+            failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
             return;
         }
         transmitPendingSignal(generation, signal, desiredState, logName);
@@ -878,8 +774,7 @@ public final class ApolloTlcService extends Service {
             publishState();
             return;
         }
-        if (!runtimeProfileValid || !canBusConnected || !callbackAdded
-                || canBusBinder == null) {
+        if (!runtimeProfileValid || !canBusConnected || canBusBinder == null) {
             failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
             return;
         }
@@ -894,12 +789,12 @@ public final class ApolloTlcService extends Service {
             return;
         }
 
-        // Keep the command pending for the complete ECU window. A full immediate snapshot used to
-        // add five synchronous transactions without acknowledging the write; the delayed targeted
-        // TX57 below remains the only authoritative confirmation.
+        // Fire-and-forget by design: a successful synchronous TX58 means only that the OEM service
+        // accepted the command. Do not subscribe globally or issue a delayed verification read.
+        setCachedState(signal, desiredState);
+        clearPendingWrite(generation);
+        lastError = ApolloTlcPolicy.ERROR_NONE;
         publishState();
-        handler.postDelayed(() -> runWorkerSafely("delayed readback",
-                () -> finishDelayedReadback(generation)), DELAYED_READBACK_MS);
     }
 
     private void failPendingWrite(int generation, String error) {
@@ -915,121 +810,6 @@ public final class ApolloTlcService extends Service {
         pendingSignal = null;
         pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
         pendingBindEpoch = 0;
-    }
-
-    private void finishDelayedReadback(int generation) {
-        if (!ApolloTlcPolicy.writeSessionCurrent(
-                destroyed, pending, writeGeneration, generation,
-                activeBindEpoch, pendingBindEpoch)) {
-            if (!destroyed && generation == writeGeneration && pending
-                    && pendingBindEpoch != activeBindEpoch) {
-                failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
-            }
-            return;
-        }
-        if (!runtimeProfileValid) {
-            pending = false;
-            pendingSignal = null;
-            pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-            pendingBindEpoch = 0;
-            publishState();
-            return;
-        }
-        boolean readOk = canBusConnected && callbackAdded && refreshPendingReadback();
-        boolean shouldUpdateCompositeEntitlements = false;
-        pending = false;
-        if (!readOk) {
-            if (runtimeProfileValid) {
-                lastError = "delayed_readback_failed";
-            }
-        } else if (pendingSignal == null || cachedState(pendingSignal) != pendingDesiredState) {
-            lastError = "readback_mismatch";
-        } else {
-            lastError = ApolloTlcPolicy.ERROR_NONE;
-            shouldUpdateCompositeEntitlements = ApolloTlcPolicy.readbackNeedsPeerSwitch(
-                    pendingSignal, pendingDesiredState);
-        }
-        pendingSignal = null;
-        pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-        pendingBindEpoch = 0;
-        if (shouldUpdateCompositeEntitlements) {
-            updateCompositeEntitlementsAfterConfirmedSwitchOff();
-        } else {
-            publishState();
-        }
-    }
-
-    /**
-     * Confirms only the signal written by the pending command. A confirmed PLC/GLA OFF also reads
-     * the peer switch because the subsequent TX77 must preserve that peer's live entitlement.
-     */
-    private boolean refreshPendingReadback() {
-        ApolloTlcPolicy.Signal signal = pendingSignal;
-        if (!runtimeProfileValid || !hasWriteCanBusPermission()
-                || !canBusConnected || canBusBinder == null || signal == null) {
-            if (signal != null) setCachedState(signal, ApolloTlcPolicy.UNKNOWN);
-            return false;
-        }
-        try {
-            setCachedState(signal, getVehicleState(signal));
-            if (ApolloTlcPolicy.readbackNeedsPeerSwitch(signal, pendingDesiredState)) {
-                if (signal == ApolloTlcPolicy.Signal.PLC_SWITCH) {
-                    glaSwitch = getVehicleState(ApolloTlcPolicy.Signal.GLA_SWITCH);
-                } else if (signal == ApolloTlcPolicy.Signal.GLA_SWITCH) {
-                    plcSwitch = getVehicleState(ApolloTlcPolicy.Signal.PLC_SWITCH);
-                }
-            }
-            Log.i(TAG, "targeted readback: signal=" + signal
-                    + " actual=" + cachedState(signal)
-                    + " desired=" + pendingDesiredState);
-            return true;
-        } catch (RemoteException | RuntimeException e) {
-            setCachedState(signal, ApolloTlcPolicy.UNKNOWN);
-            lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
-            Log.e(TAG, "Targeted readback failed for " + signal, e);
-            return false;
-        }
-    }
-
-    /**
-     * The target user switch is already confirmed OFF. Rebuilding from both live switches clears
-     * only its entitlement pair while preserving the other feature. TX77 has no ECU
-     * acknowledgement and is not retried automatically.
-     */
-    private void updateCompositeEntitlementsAfterConfirmedSwitchOff() {
-        if (!hasWriteCanBusPermission()) {
-            failWritePermissionClosed();
-            publishState();
-            return;
-        }
-        if (!runtimeProfileValid || !canBusConnected || !callbackAdded
-                || canBusBinder == null) {
-            lastError = ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
-            publishState();
-            return;
-        }
-        if (!hasCompleteCompositeSwitchSnapshot()) {
-            lastError = "composite_switch_state_unknown";
-            publishState();
-            return;
-        }
-        try {
-            boolean tlcEnabled = plcSwitch == ApolloTlcPolicy.MODULE_ON;
-            boolean trafficLightEnabled = glaSwitch == ApolloTlcPolicy.MODULE_ON;
-            int result = setCompositeEntitlements(tlcEnabled, trafficLightEnabled);
-            if (result != 0) {
-                lastError = "feature_entitlement_disable_rejected";
-                Log.e(TAG, "Composite disable TX77 rejected; result=" + result);
-            } else {
-                lastError = ApolloTlcPolicy.ERROR_NONE;
-                Log.i(TAG, "Composite TX77 queued after confirmed OFF: tlc=" + tlcEnabled
-                        + " trafficLight=" + trafficLightEnabled);
-            }
-        } catch (RemoteException | RuntimeException e) {
-            lastError = "feature_entitlement_disable_tx_failed";
-            Log.e(TAG, "Composite disable TX77 failed; no retry", e);
-        }
-        publishState();
     }
 
     private boolean hasCompleteCompositeSwitchSnapshot() {
@@ -1054,97 +834,9 @@ public final class ApolloTlcService extends Service {
                 return tlcCapability;
             case PLC_FUNC_ENABLE_SA:
                 return plcCapabilitySa;
-            case HUM_VCU_READY:
-                return humVcuReady;
-            case BMS_STATE:
-                return bmsState;
             default:
                 return ApolloTlcPolicy.UNKNOWN;
         }
-    }
-
-    private void onVehicleStateCallback(int ordinal, ApolloTlcPolicy.Signal signal, int state) {
-        if (destroyed || !runtimeProfileValid) return;
-        Integer expectedOrdinal = runtimeSignalOrdinals.get(signal);
-        if (expectedOrdinal == null || expectedOrdinal != ordinal) {
-            failRuntimeProfileClosed("profile_callback_mismatch");
-            Log.e(TAG, "Pinned VehicleState mismatch for id=" + signal.id
-                    + ": expected ordinal=" + expectedOrdinal + " actual=" + ordinal);
-            publishState();
-            return;
-        }
-        int previousState = cachedState(signal);
-        setCachedState(signal, state);
-        if (ApolloTlcPolicy.shouldScheduleWakeReassert(signal, previousState, state)) {
-            scheduleCompositeEntitlementReassert(signal.name());
-        }
-        // HUM/BMS are edge-triggered wake inputs only and do not change the UI snapshot. Caching
-        // their last values prevents a steady eligible-state stream from reasserting TX77 forever.
-        if (signal != ApolloTlcPolicy.Signal.HUM_VCU_READY
-                && signal != ApolloTlcPolicy.Signal.BMS_STATE
-                && previousState != state) {
-            publishState();
-        }
-    }
-
-    /** Coalesces the two OEM wake signals into one complete entitlement write. */
-    private void scheduleCompositeEntitlementReassert(String reason) {
-        if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO) return;
-        entitlementReassertReason = reason;
-        if (entitlementReassertScheduled) {
-            wakeCoalesced.incrementAndGet();
-            return;
-        }
-        entitlementReassertScheduled = true;
-        handler.postDelayed(entitlementReassertRunnable, ENTITLEMENT_WAKE_DEBOUNCE_MS);
-    }
-
-    /**
-     * Reasserts only permissions for user switches that the vehicle itself currently reports ON.
-     * This restores ECU capability state after sleep without automatically changing a switch.
-     */
-    private void reassertCompositeEntitlements(String reason) {
-        if (destroyed) return;
-        if (pending) {
-            scheduleCompositeEntitlementReassert(reason);
-            return;
-        }
-        if (!runtimeProfileValid || !canBusConnected
-                || !callbackAdded || canBusBinder == null || !hasWriteCanBusPermission()) {
-            return;
-        }
-        if (!refreshCompositeSwitches("entitlement reassert " + reason)) {
-            publishState();
-            return;
-        }
-        boolean tlcEnabled = plcSwitch == ApolloTlcPolicy.MODULE_ON;
-        boolean trafficLightEnabled = glaSwitch == ApolloTlcPolicy.MODULE_ON;
-        if (!hasCompleteCompositeSwitchSnapshot()) {
-            lastError = "composite_switch_state_unknown";
-            publishState();
-            return;
-        }
-        if (!tlcEnabled && !trafficLightEnabled) {
-            publishState();
-            return;
-        }
-        try {
-            int result = setCompositeEntitlements(tlcEnabled, trafficLightEnabled);
-            if (result == 0) {
-                lastError = ApolloTlcPolicy.ERROR_NONE;
-                Log.i(TAG, "Composite TX77 reassert queued after " + reason
-                        + ": tlc=" + tlcEnabled
-                        + " trafficLight=" + trafficLightEnabled);
-            } else {
-                lastError = "feature_entitlement_reassert_rejected";
-                Log.e(TAG, "Composite TX77 reassert rejected after " + reason
-                        + "; result=" + result);
-            }
-        } catch (RemoteException | RuntimeException e) {
-            lastError = "feature_entitlement_reassert_tx_failed";
-            Log.e(TAG, "Composite TX77 reassert failed after " + reason, e);
-        }
-        publishState();
     }
 
     /** Reads only the state required by an independent GLA/GLA-sound/TSR command. */
@@ -1208,28 +900,6 @@ public final class ApolloTlcService extends Service {
             invalidateCanSnapshot();
             lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
             Log.e(TAG, "Targeted TLC prewrite failed", e);
-            return false;
-        }
-    }
-
-    /** Reads the only two switches needed to construct the shared TX77 entitlement vector. */
-    private boolean refreshCompositeSwitches(String reason) {
-        if (!runtimeProfileValid || !hasWriteCanBusPermission()
-                || !canBusConnected || canBusBinder == null) {
-            plcSwitch = ApolloTlcPolicy.UNKNOWN;
-            glaSwitch = ApolloTlcPolicy.UNKNOWN;
-            return false;
-        }
-        try {
-            plcSwitch = getVehicleState(ApolloTlcPolicy.Signal.PLC_SWITCH);
-            glaSwitch = getVehicleState(ApolloTlcPolicy.Signal.GLA_SWITCH);
-            Log.i(TAG, reason + ": plc=" + plcSwitch + " gla=" + glaSwitch);
-            return true;
-        } catch (RemoteException | RuntimeException e) {
-            plcSwitch = ApolloTlcPolicy.UNKNOWN;
-            glaSwitch = ApolloTlcPolicy.UNKNOWN;
-            lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
-            Log.e(TAG, reason + " failed", e);
             return false;
         }
     }
@@ -1319,8 +989,6 @@ public final class ApolloTlcService extends Service {
         glaSwitch = ApolloTlcPolicy.UNKNOWN;
         glaLightChangeSwitch = ApolloTlcPolicy.UNKNOWN;
         tsrSwitch = ApolloTlcPolicy.UNKNOWN;
-        humVcuReady = ApolloTlcPolicy.UNKNOWN;
-        bmsState = ApolloTlcPolicy.UNKNOWN;
     }
 
     private void setCachedState(ApolloTlcPolicy.Signal signal, int state) {
@@ -1348,12 +1016,6 @@ public final class ApolloTlcService extends Service {
                 break;
             case PLC_FUNC_ENABLE_SA:
                 plcCapabilitySa = state;
-                break;
-            case HUM_VCU_READY:
-                humVcuReady = state;
-                break;
-            case BMS_STATE:
-                bmsState = state;
                 break;
         }
     }
@@ -1477,7 +1139,7 @@ public final class ApolloTlcService extends Service {
     /** Performs one measured synchronous transaction, always from the serial worker thread. */
     private boolean transactCanBus(int transactionCode, Parcel data, Parcel reply)
             throws RemoteException {
-        if (destroyed && transactionCode != TX_REMOVE_CALLBACK) {
+        if (destroyed) {
             throw new RemoteException("Apollo service destroyed");
         }
         IBinder binder = canBusBinder;
@@ -1557,26 +1219,13 @@ public final class ApolloTlcService extends Service {
         }
         canBusBinder = service;
         canBusConnected = true;
-        callbackAdded = false;
-        int registrationEpoch = ++callbackEpoch;
-        activeCallbackEpoch = registrationEpoch;
-        canBusCallback = createCanBusCallback(registrationEpoch);
         lastError = ApolloTlcPolicy.ERROR_NONE;
-        Log.i(TAG, "CanBusService connected after current schema verification");
-        addCanBusCallback();
-        if (!callbackAdded) {
-            String registrationError = ApolloTlcPolicy.ERROR_NONE.equals(lastError)
-                    ? "callback_unavailable" : lastError;
-            restartCanBusBinding(registrationError);
-            return;
-        }
+        Log.i(TAG, "CanBusService connected without global callback subscription");
         rebindAttempt = 0;
         if (!refreshFromCan("connect")) {
             if (runtimeProfileValid) {
                 lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
             }
-        } else {
-            scheduleCompositeEntitlementReassert("CanBus reconnect");
         }
         publishState();
     }
@@ -1589,10 +1238,9 @@ public final class ApolloTlcService extends Service {
             return;
         }
         // This path is entered only after disconnect/death/rejection. Mark disconnected before
-        // unbind so release cannot emit TX29 to an unverified or dead Binder identity.
+        // releasing the stale binding.
         canBusBinder = null;
         canBusConnected = false;
-        callbackAdded = false;
         releaseCanBusBinding(reason);
 
         final int generation = beginCanBusVerification(null);
@@ -1625,7 +1273,6 @@ public final class ApolloTlcService extends Service {
         runtimeSignalOrdinals.clear();
         canBusBinder = null;
         canBusConnected = false;
-        invalidateCallbackIdentity();
         invalidateCanSnapshot();
         publishState();
         return generation;
@@ -1648,7 +1295,6 @@ public final class ApolloTlcService extends Service {
         runtimeSignalOrdinals.clear();
         canBusBinder = null;
         canBusConnected = false;
-        invalidateCallbackIdentity();
         invalidateCanSnapshot();
         writeMaster(false);
         releaseCanBusBinding("CanBus schema verification failed");
@@ -1726,8 +1372,6 @@ public final class ApolloTlcService extends Service {
     }
 
     private void invalidateCanBusIdentity(String error) {
-        handler.removeCallbacks(entitlementReassertRunnable);
-        entitlementReassertScheduled = false;
         ++canBusVerificationGeneration;
         canBusVerificationPending = false;
         pendingCanBusBinder = null;
@@ -1736,7 +1380,6 @@ public final class ApolloTlcService extends Service {
         runtimeSignalOrdinals.clear();
         canBusBinder = null;
         canBusConnected = false;
-        invalidateCallbackIdentity();
         invalidateCanSnapshot();
         if (pending) {
             ++writeGeneration;
@@ -1752,9 +1395,6 @@ public final class ApolloTlcService extends Service {
     private void releaseCanBusBinding(String reason) {
         handler.removeCallbacks(rebindRunnable);
         cancelBindConnectWatchdog();
-        handler.removeCallbacks(entitlementReassertRunnable);
-        entitlementReassertScheduled = false;
-        if (canBusConnected && callbackAdded) removeCanBusCallback();
         ServiceConnection connection = canBusConnection;
         boolean wasBindingRequested = canBusBindingRequested;
         activeBindEpoch = ++bindEpoch;
@@ -1769,69 +1409,6 @@ public final class ApolloTlcService extends Service {
         }
         canBusBinder = null;
         canBusConnected = false;
-        invalidateCallbackIdentity();
-    }
-
-    private void invalidateCallbackIdentity() {
-        activeCallbackEpoch = ++callbackEpoch;
-        callbackAdded = false;
-        canBusCallback = null;
-    }
-
-    private void addCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null
-                || canBusCallback == null || callbackAdded) return;
-        if (!hasWriteCanBusPermission()) {
-            failWritePermissionClosed();
-            return;
-        }
-        Parcel data = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallback);
-            if (!transactCanBus(TX_ADD_CALLBACK, data, reply)) {
-                throw new RemoteException("TX28 rejected");
-            }
-            reply.readException();
-            int result = reply.readInt();
-            if (!ApolloTlcPolicy.callbackRegistrationAccepted(result)) {
-                invalidateCallbackIdentity();
-                invalidateCanSnapshot();
-                lastError = "callback_unavailable";
-                Log.e(TAG, "CanBus callback registration rejected (TX28 result="
-                        + result + ", expected 1)");
-                return;
-            }
-            callbackAdded = true;
-        } catch (RemoteException | RuntimeException e) {
-            invalidateCallbackIdentity();
-            invalidateCanSnapshot();
-            lastError = "callback_register_failed";
-            Log.e(TAG, "Cannot add CanBus callback", e);
-        } finally {
-            reply.recycle();
-            data.recycle();
-        }
-    }
-
-    private void removeCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null
-                || canBusCallback == null || !callbackAdded) return;
-        Parcel data = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallback);
-            transactCanBus(TX_REMOVE_CALLBACK, data, reply);
-            reply.readException();
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "Cannot remove CanBus callback", e);
-        } finally {
-            callbackAdded = false;
-            reply.recycle();
-            data.recycle();
-        }
     }
 
     private void startSchemaCheck() {
@@ -2033,26 +1610,18 @@ public final class ApolloTlcService extends Service {
         }
         if (!directTlcSupported) return ApolloTlcPolicy.ERROR_PROFILE_UNSUPPORTED;
         if (!canBusConnected) return ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
-        if (!callbackAdded) return "callback_unavailable";
         if (!lastError.isEmpty()) return lastError;
         return ApolloTlcPolicy.directTlcStateError(plcSwitch);
     }
 
-    /** Emits one compact interval summary; hot callbacks never log individually. */
+    /** Emits one compact interval summary for command/query Binder pressure. */
     private void logAndRescheduleMetrics() {
         if (destroyed) return;
         long nowMs = SystemClock.elapsedRealtime();
         long actualWindowMs = metricsWindowStartedAtMs <= 0L
                 ? METRICS_INTERVAL_MS : Math.max(0L, nowMs - metricsWindowStartedAtMs);
         metricsWindowStartedAtMs = nowMs;
-        long total = callbackTotal.getAndSet(0L);
-        long relevant = callbackRelevant.getAndSet(0L);
-        long ignored = callbackIgnored.getAndSet(0L);
-        long rejected = callbackPostRejected.getAndSet(0L);
-        long malformed = callbackMalformed.getAndSet(0L);
-        long stale = callbackStale.getAndSet(0L);
         long coalescedQueries = queryCoalesced.getAndSet(0L);
-        long coalescedWakes = wakeCoalesced.getAndSet(0L);
         long timedOutBinds = bindTimeouts.getAndSet(0L);
         long maxDispatchUs = workerDispatchMaxUs.getAndSet(0L);
         long descriptors = descriptorCount.getAndSet(0L);
@@ -2079,19 +1648,10 @@ public final class ApolloTlcService extends Service {
                     .append('/').append(descriptorDurationUs / descriptors)
                     .append('/').append(descriptorLongestUs);
         }
-        if (total != 0L || transactionEvents != 0L || coalescedQueries != 0L
-                || coalescedWakes != 0L || rejected != 0L
-                || malformed != 0L || stale != 0L || maxDispatchUs != 0L
+        if (transactionEvents != 0L || coalescedQueries != 0L || maxDispatchUs != 0L
                 || timedOutBinds != 0L) {
             Log.i(TAG, "metrics window_ms=" + actualWindowMs
-                    + " callbacks=" + total
-                    + " relevant=" + relevant
-                    + " ignored=" + ignored
-                    + " malformed=" + malformed
-                    + " stale=" + stale
-                    + " post_rejected=" + rejected
                     + " query_coalesced=" + coalescedQueries
-                    + " wake_coalesced=" + coalescedWakes
                     + " bind_timeouts=" + timedOutBinds
                     + " worker_delay_max_us=" + maxDispatchUs
                     + " tx_code_count_avg_max_us={" + transactions + '}');

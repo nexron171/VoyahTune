@@ -31,14 +31,16 @@ set CANBUS_PERMISSION_PRESENT=0
 adb.exe shell "dumpsys package permissions | grep -qF 'Permission [com.qinggan.permission.WRITE_CANBUS]'" >nul 2>nul
 if not errorlevel 1 set CANBUS_PERMISSION_PRESENT=1
 set CANBUS_PERMISSION_OWNER=
-if "%CANBUS_PERMISSION_PRESENT%"=="1" for /f "tokens=2 delims==" %%i in ('adb.exe shell "dumpsys package permissions ^| grep -A 8 -F 'Permission [com.qinggan.permission.WRITE_CANBUS]' ^| grep -m 1 'sourcePackage='" 2^>nul') do set CANBUS_PERMISSION_OWNER=%%i
+if "%CANBUS_PERMISSION_PRESENT%"=="1" for /f "tokens=2 delims==" %%i in ('adb.exe shell "dumpsys package permissions ^| grep -A 32 -F 'Permission [com.qinggan.permission.WRITE_CANBUS]' ^| grep -F 'sourcePackage='" 2^>nul') do if not defined CANBUS_PERMISSION_OWNER set CANBUS_PERMISSION_OWNER=%%i
 if "%CANBUS_PERMISSION_PRESENT%"=="0" goto :canbus_permission_ok
 if "%CANBUS_PERMISSION_OWNER%"=="ru.big.town.anative" goto :canbus_permission_ok
 if "%CANBUS_PERMISSION_OWNER%"=="" (
-    echo !!! The owner of com.qinggan.permission.WRITE_CANBUS could not be determined.
-) else (
-    echo !!! com.qinggan.permission.WRITE_CANBUS already belongs to %CANBUS_PERMISSION_OWNER%.
+    echo   WARNING: this firmware does not report the owner of com.qinggan.permission.WRITE_CANBUS.
+    echo   Continuing. Android PackageManager will still reject a real duplicate permission.
+    set CANBUS_PERMISSION_PRESENT=2
+    goto :canbus_permission_ok
 )
+echo !!! com.qinggan.permission.WRITE_CANBUS already belongs to %CANBUS_PERMISSION_OWNER%.
 echo     Remove the incompatible package and repeat full install. /system is still unchanged.
 exit /b 1
 :canbus_permission_ok

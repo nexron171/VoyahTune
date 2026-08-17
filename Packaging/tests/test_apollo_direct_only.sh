@@ -135,8 +135,18 @@ require_fixed "$RESTORE_ACTIVITY" 'BuildConfig.HAS_DIRECT_APOLLO'
 if grep -Fq 'BuildConfig.IS_FULL' "$NATIVE_SERVICE"; then
     fail "ApolloTlcService must not couple direct Apollo to the full flavor"
 fi
+for FORBIDDEN in TX_ADD_CALLBACK TX_REMOVE_CALLBACK createCanBusCallback \
+        addCanBusCallback removeCanBusCallback DELAYED_READBACK_MS finishDelayedReadback; do
+    if grep -Fq "$FORBIDDEN" "$NATIVE_SERVICE"; then
+        fail "ApolloTlcService must remain callback-free/fire-and-forget: $FORBIDDEN"
+    fi
+done
+require_fixed "$NATIVE_SERVICE" 'without global callback subscription'
+require_fixed "$NATIVE_SERVICE" 'Do not subscribe globally or issue a delayed verification read.'
 require_fixed "$README" "$OPT_IN_KEY=1"
 require_fixed "$README" 'generic `onVehicleStateChanged` не'
 require_fixed "$README" 'Прямой H97X Binder-контур Native доступен в full и light'
+require_fixed "$README" 'не вызывает OEM'
+require_fixed "$README" '`TX28/TX29`'
 
 echo "PASS: Apollo direct-only packaging guards"
