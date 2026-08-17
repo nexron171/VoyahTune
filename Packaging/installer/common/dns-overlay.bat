@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableExtensions DisableDelayedExpansion
 REM Windows host-side integration for the optional static Yandex DNS RRO.
 
 set "YDNS_MODE=%~1"

@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
 set "YDNS_HELPER=%~dp0dns-overlay.bat"
 if not exist "%YDNS_HELPER%" (

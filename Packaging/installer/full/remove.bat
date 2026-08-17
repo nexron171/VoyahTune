@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
 set "YDNS_HELPER=%~dp0dns-overlay.bat"
 if not exist "%YDNS_HELPER%" (
@@ -270,7 +271,7 @@ exit /b 1
 set "LEGACY_INIT_VALID=0"
 if not exist "%~1" exit /b 0
 for %%A in ("%~1") do if %%~zA LEQ 0 exit /b 0
-findstr /N /R "^" "%~1" 2>nul | findstr /L /X /C:"1:#!/system/bin/sh" >nul 2>nul
+findstr /B /L /C:"#!/system/bin/sh" "%~1" >nul 2>nul
 if errorlevel 1 exit /b 0
 findstr /L /C:"/system/bin/logcat" "%~1" >nul 2>nul
 if errorlevel 1 exit /b 0

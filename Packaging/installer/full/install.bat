@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
 for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
@@ -385,7 +386,7 @@ exit /b 1
 set "LEGACY_INIT_VALID=0"
 if not exist "%~1" exit /b 0
 for %%A in ("%~1") do if %%~zA LEQ 0 exit /b 0
-findstr /N /R "^" "%~1" 2>nul | findstr /L /X /C:"1:#!/system/bin/sh" >nul 2>nul
+findstr /B /L /C:"#!/system/bin/sh" "%~1" >nul 2>nul
 if errorlevel 1 exit /b 0
 findstr /L /C:"/system/bin/logcat" "%~1" >nul 2>nul
 if errorlevel 1 exit /b 0
