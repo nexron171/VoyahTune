@@ -1,103 +1,93 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0" || exit /b 1
-REM Удаление Open Voyah v@VERSION@ — полный откат к состоянию ДО установки нашего приложения.
 set "YDNS_HELPER=%~dp0dns-overlay.bat"
 if not exist "%YDNS_HELPER%" (
-    echo !!! Не найден dns-overlay.bat - удаление прервано до изменения устройства.
+    echo !!! Missing dns-overlay.bat. Removal stopped before changing the device.
     exit /b 1
 )
 call "%YDNS_HELPER%" prepare
 if errorlevel 1 (
-    echo !!! DNS-overlay helper не готов - удаление прервано до изменения устройства.
+    echo !!! The DNS overlay helper is not ready. Removal stopped before changing the device.
     exit /b 1
 )
 if not exist "init.logcat.original.sh" (
-    echo !!! Нет переходного init.logcat.original.sh - удаление прервано до изменения устройства.
+    echo !!! Missing migration file init.logcat.original.sh. Removal stopped before changing the device.
     exit /b 1
 )
 
 adb.exe root
 adb.exe wait-for-device
 adb.exe root
-REM /system записываемым: снимаем verity (идемпотентно) + overlay-remount + сырой remount. Полный
-REM ребут-цикл здесь не нужен (после install verity уже снята; если её вернул OTA - сначала install.bat).
 adb.exe disable-verity >nul 2>nul
 adb.exe remount >nul 2>nul
 adb.exe shell "mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null"
 adb.exe shell "touch /system/.ovw_remove_rwtest && rm -f /system/.ovw_remove_rwtest"
 if errorlevel 1 (
-    echo !!! /system недоступен для записи - удаление прервано до изменения компонентов.
+    echo !!! /system is not writable. Removal stopped before changing components.
     exit /b 1
 )
 
-REM До любых удалений переводим master в 0 и проверяем фактическое значение.
 adb.exe shell settings put global open_voyah_apollo_master 0
 if errorlevel 1 (
-    echo !!! Не удалось выключить Apollo master - удаление прервано до выгрузки hook.
+    echo !!! Could not disable Apollo master. Removal stopped before unloading the hook.
     exit /b 1
 )
 set APOLLO_MASTER_STATE=
 for /f "delims=" %%i in ('adb.exe shell settings get global open_voyah_apollo_master 2^>nul') do set APOLLO_MASTER_STATE=%%i
 if not "%APOLLO_MASTER_STATE%"=="0" (
-    echo !!! Apollo master не подтвердил состояние 0 - удаление прервано до выгрузки hook.
+    echo !!! Apollo master did not confirm value 0. Removal stopped before unloading the hook.
     exit /b 1
 )
 adb.exe shell settings put global open_voyah_apollo_legacy_hook_enabled 0
 if errorlevel 1 (
-    echo !!! Не удалось закрыть legacy Apollo opt-in - удаление прервано до выгрузки hook.
+    echo !!! Could not disable legacy Apollo opt-in. Removal stopped before unloading the hook.
     exit /b 1
 )
 set APOLLO_LEGACY_OPT_IN_STATE=
 for /f "delims=" %%i in ('adb.exe shell settings get global open_voyah_apollo_legacy_hook_enabled 2^>nul') do set APOLLO_LEGACY_OPT_IN_STATE=%%i
 if not "%APOLLO_LEGACY_OPT_IN_STATE%"=="0" (
-    echo !!! Legacy Apollo opt-in не подтвердил 0 - удаление прервано.
+    echo !!! Legacy Apollo opt-in did not confirm value 0. Removal stopped.
     exit /b 1
 )
-REM Живой hook получает короткое окно на один best-effort штатный subscription resync.
 timeout /t 3 /nobreak >nul
 
-echo === Откат DNS-overlay ===
+echo === Restoring the DNS overlay ===
 call "%YDNS_HELPER%" restore
 if errorlevel 1 (
-    echo !!! Не удалось восстановить/отключить DNS-overlay - остальные компоненты не удалялись.
+    echo !!! Could not restore or disable the DNS overlay. Other components were not removed.
     exit /b 1
 )
 
-echo === Миграция boot-hook предыдущего full-релиза ===
+echo === Migrating the previous full-release boot hook ===
 call :migrate_legacy_init_logcat
 if errorlevel 1 (
-    echo !!! DNS уже восстановлен, boot-компоненты не удалялись. Исправьте ошибку и повторите remove.
+    echo !!! DNS was restored, but boot components were not removed. Fix the error and run remove again.
     exit /b 1
 )
 
-REM --- Boot-хук: init.logcat уже мигрирован; остановить service и лишь затем удалить файлы ---
-echo === Остановка и удаление voyahtune RC-сервисов ===
+echo === Stopping and removing VoyahTune RC services ===
 call :stop_voyahtune_load
 if errorlevel 1 (
     call :rollback_legacy_init_logcat
-    if errorlevel 1 echo !!! Legacy init.logcat.sh также не удалось вернуть. Не перезагружайте ГУ; повторите remove.
+    if errorlevel 1 echo !!! Legacy init.logcat.sh could not be restored. Do not reboot; run remove again.
     exit /b 1
 )
 adb.exe shell "rm -f /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.load.rc && test ! -e /system/etc/init.voyahtune.load.sh && test ! -e /system/etc/init/voyahtune.setenforce.rc"
 if errorlevel 1 (
-    echo !!! Не удалось удалить voyahtune RC-файлы - удаление прервано.
-    echo     Не перезагружайте ГУ; восстановите ADB и повторите remove.
+    echo !!! Could not remove VoyahTune RC files. Removal stopped.
+    echo     Do not reboot. Restore ADB and run remove again.
     exit /b 1
 )
 set "LEGACY_INIT_MIGRATED=0"
 adb.exe shell "rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback"
-if errorlevel 1 echo   ПРЕДУПРЕЖДЕНИЕ: часть неактивных transaction-файлов не очищена; boot-hook уже удалён.
+if errorlevel 1 echo   WARNING: some inactive transaction files remain; the boot hook is already removed.
 
-REM --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb.exe shell "pkill -f /data/local/bin/load.bin"
 adb.exe shell "rm -f /data/local/tmp/voyah_load.v2.lock"
 adb.exe shell "rm -rf /data/local/tmp/voyah_load.lock"
 adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech' | grep -v grep | awk '{print $2}' | xargs kill -9"
-REM Eternalized agent живёт в target без frida-inject; force-stop выгружает его до финального reboot.
 adb.exe shell "am force-stop com.qinggan.app.vehiclesetting"
 
-REM --- Убрать наши Frida-файлы (или вернуть бэкап, если что-то было до нас) ---
 if exist "backup\load.bin" (
     adb.exe push backup\load.bin /data/local/bin/load.bin
 ) else (
@@ -105,32 +95,31 @@ if exist "backup\load.bin" (
 )
 adb.exe shell "rm -f /data/local/bin/vd_bypass.js"
 adb.exe shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"
-REM Apollo-файл имеет симметричный backup: восстанавливаем прежний либо подтверждённое отсутствие.
 if exist "backup\apollo_tech.js" (
     adb.exe push backup\apollo_tech.js /data/local/bin/apollo_tech.js.new
     if errorlevel 1 (
         adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new" 1>nul 2>nul
-        echo !!! Не удалось восстановить backup\apollo_tech.js - удаление прервано.
+        echo !!! Could not restore backup\apollo_tech.js. Removal stopped.
         exit /b 1
     )
     adb.exe shell "chmod 644 /data/local/bin/apollo_tech.js.new && mv -f /data/local/bin/apollo_tech.js.new /data/local/bin/apollo_tech.js"
     if errorlevel 1 (
         adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new" 1>nul 2>nul
-        echo !!! Не удалось завершить восстановление apollo_tech.js - удаление прервано.
+        echo !!! Could not finish restoring apollo_tech.js. Removal stopped.
         exit /b 1
     )
 ) else (
     if exist "backup\apollo_tech.js.absent" (
         adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
         if errorlevel 1 (
-            echo !!! Не удалось вернуть подтверждённо отсутствовавший apollo_tech.js - удаление прервано.
+            echo !!! Could not restore the confirmed-absent apollo_tech.js state. Removal stopped.
             exit /b 1
         )
     ) else (
-        echo Backup metadata для apollo_tech.js нет - неизвестный существующий файл оставлен без изменений
+        echo No backup metadata exists for apollo_tech.js. An unknown existing file was left unchanged.
         adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new"
         if errorlevel 1 (
-            echo !!! Не удалось удалить временный apollo_tech.js.new - удаление прервано.
+            echo !!! Could not remove temporary apollo_tech.js.new. Removal stopped.
             exit /b 1
         )
     )
@@ -140,10 +129,7 @@ if exist "backup\frida-inject" (
 ) else (
     adb.exe shell "rm -f /data/local/bin/frida-inject"
 )
-REM Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
 adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_swk.*.try /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"
-REM Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка
-REM не подхватила старые назначения до первой синхронизации из RestoreMode.
 adb.exe shell settings delete global voyahtune_dock1 2>nul
 adb.exe shell settings delete global voyahtune_dock2 2>nul
 adb.exe shell settings delete global voyahtune_dock1Dpi 2>nul
@@ -163,32 +149,25 @@ adb.exe shell settings delete global open_voyah_apollo_sdb 2>nul
 adb.exe shell settings delete global open_voyah_apollo_profile_supported 2>nul
 adb.exe shell settings delete global open_voyah_apollo_profile_heartbeat 2>nul
 
-REM --- Whitelist + Native из /system/priv-app (+ снять /data-оверлей обновления) ---
 adb.exe shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"
 adb.exe shell "rm -rf /system/priv-app/Native"
 adb.exe shell "ls -all /system/priv-app/Native"
 adb.exe shell pm uninstall ru.big.town.anative
 adb.exe shell pm uninstall ru.big.town.restoremode
 adb.exe shell am force-stop ru.big.town.anative
-REM Полностью вычистить data-каталоги Native (лечение краха zygote "data_de/null" при след. установке)
 adb.exe shell "rm -rf /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative /data/data/ru.big.town.anative"
 
-REM --- Откат наших global settings (freeform для VirtualDisplay-сплита) ---
 adb.exe shell settings delete global enable_freeform_support
 adb.exe shell settings delete global force_resizable_activities
-REM Примечание: persist.app.feature.leavecar (power hold) НЕ откатываем — штатная функция авто.
 
 adb.exe reboot
 if errorlevel 1 (
-    echo !!! Откат подготовлен, но ADB не смог перезагрузить ГУ. Выполните reboot вручную.
-    pause
+    echo !!! Removal is prepared, but ADB could not reboot the device. Reboot it manually.
     exit /b 1
 )
-echo "Press any key..."
-pause
+echo Removal complete. The device is rebooting.
 exit /b 0
 
-REM Мигрирует только предыдущий VoyahTune init.logcat.sh с явным ownership-marker.
 :migrate_legacy_init_logcat
 set "LEGACY_INIT_STATE_FILE=%TEMP%\open_voyah_legacy_init_%RANDOM%_%RANDOM%.tmp"
 set "LEGACY_INIT_ROLLBACK_SOURCE=backup\init.logcat.voyahtune-legacy.sh"
@@ -199,15 +178,15 @@ if errorlevel 1 goto :remove_legacy_init_check_failed
 set /p "LEGACY_INIT_STATE=" < "%LEGACY_INIT_STATE_FILE%"
 del "%LEGACY_INIT_STATE_FILE%" >nul 2>nul
 if "%LEGACY_INIT_STATE%"=="CLEAN" (
-    echo   Штатный init.logcat.sh не содержит marker VoyahTune - оставляем без изменений.
+    echo   Stock init.logcat.sh has no VoyahTune marker - left unchanged.
     exit /b 0
 )
 if "%LEGACY_INIT_STATE%"=="MISSING" (
-    echo   /system/etc/init.logcat.sh отсутствует - legacy-hook восстанавливать не нужно.
+    echo   /system/etc/init.logcat.sh is absent - no legacy hook restoration is needed.
     exit /b 0
 )
 if not "%LEGACY_INIT_STATE%"=="LEGACY" (
-    echo !!! Неизвестный результат проверки init.logcat.sh: %LEGACY_INIT_STATE%
+    echo !!! Unknown init.logcat.sh check result: %LEGACY_INIT_STATE%
     exit /b 1
 )
 
@@ -215,24 +194,24 @@ if not exist "backup" mkdir "backup"
 del "%LEGACY_INIT_ROLLBACK_SOURCE%.new" >nul 2>nul
 adb.exe pull /system/etc/init.logcat.sh "%LEGACY_INIT_ROLLBACK_SOURCE%.new" >nul 2>nul
 if errorlevel 1 (
-    echo !!! Не удалось сохранить legacy init.logcat.sh для rollback.
+    echo !!! Could not save legacy init.logcat.sh for rollback.
     exit /b 1
 )
 for %%A in ("%LEGACY_INIT_ROLLBACK_SOURCE%.new") do if %%~zA LEQ 0 (
     del "%LEGACY_INIT_ROLLBACK_SOURCE%.new" >nul 2>nul
-    echo !!! Rollback-копия legacy init.logcat.sh пуста.
+    echo !!! The legacy init.logcat.sh rollback copy is empty.
     exit /b 1
 )
 findstr /L /C:"# init.logcat.sh Open Voyah:" "%LEGACY_INIT_ROLLBACK_SOURCE%.new" >nul 2>nul
 if errorlevel 1 (
     del "%LEGACY_INIT_ROLLBACK_SOURCE%.new" >nul 2>nul
-    echo !!! Rollback-копия legacy init.logcat.sh не прошла проверку.
+    echo !!! The legacy init.logcat.sh rollback copy failed validation.
     exit /b 1
 )
 move /y "%LEGACY_INIT_ROLLBACK_SOURCE%.new" "%LEGACY_INIT_ROLLBACK_SOURCE%" >nul 2>nul
 if errorlevel 1 (
     del "%LEGACY_INIT_ROLLBACK_SOURCE%.new" >nul 2>nul
-    echo !!! Не удалось зафиксировать rollback-копию legacy init.logcat.sh.
+    echo !!! Could not commit the legacy init.logcat.sh rollback copy.
     exit /b 1
 )
 
@@ -244,13 +223,13 @@ set "LEGACY_INIT_SOURCE=backup\init.logcat.sh"
 :remove_legacy_init_source_selected
 call :validate_legacy_init_source "%LEGACY_INIT_SOURCE%"
 if not "%LEGACY_INIT_VALID%"=="1" (
-    echo !!! Найден legacy init.logcat.sh, но %LEGACY_INIT_SOURCE% не прошёл проверку.
+    echo !!! Legacy init.logcat.sh was found, but %LEGACY_INIT_SOURCE% failed validation.
     exit /b 1
 )
 if "%LEGACY_INIT_SOURCE%"=="backup\init.logcat.sh" (
-    echo   Найден OEM-backup предыдущего установщика: %LEGACY_INIT_SOURCE%
+    echo   Found the previous installer's OEM backup: %LEGACY_INIT_SOURCE%
 ) else (
-    echo   Используем проверенный чистый init.logcat.original.sh.
+    echo   Using validated clean init.logcat.original.sh.
 )
 
 adb.exe push "%LEGACY_INIT_SOURCE%" /system/etc/init.logcat.sh.voyahtune.new
@@ -266,32 +245,31 @@ set /p "LEGACY_INIT_STATE=" < "%LEGACY_INIT_STATE_FILE%"
 del "%LEGACY_INIT_STATE_FILE%" >nul 2>nul
 if not "%LEGACY_INIT_STATE%"=="CLEAN" (
     call :rollback_legacy_init_logcat
-    if errorlevel 1 echo !!! Rollback init.logcat.sh не подтверждён. Не перезагружайте ГУ; повторите remove.
-    echo !!! Legacy-marker остался после восстановления init.logcat.sh.
+    if errorlevel 1 echo !!! init.logcat.sh rollback was not confirmed. Do not reboot; run remove again.
+    echo !!! The legacy marker remains after restoring init.logcat.sh.
     exit /b 1
 )
-echo   Legacy init.logcat.sh успешно удалён из boot path.
+echo   Legacy init.logcat.sh was removed from the boot path.
 exit /b 0
 
 :remove_legacy_init_check_failed
 del "%LEGACY_INIT_STATE_FILE%" >nul 2>nul
 call :rollback_legacy_init_logcat
-if errorlevel 1 echo !!! Rollback init.logcat.sh не подтверждён. Не перезагружайте ГУ; повторите remove.
-echo !!! Не удалось проверить /system/etc/init.logcat.sh - удаление прервано.
+if errorlevel 1 echo !!! init.logcat.sh rollback was not confirmed. Do not reboot; run remove again.
+echo !!! Could not verify /system/etc/init.logcat.sh. Removal stopped.
 exit /b 1
 
 :remove_legacy_init_publish_failed
 adb.exe shell "rm -f /system/etc/init.logcat.sh.voyahtune.new" >nul 2>nul
 call :rollback_legacy_init_logcat
-if errorlevel 1 echo !!! Rollback init.logcat.sh не подтверждён. Не перезагружайте ГУ; повторите remove.
-echo !!! Не удалось атомарно восстановить init.logcat.sh - удаление прервано.
+if errorlevel 1 echo !!! init.logcat.sh rollback was not confirmed. Do not reboot; run remove again.
+echo !!! Could not atomically restore init.logcat.sh. Removal stopped.
 exit /b 1
 
 :validate_legacy_init_source
 set "LEGACY_INIT_VALID=0"
 if not exist "%~1" exit /b 0
 for %%A in ("%~1") do if %%~zA LEQ 0 exit /b 0
-REM Device-derived content must stay pipeline data: never expand its first line into cmd syntax.
 findstr /N /R "^" "%~1" 2>nul | findstr /L /X /C:"1:#!/system/bin/sh" >nul 2>nul
 if errorlevel 1 exit /b 0
 findstr /L /C:"/system/bin/logcat" "%~1" >nul 2>nul
@@ -349,10 +327,10 @@ exit /b 0
 
 :stop_voyahtune_load_ok
 del "%VTS_STATE_FILE%" >nul 2>nul
-echo   voyahtune_load остановлен или ещё не зарегистрирован.
+echo   voyahtune_load is stopped or is not registered.
 exit /b 0
 
 :stop_voyahtune_load_fail
 del "%VTS_STATE_FILE%" >nul 2>nul
-echo !!! voyahtune_load не остановлен; удаление boot-файлов отменено.
+echo !!! voyahtune_load did not stop. Boot file removal was cancelled.
 exit /b 1

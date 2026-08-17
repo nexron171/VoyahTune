@@ -34,7 +34,8 @@ ADB/`adb` (Android Debug Bridge) — служебный интерфейс уп�
 | `inject/` | Frida-скрипты: `vd_bypass.js`, `launcherdock.js`, `steeringwheelkeys.js`, `multidisplay.js`, `apollo_tech.js` | только full |
 | `system/` | `load.bin`, атомарный composite `voyahtune.load.rc`, `voyahtune.load.sh`, переходный чистый `init.logcat.original.sh`, `privapp-permissions-…xml` | full целиком; в light — только `privapp-permissions` |
 | `vendor-overlay/` | Зафиксированный DNS RRO APK и его provenance | APK — в full и light; README в релиз не копируется |
-| `installer/common/` | Четыре общих helper-файла для установки/отката DNS RRO | full и light, плоско рядом с основными установщиками |
+| `installer/common/` | Четыре общих helper-файла для установки/отката DNS RRO, включая отдельный Windows `install-yandex-dns.bat` | full и light, плоско рядом с основными установщиками |
+| `README.txt` | Пользовательская инструкция по установке и устранению ошибок на Windows/macOS | в корень каждого full/light-релиза и ZIP-архива |
 | `installer/full/` | `install.sh`, `install.bat`, `remove.sh`, `remove.bat` | full |
 | `installer/light/` | `install.sh`, `install.bat`, `remove.sh`, `remove.bat` | light |
 
@@ -63,18 +64,16 @@ c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d
 ```
 
 Проверка использует доступный `sha256sum` либо `shasum`. Отсутствующий APK, несовпавший checksum,
-отсутствующая `installer/common/` или любой из четырёх обязательных helper-файлов останавливают
-сборку. APK и все четыре helper-файла копируются в плоский корень обоих вариантов релиза.
+отсутствующая `installer/common/`, `README.txt` или любой из четырёх обязательных helper-файлов
+останавливают сборку. APK, инструкция и все четыре helper-файла копируются в плоский корень обоих
+вариантов релиза.
 
-После установки основных компонентов full/light Windows-установщик задаёт единственный
-текстовый вопрос `Install Yandex DNS? y/n`. Только точный ответ `y` запускает DNS preflight и
-установку; `n`, пустой Enter, закрытый stdin и любой другой ответ безопасно означают `n` и не меняют
-текущее DNS-состояние. Поэтому отказ от опционального DNS не зависит от PowerShell. Unix-`install.sh`
-сохраняет своё меню со стрелками. DNS-действие подготавливается до уже существующего финального reboot
-и не добавляет отдельную перезагрузку.
-Если DNS preflight/action завершается ошибкой, установщик намеренно не делает финальный reboot:
-нужно устранить указанную причину и повторить идемпотентный installer до ручной перезагрузки, чтобы
-не применять заведомо частично подготовленную транзакцию.
+Full/light Windows `install.bat` полностью неинтерактивны и DNS не меняют. Для явной установки
+Yandex DNS пользователь после успешной основной установки отдельно запускает
+`install-yandex-dns.bat`; он проверяет состояние overlay, не перезаписывает чужой/неоднозначный
+overlay, устанавливает управляемый RRO и перезагружает устройство. PowerShell Windows-процессу не
+требуется. Все `.bat` используют только ASCII/английские сообщения, чтобы не зависеть от code page
+стандартного `cmd.exe`. Unix-`install.sh` и его меню DNS остаются без изменений.
 
 Device-helper хранит ownership/rollback-состояние в `/data/local/open_voyah/qgdns`, проверяет
 checksum, Android API 30, наличие ожидаемых адресов `172.16.{104,110,120}.40/24` на `eth0`,

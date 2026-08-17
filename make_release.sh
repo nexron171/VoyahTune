@@ -23,7 +23,8 @@ DNS_OVERLAY_NAME="framework-res__config_ethernet_interfaces_yandexdns.apk"
 DNS_OVERLAY="$COMMON/vendor-overlay/$DNS_OVERLAY_NAME"
 DNS_OVERLAY_SHA256="c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d"
 COMMON_INSTALLER="$COMMON/installer/common"
-COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat select-yandex-dns.ps1 dns-overlay-device.sh"
+COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh"
+RELEASE_README="$COMMON/README.txt"
 
 VERSION=""
 DO_FULL=1
@@ -212,6 +213,11 @@ verify_common_release_assets() {
         exit 1
     fi
 
+    if [ ! -s "$RELEASE_README" ]; then
+        echo "Нет $RELEASE_README — пользовательская инструкция обязательна для релиза." >&2
+        exit 1
+    fi
+
     for helper in $COMMON_INSTALLER_FILES; do
         if [ ! -f "$COMMON_INSTALLER/$helper" ]; then
             echo "Нет обязательного helper-файла $COMMON_INSTALLER/$helper." >&2
@@ -219,9 +225,9 @@ verify_common_release_assets() {
         fi
     done
 
-    # Hash намеренно продублирован в host/device helpers, которые работают уже вне build tree.
-    # Не позволяем обновить prebuilt только в одном месте и собрать заведомо нерабочий релиз.
-    for helper in dns-overlay.sh dns-overlay.bat dns-overlay-device.sh; do
+    # Hash намеренно продублирован в Unix host-helper и device-helper, которые работают вне build tree.
+    # Windows BAT остаётся максимально простым; device-helper всё равно проверяет APK до установки.
+    for helper in dns-overlay.sh dns-overlay-device.sh; do
         hash_mentions="$(grep -F -c "$DNS_OVERLAY_SHA256" "$COMMON_INSTALLER/$helper" || true)"
         if [ "$hash_mentions" -ne 1 ]; then
             echo "В $COMMON_INSTALLER/$helper должен быть ровно один актуальный DNS RRO SHA-256." >&2
@@ -234,6 +240,7 @@ verify_common_release_assets() {
 copy_common_release_assets() {
     out="$1"
     cp -p "$DNS_OVERLAY" "$out/$DNS_OVERLAY_NAME"
+    cp -p "$RELEASE_README" "$out/README.txt"
     for helper in $COMMON_INSTALLER_FILES; do
         case "$helper" in
             *.bat) copy_crlf "$COMMON_INSTALLER/$helper" "$out/$helper" ;;
@@ -322,10 +329,13 @@ verify_windows_batch_files() {
     for batch in "$out/"*.bat; do
         [ -f "$batch" ] || continue
         if ! LC_ALL=C awk '
-            { if (!sub(/\r$/, "")) exit 1 }
+            {
+                if (!sub(/\r$/, "")) exit 1
+                if ($0 ~ /[^ -~\t]/) exit 1
+            }
             END { if (NR == 0) exit 1 }
         ' "$batch"; then
-            echo "Некорректные переводы строк в $batch — .bat должен использовать CRLF." >&2
+            echo "Некорректный $batch — .bat должен использовать CRLF и только ASCII." >&2
             exit 1
         fi
     done
@@ -334,7 +344,7 @@ verify_windows_batch_files() {
 verify_release_payload() {
     out="$1"
     flavor="$2"
-    required="native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat select-yandex-dns.ps1 dns-overlay-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
+    required="README.txt native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
     if [ "$flavor" = full ]; then
         required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
     fi
