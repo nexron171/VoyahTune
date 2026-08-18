@@ -146,38 +146,14 @@ public class MainActivity extends AppCompatActivity {
         return arraysStr2arraysBytes(cmds);
     }
 
-    //------------- Метод получения команд CAN режимов вождения  ------------------------------------
-    public static byte[][] getDriveModeCanCommand(String mode) {
-        Bundle energyMode = new Bundle();
-        energyMode.putStringArray("ECO", new String[]{
-                "6c 08 00 3e 5a 01 88 01 00 20",
-                "68 08 02 00 00 f0 2c 04 08 00"
-        });
-        energyMode.putStringArray("COMFORT", new String[]{
-                "6c 08 00 3e 5a 01 88 01 00 40",
-                "68 08 02 00 00 f0 2c 04 10 00"
-        });
-        energyMode.putStringArray("SPORT", new String[]{
-                "6c 08 00 3e 5a 01 88 01 00 60",
-                "68 08 03 00 00 f0 2c 04 18 00",
-                "6f 08 0d 00 80 13 83 00 00 40"
-        });
-        energyMode.putStringArray("OUTING", new String[]{
-                "6c 08 00 3e 5a 01 88 01 00 80",
-                "68 08 02 00 00 f0 2c 04 18 00"
-        });
-        energyMode.putStringArray("SNOW", new String[]{
-                "6c 08 40 3e 5a 01 88 01 00 c0",
-                "68 08 02 00 00 f0 2c 04 10 00"
-        });
-        energyMode.putStringArray("INDIVIDUAL", new String[]{
-                "6c 08 00 3e 5a 01 88 01 00 a0",
-                "68 08 03 00 00 f0 2c 04 18 00"
-        });
+    //------------- OEM VehicleState-команды режимов вождения ---------------------------------------
+    public static boolean sendDriveModeCommand(Context context, String mode) {
+        return DriveModeCanTransport.send(context, mode);
+    }
 
-
-        String[] cmds = energyMode.getStringArray(mode);
-        return arraysStr2arraysBytes(cmds);
+    /** Вариант для wake-restore после ранней инициализации транспорта в SetModesService. */
+    public static boolean sendDriveModeCommand(String mode) {
+        return DriveModeCanTransport.send(mode);
     }
 
     //------------- Метод получения команд CAN режимов рекуперации  ---------------------------------
@@ -521,8 +497,7 @@ public class MainActivity extends AppCompatActivity {
         // всё равно открывал HAL для всех 5–7 кадров и за 120с создавал сотни бесполезных ioctl.
         if (energyEnabled && !sendRequiredCanValues(1, getEnergyCanCommand(energy),
                 "energy mode: " + energy)) return false;
-        if (driveEnabled && !sendRequiredCanValues(1, getDriveModeCanCommand(driveMode),
-                "drive mode: " + driveMode)) return false;
+        if (driveEnabled && !sendDriveModeCommand(driveMode)) return false;
         if (recycleEnabled && !sendRequiredCanValues(1, getRecEnergyCanCommand(recycle),
                 "recuperation level: " + recycle)) return false;
         // «Отключить звук для пешеходов» — бинарное состояние, применяем всегда
@@ -537,7 +512,7 @@ public class MainActivity extends AppCompatActivity {
         return true;
     }
     public static void setDriveMode(String driveMode){
-        setCanValues(1, getDriveModeCanCommand(driveMode), "drive mode: " + driveMode);
+        sendDriveModeCommand(driveMode);
     }
 
     // Провайдер настроек RestoreMode — источник истины режимов (его читает loadModes/ApplyEngine и UI VoyahTune).
