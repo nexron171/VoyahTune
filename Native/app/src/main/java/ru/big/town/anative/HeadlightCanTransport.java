@@ -115,6 +115,12 @@ final class HeadlightCanTransport {
         return INSTANCE.sendInternal(HeadlightCanPolicy.commandFor(headlightsOn));
     }
 
+    /** Sends LOW_BEAM for true and OEM AUTO_LAMP_SWITCH for false. */
+    static boolean sendAutoPair(Context context, boolean lowBeam) {
+        INSTANCE.initializeInternal(context);
+        return INSTANCE.sendInternal(HeadlightCanPolicy.commandForAutoPair(lowBeam));
+    }
+
     private void initializeInternal(Context context) {
         if (context == null) return;
         synchronized (lock) {
@@ -173,7 +179,7 @@ final class HeadlightCanTransport {
             Log.e(TAG, "Headlight Binder disabled: " + result.error);
             return;
         }
-        Log.i(TAG, "VehicleState schema verified for LOW_BEAM and OUT_LAMP_OFF");
+        Log.i(TAG, "VehicleState schema verified for LOW_BEAM, OUT_LAMP_OFF and AUTO_LAMP_SWITCH");
         bindCanBus();
     }
 

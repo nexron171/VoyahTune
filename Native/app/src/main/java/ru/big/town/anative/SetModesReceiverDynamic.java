@@ -281,6 +281,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             toggleSetting(ctx, "disablePedestrianSound");
         } else if ("toggle_headlights".equals(action)) {
             toggleHeadlights(ctx);
+        } else if ("toggle_headlights_auto".equals(action)) {
+            toggleHeadlightsAuto(ctx);
         } else if ("system_back".equals(action)) {
             BackButtonService.performBack(ctx);
         } else if (action.startsWith("app:")) {
@@ -426,12 +428,36 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
             boolean current = prefs.getBoolean("steerHeadlightsOn", false);
             boolean next = !current;
+            boolean previousManualAuto = LightSensorService.setManualAutoOverride(false);
             if (!MainActivity.setHeadlights(app, next)) {
+                LightSensorService.setManualAutoOverride(previousManualAuto);
                 Log.w(TAG, "STEER_ACTION headlights: CAN failed, state not persisted");
                 return;
             }
             prefs.edit().putBoolean("steerHeadlightsOn", next).apply();
             Log.i(TAG, "STEER_ACTION headlights: " + current + " → " + next);
+        });
+    }
+
+    /** Независимая пара для руля: штатный Auto ↔ ручной ближний свет. */
+    private static void toggleHeadlightsAuto(Context ctx) {
+        final Context app = ctx.getApplicationContext();
+        ApplyEngine.postUserCommand("steer headlights auto/low", () -> {
+            android.content.SharedPreferences prefs =
+                    app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+            boolean currentLowBeam = prefs.getBoolean("steerHeadlightsAutoLowBeam", false);
+            boolean nextLowBeam = !currentLowBeam;
+            boolean previousManualAuto =
+                    LightSensorService.setManualAutoOverride(!nextLowBeam);
+            if (!MainActivity.setHeadlightsAutoLow(app, nextLowBeam)) {
+                LightSensorService.setManualAutoOverride(previousManualAuto);
+                Log.w(TAG, "STEER_ACTION headlights auto/low: CAN failed, state not persisted");
+                return;
+            }
+            prefs.edit().putBoolean("steerHeadlightsAutoLowBeam", nextLowBeam).apply();
+            Log.i(TAG, "STEER_ACTION headlights auto/low: "
+                    + (currentLowBeam ? "LOW_BEAM" : "AUTO") + " → "
+                    + (nextLowBeam ? "LOW_BEAM" : "AUTO"));
         });
     }
 

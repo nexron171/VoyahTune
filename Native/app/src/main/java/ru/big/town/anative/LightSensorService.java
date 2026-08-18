@@ -121,6 +121,11 @@ public class LightSensorService extends Service {
     // время состояние ушло из «авто» — переустановку отменяем (debounce + анти-луп).
     private static final long CANBUS_REASSERT_DELAY_MS = 5_000L;
 
+    // OEM Auto, выбранный пользователем отдельным действием руля, нельзя принимать за самовольный
+    // BCM-сброс. Флаг живёт в процессе и снимается следующим решением датчика или ручной командой
+    // OFF/LOW; хранить его между перезапусками не нужно — force-init снова применит датчик.
+    private static volatile boolean manualAutoOverride = false;
+
     private Handler timerHandler;
     private IBinder carSignalBinder = null;
     private boolean carSignalBindingRequested = false;
@@ -662,6 +667,7 @@ public class LightSensorService extends Service {
 
     private void commit(boolean targetOn, String reason) {
         Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "выкл") + ") — " + reason);
+        setManualAutoOverride(false);
         final long sequence = ++commitSequence;
         headlightsOn      = targetOn;
         everSent          = true;
@@ -735,6 +741,10 @@ public class LightSensorService extends Service {
     private final Runnable driveFallbackRunnable = new Runnable() {
         @Override
         public void run() {
+            if (manualAutoOverride) {
+                Log.i(TAG, "drive+5s: OEM Auto выбран с руля — anti-Auto пропущен");
+                return;
+            }
             applyTarget("drive+5s (анти-Auto)");
         }
     };
@@ -763,6 +773,10 @@ public class LightSensorService extends Service {
         // решение принимаем заново по свежему состоянию.
         timerHandler.removeCallbacks(canbusReassertRunnable);
 
+        if (manualAutoOverride) {
+            Log.i(TAG, "lightstatus: OEM Auto выбран с руля — anti-Auto подавлен");
+            return;
+        }
         if (!everSent) return;                 // режим ещё не выставляли — ждём force-init
         if (!headlightsOn) return;             // таргет «выкл» (светло) — не вмешиваемся
         if (since < HEADLIGHT_GUARD_MS) {      // эхо нашей же команды
@@ -784,6 +798,10 @@ public class LightSensorService extends Service {
     private final Runnable canbusReassertRunnable = new Runnable() {
         @Override
         public void run() {
+            if (manualAutoOverride) {
+                Log.i(TAG, "canbus-reset: OEM Auto выбран с руля — отмена");
+                return;
+            }
             if (!everSent || !headlightsOn) return;
             if (lastAutoLamp != 1) {           // за время выдержки ушли из «авто» — отменяем
                 Log.i(TAG, "canbus-reset: за выдержку состояние ушло из авто — отмена");
@@ -793,6 +811,13 @@ public class LightSensorService extends Service {
             commit(true, "canbus-reset");
         }
     };
+
+    /** Отмечает намеренный OEM Auto с руля; возвращает предыдущее значение для rollback при CAN-ошибке. */
+    static boolean setManualAutoOverride(boolean enabled) {
+        boolean previous = manualAutoOverride;
+        manualAutoOverride = enabled;
+        return previous;
+    }
 
     // -------------------------------------------------------------------------
     // ContentProvider — настройки RestoreMode (один запрос за вызов)

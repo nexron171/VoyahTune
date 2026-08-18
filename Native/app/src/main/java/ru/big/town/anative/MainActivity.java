@@ -239,6 +239,17 @@ public class MainActivity extends AppCompatActivity {
         return HeadlightCanTransport.send(context, on);
     }
 
+    /** Отдельная пара для кнопок руля: ближний свет ↔ штатный автоматический режим. */
+    public static boolean setHeadlightsAutoLow(Context context, boolean lowBeam){
+        String command = lowBeam ? "LOW_BEAM" : "AUTO_LAMP_SWITCH";
+        Log.i("$$$ MainActivity setHeadlights $$$", "OEM CAN: " + command);
+        if (CanSender.isDebugMode()) {
+            Log.i("$$$ MainActivity setHeadlights $$$", "EMULATE OEM TX58: " + command + " state=1");
+            return true;
+        }
+        return HeadlightCanTransport.sendAutoPair(context, lowBeam);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);

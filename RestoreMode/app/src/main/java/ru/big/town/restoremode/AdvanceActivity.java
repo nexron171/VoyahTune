@@ -1771,7 +1771,8 @@ public class AdvanceActivity extends AppCompatActivity {
             {"recycle:MEDIUM,HIGH",      "Рекуперация: Стандартная → Высокая"},
             {"toggle_forced_ev",         "Force EV: вкл/выкл"},
             {"toggle_pedestrian_sound",  "Звук пешеходов: вкл/выкл"},
-            {"toggle_headlights",        "Фары: вкл/выкл"},
+            {"toggle_headlights",        "Фары: выкл/ближний"},
+            {"toggle_headlights_auto",   "Фары: ближний/авто"},
     };
 
     private void initSteeringButtons() {
