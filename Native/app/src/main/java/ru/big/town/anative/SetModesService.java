@@ -744,6 +744,7 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        HeadlightCanTransport.initialize(this);
         screenOffObserved = !isScreenInteractive();
         initializeCarPowerManager();
         setModesReceiverDynamic = new SetModesReceiverDynamic(

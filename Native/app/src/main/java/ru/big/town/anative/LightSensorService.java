@@ -49,7 +49,7 @@ import androidx.core.app.NotificationCompat;
  *
  * Решение по уровню → режим (с гистерезисом):
  *  - level ≤ threshOn  → ближний свет (setHeadlights(true))
- *  - level > threshOff → авторежим    (setHeadlights(false))
+ *  - level > threshOff → наружный свет выключен (setHeadlights(false))
  *  - между порогами    → не менять
  *
  * CAN отправляется ТОЛЬКО при изменении целевого режима по датчику (heartbeat убран).
@@ -129,7 +129,7 @@ public class LightSensorService extends Service {
     private long    lastBindAttempt = -BIND_RETRY_MS;
     private final Runnable carSignalRebindRunnable = this::ensureBound;
 
-    // Текущая зафиксированная цель: true = ближний свет, false = авторежим
+    // Текущая зафиксированная цель: true = ближний свет, false = наружный свет выключен
     private boolean headlightsOn = false;
     private boolean everSent     = false;
     private boolean forceInitScheduled = false;
@@ -542,6 +542,7 @@ public class LightSensorService extends Service {
         Log.i(TAG, "onCreate() — LightSensorService (event-driven + safety-poll)");
         Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         timerHandler = new Handler(Looper.getMainLooper());
+        HeadlightCanTransport.initialize(this);
 
         createNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -655,18 +656,18 @@ public class LightSensorService extends Service {
             Log.i(TAG, src + ": нет данных (reason=" + lastReason + ") — не трогаем");
             return;
         }
-        Log.i(TAG, s2 + " → " + (desired ? "ближний" : "авто"));
+        Log.i(TAG, s2 + " → " + (desired ? "ближний" : "выкл"));
         commit(desired, s2);
     }
 
     private void commit(boolean targetOn, String reason) {
-        Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "авто") + ") — " + reason);
+        Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "выкл") + ") — " + reason);
         final long sequence = ++commitSequence;
         headlightsOn      = targetOn;
         everSent          = true;
         lastCommitElapsed = SystemClock.elapsedRealtime();
-        ApplyEngine.postWakeAction("auto light " + (targetOn ? "on" : "auto"),
-                () -> MainActivity.setHeadlights(targetOn),
+        ApplyEngine.postWakeAction("auto light " + (targetOn ? "low" : "off"),
+                () -> MainActivity.setHeadlights(this, targetOn),
                 result -> {
                     if (result != ApplyEngine.WakeActionResult.SUCCESS) {
                         invalidateCommit(sequence);
@@ -686,21 +687,21 @@ public class LightSensorService extends Service {
 
     /**
      * Уличный датчик (BCM_RSM_lightSWReason, лобовой RSM) — основной источник автосвета.
-     * 0 Day → авто; 2 Dark / 3 Tunnel / 4 Darkstart → ближний; 1 Others — не меняем.
+     * 0 Day → выкл; 2 Dark / 3 Tunnel / 4 Darkstart → ближний; 1 Others — не меняем.
      */
     private void onLightSwReason(int reason) {
         lastReason = reason; // запоминаем последнее известное состояние улицы (для анти-Auto по Drive)
         Boolean desired = reasonToDesired(reason);
         Log.i(TAG, "RSM lightSWReason=" + reason + " → "
-                + (desired == null ? "без изменений" : (desired ? "ближний" : "авто")));
+                + (desired == null ? "без изменений" : (desired ? "ближний" : "выкл")));
         if (desired == null) return;
         if (!everSent || desired != headlightsOn) commit(desired, "ext-sensor reason=" + reason);
     }
 
-    /** RSM lightSWReason → цель: 0 Day→авто, 2/3/4 Dark/Tunnel/Darkstart→ближний, иначе null. */
+    /** RSM lightSWReason → цель: 0 Day→выкл, 2/3/4 Dark/Tunnel/Darkstart→ближний, иначе null. */
     private Boolean reasonToDesired(int reason) {
         switch (reason) {
-            case 0: return Boolean.FALSE;                     // день → авто/выкл
+            case 0: return Boolean.FALSE;                     // день → выкл
             case 2: case 3: case 4: return Boolean.TRUE;      // темно/тоннель → ближний
             default: return null;                             // 1 Others / неизвестно
         }
@@ -710,7 +711,7 @@ public class LightSensorService extends Service {
     private Boolean desiredFromCabin(int level, Settings s) {
         if (level < 0) return null;
         if (level <= s.threshOn)  return Boolean.TRUE;   // темно → ближний
-        if (level >  s.threshOff) return Boolean.FALSE;  // светло → авто
+        if (level >  s.threshOff) return Boolean.FALSE;  // светло → выкл
         return null;                                     // мёртвая зона
     }
 
@@ -755,7 +756,7 @@ public class LightSensorService extends Service {
         long since = SystemClock.elapsedRealtime() - lastCommitElapsed;
         Log.i(TAG, "lightstatus: autoLamp=" + autoLamp + " dippedBeam=" + dippedBeam
                 + " headLight=" + headLight
-                + " ourTarget=" + (headlightsOn ? "ближний" : "авто")
+                + " ourTarget=" + (headlightsOn ? "ближний" : "выкл")
                 + " sinceCommit=" + since + "ms");
 
         // Любое значимое изменение статуса отменяет отложенную переустановку —
@@ -763,7 +764,7 @@ public class LightSensorService extends Service {
         timerHandler.removeCallbacks(canbusReassertRunnable);
 
         if (!everSent) return;                 // режим ещё не выставляли — ждём force-init
-        if (!headlightsOn) return;             // таргет «авто» (светло) — не вмешиваемся
+        if (!headlightsOn) return;             // таргет «выкл» (светло) — не вмешиваемся
         if (since < HEADLIGHT_GUARD_MS) {      // эхо нашей же команды
             Log.i(TAG, "lightstatus: игнор — эхо нашей команды (" + since + "ms назад)");
             return;

@@ -426,7 +426,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
             boolean current = prefs.getBoolean("steerHeadlightsOn", false);
             boolean next = !current;
-            if (!MainActivity.setHeadlights(next)) {
+            if (!MainActivity.setHeadlights(app, next)) {
                 Log.w(TAG, "STEER_ACTION headlights: CAN failed, state not persisted");
                 return;
             }

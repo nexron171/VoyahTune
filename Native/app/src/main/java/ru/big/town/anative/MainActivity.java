@@ -228,22 +228,15 @@ public class MainActivity extends AppCompatActivity {
         return setCanValues(1, getForcedEvCanCommand(on), "forced EV " + (on ? "on" : "off"));
     }
 
-    //------------- Методы получения команд CAN управления фарами  ----------------------------------
-    public static boolean setHeadlights(boolean on){
-        Log.i("$$$ MainActivity setHeadlights $$$", "sending CAN: headlights " + (on ? "ON" : "OFF"));
-        if (on) {
-            return setCanValues(1, arraysStr2arraysBytes(new String[]{
-                    "1f 08 00 10 ff f8 00 04 02 7f",
-                    "6f 08 08 00 80 11 43 04 00 40",
-                    "76 08 04 00 00 00 00 00 00 00"
-            }), "headlights: ON (low beam / manual)");
-        } else {
-            return setCanValues(1, arraysStr2arraysBytes(new String[]{
-                    "6f 08 08 00 80 11 43 00 00 40",
-                    "1f 08 00 00 ff f9 00 04 02 7f",
-                    "76 08 00 00 00 00 00 00 00 00"
-            }), "headlights: OFF (auto)");
+    //------------- Управление режимом наружного света через штатный CanBusService -------------------
+    public static boolean setHeadlights(Context context, boolean on){
+        String command = on ? "LOW_BEAM" : "OUT_LAMP_OFF";
+        Log.i("$$$ MainActivity setHeadlights $$$", "OEM CAN: " + command);
+        if (CanSender.isDebugMode()) {
+            Log.i("$$$ MainActivity setHeadlights $$$", "EMULATE OEM TX58: " + command + " state=1");
+            return true;
         }
+        return HeadlightCanTransport.send(context, on);
     }
 
     @Override
