@@ -16,7 +16,10 @@
 #   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление). Запускаем одну
 #     фоновую попытку на PID под timeout; успех подтверждаем exit-code либо точным лог-маркером агента.
 
-logs() { log -p e -t VOYAH "$1"; }
+LOG_TAG="vt_load_bin"
+
+logi() { log -p i -t $LOG_TAG "$1"; }
+loge() { log -p e -t $LOG_TAG "$1"; }
 
 # Atomic owner lock without a mkdir/pid publication gap and without relying on `flock`
 # being present in the target ROM. A new path avoids a takeover race with the legacy
@@ -151,16 +154,16 @@ inject_ret() {
     RC=$?
     cat "$TRY" >> "$3"
     if [ "$RC" -ne 0 ]; then
-        logs "inject FAIL pid=$1 $2 rc=$RC (retry next loop)"
+        loge "inject FAIL pid=$1 $2 rc=$RC (retry next loop)"
         return 1
     fi
     # Ошибки самого frida-inject (агент пишет свои сообщения через console.log/Log — их НЕ матчим).
     if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$TRY"; then
-        logs "inject FAIL pid=$1 $2 (retry next loop)"
+        loge "inject FAIL pid=$1 $2 (retry next loop)"
         return 1
     fi
     echo "$1" > "$4"
-    logs "inject OK pid=$1 $2"
+    logi "inject OK pid=$1 $2"
     return 0
 }
 
@@ -210,7 +213,7 @@ inject_verified_marker() {
     VERIFIED_TRY="$VERIFIED_LOG.try"
 
     VERIFIED_BEFORE=$(target_identity "$VERIFIED_PID" "$VERIFIED_TARGET") || {
-        logs "inject SKIP target changed pid=$VERIFIED_PID $VERIFIED_TARGET"
+        loge "inject SKIP target changed pid=$VERIFIED_PID $VERIFIED_TARGET"
         return 1
     }
 
@@ -237,33 +240,33 @@ inject_verified_marker() {
     } >> "$VERIFIED_LOG"
 
     if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$VERIFIED_TRY"; then
-        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT engine-error (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT engine-error (retry next loop)"
         return 1
     fi
     if ! grep -qF "$VERIFIED_READY" "$VERIFIED_TRY"; then
-        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT agent-marker-missing (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT agent-marker-missing (retry next loop)"
         return 1
     fi
     if [ "$VERIFIED_RC" -ne 0 ]; then
-        logs "inject READY pid=$VERIFIED_PID $VERIFIED_SCRIPT rc=$VERIFIED_RC marker-confirmed"
+        logi "inject READY pid=$VERIFIED_PID $VERIFIED_SCRIPT rc=$VERIFIED_RC marker-confirmed"
     fi
 
     VERIFIED_AFTER=$(target_identity "$VERIFIED_PID" "$VERIFIED_TARGET") || {
-        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-exited (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-exited (retry next loop)"
         return 1
     }
     if [ "$VERIFIED_AFTER" != "$VERIFIED_BEFORE" ]; then
-        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-changed (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-changed (retry next loop)"
         return 1
     fi
 
     VERIFIED_MARK_TMP="$VERIFIED_MARK.$$"
     if ! echo "$VERIFIED_AFTER" > "$VERIFIED_MARK_TMP" || ! mv -f "$VERIFIED_MARK_TMP" "$VERIFIED_MARK"; then
         rm -f "$VERIFIED_MARK_TMP"
-        logs "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT marker-write (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT marker-write (retry next loop)"
         return 1
     fi
-    logs "inject OK pid=$VERIFIED_PID $VERIFIED_SCRIPT marker=$VERIFIED_AFTER"
+    logi "inject OK pid=$VERIFIED_PID $VERIFIED_SCRIPT marker=$VERIFIED_AFTER"
     return 0
 }
 
@@ -306,17 +309,17 @@ inject_keymanager_bg() {
                 return 0
             fi
             if keymanager_inject_is_live "$KM_BUSY_TARGET"; then
-                logs "keep keymanager injection busy: live injector pid target=$KM_BUSY_TARGET"
+                logi "keep keymanager injection busy: live injector pid target=$KM_BUSY_TARGET"
                 return 0
             fi
-            logs "clear stale keymanager injection busy age=${KM_BUSY_AGE}s record=$KM_BUSY_RECORD"
+            logi "clear stale keymanager injection busy age=${KM_BUSY_AGE}s record=$KM_BUSY_RECORD"
             # Один loader владеет owner-lock; conditional read защищает от cleanup завершившегося worker.
             [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" = "$KM_BUSY_RECORD" ] \
                 && rm -f "$SWK_KM_BUSY"
             continue
         elif [ -e "$SWK_KM_BUSY" ]; then
             # Миграция с legacy regular-file busy (там лежал только target PID).
-            logs "clear legacy keymanager injection busy"
+            logi "clear legacy keymanager injection busy"
             rm -f "$SWK_KM_BUSY"
             continue
         fi
@@ -328,7 +331,7 @@ inject_keymanager_bg() {
         fi
     done
 
-    logs "inject steeringwheelkeys -> keymanager $KM_TARGET_PID (eternalize,bounded-bg)"
+    logi "inject steeringwheelkeys -> keymanager $KM_TARGET_PID (eternalize,bounded-bg)"
     (
         # Не наследуем loader traps: worker живёт не дольше timeout+KILL и сам чистит busy.
         trap - 0 HUP INT TERM
@@ -338,12 +341,12 @@ inject_keymanager_bg() {
         KM_RC=$?
         cat "$KM_TRY" >> /data/local/tmp/voyah_swk.txt
         if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$KM_TRY"; then
-            logs "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (retry next loop)"
+            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (retry next loop)"
         elif [ "$KM_RC" -eq 0 ] || grep -qF '[swk] keymanager hooks installed:' "$KM_TRY"; then
             echo "$KM_TARGET_PID" > "$SWK_KM_MARK"
-            logs "inject OK keymanager pid=$KM_TARGET_PID"
+            logi "inject OK keymanager pid=$KM_TARGET_PID"
         else
-            logs "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (retry next loop)"
+            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (retry next loop)"
         fi
         rm -f "$KM_TRY"
         [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" = "$KM_RECORD" ] \
@@ -351,7 +354,7 @@ inject_keymanager_bg() {
     ) &
 }
 
-logs "voyah load.bin start"
+logi "voyah load.bin start"
 
 while [ 1 ]; do
     # 1) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
@@ -405,9 +408,9 @@ while [ 1 ]; do
                 || [ "$APOLLO_DISABLED_HEARTBEAT" != "0" ]; then
             if disable_apollo_legacy_hook; then
                 rm -f "$APOLLO_DOWN_MARK"
-                logs "apollo direct-only: VehicleSetting injection disabled"
+                logi "apollo direct-only: VehicleSetting injection disabled"
             else
-                logs "apollo direct-only: fail-closed cleanup FAIL (retry next loop)"
+                logi "apollo direct-only: fail-closed cleanup FAIL (retry next loop)"
             fi
         fi
     else
@@ -422,12 +425,12 @@ while [ 1 ]; do
                 if reset_apollo_liveness; then
                     echo 1 > "$APOLLO_DOWN_MARK"
                 else
-                    logs "apollo target gone: liveness reset FAIL (retry next loop)"
+                    loge "apollo target gone: liveness reset FAIL (retry next loop)"
                 fi
             fi
             if [ -f "$APOLLO_MARK" ] && [ -f "$APOLLO_DOWN_MARK" ]; then
                 rm -f "$APOLLO_MARK"
-                logs "apollo target gone: liveness reset"
+                logi "apollo target gone: liveness reset"
             fi
         else
             rm -f "$APOLLO_DOWN_MARK"
@@ -442,7 +445,7 @@ while [ 1 ]; do
                             "$APOLLO_LOG" "$APOLLO_MARK" "$APOLLO_READY_MARKER"
                     fi
                 else
-                    logs "apollo new identity: liveness reset FAIL (attach deferred)"
+                    loge "apollo new identity: liveness reset FAIL (attach deferred)"
                 fi
             fi
         fi

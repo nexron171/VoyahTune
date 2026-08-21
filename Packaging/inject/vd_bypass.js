@@ -12,6 +12,7 @@
 //   5) PackageManagerService.hasSystemFeature — фич-флаг activities_on_secondary_displays = true.
 // uid резолвится динамически по имени пакета (устойчиво к переустановке).
 Java.perform(function () {
+    var TAG = "vt_vdbypass";
     var OUR_PKG = "ru.big.town.anative";
     var Log = Java.use("android.util.Log");
     var Binder = Java.use("android.os.Binder");
@@ -23,7 +24,7 @@ Java.perform(function () {
         // Fail closed: фиксированный UID после переустановки может принадлежать совсем другому пакету.
         // При -1 все UID-scoped bypass ниже штатно откажут, вместо выдачи системных прав постороннему app.
         ourUid = -1;
-        Log.e("VDBYPASS", "package uid resolve failed; privileged UID hooks disabled: " + e);
+        Log.e(TAG, "package uid resolve failed; privileged UID hooks disabled: " + e);
     }
     var installed = [];
 
@@ -36,7 +37,7 @@ Java.perform(function () {
         };
         installed.push("IMS.checkInjectEventsPermission");
     } catch (e) {
-        Log.e("VDBYPASS", "IMS hook fail: " + e);
+        Log.e(TAG, "IMS hook fail: " + e);
     }
 
     // 2) ADD_TRUSTED_DISPLAY / INTERNAL_SYSTEM_WINDOW — редко (только при createVirtualDisplay и т.п.)
@@ -52,7 +53,7 @@ Java.perform(function () {
         };
         installed.push("BinderService.checkCallingPermission");
     } catch (e) {
-        Log.e("VDBYPASS", "DMS hook fail: " + e);
+        Log.e(TAG, "DMS hook fail: " + e);
     }
 
     // 3) запуск активити на нашем VirtualDisplay — редко (только при старте активити на дисплей)
@@ -64,7 +65,7 @@ Java.perform(function () {
         };
         installed.push("ASS.isCallerAllowedToLaunchOnDisplay");
     } catch (e) {
-        Log.e("VDBYPASS", "ASS hook fail: " + e);
+        Log.e(TAG, "ASS hook fail: " + e);
     }
 
     // 4) Совместимость «капризных» приложений на вторичных дисплеях (наш VD): разрешаем запуск
@@ -78,7 +79,7 @@ Java.perform(function () {
         };
         installed.push("ActivityRecord.canBeLaunchedOnDisplay");
     } catch (e) {
-        Log.e("VDBYPASS", "AR.canBeLaunchedOnDisplay hook fail: " + e);
+        Log.e(TAG, "AR.canBeLaunchedOnDisplay hook fail: " + e);
     }
 
     // 5) Системный фич-флаг «активити на вторичных дисплеях» — часть проверок мультиоконности
@@ -92,7 +93,7 @@ Java.perform(function () {
         };
         installed.push("PMS.hasSystemFeature(secondary_displays)");
     } catch (e) {
-        Log.e("VDBYPASS", "PMS.hasSystemFeature hook fail: " + e);
+        Log.e(TAG, "PMS.hasSystemFeature hook fail: " + e);
     }
 
     // ============================================================================================
@@ -143,8 +144,8 @@ Java.perform(function () {
             FF.right  = ffInt(cr, "voyahtune_win_right", 1920);
             FF.bottom = ffInt(cr, "voyahtune_win_bottom", 720);
             FF.dpi = {};   // сбросить кэш per-app DPI
-            Log.i("VDBYPASS", "freeform cfg on=" + FF.on + " rect=" + FF.left + "," + FF.top + "," + FF.right + "," + FF.bottom);
-        } catch (e) { Log.e("VDBYPASS", "refreshFreeformCfg: " + e); }
+            Log.i(TAG, "freeform cfg on=" + FF.on + " rect=" + FF.left + "," + FF.top + "," + FF.right + "," + FF.bottom);
+        } catch (e) { Log.e(TAG, "refreshFreeformCfg: " + e); }
     }
     // Блэклист системных пакетов + наши ru.big.town.*. settings/documentsui — исключения.
     function ffBlacklisted(pkg) {
@@ -184,7 +185,7 @@ Java.perform(function () {
                 } catch (ignored) {}
             }
         } catch (e) {
-            Log.w("VDBYPASS", "WindowManagerInternal lookup failed: " + e);
+            Log.w(TAG, "WindowManagerInternal lookup failed: " + e);
         }
     }
 
@@ -196,17 +197,17 @@ Java.perform(function () {
         if (ffTraversalService === null || ffTraversalMethod === null) {
             if (!ffTraversalWarned) {
                 ffTraversalWarned = true;
-                Log.w("VDBYPASS", "freeform traversal replay unavailable");
+                Log.w(TAG, "freeform traversal replay unavailable");
             }
             return;
         }
         try {
             ffTraversalMethod.call(ffTraversalService);
-            Log.i("VDBYPASS", "freeform traversal requested: " + reason);
+            Log.i(TAG, "freeform traversal requested: " + reason);
         } catch (e) {
             if (!ffTraversalWarned) {
                 ffTraversalWarned = true;
-                Log.w("VDBYPASS", "freeform traversal request failed: " + e);
+                Log.w(TAG, "freeform traversal request failed: " + e);
             }
         }
     }
@@ -221,7 +222,7 @@ Java.perform(function () {
         var k = why + "|" + pkg + "|" + displayId + "|" + mode;
         if (ffSeen[k]) return;
         ffSeen[k] = 1; ffSeenN++;
-        Log.i("VDBYPASS", "ff " + why + " pkg=" + pkg + " display=" + displayId + " mode=" + mode);
+        Log.i(TAG, "ff " + why + " pkg=" + pkg + " display=" + displayId + " mode=" + mode);
     }
 
     refreshFreeformCfg();
@@ -259,7 +260,7 @@ Java.perform(function () {
         sctx.registerReceiver.overload('android.content.BroadcastReceiver', 'android.content.IntentFilter', 'java.lang.String', 'android.os.Handler')
             .call(sctx, WinReceiver.$new(), IF.$new("ru.big.town.anative.WIN_RELOAD"), "android.permission.WRITE_SECURE_SETTINGS", null);
         installed.push("WIN_RELOAD receiver");
-    } catch (e) { Log.e("VDBYPASS", "WIN_RELOAD receiver fail: " + e); }
+    } catch (e) { Log.e(TAG, "WIN_RELOAD receiver fail: " + e); }
 
     // 6) Ресайз не-системного окна на ФИЗИЧЕСКИХ экранах (display 0 = водитель, display 1 = пассажир) в Rect
     //    (фейк-freeform). Наш VD/прочие дисплеи не трогаем. Горячий путь → fast-path по флагу.
@@ -311,11 +312,11 @@ Java.perform(function () {
                 // пропускаем ТОЛЬКО его. НЕ выключаем freeform глобально: раньше FF.on=false здесь убивал
                 // окна ВСЕХ приложений из-за одного проблемного окна (freeform «ломался» до перезагрузки).
                 // WM жив (оригинал уже отработал). Лог троттлим — один раз, чтобы не спамить каждый layout-pass.
-                if (!FF._warned) { FF._warned = true; Log.e("VDBYPASS", "freeform layout skip (window, once): " + e); }
+                if (!FF._warned) { FF._warned = true; Log.e(TAG, "freeform layout skip (window, once): " + e); }
             }
         };
         installed.push("DisplayPolicy.layoutWindowLw(detachable-freeform)");
-    } catch (e) { Log.e("VDBYPASS", "layoutWindowLw hook fail: " + e); }
+    } catch (e) { Log.e(TAG, "layoutWindowLw hook fail: " + e); }
 
     // 7) Кастомный DPI не-системному приложению на ФИЗИЧЕСКИХ дисплеях.
     //
@@ -353,7 +354,7 @@ Java.perform(function () {
             return result;
         };
         installed.push("ActivityRecord.ensureActivityConfiguration(detachable-dpi)");
-    } catch (e) { Log.e("VDBYPASS", "ensureActivityConfiguration hook fail: " + e); }
+    } catch (e) { Log.e(TAG, "ensureActivityConfiguration hook fail: " + e); }
 
     function detachFreeformHotHooks(reason) {
         var changed = false;
@@ -362,16 +363,16 @@ Java.perform(function () {
                 ffLayoutMethod.implementation = null;
                 ffLayoutAttached = false;
                 changed = true;
-            } catch (e) { Log.e("VDBYPASS", "layout detach fail: " + e); }
+            } catch (e) { Log.e(TAG, "layout detach fail: " + e); }
         }
         if (ffConfigAttached && ffConfigMethod !== null) {
             try {
                 ffConfigMethod.implementation = null;
                 ffConfigAttached = false;
                 changed = true;
-            } catch (e) { Log.e("VDBYPASS", "config detach fail: " + e); }
+            } catch (e) { Log.e(TAG, "config detach fail: " + e); }
         }
-        if (changed) Log.i("VDBYPASS", "freeform hot hooks DETACHED: " + reason);
+        if (changed) Log.i(TAG, "freeform hot hooks DETACHED: " + reason);
     }
 
     function attachFreeformHotHooks(reason) {
@@ -382,17 +383,17 @@ Java.perform(function () {
                 ffLayoutMethod.implementation = ffLayoutImplementation;
                 ffLayoutAttached = true;
                 changed = true;
-            } catch (e) { Log.e("VDBYPASS", "layout attach fail: " + e); }
+            } catch (e) { Log.e(TAG, "layout attach fail: " + e); }
         }
         if (!ffConfigAttached && ffConfigMethod !== null && ffConfigImplementation !== null) {
             try {
                 ffConfigMethod.implementation = ffConfigImplementation;
                 ffConfigAttached = true;
                 changed = true;
-            } catch (e) { Log.e("VDBYPASS", "config attach fail: " + e); }
+            } catch (e) { Log.e(TAG, "config attach fail: " + e); }
         }
         if (changed) {
-            Log.i("VDBYPASS", "freeform hot hooks ATTACHED: " + reason);
+            Log.i(TAG, "freeform hot hooks ATTACHED: " + reason);
             requestFreeformTraversalOnce(reason);
         }
     }
@@ -431,7 +432,7 @@ Java.perform(function () {
                     .getSystemService("power"), PowerManager);
             return power.isInteractive();
         } catch (e) {
-            Log.w("VDBYPASS", "isInteractive unavailable, assume screen on: " + e);
+            Log.w(TAG, "isInteractive unavailable, assume screen on: " + e);
             return true;
         }
     }
@@ -465,7 +466,7 @@ Java.perform(function () {
         sf.addAction("android.intent.action.SCREEN_OFF");
         ATh.currentActivityThread().getSystemContext().registerReceiver(ScreenReceiver.$new(), sf);
         installed.push("screen hot-hook attach/detach");
-    } catch (e) { Log.e("VDBYPASS", "screen hot-hook controller fail: " + e); }
+    } catch (e) { Log.e(TAG, "screen hot-hook controller fail: " + e); }
 
     FF.screenOn = ffScreenIsInteractive();
     if (FF.screenOn) {
@@ -477,5 +478,5 @@ Java.perform(function () {
     }
 
     // Маркер пишет load.bin (root), а не мы: система (uid system) не может писать в /data/local/tmp (EACCES).
-    Log.i("VDBYPASS", "hooks installed [" + installed.join(", ") + "] uid=" + ourUid);
+    Log.i(TAG, "hooks installed [" + installed.join(", ") + "] uid=" + ourUid);
 });

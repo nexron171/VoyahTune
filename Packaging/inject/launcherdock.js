@@ -43,6 +43,9 @@ Java.perform(function () {
     var BitmapDrawable = Java.use("android.graphics.drawable.BitmapDrawable");
     var Canvas         = Java.use("android.graphics.Canvas");
 
+    var TAG = "vt_launcherdock";
+    var Log = Java.use("android.util.Log");
+
     // На ОД-прошивках NavigationBarMain — ОТДЕЛЬНЫЙ класс водительского бара (пассажирский —
     // NavigationBarSecond), поэтому сам факт хука уже ограничивает нас нужным экраном. На ПИ-прошивках
     // класс NavigationBar ОБЩИЙ для обоих экранов и различается только полем mScreenId → без явного гарда
@@ -51,11 +54,11 @@ Java.perform(function () {
     var SHARED_NAV = false;
     try {
         Java.use(NAV_MAIN);
-        console.log("OD firmware");
+        Log.i(TAG, "OD firmware");
     } catch (e) {
         NAV_MAIN   = "com.qinggan.mainlauncher.navigation.NavigationBar";  // класс навбара в ПИ-прошивках
         SHARED_NAV = true;
-        console.log("PI firmware");
+        Log.i(TAG, "PI firmware");
     }
 
     // Номер экрана инстанса навбара: 0 = водительский (наш), 1 = пассажирский, -1 = определить не удалось.
@@ -85,7 +88,7 @@ Java.perform(function () {
         if (id === -1 && !SHARED_NAV) return true;
         if (id === -1 && !isDriverBar._warned) {
             isDriverBar._warned = true;
-            try { Java.use("android.util.Log").w("voyahdock", "screenId неизвестен на общем классе навбара — хуки пропущены"); } catch (e) {}
+            try { Log.i(TAG, "screenId неизвестен на общем классе навбара — хуки пропущены"); } catch (e) {}
         }
         return false;
     }
@@ -187,7 +190,7 @@ Java.perform(function () {
     function refreshCache() {
         cache.dock1 = cfg("dock1");
         cache.dock2 = cfg("dock2");
-        console.log("[dock] cache: dock1=" + cache.dock1 + " dock2=" + cache.dock2);
+        Log.i(TAG, "[dock] cache: dock1=" + cache.dock1 + " dock2=" + cache.dock2);
     }
 
     // Проверка «pkg установлен и запускаем» — гейт перед перехватом клика.
@@ -229,7 +232,7 @@ Java.perform(function () {
             d.setBounds(0, 0, 50, 50);
             return retainDrawable(d);
         } catch (e) {
-            console.log("[dock] getAppDrawable err " + pkg + ": " + e);
+            Log.e(TAG, "[dock] getAppDrawable err " + pkg + ": " + e);
             return null;
         }
     }
@@ -242,8 +245,8 @@ Java.perform(function () {
             i.addFlags(0x10000000);   // FLAG_ACTIVITY_NEW_TASK
             ctx().startActivity(i);
             try { Java.use("android.util.Log").i("voyahdock", "menu long-press -> VoyahTune"); } catch (ee) {}
-            console.log("[dock] menu long-press -> VoyahTune");
-        } catch (e) { console.log("[dock] openVoyahTune err: " + e); }
+            Log.i(TAG, "[dock] menu long-press -> VoyahTune");
+        } catch (e) { Log.e(TAG, "[dock] openVoyahTune err: " + e); }
     }
 
     // Слушатель долгого тапа «меню» (кнопка «все приложения», последний элемент дока). Регистрируем
@@ -265,7 +268,7 @@ Java.perform(function () {
                 }
             });
             menuLC = Listener.$new();
-        } catch (e) { console.log("[dock] menuLongClick reg err: " + e); }
+        } catch (e) { Log.e(TAG, "[dock] menuLongClick reg err: " + e); }
         return menuLC;
     }
 
@@ -294,7 +297,7 @@ Java.perform(function () {
                                 openDockSplit(slot);
                                 return true;
                             } catch (e) {
-                                try { Java.use("android.util.Log").w("voyahdock", "slot long-press err: " + e); } catch (ee) {}
+                                try { Log.e(TAG, "slot long-press err: " + e); } catch (ee) {}
                                 return false;
                             }
                         }
@@ -302,7 +305,7 @@ Java.perform(function () {
                 }
             });
             slotLC = Listener.$new();
-        } catch (e) { console.log("[dock] slotLongClick reg err: " + e); }
+        } catch (e) { Log.e(TAG, "[dock] slotLongClick reg err: " + e); }
         return slotLC;
     }
 
@@ -314,11 +317,11 @@ Java.perform(function () {
             i.putExtra.overload('java.lang.String', 'int').call(i, "slot", slot);
             i.addFlags(0x00000020);   // FLAG_INCLUDE_STOPPED_PACKAGES — добудиться, даже если Native стоплен
             ctx().sendBroadcast(i);
-            console.log("[dock] OPEN_DOCK_SPLIT slot=" + slot);
+            Log.i(TAG, "[dock] OPEN_DOCK_SPLIT slot=" + slot);
             try { Java.use("android.util.Log").i("voyahdock", "OPEN_DOCK_SPLIT sent slot=" + slot); } catch (ee) {}
         } catch (e) {
-            console.log("[dock] openDockSplit err: " + e);
-            try { Java.use("android.util.Log").w("voyahdock", "openDockSplit err: " + e); } catch (ee) {}
+            Log.e(TAG, "[dock] openDockSplit err: " + e);
+            try { Log.e(TAG, "openDockSplit err: " + e); } catch (ee) {}
         }
     }
 
@@ -357,7 +360,7 @@ Java.perform(function () {
                     var lc = getMenuLongClick();
                     if (lc) { av.setLongClickable(true); av.setOnLongClickListener(lc); }
                 }
-            } catch (e) { console.log("[dock] menu long-press attach err: " + e); }
+            } catch (e) { Log.e(TAG, "[dock] menu long-press attach err: " + e); }
             // Долгий тап по слотам 1/2 → открыть назначенный сплит. Регистрируем viewId→slot и вешаем
             // слушатель (идемпотентно, переживает перекраску темы, как и меню-лонгтап выше).
             try {
@@ -366,8 +369,8 @@ Java.perform(function () {
                 var sv2 = instance.mScreenUpItemView2.value;
                 if (slc && sv1) { slotByViewId["" + sv1.getId()] = 1; sv1.setLongClickable(true); sv1.setOnLongClickListener(slc); }
                 if (slc && sv2) { slotByViewId["" + sv2.getId()] = 2; sv2.setLongClickable(true); sv2.setOnLongClickListener(slc); }
-            } catch (e) { console.log("[dock] slot long-press attach err: " + e); }
-        } catch (e) { console.log("[dock] updateIcons err: " + e); }
+            } catch (e) { Log.e(TAG, "[dock] slot long-press attach err: " + e); }
+        } catch (e) { Log.e(TAG, "[dock] updateIcons err: " + e); }
     }
 
     // Первичный проход + reload: перерисовать иконки на всех живых инстансах NavigationBarMain.
@@ -376,12 +379,12 @@ Java.perform(function () {
             Java.choose(NAV_MAIN, {
                 onMatch: function (inst) {
                     Java.scheduleOnMainThread(function () {
-                        try { updateIcons(inst); } catch (e) { console.log("[dock] updateAll err: " + e); }
+                        try { updateIcons(inst); } catch (e) { Log.e(TAG, "[dock] updateAll err: " + e); }
                     });
                 },
                 onComplete: function () {}
             });
-        } catch (e) { console.log("[dock] choose err: " + e); }
+        } catch (e) { Log.e(TAG, "[dock] choose err: " + e); }
     }
 
     // Freeform-запуск приложения из слота дока ДЕЛЕГИРУЕМ Native (broadcast OPEN_FREEFORM): Native закроет
@@ -395,8 +398,8 @@ Java.perform(function () {
             i.putExtra.overload('java.lang.String', 'java.lang.String').call(i, "pkg", "" + pkg);
             i.addFlags(0x00000020);   // FLAG_INCLUDE_STOPPED_PACKAGES — добудиться, даже если Native стоплен
             ctx().sendBroadcast(i);
-            console.log("[dock] OPEN_FREEFORM -> " + pkg);
-        } catch (e) { console.log("[dock] launchFreeform err: " + e); }
+            Log.i(TAG, "[dock] OPEN_FREEFORM -> " + pkg);
+        } catch (e) { Log.e(TAG, "[dock] launchFreeform err: " + e); }
     }
 
     try {
@@ -418,7 +421,7 @@ Java.perform(function () {
                 origInitUp.call(this);
                 try { updateIcons(this); } catch (e) {}
             };
-        } catch (e) { console.log("[dock] initScreenUpViews hook skip: " + e); }
+        } catch (e) { Log.e(TAG, "[dock] initScreenUpViews hook skip: " + e); }
 
         // 2) ПОДСВЕТКА (косметика): reverse-mapping нашего pkg слота → штатный pkg, чтобы родной код чекнул
         //    правильную кнопку. Для нашего VD-хоста (SplitHostActivity) чекаем слот 2 напрямую.
@@ -469,7 +472,7 @@ Java.perform(function () {
                     var p2 = cfg("dock2");
                     if (isInstalled(p2)) { lastSlot = 2; launchFreeform(p2); return; }
                 }
-            } catch (e) { console.log("[dock] onClick err: " + e); }
+            } catch (e) { Log.e(TAG, "[dock] onClick err: " + e); }
             this.onClick(view);
         };
 
@@ -513,8 +516,8 @@ Java.perform(function () {
                     } catch (e) {}
                     return origDismiss.call(this);
                 };
-                console.log("[dock] dismiss pinned on " + label);
-            } catch (e) { console.log("[dock] dismiss hook skip " + label + ": " + e); }
+                Log.i(TAG, "[dock] dismiss pinned on " + label);
+            } catch (e) { Log.e(TAG, "[dock] dismiss hook skip " + label + ": " + e); }
         }
         pinDock(NAV_MAIN, "bar");
         pinDock(NAV_MAIN.replace(/\.[^.]+$/, ".NavigationBarController"), "controller");
@@ -534,15 +537,15 @@ Java.perform(function () {
             LM.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
                 return floatHomeOff() ? false : this.isThirdShowFloatApp(cn);
             };
-            console.log("[dock] floating home suppressed (LauncherModel)");
-        } catch (e) { console.log("[dock] LauncherModel.isThirdShowFloatApp skip: " + e); }
+            Log.i(TAG, "[dock] floating home suppressed (LauncherModel)");
+        } catch (e) { Log.e(TAG, "[dock] LauncherModel.isThirdShowFloatApp skip: " + e); }
         try {
             var TAU = Java.use("com.qinggan.launcher.base.drag.ThirdAppUtil");
             TAU.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
                 return cfg("floathome") !== "0" ? false : this.isThirdShowFloatApp(cn);
             };
-            console.log("[dock] floating home suppressed (ThirdAppUtil)");
-        } catch (e) { console.log("[dock] ThirdAppUtil.isThirdShowFloatApp skip: " + e); }
+            Log.i(TAG, "[dock] floating home suppressed (ThirdAppUtil)");
+        } catch (e) { Log.e(TAG, "[dock] ThirdAppUtil.isThirdShowFloatApp skip: " + e); }
 
         // 6) РАЗВЕДКА пути скрытия дока при переносе окна между экранами.
         //    Симптом «перенёс жестом на водительский — док пропал» блокировкой dismiss НЕ лечится,
@@ -563,8 +566,8 @@ Java.perform(function () {
                     return ov.apply(this, arguments);        // оригинал ВЫЗЫВАЕМ — это разведка, не правка
                 };
             });
-            console.log("[dock] onMoveStart traced");
-        } catch (e) { console.log("[dock] onMoveStart trace skip: " + e); }
+            Log.i(TAG, "[dock] onMoveStart traced");
+        } catch (e) { Log.e(TAG, "[dock] onMoveStart trace skip: " + e); }
 
         // Приёмник reload: Native шлёт DOCK_RELOAD после записи voyahtune_dock* → перечитать + перерисовать.
         // ВАЖНО: BroadcastReceiver.onReceive — АБСТРАКТНЫЙ метод. Shorthand-форма registerClass
@@ -586,7 +589,7 @@ Java.perform(function () {
                             try {
                                 refreshCache();
                                 setTimeout(updateAllNavbars, 300);   // дать навбару стабилизироваться
-                            } catch (e) { console.log("[dock] onReceive err: " + e); }
+                            } catch (e) { Log.e(TAG, "[dock] onReceive err: " + e); }
                         }
                     }
                 }
@@ -604,8 +607,8 @@ Java.perform(function () {
                 ctx().registerReceiver.overload('android.content.BroadcastReceiver',
                     'android.content.IntentFilter').call(ctx(), recv, filt);
             }
-            console.log("[dock] reload receiver registered: " + RELOAD_ACT + " (sdk=" + sdk + ")");
-        } catch (e) { console.log("[dock] receiver reg err: " + e); }
+            Log.i(TAG, "[dock] reload receiver registered: " + RELOAD_ACT + " (sdk=" + sdk + ")");
+        } catch (e) { Log.e(TAG, "[dock] receiver reg err: " + e); }
 
         // Первичная загрузка конфига + отрисовка иконок на уже живых навбарах. Повторы — на случай,
         // если навбар создаётся чуть позже инъекции (на буте load.bin инжектит рано).
@@ -615,9 +618,9 @@ Java.perform(function () {
         setTimeout(updateAllNavbars, 2500);
         setTimeout(updateAllNavbars, 5000);
 
-        console.log("[dock] NavigationBarMain hooks installed (updateTheme/updateSelectedApp/onClick)");
+        Log.i(TAG, "[dock] NavigationBarMain hooks installed (updateTheme/updateSelectedApp/onClick)");
     } catch (e) {
         // Класс не найден (скрипт заинжектили не в лаунчер, либо CN/другая прошивка) — тихо выходим.
-        console.log("[dock] NavigationBarMain not found (not launcher/oversea?): " + e);
+        Log.e(TAG, "[dock] NavigationBarMain not found (not launcher/oversea?): " + e);
     }
 });

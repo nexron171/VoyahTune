@@ -20,7 +20,7 @@
 //   settings put global voyahtune_multidisplay 0
 //   am broadcast -a ru.big.town.anative.MD_RELOAD
 Java.perform(function () {
-    var TAG = "voyahmd";
+    var TAG = "vt_multidisplay";
     var CLS = "com.qinggan.systemservice.multidisplay.MultiDisplayImpl";
     var RELOAD_ACT = "ru.big.town.anative.MD_RELOAD";
 

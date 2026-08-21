@@ -10,7 +10,7 @@
 // Долгое нажатие — ПО ТАЙМЕРУ (порог LONG_MS): сработал → сразу «долгое», не дожидаясь UP; отпустил
 // раньше порога → «короткое». Действия читаем ЖИВЬЁМ из Settings.Global (voyahtune_<slot>, зеркалит
 // Native из UI «Кнопки на руле»), исполняет их Native через explicit-broadcast STEER_ACTION →
-// SetModesReceiverDynamic.handleSteerAction. Оба слота кнопки "none" → НЕ перехватываем (штатно).
+// SetModesReceiverDynamic.handleSteerAction. Оба слsота кнопки "none" → НЕ перехватываем (штатно).
 Java.perform(function () {
     var LONG_MS = 600;
     // Медиа-кнопки руля: QG-код → команда Native + стандартный media keycode.
@@ -38,7 +38,7 @@ Java.perform(function () {
     var KeyEvent = Java.use("android.view.KeyEvent");
     var AudioManager = Java.use("android.media.AudioManager");
     var Log = Java.use("android.util.Log");
-    var TAG = "steeringwheelkeys.js"
+    var TAG = "vt_steeringwheelkeys";
 
     function ctx() {
         try { var app = ActivityThread.currentApplication(); if (app !== null) return app.getApplicationContext(); } catch (e) {}
@@ -82,10 +82,10 @@ Java.perform(function () {
             // Provider contract for a physical wheel command is exact; never turn PLAY_PAUSE into
             // PAUSE (or vice versa) because of a malformed/stale response.
             if (route === "keymanager" && keyCode !== spec.keyCode) keyCode = spec.keyCode;
-            console.log("[swk] media decision " + spec.command + " -> " + route + " kc=" + keyCode);
+            Log.i(TAG, "[swk] media decision " + spec.command + " -> " + route + " kc=" + keyCode);
             return { route: route, keyCode: keyCode };
         } catch (e) {
-            console.log("[swk] media decision err, native fallback: " + e);
+            Log.e(TAG, "[swk] media decision err, native fallback: " + e);
             return fallback;
         }
     }
@@ -99,8 +99,8 @@ Java.perform(function () {
             i.putExtra("action", id);
             i.addFlags(0x00000020);   // FLAG_INCLUDE_STOPPED_PACKAGES — добудиться, даже если Native стоплен
             ctx().sendBroadcast(i);
-            console.log("[swk] STEER_ACTION -> " + id);
-        } catch (e) { console.log("[swk] doAction err: " + e); }
+            Log.i(TAG, "[swk] STEER_ACTION -> " + id);
+        } catch (e) { Log.e(TAG, "[swk] doAction err: " + e); }
     }
 
     // Медиа-кнопка → ровно один стандартный медиа-эвент в активную media-session (работает в любом
@@ -111,7 +111,7 @@ Java.perform(function () {
             am = Java.cast(ctx().getSystemService("audio"), AudioManager);
             am.dispatchMediaKeyEvent(KeyEvent.$new(0, kc));   // ACTION_DOWN
         } catch (e) {
-            console.log("[swk] media DOWN failed before delivery: " + e);
+            Log.e(TAG, "[swk] media DOWN failed before delivery: " + e);
             return false;
         }
 
@@ -120,9 +120,9 @@ Java.perform(function () {
         try {
             am.dispatchMediaKeyEvent(KeyEvent.$new(1, kc));   // ACTION_UP
         } catch (e) {
-            console.log("[swk] media UP failed after delivered DOWN, no fallback: " + e);
+            Log.e(TAG, "[swk] media UP failed after delivered DOWN, no fallback: " + e);
         }
-        console.log("[swk] media dispatch kc=" + kc);
+        Log.i(TAG, "[swk] media dispatch kc=" + kc);
         return true;
     }
 
@@ -131,19 +131,19 @@ Java.perform(function () {
     function syntheticNativePlayPause() {
         var reader = readerInstance;
         if (reader === null || readerOnKeyEvent === null) {
-            console.log("[swk] MEDIA_KEY_PROXY nativeQG: no captured KeyManagerReader");
+            Log.i(TAG, "[swk] MEDIA_KEY_PROXY nativeQG: no captured KeyManagerReader");
             return false;
         }
         try {
             readerOnKeyEvent.call(reader, KeyEvent.$new(0, 6));
         } catch (e) {
-            console.log("[swk] MEDIA_KEY_PROXY QG down err: " + e);
+            Log.e(TAG, "[swk] MEDIA_KEY_PROXY QG down err: " + e);
             return false;
         }
         // UP синхронный: ACK ordered-broadcast выдаётся только после попытки завершить всю пару.
         try { readerOnKeyEvent.call(reader, KeyEvent.$new(1, 6)); }
         catch (e) {
-            console.log("[swk] MEDIA_KEY_PROXY QG up failed after DOWN, no fallback: " + e);
+            Log.e(TAG, "[swk] MEDIA_KEY_PROXY QG up failed after DOWN, no fallback: " + e);
         }
         return true;
     }
@@ -162,7 +162,7 @@ Java.perform(function () {
             if (attempt < 120) {
                 setTimeout(function () { installMediaProxyReceiver(attempt + 1); }, 250);
             } else {
-                console.log("[swk] MEDIA_KEY_PROXY: application context unavailable");
+                Log.w(TAG, "[swk] MEDIA_KEY_PROXY: application context unavailable");
             }
             return;
         }
@@ -181,19 +181,19 @@ Java.perform(function () {
                                             || intent.getAction().toString() !== MEDIA_PROXY_ACTION) return;
                                     var keyCode = intent.getIntExtra("keyCode", -1);
                                     if (!allowedMediaKey(keyCode)) {
-                                        console.log("[swk] MEDIA_KEY_PROXY rejected kc=" + keyCode);
+                                        Log.w(TAG, "[swk] MEDIA_KEY_PROXY rejected kc=" + keyCode);
                                         return;
                                     }
                                     var nativeQG = intent.getBooleanExtra("nativeQG", false);
                                     if (nativeQG && keyCode !== 85) {
-                                        console.log("[swk] MEDIA_KEY_PROXY rejected nativeQG kc=" + keyCode);
+                                        Log.w(TAG, "[swk] MEDIA_KEY_PROXY rejected nativeQG kc=" + keyCode);
                                         return;
                                     }
                                     var handled = nativeQG
                                         ? syntheticNativePlayPause() : dispatchMedia(keyCode);
                                     if (handled) this.setResultCode(MEDIA_PROXY_ACK);
                                 } catch (e) {
-                                    console.log("[swk] MEDIA_KEY_PROXY err: " + e);
+                                    Log.e(TAG, "[swk] MEDIA_KEY_PROXY err: " + e);
                                 }
                             }
                         }
@@ -207,9 +207,9 @@ Java.perform(function () {
             register.call(context, mediaProxyReceiver, IntentFilter.$new(MEDIA_PROXY_ACTION),
                 "android.permission.WRITE_SECURE_SETTINGS", null);
             mediaProxyInstalled = true;
-            console.log("[swk] MEDIA_KEY_PROXY receiver registered");
+            Log.i(TAG, "[swk] MEDIA_KEY_PROXY receiver registered");
         } catch (e) {
-            console.log("[swk] MEDIA_KEY_PROXY registration attempt " + attempt + " failed: " + e);
+            Log.e(TAG, "[swk] MEDIA_KEY_PROXY registration attempt " + attempt + " failed: " + e);
             if (attempt < 120) {
                 setTimeout(function () { installMediaProxyReceiver(attempt + 1); }, 250);
             }
@@ -283,7 +283,7 @@ Java.perform(function () {
         readerOnKeyEvent.implementation = function (ke) {
             if (readerInstance === null) {
                 try { readerInstance = Java.retain(this); }
-                catch (e) { console.log("[swk] retain KeyManagerReader err: " + e); }
+                catch (e) { Log.e(TAG, "[swk] retain KeyManagerReader err: " + e); }
             }
             var code = ke.getKeyCode();
             Log.i(TAG, "key press: " + code + " action: " + ke.getAction())
@@ -327,7 +327,7 @@ Java.perform(function () {
                             readerOnKeyEvent.call(this, replayDown);
                             return readerOnKeyEvent.call(this, ke);
                         } catch (e) {
-                            console.log("[swk] native action replay err: " + e);
+                            Log.e(TAG, "[swk] native action replay err: " + e);
                             return true;
                         }
                     }
@@ -337,10 +337,10 @@ Java.perform(function () {
             return readerOnKeyEvent.call(this, ke);     // штатное действие кнопки
         };
         installMediaProxyReceiver(0);
-        console.log("[swk] keymanager hooks installed: STAR DVR VOICE PHONE media=3/4/6 (LONG_MS=" + LONG_MS + ")");
+        Log.i(TAG, "[swk] keymanager hooks installed: STAR DVR VOICE PHONE media=3/4/6 (LONG_MS=" + LONG_MS + ")");
     } catch (e) {
         // Если класс не найден (скрипт заинжектили не в keymanager) — просто ничего не делаем.
-        console.log("[swk] KeyManagerReader not found (not keymanager?): " + e);
+        Log.e(TAG, "[swk] KeyManagerReader not found (not keymanager?): " + e);
     }
 
 });
