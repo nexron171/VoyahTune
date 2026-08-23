@@ -101,11 +101,13 @@ Java.perform(function () {
         }
     }
 
-    function clearPublishedGate(reason) {
+    function clearPublishedGate(reason, suppressInfo) {
         var profileCleared = putIntSetting(PROFILE_KEY, 0);
         var heartbeatCleared = putHeartbeat(0);
-        info("gate_cleared", "reason=" + reason + " ok="
-            + ((profileCleared && heartbeatCleared) ? 1 : 0));
+        if (suppressInfo !== true) {
+            info("gate_cleared", "reason=" + reason + " ok="
+                + ((profileCleared && heartbeatCleared) ? 1 : 0));
+        }
         return profileCleared && heartbeatCleared;
     }
 
@@ -364,6 +366,8 @@ Java.perform(function () {
 
     var hooksInstalled = false;
     var hookAllowed = false;
+    var selfDisarmed = false;
+    var subscribeInstalled = false;
     var masterKnown = false;
     var persistedMaster = false;
     var activationBlockedUntil = 0;
@@ -380,8 +384,168 @@ Java.perform(function () {
     var forceStockPassThrough = false;
     var reactivateAfterStockResync = false;
     var postStockReactivationTimer = null;
+    var selfDisarmCleanupTimer = null;
+    var selfDisarmCleanupDone = false;
+    var selfDisarmReason = "";
+    var selfDisarmStockRefreshPending = false;
+    var selfDisarmStockRefreshAttempted = false;
+    var selfDisarmStockRefreshSource = "not_needed";
+
+    function detachProviderHookNow() {
+        if (!subscribeInstalled) return true;
+        try {
+            subscribeQuery.implementation = null;
+            subscribeInstalled = false;
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // A provider call already in progress is itself the required stock refresh: claim it before
+    // invoking the saved original so deferred cleanup cannot dispatch a duplicate OEM query.
+    function claimSelfDisarmStockRefresh(source) {
+        if (!selfDisarmed || !selfDisarmStockRefreshPending
+                || selfDisarmStockRefreshAttempted) {
+            return false;
+        }
+        selfDisarmStockRefreshPending = false;
+        selfDisarmStockRefreshAttempted = true;
+        selfDisarmStockRefreshSource = source;
+        return true;
+    }
+
+    // At most one best-effort OEM query removes a fake result that may already be cached. This path
+    // deliberately has no retry, debounce, activation, or reactivation semantics.
+    function dispatchSelfDisarmStockRefresh() {
+        if (!claimSelfDisarmStockRefresh("deferred")) return true;
+        try {
+            var existingManager = managerSingletonGet.call(managerSingletonField, null);
+            var manager = managerInstance.call(AdasManager, context);
+            if (manager === null) {
+                selfDisarmStockRefreshSource = "manager_null";
+                return false;
+            }
+            var constructorDispatched = existingManager === null && !diagnosticH97XProfile;
+            if (!constructorDispatched) asyncQuery.call(manager);
+            selfDisarmStockRefreshSource = constructorDispatched
+                ? "constructor" : "explicit";
+            return true;
+        } catch (e) {
+            selfDisarmStockRefreshSource = "failed";
+            return false;
+        }
+    }
+
+    /**
+     * Runs outside an executing provider implementation. Flags have already made every queued
+     * callback passive; cleanup only removes registrations, publishes zeroes, and (if needed)
+     * performs one bounded stock query after the provider hook has been detached.
+     */
+    function finishSelfDisarmCleanup() {
+        if (selfDisarmCleanupDone) return;
+        selfDisarmCleanupDone = true;
+        var cleanupOk = true;
+        try {
+            JavaSystem.setProperty(PROCESS_SENTINEL_KEY, "disabled_opt_out");
+        } catch (sentinelError) {
+            cleanupOk = false;
+        }
+        if (heartbeatTimer !== null) {
+            try { clearInterval(heartbeatTimer); } catch (heartbeatError) { cleanupOk = false; }
+            heartbeatTimer = null;
+        }
+        if (stockResyncTimer !== null) {
+            try { clearTimeout(stockResyncTimer); } catch (stockTimerError) { cleanupOk = false; }
+            stockResyncTimer = null;
+        }
+        if (postStockReactivationTimer !== null) {
+            try {
+                clearTimeout(postStockReactivationTimer);
+            } catch (reactivationTimerError) {
+                cleanupOk = false;
+            }
+            postStockReactivationTimer = null;
+        }
+        var registeredObserver = observer;
+        observer = null;
+        if (registeredObserver !== null) {
+            try {
+                resolver.unregisterContentObserver(registeredObserver);
+            } catch (observerError) {
+                cleanupOk = false;
+            }
+        }
+
+        if (!putIntSetting(MASTER_KEY, 0)) cleanupOk = false;
+        if (!clearPublishedGate("legacy_opt_out", true)) cleanupOk = false;
+        if (!detachProviderHookNow()) cleanupOk = false;
+        if (!dispatchSelfDisarmStockRefresh()) cleanupOk = false;
+        info("legacy_self_disarmed", "reason=" + selfDisarmReason
+            + " cleanup_ok=" + (cleanupOk ? 1 : 0)
+            + " stock_refresh=" + selfDisarmStockRefreshSource);
+    }
+
+    function scheduleSelfDisarmCleanup(providerCallbackActive) {
+        if (selfDisarmCleanupDone || selfDisarmCleanupTimer !== null) return true;
+        try {
+            selfDisarmCleanupTimer = setTimeout(function () {
+                Java.perform(function () {
+                    selfDisarmCleanupTimer = null;
+                    finishSelfDisarmCleanup();
+                });
+            }, 0);
+            return true;
+        } catch (e) {
+            selfDisarmCleanupTimer = null;
+            // Never unregister/replace an implementation from inside that implementation.
+            if (providerCallbackActive === true) return false;
+            finishSelfDisarmCleanup();
+            return true;
+        }
+    }
+
+    /**
+     * Monotonic fail-passive transition. All guards flip before any deferred cleanup, so queued
+     * timers and a still-installed provider hook can only pass through to stock code.
+     */
+    function selfDisarmLegacy(reason, providerCallbackActive) {
+        if (!selfDisarmed) {
+            var hadFake = fakeMayBeApplied;
+            selfDisarmed = true;
+            hooksInstalled = false;
+            hookAllowed = false;
+            forceStockPassThrough = true;
+            fakeMayBeApplied = false;
+            pendingStockResync = false;
+            stockResyncInFlight = false;
+            pendingStockAllowsRawOn = false;
+            stockResyncAttempts = 0;
+            stockResyncExhaustedLogged = false;
+            reactivateAfterStockResync = false;
+            masterKnown = true;
+            persistedMaster = false;
+            activationBlockedUntil = 0;
+            periodicResyncDueAt = 0;
+            selfDisarmReason = reason;
+            selfDisarmStockRefreshPending = hadFake;
+            selfDisarmStockRefreshSource = hadFake ? "pending" : "not_needed";
+        }
+        scheduleSelfDisarmCleanup(providerCallbackActive);
+        return false;
+    }
+
+    function ensureLegacyOptInOrDisarm(reason, providerCallbackActive) {
+        if (selfDisarmed) {
+            scheduleSelfDisarmCleanup(providerCallbackActive);
+            return false;
+        }
+        if (readLegacyOptIn() === true) return true;
+        return selfDisarmLegacy(reason, providerCallbackActive);
+    }
 
     function scheduleStockResync(reason, allowRawOn, resetBudget) {
+        if (selfDisarmed) return;
         if (!pendingStockResync || (resetBudget === true && !stockResyncInFlight)) {
             stockResyncAttempts = 0;
             stockResyncExhaustedLogged = false;
@@ -394,6 +558,7 @@ Java.perform(function () {
     }
 
     function markFakeMayBeApplied() {
+        if (selfDisarmed) return;
         fakeMayBeApplied = true;
         // Новый ON/fake supersede-ит старый OFF-resync и даёт следующему OFF новый bounded budget.
         // Если raw key уже успел стать 0, observer должен сохранить/создать shutdown, а не потерять его.
@@ -414,6 +579,7 @@ Java.perform(function () {
     // Вызывается уже из OEM provider callback: текущий organic query сам является нужным stock
     // resync, поэтому не стартуем второй Thread. Только помечаем bounded attempt до saved original.
     function beginOrganicStockResync(reason) {
+        if (selfDisarmed) return false;
         if (!pendingStockResync || stockResyncInFlight) return false;
         var rawMaster = readPersistedMaster();
         var rawAllowed = rawMaster === false
@@ -441,6 +607,7 @@ Java.perform(function () {
     }
 
     function refreshValidatedGate(reason) {
+        if (selfDisarmed) return false;
         var wasAllowed = hookAllowed;
         hashMatches = refreshCanBusPin(reason);
         var result = evaluateProfile(reason, hooksInstalled && hashMatches);
@@ -489,6 +656,7 @@ Java.perform(function () {
     }
 
     function runAsyncQuery(reason, stockResync, allowRawOn) {
+        if (selfDisarmed) return false;
         if (stockResync === true) {
             // User-OFF требует raw 0. Gate-loss shutdown может выполнить pass-through при raw 1, но
             // только пока in-memory profile gate уже закрыт и оба APK всё ещё pinned.
@@ -558,6 +726,10 @@ Java.perform(function () {
                     if (stockResyncTimer !== null) clearTimeout(stockResyncTimer);
                     stockResyncTimer = setTimeout(function () {
                         Java.perform(function () {
+                            if (selfDisarmed) {
+                                stockResyncTimer = null;
+                                return;
+                            }
                             stockResyncInFlight = false;
                             stockResyncTimer = null;
                             if (pendingStockResync) {
@@ -586,6 +758,7 @@ Java.perform(function () {
 
     // Возвращает true только для уже известного explicit 0<->1 transition.
     function refreshMaster(reason) {
+        if (selfDisarmed) return null;
         var next = readPersistedMaster();
         if (next === null) return null;
         // H97X использует только прямой PLC_SWITCH. Никогда не сохраняем и не активируем master,
@@ -639,6 +812,7 @@ Java.perform(function () {
     }
 
     function effectiveMaster() {
+        if (selfDisarmed) return false;
         if (forceStockPassThrough) return false;
         if (!hookAllowed) return false;
         // Point-of-use fail-closed: CanBusService и online profile могут измениться независимо от
@@ -682,7 +856,7 @@ Java.perform(function () {
     // каждом CAN event. Редкий activation resync выполняется только из 30-секундного
     // heartbeat и не чаще одного раза за PERIODIC_RESYNC_INTERVAL_MS при активном legacy master.
     function maybeRunPeriodicResync(reason) {
-        if (!legacy97CProfile || diagnosticH97XProfile || !hookAllowed
+        if (selfDisarmed || !legacy97CProfile || diagnosticH97XProfile || !hookAllowed
                 || !masterKnown || !persistedMaster || forceStockPassThrough) {
             return false;
         }
@@ -693,60 +867,75 @@ Java.perform(function () {
         return runAsyncQuery("periodic_resync:" + reason, false);
     }
 
-    var subscribeInstalled = false;
+    function callStockSubscription(queryContext) {
+        claimSelfDisarmStockRefresh("provider");
+        var stockResult;
+        try {
+            stockResult = subscribeQuery.call(BaiduProviderUtil, queryContext);
+        } catch (stockError) {
+            if (pendingStockResync && stockResyncInFlight) {
+                stockResyncInFlight = false;
+                warn("stock_resync_provider_failed", "retry_available="
+                    + (stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS ? 1 : 0));
+            }
+            throw stockError;
+        }
+        if (pendingStockResync && stockResyncInFlight) {
+            stockResyncInFlight = false;
+            if (stockResyncTimer !== null) {
+                clearTimeout(stockResyncTimer);
+                stockResyncTimer = null;
+            }
+            if (stockResult !== null) {
+                pendingStockResync = false;
+                pendingStockAllowsRawOn = false;
+                fakeMayBeApplied = false;
+                stockResyncAttempts = 0;
+                stockResyncExhaustedLogged = false;
+                info("stock_resync_provider_observed", "result=non_null ecu_confirmed=0");
+                if (reactivateAfterStockResync && postStockReactivationTimer === null) {
+                    // OEM worker поставит stock result в main Handler сразу после возврата hook.
+                    // Delayed revalidation enqueues возможный ON позже и сохраняет порядок.
+                    postStockReactivationTimer = setTimeout(function () {
+                        Java.perform(function () {
+                            postStockReactivationTimer = null;
+                            if (!ensureLegacyOptInOrDisarm(
+                                    "post_stock_reactivation", false)) {
+                                return;
+                            }
+                            forceStockPassThrough = false;
+                            reactivateAfterStockResync = false;
+                            refreshValidatedGate("post_gate_loss_resync");
+                            refreshMaster("post_gate_loss_resync");
+                        });
+                    }, 500);
+                } else if (!reactivateAfterStockResync) {
+                    forceStockPassThrough = false;
+                }
+            } else {
+                warn("stock_resync_provider_empty", "retry_available="
+                    + (stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS ? 1 : 0));
+            }
+        }
+        return stockResult;
+    }
+
     var hookInstallStage = "subscribe_hook";
     try {
         subscribeQuery.implementation = function (queryContext) {
+            if (!ensureLegacyOptInOrDisarm("provider_entry", true)) {
+                return callStockSubscription(queryContext);
+            }
             if (!effectiveMaster()) {
                 info("subscription_query", "mode=passthrough");
-                var stockResult;
-                try {
-                    stockResult = subscribeQuery.call(BaiduProviderUtil, queryContext);
-                } catch (stockError) {
-                    if (pendingStockResync && stockResyncInFlight) {
-                        stockResyncInFlight = false;
-                        warn("stock_resync_provider_failed", "retry_available="
-                            + (stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS ? 1 : 0));
-                    }
-                    throw stockError;
-                }
-                if (pendingStockResync && stockResyncInFlight) {
-                    stockResyncInFlight = false;
-                    if (stockResyncTimer !== null) {
-                        clearTimeout(stockResyncTimer);
-                        stockResyncTimer = null;
-                    }
-                    if (stockResult !== null) {
-                        pendingStockResync = false;
-                        pendingStockAllowsRawOn = false;
-                        fakeMayBeApplied = false;
-                        stockResyncAttempts = 0;
-                        stockResyncExhaustedLogged = false;
-                        info("stock_resync_provider_observed", "result=non_null ecu_confirmed=0");
-                        if (reactivateAfterStockResync && postStockReactivationTimer === null) {
-                            // OEM worker поставит stock result в main Handler сразу после возврата hook.
-                            // Delayed revalidation enqueues возможный ON позже и сохраняет порядок.
-                            postStockReactivationTimer = setTimeout(function () {
-                                Java.perform(function () {
-                                    postStockReactivationTimer = null;
-                                    forceStockPassThrough = false;
-                                    reactivateAfterStockResync = false;
-                                    refreshValidatedGate("post_gate_loss_resync");
-                                    refreshMaster("post_gate_loss_resync");
-                                });
-                            }, 500);
-                        } else if (!reactivateAfterStockResync) {
-                            forceStockPassThrough = false;
-                        }
-                    } else {
-                        warn("stock_resync_provider_empty", "retry_available="
-                            + (stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS ? 1 : 0));
-                    }
-                }
-                return stockResult;
+                return callStockSubscription(queryContext);
             }
             info("subscription_query", "mode=fake_active");
             markFakeMayBeApplied();
+            // Exact final check is deliberately immediately before FAKE_SUBSCRIPTION.
+            if (!ensureLegacyOptInOrDisarm("provider_before_fake", true)) {
+                return callStockSubscription(queryContext);
+            }
             return FAKE_SUBSCRIPTION;
         };
         subscribeInstalled = true;
@@ -770,6 +959,7 @@ Java.perform(function () {
                         returnType: "void",
                         argumentTypes: ["boolean"],
                         implementation: function () {
+                            if (!ensureLegacyOptInOrDisarm("observer", false)) return;
                             refreshValidatedGate("master_observer");
                             refreshMaster("observer");
                         }
@@ -778,6 +968,7 @@ Java.perform(function () {
                         returnType: "void",
                         argumentTypes: ["boolean", "android.net.Uri"],
                         implementation: function () {
+                            if (!ensureLegacyOptInOrDisarm("observer_uri", false)) return;
                             refreshValidatedGate("master_observer_uri");
                             refreshMaster("observer_uri");
                         }
@@ -788,14 +979,30 @@ Java.perform(function () {
         hookInstallStage = "observer_instance";
         observer = ObserverClass.$new(Handler.$new(Looper.getMainLooper()));
         var masterUri = settingsGetUri.call(SettingsGlobal, MASTER_KEY);
-        hookInstallStage = "observer_register";
+        var legacyOptInUri = settingsGetUri.call(SettingsGlobal, LEGACY_OPT_IN_KEY);
+        hookInstallStage = "master_observer_register";
         resolver.registerContentObserver.overload(
             "android.net.Uri", "boolean", "android.database.ContentObserver")
             .call(resolver, masterUri, false, observer);
+        hookInstallStage = "opt_in_observer_register";
+        resolver.registerContentObserver.overload(
+            "android.net.Uri", "boolean", "android.database.ContentObserver")
+            .call(resolver, legacyOptInUri, false, observer);
 
         hooksInstalled = true;
         hookInstallStage = "validated_gate";
+        // One exact check per attach chain, immediately before gate/profile publication.
+        if (!ensureLegacyOptInOrDisarm("attach", false)) {
+            hookInstallStage = "ready_self_disarmed";
+            console.log(READY_MARKER);
+            return;
+        }
         refreshValidatedGate("attach");
+        if (selfDisarmed) {
+            hookInstallStage = "ready_self_disarmed";
+            console.log(READY_MARKER);
+            return;
+        }
         // Gate/hash/profile уже опубликованы и heartbeat жив; лишь теперь допустим initial query.
         hookInstallStage = "initial_master";
         refreshMaster("initial");
@@ -803,7 +1010,9 @@ Java.perform(function () {
         hookInstallStage = "heartbeat_timer";
         heartbeatTimer = setInterval(function () {
             Java.perform(function () {
+                if (!ensureLegacyOptInOrDisarm("heartbeat", false)) return;
                 refreshValidatedGate("heartbeat");
+                if (selfDisarmed) return;
                 // ContentObserver остаётся основным путём, poll закрывает редкий пропуск callback:
                 // OFF после fake всё равно получит best-effort stock resync максимум через интервал.
                 var masterRefresh = refreshMaster("heartbeat_poll");
@@ -824,15 +1033,25 @@ Java.perform(function () {
         hooksInstalled = false;
         hookAllowed = false;
         if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
         if (stockResyncTimer !== null) clearTimeout(stockResyncTimer);
+        stockResyncTimer = null;
         if (postStockReactivationTimer !== null) clearTimeout(postStockReactivationTimer);
+        postStockReactivationTimer = null;
+        if (selfDisarmCleanupTimer !== null) clearTimeout(selfDisarmCleanupTimer);
+        selfDisarmCleanupTimer = null;
         try {
             if (observer !== null) resolver.unregisterContentObserver(observer);
         } catch (ignored) {}
+        observer = null;
+        detachProviderHookNow();
         try {
-            if (subscribeInstalled) subscribeQuery.implementation = null;
+            if (selfDisarmed) {
+                JavaSystem.setProperty(PROCESS_SENTINEL_KEY, "disabled_opt_out");
+            } else {
+                JavaSystem.clearProperty(PROCESS_SENTINEL_KEY);
+            }
         } catch (ignored2) {}
-        try { JavaSystem.clearProperty(PROCESS_SENTINEL_KEY); } catch (ignored3) {}
         clearPublishedGate("hook_failed");
         error("hook_install_failed", "stage=" + hookInstallStage);
         console.log("[apollo] event=install_failed stage=" + hookInstallStage);

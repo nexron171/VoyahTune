@@ -106,6 +106,16 @@ identity, переход `1` → `0` однократно выгружает е�
 проверку opt-in до SHA-256 и разрешения OEM-классов. PID-marker v2 включает boot UUID;
 старый marker без UUID никогда не является основанием для `force-stop` после reboot.
 
+Потеря PID-marker не оставляет уже загруженный legacy-agent активным. Observer самого opt-in и
+heartbeat читают точное значение ключа, а provider проверяет его при входе и непосредственно перед
+fake. Любое значение, кроме `1`, включая ошибку чтения, переводит агент в монотонное fail-passive
+состояние до перезапуска процесса: fake больше не возвращается, master/profile/heartbeat обнуляются,
+таймеры и observer снимаются, provider-hook восстанавливается отложенно после текущего вызова. Если
+fake мог уже попасть в OEM-cache, текущий provider-вызов либо ровно один отдельный stock-query без
+retry обновляет cache перед окончательным отключением. JS сам не вызывает `force-stop` и после
+self-disarm не включает hook повторно; новый opt-in требует обычной повторной инъекции в новом
+экземпляре процесса.
+
 При явном opt-in остаются legacy-gate: `open_voyah_apollo_master=1`, точные pinned SHA-256
 VehicleSetting/CanBusService и поддерживаемый профиль. Generic `onVehicleStateChanged` не хукается ни
 на direct H97X, ни на legacy 97C, поэтому поток CAN-событий вообще не пересекает GumJS. Переходы
@@ -137,8 +147,9 @@ master по-прежнему обрабатывает `ContentObserver`, heartbe
    adb shell settings put global open_voyah_apollo_legacy_hook_enabled 0
    ```
 
-   Watchdog закроет gate и выгрузит подтверждённый агент. Для отката запустить full
-   `remove.sh`/`remove.bat` из той же папки рядом с её `backup/`.
+   Watchdog закроет gate и выгрузит подтверждённый marker-ом агент. Если marker потерян, сам JS
+   монотонно перейдёт в pass-through и снимет hook без остановки процесса. Для отката запустить
+   full `remove.sh`/`remove.bat` из той же папки рядом с её `backup/`.
 
 Все первичные проверки выполняются на неподвижном автомобиле в `P` со стояночным тормозом.
 
