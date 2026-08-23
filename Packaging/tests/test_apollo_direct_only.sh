@@ -68,38 +68,48 @@ assert_before "$APOLLO_JS" 'if (readLegacyOptIn() !== true) {' \
 assert_before "$APOLLO_JS" 'var hashMatches = verifyPinnedPackages();' \
     'BaiduProviderUtil = Java.use('
 
-# H97X never installs the hot generic callback. Legacy callback filters pinned numeric
-# VehicleState IDs and values before assigning names or scheduling main-thread work.
-require_fixed "$APOLLO_JS" 'if (!legacy97CProfile) {'
-require_fixed "$APOLLO_JS" '"mode=direct_h97x" : "mode=unsupported"'
-assert_before "$APOLLO_JS" 'if (legacy97CProfile) {' \
-    'CanBusCallback = Java.use("com.qinggan.app.basevehiclesetting.canbustools.CanBusTool$3");'
-require_fixed "$APOLLO_JS" 'vehicleStateGetValue = VehicleStateClass.getValue.overload();'
-require_fixed "$APOLLO_JS" 'wakeId = vehicleStateGetValue.call(state);'
-require_fixed "$APOLLO_JS" 'var HUM_VCU_READY_ID = 924;'
-require_fixed "$APOLLO_JS" 'var BMS_STATE_ID = 958;'
-require_fixed "$APOLLO_JS" 'stateId === HUM_VCU_READY_ID && value === 1'
-require_fixed "$APOLLO_JS" 'stateId === BMS_STATE_ID && value === 3'
-require_fixed "$APOLLO_JS" 'Legacy generic hook всё ещё делает GumJS crossing'
-assert_before "$APOLLO_JS" 'if (!legacy97CProfile) return;' \
-    'wakeId = vehicleStateGetValue.call(state);'
-assert_before "$APOLLO_JS" 'if (!isEligibleWakeId(wakeId, value)) return;' \
-    'var wakeName = wakeId === HUM_VCU_READY_ID'
+# Neither H97X nor explicit legacy 97C may hook the hot generic callback: filtering inside a Frida
+# implementation is already too late because every CAN event has crossed into GumJS.
+for FORBIDDEN in 'CanBusTool$3' 'onVehicleStateChanged' 'scheduleEligibleWake' \
+        'Java.scheduleOnMainThread' 'HUM_VCU_READY_ID' 'BMS_STATE_ID'; do
+    if grep -Fq "$FORBIDDEN" "$APOLLO_JS"; then
+        fail "Apollo JS must not install or retain the hot generic callback path: $FORBIDDEN"
+    fi
+done
 
-WAKE_FUNCTION=$(awk '
-    /function scheduleEligibleWake\(state, value\)/ { capture = 1 }
+# Low-rate recovery remains explicit and bounded: heartbeat checks every 30 seconds, but an active
+# legacy master can enter OEM activation code at most once per five-minute periodic slot.
+require_fixed "$APOLLO_JS" 'var HEARTBEAT_INTERVAL_MS = 30000;'
+require_fixed "$APOLLO_JS" 'var PERIODIC_RESYNC_INTERVAL_MS = 300000;'
+require_fixed "$APOLLO_JS" 'function maybeRunPeriodicResync(reason) {'
+require_fixed "$APOLLO_JS" 'periodicResyncDueAt = now + PERIODIC_RESYNC_INTERVAL_MS;'
+PERIODIC_REFERENCES=$(grep -F -c 'maybeRunPeriodicResync(' "$APOLLO_JS")
+[ "$PERIODIC_REFERENCES" -eq 2 ] \
+    || fail "maybeRunPeriodicResync must be defined once and called only by heartbeat"
+assert_before "$APOLLO_JS" \
+    'periodicResyncDueAt = now + PERIODIC_RESYNC_INTERVAL_MS;' \
+    'var existingManager = managerSingletonGet.call(managerSingletonField, null);'
+assert_before "$APOLLO_JS" \
+    'periodicResyncDueAt = now + PERIODIC_RESYNC_INTERVAL_MS;' \
+    'var manager = managerInstance.call(AdasManager, context);'
+assert_before "$APOLLO_JS" 'var masterRefresh = refreshMaster("heartbeat_poll");' \
+    'if (masterRefresh !== null) maybeRunPeriodicResync("heartbeat");'
+
+PERIODIC_FUNCTION=$(awk '
+    /function maybeRunPeriodicResync\(reason\)/ { capture = 1 }
     capture { print }
     capture && /^    }$/ { exit }
 ' "$APOLLO_JS")
-case "$WAKE_FUNCTION" in
-    *toString*) fail "scheduleEligibleWake must not stringify generic VehicleState callbacks" ;;
-esac
-
-# Single-flight coalesces an initial burst and retains one event arriving during handling.
-require_fixed "$APOLLO_JS" 'if (wakeDispatchPending) {'
-require_fixed "$APOLLO_JS" 'trailingWakePending = true;'
-require_fixed "$APOLLO_JS" 'if (trailingWakePending) {'
-require_fixed "$APOLLO_JS" 'Java.scheduleOnMainThread(dispatchPendingWake);'
+for REQUIRED in '!legacy97CProfile' 'diagnosticH97XProfile' '!hookAllowed' \
+        '!masterKnown || !persistedMaster || forceStockPassThrough' \
+        'pendingStockResync || stockResyncInFlight' \
+        'readPersistedMaster() !== true' \
+        'periodicResyncDueAt > now' \
+        'runAsyncQuery("periodic_resync:" + reason, false)'; do
+    printf '%s\n' "$PERIODIC_FUNCTION" | grep -Fq "$REQUIRED" \
+        || fail "maybeRunPeriodicResync lacks guard/action: $REQUIRED"
+done
+require_fixed "$APOLLO_JS" 'var MAX_STOCK_RESYNC_ATTEMPTS = 3;'
 
 # Install/update always closes opt-in and liveness before system mutation in both flavors.
 for FILE in "$INSTALL_SH" "$INSTALL_BAT" "$LIGHT_INSTALL_SH" "$LIGHT_INSTALL_BAT"; do
@@ -144,7 +154,9 @@ done
 require_fixed "$NATIVE_SERVICE" 'without global callback subscription'
 require_fixed "$NATIVE_SERVICE" 'Do not subscribe globally or issue a delayed verification read.'
 require_fixed "$README" "$OPT_IN_KEY=1"
-require_fixed "$README" 'generic `onVehicleStateChanged` не'
+require_fixed "$README" 'Generic `onVehicleStateChanged` не хукается ни'
+require_fixed "$README" 'поток CAN-событий вообще не пересекает GumJS'
+require_fixed "$README" 'activation resync не чаще одного'
 require_fixed "$README" 'Прямой H97X Binder-контур Native доступен в full и light'
 require_fixed "$README" 'не вызывает OEM'
 require_fixed "$README" '`TX28/TX29`'

@@ -12,7 +12,8 @@
 // Любая ошибка — pass-through без дополнительных ADAS-запросов. Прямых CAN/Bundle-записей,
 // приватных direct-send, overseas/model spoof, лицензирования и локализации здесь нет. После OFF или
 // gate-loss допускается не более трёх stock async attempts до non-null provider observation; это
-// bounded попытки штатного запроса, а не ECU-confirmation.
+// bounded попытки штатного запроса, а не ECU-confirmation. Generic CAN callback не хукается:
+// legacy activation поддерживается observer-переходами и resync не чаще одного раза в пять минут.
 Java.perform(function () {
     "use strict";
 
@@ -31,12 +32,11 @@ Java.perform(function () {
     var PROCESS_SENTINEL_KEY = "open_voyah.apollo.hook_state.v1";
     var READY_MARKER = "[apollo] hook ready";
     var FAKE_SUBSCRIPTION = "{\"expireStatus\":\"0\",\"isMqtt\":false,\"remainDays\":\"30\",\"subscriptionStatus\":\"1\"}";
-    var WAKE_DEBOUNCE_MS = 5000;
+    var ACTIVATION_DEBOUNCE_MS = 5000;
     var HEARTBEAT_INTERVAL_MS = 30000;
+    var PERIODIC_RESYNC_INTERVAL_MS = 300000;
     var STOCK_RESYNC_RETRY_MS = 10000;
     var MAX_STOCK_RESYNC_ATTEMPTS = 3;
-    var HUM_VCU_READY_ID = 924;
-    var BMS_STATE_ID = 958;
 
     var Log = Java.use("android.util.Log");
     var ActivityThread = Java.use("android.app.ActivityThread");
@@ -219,7 +219,7 @@ Java.perform(function () {
     }
 
     // VehicleSetting source не может смениться без смерти текущего процесса. CanBusService может
-    // обновиться отдельно: дешёво сравниваем metadata каждые heartbeat/wake/transition и хешируем
+    // обновиться отдельно: дешёво сравниваем metadata при heartbeat/transition/point-of-use и хешируем
     // его APK повторно только после фактического изменения metadata.
     function refreshCanBusPin(reason) {
         var current = readCanBusMetadata();
@@ -336,13 +336,9 @@ Java.perform(function () {
 
     var BaiduProviderUtil;
     var AdasManager;
-    var CanBusCallback;
-    var VehicleStateClass;
     var subscribeQuery;
     var managerInstance;
     var asyncQuery;
-    var vehicleStateChanged;
-    var vehicleStateGetValue;
     var managerSingletonField;
     var managerSingletonGet;
 
@@ -360,13 +356,6 @@ Java.perform(function () {
         managerSingletonField = AdasManager.class.getDeclaredField("instance");
         managerSingletonField.setAccessible(true);
         managerSingletonGet = managerSingletonField.get.overload("java.lang.Object");
-        if (legacy97CProfile) {
-            CanBusCallback = Java.use("com.qinggan.app.basevehiclesetting.canbustools.CanBusTool$3");
-            VehicleStateClass = Java.use("com.qinggan.canbus.VehicleState");
-            vehicleStateChanged = CanBusCallback.onVehicleStateChanged.overload(
-                "com.qinggan.canbus.VehicleState", "int");
-            vehicleStateGetValue = VehicleStateClass.getValue.overload();
-        }
     } catch (e) {
         clearPublishedGate("core_resolution_failed");
         console.log("[apollo] event=install_failed stage=resolve");
@@ -377,13 +366,8 @@ Java.perform(function () {
     var hookAllowed = false;
     var masterKnown = false;
     var persistedMaster = false;
-    var wakeBlockedUntil = 0;
-    var wakeDispatchPending = false;
-    var pendingWakeName = "";
-    var pendingWakeValue = 0;
-    var trailingWakePending = false;
-    var trailingWakeName = "";
-    var trailingWakeValue = 0;
+    var activationBlockedUntil = 0;
+    var periodicResyncDueAt = 0;
     var observer = null;
     var heartbeatTimer = null;
     var fakeMayBeApplied = false;
@@ -493,7 +477,7 @@ Java.perform(function () {
             }
         }
         // Если профиль был временно не готов, persisted ON не теряется: первое verified gate opening
-        // делает один activation query. Общий debounce coalesce-ит его с observer/wake.
+        // делает один activation query. Общий debounce coalesce-ит его с observer/periodic resync.
         if (!wasAllowed && hookAllowed && !diagnosticH97XProfile
                 && masterKnown && !forceStockPassThrough
                 && !stockResyncInFlight) {
@@ -534,9 +518,14 @@ Java.perform(function () {
             return false;
         }
         var now = SystemClock.elapsedRealtime();
-        if (stockResync !== true && now < wakeBlockedUntil) {
+        if (stockResync !== true && now < activationBlockedUntil) {
             info("activation_query_debounced", "reason=" + reason);
             return false;
+        }
+        if (stockResync !== true) {
+            // Reserve before entering OEM code so repeated failures cannot turn heartbeat into a
+            // 30-second retry loop. Any successful query keeps the same periodic deadline.
+            periodicResyncDueAt = now + PERIODIC_RESYNC_INTERVAL_MS;
         }
         try {
             if (stockResync === true && allowRawOn === true
@@ -581,7 +570,7 @@ Java.perform(function () {
                 }
             } else {
                 markFakeMayBeApplied();
-                wakeBlockedUntil = now + WAKE_DEBOUNCE_MS;
+                activationBlockedUntil = now + ACTIVATION_DEBOUNCE_MS;
             }
             info("async_query_requested", "reason=" + reason
                 + " stock_resync=" + (stockResync === true ? 1 : 0)
@@ -616,6 +605,7 @@ Java.perform(function () {
             info("master_initial", "enabled=" + (next ? 1 : 0)
                 + " gate=" + (hookAllowed ? 1 : 0));
             // Missing/0 полностью пассивен. Persisted explicit 1 делает один query только при valid gate.
+            if (next) periodicResyncDueAt = 0;
             if (next && hookAllowed) runAsyncQuery("initial_enabled");
             return false;
         }
@@ -635,11 +625,15 @@ Java.perform(function () {
             + " source=" + reason + " gate=" + (hookAllowed ? 1 : 0));
         if (next) {
             // ON никогда не активируется при invalid gate.
+            periodicResyncDueAt = 0;
             if (hookAllowed) runAsyncQuery("master_transition_on", false);
         } else if (fakeMayBeApplied) {
             // OFF не теряем: при valid gate resync сейчас, иначе откладываем до восстановления gate.
+            periodicResyncDueAt = 0;
             scheduleStockResync("master_transition_off", false, true);
             if (hashMatches) runAsyncQuery("master_transition_off_resync", true, false);
+        } else {
+            periodicResyncDueAt = 0;
         }
         return true;
     }
@@ -684,124 +678,22 @@ Java.perform(function () {
         return enabled === true;
     }
 
-    function isEligibleWake(stateName, value) {
-        return (stateName === "HUM_VCU_READY" && value === 1)
-            || (stateName === "BMS_STATE" && value === 3);
-    }
-
-    function isEligibleWakeId(stateId, value) {
-        return (stateId === HUM_VCU_READY_ID && value === 1)
-            || (stateId === BMS_STATE_ID && value === 3);
-    }
-
-    function handleWake(stateName, value) {
-        if (!isEligibleWake(stateName, value)) return;
-
-        refreshValidatedGate("wake");
-        if (diagnosticH97XProfile) {
-            refreshMaster("wake_direct_h97x");
-            info("wake_ignored", "state=" + stateName + " value=" + value
-                + " mode=direct_h97x");
-            return;
+    // Generic CAN callback намеренно не хукается: даже ранний JS-фильтр пересекал бы GumJS на
+    // каждом CAN event. Редкий activation resync выполняется только из 30-секундного
+    // heartbeat и не чаще одного раза за PERIODIC_RESYNC_INTERVAL_MS при активном legacy master.
+    function maybeRunPeriodicResync(reason) {
+        if (!legacy97CProfile || diagnosticH97XProfile || !hookAllowed
+                || !masterKnown || !persistedMaster || forceStockPassThrough) {
+            return false;
         }
-        if (!hookAllowed) {
-            info("wake_ignored", "state=" + stateName + " value=" + value + " gate=0");
-            return;
-        }
-
-        // Если wake совпал с master transition, transition-query уже достаточен.
-        var transitioned = refreshMaster("wake_check");
-        if (transitioned === true) {
-            wakeBlockedUntil = SystemClock.elapsedRealtime() + WAKE_DEBOUNCE_MS;
-            return;
-        }
-        if (!persistedMaster) {
-            info("wake_ignored", "state=" + stateName + " value=" + value + " master=0");
-            return;
-        }
-
+        if (pendingStockResync || stockResyncInFlight) return false;
+        if (readPersistedMaster() !== true) return false;
         var now = SystemClock.elapsedRealtime();
-        if (now < wakeBlockedUntil) {
-            info("wake_debounced", "state=" + stateName + " value=" + value);
-            return;
-        }
-        putHeartbeat(now);
-        runAsyncQuery("wake:" + stateName, false);
-    }
-
-    function resetPendingWake() {
-        wakeDispatchPending = false;
-        pendingWakeName = "";
-        pendingWakeValue = 0;
-        trailingWakePending = false;
-        trailingWakeName = "";
-        trailingWakeValue = 0;
-    }
-
-    function dispatchPendingWake() {
-        var wakeName = pendingWakeName;
-        var wakeValue = pendingWakeValue;
-        try {
-            handleWake(wakeName, wakeValue);
-        } catch (wakeError) {
-            error("wake_handler_failed", "fail_closed=1");
-        } finally {
-            // Один callback обрабатывается, один latest trailing сохраняется;
-            // более глубокая main queue при CAN burst не растёт.
-            if (trailingWakePending) {
-                pendingWakeName = trailingWakeName;
-                pendingWakeValue = trailingWakeValue;
-                trailingWakePending = false;
-                trailingWakeName = "";
-                trailingWakeValue = 0;
-                try {
-                    Java.scheduleOnMainThread(dispatchPendingWake);
-                } catch (trailingScheduleError) {
-                    resetPendingWake();
-                    error("wake_trailing_schedule_failed", "fail_closed=1");
-                }
-            } else {
-                resetPendingWake();
-            }
-        }
-    }
-
-    function scheduleEligibleWake(state, value) {
-        if (!legacy97CProfile) return;
-        if (state === null) return;
-        var wakeId;
-        try {
-            wakeId = vehicleStateGetValue.call(state);
-        } catch (idReadError) {
-            // Malformed unrelated callback must not cancel an already pending eligible wake.
-            error("wake_id_read_failed", "fail_closed=1");
-            return;
-        }
-        // Legacy generic hook всё ещё делает GumJS crossing на каждом callback.
-        // Числовой ID/value фильтр отсекает остальные CAN events до присвоения
-        // строкового имени, main Runnable и тяжёлой gate/hash/query работы.
-        if (!isEligibleWakeId(wakeId, value)) return;
-        var wakeName = wakeId === HUM_VCU_READY_ID ? "HUM_VCU_READY" : "BMS_STATE";
-        if (wakeDispatchPending) {
-            // Coalesce a burst into one latest trailing event without losing the second wake.
-            trailingWakeName = wakeName;
-            trailingWakeValue = value;
-            trailingWakePending = true;
-            return;
-        }
-        pendingWakeName = wakeName;
-        pendingWakeValue = value;
-        wakeDispatchPending = true;
-        try {
-            Java.scheduleOnMainThread(dispatchPendingWake);
-        } catch (scheduleError) {
-            resetPendingWake();
-            throw scheduleError;
-        }
+        if (periodicResyncDueAt > now) return false;
+        return runAsyncQuery("periodic_resync:" + reason, false);
     }
 
     var subscribeInstalled = false;
-    var callbackInstalled = false;
     var hookInstallStage = "subscribe_hook";
     try {
         subscribeQuery.implementation = function (queryContext) {
@@ -859,29 +751,6 @@ Java.perform(function () {
         };
         subscribeInstalled = true;
 
-        hookInstallStage = "vehicle_callback_hook";
-        if (!legacy97CProfile) {
-            // Generic subscription wake path нужен только положительно
-            // опознанному legacy 97C. Direct H97X и unknown/error profile не хукаются.
-            info("vehicle_callback_skipped", diagnosticH97XProfile
-                ? "mode=direct_h97x" : "mode=unsupported");
-        } else {
-            vehicleStateChanged.implementation = function (state, value) {
-                try {
-                    // OEM callback всегда получает исходный вызов первым и ровно один раз.
-                    return vehicleStateChanged.call(this, state, value);
-                } finally {
-                    try {
-                        scheduleEligibleWake(state, value);
-                    } catch (scheduleError) {
-                        resetPendingWake();
-                        error("wake_schedule_failed", "fail_closed=1");
-                    }
-                }
-            };
-            callbackInstalled = true;
-        }
-
         hookInstallStage = "observer_class";
         var ObserverClass = Java.registerClass({
             name: "com.qinggan.app.vehiclesetting.VoyahApolloObserver_" + Date.now(),
@@ -937,7 +806,8 @@ Java.perform(function () {
                 refreshValidatedGate("heartbeat");
                 // ContentObserver остаётся основным путём, poll закрывает редкий пропуск callback:
                 // OFF после fake всё равно получит best-effort stock resync максимум через интервал.
-                refreshMaster("heartbeat_poll");
+                var masterRefresh = refreshMaster("heartbeat_poll");
+                if (masterRefresh !== null) maybeRunPeriodicResync("heartbeat");
             });
         }, HEARTBEAT_INTERVAL_MS);
 
@@ -960,12 +830,9 @@ Java.perform(function () {
             if (observer !== null) resolver.unregisterContentObserver(observer);
         } catch (ignored) {}
         try {
-            if (callbackInstalled) vehicleStateChanged.implementation = null;
-        } catch (ignored2) {}
-        try {
             if (subscribeInstalled) subscribeQuery.implementation = null;
-        } catch (ignored3) {}
-        try { JavaSystem.clearProperty(PROCESS_SENTINEL_KEY); } catch (ignored4) {}
+        } catch (ignored2) {}
+        try { JavaSystem.clearProperty(PROCESS_SENTINEL_KEY); } catch (ignored3) {}
         clearPublishedGate("hook_failed");
         error("hook_install_failed", "stage=" + hookInstallStage);
         console.log("[apollo] event=install_failed stage=" + hookInstallStage);

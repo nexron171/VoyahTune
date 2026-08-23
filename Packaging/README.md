@@ -107,11 +107,11 @@ identity, переход `1` → `0` однократно выгружает е�
 старый marker без UUID никогда не является основанием для `force-stop` после reboot.
 
 При явном opt-in остаются legacy-gate: `open_voyah_apollo_master=1`, точные pinned SHA-256
-VehicleSetting/CanBusService и поддерживаемый профиль. На direct H97X generic `onVehicleStateChanged` не
-хукается даже в диагностическом режиме. На legacy 97C callback фильтруется до main queue
-только для `HUM_VCU_READY=1`/`BMS_STATE=3`; CAN burst ограничен текущим и одним latest
-trailing dispatch. Сам legacy generic hook всё ещё входит в GumJS на каждом callback;
-числовой фильтр убирает лишь строки, main Runnable и тяжёлую работу для нецелевых events.
+VehicleSetting/CanBusService и поддерживаемый профиль. Generic `onVehicleStateChanged` не хукается ни
+на direct H97X, ни на legacy 97C, поэтому поток CAN-событий вообще не пересекает GumJS. Переходы
+master по-прежнему обрабатывает `ContentObserver`, heartbeat каждые 30 секунд перепроверяет gate и
+редкий пропуск observer, а при активном legacy master выполняется activation resync не чаще одного
+раза в пять минут. Bounded stock-resync после OFF/gate-loss остаётся отдельным fail-closed путём.
 
 ### Установка и диагностика
 
