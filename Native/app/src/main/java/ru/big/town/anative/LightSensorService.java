@@ -180,7 +180,7 @@ public class LightSensorService extends Service {
 
     // Текущая зафиксированная цель: true = ближний свет, false = наружный свет выключен
     private boolean headlightsOn = false;
-    private boolean everSent     = false;
+    private volatile boolean everSent = false;
     private boolean forceInitCompleted = false;
     private long    readyCarSignalEpoch = 0L;
     private long    forceInitCarSignalEpoch = 0L;
@@ -202,7 +202,7 @@ public class LightSensorService extends Service {
 
     // Тестовый режим уличного сенсора: последняя КПП и последнее решение RSM (для анти-Auto по Drive)
     private int lastGear   = -1;
-    private int lastReason = -1;
+    private volatile int lastReason = -1;
 
     private CanBusEventHub.Subscription canBusSubscription;
     private volatile boolean destroyed = false;
@@ -885,13 +885,13 @@ public class LightSensorService extends Service {
     // -------------------------------------------------------------------------
 
     private void requestSettingsForApply(SensorApplyRequest request) {
-        if (!isSettingsRequestCurrentOnMain(request)) return;
+        if (!isSettingsRequestEligibleOnMain(request)) return;
         SensorApplyRequest start = settingsRequestGate.offer(request);
         if (start != null) submitSettingsQuery(start);
     }
 
     private void submitSettingsQuery(SensorApplyRequest request) {
-        if (!isSettingsRequestCurrentOnMain(request)) {
+        if (!isSettingsRequestEligibleOnMain(request)) {
             dropSettingsQueryOnMain(request);
             return;
         }
@@ -902,7 +902,8 @@ public class LightSensorService extends Service {
                 LightSensorService beforeQuery = serviceRef.get();
                 if (beforeQuery == null || beforeQuery.destroyed
                         || beforeQuery.pendingMainSensorApply != request
-                        || beforeQuery.activeCarSignalEpoch != request.epoch) {
+                        || beforeQuery.activeCarSignalEpoch != request.epoch
+                        || !beforeQuery.isSettingsRequestSemanticallyNeeded(request)) {
                     if (beforeQuery != null) {
                         Handler main = beforeQuery.timerHandler;
                         if (main != null) {
@@ -931,6 +932,18 @@ public class LightSensorService extends Service {
                 && request.epoch == activeCarSignalEpoch;
     }
 
+    private boolean isSettingsRequestEligibleOnMain(SensorApplyRequest request) {
+        return isSettingsRequestCurrentOnMain(request)
+                && isSettingsRequestSemanticallyNeeded(request);
+    }
+
+    private boolean isSettingsRequestSemanticallyNeeded(SensorApplyRequest request) {
+        return LightSettingsPolicy.needsThresholds(
+                request.cancelOnManualAuto, MANUAL_AUTO_GATE.blocksAntiAuto(),
+                request.mode == SensorApplyMode.IF_UNSENT, everSent,
+                reasonToDesired(lastReason) != null);
+    }
+
     private void dropSettingsQueryOnMain(SensorApplyRequest request) {
         LatestRequestGate.Completion<SensorApplyRequest> completion =
                 settingsRequestGate.finish(request);
@@ -941,7 +954,7 @@ public class LightSensorService extends Service {
                                            LightThresholds thresholds) {
         LatestRequestGate.Completion<SensorApplyRequest> completion =
                 settingsRequestGate.finish(request);
-        if (completion.publish && isSettingsRequestCurrentOnMain(request)) {
+        if (completion.publish && isSettingsRequestEligibleOnMain(request)) {
             CarSignalCallbackBinder callback = activeCarSignalCallback;
             long liveRevisionFence = callback != null && callback.epoch == request.epoch
                     ? callback.ingressRevision.get() : Long.MAX_VALUE;
