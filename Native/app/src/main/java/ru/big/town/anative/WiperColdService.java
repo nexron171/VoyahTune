@@ -5,26 +5,17 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.BroadcastReceiver;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
 import android.media.AudioManager;
-import android.os.Binder;
 import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.Parcel;
-import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.KeyEvent;
 
 import androidx.core.app.NotificationCompat;
-
-import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Сервис «Сервисный режим дворников» (для холодного сезона).
@@ -53,10 +44,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p><b>Сигнал</b> берём из {@code CanBusService} (тот же сервис, что и автосвет,
  * проверен декомпиляцией — см. память reference-canbus-door-temp):
  * <ul>
- *   <li>подписка addCallback (TX=28), колбэк {@code ICanBusServiceCallback}:
- *       {@code onDoorStatusChanged(DoorStatus)} код 1;</li>
- *   <li>синхронный seed на коннекте: {@code getDoorStatus()} TX=2 —
- *       колбэки дельта-only, начальное значение не отдают.</li>
+ *   <li>единая process-wide подписка {@link CanBusEventHub} фильтрует коды двери и передачи
+ *       до ограниченной очереди;</li>
+ *   <li>seed двери TX=2 выполняется изолированно в фоновом query-потоке hub — колбэки
+ *       delta-only, начальное значение не отдают.</li>
  * </ul>
  * Логика <i>level-triggered</i> с guard'ом по флагу активности: это заодно ловит
  * сценарий, когда голова просыпается именно от открытия двери — на seed мы уже видим
@@ -103,53 +94,23 @@ public class WiperColdService extends Service {
     private static final String WIPER_TOGGLE_FRAME = "65 08 00 00 c1 c0 00 00 40 00";
     private static final int    CAN_CMD_NUM        = 1;
 
-    // ICanBusService — статус дверей
-    private static final String CANBUS_DESCRIPTOR    = "com.qinggan.canbus.ICanBusService";
-    private static final String CANBUS_CB_DESCRIPTOR = "com.qinggan.canbus.ICanBusServiceCallback";
-    private static final int    TX_addCallback    = 28;
-    private static final int    TX_removeCallback = 29;
-    private static final int    TX_getDoorStatus  = 2;
-    private static final int    CB_onDoorStatusChanged = 1;
-    private static final int    CB_onGearStatusChanged = 12;
-    private static final String CANBUS_ACTION  = "com.qinggan.canbus.CanBusService";
-    private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
-
     // GearState.value: Parking=0, Reverse=1, Neutral=2, Drive=3, Battery=4, Unknown=-1.
     // «Готов ехать» = передача из Parking (>=1). Это единственный надёжный сигнал зажигания
     // на этой голове: ACC/engine/vehicleKey/ignition-колбэки CanBus не шлёт вообще (проверено логами).
-    private static final int    GEAR_UNKNOWN     = -1;
     private static final int    GEAR_MIN_MOVING  = 1;
 
     // DoorStatus: флаг наличия, bonnet, затем водительская fLDoor.
-    private static final int DOOR_OPEN        = 1;
-    private static final int DOOR_QUEUE_CAPACITY = 8;
-    private static final int DOOR_DRAIN_SLICE = 8;
-
-    // Периодичность страховочной проверки коннекта/подписки
-    private static final long SAFETY_POLL_MS = 30_000L;
-    private static final long BIND_RETRY_MS  = 5_000L;
+    private static final int DOOR_OPEN = 1;
     // Окно после power-on reset, в течение которого не поднимаем дворники заново: гасит
     // гонку «сбросили флаг → seed видит дверь всё ещё открытой → снова включает».
     private static final long POWER_ON_RESET_SUPPRESS_MS = 10_000L;
 
     private volatile Handler timerHandler;
-    private HandlerThread canBusIoThread;
-    private Handler canBusIoHandler;
-    private Executor canBusExecutor;
+    private CanBusEventHub.Subscription canBusSubscription;
 
     private final DoorPauseRunState mediaPauseState = new DoorPauseRunState();
     private AudioManager mediaFadeAudioManager = null;
-    private final WiperSignalIngress signalIngress =
-            new WiperSignalIngress(DOOR_QUEUE_CAPACITY);
-
-    private IBinder canBusBinder = null;
-    private boolean canBusBindingRequested = false;
-    private boolean canBusConnected = false;
-    private boolean canBusCallbackAdded   = false;
-    private long    lastCanBusBindAttempt = -BIND_RETRY_MS;
-    private final AtomicLong activeCanBusGeneration = new AtomicLong();
     private volatile boolean destroyed = false;
-    private final Runnable canBusRebindRunnable = this::ensureCanBusBound;
     private boolean wiperTogglePending = false;
     private Boolean queuedWiperTarget = null;
 
@@ -157,282 +118,33 @@ public class WiperColdService extends Service {
     private int  lastFLDoor = -1;
     private long lastPowerOnResetElapsed = 0L; // когда последний раз возвращали дворники по power on
 
-    // -------------------------------------------------------------------------
-    // ICanBusServiceCallback — stub (получает ВСЕ колбэки, обрабатываем только двери)
-    // -------------------------------------------------------------------------
-
-    private final IBinder canBusCallbackBinder = new Binder() {
-        @Override
-        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
-                throws RemoteException {
-            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
-                    && code <= IBinder.LAST_CALL_TRANSACTION) {
-                return true;
-            }
-            switch (code) {
-                case CB_onDoorStatusChanged: { // 1
-                    int fl = -1;
-                    try {
-                        data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                        if (data.readInt() != 0) {
-                            data.readInt(); // bonnet
-                            fl = data.readInt(); // fLDoor
-                        }
-                    } catch (RuntimeException ignored) {
-                        return true;
-                    }
-                    enqueueDoorState(fl);
-                    return true;
-                }
-                case CB_onGearStatusChanged: { // 12 — передача (parcel: presence, ordinal, value)
-                    int gearVal = GEAR_UNKNOWN;
-                    try {
-                        data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                        if (data.readInt() != 0) {
-                            data.readInt();            // ordinal (не используем)
-                            gearVal = data.readInt();  // value: Parking=0,Reverse=1,Neutral=2,Drive=3,Battery=4,Unknown=-1
-                        }
-                    } catch (RuntimeException ignored) {
-                        return true;
-                    }
-                    enqueueGearState(gearVal);
-                    return true;
-                }
-                default:
-                    // Прочие oneway-колбэки CanBus (скорость/одометр/десятки сигналов) ТИХО поглощаем:
-                    // иначе на КАЖДЫЙ Binder отдаёт UNKNOWN_TRANSACTION и фреймворк спамит в logcat
-                    // "oneway function results will be dropped …" (~14 строк/сек — забивает кольцевой лог,
-                    // вымывает реальную диагностику). Так же сделано в TripStatsService. Спец-коды (dump/
-                    // interface и пр. вне диапазона вызовов) — в super.
-                    if (code >= IBinder.FIRST_CALL_TRANSACTION && code <= IBinder.LAST_CALL_TRANSACTION) {
-                        return true;
-                    }
-                    return super.onTransact(code, data, reply, flags);
-            }
-        }
-    };
-
-    private final Runnable doorDrainRunnable = this::drainDoorStates;
-    private final Runnable gearDrainRunnable = () -> {
-        int gear = signalIngress.takeLatestGear();
-        if (!destroyed && gear != WiperSignalIngress.UNKNOWN) onGearState(gear);
-    };
-
-    /** Binder-pool hot path: adjacent dedupe + bounded queue before touching the main looper. */
-    private void enqueueDoorState(int value) {
-        if (destroyed || !signalIngress.offerDoor(value)) return;
-        Handler handler = timerHandler;
-        if (handler == null || !handler.post(doorDrainRunnable)) {
-            signalIngress.cancelDoorDrain();
-        }
-    }
-
-    private void drainDoorStates() {
-        int processed = 0;
-        Integer value;
-        while (!destroyed && processed < DOOR_DRAIN_SLICE
-                && (value = signalIngress.pollDoor()) != null) {
-            onDoorState(value);
-            processed++;
-        }
-        if (destroyed) {
-            signalIngress.clear();
-            return;
-        }
-        if (signalIngress.finishDoorDrainSlice()) {
-            Handler handler = timerHandler;
-            if (handler == null || !handler.post(doorDrainRunnable)) {
-                signalIngress.cancelDoorDrain();
-            }
-        }
-    }
-
-    /** Gear is level state: keep one latest-value slot and at most one pending main runnable. */
-    private void enqueueGearState(int value) {
-        if (destroyed || !signalIngress.offerGear(value)) return;
-        Handler handler = timerHandler;
-        if (handler == null || !handler.post(gearDrainRunnable)) {
-            signalIngress.cancelGearDrain();
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // ServiceConnection
-    // -------------------------------------------------------------------------
-
-    private final ServiceConnection canBusConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            if (destroyed) {
-                releaseCanBusBinding("connected after destroy");
-                return;
-            }
-            canBusIoHandler.removeCallbacks(canBusRebindRunnable);
-            canBusBindingRequested = true;
-            canBusBinder = service;
-            canBusConnected = true;
-            canBusCallbackAdded = false;
-            long generation = activeCanBusGeneration.incrementAndGet();
-            Log.i(TAG, "CanBusService connected, alive=" + service.isBinderAlive());
-            addCanBusCallback();
-            seedFromSyncReads(generation, service);
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            markCanBusDisconnected();
-            Log.w(TAG, "CanBusService disconnected — waiting for automatic reconnect");
-        }
-
-        @Override
-        public void onBindingDied(ComponentName name) {
-            restartCanBusBinding("binding died");
-        }
-
-        @Override
-        public void onNullBinding(ComponentName name) {
-            restartCanBusBinding("null binding");
-        }
-    };
-
-    private void ensureCanBusBound() {
-        if (destroyed || canBusBindingRequested || canBusExecutor == null) return;
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
-        lastCanBusBindAttempt = now;
-        try {
-            Intent intent = new Intent(CANBUS_ACTION);
-            intent.setPackage(CANBUS_PACKAGE);
-            boolean ok = bindService(intent, Context.BIND_AUTO_CREATE,
-                    canBusExecutor, canBusConnection);
-            canBusBindingRequested = ok;
-            Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
-            if (!ok) scheduleCanBusRebind();
-        } catch (Exception e) {
-            canBusBindingRequested = false;
-            Log.e(TAG, "ensureCanBusBound: exception: " + e.getMessage(), e);
-            scheduleCanBusRebind();
-        }
-    }
-
-    private void markCanBusDisconnected() {
-        canBusBinder = null;
-        canBusConnected = false;
-        canBusCallbackAdded = false;
-        activeCanBusGeneration.incrementAndGet();
-    }
-
-    private void restartCanBusBinding(String reason) {
-        Log.w(TAG, "CanBusService " + reason + " — replacing binding");
-        releaseCanBusBinding(reason);
-        scheduleCanBusRebind();
-    }
-
-    private void scheduleCanBusRebind() {
+    private void onCanBusEvent(CanBusEvent event) {
         if (destroyed) return;
-        lastCanBusBindAttempt = SystemClock.elapsedRealtime();
-        canBusIoHandler.removeCallbacks(canBusRebindRunnable);
-        canBusIoHandler.postDelayed(canBusRebindRunnable, BIND_RETRY_MS);
-    }
-
-    private void releaseCanBusBinding(String reason) {
-        if (canBusIoHandler != null) canBusIoHandler.removeCallbacks(canBusRebindRunnable);
-        if (canBusConnected) removeCanBusCallback();
-        if (canBusBindingRequested) {
-            try {
-                unbindService(canBusConnection);
-            } catch (Exception e) {
-                Log.w(TAG, reason + ": unbindService failed: " + e.getMessage());
-            }
-        }
-        canBusBindingRequested = false;
-        markCanBusDisconnected();
-    }
-
-    private void addCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null || canBusCallbackAdded) return;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallbackBinder);
-            if (!canBusBinder.transact(TX_addCallback, data, reply, 0)) {
-                Log.w(TAG, "addCanBusCallback: transaction rejected");
-                return;
-            }
-            reply.readException();
-            int result = reply.readInt();
-            // AIDL signature is boolean addCallback(...): Stub writes 1 for success, 0 for false.
-            canBusCallbackAdded = result != 0;
-            if (canBusCallbackAdded) {
-                Log.i(TAG, "addCanBusCallback: OK (TX=" + TX_addCallback + ")");
-            } else {
-                Log.w(TAG, "addCanBusCallback: rejected result=" + result);
-            }
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "addCanBusCallback: error: " + e.getMessage());
-        } finally {
-            data.recycle();
-            reply.recycle();
+        switch (event.kind) {
+            case CONNECTION:
+                CanBusEventHub.get(this).requestDriverDoorSeed();
+                break;
+            case DOOR:
+                if (event.origin == CanBusEvent.Origin.LIVE) {
+                    onDoorState(event.first);
+                } else {
+                    applyDoorSeed(event.first);
+                }
+                break;
+            case GEAR:
+                onGearState(event.first);
+                break;
+            default:
+                break;
         }
     }
 
-    private void removeCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null || !canBusCallbackAdded) return;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallbackBinder);
-            canBusBinder.transact(TX_removeCallback, data, reply, 0);
-            reply.readException();
-            Log.i(TAG, "removeCanBusCallback: OK");
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "removeCanBusCallback: error: " + e.getMessage());
-        } finally {
-            data.recycle();
-            reply.recycle();
-            canBusCallbackAdded = false;
-        }
-    }
-
-    /** Blocking seed runs on WiperCanBusIo and publishes only a current result to main. */
-    private void seedFromSyncReads(long generation, IBinder binder) {
-        int fl = readDriverDoor(binder);
-        if (fl < 0 || destroyed || generation != activeCanBusGeneration.get()
-                || binder != canBusBinder) return;
-        Handler handler = timerHandler;
-        if (handler == null) return;
-        handler.post(() -> {
-            if (destroyed || generation != activeCanBusGeneration.get()) return;
-            lastFLDoor = fl;
-            signalIngress.seedDoor(fl);
-            Log.i(TAG, "seed: fLDoor=" + lastFLDoor + " active=" + isServiceActive());
-            // Seed is a level snapshot, not a real open edge: never pause media here.
-            if (isWiperEnabled()) evaluate("seed");
-        });
-    }
-
-    /** Blocking TX2 on WiperCanBusIo. Returns DoorStatus.fLDoor or -1. */
-    private int readDriverDoor(IBinder binder) {
-        if (!canBusConnected || binder == null) return -1;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            if (!binder.transact(TX_getDoorStatus, data, reply, 0)) return -1;
-            reply.readException();
-            if (reply.readInt() == 0) { Log.i(TAG, "readDriverDoor: null DoorStatus"); return -1; }
-            reply.readInt(); // bonnet
-            int fl = reply.readInt(); // fLDoor
-            return fl;
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "readDriverDoor: error: " + e.getMessage());
-            return -1;
-        } finally {
-            data.recycle();
-            reply.recycle();
-        }
+    private void applyDoorSeed(int frontLeft) {
+        if (frontLeft < 0) return;
+        lastFLDoor = frontLeft;
+        Log.i(TAG, "seed: fLDoor=" + lastFLDoor + " active=" + isServiceActive());
+        // A snapshot establishes the level but is not a real open edge: never pause media here.
+        if (isWiperEnabled()) evaluate("seed");
     }
 
     // -------------------------------------------------------------------------
@@ -734,15 +446,6 @@ public class WiperColdService extends Service {
         super.onCreate();
         Log.i(TAG, "onCreate() — WiperColdService, wiperServiceActive=" + isServiceActive());
         timerHandler = new Handler(Looper.getMainLooper());
-        canBusIoThread = new HandlerThread("WiperCanBusIo");
-        canBusIoThread.start();
-        canBusIoHandler = new Handler(canBusIoThread.getLooper());
-        canBusExecutor = command -> {
-            Handler handler = canBusIoHandler;
-            if (handler != null && !handler.post(command)) {
-                Log.w(TAG, "CanBus ServiceConnection callback rejected: worker stopped");
-            }
-        };
 
         createNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -752,8 +455,11 @@ public class WiperColdService extends Service {
                 .build();
         startForeground(3, notification);
 
-        canBusIoHandler.post(this::ensureCanBusBound);
-        canBusIoHandler.postDelayed(safetyRunnable, 2_000L);
+        canBusSubscription = CanBusEventHub.get(this).subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_DOOR
+                        | CanBusEventRouter.INTEREST_GEAR,
+                null, timerHandler, this::onCanBusEvent);
     }
 
     @Override
@@ -775,8 +481,9 @@ public class WiperColdService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
         destroyed = true;
-        activeCanBusGeneration.incrementAndGet();
-        signalIngress.clear();
+        CanBusEventHub.Subscription subscription = canBusSubscription;
+        canBusSubscription = null;
+        if (subscription != null) subscription.close();
         int restoreVolume = mediaPauseState.cancelAndTakeRestoreVolume();
         if (mediaFadeAudioManager != null && restoreVolume >= 0) {
             try {
@@ -788,34 +495,8 @@ public class WiperColdService extends Service {
         }
         mediaFadeAudioManager = null;
         if (timerHandler != null) timerHandler.removeCallbacksAndMessages(null);
-        Handler ioHandler = canBusIoHandler;
-        HandlerThread ioThread = canBusIoThread;
-        if (ioHandler != null) {
-            ioHandler.removeCallbacks(safetyRunnable);
-            ioHandler.removeCallbacks(canBusRebindRunnable);
-            boolean queued = ioHandler.post(() -> {
-                releaseCanBusBinding("onDestroy");
-                if (signalIngress.droppedDoorTransitions() > 0) {
-                    Log.w(TAG, "door ingress dropped transitions="
-                            + signalIngress.droppedDoorTransitions());
-                }
-                if (ioThread != null) ioThread.quitSafely();
-            });
-            if (!queued && ioThread != null) ioThread.quitSafely();
-        }
         super.onDestroy();
     }
-
-    // Страховка: держим коннект/подписку
-    private final Runnable safetyRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (destroyed) return;
-            ensureCanBusBound();
-            addCanBusCallback(); // no-op если уже добавлен
-            canBusIoHandler.postDelayed(this, SAFETY_POLL_MS);
-        }
-    };
 
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(
