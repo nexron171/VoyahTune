@@ -80,20 +80,18 @@ SELF_DISARM_TRUE_WRITES=$(grep -F -c 'selfDisarmed = true;' "$APOLLO_JS")
 require_fixed "$APOLLO_JS" 'if (readLegacyOptIn() === true) return true;'
 require_fixed "$APOLLO_JS" 'if (!ensureLegacyOptInOrDisarm("observer", false)) return;'
 require_fixed "$APOLLO_JS" 'if (!ensureLegacyOptInOrDisarm("observer_uri", false)) return;'
-require_fixed "$APOLLO_JS" 'if (!ensureLegacyOptInOrDisarm("heartbeat", false)) return;'
+require_fixed "$APOLLO_JS" 'if (!ensureLegacyOptInOrDisarm("screen_on", false)) return;'
 require_fixed "$APOLLO_JS" 'if (!ensureLegacyOptInOrDisarm("attach", false)) {'
 require_fixed "$APOLLO_JS" 'var legacyOptInUri = settingsGetUri.call(SettingsGlobal, LEGACY_OPT_IN_KEY);'
 require_fixed "$APOLLO_JS" '.call(resolver, legacyOptInUri, false, observer);'
 assert_before "$APOLLO_JS" \
     'if (!ensureLegacyOptInOrDisarm("attach", false)) {' \
     '        refreshValidatedGate("attach");'
-assert_before "$APOLLO_JS" '        refreshValidatedGate("attach");' \
-    '        heartbeatTimer = setInterval(function () {'
 
-# Heartbeat/observer already performed the exact opt-in read, so gate refresh must not duplicate
+# Event callbacks already performed the exact opt-in read, so gate refresh must not duplicate
 # Settings IPC in the same chain. Provider entry + before-fake checks intentionally remain two.
 VALIDATED_GATE_FUNCTION=$(awk '
-    /function refreshValidatedGate\(reason\)/ { capture = 1 }
+    /function refreshValidatedGate\(reason, suppressActivation\)/ { capture = 1 }
     capture { print }
     capture && /^    }$/ { exit }
 ' "$APOLLO_JS")
@@ -181,9 +179,8 @@ CLEANUP_FUNCTION=$(awk '
     capture { print }
     capture && /^    }$/ { exit }
 ' "$APOLLO_JS")
-for REQUIRED in 'clearInterval(heartbeatTimer)' 'clearTimeout(stockResyncTimer)' \
-        'clearTimeout(postStockReactivationTimer)' \
-        'resolver.unregisterContentObserver(registeredObserver)' \
+for REQUIRED in 'clearTimeout(stockResyncTimer)' \
+        'clearTimeout(postStockReactivationTimer)' 'detachEventSources()' \
         'putIntSetting(MASTER_KEY, 0)' \
         'clearPublishedGate("legacy_opt_out", true)' \
         'detachProviderHookNow()' 'dispatchSelfDisarmStockRefresh()'; do
@@ -208,46 +205,144 @@ for FORBIDDEN in 'CanBusTool$3' 'onVehicleStateChanged' 'scheduleEligibleWake' \
     fi
 done
 
-# Low-rate recovery remains explicit and bounded: heartbeat checks every 30 seconds, but an active
-# legacy master can enter OEM activation code at most once per five-minute periodic slot.
-require_fixed "$APOLLO_JS" 'var HEARTBEAT_INTERVAL_MS = 30000;'
-require_fixed "$APOLLO_JS" 'var PERIODIC_RESYNC_INTERVAL_MS = 300000;'
-require_fixed "$APOLLO_JS" 'function maybeRunPeriodicResync(reason) {'
-require_fixed "$APOLLO_JS" 'periodicResyncDueAt = now + PERIODIC_RESYNC_INTERVAL_MS;'
-PERIODIC_REFERENCES=$(grep -F -c 'maybeRunPeriodicResync(' "$APOLLO_JS")
-[ "$PERIODIC_REFERENCES" -eq 2 ] \
-    || fail "maybeRunPeriodicResync must be defined once and called only by heartbeat"
+# Legacy runtime is strictly event-driven. The obsolete liveness key remains installer migration
+# state only and must never be published by the injected process.
+for FORBIDDEN in 'setInterval' 'heartbeatTimer' 'HEARTBEAT_INTERVAL_MS' \
+        'PERIODIC_RESYNC_INTERVAL_MS' 'periodicResyncDueAt' \
+        'maybeRunPeriodicResync' 'periodic_resync' 'HEARTBEAT_KEY' \
+        'settingsPutLong' 'putHeartbeat' 'open_voyah_apollo_profile_heartbeat' \
+        'getMainLooper' 'Java.use("android.os.Looper")'; do
+    if grep -Fq "$FORBIDDEN" "$APOLLO_JS"; then
+        fail "Apollo JS must remain event-driven and heartbeat-free: $FORBIDDEN"
+    fi
+done
+
+# ContentObserver and SCREEN_ON share one background HandlerThread; no event work is delivered on
+# VehicleSetting's main looper. The receiver uses an exact abstract-method override.
+for REQUIRED in 'var SCREEN_ON_ACTION = "android.intent.action.SCREEN_ON";' \
+        'var HandlerThread = Java.use("android.os.HandlerThread");' \
+        'AndroidProcess.THREAD_PRIORITY_BACKGROUND.value' \
+        'eventThread.start();' 'eventHandler = Handler.$new(eventThread.getLooper());' \
+        'observer = ObserverClass.$new(eventHandler);' \
+        'superClass: BroadcastReceiver' \
+        'argumentTypes: ["android.content.Context", "android.content.Intent"]' \
+        '.call(context, screenOnReceiver, screenOnFilter, null, eventHandler);'; do
+    require_fixed "$APOLLO_JS" "$REQUIRED"
+done
+assert_before "$APOLLO_JS" '        eventThread.start();' \
+    '        observer = ObserverClass.$new(eventHandler);'
+assert_before "$APOLLO_JS" '        eventThread.start();' \
+    '            .call(context, screenOnReceiver, screenOnFilter, null, eventHandler);'
+QUEUED_EVENT_FENCES=$(grep -F -c \
+    'if (selfDisarmed || !hooksInstalled) return;' "$APOLLO_JS")
+[ "$QUEUED_EVENT_FENCES" -eq 2 ] \
+    || fail "both ContentObserver overloads must fence queued callbacks"
+
+SCREEN_ON_FUNCTION=$(awk '
+    /function handleScreenOn\(intent\)/ { capture = 1 }
+    capture { print }
+    capture && /^    }$/ { exit }
+' "$APOLLO_JS")
+for REQUIRED in 'selfDisarmed || !hooksInstalled || intent === null' \
+        'action.toString() !== SCREEN_ON_ACTION' \
+        'intent.getComponent() !== null' \
+        'ensureLegacyOptInOrDisarm("screen_on", false)' \
+        'refreshValidatedGate("screen_on", true)' \
+        'refreshMaster("screen_on")' '!legacy97CProfile' 'diagnosticH97XProfile' \
+        '!persistedMaster || forceStockPassThrough' \
+        'pendingStockResync || stockResyncInFlight' \
+        'runAsyncQuery("screen_on_restore", false)'; do
+    printf '%s\n' "$SCREEN_ON_FUNCTION" | grep -Fq "$REQUIRED" \
+        || fail "SCREEN_ON path lacks event guard/action: $REQUIRED"
+done
+SCREEN_ON_ACTIVATIONS=$(grep -F -c \
+    'runAsyncQuery("screen_on_restore", false)' "$APOLLO_JS")
+[ "$SCREEN_ON_ACTIVATIONS" -eq 1 ] \
+    || fail "SCREEN_ON must have exactly one activation call site"
+if printf '%s\n' "$SCREEN_ON_FUNCTION" | grep -Fq 'setTimeout'; then
+    fail "SCREEN_ON must not create a delayed/polling activation"
+fi
+
+# Debounce is reserved before entering OEM code, including failures, so duplicate wake/observer
+# delivery cannot generate an activation burst.
 RUN_ASYNC_QUERY_FUNCTION=$(awk '
     /function runAsyncQuery\(reason, stockResync, allowRawOn\)/ { capture = 1 }
     capture { print }
     capture && /^    }$/ { exit }
 ' "$APOLLO_JS")
 printf '%s\n' "$RUN_ASYNC_QUERY_FUNCTION" | awk '
-    /periodicResyncDueAt = now \+ PERIODIC_RESYNC_INTERVAL_MS;/ { reserve = NR }
+    /activationBlockedUntil = now \+ ACTIVATION_DEBOUNCE_MS;/ { reserve = NR }
     /var existingManager = managerSingletonGet.call/ { singleton = NR }
     /var manager = managerInstance.call/ { manager = NR }
     END { exit !(reserve > 0 && reserve < singleton && reserve < manager) }
-' || fail "periodic activation slot must be reserved before entering OEM query code"
-assert_before "$APOLLO_JS" 'var masterRefresh = refreshMaster("heartbeat_poll");' \
-    'if (masterRefresh !== null) maybeRunPeriodicResync("heartbeat");'
+' || fail "activation debounce must be reserved before entering OEM query code"
 
-PERIODIC_FUNCTION=$(awk '
-    /function maybeRunPeriodicResync\(reason\)/ { capture = 1 }
+# OFF/gate-loss retry is a finite chain caused by a concrete shutdown event, not a poll: one timer
+# is armed at a time and can dispatch only attempts 2/3 while pending remains true.
+STOCK_RETRY_SCHEDULER=$(awk '
+    /function schedulePendingStockRetry\(\)/ { capture = 1 }
     capture { print }
     capture && /^    }$/ { exit }
 ' "$APOLLO_JS")
-for REQUIRED in '!legacy97CProfile' 'diagnosticH97XProfile' '!hookAllowed' \
-        '!masterKnown || !persistedMaster || forceStockPassThrough' \
-        'pendingStockResync || stockResyncInFlight' \
-        'readPersistedMaster() !== true' \
-        'periodicResyncDueAt > now' \
-        'runAsyncQuery("periodic_resync:" + reason, false)'; do
-    printf '%s\n' "$PERIODIC_FUNCTION" | grep -Fq "$REQUIRED" \
-        || fail "maybeRunPeriodicResync lacks guard/action: $REQUIRED"
+for REQUIRED in '!pendingStockResync || stockResyncTimer !== null' \
+        'stockResyncTimer = setTimeout(function () {' \
+        'stockResyncTimer = null;' 'stockResyncInFlight = false;' \
+        'stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS' \
+        'if (retryAvailable) retryPendingStockResync();'; do
+    printf '%s\n' "$STOCK_RETRY_SCHEDULER" | grep -Fq "$REQUIRED" \
+        || fail "bounded stock scheduler lacks guard/action: $REQUIRED"
+done
+STOCK_RETRY_FUNCTION=$(awk '
+    /function retryPendingStockResync\(\)/ { capture = 1 }
+    capture { print }
+    capture && /^    }$/ { exit }
+' "$APOLLO_JS")
+for REQUIRED in 'stockResyncAttempts >= MAX_STOCK_RESYNC_ATTEMPTS' \
+        'ensureLegacyOptInOrDisarm("stock_resync_retry", false)' \
+        '"bounded_stock_retry", true, pendingStockAllowsRawOn'; do
+    printf '%s\n' "$STOCK_RETRY_FUNCTION" | grep -Fq "$REQUIRED" \
+        || fail "bounded stock retry lacks guard/action: $REQUIRED"
+done
+for REQUIRED in 'cause=manager_null' 'schedulePendingStockRetry();' \
+        'stock_resync_provider_failed' 'stock_resync_provider_empty'; do
+    require_fixed "$APOLLO_JS" "$REQUIRED"
+done
+RUN_RETRY_ARMS=$(printf '%s\n' "$RUN_ASYNC_QUERY_FUNCTION" \
+    | grep -F -c 'schedulePendingStockRetry();')
+[ "$RUN_RETRY_ARMS" -eq 3 ] \
+    || fail "stock request must arm retry after manager-null, dispatch, and exception"
+CALL_STOCK_FUNCTION=$(awk '
+    /function callStockSubscription\(queryContext\)/ { capture = 1 }
+    capture { print }
+    capture && /^    }$/ { exit }
+' "$APOLLO_JS")
+PROVIDER_RETRY_ARMS=$(printf '%s\n' "$CALL_STOCK_FUNCTION" \
+    | grep -F -c 'schedulePendingStockRetry();')
+[ "$PROVIDER_RETRY_ARMS" -eq 2 ] \
+    || fail "provider exception and null result must preserve bounded retry"
+for REQUIRED in 'if (stockResult !== null) {' 'clearTimeout(stockResyncTimer)' \
+        'pendingStockResync = false;'; do
+    printf '%s\n' "$CALL_STOCK_FUNCTION" | grep -Fq "$REQUIRED" \
+        || fail "non-null provider success must stop bounded retry: $REQUIRED"
 done
 require_fixed "$APOLLO_JS" 'var MAX_STOCK_RESYNC_ATTEMPTS = 3;'
 
-# Install/update always closes opt-in and liveness before system mutation in both flavors.
+EVENT_CLEANUP_FUNCTION=$(awk '
+    /function detachEventSources\(\)/ { capture = 1 }
+    capture { print }
+    capture && /^    }$/ { exit }
+' "$APOLLO_JS")
+for REQUIRED in 'context.unregisterReceiver(registeredReceiver)' \
+        'resolver.unregisterContentObserver(registeredObserver)' \
+        'eventHandler = null;' 'eventThread = null;' 'runningThread.quitSafely();'; do
+    printf '%s\n' "$EVENT_CLEANUP_FUNCTION" | grep -Fq "$REQUIRED" \
+        || fail "event cleanup lacks teardown: $REQUIRED"
+done
+EVENT_CLEANUP_REFERENCES=$(grep -F -c 'detachEventSources()' "$APOLLO_JS")
+[ "$EVENT_CLEANUP_REFERENCES" -eq 3 ] \
+    || fail "self-disarm and hook-failure must both detach event sources"
+
+# Install/update keeps clearing the obsolete heartbeat key as migration state before system mutation.
 for FILE in "$INSTALL_SH" "$INSTALL_BAT" "$LIGHT_INSTALL_SH" "$LIGHT_INSTALL_BAT"; do
     require_fixed "$FILE" "$OPT_IN_KEY"
     require_fixed "$FILE" 'open_voyah_apollo_profile_supported'
@@ -292,7 +387,10 @@ require_fixed "$NATIVE_SERVICE" 'Do not subscribe globally or issue a delayed ve
 require_fixed "$README" "$OPT_IN_KEY=1"
 require_fixed "$README" 'Generic `onVehicleStateChanged` не хукается ни'
 require_fixed "$README" 'поток CAN-событий вообще не пересекает GumJS'
-require_fixed "$README" 'activation resync не чаще одного'
+require_fixed "$README" '`ACTION_SCREEN_ON`'
+require_fixed "$README" 'dedicated background `HandlerThread`'
+require_fixed "$README" 'Interval/periodic poll отсутствуют'
+require_fixed "$README" 'только обнуляют этот legacy cleanup key'
 require_fixed "$README" 'Прямой H97X Binder-контур Native доступен в full и light'
 require_fixed "$README" 'не вызывает OEM'
 require_fixed "$README" '`TX28/TX29`'

@@ -100,36 +100,42 @@ Native Apollo работает без постоянной подписки `ICa
 
 `load.bin` разрешает attach только при точном
 `Settings.Global open_voyah_apollo_legacy_hook_enabled=1`. Отсутствующее, нечитаемое, `0`
-или любое другое значение fail-closed: master, profile и heartbeat сбрасываются, attach не
-выполняется. Если PID-marker доказывает наличие нашего агента в точно той же process
+или любое другое значение fail-closed: master и profile сбрасываются, attach не выполняется.
+Если PID-marker доказывает наличие нашего агента в точно той же process
 identity, переход `1` → `0` однократно выгружает его через `am force-stop`. Сам JS повторяет
 проверку opt-in до SHA-256 и разрешения OEM-классов. PID-marker v2 включает boot UUID;
 старый marker без UUID никогда не является основанием для `force-stop` после reboot.
 
 Потеря PID-marker не оставляет уже загруженный legacy-agent активным. Observer самого opt-in и
-heartbeat читают точное значение ключа, а provider проверяет его при входе и непосредственно перед
-fake. Любое значение, кроме `1`, включая ошибку чтения, переводит агент в монотонное fail-passive
-состояние до перезапуска процесса: fake больше не возвращается, master/profile/heartbeat обнуляются,
-таймеры и observer снимаются, provider-hook восстанавливается отложенно после текущего вызова. Если
-fake мог уже попасть в OEM-cache, текущий provider-вызов либо ровно один отдельный stock-query без
-retry обновляет cache перед окончательным отключением. JS сам не вызывает `force-stop` и после
-self-disarm не включает hook повторно; новый opt-in требует обычной повторной инъекции в новом
-экземпляре процесса.
+системный `ACTION_SCREEN_ON` читают точное значение ключа, а provider проверяет его при входе и
+непосредственно перед fake. Любое значение, кроме `1`, включая ошибку чтения, переводит агент в
+монотонное fail-passive состояние до перезапуска процесса: fake больше не возвращается, master/profile
+обнуляются, receiver и observer снимаются, их `HandlerThread` завершается, provider-hook
+восстанавливается отложенно после текущего вызова. Если fake мог уже попасть в OEM-cache, текущий
+provider-вызов либо ровно один отдельный stock-query без retry обновляет cache перед окончательным
+отключением. JS сам не вызывает `force-stop` и после self-disarm не включает hook повторно; новый
+opt-in требует обычной повторной инъекции в новом экземпляре процесса.
 
 При явном opt-in остаются legacy-gate: `open_voyah_apollo_master=1`, точные pinned SHA-256
 VehicleSetting/CanBusService и поддерживаемый профиль. Generic `onVehicleStateChanged` не хукается ни
 на direct H97X, ни на legacy 97C, поэтому поток CAN-событий вообще не пересекает GumJS. Переходы
-master по-прежнему обрабатывает `ContentObserver`, heartbeat каждые 30 секунд перепроверяет gate и
-редкий пропуск observer, а при активном legacy master выполняется activation resync не чаще одного
-раза в пять минут. Bounded stock-resync после OFF/gate-loss остаётся отдельным fail-closed путём.
+master и opt-in обрабатывает `ContentObserver`, а wake-восстановление — динамический системный
+`ACTION_SCREEN_ON`; оба доставляются одним dedicated background `HandlerThread`, не main-потоком
+VehicleSetting. SCREEN_ON перечитывает gate/master и допускает максимум один activation-query через
+общий debounce. Interval/periodic poll отсутствуют. Bounded stock-resync после конкретного
+OFF/gate-loss остаётся отдельной цепочкой максимум из трёх попыток, а не фоновым poll.
+
+Старый `open_voyah_apollo_profile_heartbeat` больше не является liveness-сигналом: JS его не читает
+и не публикует. Установщики и loader только обнуляют этот legacy cleanup key при миграции, чтобы не
+оставлять значение от предыдущих версий.
 
 ### Установка и диагностика
 
 1. Оба установщика до `disable-verity` и любых `/system` mutations записывают и читают обратно `0`
-   для legacy opt-in, master, profile и heartbeat, а также отклоняют чужого владельца
+   для legacy opt-in, master, profile и legacy heartbeat cleanup key, а также отклоняют чужого владельца
    `com.qinggan.permission.WRITE_CANBUS`. Любая ошибка останавливает установку до записи в `/system`.
-2. После перезагрузки `open_voyah_apollo_legacy_hook_enabled`, master, profile и heartbeat должны
-   быть равны `0`. В full `/data/local/tmp/voyah_apollo.disabled` создан, а `voyah_apollo.pid`
+2. После перезагрузки `open_voyah_apollo_legacy_hook_enabled`, master, profile и legacy heartbeat
+   cleanup key должны быть равны `0`. В full `/data/local/tmp/voyah_apollo.disabled` создан, а `voyah_apollo.pid`
    отсутствует; light вообще не устанавливает Apollo loader/Frida-файлы. `[apollo] hook ready` в
    direct-only режиме не ожидается: агент не загружался.
 3. Legacy-перехват доступен только в full и включается только для отдельной стояночной диагностики:

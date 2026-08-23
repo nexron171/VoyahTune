@@ -13,7 +13,7 @@
 // приватных direct-send, overseas/model spoof, лицензирования и локализации здесь нет. После OFF или
 // gate-loss допускается не более трёх stock async attempts до non-null provider observation; это
 // bounded попытки штатного запроса, а не ECU-confirmation. Generic CAN callback не хукается:
-// legacy activation поддерживается observer-переходами и resync не чаще одного раза в пять минут.
+// legacy activation поддерживается только observer-переходами и системным SCREEN_ON.
 Java.perform(function () {
     "use strict";
 
@@ -23,7 +23,6 @@ Java.perform(function () {
     var ASC_KEY = "open_voyah_apollo_asc";
     var SDB_KEY = "open_voyah_apollo_sdb";
     var PROFILE_KEY = "open_voyah_apollo_profile_supported";
-    var HEARTBEAT_KEY = "open_voyah_apollo_profile_heartbeat";
     var VEHICLE_SETTING_SHA256 = "72f1c549e5cbfe22f65169898710d63c84981adcbbf7490c959f84fdeff621e6";
     var CANBUS_PACKAGE = "com.qinggan.canbus.service";
     var CANBUS_SHA256 = "96ac5182e795ad70c43c78f26b9cf29e76b59db67c2d5c09216ba1d8425c427c";
@@ -31,10 +30,9 @@ Java.perform(function () {
     var H97X_TRACKING_BRAND = "H97C";
     var PROCESS_SENTINEL_KEY = "open_voyah.apollo.hook_state.v1";
     var READY_MARKER = "[apollo] hook ready";
+    var SCREEN_ON_ACTION = "android.intent.action.SCREEN_ON";
     var FAKE_SUBSCRIPTION = "{\"expireStatus\":\"0\",\"isMqtt\":false,\"remainDays\":\"30\",\"subscriptionStatus\":\"1\"}";
     var ACTIVATION_DEBOUNCE_MS = 5000;
-    var HEARTBEAT_INTERVAL_MS = 30000;
-    var PERIODIC_RESYNC_INTERVAL_MS = 300000;
     var STOCK_RESYNC_RETRY_MS = 10000;
     var MAX_STOCK_RESYNC_ATTEMPTS = 3;
 
@@ -42,10 +40,13 @@ Java.perform(function () {
     var ActivityThread = Java.use("android.app.ActivityThread");
     var SettingsGlobal = Java.use("android.provider.Settings$Global");
     var Handler = Java.use("android.os.Handler");
-    var Looper = Java.use("android.os.Looper");
+    var HandlerThread = Java.use("android.os.HandlerThread");
+    var AndroidProcess = Java.use("android.os.Process");
     var SystemClock = Java.use("android.os.SystemClock");
     var SystemProperties = Java.use("android.os.SystemProperties");
     var JavaSystem = Java.use("java.lang.System");
+    var BroadcastReceiver = Java.use("android.content.BroadcastReceiver");
+    var IntentFilter = Java.use("android.content.IntentFilter");
     var ContentObserver = Java.use("android.database.ContentObserver");
 
     var application = ActivityThread.currentApplication();
@@ -60,8 +61,6 @@ Java.perform(function () {
         "android.content.ContentResolver", "java.lang.String", "int");
     var settingsPutInt = SettingsGlobal.putInt.overload(
         "android.content.ContentResolver", "java.lang.String", "int");
-    var settingsPutLong = SettingsGlobal.putLong.overload(
-        "android.content.ContentResolver", "java.lang.String", "long");
     var settingsGetUri = SettingsGlobal.getUriFor.overload("java.lang.String");
     var systemPropertyGet = SystemProperties.get.overload(
         "java.lang.String", "java.lang.String");
@@ -90,25 +89,12 @@ Java.perform(function () {
         }
     }
 
-    function putHeartbeat(value) {
-        try {
-            var written = settingsPutLong.call(SettingsGlobal, resolver, HEARTBEAT_KEY, value);
-            if (!written) warn("heartbeat_write_rejected", "value=" + (value === 0 ? 0 : 1));
-            return written;
-        } catch (e) {
-            error("heartbeat_write_failed", "value=" + (value === 0 ? 0 : 1));
-            return false;
-        }
-    }
-
     function clearPublishedGate(reason, suppressInfo) {
         var profileCleared = putIntSetting(PROFILE_KEY, 0);
-        var heartbeatCleared = putHeartbeat(0);
         if (suppressInfo !== true) {
-            info("gate_cleared", "reason=" + reason + " ok="
-                + ((profileCleared && heartbeatCleared) ? 1 : 0));
+            info("gate_cleared", "reason=" + reason + " ok=" + (profileCleared ? 1 : 0));
         }
-        return profileCleared && heartbeatCleared;
+        return profileCleared;
     }
 
     // null означает ошибку чтения и всегда трактуется как disabled/pass-through.
@@ -221,7 +207,7 @@ Java.perform(function () {
     }
 
     // VehicleSetting source не может смениться без смерти текущего процесса. CanBusService может
-    // обновиться отдельно: дешёво сравниваем metadata при heartbeat/transition/point-of-use и хешируем
+    // обновиться отдельно: дешёво сравниваем metadata при event/transition/point-of-use и хешируем
     // его APK повторно только после фактического изменения metadata.
     function refreshCanBusPin(reason) {
         var current = readCanBusMetadata();
@@ -240,8 +226,8 @@ Java.perform(function () {
     }
 
     // Читает реальную конфигурацию без spoof. published=true возможно только когда allowPublish=true
-    // и все диагностические записи успешны. Attach отдельно заранее обнуляет profile/heartbeat;
-    // периодический refresh не создаёт ложное окно profile=0 между двумя успешными проверками.
+    // и все диагностические записи успешны. Attach отдельно заранее обнуляет profile;
+    // event-driven refresh не создаёт ложное окно profile=0 между двумя успешными проверками.
     function evaluateProfile(reason, allowPublish) {
         try {
             var VehicleConfigHelper = Java.use("com.qinggan.vehicle.VehicleConfigHelper");
@@ -283,7 +269,6 @@ Java.perform(function () {
             var canPublish = allowPublish && vehicleSupported && ascWritten && sdbWritten;
             var profileWritten = putIntSetting(PROFILE_KEY, canPublish ? 1 : 0);
             var published = canPublish && profileWritten;
-            if (!published) putHeartbeat(0);
 
             info("profile", "reason=" + reason + " asc=" + asc + " sdb=" + sdb
                 + " is97c=" + (is97C ? 1 : 0) + " excluded="
@@ -301,7 +286,6 @@ Java.perform(function () {
             putIntSetting(ASC_KEY, 0);
             putIntSetting(SDB_KEY, 0);
             putIntSetting(PROFILE_KEY, 0);
-            putHeartbeat(0);
             error("profile_read_failed", "reason=" + reason + " fail_closed=1");
             return { vehicleSupported: false, published: false };
         }
@@ -371,9 +355,11 @@ Java.perform(function () {
     var masterKnown = false;
     var persistedMaster = false;
     var activationBlockedUntil = 0;
-    var periodicResyncDueAt = 0;
+    var eventThread = null;
+    var eventHandler = null;
     var observer = null;
-    var heartbeatTimer = null;
+    var screenOnReceiver = null;
+    var screenOnReceiverRegistered = false;
     var fakeMayBeApplied = false;
     var pendingStockResync = false;
     var stockResyncInFlight = false;
@@ -400,6 +386,43 @@ Java.perform(function () {
         } catch (e) {
             return false;
         }
+    }
+
+    function detachEventSources() {
+        var cleanupOk = true;
+        var registeredReceiver = screenOnReceiver;
+        var receiverWasRegistered = screenOnReceiverRegistered;
+        screenOnReceiver = null;
+        screenOnReceiverRegistered = false;
+        if (receiverWasRegistered && registeredReceiver !== null) {
+            try {
+                context.unregisterReceiver(registeredReceiver);
+            } catch (receiverError) {
+                cleanupOk = false;
+            }
+        }
+
+        var registeredObserver = observer;
+        observer = null;
+        if (registeredObserver !== null) {
+            try {
+                resolver.unregisterContentObserver(registeredObserver);
+            } catch (observerError) {
+                cleanupOk = false;
+            }
+        }
+
+        eventHandler = null;
+        var runningThread = eventThread;
+        eventThread = null;
+        if (runningThread !== null) {
+            try {
+                runningThread.quitSafely();
+            } catch (threadError) {
+                cleanupOk = false;
+            }
+        }
+        return cleanupOk;
     }
 
     // A provider call already in progress is itself the required stock refresh: claim it before
@@ -451,10 +474,6 @@ Java.perform(function () {
         } catch (sentinelError) {
             cleanupOk = false;
         }
-        if (heartbeatTimer !== null) {
-            try { clearInterval(heartbeatTimer); } catch (heartbeatError) { cleanupOk = false; }
-            heartbeatTimer = null;
-        }
         if (stockResyncTimer !== null) {
             try { clearTimeout(stockResyncTimer); } catch (stockTimerError) { cleanupOk = false; }
             stockResyncTimer = null;
@@ -467,15 +486,7 @@ Java.perform(function () {
             }
             postStockReactivationTimer = null;
         }
-        var registeredObserver = observer;
-        observer = null;
-        if (registeredObserver !== null) {
-            try {
-                resolver.unregisterContentObserver(registeredObserver);
-            } catch (observerError) {
-                cleanupOk = false;
-            }
-        }
+        if (!detachEventSources()) cleanupOk = false;
 
         if (!putIntSetting(MASTER_KEY, 0)) cleanupOk = false;
         if (!clearPublishedGate("legacy_opt_out", true)) cleanupOk = false;
@@ -526,7 +537,6 @@ Java.perform(function () {
             masterKnown = true;
             persistedMaster = false;
             activationBlockedUntil = 0;
-            periodicResyncDueAt = 0;
             selfDisarmReason = reason;
             selfDisarmStockRefreshPending = hadFake;
             selfDisarmStockRefreshSource = hadFake ? "pending" : "not_needed";
@@ -555,6 +565,41 @@ Java.perform(function () {
         info("stock_resync_scheduled", "reason=" + reason
             + " raw_on_allowed=" + (pendingStockAllowsRawOn ? 1 : 0)
             + " attempt=" + stockResyncAttempts + "/" + MAX_STOCK_RESYNC_ATTEMPTS);
+    }
+
+    function retryPendingStockResync() {
+        if (selfDisarmed || !pendingStockResync || stockResyncInFlight
+                || stockResyncAttempts >= MAX_STOCK_RESYNC_ATTEMPTS) {
+            return false;
+        }
+        if (!ensureLegacyOptInOrDisarm("stock_resync_retry", false)) return false;
+        // runAsyncQuery повторно проверяет raw master и APK pin. allowRawOn действует только для
+        // уже установленного gate-loss shutdown; обычный user-OFF по-прежнему требует raw 0.
+        return runAsyncQuery(
+            "bounded_stock_retry", true, pendingStockAllowsRawOn);
+    }
+
+    function schedulePendingStockRetry() {
+        if (selfDisarmed || !pendingStockResync || stockResyncTimer !== null) return false;
+        try {
+            stockResyncTimer = setTimeout(function () {
+                Java.perform(function () {
+                    stockResyncTimer = null;
+                    if (selfDisarmed || !pendingStockResync) return;
+                    stockResyncInFlight = false;
+                    var retryAvailable = stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS;
+                    warn("stock_resync_unconfirmed", "attempt=" + stockResyncAttempts
+                        + "/" + MAX_STOCK_RESYNC_ATTEMPTS + " retry_available="
+                        + (retryAvailable ? 1 : 0));
+                    if (retryAvailable) retryPendingStockResync();
+                });
+            }, STOCK_RESYNC_RETRY_MS);
+            return true;
+        } catch (e) {
+            stockResyncTimer = null;
+            error("stock_resync_retry_schedule_failed", "pending=1");
+            return false;
+        }
     }
 
     function markFakeMayBeApplied() {
@@ -606,7 +651,7 @@ Java.perform(function () {
         return true;
     }
 
-    function refreshValidatedGate(reason) {
+    function refreshValidatedGate(reason, suppressActivation) {
         if (selfDisarmed) return false;
         var wasAllowed = hookAllowed;
         hashMatches = refreshCanBusPin(reason);
@@ -615,15 +660,6 @@ Java.perform(function () {
             && !forceStockPassThrough;
         if (forceStockPassThrough) {
             putIntSetting(PROFILE_KEY, 0);
-            putHeartbeat(0);
-        }
-        if (hookAllowed) {
-            var heartbeatOk = putHeartbeat(SystemClock.elapsedRealtime());
-            if (!heartbeatOk) {
-                hookAllowed = false;
-                putIntSetting(PROFILE_KEY, 0);
-                putHeartbeat(0);
-            }
         }
         if (hooksInstalled) {
             JavaSystem.setProperty(PROCESS_SENTINEL_KEY,
@@ -644,8 +680,10 @@ Java.perform(function () {
             }
         }
         // Если профиль был временно не готов, persisted ON не теряется: первое verified gate opening
-        // делает один activation query. Общий debounce coalesce-ит его с observer/periodic resync.
-        if (!wasAllowed && hookAllowed && !diagnosticH97XProfile
+        // делает один activation query. SCREEN_ON может подавить этот внутренний dispatch и выполнить
+        // не более одного activation после согласованного gate/master refresh.
+        if (suppressActivation !== true
+                && !wasAllowed && hookAllowed && !diagnosticH97XProfile
                 && masterKnown && !forceStockPassThrough
                 && !stockResyncInFlight) {
             var masterAtGateOpen = readPersistedMaster();
@@ -691,9 +729,9 @@ Java.perform(function () {
             return false;
         }
         if (stockResync !== true) {
-            // Reserve before entering OEM code so repeated failures cannot turn heartbeat into a
-            // 30-second retry loop. Any successful query keeps the same periodic deadline.
-            periodicResyncDueAt = now + PERIODIC_RESYNC_INTERVAL_MS;
+            // Reserve before OEM code: duplicate SCREEN_ON/observer delivery and synchronous
+            // failures cannot turn one wake into a burst of activation requests.
+            activationBlockedUntil = now + ACTIVATION_DEBOUNCE_MS;
         }
         try {
             if (stockResync === true && allowRawOn === true
@@ -714,35 +752,21 @@ Java.perform(function () {
             if (stockResync === true) stockResyncInFlight = true;
             var manager = managerInstance.call(AdasManager, context);
             if (manager === null) {
-                if (stockResync === true) stockResyncInFlight = false;
+                if (stockResync === true) {
+                    stockResyncInFlight = false;
+                    schedulePendingStockRetry();
+                }
                 warn("async_query_skipped", "reason=" + reason + " cause=manager_null");
                 return false;
             }
             var constructorDispatched = existingManager === null && !diagnosticH97XProfile;
             if (!constructorDispatched) asyncQuery.call(manager);
             if (stockResync === true) {
-                // Provider может отработать очень быстро в worker-thread ещё до возврата call().
-                if (pendingStockResync) {
-                    if (stockResyncTimer !== null) clearTimeout(stockResyncTimer);
-                    stockResyncTimer = setTimeout(function () {
-                        Java.perform(function () {
-                            if (selfDisarmed) {
-                                stockResyncTimer = null;
-                                return;
-                            }
-                            stockResyncInFlight = false;
-                            stockResyncTimer = null;
-                            if (pendingStockResync) {
-                                warn("stock_resync_unconfirmed", "attempt=" + stockResyncAttempts
-                                    + "/" + MAX_STOCK_RESYNC_ATTEMPTS + " retry_available="
-                                    + (stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS ? 1 : 0));
-                            }
-                        });
-                    }, STOCK_RESYNC_RETRY_MS);
-                }
+                // Provider может отработать очень быстро до возврата call(); helper ставит только
+                // один bounded retry и success-path ниже отменит его.
+                schedulePendingStockRetry();
             } else {
                 markFakeMayBeApplied();
-                activationBlockedUntil = now + ACTIVATION_DEBOUNCE_MS;
             }
             info("async_query_requested", "reason=" + reason
                 + " stock_resync=" + (stockResync === true ? 1 : 0)
@@ -750,7 +774,10 @@ Java.perform(function () {
                     : (diagnosticH97XProfile ? "explicit_h97x" : "explicit")));
             return true;
         } catch (e) {
-            if (stockResync === true) stockResyncInFlight = false;
+            if (stockResync === true) {
+                stockResyncInFlight = false;
+                schedulePendingStockRetry();
+            }
             error("async_query_failed", "reason=" + reason);
             return false;
         }
@@ -778,7 +805,6 @@ Java.perform(function () {
             info("master_initial", "enabled=" + (next ? 1 : 0)
                 + " gate=" + (hookAllowed ? 1 : 0));
             // Missing/0 полностью пассивен. Persisted explicit 1 делает один query только при valid gate.
-            if (next) periodicResyncDueAt = 0;
             if (next && hookAllowed) runAsyncQuery("initial_enabled");
             return false;
         }
@@ -798,15 +824,11 @@ Java.perform(function () {
             + " source=" + reason + " gate=" + (hookAllowed ? 1 : 0));
         if (next) {
             // ON никогда не активируется при invalid gate.
-            periodicResyncDueAt = 0;
             if (hookAllowed) runAsyncQuery("master_transition_on", false);
         } else if (fakeMayBeApplied) {
             // OFF не теряем: при valid gate resync сейчас, иначе откладываем до восстановления gate.
-            periodicResyncDueAt = 0;
             scheduleStockResync("master_transition_off", false, true);
             if (hashMatches) runAsyncQuery("master_transition_off_resync", true, false);
-        } else {
-            periodicResyncDueAt = 0;
         }
         return true;
     }
@@ -823,11 +845,6 @@ Java.perform(function () {
         var profileResult = evaluateProfile(
             "subscription_point_of_use", hooksInstalled && hashMatches);
         hookAllowed = hooksInstalled && hashMatches && profileResult.published;
-        if (hookAllowed && !putHeartbeat(SystemClock.elapsedRealtime())) {
-            hookAllowed = false;
-            putIntSetting(PROFILE_KEY, 0);
-            putHeartbeat(0);
-        }
         JavaSystem.setProperty(PROCESS_SENTINEL_KEY,
             hookAllowed ? "active" : "pass_through");
         if (diagnosticH97XProfile) {
@@ -852,19 +869,37 @@ Java.perform(function () {
         return enabled === true;
     }
 
-    // Generic CAN callback намеренно не хукается: даже ранний JS-фильтр пересекал бы GumJS на
-    // каждом CAN event. Редкий activation resync выполняется только из 30-секундного
-    // heartbeat и не чаще одного раза за PERIODIC_RESYNC_INTERVAL_MS при активном legacy master.
-    function maybeRunPeriodicResync(reason) {
-        if (selfDisarmed || !legacy97CProfile || diagnosticH97XProfile || !hookAllowed
-                || !masterKnown || !persistedMaster || forceStockPassThrough) {
-            return false;
+    // SCREEN_ON — единственный wake-resync legacy-пути. Gate refresh здесь не запускает activation
+    // сам: initial/transition master уже делает максимум один query, а same-state ON получает ровно
+    // один дополнительный запрос через общий elapsedRealtime debounce.
+    function handleScreenOn(intent) {
+        if (selfDisarmed || !hooksInstalled || intent === null) return;
+        var action;
+        try {
+            action = intent.getAction();
+            if (action === null || action.toString() !== SCREEN_ON_ACTION) return;
+            // Системный SCREEN_ON приходит implicit. Явно адресованный spoof не является wake.
+            if (intent.getComponent() !== null) return;
+        } catch (intentError) {
+            error("screen_on_rejected", "cause=intent_read_failed");
+            return;
         }
-        if (pendingStockResync || stockResyncInFlight) return false;
-        if (readPersistedMaster() !== true) return false;
-        var now = SystemClock.elapsedRealtime();
-        if (periodicResyncDueAt > now) return false;
-        return runAsyncQuery("periodic_resync:" + reason, false);
+        if (!ensureLegacyOptInOrDisarm("screen_on", false)) return;
+        refreshValidatedGate("screen_on", true);
+        if (selfDisarmed) return;
+
+        var masterWasKnown = masterKnown;
+        var transitioned = refreshMaster("screen_on");
+        if (selfDisarmed || transitioned === null || !masterWasKnown
+                || transitioned === true) {
+            return;
+        }
+        if (!legacy97CProfile || diagnosticH97XProfile || !hookAllowed
+                || !persistedMaster || forceStockPassThrough
+                || pendingStockResync || stockResyncInFlight) {
+            return;
+        }
+        runAsyncQuery("screen_on_restore", false);
     }
 
     function callStockSubscription(queryContext) {
@@ -875,6 +910,7 @@ Java.perform(function () {
         } catch (stockError) {
             if (pendingStockResync && stockResyncInFlight) {
                 stockResyncInFlight = false;
+                schedulePendingStockRetry();
                 warn("stock_resync_provider_failed", "retry_available="
                     + (stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS ? 1 : 0));
             }
@@ -882,11 +918,11 @@ Java.perform(function () {
         }
         if (pendingStockResync && stockResyncInFlight) {
             stockResyncInFlight = false;
-            if (stockResyncTimer !== null) {
-                clearTimeout(stockResyncTimer);
-                stockResyncTimer = null;
-            }
             if (stockResult !== null) {
+                if (stockResyncTimer !== null) {
+                    clearTimeout(stockResyncTimer);
+                    stockResyncTimer = null;
+                }
                 pendingStockResync = false;
                 pendingStockAllowsRawOn = false;
                 fakeMayBeApplied = false;
@@ -913,6 +949,7 @@ Java.perform(function () {
                     forceStockPassThrough = false;
                 }
             } else {
+                schedulePendingStockRetry();
                 warn("stock_resync_provider_empty", "retry_available="
                     + (stockResyncAttempts < MAX_STOCK_RESYNC_ATTEMPTS ? 1 : 0));
             }
@@ -940,6 +977,12 @@ Java.perform(function () {
         };
         subscribeInstalled = true;
 
+        hookInstallStage = "event_thread";
+        eventThread = HandlerThread.$new(
+            "VoyahApolloEvents", AndroidProcess.THREAD_PRIORITY_BACKGROUND.value);
+        eventThread.start();
+        eventHandler = Handler.$new(eventThread.getLooper());
+
         hookInstallStage = "observer_class";
         var ObserverClass = Java.registerClass({
             name: "com.qinggan.app.vehiclesetting.VoyahApolloObserver_" + Date.now(),
@@ -959,6 +1002,7 @@ Java.perform(function () {
                         returnType: "void",
                         argumentTypes: ["boolean"],
                         implementation: function () {
+                            if (selfDisarmed || !hooksInstalled) return;
                             if (!ensureLegacyOptInOrDisarm("observer", false)) return;
                             refreshValidatedGate("master_observer");
                             refreshMaster("observer");
@@ -968,6 +1012,7 @@ Java.perform(function () {
                         returnType: "void",
                         argumentTypes: ["boolean", "android.net.Uri"],
                         implementation: function () {
+                            if (selfDisarmed || !hooksInstalled) return;
                             if (!ensureLegacyOptInOrDisarm("observer_uri", false)) return;
                             refreshValidatedGate("master_observer_uri");
                             refreshMaster("observer_uri");
@@ -977,7 +1022,7 @@ Java.perform(function () {
             }
         });
         hookInstallStage = "observer_instance";
-        observer = ObserverClass.$new(Handler.$new(Looper.getMainLooper()));
+        observer = ObserverClass.$new(eventHandler);
         var masterUri = settingsGetUri.call(SettingsGlobal, MASTER_KEY);
         var legacyOptInUri = settingsGetUri.call(SettingsGlobal, LEGACY_OPT_IN_KEY);
         hookInstallStage = "master_observer_register";
@@ -988,6 +1033,30 @@ Java.perform(function () {
         resolver.registerContentObserver.overload(
             "android.net.Uri", "boolean", "android.database.ContentObserver")
             .call(resolver, legacyOptInUri, false, observer);
+
+        hookInstallStage = "screen_receiver_class";
+        var ScreenOnReceiverClass = Java.registerClass({
+            name: "com.qinggan.app.vehiclesetting.VoyahApolloScreenReceiver_" + Date.now(),
+            superClass: BroadcastReceiver,
+            methods: {
+                onReceive: {
+                    returnType: "void",
+                    argumentTypes: ["android.content.Context", "android.content.Intent"],
+                    implementation: function (receiverContext, intent) {
+                        handleScreenOn(intent);
+                    }
+                }
+            }
+        });
+        hookInstallStage = "screen_receiver_instance";
+        screenOnReceiver = ScreenOnReceiverClass.$new();
+        var screenOnFilter = IntentFilter.$new(SCREEN_ON_ACTION);
+        hookInstallStage = "screen_receiver_register";
+        context.registerReceiver.overload(
+            "android.content.BroadcastReceiver", "android.content.IntentFilter",
+            "java.lang.String", "android.os.Handler")
+            .call(context, screenOnReceiver, screenOnFilter, null, eventHandler);
+        screenOnReceiverRegistered = true;
 
         hooksInstalled = true;
         hookInstallStage = "validated_gate";
@@ -1003,47 +1072,28 @@ Java.perform(function () {
             console.log(READY_MARKER);
             return;
         }
-        // Gate/hash/profile уже опубликованы и heartbeat жив; лишь теперь допустим initial query.
+        // Gate/hash/profile подтверждены attach-событием; лишь теперь допустим initial query.
         hookInstallStage = "initial_master";
         refreshMaster("initial");
-
-        hookInstallStage = "heartbeat_timer";
-        heartbeatTimer = setInterval(function () {
-            Java.perform(function () {
-                if (!ensureLegacyOptInOrDisarm("heartbeat", false)) return;
-                refreshValidatedGate("heartbeat");
-                if (selfDisarmed) return;
-                // ContentObserver остаётся основным путём, poll закрывает редкий пропуск callback:
-                // OFF после fake всё равно получит best-effort stock resync максимум через интервал.
-                var masterRefresh = refreshMaster("heartbeat_poll");
-                if (masterRefresh !== null) maybeRunPeriodicResync("heartbeat");
-            });
-        }, HEARTBEAT_INTERVAL_MS);
 
         hookInstallStage = "ready";
         if (hookAllowed) {
             console.log(READY_MARKER);
-            info("hooks_installed", "mode=active heartbeat_ms=" + HEARTBEAT_INTERVAL_MS);
+            info("hooks_installed", "mode=active events=observer,screen_on");
         } else {
             console.log(READY_MARKER);
-            info("hooks_installed", "mode=pass_through profile=0 heartbeat_ms="
-                + HEARTBEAT_INTERVAL_MS);
+            info("hooks_installed", "mode=pass_through profile=0 events=observer,screen_on");
         }
     } catch (e) {
         hooksInstalled = false;
         hookAllowed = false;
-        if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
         if (stockResyncTimer !== null) clearTimeout(stockResyncTimer);
         stockResyncTimer = null;
         if (postStockReactivationTimer !== null) clearTimeout(postStockReactivationTimer);
         postStockReactivationTimer = null;
         if (selfDisarmCleanupTimer !== null) clearTimeout(selfDisarmCleanupTimer);
         selfDisarmCleanupTimer = null;
-        try {
-            if (observer !== null) resolver.unregisterContentObserver(observer);
-        } catch (ignored) {}
-        observer = null;
+        detachEventSources();
         detachProviderHookNow();
         try {
             if (selfDisarmed) {
