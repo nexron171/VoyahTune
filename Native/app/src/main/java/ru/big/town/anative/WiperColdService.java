@@ -362,7 +362,8 @@ public class WiperColdService extends Service {
             }
             reply.readException();
             int result = reply.readInt();
-            canBusCallbackAdded = result == 0;
+            // AIDL signature is boolean addCallback(...): Stub writes 1 for success, 0 for false.
+            canBusCallbackAdded = result != 0;
             if (canBusCallbackAdded) {
                 Log.i(TAG, "addCanBusCallback: OK (TX=" + TX_addCallback + ")");
             } else {
