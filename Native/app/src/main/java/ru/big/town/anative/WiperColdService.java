@@ -81,6 +81,8 @@ public class WiperColdService extends Service {
     // нулевую громкость держим дольше типичного 1–1.5-секундного буфера wireless CarPlay/AndroidAuto.
     private static final int  FADE_STEPS = 12;      // шагов затухания
     private static final long FADE_TOTAL_MS = 500;  // общая длительность затухания
+    private static final long FADE_BACKPRESSURE_MS =
+            (FADE_TOTAL_MS + FADE_STEPS - 1L) / FADE_STEPS;
     private static final long REMOTE_AUDIO_DRAIN_MS = 2_200L;
 
     // Native не может вызвать оригинальный Qinggan KeyManagerReader напрямую. В full-сборке это
@@ -370,27 +372,58 @@ public class WiperColdService extends Service {
             return;
         }
 
-        Handler worker = mediaHandler;
-        if (worker == null) {
+        DoorPauseFadeCursor cursor = new DoorPauseFadeCursor(
+                startVol, FADE_STEPS, FADE_TOTAL_MS, REMOTE_AUDIO_DRAIN_MS);
+        scheduleMediaFadeTick(generation, workGeneration, am, cursor,
+                SystemClock.uptimeMillis());
+    }
+
+    /** Keeps at most one fade tick queued and jumps directly to the level due at absolute time. */
+    private void scheduleMediaFadeTick(int generation, int workGeneration, AudioManager am,
+                                       DoorPauseFadeCursor cursor, long startedUptime) {
+        if (!mediaPauseState.isCurrent(generation)) return;
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
             finishMediaFade(generation, workGeneration, true);
             return;
         }
-        final int startVolF = startVol;
-        for (int i = 1; i <= FADE_STEPS; i++) {
-            final int target = DoorPauseTimeline.fadeStepVolume(startVolF, i, FADE_STEPS);
-            worker.postDelayed(() -> {
-                if (!mediaPauseState.isCurrent(generation)) return;
-                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0); }
-                catch (Exception ignored) {}
-            }, DoorPauseTimeline.fadeStepDelayMs(i, FADE_STEPS, FADE_TOTAL_MS));
+
+        long elapsed = SystemClock.uptimeMillis() - startedUptime;
+        DoorPauseFadeCursor.Action action = cursor.actionAt(elapsed);
+        if (action.kind == DoorPauseFadeCursor.Kind.RESTORE) {
+            finishMediaFade(generation, workGeneration, true);
+            return;
+        }
+        boolean attemptedWrite = false;
+        if (action.kind == DoorPauseFadeCursor.Kind.WRITE) {
+            attemptedWrite = true;
+            try {
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, action.volume, 0);
+            } catch (Exception e) {
+                Log.w(TAG, "media fade volume=" + action.volume + ": " + e.getMessage());
+            } finally {
+                // A failed AudioService call must advance the cursor too; immediate retries could
+                // otherwise turn one vendor failure into a tight Binder loop.
+                cursor.markAttempted(action.volume);
+            }
+            elapsed = SystemClock.uptimeMillis() - startedUptime;
+            action = cursor.actionAt(elapsed);
+            if (action.kind == DoorPauseFadeCursor.Kind.RESTORE) {
+                finishMediaFade(generation, workGeneration, true);
+                return;
+            }
         }
 
-        // Не возвращаем громкость сразу после fade: удалённый CP/AA endpoint может ещё 1–1.5 с
-        // выдавать уже буферизованный звук после принятия pause.
-        if (!worker.postDelayed(() -> {
-            if (!mediaPauseState.isCurrent(generation)) return;
-            finishMediaFade(generation, workGeneration, true);
-        }, DoorPauseTimeline.restoreDelayMs(FADE_TOTAL_MS, REMOTE_AUDIO_DRAIN_MS))) {
+        // If AudioService itself is slower than the nominal fade cadence, do not immediately issue
+        // another overdue Binder call. Yield one quantum, then recompute and jump to the latest step.
+        long delay = action.kind == DoorPauseFadeCursor.Kind.WRITE
+                ? (attemptedWrite ? FADE_BACKPRESSURE_MS : 0L)
+                : action.delayMs;
+        delay = cursor.capDelayToRestore(elapsed, delay);
+        Handler worker = mediaHandler;
+        long executeAt = startedUptime + elapsed + delay;
+        if (worker == null || !worker.postAtTime(
+                () -> scheduleMediaFadeTick(generation, workGeneration, am, cursor, startedUptime),
+                executeAt)) {
             finishMediaFade(generation, workGeneration, true);
         }
     }
