@@ -35,8 +35,8 @@ import androidx.core.app.NotificationCompat;
  *    при коннекте читаем уровень синхронно через TX=36 (getLightSensorLevel).
  *  - Safety-poll каждые SAFETY_POLL_MS: страховка от пропущенного события.
  *    CAN шлёт только при реальной смене цели — холостого трафика не создаёт.
- *  - Подписка на CanBusService.onLightStatusChanged (код 10, addCallback TX=28):
- *    даёт LightStatus с полем autoLamp. Когда BCM сам уходит в «авто» (перевод КПП
+ *  - Общая process-wide подписка CanBusEventHub фильтрует LightStatus, Gear и только
+ *    VehicleState 1072 до очереди этого сервиса. Когда BCM сам уходит в «авто» (перевод КПП
  *    в Drive сбрасывает фары в auto) при нашем таргете «ближний» — возвращаем ближний.
  *    Ручное «выкл» (autoLamp=0, headLight=0) под правило не попадает — уважается.
  *    Guard HEADLIGHT_GUARD_MS отсекает «эхо» собственных команд. Так заменяется
@@ -93,27 +93,12 @@ public class LightSensorService extends Service {
     private static final String CAR_SIGNAL_ACTION  = "com.qinggan.carsignal.CarSignalService";
     private static final String CAR_SIGNAL_PACKAGE = "com.qinggan.carsignal.service";
 
-    // ICanBusService — статус фар (LightStatus.autoLamp) для отлова внешнего сброса режима
-    private static final String CANBUS_DESCRIPTOR    = "com.qinggan.canbus.ICanBusService";
-    private static final String CANBUS_CB_DESCRIPTOR = "com.qinggan.canbus.ICanBusServiceCallback";
-    private static final int    TX_addCallback          = 28;
-    private static final int    TX_removeCallback       = 29;
-    private static final int    CB_onLightStatusChanged = 10;
-    private static final int    CB_onVehicleStateChanged = 36;   // тестовый режим: RSM lightSWReason
-    private static final int    CB_onGearStatusChanged   = 12;   // перевод в Drive → анти-Auto
+    // CanBus signals routed through the single process-wide callback.
     private static final int    GEAR_DRIVE               = 3;
     // BCM_RSM_lightSWReason (value 1072): 0 Day, 1 Others, 2 Dark, 3 Tunnel, 4 Darkstart
     private static final int    RSM_LIGHT_SW_REASON      = 1072;
     // Задержка после перевода в Drive: даём BCM сбросить фары в Auto, затем выставляем наш таргет.
     private static final long   DRIVE_FALLBACK_MS        = 5_000L;
-    private static final String CANBUS_ACTION  = "com.qinggan.canbus.CanBusService";
-    private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
-    // Индексы нужных полей в LightStatus (17 int'ов после флага наличия)
-    private static final int LS_IDX_DIPPED_BEAM = 7;
-    private static final int LS_IDX_HEAD_LIGHT  = 13;
-    private static final int LS_IDX_AUTO_LAMP   = 16;
-    private static final int LS_FIELD_COUNT     = 17;
-
     // Окно после нашей CAN-команды, в течение которого статус фар считаем «эхом»
     // своей же команды и игнорируем (защита от самозацикливания).
     private static final long HEADLIGHT_GUARD_MS = 2_500L;
@@ -149,14 +134,8 @@ public class LightSensorService extends Service {
     private int lastGear   = -1;
     private int lastReason = -1;
 
-    // CanBusService — подписка на LightStatus (autoLamp)
-    private IBinder canBusBinder = null;
-    private boolean canBusBindingRequested = false;
-    private boolean canBusConnected = false;
-    private boolean canBusCallbackAdded   = false;
-    private long    lastCanBusBindAttempt = -BIND_RETRY_MS;
+    private CanBusEventHub.Subscription canBusSubscription;
     private volatile boolean destroyed = false;
-    private final Runnable canBusRebindRunnable = this::ensureCanBusBound;
     // Последние значимые поля LightStatus — фильтр шума от поворотников/стопа
     private int lastAutoLamp   = -1;
     private int lastDippedBeam = -1;
@@ -196,69 +175,22 @@ public class LightSensorService extends Service {
         }
     };
 
-    // -------------------------------------------------------------------------
-    // ICanBusServiceCallback — stub для LightStatus (autoLamp)
-    // -------------------------------------------------------------------------
-
-    private final IBinder canBusCallbackBinder = new Binder() {
-        @Override
-        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
-                throws RemoteException {
-            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
-                    && code <= IBinder.LAST_CALL_TRANSACTION) {
-                return true;
-            }
-            if (code == CB_onLightStatusChanged) {
-                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                // readInt() = флаг наличия объекта, затем 17 int-полей LightStatus
-                int autoLamp = -1, dippedBeam = -1, headLight = -1;
-                if (data.readInt() != 0) {
-                    for (int i = 0; i < LS_FIELD_COUNT; i++) {
-                        int v = data.readInt();
-                        if (i == LS_IDX_DIPPED_BEAM) dippedBeam = v;
-                        else if (i == LS_IDX_HEAD_LIGHT) headLight = v;
-                        else if (i == LS_IDX_AUTO_LAMP) autoLamp = v;
-                    }
-                }
-                final int fAuto = autoLamp, fDipped = dippedBeam, fHead = headLight;
-                timerHandler.post(() -> {
-                    if (!destroyed) onLightStatusChanged(fAuto, fDipped, fHead);
-                });
-                return true;
-            }
-            if (code == CB_onGearStatusChanged) {
-                // Перевод в Drive → BCM сбросит фары в Auto; планируем анти-Auto.
-                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                int gearVal = -1;
-                if (data.readInt() != 0) { data.readInt(); gearVal = data.readInt(); }
-                final int g = gearVal;
-                timerHandler.post(() -> {
-                    if (!destroyed) onGear(g);
-                });
-                return true;
-            }
-            if (code == CB_onVehicleStateChanged) {
-                // Тестовый режим уличного сенсора: ловим BCM_RSM_lightSWReason (1072).
-                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                int id = -1;
-                if (data.readInt() != 0) { data.readInt(); id = data.readInt(); }
-                int state = data.readInt();
-                if (id == RSM_LIGHT_SW_REASON) {
-                    final int r = state;
-                    timerHandler.post(() -> {
-                        if (!destroyed) onLightSwReason(r);
-                    });
-                }
-                return true;
-            }
-            // Прочие oneway-колбэки CanBus тихо поглощаем — иначе Binder спамит
-            // UNKNOWN_TRANSACTION на каждый (тысячи/сек). Спец-коды — в super.
-            if (code >= IBinder.FIRST_CALL_TRANSACTION && code <= IBinder.LAST_CALL_TRANSACTION) {
-                return true;
-            }
-            return super.onTransact(code, data, reply, flags);
+    private void onCanBusEvent(CanBusEvent event) {
+        if (destroyed) return;
+        switch (event.kind) {
+            case LIGHT_STATUS:
+                onLightStatusChanged(event.first, event.second, event.third);
+                break;
+            case GEAR:
+                onGear(event.first);
+                break;
+            case VEHICLE_STATE:
+                if (event.first == RSM_LIGHT_SW_REASON) onLightSwReason(event.second);
+                break;
+            default:
+                break;
         }
-    };
+    }
 
     // -------------------------------------------------------------------------
     // ServiceConnection
@@ -352,132 +284,6 @@ public class LightSensorService extends Service {
         markCarSignalDisconnected();
     }
 
-    // -------------------------------------------------------------------------
-    // CanBusService — bind + addCallback (LightStatus)
-    // -------------------------------------------------------------------------
-
-    private final ServiceConnection canBusConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            if (destroyed) return;
-            timerHandler.removeCallbacks(canBusRebindRunnable);
-            canBusBindingRequested = true;
-            canBusBinder = service;
-            canBusConnected = true;
-            canBusCallbackAdded = false;
-            Log.i(TAG, "CanBusService connected, alive=" + service.isBinderAlive());
-            addCanBusCallback();
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            markCanBusDisconnected();
-            Log.w(TAG, "CanBusService disconnected — waiting for automatic reconnect");
-        }
-
-        @Override
-        public void onBindingDied(ComponentName name) {
-            restartCanBusBinding("binding died");
-        }
-
-        @Override
-        public void onNullBinding(ComponentName name) {
-            restartCanBusBinding("null binding");
-        }
-    };
-
-    private void ensureCanBusBound() {
-        if (destroyed || canBusBindingRequested) return;
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
-        lastCanBusBindAttempt = now;
-        try {
-            Intent intent = new Intent(CANBUS_ACTION);
-            intent.setPackage(CANBUS_PACKAGE);
-            boolean ok = bindService(intent, canBusConnection, Context.BIND_AUTO_CREATE);
-            canBusBindingRequested = ok;
-            Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
-            if (!ok) scheduleCanBusRebind();
-        } catch (Exception e) {
-            canBusBindingRequested = false;
-            Log.e(TAG, "ensureCanBusBound: exception: " + e.getMessage(), e);
-            scheduleCanBusRebind();
-        }
-    }
-
-    private void markCanBusDisconnected() {
-        canBusBinder = null;
-        canBusConnected = false;
-        canBusCallbackAdded = false;
-    }
-
-    private void restartCanBusBinding(String reason) {
-        Log.w(TAG, "CanBusService " + reason + " — replacing binding");
-        releaseCanBusBinding(reason);
-        scheduleCanBusRebind();
-    }
-
-    private void scheduleCanBusRebind() {
-        if (destroyed) return;
-        lastCanBusBindAttempt = SystemClock.elapsedRealtime();
-        timerHandler.removeCallbacks(canBusRebindRunnable);
-        timerHandler.postDelayed(canBusRebindRunnable, BIND_RETRY_MS);
-    }
-
-    private void releaseCanBusBinding(String reason) {
-        timerHandler.removeCallbacks(canBusRebindRunnable);
-        if (canBusConnected) removeCanBusCallback();
-        if (canBusBindingRequested) {
-            try {
-                unbindService(canBusConnection);
-            } catch (Exception e) {
-                Log.w(TAG, reason + ": CanBus unbindService failed: " + e.getMessage());
-            }
-        }
-        canBusBindingRequested = false;
-        markCanBusDisconnected();
-    }
-
-    /** Регистрирует canBusCallbackBinder в CanBusService (TX=28, addCallback). */
-    private void addCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null || canBusCallbackAdded) return;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallbackBinder);
-            canBusBinder.transact(TX_addCallback, data, reply, 0);
-            reply.readException();
-            int result = reply.readInt();
-            canBusCallbackAdded = true;
-            Log.i(TAG, "addCanBusCallback: OK (TX=" + TX_addCallback + ") result=" + result);
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "addCanBusCallback: error: " + e.getMessage());
-        } finally {
-            data.recycle();
-            reply.recycle();
-        }
-    }
-
-    private void removeCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null || !canBusCallbackAdded) return;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallbackBinder);
-            canBusBinder.transact(TX_removeCallback, data, reply, 0);
-            reply.readException();
-            Log.i(TAG, "removeCanBusCallback: OK");
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "removeCanBusCallback: error: " + e.getMessage());
-        } finally {
-            data.recycle();
-            reply.recycle();
-            canBusCallbackAdded = false;
-        }
-    }
-
     /** Регистрирует наш callbackBinder в CarSignalService (TX=46, writeStrongBinder). */
     private void registerCallback() {
         if (!carSignalConnected || carSignalBinder == null || callbackRegistered) return;
@@ -561,7 +367,11 @@ public class LightSensorService extends Service {
         registerReceiver(requestReceiver, reqFilter, RECEIVER_EXPORTED);
 
         ensureBound();
-        ensureCanBusBound();
+        canBusSubscription = CanBusEventHub.get(this).subscribe(
+                CanBusEventRouter.INTEREST_LIGHT_STATUS
+                        | CanBusEventRouter.INTEREST_GEAR
+                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                new int[]{RSM_LIGHT_SW_REASON}, timerHandler, this::onCanBusEvent);
         timerHandler.postDelayed(safetyRunnable, 2_000L);
     }
 
@@ -579,9 +389,11 @@ public class LightSensorService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn
-                + " carSignalConnected=" + carSignalConnected
-                + " canBusConnected=" + canBusConnected);
+                + " carSignalConnected=" + carSignalConnected);
         destroyed = true;
+        CanBusEventHub.Subscription subscription = canBusSubscription;
+        canBusSubscription = null;
+        if (subscription != null) subscription.close();
         try { unregisterReceiver(requestReceiver); } catch (Exception ignored) {}
         timerHandler.removeCallbacks(safetyRunnable);
         timerHandler.removeCallbacks(forceInitRunnable);
@@ -589,7 +401,6 @@ public class LightSensorService extends Service {
         timerHandler.removeCallbacks(canbusReassertRunnable);
         timerHandler.removeCallbacks(driveFallbackRunnable);
         releaseCarSignalBinding("onDestroy");
-        releaseCanBusBinding("onDestroy");
         timerHandler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
@@ -621,8 +432,6 @@ public class LightSensorService extends Service {
         public void run() {
             ensureBound();
             registerCallback(); // no-op если уже зарегистрирован
-            ensureCanBusBound();
-            addCanBusCallback(); // no-op если уже добавлен
 
             int level = readSensorLevel();
             if (level >= 0) {
