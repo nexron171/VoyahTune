@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -24,6 +25,7 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import java.lang.ref.WeakReference;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -111,6 +113,8 @@ public class LightSensorService extends Service {
             newBoundedBinderExecutor("CarSignalRegistration");
     private static final ThreadPoolExecutor CAR_SIGNAL_CLEANUP_EXECUTOR =
             newBoundedBinderExecutor("CarSignalCleanup");
+    private static final ThreadPoolExecutor LIGHT_SETTINGS_EXECUTOR =
+            newBoundedBinderExecutor("LightSettings");
 
     private static ThreadPoolExecutor newBoundedBinderExecutor(String name) {
         ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
@@ -154,6 +158,8 @@ public class LightSensorService extends Service {
     private boolean sensorQueryRequested;
     private long nextSensorApplyGeneration;
     private SensorApplyRequest pendingIoSensorApply;
+    private SensorApplyRequest pendingIoSettingsRequest;
+    private long pendingIoSettingsGeneration;
     private SensorQueryRun runningSensorQuery;
     private IBinder carSignalBinder = null;
     private CarSignalCallbackBinder carSignalCallbackBinder;
@@ -188,7 +194,11 @@ public class LightSensorService extends Service {
     private long lastSensorEpoch = 0L;
     private long lastSensorRevision = 0L;
     private int lastSensorLevel = -1;
-    private SensorApplyRequest pendingMainSensorApply;
+    private volatile SensorApplyRequest pendingMainSensorApply;
+    private final LatestRequestGate<SensorApplyRequest> settingsRequestGate =
+            new LatestRequestGate<>();
+    private SettingsSnapshot pendingSettingsSnapshot;
+    private long nextSettingsSnapshotGeneration;
 
     // Тестовый режим уличного сенсора: последняя КПП и последнее решение RSM (для анти-Auto по Drive)
     private int lastGear   = -1;
@@ -306,6 +316,10 @@ public class LightSensorService extends Service {
         if (pendingMainSensorApply != null && pendingMainSensorApply.epoch == closingEpoch) {
             pendingMainSensorApply = null;
         }
+        if (pendingSettingsSnapshot != null
+                && pendingSettingsSnapshot.request.epoch == closingEpoch) {
+            pendingSettingsSnapshot = null;
+        }
         timerHandler.removeCallbacks(forceInitRunnable);
         timerHandler.removeCallbacks(sensorDebounceRunnable);
     }
@@ -370,20 +384,36 @@ public class LightSensorService extends Service {
         }
     }
 
+    private static final class SettingsSnapshot {
+        final SensorApplyRequest request;
+        final LightThresholds thresholds;
+        final SensorSampleFence sensorFence;
+
+        SettingsSnapshot(SensorApplyRequest request, LightThresholds thresholds,
+                         long generation, long liveRevisionFence) {
+            this.request = request;
+            this.thresholds = thresholds;
+            this.sensorFence = new SensorSampleFence(generation, liveRevisionFence);
+        }
+    }
+
     private static final class SensorQueryRun {
         final IBinder binder;
         final CarSignalCallbackBinder callback;
         final long epoch;
         final long ingressRevision;
         final SensorApplyRequest apply;
+        final long settingsGeneration;
 
         SensorQueryRun(IBinder binder, CarSignalCallbackBinder callback, long epoch,
-                       long ingressRevision, SensorApplyRequest apply) {
+                       long ingressRevision, SensorApplyRequest apply,
+                       long settingsGeneration) {
             this.binder = binder;
             this.callback = callback;
             this.epoch = epoch;
             this.ingressRevision = ingressRevision;
             this.apply = apply;
+            this.settingsGeneration = settingsGeneration;
         }
     }
 
@@ -533,6 +563,11 @@ public class LightSensorService extends Service {
         }
         if (pendingIoSensorApply != null && pendingIoSensorApply.epoch == closingEpoch) {
             pendingIoSensorApply = null;
+        }
+        if (pendingIoSettingsRequest != null
+                && pendingIoSettingsRequest.epoch == closingEpoch) {
+            pendingIoSettingsRequest = null;
+            pendingIoSettingsGeneration = 0L;
         }
         sensorQueryRequested = false;
         carSignalEpoch++;
@@ -749,9 +784,11 @@ public class LightSensorService extends Service {
         sensorQueryRequested = false;
         SensorApplyRequest apply = pendingIoSensorApply;
         if (apply != null && apply.epoch != epoch) apply = null;
+        long settingsGeneration = pendingIoSettingsRequest == apply
+                ? pendingIoSettingsGeneration : 0L;
         long ingressRevision = callback.ingressRevision.get();
         SensorQueryRun run = new SensorQueryRun(
-                binder, callback, epoch, ingressRevision, apply);
+                binder, callback, epoch, ingressRevision, apply, settingsGeneration);
         sensorQueryRunning = true;
         runningSensorQuery = run;
         try {
@@ -798,7 +835,8 @@ public class LightSensorService extends Service {
             onSensorLevel(run.epoch, run.ingressRevision, level, "poll");
             SensorApplyRequest apply = run.apply;
             if (apply != null && pendingMainSensorApply == apply) {
-                applyAccepted = applySensorRequest(apply, level);
+                applyAccepted = applySensorRequest(
+                        apply, level, run.ingressRevision, run.settingsGeneration);
                 if (applyAccepted) pendingMainSensorApply = null;
             }
         }
@@ -815,6 +853,10 @@ public class LightSensorService extends Service {
         if (!sensorQueryRunning || runningSensorQuery != run) return;
         if (applyAccepted && pendingIoSensorApply == run.apply) {
             pendingIoSensorApply = null;
+            if (pendingIoSettingsRequest == run.apply) {
+                pendingIoSettingsRequest = null;
+                pendingIoSettingsGeneration = 0L;
+            }
         }
         sensorQueryRunning = false;
         runningSensorQuery = null;
@@ -829,9 +871,110 @@ public class LightSensorService extends Service {
             if (pending != null && pending.epoch == epoch
                     && pending.generation == generation) {
                 pendingIoSensorApply = null;
+                if (pendingIoSettingsRequest == pending) {
+                    pendingIoSettingsRequest = null;
+                    pendingIoSettingsGeneration = 0L;
+                }
             }
         });
     }
+
+    // -------------------------------------------------------------------------
+    // RestoreMode settings IO. ContentProvider.query is synchronous Binder work, so it has its
+    // own process-wide bounded lane and never runs on main or on either CarSignal lane.
+    // -------------------------------------------------------------------------
+
+    private void requestSettingsForApply(SensorApplyRequest request) {
+        if (!isSettingsRequestCurrentOnMain(request)) return;
+        SensorApplyRequest start = settingsRequestGate.offer(request);
+        if (start != null) submitSettingsQuery(start);
+    }
+
+    private void submitSettingsQuery(SensorApplyRequest request) {
+        if (!isSettingsRequestCurrentOnMain(request)) {
+            dropSettingsQueryOnMain(request);
+            return;
+        }
+        ContentResolver resolver = getApplicationContext().getContentResolver();
+        WeakReference<LightSensorService> serviceRef = new WeakReference<>(this);
+        try {
+            LIGHT_SETTINGS_EXECUTOR.execute(() -> {
+                LightSensorService beforeQuery = serviceRef.get();
+                if (beforeQuery == null || beforeQuery.destroyed
+                        || beforeQuery.pendingMainSensorApply != request
+                        || beforeQuery.activeCarSignalEpoch != request.epoch) {
+                    if (beforeQuery != null) {
+                        Handler main = beforeQuery.timerHandler;
+                        if (main != null) {
+                            main.post(() -> beforeQuery.dropSettingsQueryOnMain(request));
+                        }
+                    }
+                    return;
+                }
+                LightThresholds thresholds = queryThresholds(resolver);
+                LightSensorService service = serviceRef.get();
+                if (service == null) return;
+                Handler main = service.timerHandler;
+                if (main != null) {
+                    main.post(() -> service.finishSettingsQueryOnMain(request, thresholds));
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            settingsRequestGate.reject(request);
+            scheduleSettingsRetry();
+        }
+    }
+
+    private boolean isSettingsRequestCurrentOnMain(SensorApplyRequest request) {
+        return !destroyed && pendingMainSensorApply == request
+                && request.epoch == readyCarSignalEpoch
+                && request.epoch == activeCarSignalEpoch;
+    }
+
+    private void dropSettingsQueryOnMain(SensorApplyRequest request) {
+        LatestRequestGate.Completion<SensorApplyRequest> completion =
+                settingsRequestGate.finish(request);
+        if (completion.next != null) submitSettingsQuery(completion.next);
+    }
+
+    private void finishSettingsQueryOnMain(SensorApplyRequest request,
+                                           LightThresholds thresholds) {
+        LatestRequestGate.Completion<SensorApplyRequest> completion =
+                settingsRequestGate.finish(request);
+        if (completion.publish && isSettingsRequestCurrentOnMain(request)) {
+            CarSignalCallbackBinder callback = activeCarSignalCallback;
+            long liveRevisionFence = callback != null && callback.epoch == request.epoch
+                    ? callback.ingressRevision.get() : Long.MAX_VALUE;
+            long settingsGeneration = ++nextSettingsSnapshotGeneration;
+            pendingSettingsSnapshot = new SettingsSnapshot(
+                    request, thresholds, settingsGeneration, liveRevisionFence);
+            // Never apply a threshold result to the sensor value captured before the blocking
+            // provider call. Request a fresh, epoch/revision-protected TX36 instead.
+            Handler io = carSignalIoHandler;
+            if (io != null) io.post(() -> {
+                if (destroyed || request.epoch != carSignalEpoch
+                        || pendingIoSensorApply != request) {
+                    return;
+                }
+                pendingIoSettingsRequest = request;
+                pendingIoSettingsGeneration = settingsGeneration;
+                requestSensorLevelOnIo(request);
+            });
+        }
+        if (completion.next != null) submitSettingsQuery(completion.next);
+    }
+
+    private void scheduleSettingsRetry() {
+        if (destroyed) return;
+        timerHandler.removeCallbacks(settingsRetryRunnable);
+        timerHandler.postDelayed(settingsRetryRunnable, BIND_RETRY_MS);
+    }
+
+    private final Runnable settingsRetryRunnable = () -> {
+        if (destroyed) return;
+        SensorApplyRequest retry = settingsRequestGate.retry();
+        if (retry != null) submitSettingsQuery(retry);
+    };
 
     /** Synchronous TX36 isolated from both main and the bind/register IO queue. */
     private int readSensorLevelOnQueryThread(IBinder binder) {
@@ -913,6 +1056,7 @@ public class LightSensorService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn);
         destroyed = true;
+        settingsRequestGate.close();
         LatestIntDelivery sensorDelivery = sensorCallbackDelivery;
         sensorCallbackDelivery = null;
         if (sensorDelivery != null) sensorDelivery.close();
@@ -925,6 +1069,7 @@ public class LightSensorService extends Service {
         timerHandler.removeCallbacks(sensorDebounceRunnable);
         timerHandler.removeCallbacks(canbusReassertRunnable);
         timerHandler.removeCallbacks(driveFallbackRunnable);
+        timerHandler.removeCallbacks(settingsRetryRunnable);
         Handler io = carSignalIoHandler;
         HandlerThread ioThread = carSignalIoThread;
         if (io != null && ioThread != null) {
@@ -957,7 +1102,7 @@ public class LightSensorService extends Service {
             onSensorLevel(epoch, revision, level, "callback");
             SensorApplyRequest apply = pendingMainSensorApply;
             if (apply != null && apply.epoch == epoch) {
-                if (applySensorRequest(apply, level)) {
+                if (applySensorRequest(apply, level, revision, 0L)) {
                     pendingMainSensorApply = null;
                     acknowledgeSensorApplyFromCallback(epoch, apply.generation);
                 }
@@ -1030,15 +1175,30 @@ public class LightSensorService extends Service {
         broadcastUpdate(level);
     }
 
-    private boolean applySensorRequest(SensorApplyRequest request, int level) {
+    private boolean applySensorRequest(SensorApplyRequest request, int level,
+                                       long sensorRevision, long settingsGeneration) {
         if (request.cancelOnManualAuto && MANUAL_AUTO_GATE.blocksAntiAuto()) {
             Log.i(TAG, request.reason + ": OEM Auto выбран с руля — pending action отменён");
             if (request.mode == SensorApplyMode.FORCE) forceInitCompleted = true;
             return true;
         }
         if (request.mode == SensorApplyMode.IF_UNSENT && everSent) return true;
+        LightThresholds thresholds = null;
+        if (reasonToDesired(lastReason) == null) {
+            SettingsSnapshot snapshot = pendingSettingsSnapshot;
+            if (snapshot == null || snapshot.request != request) {
+                requestSettingsForApply(request);
+                return false;
+            }
+            if (!snapshot.sensorFence.accepts(sensorRevision, settingsGeneration)) {
+                Log.i(TAG, request.reason + ": sensor sample predates thresholds — waiting");
+                return false;
+            }
+            thresholds = snapshot.thresholds;
+            pendingSettingsSnapshot = null;
+        }
         boolean fulfilled = applyTargetWithSensorLevel(
-                request.reason, level, request.mode == SensorApplyMode.FORCE);
+                request.reason, level, request.mode == SensorApplyMode.FORCE, thresholds);
         if (fulfilled && request.mode == SensorApplyMode.FORCE) {
             forceInitCompleted = true;
         }
@@ -1050,15 +1210,25 @@ public class LightSensorService extends Service {
      * если данных улицы нет — фолбэк на салонный уровень по порогам.
      */
     private boolean applyTargetWithSensorLevel(String src, int sensorLevel) {
-        return applyTargetWithSensorLevel(src, sensorLevel, false);
+        return applyTargetWithSensorLevel(src, sensorLevel, false, null);
     }
 
     private boolean applyTargetWithSensorLevel(String src, int sensorLevel,
                                                boolean retainCurrentTarget) {
+        return applyTargetWithSensorLevel(src, sensorLevel, retainCurrentTarget, null);
+    }
+
+    private boolean applyTargetWithSensorLevel(String src, int sensorLevel,
+                                               boolean retainCurrentTarget,
+                                               LightThresholds thresholds) {
         Boolean desired = reasonToDesired(lastReason);
         String s2 = src + " ext reason=" + lastReason;
         if (desired == null) {
-            desired = desiredFromCabin(sensorLevel, readSettings());
+            if (thresholds == null) {
+                Log.i(TAG, src + ": thresholds pending — decision deferred");
+                return false;
+            }
+            desired = thresholds.desiredFor(sensorLevel);
             s2 = src + " cabin level=" + sensorLevel;
         }
         if (desired == null && retainCurrentTarget && everSent) {
@@ -1132,14 +1302,6 @@ public class LightSensorService extends Service {
             case 2: case 3: case 4: return Boolean.TRUE;      // темно/тоннель → ближний
             default: return null;                             // 1 Others / неизвестно
         }
-    }
-
-    /** Салонный уровень (0–7) → цель по порогам (фолбэк, если нет данных уличного). */
-    private Boolean desiredFromCabin(int level, Settings s) {
-        if (level < 0) return null;
-        if (level <= s.threshOn)  return Boolean.TRUE;   // темно → ближний
-        if (level >  s.threshOff) return Boolean.FALSE;  // светло → выкл
-        return null;                                     // мёртвая зона
     }
 
     /**
@@ -1257,42 +1419,32 @@ public class LightSensorService extends Service {
     private static final Uri CONTENT_PROVIDER_URI =
             Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
 
-    private static final int COL_THRESHOLD_ON  = 9;
+    private static final int COL_THRESHOLD_ON = 9;
     private static final int COL_THRESHOLD_OFF = 10;
 
-    private static final int DEF_THRESHOLD_ON  = 3;
-    private static final int DEF_THRESHOLD_OFF = 5;
-
-    private static final class Settings {
-        int threshOn;
-        int threshOff;
-    }
-
-    private Settings readSettings() {
-        Settings s = new Settings();
-        s.threshOn  = DEF_THRESHOLD_ON;
-        s.threshOff = DEF_THRESHOLD_OFF;
+    private static LightThresholds queryThresholds(ContentResolver resolver) {
+        int thresholdOn = LightThresholds.DEFAULT_ON;
+        int thresholdOff = LightThresholds.DEFAULT_OFF;
         try {
-            Cursor cursor = getContentResolver().query(
+            Cursor cursor = resolver.query(
                     CONTENT_PROVIDER_URI, null, null, null, null);
             if (cursor != null) {
                 try {
                     if (cursor.moveToFirst() && cursor.getColumnCount() > COL_THRESHOLD_OFF) {
-                        s.threshOn  = cursor.getInt(COL_THRESHOLD_ON);
-                        s.threshOff = cursor.getInt(COL_THRESHOLD_OFF);
+                        thresholdOn = cursor.getInt(COL_THRESHOLD_ON);
+                        thresholdOff = cursor.getInt(COL_THRESHOLD_OFF);
                     }
                 } finally {
                     cursor.close();
                 }
             }
         } catch (Exception e) {
-            Log.w(TAG, "readSettings: " + e.getMessage() + " — defaults");
+            Log.w(TAG, "queryThresholds: " + e.getMessage() + " — defaults");
         }
-        if (s.threshOn > s.threshOff) {
-            int tmp = s.threshOn; s.threshOn = s.threshOff; s.threshOff = tmp;
-            Log.w(TAG, "readSettings: thresholds inverted — swapped");
+        if (thresholdOn > thresholdOff) {
+            Log.w(TAG, "queryThresholds: thresholds inverted — swapped");
         }
-        return s;
+        return new LightThresholds(thresholdOn, thresholdOff);
     }
 
     // -------------------------------------------------------------------------
