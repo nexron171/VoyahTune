@@ -54,6 +54,7 @@ final class CanBusEventHub {
     private static final int LIGHT_HEAD_LIGHT_INDEX = 13;
     private static final int LIGHT_AUTO_LAMP_INDEX = 16;
     private static final int AIR_TEMPERATURE_OUT_INDEX = 35;
+    private static final int AIR_TEMPERATURE_INVALID = -9999;
 
     private static final int PRE_READY_CAPACITY = 64;
     private static final long BIND_RETRY_MS = 5_000L;
@@ -656,15 +657,16 @@ final class CanBusEventHub {
                         if (!router.hasInterest(
                                 CanBusEventRouter.INTEREST_AMBIENT_TEMPERATURE)) return true;
                         data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        if (data.readInt() == 0) return true;
-                        int outsideTemperature = 0;
-                        for (int index = 0; index <= AIR_TEMPERATURE_OUT_INDEX; index++) {
-                            if (index >= 11 && index <= 13) {
-                                data.readFloat();
-                            } else {
-                                int value = data.readInt();
-                                if (index == AIR_TEMPERATURE_OUT_INDEX) {
-                                    outsideTemperature = value;
+                        int outsideTemperature = AIR_TEMPERATURE_INVALID;
+                        if (data.readInt() != 0) {
+                            for (int index = 0; index <= AIR_TEMPERATURE_OUT_INDEX; index++) {
+                                if (index >= 11 && index <= 13) {
+                                    data.readFloat();
+                                } else {
+                                    int value = data.readInt();
+                                    if (index == AIR_TEMPERATURE_OUT_INDEX) {
+                                        outsideTemperature = value;
+                                    }
                                 }
                             }
                         }
