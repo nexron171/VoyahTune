@@ -55,16 +55,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         }
 
-        // NB: одиночный запуск приложения из слота дока БОЛЬШЕ не идёт на VD (был broadcast LAUNCH_ON_VD →
-        // SplitHostActivity одиночным окном). Теперь одиночное стороннее приложение открывается freeform-окном
-        // на display 0 (launcherdock.js → обычный launch-интент, системный хук vd_bypass ужимает окно). VD
-        // остаётся ТОЛЬКО под сплит ДВУХ приложений (запускается из SetModesService по пресетам). Мёртвый
-        // обработчик LAUNCH_ON_VD удалён.
-
-        // Открытие приложения из дока во freeform (launcherdock делегирует СЮДА, чтобы мы закрыли активный
-        // VD-сплит и запустили приложение ЧИСТО на display 0). Иначе приложение-панель «уехало» бы с VD с
-        // глитчем (чёрное окно). closeActiveSplit force-stop'ит панели → приложение стартует заново; если
-        // сплит был — запускаем с задержкой (teardown асинхронный), иначе сразу. Только full.
+        // Одиночное приложение из дока снова идёт через однопанельный VirtualDisplay. Это сохраняет рамку
+        // и per-app DPI, но убирает два глобальных Frida hot-hook из WindowManager system_server.
+        // Уже живой host получает новый intent и сам пересоздаёт VD без delayed handoff. Только full.
         if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && BuildConfig.IS_FULL) {
             // display: на каком экране открыть. Отсутствует → 0 (водительский), т.е. прежнее поведение.
             String pkg = intent.getStringExtra("pkg");
@@ -168,8 +161,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             android.content.ContentResolver cr = ctx.getContentResolver();
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot, pkg);
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "Dpi", String.valueOf(dpi));
-            // Per-package DPI для freeform-хука: 0 тоже обязательно зеркалируем. Иначе после выбора
-            // «Авто» в Settings.Global навсегда оставалось старое ненулевое значение для пакета.
+            // Per-package DPI читает one-pane VD launcher: 0 тоже обязательно зеркалируем. Иначе после
+            // выбора «Авто» в Settings.Global навсегда оставалось старое ненулевое значение.
             if (!"none".equals(pkg)) {
                 android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
             }
@@ -231,7 +224,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         return false;
     }
 
-    /** Флаг + bounds «оконного режима» → Settings.Global (читает vd_bypass.js в system_server).
+    /** Legacy флаг + bounds физического «оконного режима» → Settings.Global.
+     *  Два system_server hot-hook теперь compile-time disabled; значения оставляем для rollback/debug.
      *  extras: on(boolean, опц.), left/top/right/bottom(int, опц., пишем только >=0). */
     static void mirrorFreeform(Context ctx, Intent intent) {
         try {
@@ -248,8 +242,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         } catch (Exception e) { Log.w(TAG, "mirrorFreeform: " + e.getMessage()); }
     }
 
-    /** Разбудить system_server-хук freeform: перечитать кэш (флаг/bounds/DPI). Ресивер в vd_bypass.js
-     *  гейтит пермишеном WRITE_SECURE_SETTINGS — доставить может только наш Native (он его держит). */
+    /** Разбудить vd_bypass config receiver. Hot-hook attach compile-time запрещён, но reload сохраняем
+     *  для совместимости и диагностики; receiver гейтится WRITE_SECURE_SETTINGS. */
     static void sendWinReload(Context ctx) {
         try {
             Intent w = new Intent("ru.big.town.anative.WIN_RELOAD");
@@ -325,10 +319,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
     }
 
-    /** Открыть приложение freeform-окном на указанном физическом экране: закрываем активный VD-сплит
-     *  (иначе его панели «уехали» бы с VD с глитчем), затем стартуем приложение обычным launch-интентом
-     *  (системный хук vd_bypass ужмёт окно). Общий путь для OPEN_FREEFORM (клик слота дока) и действия
-     *  кнопки руля «app:». */
+    /** Открыть приложение однопанельным VD-хостом на указанном физическом экране. Общий путь для
+     *  OPEN_FREEFORM (клик слота дока) и действия кнопки руля «app:». */
     static void openFreeformApp(Context context, String pkg) {
         openFreeformApp(context, pkg, 0);
     }
@@ -345,28 +337,18 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     static void openFreeformApp(Context context, String pkg, int displayId) {
         if (pkg == null || pkg.isEmpty()) return;
         final Context app = context.getApplicationContext();
-        Intent li = app.getPackageManager().getLaunchIntentForPackage(pkg);
-        if (li == null) { Log.w(TAG, "openFreeformApp: нет launch intent для " + pkg); return; }
-        li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        // Ставим guard ДО teardown сплита: finish SplitHost тоже может запустить dismiss дока раньше,
-        // чем Launcher успеет записать в foreground-кэш пакет нового приложения.
-        DockLaunchGuard.arm(app, displayId, pkg);
-        boolean hadSplit = SplitHostActivity.closeActiveSplit();
-        final Intent fli = li;
-        final android.os.Bundle opts;
-        {
-            android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
-            o.setLaunchDisplayId(displayId);
-            opts = o.toBundle();
+        int dpi = 0;
+        try {
+            dpi = parseIntSafe(android.provider.Settings.Global.getString(
+                    app.getContentResolver(), "voyahtune_dpi_" + pkg), 0);
+        } catch (Exception e) {
+            Log.w(TAG, "openFreeformApp dpi: " + e.getMessage());
         }
-        if (hadSplit) {
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                try { app.startActivity(fli, opts); } catch (Exception e) { Log.w(TAG, "openFreeformApp delayed: " + e.getMessage()); }
-            }, 500);
-        } else {
-            try { app.startActivity(fli, opts); } catch (Exception e) { Log.w(TAG, "openFreeformApp: " + e.getMessage()); }
-        }
-        Log.i(TAG, "openFreeformApp pkg=" + pkg + " display=" + displayId + " hadSplit=" + hadSplit);
+        // SplitHostActivity is singleTop: an existing single/split host receives onNewIntent and
+        // recreate() releases old VDs before building the latest request. No stale delayed launch.
+        SplitHostActivity.launchSingle(app, pkg, dpi, displayId);
+        Log.i(TAG, "openFreeformApp one-pane VD pkg=" + pkg + " display=" + displayId
+                + " dpi=" + dpi);
     }
 
     /**

@@ -29,9 +29,9 @@ import android.widget.LinearLayout;
 import java.lang.reflect.Method;
 
 /**
- * Хост сплита на VirtualDisplay: каждое из двух приложений запускается на СВОЁМ
- * VirtualDisplay, картинка которого рендерится в свой SurfaceView. Даёт то, чего не может
- * freeform:
+ * Хост одного приложения или сплита на VirtualDisplay: каждая видимая панель запускается на СВОЁМ
+ * VirtualDisplay, картинка которого рендерится в SurfaceView. Однопанельный режим заменяет legacy
+ * system_server freeform hot-hooks; двухпанельный даёт полноценный сплит. Оба режима поддерживают:
  *  - per-app DPI: плотность задаётся на каждый VirtualDisplay ({@code createVirtualDisplay(...,densityDpi,...)});
  *  - ресайз пропорций: во время жеста двигаем безопасное превью, на отпускании один раз меняем веса
  *    SurfaceView → {@code vd.resize(w,h,dpi)}. Activity стороннего приложения при этом может штатно
@@ -109,10 +109,6 @@ public class SplitHostActivity extends Activity {
     private final Pane left  = new Pane("L");
     private final Pane right = new Pane("R");
 
-    // Ссылка на активный сплит-хост — чтобы Native мог закрыть сплит, когда пользователь открывает
-    // приложение из дока во freeform (иначе приложение-панель «уехало» бы с VD с глитчем). См. closeActiveSplit.
-    private static volatile SplitHostActivity sCurrent;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -132,7 +128,6 @@ public class SplitHostActivity extends Activity {
         Intent in = getIntent();
         left.pkg   = in.getStringExtra(EXTRA_LEFT);
         right.pkg  = in.getStringExtra(EXTRA_RIGHT);
-        sCurrent = this;   // этот сплит теперь активный (для закрытия из Native при OPEN_FREEFORM)
         left.dpi   = in.getIntExtra(EXTRA_LEFT_DPI, 0);
         right.dpi  = in.getIntExtra(EXTRA_RIGHT_DPI, 0);
         int ratio  = in.getIntExtra(EXTRA_RATIO, 1);
@@ -963,10 +958,42 @@ public class SplitHostActivity extends Activity {
     protected void onDestroy() {
         watchHandler.removeCallbacks(watchTick);
         cancelResizeGesture();
-        if (sCurrent == this) sCurrent = null;
         releasePane(left);
         releasePane(right);
         super.onDestroy();
+    }
+
+    /**
+     * Открыть одно приложение в VD-панели на физическом экране. Геометрия задаётся layout хоста,
+     * DPI — самим VirtualDisplay, поэтому WindowManager system_server не требует hot-path hooks.
+     */
+    public static void launchSingle(android.content.Context ctx, String pkg, int dpi, int displayId) {
+        if (ctx == null || pkg == null || pkg.isEmpty()) {
+            Log.w(TAG, "launchSingle: пустой пакет — пропуск");
+            return;
+        }
+        if (displayId != 0 && displayId != 1) displayId = 0;
+        if (ctx.getPackageManager().getLaunchIntentForPackage(pkg) == null) {
+            Log.w(TAG, "launchSingle: нет launch intent для " + pkg);
+            return;
+        }
+        try {
+            Intent i = new Intent(ctx, SplitHostActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            i.putExtra(EXTRA_LEFT, pkg);
+            i.putExtra(EXTRA_RIGHT, "");
+            i.putExtra(EXTRA_RATIO, 1);
+            i.putExtra(EXTRA_LEFT_DPI, Math.max(0, dpi));
+            i.putExtra(EXTRA_RIGHT_DPI, 0);
+            DockLaunchGuard.arm(ctx, displayId, "ru.big.town.anative");
+            ActivityOptions options = ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(displayId);
+            ctx.startActivity(i, options.toBundle());
+            Log.i(TAG, "launchSingle host started pkg=" + pkg + " dpi=" + dpi
+                    + " display=" + displayId);
+        } catch (Exception e) {
+            Log.e(TAG, "launchSingle failed: " + e.getMessage());
+        }
     }
 
     /** Запустить сплит на VirtualDisplay из статического контекста (напр. из {@link SetModesReceiverDynamic}
@@ -1017,21 +1044,4 @@ public class SplitHostActivity extends Activity {
         }
     }
 
-    /** Закрыть активный сплит, если есть: завершаем ЗАДАЧИ обеих панелей (removeTask, без убийства
-     *  процессов → музыка не глохнет), чтобы приложения не остались «застрявшими» на VD и открылись
-     *  заново ЧИСТО там, где их запросили из дока, + finish хоста. Зовёт Native при OPEN_FREEFORM
-     *  (пользователь открыл приложение из дока во freeform поверх сплита).
-     *  @return true, если сплит был активен (тогда запуск во freeform стоит отложить на teardown). */
-    static boolean closeActiveSplit() {
-        final SplitHostActivity a = sCurrent;
-        if (a == null) return false;
-        sCurrent = null;
-        try {
-            if (a.left.pkg  != null && !a.left.pkg.isEmpty())  a.finishTasksForPackage(a.left.pkg);
-            if (a.right.pkg != null && !a.right.pkg.isEmpty()) a.finishTasksForPackage(a.right.pkg);
-            a.runOnUiThread(a::finish);
-            Log.i(TAG, "closeActiveSplit: сплит закрыт (removeTask панелей + finish)");
-        } catch (Exception e) { Log.w(TAG, "closeActiveSplit: " + e.getMessage()); }
-        return true;
-    }
 }

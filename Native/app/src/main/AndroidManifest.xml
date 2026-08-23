@@ -246,7 +246,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Хост сплита на VirtualDisplay (per-app DPI + живой ресайз) -->
+        <!-- Однопанельный/двухпанельный VirtualDisplay-хост (per-app DPI + живой ресайз) -->
         <activity
             android:name=".SplitHostActivity"
             android:exported="false"
