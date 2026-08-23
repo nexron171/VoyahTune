@@ -885,14 +885,24 @@ public class LightSensorService extends Service {
     // -------------------------------------------------------------------------
 
     private void requestSettingsForApply(SensorApplyRequest request) {
-        if (!isSettingsRequestEligibleOnMain(request)) return;
+        if (!isSettingsRequestCurrentOnMain(request)) return;
+        LightSettingsPolicy.Decision decision = settingsDecision(request);
+        if (decision != LightSettingsPolicy.Decision.NEED_THRESHOLDS) {
+            resolveSettingsRequestOnMain(request, decision);
+            return;
+        }
         SensorApplyRequest start = settingsRequestGate.offer(request);
         if (start != null) submitSettingsQuery(start);
     }
 
     private void submitSettingsQuery(SensorApplyRequest request) {
-        if (!isSettingsRequestEligibleOnMain(request)) {
+        if (!isSettingsRequestCurrentOnMain(request)) {
             dropSettingsQueryOnMain(request);
+            return;
+        }
+        LightSettingsPolicy.Decision decision = settingsDecision(request);
+        if (decision != LightSettingsPolicy.Decision.NEED_THRESHOLDS) {
+            finishSettingsWithoutQueryOnMain(request);
             return;
         }
         ContentResolver resolver = getApplicationContext().getContentResolver();
@@ -902,13 +912,22 @@ public class LightSensorService extends Service {
                 LightSensorService beforeQuery = serviceRef.get();
                 if (beforeQuery == null || beforeQuery.destroyed
                         || beforeQuery.pendingMainSensorApply != request
-                        || beforeQuery.activeCarSignalEpoch != request.epoch
-                        || !beforeQuery.isSettingsRequestSemanticallyNeeded(request)) {
+                        || beforeQuery.activeCarSignalEpoch != request.epoch) {
                     if (beforeQuery != null) {
                         Handler main = beforeQuery.timerHandler;
                         if (main != null) {
                             main.post(() -> beforeQuery.dropSettingsQueryOnMain(request));
                         }
+                    }
+                    return;
+                }
+                LightSettingsPolicy.Decision beforeQueryDecision =
+                        beforeQuery.settingsDecision(request);
+                if (beforeQueryDecision != LightSettingsPolicy.Decision.NEED_THRESHOLDS) {
+                    Handler main = beforeQuery.timerHandler;
+                    if (main != null) {
+                        main.post(() -> beforeQuery.finishSettingsWithoutQueryOnMain(
+                                request));
                     }
                     return;
                 }
@@ -932,16 +951,38 @@ public class LightSensorService extends Service {
                 && request.epoch == activeCarSignalEpoch;
     }
 
-    private boolean isSettingsRequestEligibleOnMain(SensorApplyRequest request) {
-        return isSettingsRequestCurrentOnMain(request)
-                && isSettingsRequestSemanticallyNeeded(request);
-    }
-
-    private boolean isSettingsRequestSemanticallyNeeded(SensorApplyRequest request) {
-        return LightSettingsPolicy.needsThresholds(
+    private LightSettingsPolicy.Decision settingsDecision(SensorApplyRequest request) {
+        return LightSettingsPolicy.decide(
                 request.cancelOnManualAuto, MANUAL_AUTO_GATE.blocksAntiAuto(),
                 request.mode == SensorApplyMode.IF_UNSENT, everSent,
                 reasonToDesired(lastReason) != null);
+    }
+
+    private void finishSettingsWithoutQueryOnMain(SensorApplyRequest request) {
+        LatestRequestGate.Completion<SensorApplyRequest> completion =
+                settingsRequestGate.finish(request);
+        if (completion.publish && isSettingsRequestCurrentOnMain(request)) {
+            resolveSettingsRequestOnMain(request, settingsDecision(request));
+        }
+        if (completion.next != null) submitSettingsQuery(completion.next);
+    }
+
+    private void resolveSettingsRequestOnMain(
+            SensorApplyRequest request, LightSettingsPolicy.Decision decision) {
+        if (!isSettingsRequestCurrentOnMain(request)) return;
+        if (decision == LightSettingsPolicy.Decision.NEED_THRESHOLDS) {
+            requestSettingsForApply(request);
+            return;
+        }
+        boolean fulfilled = applySensorRequest(request, -1, 0L, 0L);
+        if (fulfilled && pendingMainSensorApply == request) {
+            pendingMainSensorApply = null;
+            if (pendingSettingsSnapshot != null
+                    && pendingSettingsSnapshot.request == request) {
+                pendingSettingsSnapshot = null;
+            }
+            acknowledgeSensorApplyFromCallback(request.epoch, request.generation);
+        }
     }
 
     private void dropSettingsQueryOnMain(SensorApplyRequest request) {
@@ -954,25 +995,30 @@ public class LightSensorService extends Service {
                                            LightThresholds thresholds) {
         LatestRequestGate.Completion<SensorApplyRequest> completion =
                 settingsRequestGate.finish(request);
-        if (completion.publish && isSettingsRequestEligibleOnMain(request)) {
-            CarSignalCallbackBinder callback = activeCarSignalCallback;
-            long liveRevisionFence = callback != null && callback.epoch == request.epoch
-                    ? callback.ingressRevision.get() : Long.MAX_VALUE;
-            long settingsGeneration = ++nextSettingsSnapshotGeneration;
-            pendingSettingsSnapshot = new SettingsSnapshot(
-                    request, thresholds, settingsGeneration, liveRevisionFence);
-            // Never apply a threshold result to the sensor value captured before the blocking
-            // provider call. Request a fresh, epoch/revision-protected TX36 instead.
-            Handler io = carSignalIoHandler;
-            if (io != null) io.post(() -> {
-                if (destroyed || request.epoch != carSignalEpoch
-                        || pendingIoSensorApply != request) {
-                    return;
-                }
-                pendingIoSettingsRequest = request;
-                pendingIoSettingsGeneration = settingsGeneration;
-                requestSensorLevelOnIo(request);
-            });
+        if (completion.publish && isSettingsRequestCurrentOnMain(request)) {
+            LightSettingsPolicy.Decision decision = settingsDecision(request);
+            if (decision != LightSettingsPolicy.Decision.NEED_THRESHOLDS) {
+                resolveSettingsRequestOnMain(request, decision);
+            } else {
+                CarSignalCallbackBinder callback = activeCarSignalCallback;
+                long liveRevisionFence = callback != null && callback.epoch == request.epoch
+                        ? callback.ingressRevision.get() : Long.MAX_VALUE;
+                long settingsGeneration = ++nextSettingsSnapshotGeneration;
+                pendingSettingsSnapshot = new SettingsSnapshot(
+                        request, thresholds, settingsGeneration, liveRevisionFence);
+                // Never apply a threshold result to the sensor value captured before the blocking
+                // provider call. Request a fresh, epoch/revision-protected TX36 instead.
+                Handler io = carSignalIoHandler;
+                if (io != null) io.post(() -> {
+                    if (destroyed || request.epoch != carSignalEpoch
+                            || pendingIoSensorApply != request) {
+                        return;
+                    }
+                    pendingIoSettingsRequest = request;
+                    pendingIoSettingsGeneration = settingsGeneration;
+                    requestSensorLevelOnIo(request);
+                });
+            }
         }
         if (completion.next != null) submitSettingsQuery(completion.next);
     }
