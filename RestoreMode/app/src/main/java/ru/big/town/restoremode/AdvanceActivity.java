@@ -7,11 +7,13 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
+import android.os.Binder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
+import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.text.Editable;
@@ -109,6 +111,9 @@ public class AdvanceActivity extends AppCompatActivity {
     private static final String ACTION_RELEASE_APOLLO_TLC_DEMAND =
             "ru.big.town.anative.RELEASE_APOLLO_TLC_DEMAND";
     private static final String EXTRA_APOLLO_DEMAND_SESSION = "apolloDemandSession";
+    private static final String EXTRA_APOLLO_DEMAND_OWNER = "apolloDemandOwner";
+    /** Process-liveness owner: contains no Activity reference and dies with RestoreMode. */
+    private static final IBinder APOLLO_DEMAND_OWNER = new Binder();
     private static final String NATIVE_PACKAGE = "ru.big.town.anative";
     private static final String NATIVE_BIND_PERMISSION =
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
@@ -1384,6 +1389,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 Message query = Message.obtain(null, MSG_APOLLO_QUERY);
                 Bundle data = new Bundle();
                 data.putLong(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
+                data.putBinder(EXTRA_APOLLO_DEMAND_OWNER, APOLLO_DEMAND_OWNER);
                 query.setData(data);
                 GlobalVars.serviceMessenger.send(query);
                 messengerDelivered = true;
@@ -1392,9 +1398,8 @@ public class AdvanceActivity extends AppCompatActivity {
             }
         }
         if (shouldUseApolloBroadcastFallback(messengerReady, messengerDelivered)) {
-            Intent request = new Intent(ACTION_REQUEST_APOLLO_TLC_UPDATE)
-                    .setPackage(NATIVE_PACKAGE)
-                    .putExtra(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
+            Intent request = apolloDemandIntent(
+                    ACTION_REQUEST_APOLLO_TLC_UPDATE, sessionToken);
             sendBroadcast(request);
         }
     }
@@ -1405,10 +1410,16 @@ public class AdvanceActivity extends AppCompatActivity {
         long sessionToken = apolloDemandSession;
         if (sessionToken <= 0L) return;
         apolloDemandSession = 0L;
-        Intent release = new Intent(ACTION_RELEASE_APOLLO_TLC_DEMAND)
-                .setPackage(NATIVE_PACKAGE)
-                .putExtra(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
+        Intent release = apolloDemandIntent(
+                ACTION_RELEASE_APOLLO_TLC_DEMAND, sessionToken);
         sendBroadcast(release);
+    }
+
+    private static Intent apolloDemandIntent(String action, long sessionToken) {
+        Bundle extras = new Bundle();
+        extras.putLong(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
+        extras.putBinder(EXTRA_APOLLO_DEMAND_OWNER, APOLLO_DEMAND_OWNER);
+        return new Intent(action).setPackage(NATIVE_PACKAGE).putExtras(extras);
     }
 
     /** One token survives duplicate refreshes but never an Apollo-page pause/leave boundary. */

@@ -3,10 +3,10 @@ package ru.big.town.anative;
 /**
  * Android-free client-demand and idle-release generation gate for Apollo's CanBus binding.
  *
- * <p>The gate deliberately tracks only whether the Apollo UI currently needs the transport.
- * Binder identity, schema and write generations remain owned by {@link ApolloTlcService}. Every
- * acquire/release invalidates an already queued idle callback, so a configuration-change re-entry
- * cannot tear down the newly active session.</p>
+ * <p>The gate compares an opaque owner identity together with the UI session token; the actual
+ * Binder death registration, schema and write generations remain owned by
+ * {@link ApolloTlcService}. Every acquire/release invalidates an already queued idle callback, so
+ * a configuration-change re-entry cannot tear down the newly active session.</p>
  */
 final class ApolloCanBusDemandGate {
     static final int REJECTED_GENERATION = -1;
@@ -17,6 +17,7 @@ final class ApolloCanBusDemandGate {
 
     private int generation;
     private long currentSessionToken;
+    private Object currentOwner;
     private long runningQuerySession;
     private long trailingQuerySession;
     private boolean clientActive;
@@ -29,14 +30,17 @@ final class ApolloCanBusDemandGate {
      * query travels through Messenger/startService while release travels through a permission-
      * gated broadcast; either IPC may reach the worker first.</p>
      */
-    synchronized int acquire(long sessionToken) {
-        if (closed || sessionToken <= 0L || sessionToken < currentSessionToken) {
+    synchronized int acquire(long sessionToken, Object owner) {
+        if (closed || sessionToken <= 0L || owner == null
+                || sessionToken < currentSessionToken) {
             return ACQUIRE_REJECTED;
         }
         if (sessionToken == currentSessionToken) {
-            return clientActive ? ACQUIRE_EXISTING : ACQUIRE_REJECTED;
+            return clientActive && currentOwner == owner
+                    ? ACQUIRE_EXISTING : ACQUIRE_REJECTED;
         }
         currentSessionToken = sessionToken;
+        currentOwner = owner;
         clientActive = true;
         generation++;
         return ACQUIRE_NEW;
@@ -48,10 +52,25 @@ final class ApolloCanBusDemandGate {
      *
      * @return true when the current demand state changed and transport cleanup should be armed.
      */
-    synchronized boolean release(long sessionToken) {
-        if (closed || sessionToken <= 0L || sessionToken < currentSessionToken) return false;
+    synchronized boolean release(long sessionToken, Object owner) {
+        if (closed || sessionToken <= 0L || owner == null
+                || sessionToken < currentSessionToken) return false;
+        if (sessionToken == currentSessionToken && currentOwner != owner) return false;
         if (sessionToken == currentSessionToken && !clientActive) return false;
         currentSessionToken = sessionToken;
+        currentOwner = null;
+        clientActive = false;
+        generation++;
+        return true;
+    }
+
+    /** Releases demand only when the exact currently linked owner died. */
+    synchronized boolean ownerDied(long sessionToken, Object owner) {
+        if (closed || !clientActive || sessionToken <= 0L || owner == null
+                || sessionToken != currentSessionToken || owner != currentOwner) {
+            return false;
+        }
+        currentOwner = null;
         clientActive = false;
         generation++;
         return true;
@@ -61,17 +80,17 @@ final class ApolloCanBusDemandGate {
         return !closed && clientActive;
     }
 
-    synchronized boolean isActive(long sessionToken) {
-        return !closed && clientActive && sessionToken > 0L
-                && sessionToken == currentSessionToken;
+    synchronized boolean isActive(long sessionToken, Object owner) {
+        return !closed && clientActive && sessionToken > 0L && owner != null
+                && sessionToken == currentSessionToken && owner == currentOwner;
     }
 
     /**
      * Starts a refresh or coalesces it. Only a newer UI session earns one trailing refresh;
      * duplicate requests from the same visible session do not multiply the five CAN reads.
      */
-    synchronized boolean beginQuery(long sessionToken) {
-        if (closed || sessionToken <= 0L) return false;
+    synchronized boolean beginQuery(long sessionToken, Object owner) {
+        if (!isActive(sessionToken, owner)) return false;
         if (runningQuerySession == NO_QUERY_SESSION) {
             runningQuerySession = sessionToken;
             return true;
@@ -120,6 +139,7 @@ final class ApolloCanBusDemandGate {
     synchronized void close() {
         closed = true;
         clientActive = false;
+        currentOwner = null;
         runningQuerySession = NO_QUERY_SESSION;
         trailingQuerySession = NO_QUERY_SESSION;
         generation++;

@@ -18,6 +18,7 @@ NATIVE_BUILD="$REPO_ROOT/Native/app/build.gradle.kts"
 RESTORE_BUILD="$REPO_ROOT/RestoreMode/app/build.gradle.kts"
 NATIVE_MANIFEST="$REPO_ROOT/Native/app/src/main/AndroidManifest.xml"
 NATIVE_SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloTlcService.java"
+SET_MODES_SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 RESTORE_ACTIVITY="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
 OPT_IN_KEY=open_voyah_apollo_legacy_hook_enabled
 
@@ -443,16 +444,40 @@ require_fixed "$NATIVE_SERVICE" 'return service.getInterfaceDescriptor();'
 require_fixed "$NATIVE_SERVICE" 'Log.e(TAG, "CanBus bind timed out before onServiceConnected");'
 require_fixed "$NATIVE_SERVICE" 'restartCanBusBinding("bind_timeout");'
 ENQUEUE_QUERY_FUNCTION=$(awk '
-    /private void enqueueQuery\(long sessionToken\)/ { capture = 1 }
+    /private void enqueueQuery\(long sessionToken, IBinder owner\)/ { capture = 1 }
     capture { print }
     capture && /^    }$/ { exit }
 ' "$NATIVE_SERVICE")
 printf '%s\n' "$ENQUEUE_QUERY_FUNCTION" | awk '
-    /!canBusDemandGate.beginQuery\(sessionToken\)/ { gate = NR }
-    gate && /return;/ && !returned { returned = NR }
-    /postQueryWork\(sessionToken\);/ { post = NR }
-    END { exit !(gate > 0 && returned > gate && post > returned) }
-' || fail "coalesced Apollo query must still return before posting query work"
+    /acquireClientDemand\(sessionToken, owner\)/ { acquire = NR }
+    /!canBusDemandGate.beginQuery\(sessionToken, owner\)/ {
+        gate = NR
+        if ($0 ~ /return;/) returned = NR
+    }
+    /postQueryWork\(sessionToken, owner\);/ { post = NR }
+    END { exit !(acquire > 0 && gate > acquire && returned == gate && post > gate) }
+' || fail "owner acquire and coalesced Apollo query must be one ordered worker action"
+
+# A visible RestoreMode process owns direct Apollo demand through Binder death, not a TTL/poll.
+for REQUIRED in EXTRA_DEMAND_OWNER 'owner.linkToDeath(candidate, 0);' \
+        'link.owner.unlinkToDeath(link, 0);' 'handleDemandOwnerDeath' \
+        'canBusDemandGate.ownerDied' 'synchronized (demandOwnerLock)' \
+        'ownerExtra.putBinder(EXTRA_DEMAND_OWNER, owner);' \
+        'extras.getBinder(key)'; do
+    require_fixed "$NATIVE_SERVICE" "$REQUIRED"
+done
+require_fixed "$SET_MODES_SERVICE" \
+    'apolloQuery.getBinder(ApolloTlcService.EXTRA_DEMAND_OWNER)'
+require_fixed "$RESTORE_ACTIVITY" 'private static final IBinder APOLLO_DEMAND_OWNER = new Binder();'
+require_fixed "$RESTORE_ACTIVITY" \
+    'data.putBinder(EXTRA_APOLLO_DEMAND_OWNER, APOLLO_DEMAND_OWNER);'
+require_fixed "$RESTORE_ACTIVITY" \
+    'extras.putBinder(EXTRA_APOLLO_DEMAND_OWNER, APOLLO_DEMAND_OWNER);'
+for FORBIDDEN in APOLLO_DEMAND_TTL APOLLO_DEMAND_RENEW demandHeartbeat ownerHeartbeat; do
+    if grep -Fq "$FORBIDDEN" "$NATIVE_SERVICE" "$RESTORE_ACTIVITY"; then
+        fail "Apollo owner lease must remain death/event-driven: $FORBIDDEN"
+    fi
+done
 require_fixed "$README" "$OPT_IN_KEY=1"
 require_fixed "$README" 'Generic `onVehicleStateChanged` не хукается ни'
 require_fixed "$README" 'поток CAN-событий вообще не пересекает GumJS'

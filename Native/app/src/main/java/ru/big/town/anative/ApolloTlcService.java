@@ -64,6 +64,7 @@ public final class ApolloTlcService extends Service {
     public static final String EXTRA_TSR_SWITCH = "tsrSwitch";
     public static final String EXTRA_ERROR = "error";
     public static final String EXTRA_DEMAND_SESSION = "apolloDemandSession";
+    public static final String EXTRA_DEMAND_OWNER = "apolloDemandOwner";
 
     public static final String GLOBAL_MASTER_KEY = "open_voyah_apollo_master";
 
@@ -107,6 +108,8 @@ public final class ApolloTlcService extends Service {
     private volatile Handler handler;
     private final ApolloCanBusDemandGate canBusDemandGate =
             new ApolloCanBusDemandGate();
+    private final Object demandOwnerLock = new Object();
+    private DemandOwnerLink demandOwnerLink;
     private final ExecutorService schemaExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "ApolloTlcSchema");
         thread.setDaemon(true);
@@ -127,6 +130,22 @@ public final class ApolloTlcService extends Service {
     private int rebindAttempt;
     private Runnable bindConnectWatchdog;
     private Runnable idleUnbindRunnable;
+
+    /** Exact death registration belonging to one accepted UI demand tuple. */
+    private final class DemandOwnerLink implements IBinder.DeathRecipient {
+        final long sessionToken;
+        final IBinder owner;
+
+        DemandOwnerLink(long sessionToken, IBinder owner) {
+            this.sessionToken = sessionToken;
+            this.owner = owner;
+        }
+
+        @Override
+        public void binderDied() {
+            postWorker(() -> handleDemandOwnerDeath(this));
+        }
+    }
 
     private boolean schemaCheckComplete;
     private boolean canBusSchemaMatches;
@@ -163,10 +182,11 @@ public final class ApolloTlcService extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
             long sessionToken = intent.getLongExtra(EXTRA_DEMAND_SESSION, 0L);
+            IBinder owner = binderExtra(intent, EXTRA_DEMAND_OWNER);
             if (ACTION_REQUEST_APOLLO_TLC_UPDATE.equals(intent.getAction())) {
-                enqueueQuery(sessionToken);
+                enqueueQuery(sessionToken, owner);
             } else if (ACTION_RELEASE_APOLLO_TLC_DEMAND.equals(intent.getAction())) {
-                postWorker(() -> releaseClientDemand(sessionToken));
+                postWorker(() -> releaseClientDemand(sessionToken, owner, "lifecycle release"));
             }
         }
     };
@@ -278,29 +298,35 @@ public final class ApolloTlcService extends Service {
      * One trailing refresh guarantees that a newer visible session receives a snapshot after an
      * older synchronous Binder read completes.
      */
-    private void enqueueQuery(long sessionToken) {
+    private void enqueueQuery(long sessionToken, IBinder owner) {
         if (destroyed) return;
-        if (sessionToken <= 0L) {
-            Log.w(TAG, "Ignoring Apollo query without a valid demand session");
+        if (sessionToken <= 0L || owner == null) {
+            Log.w(TAG, "Ignoring Apollo query without a valid demand owner/session");
             return;
         }
-        if (!postWorker(() -> acquireClientDemand(sessionToken))) return;
-        if (!canBusDemandGate.beginQuery(sessionToken)) {
-            return;
-        }
-        postQueryWork(sessionToken);
+        postWorker(() -> {
+            int acquired = acquireClientDemand(sessionToken, owner);
+            if (acquired == ApolloCanBusDemandGate.ACQUIRE_REJECTED) return;
+            if (!canBusDemandGate.beginQuery(sessionToken, owner)) return;
+            postQueryWork(sessionToken, owner);
+        });
     }
 
-    private void postQueryWork(long sessionToken) {
+    private void postQueryWork(long sessionToken, IBinder owner) {
         if (!postWorker(() -> {
             try {
-                if (canBusDemandGate.isActive(sessionToken)) {
+                if (canBusDemandGate.isActive(sessionToken, owner)) {
                     handleQuery();
                 }
             } finally {
                 long trailingSession = canBusDemandGate.finishQuery(sessionToken);
                 if (trailingSession != ApolloCanBusDemandGate.NO_QUERY_SESSION) {
-                    postQueryWork(trailingSession);
+                    IBinder trailingOwner = activeDemandOwner(trailingSession);
+                    if (trailingOwner != null) {
+                        postQueryWork(trailingSession, trailingOwner);
+                    } else {
+                        canBusDemandGate.abandonQuery(trailingSession);
+                    }
                 }
             }
         })) {
@@ -309,28 +335,119 @@ public final class ApolloTlcService extends Service {
     }
 
     /** A real UI query opens one idempotent, monotonically versioned CanBus demand session. */
-    private void acquireClientDemand(long sessionToken) {
-        int result = canBusDemandGate.acquire(sessionToken);
-        if (result == ApolloCanBusDemandGate.ACQUIRE_REJECTED) return;
+    private int acquireClientDemand(long sessionToken, IBinder owner) {
+        boolean existing = false;
+        synchronized (demandOwnerLock) {
+            DemandOwnerLink current = demandOwnerLink;
+            if (!destroyed && current != null && current.sessionToken == sessionToken
+                    && current.owner == owner
+                    && canBusDemandGate.isActive(sessionToken, owner)) {
+                existing = true;
+            }
+        }
+        if (existing) {
+            cancelIdleUnbind();
+            return ApolloCanBusDemandGate.ACQUIRE_EXISTING;
+        }
+
+        DemandOwnerLink candidate = new DemandOwnerLink(sessionToken, owner);
+        try {
+            owner.linkToDeath(candidate, 0);
+        } catch (RemoteException | RuntimeException e) {
+            unlinkDemandOwner(candidate);
+            Log.w(TAG, "Apollo demand owner unavailable; session=" + sessionToken, e);
+            releaseClientDemand(sessionToken, owner, "owner unavailable");
+            return ApolloCanBusDemandGate.ACQUIRE_REJECTED;
+        }
+
+        int result = ApolloCanBusDemandGate.ACQUIRE_REJECTED;
+        DemandOwnerLink previous = null;
+        boolean adopted = false;
+        synchronized (demandOwnerLock) {
+            if (!destroyed) {
+                result = canBusDemandGate.acquire(sessionToken, owner);
+                if (result == ApolloCanBusDemandGate.ACQUIRE_NEW) {
+                    previous = demandOwnerLink;
+                    demandOwnerLink = candidate;
+                    adopted = true;
+                } else if (result == ApolloCanBusDemandGate.ACQUIRE_EXISTING) {
+                    DemandOwnerLink current = demandOwnerLink;
+                    if (current == null || current.sessionToken != sessionToken
+                            || current.owner != owner) {
+                        previous = current;
+                        demandOwnerLink = candidate;
+                        adopted = true;
+                    }
+                }
+            }
+        }
+        if (!adopted) unlinkDemandOwner(candidate);
+        if (previous != null) unlinkDemandOwner(previous);
+        if (result == ApolloCanBusDemandGate.ACQUIRE_REJECTED) return result;
         cancelIdleUnbind();
         if (result == ApolloCanBusDemandGate.ACQUIRE_NEW) {
             // A new UI session must not inherit a minute-long backoff from an older one.
             rebindAttempt = 0;
             Log.i(TAG, "Apollo UI demand acquired; session=" + sessionToken);
         }
+        return result;
     }
 
     /** Called by the permission-gated RestoreMode lifecycle broadcast. */
-    private void releaseClientDemand(long sessionToken) {
-        if (!canBusDemandGate.release(sessionToken)) return;
+    private void releaseClientDemand(long sessionToken, IBinder owner, String reason) {
+        if (sessionToken <= 0L || owner == null) return;
+        DemandOwnerLink released;
+        synchronized (demandOwnerLock) {
+            if (destroyed || !canBusDemandGate.release(sessionToken, owner)) return;
+            released = demandOwnerLink;
+            demandOwnerLink = null;
+        }
+        if (released != null) unlinkDemandOwner(released);
         handler.removeCallbacks(rebindRunnable);
-        Log.i(TAG, "Apollo UI demand released; session=" + sessionToken
+        Log.i(TAG, "Apollo UI demand released (" + reason + "); session=" + sessionToken
                 + " idle grace=" + IDLE_UNBIND_GRACE_MS + "ms");
         maybeScheduleIdleUnbind();
     }
 
+    private void handleDemandOwnerDeath(DemandOwnerLink dead) {
+        DemandOwnerLink released;
+        synchronized (demandOwnerLock) {
+            if (destroyed || demandOwnerLink != dead
+                    || !canBusDemandGate.ownerDied(dead.sessionToken, dead.owner)) return;
+            released = demandOwnerLink;
+            demandOwnerLink = null;
+        }
+        unlinkDemandOwner(released);
+        handler.removeCallbacks(rebindRunnable);
+        Log.i(TAG, "Apollo UI process died; session=" + dead.sessionToken
+                + " idle grace=" + IDLE_UNBIND_GRACE_MS + "ms");
+        maybeScheduleIdleUnbind();
+    }
+
+    private IBinder activeDemandOwner(long sessionToken) {
+        synchronized (demandOwnerLock) {
+            DemandOwnerLink current = demandOwnerLink;
+            if (destroyed || current == null || current.sessionToken != sessionToken
+                    || !canBusDemandGate.isActive(sessionToken, current.owner)) return null;
+            return current.owner;
+        }
+    }
+
+    private static void unlinkDemandOwner(DemandOwnerLink link) {
+        if (link == null) return;
+        try {
+            link.owner.unlinkToDeath(link, 0);
+        } catch (RuntimeException ignored) {
+            // Already dead/unlinked is an idempotent terminal state.
+        }
+    }
+
     private boolean hasClientDemand() {
-        return canBusDemandGate.isActive();
+        synchronized (demandOwnerLock) {
+            DemandOwnerLink current = demandOwnerLink;
+            return !destroyed && current != null
+                    && canBusDemandGate.isActive(current.sessionToken, current.owner);
+        }
     }
 
     private void cancelIdleUnbind() {
@@ -380,8 +497,8 @@ public final class ApolloTlcService extends Service {
         publishState();
     }
 
-    public static void requestQuery(Context context, long sessionToken) {
-        start(context, ACTION_INTERNAL_QUERY, false, true, sessionToken);
+    public static void requestQuery(Context context, long sessionToken, IBinder owner) {
+        start(context, ACTION_INTERNAL_QUERY, false, true, sessionToken, owner);
     }
 
     public static void requestTlcSet(Context context, boolean enabled, boolean argumentValid) {
@@ -411,16 +528,21 @@ public final class ApolloTlcService extends Service {
 
     private static void start(Context context, String action, boolean enabled,
                               boolean argumentValid) {
-        start(context, action, enabled, argumentValid, 0L);
+        start(context, action, enabled, argumentValid, 0L, null);
     }
 
     private static void start(Context context, String action, boolean enabled,
-                              boolean argumentValid, long sessionToken) {
+                              boolean argumentValid, long sessionToken, IBinder owner) {
         Intent intent = new Intent(context, ApolloTlcService.class);
         intent.setAction(action);
         intent.putExtra(EXTRA_ENABLED, enabled);
         intent.putExtra(EXTRA_ARGUMENT_VALID, argumentValid);
         if (sessionToken > 0L) intent.putExtra(EXTRA_DEMAND_SESSION, sessionToken);
+        if (owner != null) {
+            Bundle ownerExtra = new Bundle();
+            ownerExtra.putBinder(EXTRA_DEMAND_OWNER, owner);
+            intent.putExtras(ownerExtra);
+        }
         try {
             context.startService(intent);
         } catch (RuntimeException e) {
@@ -476,6 +598,7 @@ public final class ApolloTlcService extends Service {
                 && intent.getBooleanExtra(EXTRA_ARGUMENT_VALID, false);
         final long sessionToken = intent == null
                 ? 0L : intent.getLongExtra(EXTRA_DEMAND_SESSION, 0L);
+        final IBinder owner = binderExtra(intent, EXTRA_DEMAND_OWNER);
         if (ACTION_INTERNAL_SET.equals(action)
                 || ACTION_INTERNAL_MASTER_SET.equals(action)
                 || ACTION_INTERNAL_GLA_SET.equals(action)
@@ -498,7 +621,7 @@ public final class ApolloTlcService extends Service {
                 }
             });
         } else if (ACTION_INTERNAL_QUERY.equals(action)) {
-            enqueueQuery(sessionToken);
+            enqueueQuery(sessionToken, owner);
         } else if (action != null) {
             Log.w(TAG, "Ignoring unknown Apollo action: " + action);
         }
@@ -513,7 +636,13 @@ public final class ApolloTlcService extends Service {
     @Override
     public void onDestroy() {
         destroyed = true;
-        canBusDemandGate.close();
+        DemandOwnerLink releasedOwner;
+        synchronized (demandOwnerLock) {
+            canBusDemandGate.close();
+            releasedOwner = demandOwnerLink;
+            demandOwnerLink = null;
+        }
+        unlinkDemandOwner(releasedOwner);
         if (requestReceiverRegistered) {
             try {
                 unregisterReceiver(requestReceiver);
@@ -544,6 +673,11 @@ public final class ApolloTlcService extends Service {
             thread.quitSafely();
         }
         super.onDestroy();
+    }
+
+    private static IBinder binderExtra(Intent intent, String key) {
+        Bundle extras = intent == null ? null : intent.getExtras();
+        return extras == null ? null : extras.getBinder(key);
     }
 
     private void handleQuery() {
