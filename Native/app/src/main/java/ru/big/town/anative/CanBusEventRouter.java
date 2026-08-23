@@ -4,6 +4,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,7 +22,7 @@ final class CanBusEventRouter {
     static final int INTEREST_AMBIENT_TEMPERATURE = 1 << 5;
 
     private static final int DEFAULT_MAILBOX_CAPACITY = 32;
-    private static final int DRAIN_SLICE = 16;
+    private static final int DRAIN_SLICE = 8;
 
     interface Listener {
         void onCanBusEvent(CanBusEvent event);
@@ -152,7 +153,7 @@ final class CanBusEventRouter {
                     lastAccepted.put(key, event);
                     if (!event.isOrderedTransition()) removeQueuedLevel(key);
                     if (queue.size() == capacity) {
-                        queue.removeFirst();
+                        dropForCapacity();
                         dropped++;
                     }
                     queue.addLast(event);
@@ -185,6 +186,29 @@ final class CanBusEventRouter {
                 if (queued.signalKey() != signalKey) keep.add(queued);
             }
             queue.addAll(keep);
+        }
+
+        private void dropForCapacity() {
+            // A connection is an epoch barrier and must never be displaced by a callback burst.
+            // Prefer an already-coalescible level; only then sacrifice the oldest transition.
+            Iterator<CanBusEvent> iterator = queue.iterator();
+            while (iterator.hasNext()) {
+                CanBusEvent queued = iterator.next();
+                if (queued.kind != CanBusEvent.Kind.CONNECTION
+                        && !queued.isOrderedTransition()) {
+                    iterator.remove();
+                    return;
+                }
+            }
+            iterator = queue.iterator();
+            while (iterator.hasNext()) {
+                if (iterator.next().kind != CanBusEvent.Kind.CONNECTION) {
+                    iterator.remove();
+                    return;
+                }
+            }
+            // capacity >= 2 and duplicate connection events are coalesced, so this is defensive.
+            queue.removeFirst();
         }
 
         private void scheduleDrain() {

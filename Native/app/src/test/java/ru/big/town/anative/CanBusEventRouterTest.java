@@ -160,6 +160,45 @@ public class CanBusEventRouterTest {
     }
 
     @Test
+    public void callbackBurstCannotEvictConnectionBarrier() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        ManualExecutor executor = new ManualExecutor();
+        List<CanBusEvent.Kind> delivered = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_GEAR,
+                null, executor, event -> delivered.add(event.kind), 2);
+
+        router.dispatch(CanBusEvent.connection(1, 1, 1));
+        router.dispatch(gear(2, 3));
+        router.dispatch(gear(3, 0));
+        executor.runAll();
+
+        assertEquals(Arrays.asList(CanBusEvent.Kind.CONNECTION, CanBusEvent.Kind.GEAR),
+                delivered);
+    }
+
+    @Test
+    public void overflowDropsCoalescibleLevelBeforeTransition() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        ManualExecutor executor = new ManualExecutor();
+        List<CanBusEvent.Kind> delivered = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_DOOR
+                        | CanBusEventRouter.INTEREST_GEAR
+                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                new int[]{545}, executor, event -> delivered.add(event.kind), 3);
+
+        router.dispatch(CanBusEvent.connection(1, 1, 1));
+        router.dispatch(door(2, 1));
+        router.dispatch(vehicle(3, 545, 5));
+        router.dispatch(gear(4, 3));
+        executor.runAll();
+
+        assertEquals(Arrays.asList(CanBusEvent.Kind.CONNECTION,
+                CanBusEvent.Kind.DOOR, CanBusEvent.Kind.GEAR), delivered);
+    }
+
+    @Test
     public void listenerFailureDoesNotStopMailbox() {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
