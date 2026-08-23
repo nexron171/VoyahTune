@@ -14,6 +14,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
@@ -23,7 +24,14 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Сервис автоматического управления фарами по датчику освещённости.
@@ -34,8 +42,9 @@ import java.util.concurrent.RejectedExecutionException;
  *    "com.qinggan.carsignal.ICarSignalServiceCallBack". Это мгновенный push при
  *    изменении освещённости (уровень 0–7).
  *  - Начальный снимок: колбэки дельта-only (не отдают текущее значение), поэтому
- *    при коннекте читаем уровень синхронно через TX=36 (getLightSensorLevel).
- *  - Safety-poll каждые SAFETY_POLL_MS: страховка от пропущенного события.
+ *    при коннекте читаем уровень через TX=36 (getLightSensorLevel) на отдельной
+ *    single-flight очереди, не блокируя main и bind/reconnect.
+ *  - Safety-poll каждые SAFETY_POLL_MS: фоновая страховка от пропущенного события.
  *    CAN шлёт только при реальной смене цели — холостого трафика не создаёт.
  *  - Общая process-wide подписка CanBusEventHub фильтрует LightStatus, Gear и только
  *    VehicleState 1072 до очереди этого сервиса. Когда BCM сам уходит в «авто» (перевод КПП
@@ -91,6 +100,28 @@ public class LightSensorService extends Service {
     // ICarSignalServiceCallBack — наш stub датчика
     private static final String CALLBACK_DESCRIPTOR     = "com.qinggan.carsignal.ICarSignalServiceCallBack";
     private static final int    CB_onLightSensorChanged = 13;
+    private static final int    MAX_OUTSTANDING_CALLBACKS = 2;
+    private static final AtomicInteger OUTSTANDING_CALLBACKS = new AtomicInteger();
+
+    // Best-effort unregister is process-scoped and bounded: a stuck vendor TX47 can retain one
+    // running call plus only the latest cleanup request, never a queue per reconnect/service start.
+    private static final ThreadPoolExecutor CAR_SIGNAL_QUERY_EXECUTOR =
+            newBoundedBinderExecutor("CarSignalQuery");
+    private static final ThreadPoolExecutor CAR_SIGNAL_REGISTRATION_EXECUTOR =
+            newBoundedBinderExecutor("CarSignalRegistration");
+    private static final ThreadPoolExecutor CAR_SIGNAL_CLEANUP_EXECUTOR =
+            newBoundedBinderExecutor("CarSignalCleanup");
+
+    private static ThreadPoolExecutor newBoundedBinderExecutor(String name) {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(1), runnable -> {
+                    Thread thread = new Thread(runnable, name);
+                    thread.setDaemon(true);
+                    return thread;
+                }, new ThreadPoolExecutor.AbortPolicy());
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
 
     private static final String CAR_SIGNAL_ACTION  = "com.qinggan.carsignal.CarSignalService";
     private static final String CAR_SIGNAL_PACKAGE = "com.qinggan.carsignal.service";
@@ -115,23 +146,49 @@ public class LightSensorService extends Service {
 
     private Handler timerHandler;
     private volatile LatestIntDelivery sensorCallbackDelivery;
+    private HandlerThread carSignalIoThread;
+    private Handler carSignalIoHandler;
+    private Executor carSignalIoExecutor;
+    private final AtomicBoolean carSignalMaintenancePosted = new AtomicBoolean();
+    private boolean sensorQueryRunning;
+    private boolean sensorQueryRequested;
+    private long nextSensorApplyGeneration;
+    private SensorApplyRequest pendingIoSensorApply;
+    private SensorQueryRun runningSensorQuery;
     private IBinder carSignalBinder = null;
+    private CarSignalCallbackBinder carSignalCallbackBinder;
     private boolean carSignalBindingRequested = false;
     private boolean carSignalConnected = false;
     private boolean callbackRegistered = false;
+    private boolean callbackRegistrationInFlight = false;
+    private RegisterRequest pendingRegistration;
+    private RegisterRequest runningRegistration;
     private long    lastBindAttempt = -BIND_RETRY_MS;
     private final Runnable carSignalRebindRunnable = this::ensureBound;
+    private long carSignalEpoch = 0L;
+    private volatile long activeCarSignalEpoch = 0L;
+    private volatile CarSignalCallbackBinder activeCarSignalCallback;
+    private ServiceConnection carSignalConnection;
+    private long nextCarSignalBindingGeneration;
+    private long activeCarSignalBindingGeneration;
 
     // Текущая зафиксированная цель: true = ближний свет, false = наружный свет выключен
     private boolean headlightsOn = false;
     private boolean everSent     = false;
-    private boolean forceInitScheduled = false;
+    private boolean forceInitCompleted = false;
+    private long    readyCarSignalEpoch = 0L;
+    private long    forceInitCarSignalEpoch = 0L;
     private long    commitSequence = 0L;
+    private long    pendingSensorEpoch = 0L;
+    private long    pendingSensorRevision = 0L;
     private int     pendingSensorLevel = -1;
     private long    lastCommitElapsed  = 0L;
 
     // Последний уровень датчика для broadcast в UI
+    private long lastSensorEpoch = 0L;
+    private long lastSensorRevision = 0L;
     private int lastSensorLevel = -1;
+    private SensorApplyRequest pendingMainSensorApply;
 
     // Тестовый режим уличного сенсора: последняя КПП и последнее решение RSM (для анти-Auto по Drive)
     private int lastGear   = -1;
@@ -148,7 +205,18 @@ public class LightSensorService extends Service {
     // ICarSignalServiceCallBack — Binder stub (сервис вызывает onTransact ONEWAY)
     // -------------------------------------------------------------------------
 
-    private final IBinder callbackBinder = new Binder() {
+    private final class CarSignalCallbackBinder extends Binder {
+        final long epoch;
+        final IBinder remote;
+        final AtomicLong ingressRevision = new AtomicLong();
+        final AtomicBoolean registrationSlotHeld = new AtomicBoolean();
+        final AtomicBoolean cleanupScheduled = new AtomicBoolean();
+
+        CarSignalCallbackBinder(long epoch, IBinder remote) {
+            this.epoch = epoch;
+            this.remote = remote;
+        }
+
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
@@ -159,8 +227,13 @@ public class LightSensorService extends Service {
             if (code == CB_onLightSensorChanged) {
                 data.enforceInterface(CALLBACK_DESCRIPTOR);
                 final int level = data.readInt();
+                if (destroyed || activeCarSignalEpoch != epoch
+                        || activeCarSignalCallback != this) {
+                    return true;
+                }
+                final long revision = ingressRevision.incrementAndGet();
                 LatestIntDelivery delivery = sensorCallbackDelivery;
-                if (delivery != null) delivery.offer(level);
+                if (delivery != null) delivery.offer(epoch, revision, level);
                 return true;
             }
             // Прочие oneway-колбэки CarSignal (код 7/25/…) тихо поглощаем — иначе Binder
@@ -170,7 +243,7 @@ public class LightSensorService extends Service {
             }
             return super.onTransact(code, data, reply, flags);
         }
-    };
+    }
 
     private void onCanBusEvent(CanBusEvent event) {
         if (destroyed) return;
@@ -189,152 +262,584 @@ public class LightSensorService extends Service {
         }
     }
 
-    private void acceptSensorCallbackLevel(int level) {
-        if (destroyed) return;
+    private void acceptSensorCallbackLevel(long epoch, long revision, int level) {
+        CarSignalCallbackBinder callback = activeCarSignalCallback;
+        if (destroyed || readyCarSignalEpoch != epoch || activeCarSignalEpoch != epoch
+                || callback == null || callback.epoch != epoch
+                || callback.ingressRevision.get() != revision) {
+            return;
+        }
+        pendingSensorEpoch = epoch;
+        pendingSensorRevision = revision;
         pendingSensorLevel = level;
         timerHandler.removeCallbacks(sensorDebounceRunnable);
         timerHandler.postDelayed(sensorDebounceRunnable, SENSOR_DEBOUNCE_MS);
     }
 
+    private void markCarSignalReadyOnMain(long epoch) {
+        if (destroyed || activeCarSignalEpoch != epoch) return;
+        readyCarSignalEpoch = epoch;
+        lastSensorEpoch = 0L;
+        lastSensorRevision = 0L;
+        lastSensorLevel = -1;
+        pendingSensorEpoch = 0L;
+        pendingSensorRevision = 0L;
+        pendingSensorLevel = -1;
+        timerHandler.removeCallbacks(sensorDebounceRunnable);
+        timerHandler.removeCallbacks(forceInitRunnable);
+        if (!forceInitCompleted) {
+            forceInitCarSignalEpoch = epoch;
+            timerHandler.postDelayed(forceInitRunnable, FORCE_INIT_MS);
+        }
+    }
+
+    private void invalidateCarSignalOnMain(long closingEpoch) {
+        if (readyCarSignalEpoch != closingEpoch) return;
+        readyCarSignalEpoch = 0L;
+        forceInitCarSignalEpoch = 0L;
+        lastSensorEpoch = 0L;
+        lastSensorRevision = 0L;
+        lastSensorLevel = -1;
+        pendingSensorEpoch = 0L;
+        pendingSensorRevision = 0L;
+        pendingSensorLevel = -1;
+        if (pendingMainSensorApply != null && pendingMainSensorApply.epoch == closingEpoch) {
+            pendingMainSensorApply = null;
+        }
+        timerHandler.removeCallbacks(forceInitRunnable);
+        timerHandler.removeCallbacks(sensorDebounceRunnable);
+    }
+
+    private void requestSensorLevel(long epoch) {
+        Handler io = carSignalIoHandler;
+        if (destroyed || io == null || readyCarSignalEpoch != epoch) return;
+        io.post(() -> {
+            if (!destroyed && carSignalConnected && carSignalEpoch == epoch) {
+                requestSensorLevelOnIo(null);
+            }
+        });
+    }
+
+    private void requestSensorLevelForApply(long epoch, SensorApplyMode mode, String reason) {
+        requestSensorLevelForApply(epoch, mode, reason, false);
+    }
+
+    private void requestSensorLevelForApply(long epoch, SensorApplyMode mode, String reason,
+                                            boolean cancelOnManualAuto) {
+        if (destroyed || readyCarSignalEpoch != epoch || activeCarSignalEpoch != epoch) return;
+        SensorApplyRequest existing = pendingMainSensorApply;
+        final SensorApplyRequest request;
+        if (existing != null && existing.epoch == epoch
+                && existing.mode.priority >= mode.priority) {
+            request = existing;
+        } else {
+            request = new SensorApplyRequest(epoch, ++nextSensorApplyGeneration, mode, reason,
+                    cancelOnManualAuto);
+            pendingMainSensorApply = request;
+        }
+        Handler io = carSignalIoHandler;
+        if (io != null) {
+            io.post(() -> requestSensorLevelOnIo(request));
+        }
+    }
+
+    private enum SensorApplyMode {
+        IF_UNSENT(1), FORCE(2);
+
+        final int priority;
+
+        SensorApplyMode(int priority) {
+            this.priority = priority;
+        }
+    }
+
+    private static final class SensorApplyRequest {
+        final long epoch;
+        final long generation;
+        final SensorApplyMode mode;
+        final String reason;
+        final boolean cancelOnManualAuto;
+
+        SensorApplyRequest(long epoch, long generation, SensorApplyMode mode, String reason,
+                           boolean cancelOnManualAuto) {
+            this.epoch = epoch;
+            this.generation = generation;
+            this.mode = mode;
+            this.reason = reason;
+            this.cancelOnManualAuto = cancelOnManualAuto;
+        }
+    }
+
+    private static final class SensorQueryRun {
+        final IBinder binder;
+        final CarSignalCallbackBinder callback;
+        final long epoch;
+        final long ingressRevision;
+        final SensorApplyRequest apply;
+
+        SensorQueryRun(IBinder binder, CarSignalCallbackBinder callback, long epoch,
+                       long ingressRevision, SensorApplyRequest apply) {
+            this.binder = binder;
+            this.callback = callback;
+            this.epoch = epoch;
+            this.ingressRevision = ingressRevision;
+            this.apply = apply;
+        }
+    }
+
     // -------------------------------------------------------------------------
-    // ServiceConnection
+    // CarSignal Binder IO. All fields in this section are confined to carSignalIoHandler.
     // -------------------------------------------------------------------------
 
-    private final ServiceConnection carSignalConnection = new ServiceConnection() {
+    private final class CarSignalConnection implements ServiceConnection {
+        private final long generation;
+
+        CarSignalConnection(long generation) {
+            this.generation = generation;
+        }
+
+        private boolean isCurrent() {
+            return carSignalConnection == this
+                    && activeCarSignalBindingGeneration == generation;
+        }
+
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            if (destroyed) return;
-            timerHandler.removeCallbacks(carSignalRebindRunnable);
+            if (!isCurrent() || destroyed) return;
+            carSignalIoHandler.removeCallbacks(carSignalRebindRunnable);
             carSignalBindingRequested = true;
             carSignalBinder = service;
             carSignalConnected = true;
             callbackRegistered = false;
+            callbackRegistrationInFlight = false;
+            long epoch = ++carSignalEpoch;
+            carSignalCallbackBinder = new CarSignalCallbackBinder(epoch, service);
+            activeCarSignalCallback = carSignalCallbackBinder;
+            activeCarSignalEpoch = epoch;
             Log.i(TAG, "CarSignalService connected, alive=" + service.isBinderAlive());
-            registerCallback();
-            // Подписки готовы — один раз через FORCE_INIT_MS принудительно
-            // отправим таргет (на случай холодного старта). Планируем единожды.
-            if (!forceInitScheduled) {
-                forceInitScheduled = true;
-                timerHandler.postDelayed(forceInitRunnable, FORCE_INIT_MS);
-            }
+            timerHandler.post(() -> markCarSignalReadyOnMain(epoch));
+            requestSensorLevelOnIo(null);
+            startRegisterCallbackOnIo();
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            markCarSignalDisconnected();
+            if (!isCurrent()) return;
+            OldCarSignalSession old = invalidateCarSignalRemoteOnIo();
+            if (old.registered) scheduleUnregister(old.remote, old.callback);
             Log.w(TAG, "CarSignalService disconnected — waiting for automatic reconnect");
         }
 
         @Override
         public void onBindingDied(ComponentName name) {
-            restartCarSignalBinding("binding died");
+            if (isCurrent()) restartCarSignalBindingOnIo("binding died");
         }
 
         @Override
         public void onNullBinding(ComponentName name) {
-            restartCarSignalBinding("null binding");
+            if (isCurrent()) restartCarSignalBindingOnIo("null binding");
         }
-    };
+    }
+
+    private static final class OldCarSignalSession {
+        final IBinder remote;
+        final CarSignalCallbackBinder callback;
+        final boolean registered;
+        final long epoch;
+
+        OldCarSignalSession(IBinder remote, CarSignalCallbackBinder callback,
+                            boolean registered, long epoch) {
+            this.remote = remote;
+            this.callback = callback;
+            this.registered = registered;
+            this.epoch = epoch;
+        }
+    }
+
+    private static final class RegisterRequest {
+        final IBinder remote;
+        final CarSignalCallbackBinder callback;
+        final long epoch;
+
+        RegisterRequest(IBinder remote, CarSignalCallbackBinder callback, long epoch) {
+            this.remote = remote;
+            this.callback = callback;
+            this.epoch = epoch;
+        }
+    }
+
+    private void requestCarSignalMaintenance() {
+        if (destroyed || !carSignalMaintenancePosted.compareAndSet(false, true)) return;
+        Handler io = carSignalIoHandler;
+        if (io == null || !io.post(() -> {
+            try {
+                if (destroyed) return;
+                ensureBound();
+                startRegisterCallbackOnIo();
+            } finally {
+                carSignalMaintenancePosted.set(false);
+            }
+        })) {
+            carSignalMaintenancePosted.set(false);
+        }
+    }
 
     private void ensureBound() {
         if (destroyed || carSignalBindingRequested) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastBindAttempt < BIND_RETRY_MS) return;
         lastBindAttempt = now;
+        long generation = ++nextCarSignalBindingGeneration;
+        CarSignalConnection connection = new CarSignalConnection(generation);
+        carSignalConnection = connection;
+        activeCarSignalBindingGeneration = generation;
         try {
             Intent intent = new Intent(CAR_SIGNAL_ACTION);
             intent.setPackage(CAR_SIGNAL_PACKAGE);
-            boolean ok = bindService(intent, carSignalConnection, Context.BIND_AUTO_CREATE);
+            boolean ok = bindService(intent, Context.BIND_AUTO_CREATE,
+                    carSignalIoExecutor, connection);
             carSignalBindingRequested = ok;
             Log.i(TAG, "ensureBound: bindService returned " + ok);
-            if (!ok) scheduleCarSignalRebind();
+            if (!ok) {
+                carSignalConnection = null;
+                activeCarSignalBindingGeneration = 0L;
+                scheduleCarSignalRebindOnIo();
+            }
         } catch (Exception e) {
             carSignalBindingRequested = false;
+            carSignalConnection = null;
+            activeCarSignalBindingGeneration = 0L;
             Log.e(TAG, "ensureBound: exception: " + e.getMessage(), e);
-            scheduleCarSignalRebind();
+            scheduleCarSignalRebindOnIo();
         }
     }
 
-    private void markCarSignalDisconnected() {
+    private OldCarSignalSession invalidateCarSignalRemoteOnIo() {
+        long closingEpoch = carSignalEpoch;
+        OldCarSignalSession old = new OldCarSignalSession(
+                carSignalBinder, carSignalCallbackBinder,
+                callbackRegistered, closingEpoch);
+        activeCarSignalEpoch = 0L;
+        activeCarSignalCallback = null;
         carSignalBinder = null;
+        carSignalCallbackBinder = null;
         carSignalConnected = false;
         callbackRegistered = false;
+        callbackRegistrationInFlight = false;
+        if (pendingRegistration != null
+                && pendingRegistration.callback == old.callback) {
+            releaseRegistrationSlot(pendingRegistration.callback);
+            pendingRegistration = null;
+        }
+        if (pendingIoSensorApply != null && pendingIoSensorApply.epoch == closingEpoch) {
+            pendingIoSensorApply = null;
+        }
+        sensorQueryRequested = false;
+        carSignalEpoch++;
+        timerHandler.post(() -> invalidateCarSignalOnMain(closingEpoch));
+        return old;
     }
 
-    private void restartCarSignalBinding(String reason) {
+    private void restartCarSignalBindingOnIo(String reason) {
         Log.w(TAG, "CarSignalService " + reason + " — replacing binding");
-        releaseCarSignalBinding(reason);
-        scheduleCarSignalRebind();
+        releaseCarSignalBindingOnIo(reason);
+        scheduleCarSignalRebindOnIo();
     }
 
-    private void scheduleCarSignalRebind() {
+    private void scheduleCarSignalRebindOnIo() {
         if (destroyed) return;
         lastBindAttempt = SystemClock.elapsedRealtime();
-        timerHandler.removeCallbacks(carSignalRebindRunnable);
-        timerHandler.postDelayed(carSignalRebindRunnable, BIND_RETRY_MS);
+        carSignalIoHandler.removeCallbacks(carSignalRebindRunnable);
+        carSignalIoHandler.postDelayed(carSignalRebindRunnable, BIND_RETRY_MS);
     }
 
-    private void releaseCarSignalBinding(String reason) {
-        timerHandler.removeCallbacks(carSignalRebindRunnable);
-        if (carSignalConnected) unregisterCallback();
-        if (carSignalBindingRequested) {
+    private void releaseCarSignalBindingOnIo(String reason) {
+        carSignalIoHandler.removeCallbacks(carSignalRebindRunnable);
+        ServiceConnection connection = carSignalConnection;
+        boolean wasBindingRequested = carSignalBindingRequested;
+        OldCarSignalSession old = invalidateCarSignalRemoteOnIo();
+        carSignalBindingRequested = false;
+        carSignalConnection = null;
+        activeCarSignalBindingGeneration = 0L;
+        if (wasBindingRequested && connection != null) {
             try {
-                unbindService(carSignalConnection);
+                unbindService(connection);
             } catch (Exception e) {
                 Log.w(TAG, reason + ": CarSignal unbindService failed: " + e.getMessage());
             }
         }
-        carSignalBindingRequested = false;
-        markCarSignalDisconnected();
+        // Lifecycle is already invalidated/unbound; vendor cleanup can never delay it.
+        if (old.registered) scheduleUnregister(old.remote, old.callback);
     }
 
-    /** Регистрирует наш callbackBinder в CarSignalService (TX=46, writeStrongBinder). */
-    private void registerCallback() {
-        if (!carSignalConnected || carSignalBinder == null || callbackRegistered) return;
+    private void startRegisterCallbackOnIo() {
+        if (destroyed || !carSignalConnected || carSignalBinder == null
+                || carSignalCallbackBinder == null
+                || callbackRegistered || callbackRegistrationInFlight
+                || carSignalCallbackBinder.cleanupScheduled.get()) {
+            return;
+        }
+        IBinder remote = carSignalBinder;
+        CarSignalCallbackBinder callback = carSignalCallbackBinder;
+        long epoch = carSignalEpoch;
+        if (!reserveRegistrationSlot(callback)) {
+            Log.w(TAG, "registerCallback deferred: cleanup backpressure");
+            return;
+        }
+        callbackRegistrationInFlight = true;
+        pendingRegistration = new RegisterRequest(remote, callback, epoch);
+        startNextRegistrationOnIo();
+    }
+
+    private void startNextRegistrationOnIo() {
+        if (runningRegistration != null || pendingRegistration == null) return;
+        RegisterRequest request = pendingRegistration;
+        pendingRegistration = null;
+        runningRegistration = request;
+        try {
+            CAR_SIGNAL_REGISTRATION_EXECUTOR.execute(() -> {
+                RegistrationResult result = registerCallbackTransaction(
+                        request.remote, request.callback);
+                boolean success = result == RegistrationResult.SUCCESS;
+                if (result == RegistrationResult.NOT_SENT) {
+                    releaseRegistrationSlot(request.callback);
+                } else if (result == RegistrationResult.AMBIGUOUS) {
+                    // transact reached the vendor but the reply failed: cleanup before retrying,
+                    // otherwise an uncounted observer could bypass the process-wide slot limit.
+                    scheduleUnregister(request.remote, request.callback);
+                }
+                Handler io = carSignalIoHandler;
+                boolean delivered = io != null
+                        && io.post(() -> finishRegisterCallbackOnIo(request, success));
+                if (!delivered && success) {
+                    // The lifecycle lane is already gone: compensate on this isolated worker.
+                    scheduleUnregister(request.remote, request.callback);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            runningRegistration = null;
+            releaseRegistrationSlot(request.callback);
+            if (request.callback == carSignalCallbackBinder) {
+                callbackRegistrationInFlight = false;
+            }
+        }
+    }
+
+    private enum RegistrationResult { SUCCESS, NOT_SENT, AMBIGUOUS }
+
+    private RegistrationResult registerCallbackTransaction(IBinder remote, IBinder callback) {
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
+        boolean attempted = false;
         try {
             data.writeInterfaceToken(CAR_SIGNAL_DESCRIPTOR);
-            data.writeStrongBinder(callbackBinder);
-            carSignalBinder.transact(TX_registerCallback, data, reply, 0);
+            data.writeStrongBinder(callback);
+            attempted = true;
+            if (!remote.transact(TX_registerCallback, data, reply, 0)) {
+                return RegistrationResult.NOT_SENT;
+            }
             reply.readException();
-            callbackRegistered = true;
             Log.i(TAG, "registerCallback: OK (TX=" + TX_registerCallback + ")");
+            return RegistrationResult.SUCCESS;
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "registerCallback: error: " + e.getMessage());
+            return attempted && remote.isBinderAlive()
+                    ? RegistrationResult.AMBIGUOUS : RegistrationResult.NOT_SENT;
         } finally {
             data.recycle();
             reply.recycle();
         }
     }
 
-    private void unregisterCallback() {
-        if (!carSignalConnected || carSignalBinder == null || !callbackRegistered) return;
+    private void finishRegisterCallbackOnIo(RegisterRequest request, boolean success) {
+        if (runningRegistration != request) return;
+        runningRegistration = null;
+        boolean current = !destroyed && request.remote == carSignalBinder
+                && request.callback == carSignalCallbackBinder
+                && request.epoch == carSignalEpoch;
+        if (!current) {
+            if (success) scheduleUnregister(request.remote, request.callback);
+        } else {
+            callbackRegistrationInFlight = false;
+            if (success) callbackRegistered = true;
+        }
+        startNextRegistrationOnIo();
+    }
+
+    private static boolean reserveRegistrationSlot(CarSignalCallbackBinder callback) {
+        if (!callback.registrationSlotHeld.compareAndSet(false, true)) return true;
+        int count = OUTSTANDING_CALLBACKS.incrementAndGet();
+        if (count <= MAX_OUTSTANDING_CALLBACKS) return true;
+        OUTSTANDING_CALLBACKS.decrementAndGet();
+        callback.registrationSlotHeld.set(false);
+        return false;
+    }
+
+    private static void releaseRegistrationSlot(CarSignalCallbackBinder callback) {
+        if (callback != null && callback.registrationSlotHeld.compareAndSet(true, false)) {
+            OUTSTANDING_CALLBACKS.decrementAndGet();
+        }
+    }
+
+    private void scheduleUnregister(IBinder remote, CarSignalCallbackBinder callback) {
+        if (remote == null || callback == null) return;
+        if (!callback.cleanupScheduled.compareAndSet(false, true)) return;
+        try {
+            CAR_SIGNAL_CLEANUP_EXECUTOR.execute(() -> {
+                if (unregisterCallbackTransaction(remote, callback)) {
+                    callback.cleanupScheduled.set(false);
+                    releaseRegistrationSlot(callback);
+                } else {
+                    Log.w(TAG, "unregisterCallback not confirmed; registration gate remains closed");
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            Log.w(TAG, "unregisterCallback deferred: cleanup queue saturated");
+        }
+    }
+
+    private boolean unregisterCallbackTransaction(IBinder remote, IBinder callback) {
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(CAR_SIGNAL_DESCRIPTOR);
-            data.writeStrongBinder(callbackBinder);
-            carSignalBinder.transact(TX_unregisterCallback, data, reply, 0);
+            data.writeStrongBinder(callback);
+            if (!remote.transact(TX_unregisterCallback, data, reply, 0)) {
+                return !remote.isBinderAlive();
+            }
             reply.readException();
             Log.i(TAG, "unregisterCallback: OK");
+            return true;
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "unregisterCallback: error: " + e.getMessage());
+            return !remote.isBinderAlive();
         } finally {
             data.recycle();
             reply.recycle();
-            callbackRegistered = false;
         }
     }
 
-    /** Синхронно читает уровень датчика (TX=36). -1 при ошибке. */
-    private int readSensorLevel() {
-        if (!carSignalConnected || carSignalBinder == null) return -1;
+    private void requestSensorLevelOnIo(SensorApplyRequest applyRequest) {
+        if (destroyed || !carSignalConnected || carSignalBinder == null
+                || carSignalCallbackBinder == null) {
+            return;
+        }
+        if (applyRequest != null) {
+            if (applyRequest.epoch != carSignalEpoch) return;
+            SensorApplyRequest existing = pendingIoSensorApply;
+            if (existing == null || existing.epoch != applyRequest.epoch
+                    || existing.mode.priority < applyRequest.mode.priority
+                    || (existing.mode == applyRequest.mode
+                    && existing.generation < applyRequest.generation)) {
+                pendingIoSensorApply = applyRequest;
+            }
+        }
+        sensorQueryRequested = true;
+        startSensorLevelQueryOnIo();
+    }
+
+    private void startSensorLevelQueryOnIo() {
+        if (destroyed || sensorQueryRunning || !sensorQueryRequested) return;
+        IBinder binder = carSignalBinder;
+        CarSignalCallbackBinder callback = carSignalCallbackBinder;
+        long epoch = carSignalEpoch;
+        if (!carSignalConnected || binder == null || callback == null) {
+            return;
+        }
+        sensorQueryRequested = false;
+        SensorApplyRequest apply = pendingIoSensorApply;
+        if (apply != null && apply.epoch != epoch) apply = null;
+        long ingressRevision = callback.ingressRevision.get();
+        SensorQueryRun run = new SensorQueryRun(
+                binder, callback, epoch, ingressRevision, apply);
+        sensorQueryRunning = true;
+        runningSensorQuery = run;
+        try {
+            CAR_SIGNAL_QUERY_EXECUTOR.execute(() -> {
+                int level = readSensorLevelOnQueryThread(binder);
+                Handler io = carSignalIoHandler;
+                if (io != null) {
+                    io.post(() -> finishSensorLevelQueryOnIo(run, level));
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            sensorQueryRunning = false;
+            runningSensorQuery = null;
+            sensorQueryRequested = true;
+        }
+    }
+
+    private void finishSensorLevelQueryOnIo(SensorQueryRun run, int level) {
+        if (!sensorQueryRunning || runningSensorQuery != run) return;
+        boolean current = !destroyed && carSignalConnected
+                && run.binder == carSignalBinder && run.callback == carSignalCallbackBinder
+                && run.epoch == carSignalEpoch
+                && run.callback.ingressRevision.get() == run.ingressRevision;
+        if (current && level >= 0
+                && timerHandler.post(() -> acceptSensorQueryResultOnMain(run, level))) {
+            // Keep the logical flight open until main validates the epoch/revision and acks it.
+            return;
+        }
+        sensorQueryRunning = false;
+        runningSensorQuery = null;
+        if (sensorQueryRequested) {
+            startSensorLevelQueryOnIo();
+        }
+    }
+
+    private void acceptSensorQueryResultOnMain(SensorQueryRun run, int level) {
+        CarSignalCallbackBinder activeCallback = activeCarSignalCallback;
+        boolean accepted = !destroyed && readyCarSignalEpoch == run.epoch
+                && activeCarSignalEpoch == run.epoch
+                && activeCallback == run.callback
+                && run.callback.ingressRevision.get() == run.ingressRevision;
+        boolean applyAccepted = false;
+        if (accepted) {
+            onSensorLevel(run.epoch, run.ingressRevision, level, "poll");
+            SensorApplyRequest apply = run.apply;
+            if (apply != null && pendingMainSensorApply == apply) {
+                applyAccepted = applySensorRequest(apply, level);
+                if (applyAccepted) pendingMainSensorApply = null;
+            }
+        }
+        Handler io = carSignalIoHandler;
+        if (io != null) {
+            final boolean acceptedAction = applyAccepted;
+            if (!io.post(() -> finishSensorQueryAfterMainOnIo(run, acceptedAction))) {
+                Log.w(TAG, "TX36 completion dropped: CarSignal IO stopped");
+            }
+        }
+    }
+
+    private void finishSensorQueryAfterMainOnIo(SensorQueryRun run, boolean applyAccepted) {
+        if (!sensorQueryRunning || runningSensorQuery != run) return;
+        if (applyAccepted && pendingIoSensorApply == run.apply) {
+            pendingIoSensorApply = null;
+        }
+        sensorQueryRunning = false;
+        runningSensorQuery = null;
+        if (sensorQueryRequested) startSensorLevelQueryOnIo();
+    }
+
+    private void acknowledgeSensorApplyFromCallback(long epoch, long generation) {
+        Handler io = carSignalIoHandler;
+        if (io == null) return;
+        io.post(() -> {
+            SensorApplyRequest pending = pendingIoSensorApply;
+            if (pending != null && pending.epoch == epoch
+                    && pending.generation == generation) {
+                pendingIoSensorApply = null;
+            }
+        });
+    }
+
+    /** Synchronous TX36 isolated from both main and the bind/register IO queue. */
+    private int readSensorLevelOnQueryThread(IBinder binder) {
         Parcel data  = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(CAR_SIGNAL_DESCRIPTOR);
-            carSignalBinder.transact(TX_getLightSensorLevel, data, reply, 0);
+            if (!binder.transact(TX_getLightSensorLevel, data, reply, 0)) return -1;
             reply.readException();
             return reply.readInt();
         } catch (RemoteException | RuntimeException e) {
@@ -357,6 +862,15 @@ public class LightSensorService extends Service {
         Log.i(TAG, "onCreate() — LightSensorService (event-driven + safety-poll)");
         Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         timerHandler = new Handler(Looper.getMainLooper());
+        carSignalIoThread = new HandlerThread("CarSignalIo");
+        carSignalIoThread.start();
+        carSignalIoHandler = new Handler(carSignalIoThread.getLooper());
+        carSignalIoExecutor = command -> {
+            Handler io = carSignalIoHandler;
+            if (io == null || !io.post(command)) {
+                if (!destroyed) Log.w(TAG, "CarSignal ServiceConnection callback dropped");
+            }
+        };
         sensorCallbackDelivery = new LatestIntDelivery(command -> {
             if (!timerHandler.post(command)) {
                 throw new RejectedExecutionException("main Handler stopped");
@@ -375,7 +889,7 @@ public class LightSensorService extends Service {
         IntentFilter reqFilter = new IntentFilter("ru.big.town.anative.REQUEST_LUX_UPDATE");
         registerReceiver(requestReceiver, reqFilter, RECEIVER_EXPORTED);
 
-        ensureBound();
+        requestCarSignalMaintenance();
         canBusSubscription = CanBusEventHub.get(this).subscribe(
                 CanBusEventRouter.INTEREST_LIGHT_STATUS
                         | CanBusEventRouter.INTEREST_GEAR
@@ -397,8 +911,7 @@ public class LightSensorService extends Service {
 
     @Override
     public void onDestroy() {
-        Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn
-                + " carSignalConnected=" + carSignalConnected);
+        Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn);
         destroyed = true;
         LatestIntDelivery sensorDelivery = sensorCallbackDelivery;
         sensorCallbackDelivery = null;
@@ -412,7 +925,16 @@ public class LightSensorService extends Service {
         timerHandler.removeCallbacks(sensorDebounceRunnable);
         timerHandler.removeCallbacks(canbusReassertRunnable);
         timerHandler.removeCallbacks(driveFallbackRunnable);
-        releaseCarSignalBinding("onDestroy");
+        Handler io = carSignalIoHandler;
+        HandlerThread ioThread = carSignalIoThread;
+        if (io != null && ioThread != null) {
+            if (!io.post(() -> {
+                releaseCarSignalBindingOnIo("onDestroy");
+                ioThread.quitSafely();
+            })) {
+                ioThread.quitSafely();
+            }
+        }
         timerHandler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
@@ -422,7 +944,24 @@ public class LightSensorService extends Service {
     private final Runnable sensorDebounceRunnable = new Runnable() {
         @Override
         public void run() {
-            if (pendingSensorLevel >= 0) onSensorLevel(pendingSensorLevel, "callback");
+            CarSignalCallbackBinder callback = activeCarSignalCallback;
+            if (pendingSensorLevel < 0 || pendingSensorEpoch != readyCarSignalEpoch
+                    || pendingSensorEpoch != activeCarSignalEpoch || callback == null
+                    || callback.epoch != pendingSensorEpoch
+                    || callback.ingressRevision.get() != pendingSensorRevision) {
+                return;
+            }
+            long epoch = pendingSensorEpoch;
+            long revision = pendingSensorRevision;
+            int level = pendingSensorLevel;
+            onSensorLevel(epoch, revision, level, "callback");
+            SensorApplyRequest apply = pendingMainSensorApply;
+            if (apply != null && apply.epoch == epoch) {
+                if (applySensorRequest(apply, level)) {
+                    pendingMainSensorApply = null;
+                    acknowledgeSensorApplyFromCallback(epoch, apply.generation);
+                }
+            }
         }
     };
 
@@ -431,7 +970,24 @@ public class LightSensorService extends Service {
     private final Runnable forceInitRunnable = new Runnable() {
         @Override
         public void run() {
-            applyTarget("force-init");
+            long epoch = forceInitCarSignalEpoch;
+            if (epoch == 0L || epoch != readyCarSignalEpoch
+                    || epoch != activeCarSignalEpoch) {
+                return;
+            }
+            forceInitCarSignalEpoch = 0L;
+            if (manualAutoOverride) {
+                Log.i(TAG, "force-init: OEM Auto выбран с руля — инициализация отменена");
+                forceInitCompleted = true;
+                return;
+            }
+            if (reasonToDesired(lastReason) != null) {
+                forceInitCompleted = applyTargetWithSensorLevel(
+                        "force-init", -1, true);
+            } else {
+                requestSensorLevelForApply(
+                        epoch, SensorApplyMode.FORCE, "force-init", true);
+            }
         }
     };
 
@@ -442,16 +998,20 @@ public class LightSensorService extends Service {
     private final Runnable safetyRunnable = new Runnable() {
         @Override
         public void run() {
-            ensureBound();
-            registerCallback(); // no-op если уже зарегистрирован
-
-            int level = readSensorLevel();
-            if (level >= 0) {
-                onSensorLevel(level, "poll");
-            } else {
-                Log.w(TAG, "poll: sensor unavailable (connected=" + carSignalConnected + ")");
+            requestCarSignalMaintenance();
+            long epoch = readyCarSignalEpoch;
+            Boolean outdoor = reasonToDesired(lastReason);
+            if (!everSent && outdoor != null) {
+                applyTargetWithSensorLevel("poll-retry", -1);
             }
-            if (!everSent) applyTarget("poll-retry");
+            if (epoch != 0L && epoch == activeCarSignalEpoch) {
+                if (!everSent && outdoor == null) {
+                    requestSensorLevelForApply(
+                            epoch, SensorApplyMode.IF_UNSENT, "poll-retry");
+                } else {
+                    requestSensorLevel(epoch);
+                }
+            }
             timerHandler.postDelayed(this, SAFETY_POLL_MS);
         }
     };
@@ -459,31 +1019,59 @@ public class LightSensorService extends Service {
     /**
      * Показание салонного датчика (из колбэка/поллинга) — только для индикации в UI.
      * Решения по фарам принимает уличный датчик (lightSWReason) + анти-Auto по Drive/старту;
-     * салонный используется лишь как ФОЛБЭК внутри {@link #applyTarget}, а не непрерывно.
+     * салонный используется лишь как ФОЛБЭК внутри {@link #applyTargetWithSensorLevel},
+     * а не непрерывно.
      */
-    private void onSensorLevel(int level, String source) {
+    private void onSensorLevel(long epoch, long revision, int level, String source) {
+        if (epoch != readyCarSignalEpoch || epoch != activeCarSignalEpoch) return;
+        lastSensorEpoch = epoch;
+        lastSensorRevision = revision;
         lastSensorLevel = level;
         broadcastUpdate(level);
+    }
+
+    private boolean applySensorRequest(SensorApplyRequest request, int level) {
+        if (request.cancelOnManualAuto && manualAutoOverride) {
+            Log.i(TAG, request.reason + ": OEM Auto выбран с руля — pending action отменён");
+            if (request.mode == SensorApplyMode.FORCE) forceInitCompleted = true;
+            return true;
+        }
+        if (request.mode == SensorApplyMode.IF_UNSENT && everSent) return true;
+        boolean fulfilled = applyTargetWithSensorLevel(
+                request.reason, level, request.mode == SensorApplyMode.FORCE);
+        if (fulfilled && request.mode == SensorApplyMode.FORCE) {
+            forceInitCompleted = true;
+        }
+        return fulfilled;
     }
 
     /**
      * Выставить целевой режим фар: приоритет — уличный датчик (последний lightSWReason);
      * если данных улицы нет — фолбэк на салонный уровень по порогам.
      */
-    private void applyTarget(String src) {
+    private boolean applyTargetWithSensorLevel(String src, int sensorLevel) {
+        return applyTargetWithSensorLevel(src, sensorLevel, false);
+    }
+
+    private boolean applyTargetWithSensorLevel(String src, int sensorLevel,
+                                               boolean retainCurrentTarget) {
         Boolean desired = reasonToDesired(lastReason);
         String s2 = src + " ext reason=" + lastReason;
         if (desired == null) {
-            int level = readSensorLevel();
-            desired = desiredFromCabin(level, readSettings());
-            s2 = src + " cabin level=" + level;
+            desired = desiredFromCabin(sensorLevel, readSettings());
+            s2 = src + " cabin level=" + sensorLevel;
+        }
+        if (desired == null && retainCurrentTarget && everSent) {
+            desired = headlightsOn;
+            s2 = src + " retain=" + (headlightsOn ? "low" : "off");
         }
         if (desired == null) {
             Log.i(TAG, src + ": нет данных (reason=" + lastReason + ") — не трогаем");
-            return;
+            return false;
         }
         Log.i(TAG, s2 + " → " + (desired ? "ближний" : "выкл"));
         commit(desired, s2);
+        return true;
     }
 
     private void commit(boolean targetOn, String reason) {
@@ -566,7 +1154,15 @@ public class LightSensorService extends Service {
                 Log.i(TAG, "drive+5s: OEM Auto выбран с руля — anti-Auto пропущен");
                 return;
             }
-            applyTarget("drive+5s (анти-Auto)");
+            if (reasonToDesired(lastReason) != null) {
+                applyTargetWithSensorLevel("drive+5s (анти-Auto)", -1);
+                return;
+            }
+            long epoch = readyCarSignalEpoch;
+            if (epoch != 0L && epoch == activeCarSignalEpoch) {
+                requestSensorLevelForApply(
+                        epoch, SensorApplyMode.FORCE, "drive+5s (анти-Auto)", true);
+            }
         }
     };
 

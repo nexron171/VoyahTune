@@ -105,6 +105,46 @@ public class LatestIntDeliveryTest {
         assertEquals(Arrays.asList(2), delivered);
     }
 
+    @Test
+    public void coalescedValueKeepsItsMatchingToken() {
+        ManualExecutor executor = new ManualExecutor();
+        List<String> delivered = new ArrayList<>();
+        LatestIntDelivery delivery = new LatestIntDelivery(executor,
+                (token, revision, value) -> delivered.add(token + ":" + revision + ":" + value));
+
+        delivery.offer(1L, 100L, 10);
+        delivery.offer(2L, 200L, 20);
+        executor.runAll();
+
+        assertEquals(Arrays.asList("2:200:20"), delivered);
+    }
+
+    @Test
+    public void concurrentOlderRevisionCannotReplaceNewerValue() {
+        ManualExecutor executor = new ManualExecutor();
+        List<Integer> delivered = new ArrayList<>();
+        LatestIntDelivery delivery = new LatestIntDelivery(executor, delivered::add);
+
+        delivery.offer(7L, 2L, 20);
+        delivery.offer(7L, 1L, 10);
+        executor.runAll();
+
+        assertEquals(Arrays.asList(20), delivered);
+    }
+
+    @Test
+    public void lateOldEpochCannotReplaceNewEpochValue() {
+        ManualExecutor executor = new ManualExecutor();
+        List<Integer> delivered = new ArrayList<>();
+        LatestIntDelivery delivery = new LatestIntDelivery(executor, delivered::add);
+
+        delivery.offer(8L, 1L, 80);
+        delivery.offer(7L, 100L, 70);
+        executor.runAll();
+
+        assertEquals(Arrays.asList(80), delivered);
+    }
+
     private static class ManualExecutor implements Executor {
         private final ArrayDeque<Runnable> tasks = new ArrayDeque<>();
 

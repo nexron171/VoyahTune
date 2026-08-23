@@ -5,16 +5,26 @@ import java.util.function.IntConsumer;
 
 /** Thread-safe latest-value slot with at most one scheduled/running delivery. */
 final class LatestIntDelivery implements AutoCloseable {
+    interface Listener {
+        void accept(long token, long revision, int value);
+    }
+
     private final Executor executor;
-    private final IntConsumer listener;
+    private final Listener listener;
     private final Runnable drainRunnable = this::drain;
 
+    private long latestToken;
+    private long latestRevision;
     private int latestValue;
     private long offeredRevision;
     private boolean scheduled;
     private boolean closed;
 
     LatestIntDelivery(Executor executor, IntConsumer listener) {
+        this(executor, (token, revision, value) -> listener.accept(value));
+    }
+
+    LatestIntDelivery(Executor executor, Listener listener) {
         if (executor == null || listener == null) {
             throw new IllegalArgumentException("executor/listener required");
         }
@@ -23,10 +33,26 @@ final class LatestIntDelivery implements AutoCloseable {
     }
 
     void offer(int value) {
+        offer(0L, 0L, value);
+    }
+
+    void offer(long token, int value) {
+        offer(token, 0L, value);
+    }
+
+    void offer(long token, long revision, int value) {
         boolean shouldSchedule = false;
         long scheduledRevision = 0L;
         synchronized (this) {
             if (closed) return;
+            if (token > 0L && latestToken > 0L) {
+                if (token < latestToken
+                        || (token == latestToken && revision < latestRevision)) {
+                    return;
+                }
+            }
+            latestToken = token;
+            latestRevision = revision;
             latestValue = value;
             offeredRevision++;
             if (!scheduled) {
@@ -58,16 +84,20 @@ final class LatestIntDelivery implements AutoCloseable {
     }
 
     private void drain() {
+        final long token;
+        final long valueRevision;
         final int value;
         final long revision;
         synchronized (this) {
             if (closed) return;
+            token = latestToken;
+            valueRevision = latestRevision;
             value = latestValue;
             revision = offeredRevision;
         }
 
         try {
-            listener.accept(value);
+            listener.accept(token, valueRevision, value);
         } catch (RuntimeException ignored) {
             // A bad consumer value must not poison future deliveries or its executor thread.
         } finally {
