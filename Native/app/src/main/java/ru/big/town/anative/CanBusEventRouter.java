@@ -105,6 +105,7 @@ final class CanBusEventRouter {
 
         private boolean drainScheduled;
         private volatile boolean closed;
+        private long acceptedEpoch = Long.MIN_VALUE;
         private long dropped;
 
         Mailbox(int interestMask, int[] vehicleStateIds, Executor executor,
@@ -132,6 +133,14 @@ final class CanBusEventRouter {
             boolean schedule = false;
             synchronized (this) {
                 if (closed) return;
+                if (event.connectionEpoch < acceptedEpoch) return;
+                if (event.connectionEpoch > acceptedEpoch) {
+                    // A reconnect is a hard barrier: no queued state or transition from the old
+                    // Binder recipient may execute in the new service session.
+                    queue.clear();
+                    lastAccepted.clear();
+                    acceptedEpoch = event.connectionEpoch;
+                }
                 int key = event.signalKey();
                 CanBusEvent previous = lastAccepted.get(key);
                 if (event.samePayload(previous)) {

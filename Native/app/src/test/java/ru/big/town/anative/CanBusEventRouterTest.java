@@ -68,6 +68,28 @@ public class CanBusEventRouterTest {
     }
 
     @Test
+    public void newEpochClearsQueuedEventsAndRejectsLateOldEpoch() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        ManualExecutor executor = new ManualExecutor();
+        List<String> delivered = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_DOOR
+                        | CanBusEventRouter.INTEREST_GEAR,
+                null, executor,
+                event -> delivered.add(event.connectionEpoch + ":" + event.kind + ":"
+                        + event.first));
+
+        router.dispatch(CanBusEvent.door(CanBusEvent.Origin.LIVE, 1, 1, 1, 1));
+        router.dispatch(CanBusEvent.gear(CanBusEvent.Origin.LIVE, 1, 2, 2, 3));
+        router.dispatch(CanBusEvent.connection(2, 3, 3));
+        router.dispatch(CanBusEvent.gear(CanBusEvent.Origin.LIVE, 1, 4, 4, 0));
+        router.dispatch(CanBusEvent.gear(CanBusEvent.Origin.LIVE, 2, 5, 5, 0));
+
+        executor.runAll();
+        assertEquals(Arrays.asList("2:CONNECTION:0", "2:GEAR:0"), delivered);
+    }
+
+    @Test
     public void levelSignalsKeepLatestValuePerKey() {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
