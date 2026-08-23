@@ -25,7 +25,6 @@ import java.util.EnumMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 
@@ -48,6 +47,8 @@ public final class ApolloTlcService extends Service {
             "ru.big.town.anative.APOLLO_TLC_UPDATE";
     public static final String ACTION_REQUEST_APOLLO_TLC_UPDATE =
             "ru.big.town.anative.REQUEST_APOLLO_TLC_UPDATE";
+    public static final String ACTION_RELEASE_APOLLO_TLC_DEMAND =
+            "ru.big.town.anative.RELEASE_APOLLO_TLC_DEMAND";
 
     public static final String EXTRA_CAN_CONNECTED = "canConnected";
     public static final String EXTRA_PROFILE_SUPPORTED = "profileSupported";
@@ -65,6 +66,7 @@ public final class ApolloTlcService extends Service {
     public static final String EXTRA_GLA_LIGHT_CHANGE_SWITCH = "glaLightChangeSwitch";
     public static final String EXTRA_TSR_SWITCH = "tsrSwitch";
     public static final String EXTRA_ERROR = "error";
+    public static final String EXTRA_DEMAND_SESSION = "apolloDemandSession";
 
     public static final String GLOBAL_MASTER_KEY = "open_voyah_apollo_master";
 
@@ -96,6 +98,7 @@ public final class ApolloTlcService extends Service {
     private static final long BIND_RETRY_MS = 5_000L;
     private static final long BIND_RETRY_MAX_MS = 60_000L;
     private static final long BIND_CONNECT_TIMEOUT_MS = 20_000L;
+    private static final long IDLE_UNBIND_GRACE_MS = 5_000L;
     private static final long ENTITLEMENT_SETTLE_MS = 1_000L;
     private static final long METRICS_INTERVAL_MS = 30_000L;
     private static final int MAX_TRACKED_TRANSACTION =
@@ -114,13 +117,14 @@ public final class ApolloTlcService extends Service {
      */
     private HandlerThread canBusWorkerThread;
     private volatile Handler handler;
+    private final ApolloCanBusDemandGate canBusDemandGate =
+            new ApolloCanBusDemandGate();
     private final ExecutorService schemaExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "ApolloTlcSchema");
         thread.setDaemon(true);
         return thread;
     });
 
-    private final AtomicBoolean queryInFlight = new AtomicBoolean();
     private final AtomicLong queryCoalesced = new AtomicLong();
     private final AtomicLong bindTimeouts = new AtomicLong();
     private final AtomicLong workerDispatchMaxUs = new AtomicLong();
@@ -148,6 +152,7 @@ public final class ApolloTlcService extends Service {
     private int rebindAttempt;
     private long metricsWindowStartedAtMs;
     private Runnable bindConnectWatchdog;
+    private Runnable idleUnbindRunnable;
 
     private boolean schemaCheckComplete;
     private boolean canBusSchemaMatches;
@@ -185,8 +190,11 @@ public final class ApolloTlcService extends Service {
     private final BroadcastReceiver requestReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            long sessionToken = intent.getLongExtra(EXTRA_DEMAND_SESSION, 0L);
             if (ACTION_REQUEST_APOLLO_TLC_UPDATE.equals(intent.getAction())) {
-                enqueueQuery();
+                enqueueQuery(sessionToken);
+            } else if (ACTION_RELEASE_APOLLO_TLC_DEMAND.equals(intent.getAction())) {
+                postWorker(() -> releaseClientDemand(sessionToken));
             }
         }
     };
@@ -204,6 +212,10 @@ public final class ApolloTlcService extends Service {
                     cancelBindConnectWatchdog();
                     handler.removeCallbacks(rebindRunnable);
                     canBusBindingRequested = true;
+                    if (!hasClientDemand()) {
+                        releaseCanBusTransportWithoutDemand("connected after UI release");
+                        return;
+                    }
                     verifyConnectedCanBus(service);
                 });
             }
@@ -213,6 +225,10 @@ public final class ApolloTlcService extends Service {
                 ServiceConnection source = this;
                 postWorker(() -> {
                     if (!isCurrentConnection(connectionEpoch, source)) return;
+                    if (!hasClientDemand()) {
+                        releaseCanBusTransportWithoutDemand("disconnected while idle");
+                        return;
+                    }
                     invalidateCanBusIdentity("can_disconnected");
                     scheduleCanBusRebind();
                 });
@@ -291,22 +307,112 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /** Coalesces Messenger, broadcast and sticky-service queries into one full CAN refresh. */
-    private void enqueueQuery() {
+    /**
+     * Acquires every versioned UI session even when its expensive CAN refresh is coalesced.
+     * One trailing refresh guarantees that a newer visible session receives a snapshot after an
+     * older synchronous Binder read completes.
+     */
+    private void enqueueQuery(long sessionToken) {
         if (destroyed) return;
-        if (!queryInFlight.compareAndSet(false, true)) {
+        if (sessionToken <= 0L) {
+            Log.w(TAG, "Ignoring Apollo query without a valid demand session");
+            return;
+        }
+        if (!postWorker(() -> acquireClientDemand(sessionToken))) return;
+        if (!canBusDemandGate.beginQuery(sessionToken)) {
             queryCoalesced.incrementAndGet();
             return;
         }
+        postQueryWork(sessionToken);
+    }
+
+    private void postQueryWork(long sessionToken) {
         if (!postWorker(() -> {
             try {
-                handleQuery();
+                if (canBusDemandGate.isActive(sessionToken)) {
+                    handleQuery();
+                }
             } finally {
-                queryInFlight.set(false);
+                long trailingSession = canBusDemandGate.finishQuery(sessionToken);
+                if (trailingSession != ApolloCanBusDemandGate.NO_QUERY_SESSION) {
+                    postQueryWork(trailingSession);
+                }
             }
         })) {
-            queryInFlight.set(false);
+            canBusDemandGate.abandonQuery(sessionToken);
         }
+    }
+
+    /** A real UI query opens one idempotent, monotonically versioned CanBus demand session. */
+    private void acquireClientDemand(long sessionToken) {
+        int result = canBusDemandGate.acquire(sessionToken);
+        if (result == ApolloCanBusDemandGate.ACQUIRE_REJECTED) return;
+        cancelIdleUnbind();
+        if (result == ApolloCanBusDemandGate.ACQUIRE_NEW) {
+            // A new UI session must not inherit a minute-long backoff from an older one.
+            rebindAttempt = 0;
+            Log.i(TAG, "Apollo UI demand acquired; session=" + sessionToken);
+        }
+    }
+
+    /** Called by the permission-gated RestoreMode lifecycle broadcast. */
+    private void releaseClientDemand(long sessionToken) {
+        if (!canBusDemandGate.release(sessionToken)) return;
+        handler.removeCallbacks(rebindRunnable);
+        Log.i(TAG, "Apollo UI demand released; session=" + sessionToken
+                + " idle grace=" + IDLE_UNBIND_GRACE_MS + "ms");
+        maybeScheduleIdleUnbind();
+    }
+
+    private boolean hasClientDemand() {
+        return canBusDemandGate.isActive();
+    }
+
+    private void cancelIdleUnbind() {
+        Runnable idle = idleUnbindRunnable;
+        idleUnbindRunnable = null;
+        Handler target = handler;
+        if (idle != null && target != null) target.removeCallbacks(idle);
+    }
+
+    /**
+     * Keeps a short grace for Activity recreation. A pending TX77 -> settle -> TX58 sequence owns
+     * an operation lease and arms the idle release only after its terminal path.
+     */
+    private void maybeScheduleIdleUnbind() {
+        if (destroyed) return;
+        int generation = canBusDemandGate.armIdleRelease(pending);
+        if (generation == ApolloCanBusDemandGate.REJECTED_GENERATION) return;
+        cancelIdleUnbind();
+        Runnable idle = () -> runWorkerSafely("idle CanBus release", () -> {
+            if (!canBusDemandGate.isIdleReleaseCurrent(generation, pending)) return;
+            idleUnbindRunnable = null;
+            releaseCanBusTransportWithoutDemand("Apollo UI idle");
+        });
+        idleUnbindRunnable = idle;
+        handler.postDelayed(idle, IDLE_UNBIND_GRACE_MS);
+    }
+
+    /** Intentional release: fence late callbacks without turning idle into a profile failure. */
+    private void releaseCanBusTransportWithoutDemand(String reason) {
+        boolean hadTransport = canBusBindingRequested || canBusConnected || canBusBinder != null;
+        canBusDemandGate.invalidateIdleRelease();
+        cancelIdleUnbind();
+        ++canBusVerificationGeneration;
+        canBusVerificationPending = false;
+        pendingCanBusBinder = null;
+        if (pending) {
+            ++writeGeneration;
+            pending = false;
+            pendingSignal = null;
+            pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
+            pendingBindEpoch = 0;
+            lastError = ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
+        }
+        releaseCanBusBinding(reason);
+        invalidateCanSnapshot();
+        if (hadTransport) Log.i(TAG, "CanBus transport released: " + reason);
+        publishState();
     }
 
     private static void updateMax(AtomicLong target, long value) {
@@ -323,8 +429,8 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    public static void requestQuery(Context context) {
-        start(context, ACTION_INTERNAL_QUERY, false, true);
+    public static void requestQuery(Context context, long sessionToken) {
+        start(context, ACTION_INTERNAL_QUERY, false, true, sessionToken);
     }
 
     public static void requestTlcSet(Context context, boolean enabled, boolean argumentValid) {
@@ -354,10 +460,16 @@ public final class ApolloTlcService extends Service {
 
     private static void start(Context context, String action, boolean enabled,
                               boolean argumentValid) {
+        start(context, action, enabled, argumentValid, 0L);
+    }
+
+    private static void start(Context context, String action, boolean enabled,
+                              boolean argumentValid, long sessionToken) {
         Intent intent = new Intent(context, ApolloTlcService.class);
         intent.setAction(action);
         intent.putExtra(EXTRA_ENABLED, enabled);
         intent.putExtra(EXTRA_ARGUMENT_VALID, argumentValid);
+        if (sessionToken > 0L) intent.putExtra(EXTRA_DEMAND_SESSION, sessionToken);
         try {
             context.startService(intent);
         } catch (RuntimeException e) {
@@ -374,8 +486,10 @@ public final class ApolloTlcService extends Service {
         handler = new Handler(canBusWorkerThread.getLooper());
         boolean receiverFailed = false;
         try {
-            registerReceiver(requestReceiver,
-                    new IntentFilter(ACTION_REQUEST_APOLLO_TLC_UPDATE),
+            IntentFilter requestFilter =
+                    new IntentFilter(ACTION_REQUEST_APOLLO_TLC_UPDATE);
+            requestFilter.addAction(ACTION_RELEASE_APOLLO_TLC_DEMAND);
+            registerReceiver(requestReceiver, requestFilter,
                     BIND_PERMISSION, null, RECEIVER_EXPORTED);
             requestReceiverRegistered = true;
         } catch (RuntimeException e) {
@@ -390,7 +504,7 @@ public final class ApolloTlcService extends Service {
             if (!BuildConfig.HAS_DIRECT_APOLLO) {
                 forceMasterOff("direct Apollo disabled at build time");
             }
-            // Direct Apollo binds only after the installed CanBus VehicleState schema matches.
+            // Boot validates only the installed schema. A real Apollo UI query owns the binding.
             if (BuildConfig.HAS_DIRECT_APOLLO) {
                 if (hasWriteCanBusPermission()) {
                     startSchemaCheck();
@@ -411,6 +525,8 @@ public final class ApolloTlcService extends Service {
                 && intent.getBooleanExtra(EXTRA_ENABLED, false);
         final boolean valid = intent != null
                 && intent.getBooleanExtra(EXTRA_ARGUMENT_VALID, false);
+        final long sessionToken = intent == null
+                ? 0L : intent.getLongExtra(EXTRA_DEMAND_SESSION, 0L);
         if (ACTION_INTERNAL_SET.equals(action)
                 || ACTION_INTERNAL_MASTER_SET.equals(action)
                 || ACTION_INTERNAL_GLA_SET.equals(action)
@@ -432,8 +548,10 @@ public final class ApolloTlcService extends Service {
                     handleTsrSet(enabled, valid);
                 }
             });
-        } else {
-            enqueueQuery();
+        } else if (ACTION_INTERNAL_QUERY.equals(action)) {
+            enqueueQuery(sessionToken);
+        } else if (action != null) {
+            Log.w(TAG, "Ignoring unknown Apollo action: " + action);
         }
         return BuildConfig.HAS_DIRECT_APOLLO ? START_STICKY : START_NOT_STICKY;
     }
@@ -446,7 +564,7 @@ public final class ApolloTlcService extends Service {
     @Override
     public void onDestroy() {
         destroyed = true;
-        queryInFlight.set(false);
+        canBusDemandGate.close();
         if (requestReceiverRegistered) {
             try {
                 unregisterReceiver(requestReceiver);
@@ -744,6 +862,7 @@ public final class ApolloTlcService extends Service {
     }
 
     private int beginPendingWrite(ApolloTlcPolicy.Signal signal, int desiredState) {
+        cancelIdleUnbind();
         int generation = ++writeGeneration;
         pending = true;
         pendingSignal = signal;
@@ -810,6 +929,7 @@ public final class ApolloTlcService extends Service {
         pendingSignal = null;
         pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
         pendingBindEpoch = 0;
+        maybeScheduleIdleUnbind();
     }
 
     private boolean hasCompleteCompositeSwitchSnapshot() {
@@ -1173,6 +1293,10 @@ public final class ApolloTlcService extends Service {
 
     /** Re-resolves the installed VehicleState table before the first Binder transaction. */
     private void verifyConnectedCanBus(IBinder candidate) {
+        if (!hasClientDemand()) {
+            releaseCanBusTransportWithoutDemand("verification started after UI release");
+            return;
+        }
         if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete) {
             rejectCanBusVerification("profile_canbus_schema_unavailable");
             return;
@@ -1182,6 +1306,11 @@ public final class ApolloTlcService extends Service {
             VehicleStateSchemaResult result = resolveVehicleStateSchema();
             postWorker(() -> {
                 if (!verificationResultCurrent(generation, candidate)) return;
+                if (!hasClientDemand()) {
+                    releaseCanBusTransportWithoutDemand(
+                            "verification completed after UI release");
+                    return;
+                }
                 canBusVerificationPending = false;
                 pendingCanBusBinder = null;
                 applyVehicleStateSchema(result);
@@ -1198,6 +1327,10 @@ public final class ApolloTlcService extends Service {
 
     private void activateVerifiedCanBus(IBinder service) {
         if (destroyed) return;
+        if (!hasClientDemand()) {
+            releaseCanBusTransportWithoutDemand("activation after UI release");
+            return;
+        }
         if (!hasWriteCanBusPermission()) {
             failWritePermissionClosed();
             publishState();
@@ -1234,7 +1367,7 @@ public final class ApolloTlcService extends Service {
     private void revalidateCanBusAndBind(String reason) {
         if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete
                 || !hasWriteCanBusPermission()
-                || canBusVerificationPending) {
+                || canBusVerificationPending || !hasClientDemand()) {
             return;
         }
         // This path is entered only after disconnect/death/rejection. Mark disconnected before
@@ -1248,6 +1381,11 @@ public final class ApolloTlcService extends Service {
             VehicleStateSchemaResult result = resolveVehicleStateSchema();
             postWorker(() -> {
                 if (!verificationResultCurrent(generation, null)) return;
+                if (!hasClientDemand()) {
+                    releaseCanBusTransportWithoutDemand(
+                            "revalidation completed after UI release");
+                    return;
+                }
                 canBusVerificationPending = false;
                 pendingCanBusBinder = null;
                 applyVehicleStateSchema(result);
@@ -1302,7 +1440,8 @@ public final class ApolloTlcService extends Service {
     }
 
     private void ensureCanBusBound() {
-        if (destroyed || canBusBindingRequested || !isBinderProfilePinned()) return;
+        if (destroyed || !hasClientDemand()
+                || canBusBindingRequested || !isBinderProfilePinned()) return;
         final int connectionEpoch = ++bindEpoch;
         activeBindEpoch = connectionEpoch;
         ServiceConnection connection = createCanBusConnection(connectionEpoch);
@@ -1332,10 +1471,10 @@ public final class ApolloTlcService extends Service {
 
     private void scheduleCanBusRebind() {
         if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete
-                || !hasWriteCanBusPermission()) return;
+                || !hasWriteCanBusPermission() || !hasClientDemand()) return;
         handler.removeCallbacks(rebindRunnable);
-        int exponent = Math.min(rebindAttempt, 4);
-        long delayMs = Math.min(BIND_RETRY_MAX_MS, BIND_RETRY_MS << exponent);
+        long delayMs = ApolloCanBusDemandGate.reconnectDelayMs(
+                rebindAttempt, BIND_RETRY_MS, BIND_RETRY_MAX_MS);
         rebindAttempt = Math.min(rebindAttempt + 1, 5);
         handler.postDelayed(rebindRunnable, delayMs);
         Log.w(TAG, "CanBus rebind scheduled in " + delayMs
@@ -1351,6 +1490,10 @@ public final class ApolloTlcService extends Service {
                 return;
             }
             bindConnectWatchdog = null;
+            if (!hasClientDemand()) {
+                releaseCanBusTransportWithoutDemand("bind timeout while idle");
+                return;
+            }
             bindTimeouts.incrementAndGet();
             Log.e(TAG, "CanBus bind timed out before onServiceConnected");
             restartCanBusBinding("bind_timeout");
@@ -1366,6 +1509,10 @@ public final class ApolloTlcService extends Service {
     }
 
     private void restartCanBusBinding(String reason) {
+        if (!hasClientDemand()) {
+            releaseCanBusTransportWithoutDemand(reason + " while idle");
+            return;
+        }
         invalidateCanBusIdentity(reason);
         releaseCanBusBinding(reason);
         scheduleCanBusRebind();
@@ -1427,7 +1574,7 @@ public final class ApolloTlcService extends Service {
                     // entitlement switch off even when an older installation persisted it as ON.
                     forceMasterOff("direct TLC startup");
                 }
-                if (isBinderProfilePinned()) {
+                if (isBinderProfilePinned() && hasClientDemand()) {
                     ensureCanBusBound();
                 } else {
                     invalidateCanSnapshot();

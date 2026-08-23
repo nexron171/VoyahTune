@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.text.Editable;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
 
 public class AdvanceActivity extends AppCompatActivity {
@@ -104,10 +106,14 @@ public class AdvanceActivity extends AppCompatActivity {
             "ru.big.town.anative.APOLLO_TLC_UPDATE";
     private static final String ACTION_REQUEST_APOLLO_TLC_UPDATE =
             "ru.big.town.anative.REQUEST_APOLLO_TLC_UPDATE";
+    private static final String ACTION_RELEASE_APOLLO_TLC_DEMAND =
+            "ru.big.town.anative.RELEASE_APOLLO_TLC_DEMAND";
+    private static final String EXTRA_APOLLO_DEMAND_SESSION = "apolloDemandSession";
     private static final String NATIVE_PACKAGE = "ru.big.town.anative";
     private static final String NATIVE_BIND_PERMISSION =
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
     private static final int APOLLO_UNKNOWN = Integer.MIN_VALUE;
+    private static final AtomicLong APOLLO_DEMAND_SEQUENCE = new AtomicLong();
 
     // Apollo Tech всегда отображает только подтверждённое Native состояние. Значения не сохраняются
     // в RestoreMode prefs: при каждом открытии раздела выполняется read-only запрос к автомобилю.
@@ -126,6 +132,7 @@ public class AdvanceActivity extends AppCompatActivity {
     private boolean apolloMasterKnown;
     private boolean apolloMasterEnabled;
     private boolean apolloPending;
+    private long apolloDemandSession;
     private int apolloPlcSwitch = APOLLO_UNKNOWN;
     private int apolloPlcStatus = APOLLO_UNKNOWN;
     private int apolloAnpSwitch = APOLLO_UNKNOWN;
@@ -1209,7 +1216,9 @@ public class AdvanceActivity extends AppCompatActivity {
     /** Переключение разделов (0 главный экран, 1 настройки автомобиля, 2 приложения и разделение экрана,
      *  3 Apollo Tech, 4 собственные команды, 5 кнопки на руле, 6 другое). */
     private void setSection(int index) {
+        int previousSection = currentSection;
         currentSection = index;
+        if (previousSection == 3 && index != 3) releaseApolloDemand();
         if (sectionTitle != null && index >= 0 && index < SECTION_TITLES.length)
             sectionTitle.setText(SECTION_TITLES[index]);
         if (pageMainScreen != null)      pageMainScreen.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
@@ -1355,6 +1364,7 @@ public class AdvanceActivity extends AppCompatActivity {
             updateApolloUi();
             return;
         }
+        long sessionToken = ensureApolloDemandSession();
         if (!apolloHasState && textApolloStatus != null) {
             textApolloStatus.setText("Запрашиваем состояние Apollo Tech у Native…");
         }
@@ -1362,7 +1372,11 @@ public class AdvanceActivity extends AppCompatActivity {
         boolean messengerDelivered = false;
         if (messengerReady) {
             try {
-                GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_APOLLO_QUERY));
+                Message query = Message.obtain(null, MSG_APOLLO_QUERY);
+                Bundle data = new Bundle();
+                data.putLong(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
+                query.setData(data);
+                GlobalVars.serviceMessenger.send(query);
                 messengerDelivered = true;
             } catch (RemoteException e) {
                 Log.w("$$$ Advance Apollo $$$", "Не удалось отправить MSG_APOLLO_QUERY", e);
@@ -1370,8 +1384,35 @@ public class AdvanceActivity extends AppCompatActivity {
         }
         if (shouldUseApolloBroadcastFallback(messengerReady, messengerDelivered)) {
             Intent request = new Intent(ACTION_REQUEST_APOLLO_TLC_UPDATE)
-                    .setPackage(NATIVE_PACKAGE);
+                    .setPackage(NATIVE_PACKAGE)
+                    .putExtra(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
             sendBroadcast(request);
+        }
+    }
+
+    /** Releases Native's CanBus UI-session lease; Native keeps a short recreation grace. */
+    private void releaseApolloDemand() {
+        if (!BuildConfig.HAS_DIRECT_APOLLO) return;
+        long sessionToken = apolloDemandSession;
+        if (sessionToken <= 0L) return;
+        apolloDemandSession = 0L;
+        Intent release = new Intent(ACTION_RELEASE_APOLLO_TLC_DEMAND)
+                .setPackage(NATIVE_PACKAGE)
+                .putExtra(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
+        sendBroadcast(release);
+    }
+
+    /** One token survives duplicate refreshes but never an Apollo-page pause/leave boundary. */
+    private long ensureApolloDemandSession() {
+        if (apolloDemandSession > 0L) return apolloDemandSession;
+        while (true) {
+            long observed = APOLLO_DEMAND_SEQUENCE.get();
+            long candidate = Math.max(
+                    Math.max(1L, SystemClock.elapsedRealtimeNanos()), observed + 1L);
+            if (APOLLO_DEMAND_SEQUENCE.compareAndSet(observed, candidate)) {
+                apolloDemandSession = candidate;
+                return apolloDemandSession;
+            }
         }
     }
 
@@ -2106,6 +2147,7 @@ public class AdvanceActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        if (currentSection == 3) releaseApolloDemand();
         try { unregisterReceiver(luxReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(modeSyncReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(settingSyncReceiver); } catch (Exception ignored) {}

@@ -190,7 +190,9 @@ public class SetModesService extends Service {
 
                 case MSG_APOLLO_TLC_QUERY:
                     Log.i(TAG, "handleMessage() MSG_APOLLO_TLC_QUERY");
-                    ApolloTlcService.requestQuery(SetModesService.this);
+                    ApolloTlcService.requestQuery(SetModesService.this,
+                            msg.getData().getLong(
+                                    ApolloTlcService.EXTRA_DEMAND_SESSION, 0L));
                     break;
 
                 case MSG_APOLLO_TLC_SET:
