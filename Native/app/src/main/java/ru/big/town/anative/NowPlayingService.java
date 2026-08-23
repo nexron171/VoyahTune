@@ -11,6 +11,7 @@ import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
+import android.media.session.MediaSession;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Handler;
@@ -26,6 +27,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -75,6 +77,7 @@ public class NowPlayingService extends Service {
     private static final AtomicLong ACTIVE_INSTANCE = new AtomicLong();
     private static final AtomicLong ROUTE_REVISION = new AtomicLong();
     private static final AtomicLong BROADCAST_REVISION = new AtomicLong();
+    private static final Object INSTANCE_CALLBACK_LOCK = new Object();
     private static final Object SNAPSHOT_COMMIT_LOCK = new Object();
     private static final Object ART_COMMIT_LOCK = new Object();
     private static final ThreadPoolExecutor ROUTE_EXECUTOR = newDeliveryExecutor("MediaRoute");
@@ -148,21 +151,26 @@ public class NowPlayingService extends Service {
 
     private volatile Handler handler;
     private HandlerThread workerThread;
+    private volatile Handler callbackHandler;
+    private HandlerThread callbackThread;
+    private volatile MediaRefreshDelivery mediaRefreshes;
     private volatile boolean stopping;
     private long instanceGeneration;
+    private long watcherSequence;
+    private volatile long activeWatcherEpoch;
     private boolean receiverRegistered;
     private MediaSessionManager msm;
-    private MediaController current;                 // сессия, за которой сейчас следим
+    private volatile MediaController current;        // пишет worker, читает лёгкий callback ingress
     private MediaController.Callback controllerCallback;
     private Bitmap lastWrittenArt;                   // тот же Bitmap не кодируем в PNG на каждый playback callback
 
     private final MediaSessionManager.OnActiveSessionsChangedListener sessionsListener =
-            controllers -> dispatchWorker("sessions", () -> onSessionsChanged(controllers));
+            controllers -> offerMediaRefresh(MediaRefreshDelivery.Work.REBUILD, "sessions");
 
     private final BroadcastReceiver requestReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             // UI открылось/подписалось — сразу отдать текущий снимок.
-            dispatchWorker("request", () -> publish("request"));
+            offerMediaRefresh(MediaRefreshDelivery.Work.PUBLISH, "request");
         }
     };
 
@@ -171,8 +179,11 @@ public class NowPlayingService extends Service {
         super.onCreate();
         // Сначала fail-closed сбрасываем legacy-маршрут. Даже если foreground-уведомление не
         // поднимется, старое значение "dispatch" не должно остаться после неудачного запуска.
-        instanceGeneration = INSTANCE_SEQUENCE.incrementAndGet();
-        ACTIVE_INSTANCE.set(instanceGeneration);
+        synchronized (INSTANCE_CALLBACK_LOCK) {
+            instanceGeneration = INSTANCE_SEQUENCE.incrementAndGet();
+            ACTIVE_INSTANCE.set(instanceGeneration);
+            MediaControlRouter.activateObserverGeneration(instanceGeneration);
+        }
         resetSnapshotForNewInstance();
         enqueueRoute(ROUTE_NATIVE, "startup", false);
         enqueueSnapshotBroadcast(buildSnapshotIntent());
@@ -195,10 +206,20 @@ public class NowPlayingService extends Service {
         workerThread = new HandlerThread("NowPlaying", Process.THREAD_PRIORITY_BACKGROUND);
         workerThread.start();
         handler = new Handler(workerThread.getLooper());
+        callbackThread = new HandlerThread("NowPlayingIngress", Process.THREAD_PRIORITY_BACKGROUND);
+        callbackThread.start();
+        callbackHandler = new Handler(callbackThread.getLooper());
+        mediaRefreshes = new MediaRefreshDelivery(command -> {
+            Handler worker = handler;
+            if (stopping || worker == null || !worker.post(command)) {
+                throw new RejectedExecutionException("NowPlaying worker unavailable");
+            }
+        }, this::runMediaRefresh);
+        final Handler callbacks = callbackHandler;
         dispatchWorker("initialize", () -> {
             try {
                 registerReceiver(requestReceiver,
-                        new IntentFilter(ACTION_REQUEST_NOW_PLAYING), null, handler,
+                        new IntentFilter(ACTION_REQUEST_NOW_PLAYING), null, callbacks,
                         RECEIVER_EXPORTED);
                 receiverRegistered = true;
             } catch (Exception e) {
@@ -208,7 +229,7 @@ public class NowPlayingService extends Service {
             if (msm == null) return;
             try {
                 // null вместо NotificationListener-компонента разрешён при MEDIA_CONTENT_CONTROL.
-                msm.addOnActiveSessionsChangedListener(sessionsListener, null, handler);
+                msm.addOnActiveSessionsChangedListener(sessionsListener, null, callbacks);
                 onSessionsChanged(msm.getActiveSessions(null));  // первичный снимок
                 Log.i(TAG, "onCreate: подписка на активные медиа-сессии установлена");
             } catch (SecurityException e) {
@@ -235,6 +256,35 @@ public class NowPlayingService extends Service {
         return !stopping && ACTIVE_INSTANCE.get() == instanceGeneration;
     }
 
+    private boolean isActiveWatcher(long generation, long watcherEpoch) {
+        return !stopping
+                && ACTIVE_INSTANCE.get() == generation
+                && activeWatcherEpoch == watcherEpoch;
+    }
+
+    private void offerMediaRefresh(MediaRefreshDelivery.Work work, String reason) {
+        if (!isActiveInstance()) return;
+        MediaRefreshDelivery refreshes = mediaRefreshes;
+        if (refreshes != null) refreshes.offer(work, reason);
+    }
+
+    private void runMediaRefresh(MediaRefreshDelivery.Work work, String reason) {
+        if (!isActiveInstance()) return;
+        switch (work) {
+            case REBUILD:
+                onSessionsChanged(safeSessions());
+                break;
+            case REPICK:
+                repick(reason);
+                break;
+            case PUBLISH:
+                publish(reason);
+                break;
+            default:
+                break;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Выбор активной сессии + подписка на её изменения
     // -------------------------------------------------------------------------
@@ -254,35 +304,68 @@ public class NowPlayingService extends Service {
     private final java.util.List<MediaController.Callback> watchedCbs = new java.util.ArrayList<>();
 
     private void onSessionsChanged(List<MediaController> controllers) {
-        if (stopping) return;
+        if (!isActiveInstance()) return;
+        Handler callbacks = callbackHandler;
+        if (callbacks == null) return;
+        final long generation = instanceGeneration;
+        final long watcherEpoch;
+        synchronized (INSTANCE_CALLBACK_LOCK) {
+            if (!isActiveInstance()) return;
+            watcherEpoch = ++watcherSequence;
+            activeWatcherEpoch = watcherEpoch;
+        }
         detachAll();
         if (controllers != null) {
             for (MediaController c : controllers) {
-                if (stopping) return;
+                if (!isActiveInstance()) return;
                 final MediaController watchedController = c;
+                final MediaSession.Token watchedToken = watchedController.getSessionToken();
                 MediaController.Callback cb = new MediaController.Callback() {
-                    private boolean wasActive = MediaControlRouter.isActiveState(
-                            safePlaybackState(watchedController));
+                    private final PlaybackActivityTracker activity = new PlaybackActivityTracker(
+                            MediaControlRouter.isActiveState(safePlaybackState(watchedController)));
 
                     @Override public void onMetadataChanged(MediaMetadata metadata) {
-                        dispatchWorker("metadata", () -> repick("metadata"));
+                        if (!isActiveWatcher(generation, watcherEpoch)) return;
+                        // Metadata cannot change controller priority. Non-current metadata is noise.
+                        if (sameController(watchedController, current)) {
+                            offerMediaRefresh(MediaRefreshDelivery.Work.PUBLISH, "metadata");
+                        }
                     }
                     @Override public void onPlaybackStateChanged(PlaybackState state) {
-                        if (stopping) return;
+                        if (!isActiveWatcher(generation, watcherEpoch)) return;
                         boolean active = MediaControlRouter.isActiveState(state);
-                        if (active && !wasActive) MediaControlRouter.notePlaying(watchedController);
-                        wasActive = active;
-                        dispatchWorker("playback", () -> repick("playback"));
+                        PlaybackActivityTracker.Change change = activity.update(active);
+                        if (change == PlaybackActivityTracker.Change.ENTERED_ACTIVE) {
+                            notePlayingIfActive(watchedToken, generation, watcherEpoch);
+                        }
+                        if (!isActiveWatcher(generation, watcherEpoch)) return;
+                        if (change != PlaybackActivityTracker.Change.SAME) {
+                            offerMediaRefresh(MediaRefreshDelivery.Work.REPICK, "playback-edge");
+                        } else if (sameController(watchedController, current)) {
+                            // Same playback class cannot change selection, but the public snapshot
+                            // still needs current state/position for the selected controller.
+                            offerMediaRefresh(MediaRefreshDelivery.Work.PUBLISH, "playback");
+                        }
                     }
                     @Override public void onSessionDestroyed() {
-                        dispatchWorker("session-destroyed",
-                                () -> onSessionsChanged(safeSessions()));
+                        if (isActiveWatcher(generation, watcherEpoch)) {
+                            offerMediaRefresh(MediaRefreshDelivery.Work.REBUILD,
+                                    "session-destroyed");
+                        }
                     }
                 };
-                try { c.registerCallback(cb, handler); watched.add(c); watchedCbs.add(cb); } catch (Exception ignored) {}
+                try {
+                    c.registerCallback(cb, callbacks);
+                    watched.add(c);
+                    watchedCbs.add(cb);
+                } catch (Exception ignored) {}
             }
         }
-        current = MediaControlRouter.selectController(controllers);
+        if (!isActiveInstance()) return;
+        MediaController selected = MediaControlRouter.selectController(
+                controllers, instanceGeneration);
+        if (!isActiveInstance()) return;
+        current = selected;
         Log.i(TAG, "сессий: " + (controllers == null ? 0 : controllers.size())
                 + ", топ: " + (current != null ? current.getPackageName() : "нет"));
         publishMediaRoute();
@@ -295,8 +378,12 @@ public class NowPlayingService extends Service {
      * publishMediaRoute внутри дедуплицирует запись, так что Settings.Global не долбится.
      */
     private void repick(String reason) {
-        if (stopping) return;
-        MediaController pick = MediaControlRouter.selectController(safeSessions());
+        if (!isActiveInstance()) return;
+        List<MediaController> controllers = safeSessions();
+        if (!isActiveInstance()) return;
+        MediaController pick = MediaControlRouter.selectController(
+                controllers, instanceGeneration);
+        if (!isActiveInstance()) return;
         if (!sameController(pick, current)) {
             current = pick;
             Log.i(TAG, "топ-сессия сменилась (" + reason + "): "
@@ -304,6 +391,14 @@ public class NowPlayingService extends Service {
         }
         publishMediaRoute();
         publish(reason);
+    }
+
+    private void notePlayingIfActive(MediaSession.Token token, long generation,
+                                     long watcherEpoch) {
+        synchronized (INSTANCE_CALLBACK_LOCK) {
+            if (!isActiveWatcher(generation, watcherEpoch)) return;
+            MediaControlRouter.notePlaying(token, generation);
+        }
     }
 
     private void detachAll() {
@@ -557,7 +652,20 @@ public class NowPlayingService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
-        stopping = true;
+        synchronized (INSTANCE_CALLBACK_LOCK) {
+            stopping = true;
+            activeWatcherEpoch++;
+            MediaControlRouter.deactivateObserverGeneration(instanceGeneration);
+        }
+        MediaRefreshDelivery refreshes = mediaRefreshes;
+        mediaRefreshes = null;
+        if (refreshes != null) refreshes.close();
+        HandlerThread ingress = callbackThread;
+        callbackHandler = null;
+        callbackThread = null;
+        // quit(), not quitSafely(): framework may already have queued a callback storm. Every
+        // callback has been invalidated above, so draining that backlog has no value.
+        if (ingress != null) ingress.quit();
         Handler worker = handler;
         HandlerThread thread = workerThread;
         enqueueRoute(ROUTE_NATIVE, "destroy", true);

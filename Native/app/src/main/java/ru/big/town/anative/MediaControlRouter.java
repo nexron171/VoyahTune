@@ -29,6 +29,7 @@ final class MediaControlRouter {
     static final String ROUTE_KEYMANAGER = "keymanager";
     static final String ROUTE_NATIVE     = "native";
     static final String ROUTE_NOOP       = "noop";
+    private static final int MAX_SELECTION_ATTEMPTS = 3;
 
     private static final Object TARGET_LOCK = new Object();
     private static MediaSession.Token stickyToken;
@@ -36,6 +37,12 @@ final class MediaControlRouter {
     private static boolean stickyPinned;
     private static final List<MediaSession.Token> lastActiveTokens = new ArrayList<>();
     private static boolean activeSnapshotInitialized;
+    /** Active NowPlayingService generation allowed to commit observer-derived routing state. */
+    private static long observerGeneration;
+    /** Invalidates selections whose controller reads started before a newer edge/command. */
+    private static long targetRevision;
+    /** Serializes active-session snapshots without replaying an old transition over a new command. */
+    private static long activeSnapshotRevision;
 
     private MediaControlRouter() {}
 
@@ -59,6 +66,16 @@ final class MediaControlRouter {
             b.putString("package", packageName);
             b.putInt("playbackClass", playbackClass);
             return b;
+        }
+    }
+
+    private static final class SelectionAttempt {
+        final MediaController selected;
+        final boolean stable;
+
+        SelectionAttempt(MediaController selected, boolean stable) {
+            this.selected = selected;
+            this.stable = stable;
         }
     }
 
@@ -99,32 +116,90 @@ final class MediaControlRouter {
     /** Called by NowPlayingService when a controller genuinely enters an active playback state. */
     static void notePlaying(MediaController controller) {
         if (controller == null) return;
+        notePlaying(controller.getSessionToken());
+    }
+
+    /** Token overload keeps callback-ingress work free of controller IPC. */
+    static void notePlaying(MediaSession.Token token) {
+        notePlaying(token, 0L);
+    }
+
+    /** Generation-fenced observer update; generation 0 is reserved for non-service callers. */
+    static void notePlaying(MediaSession.Token token, long generation) {
+        if (token == null) return;
         synchronized (TARGET_LOCK) {
-            stickyToken = controller.getSessionToken();
+            if (!canMutateObserverStateLocked(generation)) return;
+            stickyToken = token;
             // A fresh inactive->active transition is stronger evidence than stale PLAYING states
             // left behind by Bluetooth/bridge sessions. This is not an own-pause pin: once it becomes
             // inactive, another actually active session must be allowed to win.
             stickyPinned = false;
+            targetRevision++;
+        }
+    }
+
+    static void activateObserverGeneration(long generation) {
+        if (generation <= 0L) return;
+        synchronized (TARGET_LOCK) {
+            observerGeneration = generation;
+        }
+    }
+
+    static void deactivateObserverGeneration(long generation) {
+        if (generation <= 0L) return;
+        synchronized (TARGET_LOCK) {
+            if (observerGeneration == generation) observerGeneration = 0L;
         }
     }
 
     /** Selection shared by the metadata service and command router. */
     static MediaController selectController(List<MediaController> supplied) {
+        return selectController(supplied, 0L);
+    }
+
+    /**
+     * Observer selection whose global sticky-state commits are rejected after service restart.
+     * Controller/Binder reads stay outside the generation lock.
+     */
+    static MediaController selectController(List<MediaController> supplied, long generation) {
         List<MediaController> controllers = supplied == null ? Collections.emptyList() : supplied;
-        observeActiveTransitions(controllers);
-        if (controllers.isEmpty()) {
-            synchronized (TARGET_LOCK) {
-                stickyToken = null;
-                stickyPinned = false;
-            }
-            return null;
+        if (!isObserverGenerationActive(generation)) return null;
+        for (int attempt = 0; attempt < MAX_SELECTION_ATTEMPTS; attempt++) {
+            SelectionAttempt result = selectControllerOnce(controllers, generation);
+            if (result.stable) return result.selected;
+            if (!isObserverGenerationActive(generation)) return null;
         }
+        // A continuously changing target is safer than dispatching one command to a stale session.
+        return null;
+    }
+
+    private static SelectionAttempt selectControllerOnce(List<MediaController> controllers,
+                                                          long generation) {
+        observeActiveTransitions(controllers, generation);
 
         MediaSession.Token sticky;
         boolean pinned;
+        long expectedRevision;
         synchronized (TARGET_LOCK) {
+            if (!canMutateObserverStateLocked(generation)) {
+                return new SelectionAttempt(null, true);
+            }
             sticky = stickyToken;
             pinned = stickyPinned;
+            expectedRevision = targetRevision;
+        }
+        if (controllers.isEmpty()) {
+            boolean stable;
+            synchronized (TARGET_LOCK) {
+                stable = canMutateObserverStateLocked(generation)
+                        && targetRevision == expectedRevision;
+                if (stable) {
+                    stickyToken = null;
+                    stickyPinned = false;
+                    targetRevision++;
+                }
+            }
+            return new SelectionAttempt(null, stable);
         }
 
         List<MediaControlPolicy.Candidate> candidates = new ArrayList<>(controllers.size());
@@ -139,63 +214,92 @@ final class MediaControlRouter {
             candidates.add(value);
         }
 
+        MediaSession.Token nextSticky = sticky;
+        boolean nextPinned = pinned;
         if (!stickyPresent && sticky != null) {
-            synchronized (TARGET_LOCK) {
-                if (sameToken(stickyToken, sticky)) {
-                    stickyToken = null;
-                    stickyPinned = false;
-                }
-            }
+            nextSticky = null;
+            nextPinned = false;
             pinned = false;
         }
 
         // An own-pause pin may keep an inactive target ahead of stale PLAYING sessions so the next
         // press resumes the same app. A normal sticky token wins only while it is itself active.
         if (pinned && stickyActive) {
-            synchronized (TARGET_LOCK) {
-                if (sameToken(stickyToken, sticky)) stickyPinned = false;
-            }
+            nextPinned = false;
             pinned = false;
         }
         int index = MediaControlPolicy.chooseTarget(
                 candidates, "sticky", pinned || stickyActive);
         MediaController selected = index >= 0 && index < controllers.size() ? controllers.get(index) : null;
-        if (selected != null
-                && playbackClass(safePlaybackState(selected)) == MediaControlPolicy.STATE_ACTIVE) {
-            synchronized (TARGET_LOCK) {
-                stickyToken = selected.getSessionToken();
-                stickyPinned = false;
+        if (selected != null && candidates.get(index).playbackClass == MediaControlPolicy.STATE_ACTIVE) {
+            nextSticky = selected.getSessionToken();
+            nextPinned = false;
+        }
+        boolean stable;
+        synchronized (TARGET_LOCK) {
+            stable = canMutateObserverStateLocked(generation)
+                    && targetRevision == expectedRevision;
+            if (stable) {
+                stickyToken = nextSticky;
+                stickyPinned = nextPinned;
+                targetRevision++;
             }
         }
-        return selected;
+        return new SelectionAttempt(selected, stable);
     }
 
     /** Detects a newly active token even when a session was already PLAYING when it was added. */
-    private static void observeActiveTransitions(List<MediaController> controllers) {
+    private static void observeActiveTransitions(List<MediaController> controllers, long generation) {
+        final long expectedRevision;
+        final long expectedSnapshotRevision;
+        final boolean snapshotInitialized;
+        final List<MediaSession.Token> previousActive;
+        synchronized (TARGET_LOCK) {
+            if (!canMutateObserverStateLocked(generation)) return;
+            expectedRevision = targetRevision;
+            expectedSnapshotRevision = activeSnapshotRevision;
+            snapshotInitialized = activeSnapshotInitialized;
+            previousActive = new ArrayList<>(lastActiveTokens);
+        }
         List<MediaSession.Token> activeNow = new ArrayList<>();
         for (MediaController controller : controllers) {
             if (isActiveState(safePlaybackState(controller))) {
                 activeNow.add(controller.getSessionToken());
             }
         }
-        synchronized (TARGET_LOCK) {
-            MediaSession.Token newlyActive = null;
-            if (activeSnapshotInitialized) {
-                for (MediaSession.Token token : activeNow) {
-                    if (!containsToken(lastActiveTokens, token)) {
-                        newlyActive = token;
-                        break; // activeSessions is already in framework priority order
-                    }
+        MediaSession.Token newlyActive = null;
+        if (snapshotInitialized) {
+            for (MediaSession.Token token : activeNow) {
+                if (!containsToken(previousActive, token)) {
+                    newlyActive = token;
+                    break; // activeSessions is already in framework priority order
                 }
             }
+        }
+        synchronized (TARGET_LOCK) {
+            if (!canMutateObserverStateLocked(generation)
+                    || activeSnapshotRevision != expectedSnapshotRevision) return;
             lastActiveTokens.clear();
             lastActiveTokens.addAll(activeNow);
             activeSnapshotInitialized = true;
-            if (newlyActive != null) {
+            activeSnapshotRevision++;
+            if (newlyActive != null && targetRevision == expectedRevision) {
                 stickyToken = newlyActive;
                 stickyPinned = false;
+                targetRevision++;
             }
         }
+    }
+
+    private static boolean isObserverGenerationActive(long generation) {
+        if (generation == 0L) return true;
+        synchronized (TARGET_LOCK) {
+            return observerGeneration == generation;
+        }
+    }
+
+    private static boolean canMutateObserverStateLocked(long generation) {
+        return generation == 0L || observerGeneration == generation;
     }
 
     static boolean isActiveState(PlaybackState state) {
@@ -260,6 +364,7 @@ final class MediaControlRouter {
             stickyToken = target.getSessionToken();
             stickyPinned = command == MediaControlPolicy.Command.PAUSE_ONLY
                     || command == MediaControlPolicy.Command.PLAY_PAUSE;
+            targetRevision++;
         }
     }
 
