@@ -91,8 +91,8 @@ final class CanBusEventHub {
     private final AtomicInteger subscriberCount = new AtomicInteger();
     private final AtomicLong malformedCallbacks = new AtomicLong();
     private final AtomicLong preReadyDrops = new AtomicLong();
-    private final AtomicBoolean doorSeedQueuedOrRunning = new AtomicBoolean();
-    private final AtomicBoolean vehicleSnapshotQueuedOrRunning = new AtomicBoolean();
+    private final AtomicBoolean doorSeedRequestPosted = new AtomicBoolean();
+    private final AtomicBoolean vehicleSnapshotRequestPosted = new AtomicBoolean();
 
     /* Guards callback ingress ordering, the ready barrier and seed revisions. */
     private final Object eventLock = new Object();
@@ -114,6 +114,8 @@ final class CanBusEventHub {
     private ServiceConnection serviceConnection;
     private long nextBindingGeneration;
     private long activeBindingGeneration;
+    private final LatestSingleFlight doorQueryGate = new LatestSingleFlight();
+    private final LatestSingleFlight vehicleQueryGate = new LatestSingleFlight();
 
     private final Runnable bindRetryRunnable = this::ensureBound;
     private final Runnable callbackRetryRunnable = this::ensureCallbackRegistered;
@@ -153,9 +155,9 @@ final class CanBusEventHub {
     /** Blocking TX2 is posted to the hub IO thread; a stale result is discarded by revision. */
     void requestDriverDoorSeed() {
         if (!router.hasInterest(CanBusEventRouter.INTEREST_DOOR)) return;
-        if (!doorSeedQueuedOrRunning.compareAndSet(false, true)) return;
-        if (!ioHandler.post(this::startDriverDoorQuery)) {
-            doorSeedQueuedOrRunning.set(false);
+        if (!doorSeedRequestPosted.compareAndSet(false, true)) return;
+        if (!ioHandler.post(this::acceptDriverDoorQueryRequest)) {
+            doorSeedRequestPosted.set(false);
         }
     }
 
@@ -166,9 +168,9 @@ final class CanBusEventHub {
      */
     void requestVehicleStateSnapshot() {
         if (!router.hasInterest(CanBusEventRouter.INTEREST_VEHICLE_STATE)) return;
-        if (!vehicleSnapshotQueuedOrRunning.compareAndSet(false, true)) return;
-        if (!ioHandler.post(this::startVehicleStateQuery)) {
-            vehicleSnapshotQueuedOrRunning.set(false);
+        if (!vehicleSnapshotRequestPosted.compareAndSet(false, true)) return;
+        if (!ioHandler.post(this::acceptVehicleStateQueryRequest)) {
+            vehicleSnapshotRequestPosted.set(false);
         }
     }
 
@@ -442,14 +444,21 @@ final class CanBusEventHub {
         }
     }
 
-    private void startDriverDoorQuery() {
+    private void acceptDriverDoorQueryRequest() {
+        doorSeedRequestPosted.set(false);
+        doorQueryGate.request();
+        startDriverDoorQueryIfNeeded();
+    }
+
+    private void startDriverDoorQueryIfNeeded() {
+        if (!doorQueryGate.tryStart()) return;
         IBinder binder = remote;
         long epoch;
         long revision;
         synchronized (eventLock) {
             epoch = activeEpoch;
             if (epoch == 0 || readyEpoch != epoch || binder == null) {
-                doorSeedQueuedOrRunning.set(false);
+                doorQueryGate.complete();
                 return;
             }
             revision = doorRevision;
@@ -459,10 +468,11 @@ final class CanBusEventHub {
             Integer frontLeft = readDriverDoor(binder);
             if (!ioHandler.post(() -> finishDriverDoorQuery(
                     binder, epoch, revision, frontLeft))) {
-                doorSeedQueuedOrRunning.set(false);
+                Log.w(TAG, "Door query completion rejected: hub IO stopped");
             }
         })) {
-            doorSeedQueuedOrRunning.set(false);
+            doorQueryGate.complete();
+            startDriverDoorQueryIfNeeded();
         }
     }
 
@@ -480,7 +490,8 @@ final class CanBusEventHub {
                         ++nextSequence, SystemClock.elapsedRealtime(), frontLeft));
             }
         } finally {
-            doorSeedQueuedOrRunning.set(false);
+            doorQueryGate.complete();
+            startDriverDoorQueryIfNeeded();
         }
     }
 
@@ -503,22 +514,30 @@ final class CanBusEventHub {
         }
     }
 
-    private void startVehicleStateQuery() {
+    private void acceptVehicleStateQueryRequest() {
+        vehicleSnapshotRequestPosted.set(false);
+        vehicleQueryGate.request();
+        startVehicleStateQueryIfNeeded();
+    }
+
+    private void startVehicleStateQueryIfNeeded() {
+        if (!vehicleQueryGate.tryStart()) return;
         IBinder binder = remote;
         long epoch = activeEpoch;
         if (binder == null || epoch == 0) {
-            vehicleSnapshotQueuedOrRunning.set(false);
+            vehicleQueryGate.complete();
             return;
         }
         synchronized (eventLock) {
             if (readyEpoch != epoch) {
-                vehicleSnapshotQueuedOrRunning.set(false);
+                vehicleQueryGate.complete();
                 return;
             }
         }
 
         if (!vehicleQueryHandler.post(() -> queryVehicleState(binder, epoch))) {
-            vehicleSnapshotQueuedOrRunning.set(false);
+            vehicleQueryGate.complete();
+            startVehicleStateQueryIfNeeded();
         }
     }
 
@@ -537,8 +556,15 @@ final class CanBusEventHub {
         } finally {
             data.recycle();
             reply.recycle();
-            vehicleSnapshotQueuedOrRunning.set(false);
+            if (!ioHandler.post(this::finishVehicleStateQuery)) {
+                Log.w(TAG, "Vehicle query completion rejected: hub IO stopped");
+            }
         }
+    }
+
+    private void finishVehicleStateQuery() {
+        vehicleQueryGate.complete();
+        startVehicleStateQueryIfNeeded();
     }
 
     private void routeDoor(long epoch, int frontLeft) {
