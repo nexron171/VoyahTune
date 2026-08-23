@@ -146,14 +146,14 @@ public class MainActivity extends AppCompatActivity {
         return arraysStr2arraysBytes(cmds);
     }
 
-    //------------- OEM VehicleState-команды режимов вождения ---------------------------------------
+    //------------- Нативные CAN-команды режимов вождения -------------------------------------------
     public static boolean sendDriveModeCommand(Context context, String mode) {
-        return DriveModeCanTransport.send(context, mode);
+        return NativeDriveModeTransport.send(mode);
     }
 
-    /** Вариант для wake-restore после ранней инициализации транспорта в SetModesService. */
+    /** Вариант для wake-restore; все native-записи сериализуются внутри CanSender. */
     public static boolean sendDriveModeCommand(String mode) {
-        return DriveModeCanTransport.send(mode);
+        return NativeDriveModeTransport.send(mode);
     }
 
     //------------- Метод получения команд CAN режимов рекуперации  ---------------------------------
