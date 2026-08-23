@@ -228,6 +228,33 @@ public class ApplyEngineRunStateTest {
     }
 
     @Test
+    public void guardSuppressedFrameDoesNotReportAnAttempt() {
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        AtomicInteger attempts = new AtomicInteger();
+        boolean result = CanSender.runGuardedSend(allowed::get, attempts::incrementAndGet,
+                () -> {
+                    // The outer operation was admitted, but the final per-frame guard changed
+                    // before the emulated/native transaction boundary.
+                    allowed.set(false);
+                    return CanSender.beginFrameAttemptForCurrentGuard();
+                });
+
+        assertFalse(result);
+        assertEquals(0, attempts.get());
+    }
+
+    @Test
+    public void frameAttemptIsReportedAfterItsFinalGuard() {
+        AtomicInteger attempts = new AtomicInteger();
+        boolean result = CanSender.runGuardedSend(() -> true,
+                attempts::incrementAndGet,
+                CanSender::beginFrameAttemptForCurrentGuard);
+
+        assertTrue(result);
+        assertEquals(1, attempts.get());
+    }
+
+    @Test
     public void wakeActionExceptionDeliversFailedExactlyOnce() {
         AtomicInteger entered = new AtomicInteger();
         AtomicInteger completions = new AtomicInteger();

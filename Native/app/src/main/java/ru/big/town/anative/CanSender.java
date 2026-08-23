@@ -25,6 +25,9 @@ public final class CanSender {
     // ApplyEngine installs a guard on its worker threads. It is checked immediately before every
     // native frame so sleep/reset can stop a multi-frame batch between two ioctl transactions.
     private static final ThreadLocal<BooleanSupplier> SEND_GUARD = new ThreadLocal<>();
+    // A nested caller may need to distinguish a real frame attempt from a guard-suppressed batch.
+    // The callback runs only after the final per-frame guard, immediately before emulation/JNI.
+    private static final ThreadLocal<Runnable> FRAME_ATTEMPT = new ThreadLocal<>();
     private static volatile boolean debugMode = false;
 
     private CanSender() {}
@@ -56,6 +59,7 @@ public final class CanSender {
         }
         if (!sendAllowed()) return false;
         if (debugMode) {
+            if (!beginFrameAttemptForCurrentGuard()) return false;
             Log.i(TAG, "EMULATE CAN [" + (label == null || label.isEmpty() ? "?" : label) + "]"
                     + " cmd=" + cmdNum + " frame=" + MainActivity.printHexBinary(frame));
             return true;
@@ -63,7 +67,7 @@ public final class CanSender {
         final int res;
         synchronized (NATIVE_SEND_LOCK) {
             // A batch may have waited for another caller's transaction while the car went to sleep.
-            if (!sendAllowed()) return false;
+            if (!beginFrameAttemptForCurrentGuard()) return false;
             res = MainActivity.cis_can_control_bytes(cmdNum, frame);
         }
         if (res != 0) {
@@ -92,12 +96,24 @@ public final class CanSender {
 
     /** Executes a boolean CAN operation with a per-frame cooperative cancellation guard. */
     static boolean runGuardedSend(BooleanSupplier guard, BooleanSupplier operation) {
+        return runGuardedSend(guard, null, operation);
+    }
+
+    /**
+     * Executes a guarded CAN operation and reports each frame which passes its final send guard.
+     * This lets callers avoid treating a fully suppressed batch as a failed bus attempt.
+     */
+    static boolean runGuardedSend(BooleanSupplier guard, Runnable onFrameAttempt,
+                                  BooleanSupplier operation) {
         BooleanSupplier previous = SEND_GUARD.get();
+        Runnable previousAttempt = FRAME_ATTEMPT.get();
         SEND_GUARD.set(combine(previous, guard));
+        setFrameAttempt(combine(previousAttempt, onFrameAttempt));
         try {
             return sendAllowed() && operation.getAsBoolean();
         } finally {
             restoreGuard(previous);
+            restoreFrameAttempt(previousAttempt);
         }
     }
 
@@ -118,9 +134,42 @@ public final class CanSender {
         return () -> first.getAsBoolean() && second.getAsBoolean();
     }
 
+    private static Runnable combine(Runnable first, Runnable second) {
+        if (first == null) return second;
+        if (second == null) return first;
+        return () -> {
+            first.run();
+            second.run();
+        };
+    }
+
     private static void restoreGuard(BooleanSupplier previous) {
         if (previous == null) SEND_GUARD.remove();
         else SEND_GUARD.set(previous);
+    }
+
+    private static void setFrameAttempt(Runnable attempt) {
+        if (attempt == null) FRAME_ATTEMPT.remove();
+        else FRAME_ATTEMPT.set(attempt);
+    }
+
+    private static void restoreFrameAttempt(Runnable previous) {
+        setFrameAttempt(previous);
+    }
+
+    private static void notifyFrameAttempt() {
+        Runnable attempt = FRAME_ATTEMPT.get();
+        if (attempt != null) attempt.run();
+    }
+
+    /**
+     * Rechecks the current per-frame guard and records an attempt at the final send boundary.
+     * Callers must invoke this immediately before emulation or the native CAN transaction.
+     */
+    static boolean beginFrameAttemptForCurrentGuard() {
+        if (!sendAllowed()) return false;
+        notifyFrameAttempt();
+        return true;
     }
 
     private static boolean sendAllowed() {

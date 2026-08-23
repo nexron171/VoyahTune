@@ -613,8 +613,7 @@ public class SetModesService extends Service {
 
     /** Стартует BatteryHeatService (статус ВВБ для виджета + авто-прогрев по температуре). */
     private void startBatteryHeatService() {
-        Intent intent = new Intent(this, BatteryHeatService.class);
-        startForegroundService(intent);
+        BatteryHeatService.requestStartup(this);
     }
 
     /** Starts the read-mostly, fail-closed Apollo PLC/TLC bridge for both full and light reports. */
@@ -717,6 +716,7 @@ public class SetModesService extends Service {
         if (beginWakeSession()) {
             resetWiperColdOnPowerOn();
             forwardPowerOnToTripStats();
+            BatteryHeatService.requestPhysicalWake(this);
             scheduleAncillaryWakeTasks();
             Log.i(TAG, "wake side-effects started by " + source);
         } else {

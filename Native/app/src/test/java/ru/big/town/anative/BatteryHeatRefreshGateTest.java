@@ -46,13 +46,13 @@ public class BatteryHeatRefreshGateTest {
     }
 
     @Test
-    public void rejectedWorkAndNewerIntentAreRetriedTogether() {
+    public void rejectedWorkAndNewerIntentWaitForNextRealEvent() {
         BatteryHeatRefreshGate gate = new BatteryHeatRefreshGate();
         BatteryHeatRefreshGate.Request first = gate.offer(1L, true, "temperature");
         gate.offer(1L, false, "request");
 
         gate.reject(first);
-        BatteryHeatRefreshGate.Request retry = gate.retry();
+        BatteryHeatRefreshGate.Request retry = gate.offer(1L, false, "physical-wake");
 
         assertTrue(retry.evaluateAuto);
         assertTrue("temperature".equals(retry.reason));
@@ -68,7 +68,6 @@ public class BatteryHeatRefreshGateTest {
         BatteryHeatRefreshGate.Request restarted = gate.offer(1L, true, "temperature");
 
         assertTrue(restarted.evaluateAuto);
-        assertNull(gate.retry());
         assertTrue(gate.finish(restarted).publish);
     }
 
@@ -90,7 +89,6 @@ public class BatteryHeatRefreshGateTest {
         gate.close();
 
         assertFalse(gate.finish(first).publish);
-        assertNull(gate.retry());
         assertNull(gate.offer(1L, false, "future"));
     }
 

@@ -112,6 +112,9 @@ public class AdvanceActivity extends AppCompatActivity {
     private static final String NATIVE_PACKAGE = "ru.big.town.anative";
     private static final String NATIVE_BIND_PERMISSION =
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
+    private static final String ACTION_BATTERY_HEAT_AUTO_CHANGED =
+            "ru.big.town.anative.BATTERY_HEAT_AUTO_CHANGED";
+    private static final String EXTRA_BATTERY_HEAT_AUTO_ENABLED = "autoEnabled";
     private static final int APOLLO_UNKNOWN = Integer.MIN_VALUE;
     private static final AtomicLong APOLLO_DEMAND_SEQUENCE = new AtomicLong();
 
@@ -539,13 +542,19 @@ public class AdvanceActivity extends AppCompatActivity {
         initPedestrianSoundGroup();
         initForcedEvGroup();
 
-        // Автоматический прогрев батареи: при <10°C на улице Native включит прогрев.
-        // Флаг читает Native из ContentProvider (колонка 17), broadcast не нужен.
+        // Автоматический прогрев батареи: при <10°C на улице Native включит прогрев. После
+        // синхронного обновления in-memory prefs отправляем точное package-targeted событие;
+        // ContentProvider остаётся startup/wake source of truth.
         Switch switchBatteryHeat = findViewById(R.id.switchBatteryHeatAuto);
         if (switchBatteryHeat != null) {
             switchBatteryHeat.setChecked(prefs.getBoolean("batteryHeatAuto", false));
-            switchBatteryHeat.setOnCheckedChangeListener((b, checked) ->
-                    prefs.edit().putBoolean("batteryHeatAuto", checked).apply());
+            switchBatteryHeat.setOnCheckedChangeListener((b, checked) -> {
+                prefs.edit().putBoolean("batteryHeatAuto", checked).apply();
+                Intent changed = new Intent(ACTION_BATTERY_HEAT_AUTO_CHANGED)
+                        .setPackage(NATIVE_PACKAGE)
+                        .putExtra(EXTRA_BATTERY_HEAT_AUTO_ENABLED, checked);
+                sendBroadcast(changed);
+            });
         }
 
         // Автосвет + сервисный режим дворников (были в «Комфорт», теперь в «Настройки автомобиля»)

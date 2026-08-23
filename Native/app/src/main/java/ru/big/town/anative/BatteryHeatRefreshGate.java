@@ -58,18 +58,11 @@ final class BatteryHeatRefreshGate {
         return new Completion(false, next);
     }
 
-    /** Retains rejected work and any newer request for one bounded retry. */
+    /** Retains rejected work and any newer request until the next real event offers work. */
     synchronized void reject(Request request) {
         if (closed || request == null || running != request) return;
         pending = merge(running, pending);
         running = null;
-    }
-
-    synchronized Request retry() {
-        if (closed || running != null || pending == null) return null;
-        running = pending;
-        pending = null;
-        return running;
     }
 
     synchronized void close() {

@@ -58,23 +58,26 @@ public class BatteryHeatService extends Service {
     public static final String ACTION_BATTERY_HEAT_UPDATE   = "ru.big.town.anative.BATTERY_HEAT_UPDATE";
     public static final String ACTION_REQUEST_BATTERY_HEAT  = "ru.big.town.anative.REQUEST_BATTERY_HEAT";
     public static final String ACTION_BATTERY_HEAT_ACTIVATE = "ru.big.town.anative.BATTERY_HEAT_ACTIVATE";
+    public static final String ACTION_BATTERY_HEAT_AUTO_CHANGED =
+            "ru.big.town.anative.BATTERY_HEAT_AUTO_CHANGED";
+    public static final String EXTRA_BATTERY_HEAT_AUTO_ENABLED = "autoEnabled";
+    private static final String ACTION_STARTUP_SETTINGS_REFRESH =
+            "ru.big.town.anative.BATTERY_HEAT_STARTUP_SETTINGS_REFRESH";
+    private static final String ACTION_PHYSICAL_WAKE_SETTINGS_REFRESH =
+            "ru.big.town.anative.BATTERY_HEAT_PHYSICAL_WAKE_SETTINGS_REFRESH";
+    private static final String BIND_PERMISSION =
+            "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
 
     // Порог автоматического прогрева: ниже этой уличной температуры (°C) включаем прогрев.
     private static final int AUTO_TEMP_THRESHOLD_C = 10;
     // Значение уличной температуры, трактуемое как «нет данных» (так отдаёт CanBusService).
     private static final int TEMP_INVALID = -9999;
 
-    // Периодический опрос: обновляем снимок в UI + прогоняем авто-логику. CAN при этом не шлём
-    // без необходимости (только read + queryVehicleState) — холостого трафика в шину не создаём.
-    private static final long POLL_MS       = 30_000L;
     // Через это время после коннекта форсируем queryVehicleState (снимок статусов).
     private static final long FORCE_QUERY_MS = 6_000L;
-    // Пока initial snapshot неполон, не повторяем тяжёлый full query чаще этого интервала.
-    private static final long FULL_QUERY_MIN_INTERVAL_MS = 5 * 60_000L;
     // Анти-спам активации: не пытаемся включать прогрев чаще, чем раз в эти мс.
     private static final long ACTIVATE_REARM_MS = 5 * 60_000L;
     private static final long ACTIVATE_FAILURE_RETRY_MS = 30_000L;
-    private static final long SETTINGS_RETRY_MS = 5_000L;
     private static final long BROADCAST_COALESCE_MS = 250L;
 
     private static final AtomicLong INSTANCE_SEQUENCE = new AtomicLong();
@@ -139,11 +142,15 @@ public class BatteryHeatService extends Service {
     private HandlerThread workerThread;
     private boolean receiverRegistered;
     private boolean broadcastScheduled;
+    private boolean startupRefreshRequested;
     private final BatteryHeatRefreshGate refreshGate = new BatteryHeatRefreshGate();
     private long instanceGeneration;
-    private boolean cachedAutoEnabled;
+    private volatile boolean cachedAutoEnabled;
+    private volatile boolean autoSettingKnown;
+    private volatile long autoSettingRevision;
+    private volatile long autoDecisionGeneration;
     private volatile long activeCanBusEpoch;
-    private long ambientTempEpoch;
+    private volatile long ambientTempEpoch;
 
     // Кэш последних статусов ВВБ
     private volatile int ambientTemp   = TEMP_INVALID;
@@ -163,18 +170,17 @@ public class BatteryHeatService extends Service {
     private CanBusEventHub.Subscription canBusSubscription;
     private volatile boolean destroyed = false;
     private int vehicleFieldsSeenMask = 0;
-    private long lastFullQueryAttemptElapsed = Long.MIN_VALUE / 2;
 
-    private final Runnable forceQueryRunnable = this::requestVehicleStateSnapshotIfIncomplete;
+    private final Runnable forceQueryRunnable = this::requestVehicleStateSnapshot;
 
     private void onCanBusEvent(CanBusEvent event) {
         if (destroyed) return;
         switch (event.kind) {
             case CONNECTION:
                 activeCanBusEpoch = event.connectionEpoch;
+                advanceAutoDecision();
                 resetVehicleSnapshotTracking();
-                // Poll must not overtake the mandatory delayed snapshot for this fresh epoch.
-                lastFullQueryAttemptElapsed = SystemClock.elapsedRealtime();
+                // Exactly one delayed snapshot request belongs to this fresh connection epoch.
                 handler.removeCallbacks(forceQueryRunnable);
                 handler.postDelayed(forceQueryRunnable, FORCE_QUERY_MS);
                 break;
@@ -190,9 +196,8 @@ public class BatteryHeatService extends Service {
     }
 
     /** Requests a filtered callback snapshot; TX20 itself runs on the hub query thread. */
-    private void requestVehicleStateSnapshotIfIncomplete() {
+    private void requestVehicleStateSnapshot() {
         if (destroyed || canBusEventHub == null || !isVehicleSnapshotIncomplete()) return;
-        lastFullQueryAttemptElapsed = SystemClock.elapsedRealtime();
         canBusEventHub.requestVehicleStateSnapshot();
         Log.i(TAG, "queryVehicleState requested, fields="
                 + Integer.bitCount(vehicleFieldsSeenMask) + "/" + VEHICLE_FIELD_COUNT);
@@ -204,12 +209,14 @@ public class BatteryHeatService extends Service {
 
     private void onVehicleState(int id, int state) {
         final int field;
+        boolean controlStatusChanged = false;
         switch (id) {
             case ID_TEP_CONTROL_SWITCH:
                 switchState = state;
                 field = FIELD_SWITCH;
                 break;
             case ID_TEP_CONTROL_STATUS:
+                controlStatusChanged = controlStatus != state;
                 controlStatus = state;
                 field = FIELD_STATUS;
                 break;
@@ -241,17 +248,29 @@ public class BatteryHeatService extends Service {
             default: return; // не наш сигнал
         }
         vehicleFieldsSeenMask |= 1 << field;
+        if (controlStatusChanged) {
+            advanceAutoDecision();
+        }
         Log.i(TAG, "vehicleState id=" + id + " state=" + state);
         requestBroadcastUpdate();
+        if (controlStatusChanged) {
+            maybeAutoActivate("control-status");
+        }
     }
 
     private void onAmbientTemp(int t, long epoch) {
         if (t == ambientTemp && epoch == ambientTempEpoch) return;
         ambientTemp = t;
         ambientTempEpoch = epoch;
+        advanceAutoDecision();
         Log.i(TAG, "ambientTemp=" + t + "°C");
         requestBroadcastUpdate();
-        requestSettingsRefresh("temp-change", true);
+        if (BatteryHeatAutoPolicy.settingRefreshNeededForTemperature(autoSettingKnown)) {
+            // A failed startup/wake read gets another bounded chance on a real temperature event.
+            requestSettingsRefresh("temp-change", true);
+        } else {
+            maybeAutoActivate("temp-change");
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -264,23 +283,23 @@ public class BatteryHeatService extends Service {
      * неизвестна. Причина отказа (fail) от BCM отображается в виджете, но саму попытку это не блокирует
      * — решение «можно ли греть» принимает автомобиль.
      */
-    private void maybeAutoActivate(String src, boolean autoEnabled) {
-        if (!isActiveInstance()) return;
-        if (ambientTempEpoch != activeCanBusEpoch) return;
-        if (!autoEnabled) return;
-        if (ambientTemp == TEMP_INVALID) return;
-        if (ambientTemp >= AUTO_TEMP_THRESHOLD_C) return;
-        if (controlStatus == 1) return; // уже греется
+    private void maybeAutoActivate(String src) {
+        final long activationEpoch = activeCanBusEpoch;
+        final long activationDecision = autoDecisionGeneration;
+        if (!automaticActivationCurrent(
+                instanceGeneration, activationEpoch, activationDecision)) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastActivateElapsed < ACTIVATE_REARM_MS) return;
         if (now - lastActivateAttemptElapsed < ACTIVATE_FAILURE_RETRY_MS) return;
         if (activationPending) return;
         Log.i(TAG, "AUTO прогрев: " + src + " ambient=" + ambientTemp + "°C < " + AUTO_TEMP_THRESHOLD_C);
-        activate("auto <" + AUTO_TEMP_THRESHOLD_C + "°C", false);
+        activate("auto <" + AUTO_TEMP_THRESHOLD_C + "°C", false,
+                activationEpoch, activationDecision);
     }
 
     /** Активация прогрева. Реальную CAN-команду задаёт пользователь в {@link MainActivity#sendBatteryHeatCommand()}. */
-    private void activate(String reason, boolean explicitUserAction) {
+    private void activate(String reason, boolean explicitUserAction,
+                          long automaticEpoch, long automaticDecision) {
         if (destroyed) return;
         if (activationPending) {
             Log.i(TAG, "activate battery heat coalesced — " + reason);
@@ -300,48 +319,84 @@ public class BatteryHeatService extends Service {
                             : ApplyEngine.WakeActionResult.FAILED;
                     Handler worker = handler;
                     if (!destroyed && worker != null) {
-                        worker.post(() -> finishActivation(result, attemptedAt));
+                        worker.post(() -> finishActivation(
+                                result, attemptedAt, Long.MIN_VALUE));
                     }
                 }
             });
         } else {
             final long activationGeneration = instanceGeneration;
-            final long activationCanBusEpoch = activeCanBusEpoch;
-            final long[] attemptedAt = {0L};
+            final AtomicLong attemptedAt = new AtomicLong();
             ApplyEngine.postWakeAction("battery heat " + reason, () -> {
-                if (destroyed || ACTIVE_INSTANCE.get() != activationGeneration
-                        || activeCanBusEpoch != activationCanBusEpoch) {
-                    return false;
-                }
-                attemptedAt[0] = SystemClock.elapsedRealtime();
-                return MainActivity.sendBatteryHeatCommand();
+                // ApplyEngine already installs its physical-wake guard. This nested guard adds the
+                // current automatic-decision fence to the same ThreadLocal and is therefore checked
+                // immediately before every frame in MainActivity.sendBatteryHeatCommand().
+                return CanSender.runGuardedSend(
+                        () -> automaticActivationCurrent(
+                                activationGeneration, automaticEpoch, automaticDecision),
+                        () -> attemptedAt.compareAndSet(
+                                0L, SystemClock.elapsedRealtime()),
+                        MainActivity::sendBatteryHeatCommand);
             }, result -> {
-                final long attempt = attemptedAt[0];
+                final long attempt = attemptedAt.get();
                 Handler worker = handler;
                 if (!destroyed && worker != null) {
-                    worker.post(() -> finishActivation(result, attempt));
+                    worker.post(() -> finishActivation(
+                            result, attempt, automaticDecision));
                 }
             });
         }
     }
 
-    private void finishActivation(ApplyEngine.WakeActionResult result, long attemptedAt) {
+    private void finishActivation(ApplyEngine.WakeActionResult result, long attemptedAt,
+                                  long automaticDecision) {
         if (destroyed) return;
         activationPending = false;
-        if (result == ApplyEngine.WakeActionResult.SKIPPED) return;
-
-        lastActivateAttemptElapsed = attemptedAt;
-        if (result == ApplyEngine.WakeActionResult.SUCCESS) {
-            lastActivateElapsed = attemptedAt;
-        } else {
-            Log.w(TAG, "battery heat CAN failed; retry is allowed after "
-                    + ACTIVATE_FAILURE_RETRY_MS + "ms");
+        if (attemptedAt > 0L) {
+            // The physical-wake guard may turn false after a failed JNI transaction and make the
+            // terminal result SKIPPED. The exact per-frame marker still proves a real bus attempt,
+            // so it must retain the failure cooldown and prevent an immediate duplicate command.
+            lastActivateAttemptElapsed = attemptedAt;
+            if (result == ApplyEngine.WakeActionResult.SUCCESS) {
+                lastActivateElapsed = attemptedAt;
+            }
         }
+
+        if (automaticDecision != Long.MIN_VALUE
+                && automaticDecision != autoDecisionGeneration) {
+            // Exactly one completion handoff to the latest event decision. No timer/retry is armed;
+            // anti-spam timestamps still apply if any frame was actually attempted.
+            maybeAutoActivate("stale-completion-handoff");
+            return;
+        }
+        if (result == ApplyEngine.WakeActionResult.SKIPPED) return;
+        if (result != ApplyEngine.WakeActionResult.SUCCESS) {
+            Log.w(TAG, "battery heat CAN failed; next qualifying event after "
+                    + ACTIVATE_FAILURE_RETRY_MS + "ms may retry");
+        }
+    }
+
+    private void advanceAutoDecision() {
+        ++autoDecisionGeneration;
+    }
+
+    private boolean automaticActivationCurrent(long activationInstance,
+                                               long activationEpoch,
+                                               long activationDecision) {
+        return BatteryHeatAutoPolicy.canSend(
+                !destroyed && ACTIVE_INSTANCE.get() == activationInstance,
+                activationEpoch, activeCanBusEpoch, ambientTempEpoch,
+                activationDecision, autoDecisionGeneration,
+                cachedAutoEnabled,
+                ambientTemp != TEMP_INVALID,
+                ambientTemp < AUTO_TEMP_THRESHOLD_C,
+                controlStatus == 1);
     }
 
     // -------------------------------------------------------------------------
     // ContentProvider — настройка «Автоматический прогрев батареи» (колонка 17).
-    // Query is synchronous Binder work: AUTO decisions and explicit UI refreshes use a bounded worker.
+    // Query is synchronous Binder work: startup/wake reconciliation and unknown-setting recovery
+    // use a bounded worker. Ordinary temperature/UI events use the authoritative in-memory cache.
     // -------------------------------------------------------------------------
 
     private static final Uri CONTENT_PROVIDER_URI =
@@ -359,54 +414,57 @@ public class BatteryHeatService extends Service {
         if (destroyed || request == null) return;
         ContentResolver resolver = getApplicationContext().getContentResolver();
         WeakReference<BatteryHeatService> serviceRef = new WeakReference<>(this);
+        final long submittedSettingRevision = autoSettingRevision;
         try {
             SETTINGS_EXECUTOR.execute(() -> {
                 BatteryHeatService beforeQuery = serviceRef.get();
                 if (beforeQuery == null || beforeQuery.destroyed) return;
-                boolean enabled = queryAutoEnabled(resolver);
+                if (!BatteryHeatAutoPolicy.revisionCurrent(
+                        submittedSettingRevision, beforeQuery.autoSettingRevision)) {
+                    Handler staleWorker = beforeQuery.handler;
+                    if (staleWorker != null) {
+                        staleWorker.post(() -> beforeQuery.finishSettingsRefresh(
+                                request, null, submittedSettingRevision));
+                    }
+                    return;
+                }
+                Boolean enabled = queryAutoEnabled(resolver);
                 BatteryHeatService service = serviceRef.get();
                 if (service == null || service.destroyed) return;
                 Handler worker = service.handler;
                 if (worker != null) {
-                    worker.post(() -> service.finishSettingsRefresh(request, enabled));
+                    worker.post(() -> service.finishSettingsRefresh(
+                            request, enabled, submittedSettingRevision));
                 }
             });
         } catch (RejectedExecutionException e) {
             refreshGate.reject(request);
-            scheduleSettingsRetry();
+            Log.w(TAG, "settings refresh queue full; waiting for next real event");
         }
     }
 
-    private void finishSettingsRefresh(BatteryHeatRefreshGate.Request request, boolean enabled) {
+    private void finishSettingsRefresh(BatteryHeatRefreshGate.Request request, Boolean enabled,
+                                       long submittedSettingRevision) {
         if (destroyed) return;
         BatteryHeatRefreshGate.Completion completion = refreshGate.finish(request);
-        if (completion.publish) {
-            cachedAutoEnabled = enabled;
+        if (completion.publish && BatteryHeatAutoPolicy.revisionCurrent(
+                submittedSettingRevision, autoSettingRevision) && enabled != null) {
+            if (!autoSettingKnown || cachedAutoEnabled != enabled) {
+                autoSettingKnown = true;
+                cachedAutoEnabled = enabled;
+                advanceAutoDecision();
+            }
             requestBroadcastUpdate();
             // State is read only now, on the service worker; no captured snapshot triggers an action.
             if (request.evaluateAuto && request.epoch == activeCanBusEpoch
                     && isActiveInstance()) {
-                maybeAutoActivate(request.reason, enabled);
+                maybeAutoActivate(request.reason);
             }
         }
         if (completion.next != null) submitSettingsRefresh(completion.next);
     }
 
-    private void scheduleSettingsRetry() {
-        if (destroyed) return;
-        Handler worker = handler;
-        if (worker == null) return;
-        worker.removeCallbacks(settingsRetryRunnable);
-        worker.postDelayed(settingsRetryRunnable, SETTINGS_RETRY_MS);
-    }
-
-    private final Runnable settingsRetryRunnable = () -> {
-        if (destroyed) return;
-        BatteryHeatRefreshGate.Request retry = refreshGate.retry();
-        if (retry != null) submitSettingsRefresh(retry);
-    };
-
-    private static boolean queryAutoEnabled(ContentResolver resolver) {
+    private static Boolean queryAutoEnabled(ContentResolver resolver) {
         try {
             Cursor c = resolver.query(CONTENT_PROVIDER_URI, null, null, null, null);
             if (c != null) {
@@ -420,7 +478,7 @@ public class BatteryHeatService extends Service {
         } catch (Exception e) {
             Log.w(TAG, "queryAutoEnabled: " + e.getMessage());
         }
-        return false;
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -474,14 +532,27 @@ public class BatteryHeatService extends Service {
             String a = intent.getAction();
             if (ACTION_BATTERY_HEAT_ACTIVATE.equals(a)) {
                 // Ручная активация из виджета (в один клик).
-                activate("manual (виджет)", true);
-            } else {
+                activate("manual (виджет)", true, 0L, Long.MIN_VALUE);
+            } else if (ACTION_BATTERY_HEAT_AUTO_CHANGED.equals(a)) {
+                if (!intent.hasExtra(EXTRA_BATTERY_HEAT_AUTO_ENABLED)) return;
+                applyAutoSettingChange(intent.getBooleanExtra(
+                        EXTRA_BATTERY_HEAT_AUTO_ENABLED, false));
+            } else if (ACTION_REQUEST_BATTERY_HEAT.equals(a)) {
                 // ACTION_REQUEST_BATTERY_HEAT only asks for the current cached snapshot. The
                 // auto setting is used for decisions, not as confirmation before a UI response.
                 requestBroadcastUpdate();
             }
         }
     };
+
+    private void applyAutoSettingChange(boolean enabled) {
+        ++autoSettingRevision;
+        autoSettingKnown = true;
+        cachedAutoEnabled = enabled;
+        advanceAutoDecision();
+        requestBroadcastUpdate();
+        maybeAutoActivate("setting-change");
+    }
 
     private boolean isActiveInstance() {
         return !destroyed && ACTIVE_INSTANCE.get() == instanceGeneration;
@@ -514,7 +585,40 @@ public class BatteryHeatService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        String action = intent == null ? ACTION_STARTUP_SETTINGS_REFRESH : intent.getAction();
+        if (ACTION_PHYSICAL_WAKE_SETTINGS_REFRESH.equals(action)) {
+            // If this is the start which creates the service during boot/wake, a later startup
+            // start must not enqueue a second provider query for the same physical boundary.
+            startupRefreshRequested = true;
+            postSettingsRefresh("physical-wake");
+        } else if (ACTION_STARTUP_SETTINGS_REFRESH.equals(action) || action == null) {
+            if (!startupRefreshRequested) {
+                startupRefreshRequested = true;
+                postSettingsRefresh("startup");
+            }
+        } else {
+            Log.w(TAG, "Ignoring unknown start action: " + action);
+        }
         return START_STICKY;
+    }
+
+    private void postSettingsRefresh(String reason) {
+        Handler worker = handler;
+        if (destroyed || worker == null) return;
+        worker.post(() -> requestSettingsRefresh(reason, true));
+    }
+
+    static void requestStartup(Context context) {
+        requestSettingsRefreshStart(context, ACTION_STARTUP_SETTINGS_REFRESH);
+    }
+
+    static void requestPhysicalWake(Context context) {
+        requestSettingsRefreshStart(context, ACTION_PHYSICAL_WAKE_SETTINGS_REFRESH);
+    }
+
+    private static void requestSettingsRefreshStart(Context context, String action) {
+        Intent intent = new Intent(context, BatteryHeatService.class).setAction(action);
+        context.startForegroundService(intent);
     }
 
     @Override
@@ -556,8 +660,9 @@ public class BatteryHeatService extends Service {
         if (destroyed) return;
         IntentFilter filter = new IntentFilter(ACTION_REQUEST_BATTERY_HEAT);
         filter.addAction(ACTION_BATTERY_HEAT_ACTIVATE);
+        filter.addAction(ACTION_BATTERY_HEAT_AUTO_CHANGED);
         try {
-            registerReceiver(uiReceiver, filter, null, handler, RECEIVER_EXPORTED);
+            registerReceiver(uiReceiver, filter, BIND_PERMISSION, handler, RECEIVER_EXPORTED);
             receiverRegistered = true;
         } catch (Exception e) {
             Log.w(TAG, "registerReceiver: " + e.getMessage());
@@ -572,30 +677,14 @@ public class BatteryHeatService extends Service {
                         ID_TEP_CONTROL_FAIL, ID_AUTO_CTRL, ID_AUTO_CTRL_INFO,
                         ID_DRIVER_PREHEAT_SET, ID_PREHEAT_FAIL_STATE, ID_BMS_STATE},
                 handler, this::onCanBusEvent);
-        handler.postDelayed(pollRunnable, 2_000L);
+        requestBroadcastUpdate();
     }
-
-    private final Runnable pollRunnable = new Runnable() {
-        @Override
-        public void run() {
-            long now = SystemClock.elapsedRealtime();
-            if (isVehicleSnapshotIncomplete()
-                    && now - lastFullQueryAttemptElapsed >= FULL_QUERY_MIN_INTERVAL_MS) {
-                requestVehicleStateSnapshotIfIncomplete();
-            }
-            requestBroadcastUpdate();
-            requestSettingsRefresh("poll", true);
-            handler.postDelayed(this, POLL_MS);
-        }
-    };
 
     private void resetVehicleSnapshotTracking() {
         vehicleFieldsSeenMask = 0;
     }
 
     private boolean isVehicleSnapshotIncomplete() {
-        // Once the initial snapshot is complete, live callbacks are the source of truth. Polling
-        // TX20 merely to confirm unchanged values adds global Binder/CAN fan-out with no new state.
         return vehicleFieldsSeenMask != ALL_VEHICLE_FIELDS_MASK;
     }
 
