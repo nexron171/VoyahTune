@@ -426,6 +426,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     /** Переключить фары теми же CAN-командами, которые использует автоматический свет. */
     private static void toggleHeadlights(Context ctx) {
         final Context app = ctx.getApplicationContext();
+        final ManualAutoGate.Ticket manualTicket =
+                LightSensorService.reserveManualHeadlightCommand();
         ApplyEngine.postUserCommand("steer headlights", () -> {
             android.content.SharedPreferences prefs =
                     app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
@@ -439,12 +441,14 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
             prefs.edit().putBoolean("steerHeadlightsOn", next).apply();
             Log.i(TAG, "STEER_ACTION headlights: " + current + " → " + next);
-        });
+        }, manualTicket::close);
     }
 
     /** Независимая пара для руля: штатный Auto ↔ ручной ближний свет. */
     private static void toggleHeadlightsAuto(Context ctx) {
         final Context app = ctx.getApplicationContext();
+        final ManualAutoGate.Ticket manualTicket =
+                LightSensorService.reserveManualHeadlightCommand();
         ApplyEngine.postUserCommand("steer headlights auto/low", () -> {
             android.content.SharedPreferences prefs =
                     app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
@@ -461,7 +465,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             Log.i(TAG, "STEER_ACTION headlights auto/low: "
                     + (currentLowBeam ? "LOW_BEAM" : "AUTO") + " → "
                     + (nextLowBeam ? "LOW_BEAM" : "AUTO"));
-        });
+        }, manualTicket::close);
     }
 
 }

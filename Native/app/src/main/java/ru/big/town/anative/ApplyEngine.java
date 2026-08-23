@@ -369,6 +369,11 @@ public final class ApplyEngine {
 
     /** Explicit user command: prompt and never discarded merely because SCREEN_OFF raced the tap. */
     public static void postUserCommand(String reason, Runnable action) {
+        postUserCommand(reason, action, null);
+    }
+
+    /** Explicit user command with an exactly-once terminal callback, including queue rejection. */
+    public static void postUserCommand(String reason, Runnable action, Runnable onTerminal) {
         Log.i(TAG, "postUserCommand: " + reason);
         final Handler commandHandler = commandBg();
         final long restoreEpoch;
@@ -387,14 +392,18 @@ public final class ApplyEngine {
         Log.i(TAG, "automatic restore cancelled for user command: restoreEpoch="
                 + restoreEpoch + " gateGen=" + gateGeneration + " reason=" + reason);
         enqueueUserCommand(commandHandler, reason, action, () -> {
-            final boolean settling;
-            synchronized (RESTORE_LOCK) {
-                settling = MODE_SYNC_POLICY.completeUserCommand(
-                        gateGeneration, SystemClock.uptimeMillis());
-            }
-            if (settling) {
-                Log.i(TAG, "user command gate SETTLING gen=" + gateGeneration + " for "
-                        + ModeSyncPolicy.POST_RESTORE_SETTLE_MS + "ms");
+            try {
+                final boolean settling;
+                synchronized (RESTORE_LOCK) {
+                    settling = MODE_SYNC_POLICY.completeUserCommand(
+                            gateGeneration, SystemClock.uptimeMillis());
+                }
+                if (settling) {
+                    Log.i(TAG, "user command gate SETTLING gen=" + gateGeneration + " for "
+                            + ModeSyncPolicy.POST_RESTORE_SETTLE_MS + "ms");
+                }
+            } finally {
+                if (onTerminal != null) onTerminal.run();
             }
         });
     }

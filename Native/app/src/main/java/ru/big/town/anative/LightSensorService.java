@@ -142,7 +142,7 @@ public class LightSensorService extends Service {
     // OEM Auto, выбранный пользователем отдельным действием руля, нельзя принимать за самовольный
     // BCM-сброс. Флаг живёт в процессе и снимается следующим решением датчика или ручной командой
     // OFF/LOW; хранить его между перезапусками не нужно — force-init снова применит датчик.
-    private static volatile boolean manualAutoOverride = false;
+    private static final ManualAutoGate MANUAL_AUTO_GATE = new ManualAutoGate();
 
     private Handler timerHandler;
     private volatile LatestIntDelivery sensorCallbackDelivery;
@@ -976,7 +976,7 @@ public class LightSensorService extends Service {
                 return;
             }
             forceInitCarSignalEpoch = 0L;
-            if (manualAutoOverride) {
+            if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
                 Log.i(TAG, "force-init: OEM Auto выбран с руля — инициализация отменена");
                 forceInitCompleted = true;
                 return;
@@ -1031,7 +1031,7 @@ public class LightSensorService extends Service {
     }
 
     private boolean applySensorRequest(SensorApplyRequest request, int level) {
-        if (request.cancelOnManualAuto && manualAutoOverride) {
+        if (request.cancelOnManualAuto && MANUAL_AUTO_GATE.blocksAntiAuto()) {
             Log.i(TAG, request.reason + ": OEM Auto выбран с руля — pending action отменён");
             if (request.mode == SensorApplyMode.FORCE) forceInitCompleted = true;
             return true;
@@ -1070,24 +1070,36 @@ public class LightSensorService extends Service {
             return false;
         }
         Log.i(TAG, s2 + " → " + (desired ? "ближний" : "выкл"));
-        commit(desired, s2);
-        return true;
+        return commit(desired, s2);
     }
 
-    private void commit(boolean targetOn, String reason) {
+    private boolean commit(boolean targetOn, String reason) {
         Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "выкл") + ") — " + reason);
-        setManualAutoOverride(false);
+        final long automaticToken = MANUAL_AUTO_GATE.beginAutomaticDecision();
+        if (automaticToken == ManualAutoGate.INVALID_AUTOMATIC_TOKEN) {
+            Log.i(TAG, "auto-light decision suppressed by queued manual command");
+            return false;
+        }
         final long sequence = ++commitSequence;
         headlightsOn      = targetOn;
         everSent          = true;
         lastCommitElapsed = SystemClock.elapsedRealtime();
         ApplyEngine.postWakeAction("auto light " + (targetOn ? "low" : "off"),
-                () -> MainActivity.setHeadlights(this, targetOn),
+                () -> {
+                    if (!MANUAL_AUTO_GATE.isAutomaticActionCurrent(automaticToken)) {
+                        Log.i(TAG, "auto-light action superseded by newer manual intent");
+                        // The manual command may still fail. Keep this commit retryable instead of
+                        // recording a send which never happened.
+                        return false;
+                    }
+                    return MainActivity.setHeadlights(this, targetOn);
+                },
                 result -> {
                     if (result != ApplyEngine.WakeActionResult.SUCCESS) {
                         invalidateCommit(sequence);
                     }
                 });
+        return true;
     }
 
     private void invalidateCommit(long sequence) {
@@ -1150,7 +1162,7 @@ public class LightSensorService extends Service {
     private final Runnable driveFallbackRunnable = new Runnable() {
         @Override
         public void run() {
-            if (manualAutoOverride) {
+            if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
                 Log.i(TAG, "drive+5s: OEM Auto выбран с руля — anti-Auto пропущен");
                 return;
             }
@@ -1190,7 +1202,7 @@ public class LightSensorService extends Service {
         // решение принимаем заново по свежему состоянию.
         timerHandler.removeCallbacks(canbusReassertRunnable);
 
-        if (manualAutoOverride) {
+        if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
             Log.i(TAG, "lightstatus: OEM Auto выбран с руля — anti-Auto подавлен");
             return;
         }
@@ -1215,7 +1227,7 @@ public class LightSensorService extends Service {
     private final Runnable canbusReassertRunnable = new Runnable() {
         @Override
         public void run() {
-            if (manualAutoOverride) {
+            if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
                 Log.i(TAG, "canbus-reset: OEM Auto выбран с руля — отмена");
                 return;
             }
@@ -1229,11 +1241,13 @@ public class LightSensorService extends Service {
         }
     };
 
-    /** Отмечает намеренный OEM Auto с руля; возвращает предыдущее значение для rollback при CAN-ошибке. */
+    static ManualAutoGate.Ticket reserveManualHeadlightCommand() {
+        return MANUAL_AUTO_GATE.reserveManualCommand();
+    }
+
+    /** Отмечает завершённый выбор OEM Auto; возвращает предыдущее значение для rollback. */
     static boolean setManualAutoOverride(boolean enabled) {
-        boolean previous = manualAutoOverride;
-        manualAutoOverride = enabled;
-        return previous;
+        return MANUAL_AUTO_GATE.setSelected(enabled);
     }
 
     // -------------------------------------------------------------------------
