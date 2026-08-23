@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.media.AudioManager;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -106,9 +107,12 @@ public class WiperColdService extends Service {
     private static final long POWER_ON_RESET_SUPPRESS_MS = 10_000L;
 
     private volatile Handler timerHandler;
+    private volatile Handler mediaHandler;
+    private HandlerThread mediaThread;
     private CanBusEventHub.Subscription canBusSubscription;
 
     private final DoorPauseRunState mediaPauseState = new DoorPauseRunState();
+    private final DoorPauseWorkGate mediaPauseWorkGate = new DoorPauseWorkGate();
     private AudioManager mediaFadeAudioManager = null;
     private volatile boolean destroyed = false;
     private boolean wiperTogglePending = false;
@@ -161,7 +165,7 @@ public class WiperColdService extends Service {
         boolean mediaOn = isMediaPauseEnabled();
         Log.i(TAG, "door: fLDoor=" + fLDoor + " openedNow=" + openedNow + " mediaPause=" + mediaOn
                 + " wiper=" + isWiperEnabled() + " active=" + isServiceActive());
-        if (openedNow && mediaOn) pauseActiveMediaWithFade();
+        if (openedNow && mediaOn) requestDoorMediaPause();
         if (isWiperEnabled()) evaluate("door");
     }
 
@@ -291,14 +295,36 @@ public class WiperColdService extends Service {
      * её лишь после {@link #REMOTE_AUDIO_DRAIN_MS}. Это скрывает уже буферизованный wireless-звук, но
      * не откладывает саму команду паузы. За один door-open команда отправляется ровно один раз.
      */
-    private void pauseActiveMediaWithFade() {
-        final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
-        // Не запускаем второй ramp и не повторяем команду: повторный PLAY_PAUSE после задержки мог бы
-        // снова запустить уже остановившийся bridge-плеер.
-        if (mediaPauseState.isBusy()) {
+    private void requestDoorMediaPause() {
+        int workGeneration = mediaPauseWorkGate.tryAcquire();
+        if (workGeneration == DoorPauseWorkGate.REJECTED_GENERATION) {
             Log.i(TAG, "pauseActiveMediaWithFade: duplicate suppressed");
             return;
         }
+        Handler worker = mediaHandler;
+        if (destroyed || worker == null
+                || !worker.post(() -> pauseActiveMediaWithFadeOnWorker(workGeneration))) {
+            mediaPauseWorkGate.release(workGeneration);
+        }
+    }
+
+    /** Runs all AudioManager, MediaSession and ordered-broadcast work off the main looper. */
+    private void pauseActiveMediaWithFadeOnWorker(int workGeneration) {
+        try {
+            runMediaPauseAndFade(workGeneration);
+        } catch (Throwable error) {
+            Log.w(TAG, "pauseActiveMediaWithFade: " + error.getMessage());
+            cancelMediaFadeAndRestoreVolume();
+            mediaPauseWorkGate.release(workGeneration);
+        }
+    }
+
+    private void runMediaPauseAndFade(int workGeneration) {
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            mediaPauseWorkGate.release(workGeneration);
+            return;
+        }
+        final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
 
         int startVol;
         try {
@@ -307,28 +333,52 @@ public class WiperColdService extends Service {
             Log.w(TAG, "pauseActiveMedia: getStreamVolume: " + e.getMessage());
             startVol = -1;
         }
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            mediaPauseWorkGate.release(workGeneration);
+            return;
+        }
 
         Log.i(TAG, "pauseActiveMediaWithFade: startVol=" + startVol + " (дверь водителя открыта)");
         final int generation = mediaPauseState.begin(startVol);
-        if (generation == DoorPauseRunState.REJECTED_GENERATION) return;
+        if (generation == DoorPauseRunState.REJECTED_GENERATION) {
+            mediaPauseWorkGate.release(workGeneration);
+            return;
+        }
         mediaFadeAudioManager = am;
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            finishMediaFade(generation, workGeneration, true);
+            return;
+        }
 
         // Главное исправление AutoKit: команда уходит в t=0 по тому же keymanager-пути, по которому
         // работает физическая кнопка, а не после fade через глобальный PAUSE=127.
-        dispatchDoorPause(am);
+        dispatchDoorPause(am, workGeneration);
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            finishMediaFade(generation, workGeneration, true);
+            return;
+        }
 
         if (am == null || startVol <= 0) {
             // Даже без ramp держим debounce до конца remote drain window: быстрый повтор 85 до
             // обновления bridge-state мог бы снова включить уже остановленное воспроизведение.
-            timerHandler.postDelayed(() -> finishMediaFade(generation, false),
-                    REMOTE_AUDIO_DRAIN_MS);
+            Handler worker = mediaHandler;
+            if (worker == null || !worker.postDelayed(
+                    () -> finishMediaFade(generation, workGeneration, false),
+                    REMOTE_AUDIO_DRAIN_MS)) {
+                finishMediaFade(generation, workGeneration, false);
+            }
             return;
         }
 
+        Handler worker = mediaHandler;
+        if (worker == null) {
+            finishMediaFade(generation, workGeneration, true);
+            return;
+        }
         final int startVolF = startVol;
         for (int i = 1; i <= FADE_STEPS; i++) {
             final int target = DoorPauseTimeline.fadeStepVolume(startVolF, i, FADE_STEPS);
-            timerHandler.postDelayed(() -> {
+            worker.postDelayed(() -> {
                 if (!mediaPauseState.isCurrent(generation)) return;
                 try { am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0); }
                 catch (Exception ignored) {}
@@ -337,13 +387,15 @@ public class WiperColdService extends Service {
 
         // Не возвращаем громкость сразу после fade: удалённый CP/AA endpoint может ещё 1–1.5 с
         // выдавать уже буферизованный звук после принятия pause.
-        timerHandler.postDelayed(() -> {
+        if (!worker.postDelayed(() -> {
             if (!mediaPauseState.isCurrent(generation)) return;
-            finishMediaFade(generation, true);
-        }, DoorPauseTimeline.restoreDelayMs(FADE_TOTAL_MS, REMOTE_AUDIO_DRAIN_MS));
+            finishMediaFade(generation, workGeneration, true);
+        }, DoorPauseTimeline.restoreDelayMs(FADE_TOTAL_MS, REMOTE_AUDIO_DRAIN_MS))) {
+            finishMediaFade(generation, workGeneration, true);
+        }
     }
 
-    private void finishMediaFade(int generation, boolean restore) {
+    private void finishMediaFade(int generation, int workGeneration, boolean restore) {
         if (!mediaPauseState.isCurrent(generation)) return;
         int restoreVolume = mediaPauseState.finishAndTakeRestoreVolume(generation);
         if (restore && mediaFadeAudioManager != null && restoreVolume >= 0) {
@@ -357,10 +409,11 @@ public class WiperColdService extends Service {
                     + " after " + REMOTE_AUDIO_DRAIN_MS + "ms drain window");
         }
         mediaFadeAudioManager = null;
+        mediaPauseWorkGate.release(workGeneration);
     }
 
     /** Выбирает ровно одну семантическую команду; direct/noop уже полностью обработаны роутером. */
-    private void dispatchDoorPause(AudioManager am) {
+    private void dispatchDoorPause(AudioManager am, int workGeneration) {
         MediaControlRouter.Result result = MediaControlRouter.dispatch(
                 this, MediaControlPolicy.Command.PAUSE_ONLY);
         Log.i(TAG, "dispatchDoorPause: route=" + result.route + " key=" + result.keyCode
@@ -381,17 +434,18 @@ public class WiperColdService extends Service {
             if (keyCode != result.keyCode) {
                 Log.i(TAG, "dispatchDoorPause: active music stream confirms safe PLAY_PAUSE fallback");
             }
-            sendMediaProxy(keyCode, false, am);
+            sendMediaProxy(keyCode, false, am, workGeneration);
             return;
         }
         if (MediaControlRouter.ROUTE_NATIVE.equals(result.route)) {
             // NATIVE_QG is returned for a confirmed active OEM/Bluetooth target. Recreate QG6 in
             // keymanager; the completion fallback uses standard 85 if the hook is unavailable.
-            sendMediaProxy(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, true, am);
+            sendMediaProxy(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, true, am, workGeneration);
         }
     }
 
-    private void sendMediaProxy(int keyCode, boolean nativeQinggan, AudioManager fallbackAudioManager) {
+    private void sendMediaProxy(int keyCode, boolean nativeQinggan,
+                                AudioManager fallbackAudioManager, int workGeneration) {
         if (keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
                 && keyCode != KeyEvent.KEYCODE_MEDIA_NEXT
                 && keyCode != KeyEvent.KEYCODE_MEDIA_PREVIOUS
@@ -404,17 +458,34 @@ public class WiperColdService extends Service {
         intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
         intent.putExtra("keyCode", keyCode);
         intent.putExtra("nativeQG", nativeQinggan);
+        Handler callbackHandler = mediaHandler;
+        if (destroyed || callbackHandler == null) return;
         try {
             sendOrderedBroadcast(intent, null, new BroadcastReceiver() {
                 @Override public void onReceive(Context context, Intent deliveredIntent) {
-                    if (getResultCode() == MEDIA_PROXY_ACK) return;
+                    if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) return;
+                    if (getResultCode() == MEDIA_PROXY_ACK) {
+                        mediaPauseWorkGate.acknowledgeProxy(workGeneration);
+                        return;
+                    }
+                    if (!mediaPauseWorkGate.tryClaimFallback(workGeneration)) return;
                     Log.w(TAG, "sendMediaProxy: hook unavailable, standard fallback key=" + keyCode);
-                    dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+                    try {
+                        dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+                    } finally {
+                        mediaPauseWorkGate.finishFallback(workGeneration);
+                    }
                 }
-            }, timerHandler, MEDIA_PROXY_UNHANDLED, null, null);
+            }, callbackHandler, MEDIA_PROXY_UNHANDLED, null, null);
         } catch (Exception e) {
             Log.w(TAG, "sendMediaProxy: " + e.getMessage());
-            dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+            if (!destroyed && mediaPauseWorkGate.tryClaimFallback(workGeneration)) {
+                try {
+                    dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+                } finally {
+                    mediaPauseWorkGate.finishFallback(workGeneration);
+                }
+            }
         }
     }
 
@@ -455,6 +526,10 @@ public class WiperColdService extends Service {
                 .build();
         startForeground(3, notification);
 
+        mediaThread = new HandlerThread("WiperDoorMedia");
+        mediaThread.start();
+        mediaHandler = new Handler(mediaThread.getLooper());
+
         canBusSubscription = CanBusEventHub.get(this).subscribe(
                 CanBusEventRouter.INTEREST_CONNECTION
                         | CanBusEventRouter.INTEREST_DOOR
@@ -481,9 +556,35 @@ public class WiperColdService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
         destroyed = true;
+        mediaPauseWorkGate.close();
         CanBusEventHub.Subscription subscription = canBusSubscription;
         canBusSubscription = null;
         if (subscription != null) subscription.close();
+        if (timerHandler != null) timerHandler.removeCallbacksAndMessages(null);
+        Handler media = mediaHandler;
+        HandlerThread thread = mediaThread;
+        if (media != null && thread != null) {
+            boolean queued = media.postAtFrontOfQueue(() -> {
+                try {
+                    cancelMediaFadeAndRestoreVolume();
+                } finally {
+                    media.removeCallbacksAndMessages(null);
+                    mediaHandler = null;
+                    thread.quitSafely();
+                }
+            });
+            if (!queued) {
+                mediaPauseState.cancelAndTakeRestoreVolume();
+                mediaHandler = null;
+                thread.quitSafely();
+            }
+        } else {
+            mediaPauseState.cancelAndTakeRestoreVolume();
+        }
+        super.onDestroy();
+    }
+
+    private void cancelMediaFadeAndRestoreVolume() {
         int restoreVolume = mediaPauseState.cancelAndTakeRestoreVolume();
         if (mediaFadeAudioManager != null && restoreVolume >= 0) {
             try {
@@ -494,8 +595,6 @@ public class WiperColdService extends Service {
             }
         }
         mediaFadeAudioManager = null;
-        if (timerHandler != null) timerHandler.removeCallbacksAndMessages(null);
-        super.onDestroy();
     }
 
     private void createNotificationChannel() {
