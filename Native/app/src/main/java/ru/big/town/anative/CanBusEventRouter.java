@@ -22,7 +22,9 @@ final class CanBusEventRouter {
     static final int INTEREST_AMBIENT_TEMPERATURE = 1 << 5;
 
     private static final int DEFAULT_MAILBOX_CAPACITY = 32;
-    private static final int DRAIN_SLICE = 8;
+    // Consumer handlers may be the Android main looper. Yield after every callback so a retained
+    // transition burst cannot monopolize one looper quantum.
+    private static final int DRAIN_SLICE = 1;
 
     interface Listener {
         void onCanBusEvent(CanBusEvent event);

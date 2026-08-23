@@ -238,6 +238,29 @@ public class CanBusEventRouterTest {
         assertEquals(Arrays.asList(3), delivered);
     }
 
+    @Test
+    public void transitionBurstYieldsToAnotherConsumer() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        ManualExecutor executor = new ManualExecutor();
+        List<String> delivered = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_GEAR, null, executor,
+                event -> delivered.add("gear:" + event.first));
+        router.subscribe(CanBusEventRouter.INTEREST_DOOR, null, executor,
+                event -> delivered.add("door:" + event.first));
+
+        router.dispatch(gear(1, 0));
+        router.dispatch(gear(2, 3));
+        router.dispatch(gear(3, 0));
+        router.dispatch(door(4, 1));
+
+        executor.runNext();
+        executor.runNext();
+        assertEquals(Arrays.asList("gear:0", "door:1"), delivered);
+        executor.runAll();
+        assertEquals(Arrays.asList("gear:0", "door:1", "gear:3", "gear:0"),
+                delivered);
+    }
+
     private static CanBusEvent door(long sequence, int value) {
         return CanBusEvent.door(CanBusEvent.Origin.LIVE, 1, sequence, sequence, value);
     }
@@ -265,6 +288,10 @@ public class CanBusEventRouterTest {
 
         void runAll() {
             while (!tasks.isEmpty()) tasks.removeFirst().run();
+        }
+
+        void runNext() {
+            tasks.removeFirst().run();
         }
     }
 
