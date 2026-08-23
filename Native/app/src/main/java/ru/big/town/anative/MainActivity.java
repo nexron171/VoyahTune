@@ -263,15 +263,6 @@ public class MainActivity extends AppCompatActivity {
         return CanSender.send(cmdNum, cmds, label);
     }
 
-    /** Restore-команда обязательна: пустой набор нельзя засчитать как успешный CAN pass. */
-    private static boolean sendRequiredCanValues(int cmdNum, byte[][] cmds, String label) {
-        if (cmds == null || cmds.length == 0) {
-            Log.e("$$$ MainActivity runCmds $$$", "No CAN frames for required " + label);
-            return false;
-        }
-        return setCanValues(cmdNum, cmds, label);
-    }
-
     private static final String MODES_LOG = "$$$ MainActivity loadModes";
 
     /**
@@ -488,28 +479,46 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** @return true, если все включённые команды ушли без ошибки CAN. */
-    public static boolean runCmds() {
+    /** Builds one validated pass before the first frame is sent. */
+    static CanRestorePlan createCanRestorePlan() {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound);
-        // CAN ещё не готов на раннем wake — прекращаем проход на ПЕРВОЙ ошибке. Иначе один retry
-        // всё равно открывал HAL для всех 5–7 кадров и за 120с создавал сотни бесполезных ioctl.
-        if (energyEnabled && !sendRequiredCanValues(1, getEnergyCanCommand(energy),
-                "energy mode: " + energy)) return false;
-        if (driveEnabled && !sendDriveModeCommand(driveMode)) return false;
-        if (recycleEnabled && !sendRequiredCanValues(1, getRecEnergyCanCommand(recycle),
-                "recuperation level: " + recycle)) return false;
-        // «Отключить звук для пешеходов» — бинарное состояние, применяем всегда
-        if (!sendRequiredCanValues(1, getPedestrianSoundCanCommand(disablePedestrianSound),
-                "pedestrian sound mode " + (disablePedestrianSound ? "off" : "on"))) return false;
+        CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
+        int energyStep = -1;
+        if (energyEnabled) {
+            energyStep = plan.add("energy mode: " + energy, getEnergyCanCommand(energy));
+        }
+        if (driveEnabled) {
+            plan.add("drive mode: " + driveMode, NativeDriveModeFrames.forMode(driveMode));
+        }
+        if (recycleEnabled) {
+            plan.add("recuperation level: " + recycle, getRecEnergyCanCommand(recycle));
+        }
+        // «Отключить звук для пешеходов» — независимое бинарное состояние, применяем всегда.
+        plan.add("pedestrian sound mode " + (disablePedestrianSound ? "off" : "on"),
+                getPedestrianSoundCanCommand(disablePedestrianSound));
         // Форсированный EV применяем ТОЛЬКО когда он включён — и обязательно ПОСЛЕ команды энергии,
         // чтобы он её перекрыл. Команду «выкл» здесь не шлём намеренно: её байты (…2c 24 08 00)
         // содержат значение энергии «Электро», т.е. отправка на каждом применении переводила бы
         // энергорежим в электро и затирала выбор пользователя (Авто/Топливо/Сохранение).
         // Выключение уходит явным действием пользователя — см. sendForcedEvCommand(false).
-        if (forcedEv && !sendRequiredCanValues(1, getForcedEvCanCommand(true), "forced EV on")) return false;
-        return true;
+        if (forcedEv) {
+            plan.addAfter("forced EV on", getForcedEvCanCommand(true), energyStep);
+        }
+        return plan.build();
+    }
+
+    /** Compatibility one-shot; ApplyEngine keeps the plan across transient retries. */
+    public static boolean runCmds() {
+        try {
+            return createCanRestorePlan().sendPending(
+                    (frames, label) -> setCanValues(1, frames, label))
+                    == CanRestorePlan.AttemptResult.SUCCESS;
+        } catch (IllegalArgumentException e) {
+            Log.e("$$$ MainActivity runCmds $$$", "Permanent CAN plan error: " + e.getMessage());
+            return false;
+        }
     }
     public static void setDriveMode(String driveMode){
         sendDriveModeCommand(driveMode);

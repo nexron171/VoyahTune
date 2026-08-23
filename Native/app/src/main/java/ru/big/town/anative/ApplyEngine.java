@@ -501,6 +501,17 @@ public final class ApplyEngine {
             return CycleResult.FAILED;
         }
 
+        final CanRestorePlan canPlan;
+        try {
+            // Validate every required command before sending the first frame. Unknown modes and
+            // malformed mappings are permanent configuration errors, not a reason for 120 seconds
+            // of CAN retries.
+            canPlan = MainActivity.createCanRestorePlan();
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "runCycle: permanent CAN plan error — " + e.getMessage());
+            return CycleResult.FAILED;
+        }
+
         // 2) Отправляем ПОКА не наберём `repeat` УСПЕШНЫХ проходов (CAN готов) ИЛИ не выйдет дедлайн.
         //    Раньше было фикс. `repeat` проходов независимо от результата: на пробуждении CAN-сервис/HAL
         //    ещё поднимался, все проходы падали (res=-1) в отведённые ~28 с → режим не применялся. Теперь
@@ -530,7 +541,9 @@ public final class ApplyEngine {
             if (passCoverage < 0L) return CycleResult.CANCELLED;
             boolean ok = CanSender.runGuardedSend(
                     () -> RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch),
-                    MainActivity::runCmds);
+                    () -> canPlan.sendPending(
+                            (frames, label) -> MainActivity.setCanValues(1, frames, label))
+                            == CanRestorePlan.AttemptResult.SUCCESS);
             if (!RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch)) {
                 return CycleResult.CANCELLED;
             }
@@ -538,8 +551,11 @@ public final class ApplyEngine {
             if (ok) {
                 okPasses++;
                 lastSuccessfulPassCoverage = passCoverage;
+                if (okPasses < repeat) canPlan.resetForNextPass();
             } else {
-                Log.w(TAG, "runCycle: CAN не готов, проход " + tries + " не прошёл (успешных=" + okPasses + ")");
+                Log.w(TAG, "runCycle: CAN не готов, проход " + tries
+                        + " не прошёл (успешных=" + okPasses
+                        + ", осталось команд=" + canPlan.pendingCount() + ")");
             }
             if (okPasses >= repeat) break;                             // набрали нужное число успешных
             if (SystemClock.elapsedRealtime() >= deadline) break;      // CAN так и не поднялся вовремя
