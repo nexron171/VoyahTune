@@ -23,6 +23,8 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import java.util.concurrent.RejectedExecutionException;
+
 /**
  * Сервис автоматического управления фарами по датчику освещённости.
  *
@@ -112,6 +114,7 @@ public class LightSensorService extends Service {
     private static volatile boolean manualAutoOverride = false;
 
     private Handler timerHandler;
+    private volatile LatestIntDelivery sensorCallbackDelivery;
     private IBinder carSignalBinder = null;
     private boolean carSignalBindingRequested = false;
     private boolean carSignalConnected = false;
@@ -156,14 +159,8 @@ public class LightSensorService extends Service {
             if (code == CB_onLightSensorChanged) {
                 data.enforceInterface(CALLBACK_DESCRIPTOR);
                 final int level = data.readInt();
-                // Уходим с binder-потока на main и дебаунсим: реагируем только
-                // когда значение «устоялось» SENSOR_DEBOUNCE_MS — гасим дребезг.
-                timerHandler.post(() -> {
-                    if (destroyed) return;
-                    pendingSensorLevel = level;
-                    timerHandler.removeCallbacks(sensorDebounceRunnable);
-                    timerHandler.postDelayed(sensorDebounceRunnable, SENSOR_DEBOUNCE_MS);
-                });
+                LatestIntDelivery delivery = sensorCallbackDelivery;
+                if (delivery != null) delivery.offer(level);
                 return true;
             }
             // Прочие oneway-колбэки CarSignal (код 7/25/…) тихо поглощаем — иначе Binder
@@ -190,6 +187,13 @@ public class LightSensorService extends Service {
             default:
                 break;
         }
+    }
+
+    private void acceptSensorCallbackLevel(int level) {
+        if (destroyed) return;
+        pendingSensorLevel = level;
+        timerHandler.removeCallbacks(sensorDebounceRunnable);
+        timerHandler.postDelayed(sensorDebounceRunnable, SENSOR_DEBOUNCE_MS);
     }
 
     // -------------------------------------------------------------------------
@@ -353,6 +357,11 @@ public class LightSensorService extends Service {
         Log.i(TAG, "onCreate() — LightSensorService (event-driven + safety-poll)");
         Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         timerHandler = new Handler(Looper.getMainLooper());
+        sensorCallbackDelivery = new LatestIntDelivery(command -> {
+            if (!timerHandler.post(command)) {
+                throw new RejectedExecutionException("main Handler stopped");
+            }
+        }, this::acceptSensorCallbackLevel);
         HeadlightCanTransport.initialize(this);
 
         createNotificationChannel();
@@ -391,6 +400,9 @@ public class LightSensorService extends Service {
         Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn
                 + " carSignalConnected=" + carSignalConnected);
         destroyed = true;
+        LatestIntDelivery sensorDelivery = sensorCallbackDelivery;
+        sensorCallbackDelivery = null;
+        if (sensorDelivery != null) sensorDelivery.close();
         CanBusEventHub.Subscription subscription = canBusSubscription;
         canBusSubscription = null;
         if (subscription != null) subscription.close();
