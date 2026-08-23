@@ -223,6 +223,26 @@ public class CanBusEventRouterTest {
     }
 
     @Test
+    public void transitionDroppedByOverflowCanBeAcceptedAgain() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        ManualExecutor executor = new ManualExecutor();
+        List<CanBusEvent.Kind> delivered = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_DOOR
+                        | CanBusEventRouter.INTEREST_GEAR,
+                null, executor, event -> delivered.add(event.kind), 2);
+
+        router.dispatch(CanBusEvent.connection(1, 1, 1));
+        router.dispatch(door(2, 1));
+        router.dispatch(gear(3, 3)); // evicts the not-yet-delivered door transition
+        router.dispatch(door(4, 1)); // must not be suppressed by dedupe memory
+        executor.runAll();
+
+        assertEquals(Arrays.asList(CanBusEvent.Kind.CONNECTION, CanBusEvent.Kind.DOOR),
+                delivered);
+    }
+
+    @Test
     public void listenerFailureDoesNotStopMailbox() {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();

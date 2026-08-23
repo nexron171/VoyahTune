@@ -161,7 +161,13 @@ final class CanBusEventRouter {
                     lastAccepted.put(key, event);
                     if (!event.isOrderedTransition()) removeQueuedLevel(key);
                     if (queue.size() == capacity) {
-                        dropForCapacity();
+                        CanBusEvent removed = dropForCapacity();
+                        if (lastAccepted.get(removed.signalKey()) == removed) {
+                            // A dropped transition was never delivered. Forgetting it lets an
+                            // identical later safety signal enter the queue instead of being
+                            // suppressed forever as a duplicate.
+                            lastAccepted.remove(removed.signalKey());
+                        }
                         dropped++;
                     }
                     queue.addLast(event);
@@ -196,7 +202,7 @@ final class CanBusEventRouter {
             queue.addAll(keep);
         }
 
-        private void dropForCapacity() {
+        private CanBusEvent dropForCapacity() {
             // A connection is an epoch barrier and must never be displaced by a callback burst.
             // Prefer an already-coalescible level; only then sacrifice the oldest transition.
             Iterator<CanBusEvent> iterator = queue.iterator();
@@ -205,18 +211,19 @@ final class CanBusEventRouter {
                 if (queued.kind != CanBusEvent.Kind.CONNECTION
                         && !queued.isOrderedTransition()) {
                     iterator.remove();
-                    return;
+                    return queued;
                 }
             }
             iterator = queue.iterator();
             while (iterator.hasNext()) {
-                if (iterator.next().kind != CanBusEvent.Kind.CONNECTION) {
+                CanBusEvent queued = iterator.next();
+                if (queued.kind != CanBusEvent.Kind.CONNECTION) {
                     iterator.remove();
-                    return;
+                    return queued;
                 }
             }
             // capacity >= 2 and duplicate connection events are coalesced, so this is defensive.
-            queue.removeFirst();
+            return queue.removeFirst();
         }
 
         private void scheduleDrain() {
