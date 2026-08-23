@@ -15,7 +15,6 @@ import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.RemoteException;
-import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
 import dalvik.system.PathClassLoader;
@@ -25,8 +24,6 @@ import java.util.EnumMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicLongArray;
 
 /**
  * Fail-closed, schema-pinned bridge for the OEM triggered lane-change switch.
@@ -100,15 +97,6 @@ public final class ApolloTlcService extends Service {
     private static final long BIND_CONNECT_TIMEOUT_MS = 20_000L;
     private static final long IDLE_UNBIND_GRACE_MS = 5_000L;
     private static final long ENTITLEMENT_SETTLE_MS = 1_000L;
-    private static final long METRICS_INTERVAL_MS = 30_000L;
-    private static final int MAX_TRACKED_TRANSACTION =
-            TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE;
-    private static final int[] TRACKED_TRANSACTIONS = {
-            TX_GET_GEAR_STATUS,
-            TX_GET_VEHICLE_STATE,
-            TX_SET_VEHICLE_STATE,
-            TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE
-    };
 
     /**
      * Owns the complete mutable Apollo/CanBus state machine. Service lifecycle, UI requests
@@ -125,19 +113,6 @@ public final class ApolloTlcService extends Service {
         return thread;
     });
 
-    private final AtomicLong queryCoalesced = new AtomicLong();
-    private final AtomicLong bindTimeouts = new AtomicLong();
-    private final AtomicLong workerDispatchMaxUs = new AtomicLong();
-    private final AtomicLong descriptorCount = new AtomicLong();
-    private final AtomicLong descriptorTotalUs = new AtomicLong();
-    private final AtomicLong descriptorMaxUs = new AtomicLong();
-    private final AtomicLongArray transactionCount =
-            new AtomicLongArray(MAX_TRACKED_TRANSACTION + 1);
-    private final AtomicLongArray transactionTotalUs =
-            new AtomicLongArray(MAX_TRACKED_TRANSACTION + 1);
-    private final AtomicLongArray transactionMaxUs =
-            new AtomicLongArray(MAX_TRACKED_TRANSACTION + 1);
-
     private IBinder canBusBinder;
     private ServiceConnection canBusConnection;
     private boolean canBusBindingRequested;
@@ -150,7 +125,6 @@ public final class ApolloTlcService extends Service {
     private int bindEpoch;
     private int activeBindEpoch;
     private int rebindAttempt;
-    private long metricsWindowStartedAtMs;
     private Runnable bindConnectWatchdog;
     private Runnable idleUnbindRunnable;
 
@@ -184,8 +158,6 @@ public final class ApolloTlcService extends Service {
 
     private final Runnable rebindRunnable = () -> runWorkerSafely(
             "scheduled rebind", () -> revalidateCanBusAndBind("scheduled rebind"));
-    private final Runnable metricsRunnable = () -> runWorkerSafely(
-            "metrics", this::logAndRescheduleMetrics);
 
     private final BroadcastReceiver requestReceiver = new BroadcastReceiver() {
         @Override
@@ -270,17 +242,11 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /** Posts immediate work to the serial state-machine thread and records queue pressure. */
+    /** Posts immediate work to the serial state-machine thread. */
     private boolean postWorker(Runnable action) {
         Handler target = handler;
         if (destroyed || target == null) return false;
-        final long enqueuedAtNs = SystemClock.elapsedRealtimeNanos();
-        return target.post(() -> {
-            long delayUs = Math.max(0L,
-                    (SystemClock.elapsedRealtimeNanos() - enqueuedAtNs) / 1_000L);
-            updateMax(workerDispatchMaxUs, delayUs);
-            runWorkerSafely("queued work", action);
-        });
+        return target.post(() -> runWorkerSafely("queued work", action));
     }
 
     /** Keeps one unexpected task failure from terminating the authoritative HandlerThread. */
@@ -320,7 +286,6 @@ public final class ApolloTlcService extends Service {
         }
         if (!postWorker(() -> acquireClientDemand(sessionToken))) return;
         if (!canBusDemandGate.beginQuery(sessionToken)) {
-            queryCoalesced.incrementAndGet();
             return;
         }
         postQueryWork(sessionToken);
@@ -415,20 +380,6 @@ public final class ApolloTlcService extends Service {
         publishState();
     }
 
-    private static void updateMax(AtomicLong target, long value) {
-        long current = target.get();
-        while (value > current && !target.compareAndSet(current, value)) {
-            current = target.get();
-        }
-    }
-
-    private static void updateMax(AtomicLongArray target, int index, long value) {
-        long current = target.get(index);
-        while (value > current && !target.compareAndSet(index, current, value)) {
-            current = target.get(index);
-        }
-    }
-
     public static void requestQuery(Context context, long sessionToken) {
         start(context, ACTION_INTERNAL_QUERY, false, true, sessionToken);
     }
@@ -513,8 +464,6 @@ public final class ApolloTlcService extends Service {
                 }
             }
             publishState();
-            metricsWindowStartedAtMs = SystemClock.elapsedRealtime();
-            handler.postDelayed(metricsRunnable, METRICS_INTERVAL_MS);
         });
     }
 
@@ -1256,7 +1205,7 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /** Performs one measured synchronous transaction, always from the serial worker thread. */
+    /** Performs one synchronous transaction, always from the serial worker thread. */
     private boolean transactCanBus(int transactionCode, Parcel data, Parcel reply)
             throws RemoteException {
         if (destroyed) {
@@ -1264,31 +1213,11 @@ public final class ApolloTlcService extends Service {
         }
         IBinder binder = canBusBinder;
         if (binder == null) throw new RemoteException("CanBus binder unavailable");
-        long startedAtNs = SystemClock.elapsedRealtimeNanos();
-        try {
-            return binder.transact(transactionCode, data, reply, 0);
-        } finally {
-            long durationUs = Math.max(0L,
-                    (SystemClock.elapsedRealtimeNanos() - startedAtNs) / 1_000L);
-            if (transactionCode >= 0 && transactionCode <= MAX_TRACKED_TRANSACTION) {
-                transactionCount.incrementAndGet(transactionCode);
-                transactionTotalUs.addAndGet(transactionCode, durationUs);
-                updateMax(transactionMaxUs, transactionCode, durationUs);
-            }
-        }
+        return binder.transact(transactionCode, data, reply, 0);
     }
 
     private String readCanBusDescriptor(IBinder service) throws RemoteException {
-        long startedAtNs = SystemClock.elapsedRealtimeNanos();
-        try {
-            return service.getInterfaceDescriptor();
-        } finally {
-            long durationUs = Math.max(0L,
-                    (SystemClock.elapsedRealtimeNanos() - startedAtNs) / 1_000L);
-            descriptorCount.incrementAndGet();
-            descriptorTotalUs.addAndGet(durationUs);
-            updateMax(descriptorMaxUs, durationUs);
-        }
+        return service.getInterfaceDescriptor();
     }
 
     /** Re-resolves the installed VehicleState table before the first Binder transaction. */
@@ -1494,7 +1423,6 @@ public final class ApolloTlcService extends Service {
                 releaseCanBusTransportWithoutDemand("bind timeout while idle");
                 return;
             }
-            bindTimeouts.incrementAndGet();
             Log.e(TAG, "CanBus bind timed out before onServiceConnected");
             restartCanBusBinding("bind_timeout");
         });
@@ -1759,54 +1687,6 @@ public final class ApolloTlcService extends Service {
         if (!canBusConnected) return ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
         if (!lastError.isEmpty()) return lastError;
         return ApolloTlcPolicy.directTlcStateError(plcSwitch);
-    }
-
-    /** Emits one compact interval summary for command/query Binder pressure. */
-    private void logAndRescheduleMetrics() {
-        if (destroyed) return;
-        long nowMs = SystemClock.elapsedRealtime();
-        long actualWindowMs = metricsWindowStartedAtMs <= 0L
-                ? METRICS_INTERVAL_MS : Math.max(0L, nowMs - metricsWindowStartedAtMs);
-        metricsWindowStartedAtMs = nowMs;
-        long coalescedQueries = queryCoalesced.getAndSet(0L);
-        long timedOutBinds = bindTimeouts.getAndSet(0L);
-        long maxDispatchUs = workerDispatchMaxUs.getAndSet(0L);
-        long descriptors = descriptorCount.getAndSet(0L);
-        long descriptorDurationUs = descriptorTotalUs.getAndSet(0L);
-        long descriptorLongestUs = descriptorMaxUs.getAndSet(0L);
-        StringBuilder transactions = new StringBuilder();
-        long transactionEvents = 0L;
-        for (int code : TRACKED_TRANSACTIONS) {
-            long count = transactionCount.getAndSet(code, 0L);
-            long totalUs = transactionTotalUs.getAndSet(code, 0L);
-            long maxUs = transactionMaxUs.getAndSet(code, 0L);
-            if (count == 0L) continue;
-            transactionEvents += count;
-            if (transactions.length() > 0) transactions.append(',');
-            transactions.append(code)
-                    .append(':').append(count)
-                    .append('/').append(totalUs / count)
-                    .append('/').append(maxUs);
-        }
-        if (descriptors != 0L) {
-            transactionEvents += descriptors;
-            if (transactions.length() > 0) transactions.append(',');
-            transactions.append("descriptor:").append(descriptors)
-                    .append('/').append(descriptorDurationUs / descriptors)
-                    .append('/').append(descriptorLongestUs);
-        }
-        if (transactionEvents != 0L || coalescedQueries != 0L || maxDispatchUs != 0L
-                || timedOutBinds != 0L) {
-            Log.i(TAG, "metrics window_ms=" + actualWindowMs
-                    + " query_coalesced=" + coalescedQueries
-                    + " bind_timeouts=" + timedOutBinds
-                    + " worker_delay_max_us=" + maxDispatchUs
-                    + " tx_code_count_avg_max_us={" + transactions + '}');
-        }
-        Handler target = handler;
-        if (target != null && !destroyed) {
-            target.postDelayed(metricsRunnable, METRICS_INTERVAL_MS);
-        }
     }
 
     private void publishState() {

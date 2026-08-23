@@ -424,6 +424,35 @@ for FORBIDDEN in TX_ADD_CALLBACK TX_REMOVE_CALLBACK createCanBusCallback \
 done
 require_fixed "$NATIVE_SERVICE" 'without global callback subscription'
 require_fixed "$NATIVE_SERVICE" 'Do not subscribe globally or issue a delayed verification read.'
+
+# Direct Apollo must not wake its worker every 30 seconds just to aggregate metrics. Removing the
+# scheduler also removes its per-event Atomic/SystemClock instrumentation; useful failures remain
+# logged on the events that already exist.
+for FORBIDDEN in METRICS_INTERVAL_MS metricsRunnable logAndRescheduleMetrics \
+        'metrics window_ms=' AtomicLong AtomicLongArray workerDispatchMaxUs \
+        descriptorTotalUs transactionTotalUs elapsedRealtimeNanos; do
+    if grep -Fq "$FORBIDDEN" "$NATIVE_SERVICE"; then
+        fail "ApolloTlcService must remain free of periodic metrics instrumentation: $FORBIDDEN"
+    fi
+done
+require_fixed "$NATIVE_SERVICE" \
+    'return target.post(() -> runWorkerSafely("queued work", action));'
+require_fixed "$NATIVE_SERVICE" \
+    'return binder.transact(transactionCode, data, reply, 0);'
+require_fixed "$NATIVE_SERVICE" 'return service.getInterfaceDescriptor();'
+require_fixed "$NATIVE_SERVICE" 'Log.e(TAG, "CanBus bind timed out before onServiceConnected");'
+require_fixed "$NATIVE_SERVICE" 'restartCanBusBinding("bind_timeout");'
+ENQUEUE_QUERY_FUNCTION=$(awk '
+    /private void enqueueQuery\(long sessionToken\)/ { capture = 1 }
+    capture { print }
+    capture && /^    }$/ { exit }
+' "$NATIVE_SERVICE")
+printf '%s\n' "$ENQUEUE_QUERY_FUNCTION" | awk '
+    /!canBusDemandGate.beginQuery\(sessionToken\)/ { gate = NR }
+    gate && /return;/ && !returned { returned = NR }
+    /postQueryWork\(sessionToken\);/ { post = NR }
+    END { exit !(gate > 0 && returned > gate && post > returned) }
+' || fail "coalesced Apollo query must still return before posting query work"
 require_fixed "$README" "$OPT_IN_KEY=1"
 require_fixed "$README" 'Generic `onVehicleStateChanged` не хукается ни'
 require_fixed "$README" 'поток CAN-событий вообще не пересекает GumJS'
