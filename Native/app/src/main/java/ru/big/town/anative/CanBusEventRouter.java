@@ -69,6 +69,10 @@ final class CanBusEventRouter {
         return mailboxes.size();
     }
 
+    void invalidateThrough(long connectionEpoch) {
+        for (Mailbox mailbox : mailboxes) mailbox.invalidateThrough(connectionEpoch);
+    }
+
     private void remove(Mailbox mailbox) {
         mailboxes.remove(mailbox);
         mailbox.close();
@@ -107,6 +111,7 @@ final class CanBusEventRouter {
         private boolean drainScheduled;
         private volatile boolean closed;
         private long acceptedEpoch = Long.MIN_VALUE;
+        private long invalidatedThroughEpoch = Long.MIN_VALUE;
         private long dropped;
 
         Mailbox(int interestMask, int[] vehicleStateIds, Executor executor,
@@ -134,6 +139,7 @@ final class CanBusEventRouter {
             boolean schedule = false;
             synchronized (this) {
                 if (closed) return;
+                if (event.connectionEpoch <= invalidatedThroughEpoch) return;
                 if (event.connectionEpoch < acceptedEpoch) return;
                 if (event.connectionEpoch > acceptedEpoch) {
                     // A reconnect is a hard barrier: no queued state or transition from the old
@@ -254,6 +260,13 @@ final class CanBusEventRouter {
             closed = true;
             queue.clear();
             drainScheduled = false;
+        }
+
+        synchronized void invalidateThrough(long connectionEpoch) {
+            if (closed || connectionEpoch <= invalidatedThroughEpoch) return;
+            invalidatedThroughEpoch = connectionEpoch;
+            queue.clear();
+            lastAccepted.clear();
         }
     }
 }

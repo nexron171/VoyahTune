@@ -90,6 +90,30 @@ public class CanBusEventRouterTest {
     }
 
     @Test
+    public void disconnectInvalidatesQueuedAndLateEventsBeforeReconnect() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        ManualExecutor executor = new ManualExecutor();
+        List<String> delivered = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_DOOR,
+                null, executor,
+                event -> delivered.add(event.connectionEpoch + ":" + event.kind));
+
+        router.dispatch(CanBusEvent.connection(1, 1, 1));
+        router.dispatch(CanBusEvent.door(
+                CanBusEvent.Origin.LIVE, 1, 2, 2, 1));
+        router.invalidateThrough(1);
+        router.dispatch(CanBusEvent.door(
+                CanBusEvent.Origin.LIVE, 1, 3, 3, 0));
+        executor.runAll();
+        assertTrue(delivered.isEmpty());
+
+        router.dispatch(CanBusEvent.connection(2, 4, 4));
+        executor.runAll();
+        assertEquals(Arrays.asList("2:CONNECTION"), delivered);
+    }
+
+    @Test
     public void levelSignalsKeepLatestValuePerKey() {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
