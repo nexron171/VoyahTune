@@ -98,13 +98,28 @@ Native Apollo работает без постоянной подписки `ICa
 состояние, а следующий явный запрос при необходимости обновит его из автомобиля. Автоматических
 повторов и фонового восстановления Apollo-entitlement после сна также нет.
 
-`load.bin` разрешает attach только при точном
-`Settings.Global open_voyah_apollo_legacy_hook_enabled=1`. Отсутствующее, нечитаемое, `0`
-или любое другое значение fail-closed: master и profile сбрасываются, attach не выполняется.
-Если PID-marker доказывает наличие нашего агента в точно той же process
-identity, переход `1` → `0` однократно выгружает его через `am force-stop`. Сам JS повторяет
-проверку opt-in до SHA-256 и разрешения OEM-классов. PID-marker v2 включает boot UUID;
-старый marker без UUID никогда не является основанием для `force-stop` после reboot.
+`load.bin` читает `Settings.Global open_voyah_apollo_legacy_hook_enabled` ровно один раз при старте
+процесса loader. Отсутствующее, нечитаемое, `0` или любое другое значение fail-closed: один bounded
+startup cleanup независимо записывает нули в master/profile/старый heartbeat, однократно читает эти
+три ключа для проверки и затем полностью выходит из Apollo-контура. Если PID-marker доказывает
+наличие нашего агента в точно той же process identity, cleanup непосредственно перед остановкой ещё
+раз проверяет identity и только тогда вызывает `am force-stop`; сменившийся или чужой процесс не
+останавливается. PID-marker v2 включает boot UUID, поэтому старый marker без UUID также никогда не
+является основанием для `force-stop` после reboot.
+
+Единственное разрешающее значение — точное
+`Settings.Global open_voyah_apollo_legacy_hook_enabled=1`; оно предназначено только для явной
+legacy-диагностики.
+
+После startup-фазы постоянный 10-секундный watchdog обслуживает только VD, launcher, keymanager и
+multidisplay: в нём нет Apollo Settings/PID/marker/attach/log операций. Ошибка cleanup не создаёт
+retry — loader пишет одно итоговое сообщение и ждёт явного перезапуска сервиса. При startup opt-in=1
+loader сначала ищет уже работающий `com.qinggan.app.vehiclesetting`. Exact already-attached marker —
+полный no-op без Settings writes и повторной инъекции. Во всех остальных исходах старый profile и
+heartbeat один раз сбрасываются и проверяются; только свежая подтверждённая process identity получает
+одну попытку attach. Отсутствие цели, ошибка проверки/attach или последующий restart VehicleSetting
+не вызывают автоматических PID-проверок и повторов. Сам JS отдельно повторяет проверку opt-in до
+SHA-256 и разрешения OEM-классов.
 
 Потеря PID-marker не оставляет уже загруженный legacy-agent активным. Observer самого opt-in и
 системный `ACTION_SCREEN_ON` читают точное значение ключа, а provider проверяет его при входе и
@@ -142,20 +157,34 @@ OFF/gate-loss остаётся отдельной цепочкой максим�
 
    ```sh
    adb shell settings put global open_voyah_apollo_legacy_hook_enabled 1
+   adb shell settings get global open_voyah_apollo_legacy_hook_enabled  # должно быть ровно 1
    adb shell am force-stop com.qinggan.app.vehiclesetting
+   # Открыть VehicleSetting на головном устройстве и убедиться, что появился новый PID:
+   adb shell pidof com.qinggan.app.vehiclesetting
+   adb shell setprop ctl.restart voyahtune_load
+   adb shell getprop init.svc.voyahtune_load
    ```
 
-   После этого открыть VehicleSetting и проверять `logcat -s VoyahApollo VOYAH`,
-   `/data/local/tmp/voyah_apollo.txt` и `[apollo] hook ready`. Этот opt-in не нужен для direct TLC/GLA/TSR.
+   `pidof` до `ctl.restart` обязан вернуть PID уже открытого нового процесса, а последнее значение
+   состояния сервиса — `running`. Затем проверять `logcat -s VoyahApollo VOYAH`,
+   `/data/local/tmp/voyah_apollo.txt` и `[apollo] hook ready`. Если target ещё не работал, attach
+   завершился ошибкой или VehicleSetting был перезапущен позже, автоматического reattach нет:
+   повторить `force-stop` → открыть VehicleSetting → проверить новый PID →
+   `setprop ctl.restart voyahtune_load`. Если `init.svc.voyahtune_load` отсутствует, нужен reboot с
+   корректно установленным full init-конфигом. Этот opt-in не нужен для direct TLC/GLA/TSR.
 4. Выключение legacy-диагностики:
 
    ```sh
    adb shell settings put global open_voyah_apollo_legacy_hook_enabled 0
+   adb shell settings get global open_voyah_apollo_legacy_hook_enabled  # должно быть ровно 0
+   adb shell am force-stop com.qinggan.app.vehiclesetting
+   adb shell setprop ctl.restart voyahtune_load
    ```
 
-   Watchdog закроет gate и выгрузит подтверждённый marker-ом агент. Если marker потерян, сам JS
-   монотонно перейдёт в pass-through и снимет hook без остановки процесса. Для отката запустить
-   full `remove.sh`/`remove.bat` из той же папки рядом с её `backup/`.
+   Сам JS событийно замечает opt-out и монотонно переходит в pass-through; явный `force-stop`
+   немедленно убирает eternalized агент даже при потерянном marker, а restart loader выполняет
+   единственный проверенный cleanup. Постоянного опроса после этого нет. Для отката запустить full
+   `remove.sh`/`remove.bat` из той же папки рядом с её `backup/`.
 
 Все первичные проверки выполняются на неподвижном автомобиле в `P` со стояночным тормозом.
 

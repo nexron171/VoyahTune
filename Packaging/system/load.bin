@@ -5,7 +5,8 @@
 #   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
 #   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
 #   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами.
-#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — только explicit legacy-диагностика.
+#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — одноразовый explicit legacy attach
+#      при старте loader; вечный watchdog Apollo намеренно не опрашивает.
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
 #   • system_server и launcher: frida-inject -e ВОЗВРАЩАЕТ управление. Ставим по ТОЧНОМУ -p pid и пишем
@@ -101,20 +102,44 @@ APOLLO_TARGET=com.qinggan.app.vehiclesetting
 APOLLO_READY_MARKER='[apollo] hook ready'
 APOLLO_LEGACY_OPT_IN_KEY=open_voyah_apollo_legacy_hook_enabled
 APOLLO_DISABLED_MARK=/data/local/tmp/voyah_apollo.disabled
+APOLLO_SETTINGS_TIMEOUT=5
+APOLLO_FORCE_STOP_TIMEOUT=10
+
+apollo_settings_get() {
+    timeout -k 2 "$APOLLO_SETTINGS_TIMEOUT" settings get global "$1" 2>/dev/null
+}
+
+apollo_settings_put_zero() {
+    timeout -k 2 "$APOLLO_SETTINGS_TIMEOUT" settings put global "$1" 0 >/dev/null 2>&1
+}
+
+apollo_force_stop_target() {
+    timeout -k 2 "$APOLLO_FORCE_STOP_TIMEOUT" am force-stop "$APOLLO_TARGET" \
+        >/dev/null 2>&1
+}
 
 reset_apollo_liveness() {
-    # Оба сброса независимы: отказ первого не должен мешать попытке обнулить heartbeat. Heartbeat
-    # пишем первым, чтобы даже при отказе profile-write потребитель перестал доверять stale profile=1.
+    # Оба сброса независимы: отказ первого не должен мешать попытке обнулить второй ключ. Legacy
+    # heartbeat пишем первым, чтобы потребитель перестал доверять stale profile=1 как можно раньше.
+    # Этот primitive сам readback не делает: direct-only cleanup ниже проверяет одной bounded фазой
+    # все три записанных ключа, а новая legacy-инъекция подтверждается exact agent-ready marker.
     APOLLO_RESET_OK=1
-    settings put global open_voyah_apollo_profile_heartbeat 0 >/dev/null 2>&1 \
+    apollo_settings_put_zero open_voyah_apollo_profile_heartbeat \
         || APOLLO_RESET_OK=0
-    settings put global open_voyah_apollo_profile_supported 0 >/dev/null 2>&1 \
+    apollo_settings_put_zero open_voyah_apollo_profile_supported \
         || APOLLO_RESET_OK=0
-    APOLLO_RESET_HEARTBEAT=$(settings get global open_voyah_apollo_profile_heartbeat 2>/dev/null)
-    APOLLO_RESET_PROFILE=$(settings get global open_voyah_apollo_profile_supported 2>/dev/null)
-    [ "$APOLLO_RESET_HEARTBEAT" = "0" ] || APOLLO_RESET_OK=0
-    [ "$APOLLO_RESET_PROFILE" = "0" ] || APOLLO_RESET_OK=0
     [ "$APOLLO_RESET_OK" -eq 1 ]
+}
+
+verify_apollo_liveness_reset() {
+    APOLLO_VERIFY_OK=1
+    APOLLO_VERIFY_PROFILE=$(apollo_settings_get open_voyah_apollo_profile_supported) \
+        || APOLLO_VERIFY_OK=0
+    APOLLO_VERIFY_HEARTBEAT=$(apollo_settings_get open_voyah_apollo_profile_heartbeat) \
+        || APOLLO_VERIFY_OK=0
+    [ "$APOLLO_VERIFY_PROFILE" = "0" ] || APOLLO_VERIFY_OK=0
+    [ "$APOLLO_VERIFY_HEARTBEAT" = "0" ] || APOLLO_VERIFY_OK=0
+    [ "$APOLLO_VERIFY_OK" -eq 1 ]
 }
 
 # Direct-only релиз не использует VehicleSetting/Frida profile. При отсутствии
@@ -122,26 +147,89 @@ reset_apollo_liveness() {
 # доказывает, что агент живёт в текущей process identity, force-stop однократно
 # выгружает eternalized hook. Чужой/протухший PID процесс не затрагивает.
 disable_apollo_legacy_hook() {
-    APOLLO_DISABLE_OK=1
-    settings put global open_voyah_apollo_master 0 >/dev/null 2>&1 \
-        || APOLLO_DISABLE_OK=0
-    reset_apollo_liveness || APOLLO_DISABLE_OK=0
-    APOLLO_DISABLE_MASTER=$(settings get global open_voyah_apollo_master 2>/dev/null)
-    [ "$APOLLO_DISABLE_MASTER" = "0" ] || APOLLO_DISABLE_OK=0
-    [ "$APOLLO_DISABLE_OK" -eq 1 ] || return 1
-
-    APOLLO_DISABLE_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
-    APOLLO_DISABLE_PID=${APOLLO_DISABLE_PID%% *}
-    APOLLO_DISABLE_ID=$(target_identity "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)
+    # Сначала фиксируем ownership proof. Даже полный отказ Settings не должен перескочить выгрузку
+    # exact-owned eternalized agent. Нечитаемая identity остаётся unresolved: такой marker нельзя ни
+    # использовать для force-stop, ни объявлять успешно очищенным.
     APOLLO_ATTACHED_ID=$(cat "$APOLLO_MARK" 2>/dev/null)
-    if [ -n "$APOLLO_DISABLE_ID" ] && [ "$APOLLO_ATTACHED_ID" = "$APOLLO_DISABLE_ID" ]; then
-        am force-stop "$APOLLO_TARGET" >/dev/null 2>&1 || return 1
-        [ "$(target_identity "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)" != "$APOLLO_DISABLE_ID" ] \
-            || return 1
+    APOLLO_DISABLE_PID=
+    APOLLO_DISABLE_ID=
+    APOLLO_MARKER_KEEP=0
+    APOLLO_EXACT_AGENT=0
+    if [ -n "$APOLLO_ATTACHED_ID" ]; then
+        APOLLO_DISABLE_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
+        APOLLO_DISABLE_PID=${APOLLO_DISABLE_PID%% *}
+        if [ -n "$APOLLO_DISABLE_PID" ]; then
+            APOLLO_DISABLE_ID=$(target_identity \
+                "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)
+            if [ -z "$APOLLO_DISABLE_ID" ]; then
+                APOLLO_MARKER_KEEP=1
+            elif [ "$APOLLO_ATTACHED_ID" = "$APOLLO_DISABLE_ID" ]; then
+                APOLLO_EXACT_AGENT=1
+                APOLLO_MARKER_KEEP=1
+            fi
+        fi
     fi
 
-    rm -f "$APOLLO_MARK" || return 1
-    echo 1 > "$APOLLO_DISABLED_MARK" || return 1
+    APOLLO_DISABLE_OK=1
+    rm -f "$APOLLO_DISABLED_MARK" || APOLLO_DISABLE_OK=0
+    if [ "$APOLLO_EXACT_AGENT" -eq 1 ]; then
+        # Revalidate immediately before the package-level stop. In particular, do this before the
+        # three bounded Settings writes: their latency must never let a replaced clean process inherit
+        # the old ownership proof. A changed identity is stale metadata and is never force-stopped.
+        APOLLO_PRE_STOP_ID=$(target_identity \
+            "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)
+        if [ "$APOLLO_PRE_STOP_ID" = "$APOLLO_DISABLE_ID" ]; then
+            # Command status alone is not authoritative: if the exact identity has already disappeared,
+            # cleanup succeeded even when `am` raced with process death. A still-live exact identity
+            # keeps its marker and makes the one-shot cleanup fail closed.
+            apollo_force_stop_target || :
+            APOLLO_AFTER_STOP_ID=$(target_identity \
+                "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)
+            if [ "$APOLLO_AFTER_STOP_ID" = "$APOLLO_DISABLE_ID" ]; then
+                APOLLO_DISABLE_OK=0
+            elif kill -0 "$APOLLO_DISABLE_PID" 2>/dev/null \
+                    && [ -z "$APOLLO_AFTER_STOP_ID" ]; then
+                # PID всё ещё существует, но exact identity после stop прочитать не удалось.
+                APOLLO_DISABLE_OK=0
+            else
+                APOLLO_MARKER_KEEP=0
+            fi
+        elif kill -0 "$APOLLO_DISABLE_PID" 2>/dev/null \
+                && [ -z "$APOLLO_PRE_STOP_ID" ]; then
+            # Живой PID с нечитаемой identity нельзя ни убивать, ни объявлять очищенным.
+            APOLLO_DISABLE_OK=0
+        else
+            # Saved identity уже исчезла или сменилась: новый процесс не трогаем, старый marker stale.
+            APOLLO_MARKER_KEEP=0
+        fi
+    elif [ "$APOLLO_MARKER_KEEP" -eq 1 ]; then
+        APOLLO_DISABLE_OK=0
+    fi
+
+    # Settings cleanup остаётся независимым и выполняется даже после неуспешного stop/ownership
+    # revalidation. AOSP SettingsCmd может напечатать RemoteException и всё равно завершиться с 0,
+    # поэтому после всех трёх put делаем ровно одну bounded verification-фазу. Это startup cleanup,
+    # не часть вечного watchdog.
+    apollo_settings_put_zero open_voyah_apollo_master \
+        || APOLLO_DISABLE_OK=0
+    reset_apollo_liveness || APOLLO_DISABLE_OK=0
+    APOLLO_DISABLE_MASTER=$(apollo_settings_get open_voyah_apollo_master) \
+        || APOLLO_DISABLE_OK=0
+    [ "$APOLLO_DISABLE_MASTER" = "0" ] || APOLLO_DISABLE_OK=0
+    verify_apollo_liveness_reset || APOLLO_DISABLE_OK=0
+
+    if [ "$APOLLO_MARKER_KEEP" -eq 0 ]; then
+        rm -f "$APOLLO_MARK" || APOLLO_DISABLE_OK=0
+    fi
+    rm -f "$APOLLO_DOWN_MARK" || APOLLO_DISABLE_OK=0
+
+    [ "$APOLLO_DISABLE_OK" -eq 1 ] || return 1
+    APOLLO_DISABLED_TMP="$APOLLO_DISABLED_MARK.$$"
+    if ! echo 1 > "$APOLLO_DISABLED_TMP" \
+            || ! mv -f "$APOLLO_DISABLED_TMP" "$APOLLO_DISABLED_MARK"; then
+        rm -f "$APOLLO_DISABLED_TMP"
+        return 1
+    fi
     return 0
 }
 
@@ -240,11 +328,11 @@ inject_verified_marker() {
     } >> "$VERIFIED_LOG"
 
     if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$VERIFIED_TRY"; then
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT engine-error (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT engine-error (explicit loader restart required)"
         return 1
     fi
     if ! grep -qF "$VERIFIED_READY" "$VERIFIED_TRY"; then
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT agent-marker-missing (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT agent-marker-missing (explicit loader restart required)"
         return 1
     fi
     if [ "$VERIFIED_RC" -ne 0 ]; then
@@ -252,18 +340,18 @@ inject_verified_marker() {
     fi
 
     VERIFIED_AFTER=$(target_identity "$VERIFIED_PID" "$VERIFIED_TARGET") || {
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-exited (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-exited (explicit loader restart required)"
         return 1
     }
     if [ "$VERIFIED_AFTER" != "$VERIFIED_BEFORE" ]; then
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-changed (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-changed (explicit loader restart required)"
         return 1
     fi
 
     VERIFIED_MARK_TMP="$VERIFIED_MARK.$$"
     if ! echo "$VERIFIED_AFTER" > "$VERIFIED_MARK_TMP" || ! mv -f "$VERIFIED_MARK_TMP" "$VERIFIED_MARK"; then
         rm -f "$VERIFIED_MARK_TMP"
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT marker-write (retry next loop)"
+        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT marker-write (explicit loader restart required)"
         return 1
     fi
     logi "inject OK pid=$VERIFIED_PID $VERIFIED_SCRIPT marker=$VERIFIED_AFTER"
@@ -354,9 +442,80 @@ inject_keymanager_bg() {
     ) &
 }
 
-logi "voyah load.bin start"
+apollo_startup_once() {
+    # Opt-in читается ровно один раз на весь срок жизни loader. Остальные bounded Settings reads
+    # ниже только проверяют startup cleanup/reset; вечный watchdog Apollo-код не запускает. Null,
+    # timeout и любое значение кроме точного "1" выбирают fail-closed direct-only cleanup.
+    APOLLO_LEGACY_OPT_IN=$(apollo_settings_get "$APOLLO_LEGACY_OPT_IN_KEY")
+    if [ "$APOLLO_LEGACY_OPT_IN" != "1" ]; then
+        if disable_apollo_legacy_hook; then
+            logi "apollo direct-only: one-shot cleanup complete; no runtime polling"
+        else
+            loge "apollo direct-only: one-shot cleanup incomplete; explicit loader restart required"
+        fi
+        return
+    fi
 
-while [ 1 ]; do
+    # Диагностический legacy attach также одноразовый. Сначала проверяем уже запущенный
+    # VehicleSetting по exact process identity; exact already-attached агент оставляем полностью
+    # нетронутым. Отсутствие цели/скрипта и любая ошибка не создают retry: оператор готовит свежий
+    # target и явно рестартует voyahtune_load.
+    APOLLO_STARTUP_OK=1
+    rm -f "$APOLLO_DISABLED_MARK" || APOLLO_STARTUP_OK=0
+    rm -f "$APOLLO_DOWN_MARK" || APOLLO_STARTUP_OK=0
+    if [ "$APOLLO_STARTUP_OK" -ne 1 ]; then
+        loge "apollo legacy: stale state cleanup FAIL; explicit loader restart required"
+        return
+    fi
+
+    APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
+    APOLLO_PID=${APOLLO_PID%% *}
+    APOLLO_ID=
+    if [ -n "$APOLLO_PID" ]; then
+        APOLLO_ID=$(target_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null)
+    fi
+    APOLLO_ATTACHED_ID=$(cat "$APOLLO_MARK" 2>/dev/null)
+    if [ -n "$APOLLO_ID" ] && [ "$APOLLO_ATTACHED_ID" = "$APOLLO_ID" ]; then
+        logi "apollo legacy: exact agent identity already attached; no duplicate injection"
+        return
+    fi
+
+    # Во всех active-start исходах, кроме доказанного exact already-attached агента, stale liveness
+    # сбрасывается и тут же проверяется. Без вечного Apollo-watchdog отсутствие target иначе могло бы
+    # навсегда оставить profile=1 от уже умершего процесса.
+    if ! reset_apollo_liveness || ! verify_apollo_liveness_reset; then
+        loge "apollo legacy: one-shot liveness reset FAIL; explicit loader restart required"
+        return
+    fi
+
+    if [ -z "$APOLLO_PID" ]; then
+        if rm -f "$APOLLO_MARK"; then
+            logi "apollo legacy: VehicleSetting is not running; open a fresh target and restart loader"
+        else
+            loge "apollo legacy: stale marker cleanup FAIL; explicit loader restart required"
+        fi
+        return
+    fi
+    if [ -z "$APOLLO_ID" ]; then
+        loge "apollo legacy: VehicleSetting identity unavailable; explicit loader restart required"
+        return
+    fi
+
+    if ! rm -f "$APOLLO_MARK"; then
+        loge "apollo legacy: stale marker cleanup FAIL; explicit loader restart required"
+        return
+    fi
+    if [ ! -f "$APOLLO" ]; then
+        loge "apollo legacy: script missing; explicit loader restart required"
+        return
+    fi
+
+    inject_verified_marker "$APOLLO_PID" "$APOLLO_TARGET" "$APOLLO" \
+        "$APOLLO_LOG" "$APOLLO_MARK" "$APOLLO_READY_MARKER" \
+        || loge "apollo legacy: one-shot attach failed; explicit loader restart required"
+}
+
+watchdog_cycle() {
     # 1) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
     SS=$(pidof system_server)
     if [ -n "$SS" ] && [ -f "$VD" ]; then
@@ -391,65 +550,12 @@ while [ 1 ]; do
             inject_ret "$MDP" "$MD" /data/local/tmp/voyah_md.txt "$MD_MARK"
         fi
     fi
+}
 
-    # 5) Direct-only по умолчанию не входит в VehicleSetting вообще. Legacy-агент
-    #    допускается только точным Settings.Global opt-in=1; null/ошибка/любое
-    #    другое значение fail-closed. Сам JS повторяет эту проверку.
-    APOLLO_LEGACY_OPT_IN=$(settings get global "$APOLLO_LEGACY_OPT_IN_KEY" 2>/dev/null)
-    if [ "$APOLLO_LEGACY_OPT_IN" != "1" ]; then
-        # Disabled-marker убирает повторные Settings writes, но не является
-        # доверенным gate: каждый poll дёшево проверяет фактические нули.
-        APOLLO_DISABLED_MASTER=$(settings get global open_voyah_apollo_master 2>/dev/null)
-        APOLLO_DISABLED_PROFILE=$(settings get global open_voyah_apollo_profile_supported 2>/dev/null)
-        APOLLO_DISABLED_HEARTBEAT=$(settings get global open_voyah_apollo_profile_heartbeat 2>/dev/null)
-        if [ ! -f "$APOLLO_DISABLED_MARK" ] || [ -f "$APOLLO_MARK" ] \
-                || [ "$APOLLO_DISABLED_MASTER" != "0" ] \
-                || [ "$APOLLO_DISABLED_PROFILE" != "0" ] \
-                || [ "$APOLLO_DISABLED_HEARTBEAT" != "0" ]; then
-            if disable_apollo_legacy_hook; then
-                rm -f "$APOLLO_DOWN_MARK"
-                logi "apollo direct-only: VehicleSetting injection disabled"
-            else
-                logi "apollo direct-only: fail-closed cleanup FAIL (retry next loop)"
-            fi
-        fi
-    else
-        rm -f "$APOLLO_DISABLED_MARK"
-        # Safety-sensitive legacy attach: exact boot+cmdline+starttime, agent marker, atomic PID marker.
-        APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
-        APOLLO_PID=${APOLLO_PID%% *}
-        if [ -z "$APOLLO_PID" ]; then
-            # Eternalized agent умер вместе с target: немедленно закрываем Global gate, не ждём TTL Native.
-            # Down-marker ограничивает idempotent Settings writes, но создаётся лишь после их успеха.
-            if [ ! -f "$APOLLO_DOWN_MARK" ] || [ -f "$APOLLO_MARK" ]; then
-                if reset_apollo_liveness; then
-                    echo 1 > "$APOLLO_DOWN_MARK"
-                else
-                    loge "apollo target gone: liveness reset FAIL (retry next loop)"
-                fi
-            fi
-            if [ -f "$APOLLO_MARK" ] && [ -f "$APOLLO_DOWN_MARK" ]; then
-                rm -f "$APOLLO_MARK"
-                logi "apollo target gone: liveness reset"
-            fi
-        else
-            rm -f "$APOLLO_DOWN_MARK"
-            APOLLO_ID=$(target_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null)
-            if [ -n "$APOLLO_ID" ] && [ "$(cat "$APOLLO_MARK" 2>/dev/null)" != "$APOLLO_ID" ]; then
-                # Новая process identity: сначала fail-closed, затем attach. Старый identity этим не
-                # затрагивается; process-level sentinel в JS защищает от duplicate hook при потере marker.
-                if reset_apollo_liveness; then
-                    rm -f "$APOLLO_MARK"
-                    if [ -f "$APOLLO" ]; then
-                        inject_verified_marker "$APOLLO_PID" "$APOLLO_TARGET" "$APOLLO" \
-                            "$APOLLO_LOG" "$APOLLO_MARK" "$APOLLO_READY_MARKER"
-                    fi
-                else
-                    loge "apollo new identity: liveness reset FAIL (attach deferred)"
-                fi
-            fi
-        fi
-    fi
+logi "voyah load.bin start"
+apollo_startup_once
 
+while [ 1 ]; do
+    watchdog_cycle
     sleep 10
 done

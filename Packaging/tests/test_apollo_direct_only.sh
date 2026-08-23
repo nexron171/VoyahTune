@@ -53,13 +53,53 @@ fi
 # Loader is direct-only unless the exact explicit diagnostic opt-in is 1.
 require_fixed "$LOAD_BIN" "APOLLO_LEGACY_OPT_IN_KEY=$OPT_IN_KEY"
 require_fixed "$LOAD_BIN" 'if [ "$APOLLO_LEGACY_OPT_IN" != "1" ]; then'
+require_fixed "$LOAD_BIN" 'apollo_startup_once() {'
+require_fixed "$LOAD_BIN" 'watchdog_cycle() {'
 require_fixed "$LOAD_BIN" 'disable_apollo_legacy_hook'
 require_fixed "$LOAD_BIN" 'APOLLO_DISABLED_MARK=/data/local/tmp/voyah_apollo.disabled'
 require_fixed "$LOAD_BIN" 'am force-stop "$APOLLO_TARGET"'
 require_fixed "$LOAD_BIN" 'cat /proc/sys/kernel/random/boot_id'
 require_fixed "$LOAD_BIN" 'echo "v2|$IDENT_BOOT|$IDENT_PID|$IDENT_START"'
+require_fixed "$LOAD_BIN" 'APOLLO_LEGACY_OPT_IN=$(apollo_settings_get "$APOLLO_LEGACY_OPT_IN_KEY")'
 assert_before "$LOAD_BIN" 'if [ "$APOLLO_LEGACY_OPT_IN" != "1" ]; then' \
     'inject_verified_marker "$APOLLO_PID"'
+
+# Apollo performs one opt-in get when this loader process starts. Only bounded startup cleanup/reset
+# may verify written keys; the permanent watchdog cannot reference Apollo Settings/PID/marker/attach/log.
+SETTINGS_GET_SITES=$(grep -F -c 'settings get global' "$LOAD_BIN")
+[ "$SETTINGS_GET_SITES" -eq 1 ] \
+    || fail "load.bin must contain only the generic one-shot opt-in settings get"
+APOLLO_OPT_IN_GET_CALLS=$(grep -F -c \
+    'APOLLO_LEGACY_OPT_IN=$(apollo_settings_get "$APOLLO_LEGACY_OPT_IN_KEY")' "$LOAD_BIN")
+[ "$APOLLO_OPT_IN_GET_CALLS" -eq 1 ] \
+    || fail "load.bin must invoke its Apollo settings-get wrapper exactly once"
+
+WATCHDOG_FUNCTION=$(awk '
+    /^watchdog_cycle\(\) \{/ { capture = 1 }
+    capture { print }
+    capture && /^}$/ { exit }
+' "$LOAD_BIN")
+for FORBIDDEN in APOLLO apollo settings VehicleSetting inject_verified_marker; do
+    if printf '%s\n' "$WATCHDOG_FUNCTION" | grep -Fq "$FORBIDDEN"; then
+        fail "permanent watchdog must not reference $FORBIDDEN"
+    fi
+done
+
+PERMANENT_LOOP=$(awk '
+    /^logi "voyah load.bin start"$/ { armed = 1; next }
+    armed && /^while \[ 1 \]; do$/ { capture = 1 }
+    capture { print }
+    capture && /^done$/ { exit }
+' "$LOAD_BIN")
+for REQUIRED in 'while [ 1 ]; do' 'watchdog_cycle' 'sleep 10'; do
+    printf '%s\n' "$PERMANENT_LOOP" | grep -Fq "$REQUIRED" \
+        || fail "permanent loader loop lacks: $REQUIRED"
+done
+for FORBIDDEN in APOLLO apollo settings VehicleSetting inject_verified_marker; do
+    if printf '%s\n' "$PERMANENT_LOOP" | grep -Fq "$FORBIDDEN"; then
+        fail "permanent loader loop must not reference $FORBIDDEN"
+    fi
+done
 
 # Manual attach is also fail-closed before the one-time APK hashes/OEM class resolution.
 require_fixed "$APOLLO_JS" "var LEGACY_OPT_IN_KEY = \"$OPT_IN_KEY\";"
@@ -394,5 +434,13 @@ require_fixed "$README" 'только обнуляют этот legacy cleanup k
 require_fixed "$README" 'Прямой H97X Binder-контур Native доступен в full и light'
 require_fixed "$README" 'не вызывает OEM'
 require_fixed "$README" '`TX28/TX29`'
+require_fixed "$README" 'adb shell setprop ctl.restart voyahtune_load'
+require_fixed "$README" 'adb shell getprop init.svc.voyahtune_load'
+require_fixed "$README" 'adb shell settings get global open_voyah_apollo_legacy_hook_enabled  # должно быть ровно 1'
+require_fixed "$README" 'adb shell settings get global open_voyah_apollo_legacy_hook_enabled  # должно быть ровно 0'
+require_fixed "$README" 'автоматического reattach нет'
+require_fixed "$README" 'в нём нет Apollo Settings/PID/marker/attach/log операций'
+
+sh "$SCRIPT_DIR/test_apollo_loader_one_shot.sh"
 
 echo "PASS: Apollo direct-only packaging guards"
