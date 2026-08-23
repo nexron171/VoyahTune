@@ -676,15 +676,16 @@ final class CanBusEventHub {
                     case CB_LIGHT_STATUS: {
                         if (!router.hasInterest(CanBusEventRouter.INTEREST_LIGHT_STATUS)) return true;
                         data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        if (data.readInt() == 0) return true;
                         int autoLamp = -1;
                         int dippedBeam = -1;
                         int headLight = -1;
-                        for (int index = 0; index < LIGHT_FIELD_COUNT; index++) {
-                            int value = data.readInt();
-                            if (index == LIGHT_DIPPED_BEAM_INDEX) dippedBeam = value;
-                            else if (index == LIGHT_HEAD_LIGHT_INDEX) headLight = value;
-                            else if (index == LIGHT_AUTO_LAMP_INDEX) autoLamp = value;
+                        if (data.readInt() != 0) {
+                            for (int index = 0; index < LIGHT_FIELD_COUNT; index++) {
+                                int value = data.readInt();
+                                if (index == LIGHT_DIPPED_BEAM_INDEX) dippedBeam = value;
+                                else if (index == LIGHT_HEAD_LIGHT_INDEX) headLight = value;
+                                else if (index == LIGHT_AUTO_LAMP_INDEX) autoLamp = value;
+                            }
                         }
                         routeLight(epoch, autoLamp, dippedBeam, headLight);
                         return true;
