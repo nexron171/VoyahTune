@@ -58,6 +58,9 @@ public final class ApplyEngine {
     // CAN до этого дедлайна (первого успешного прохода), иначе фикс. окно заканчивалось ДО готовности CAN
     // и режим не применялся («нестабильно»).
     private static final long WAKE_CAN_DEADLINE_MS = 120_000;
+    // Cooperative cancellation is checked at most once per five-second wait interval. Exact
+    // guards immediately before and after every CAN operation remain the final safety boundary.
+    private static final long GENERATION_CHECK_INTERVAL_MS = 5_000L;
 
     private static volatile Handler bg;
     private static volatile Handler commandBg;
@@ -65,7 +68,7 @@ public final class ApplyEngine {
     private static final Object DEBOUNCE_TOKEN = new Object();
 
     // Все переходы generation/coverage и mode-gate упорядочены этим lock. Сам CAN-цикл lock не держит:
-    // он только часто проверяет cooperative cancellation token через RESTORE_RUN_STATE.
+    // он периодически проверяет cooperative cancellation token через RESTORE_RUN_STATE.
     private static final Object RESTORE_LOCK = new Object();
     private static final RestoreRunState RESTORE_RUN_STATE = new RestoreRunState();
 
@@ -666,7 +669,7 @@ public final class ApplyEngine {
         long deadline = ms > Long.MAX_VALUE - now ? Long.MAX_VALUE : now + ms;
         while (now < deadline) {
             if (!RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch)) return false;
-            long slice = Math.min(100L, deadline - now);
+            long slice = Math.min(GENERATION_CHECK_INTERVAL_MS, deadline - now);
             try {
                 Thread.sleep(slice);
             } catch (InterruptedException e) {
