@@ -205,6 +205,10 @@ verify_common_release_assets() {
         echo "Startup/wake saved-config guard failed; release was not created." >&2
         exit 1
     fi
+    if ! sh "$COMMON/tests/test_keyboard_modes.sh"; then
+        echo "Keyboard opt-in lifecycle guard failed; release was not created." >&2
+        exit 1
+    fi
 
     if [ ! -f "$DNS_OVERLAY" ]; then
         echo "Нет $DNS_OVERLAY — добавьте зафиксированный DNS RRO APK." >&2
@@ -357,7 +361,7 @@ verify_release_payload() {
     flavor="$2"
     required="README.txt native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
     if [ "$flavor" = full ]; then
-        required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
+        required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
     fi
     for payload in $required; do
         if [ ! -s "$out/$payload" ]; then
@@ -493,6 +497,7 @@ if [ "$DO_FULL" = 1 ]; then
 
     cp "$COMMON/tools/"*                                    "$STAGE/"
     cp "$COMMON/inject/"*.js                                "$STAGE/"
+    cp "$COMMON/inject/"*.json                              "$STAGE/"
     cp "$COMMON/system/"*                                   "$STAGE/"
     copy_common_release_assets "$STAGE"
     for f in "$COMMON/installer/full/"*; do

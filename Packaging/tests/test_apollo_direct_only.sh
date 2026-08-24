@@ -62,9 +62,12 @@ require_fixed "$LOAD_BIN" 'reserve_injection_attempt "$APOLLO_ID" "$APOLLO_ATTEM
 require_fixed "$LOAD_BIN" 'APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)'
 require_fixed "$LOAD_BIN" 'APOLLO_READY_MARKER='
 for FORBIDDEN in APOLLO_LEGACY_OPT_IN apollo_startup_once open_voyah_apollo \
-        'settings get global' 'settings put global' asyncQueryAdasSubData; do
+        'settings put global' asyncQueryAdasSubData; do
     forbid_fixed "$LOAD_BIN" "$FORBIDDEN"
 done
+[ "$(grep -Fc 'settings get global' "$LOAD_BIN")" -eq 1 ] \
+    || fail "loader must contain only the one identity-latched keyboard Settings read"
+require_fixed "$LOAD_BIN" 'settings get global "$KEYBOARD_SETTING"'
 [ "$(grep -Fc 'APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)' "$LOAD_BIN")" -eq 1 ] \
     || fail "Apollo process discovery is not a single watchdog call site"
 

@@ -7,8 +7,8 @@ import android.content.SharedPreferences;
 import java.util.List;
 
 /**
- * Единая сериализация пресетов для Native. Dock и steering читают копии из Settings.Global, поэтому
- * после любого изменения пресета обе копии должны обновляться одновременно.
+ * Единая event-driven публикация сохранённой конфигурации в Native. Dock/steering/DPI/keyboard
+ * зеркалируются при изменении, старте и физическом пробуждении без периодического чтения.
  */
 final class SplitConfigSync {
     private static final String NATIVE_PKG = "ru.big.town.anative";
@@ -20,6 +20,7 @@ final class SplitConfigSync {
         pushAppDpi(context, prefs, null, 0);
         pushDock(context, prefs);
         pushSteering(context, prefs);
+        pushKeyboard(context, prefs);
     }
 
     /** Публикует полный DPI snapshot; changedPkg нужен, чтобы надёжно передать переход в «Авто» (0). */
@@ -57,6 +58,22 @@ final class SplitConfigSync {
         i.putExtra("steerPhoneShort",  resolveSteerAction(prefs.getString("steerPhoneShort",  "none"), prefs));
         i.putExtra("steerPhoneLong",   resolveSteerAction(prefs.getString("steerPhoneLong",   "none"), prefs));
         context.sendBroadcast(i);
+    }
+
+    /**
+     * Keyboard hooks are full-only and opt-in. Both UI switches are projections of this single
+     * mutually-exclusive mode because the English and Russian agents hook the same Qinggan IME
+     * methods and must never be injected together.
+     */
+    static void pushKeyboard(Context context, SharedPreferences prefs) {
+        String mode = normalizeKeyboardMode(prefs.getString("keyboardMode", "off"));
+        Intent i = configIntent("ru.big.town.anative.KEYBOARD_CONFIG");
+        i.putExtra("keyboardMode", mode);
+        context.sendBroadcast(i);
+    }
+
+    static String normalizeKeyboardMode(String mode) {
+        return "en".equals(mode) || "ru".equals(mode) ? mode : "off";
     }
 
     private static Intent configIntent(String action) {

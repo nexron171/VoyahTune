@@ -256,9 +256,10 @@ fi
 adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null
 adb shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock" 2>/dev/null
 adb shell "rm -rf /data/local/tmp/voyah_load.lock" 2>/dev/null
-adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
+adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|keyboard_lock_en|keyboard_ru' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
 # Eternalized agent живёт в target без frida-inject; force-stop выгружает его до финального reboot.
 adb shell "am force-stop com.qinggan.app.vehiclesetting" 2>/dev/null
+adb shell "am force-stop com.qinggan.app.qgime" 2>/dev/null
 
 # --- Убрать наши Frida-файлы (или вернуть бэкап, если что-то было до нас) ---
 if [ -f backup/load.bin ]; then adb push backup/load.bin /data/local/bin/load.bin; else adb shell "rm -f /data/local/bin/load.bin"; fi
@@ -266,6 +267,7 @@ adb shell "rm -f /data/local/bin/vd_bypass.js"
 adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"   # keymng2 — легаси до объединения хуков руля
 # Apollo entitlement hook принадлежит Open Voyah и при remove удаляется без восстановления backup.
 adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
+adb shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
 # Project-owned Frida scripts, PID/lock markers and diagnostic logs. Generic CUNBA/Frida files
 # are deliberately not touched: only paths created by Open Voyah installers/runtime are listed.
@@ -279,6 +281,15 @@ if ! adb shell '
         /data/local/bin/keymng2.js \
         /data/local/bin/apollo_tech.js \
         /data/local/bin/apollo_tech.js.new \
+        /data/local/bin/keyboard_lock_en.js \
+        /data/local/bin/keyboard_ru.js \
+        /data/local/bin/voyahtune_keyboard_en_config.json \
+        /data/local/bin/voyahtune_keyboard_ru_config.json \
+        /data/local/bin/voyahtune_skb_qwerty_ru.json \
+        /data/local/tmp/voyahtune_keyboard.pid \
+        /data/local/tmp/voyahtune_keyboard.attempt \
+        /data/local/tmp/voyahtune_keyboard.txt \
+        /data/local/tmp/voyahtune_keyboard.txt.try \
         /data/local/tmp/voyahtune_apollo.pid \
         /data/local/tmp/voyahtune_apollo.attempt \
         /data/local/tmp/voyahtune_apollo.txt \
@@ -339,6 +350,15 @@ if ! adb shell '
         /data/local/bin/keymng2.js \
         /data/local/bin/apollo_tech.js \
         /data/local/bin/apollo_tech.js.new \
+        /data/local/bin/keyboard_lock_en.js \
+        /data/local/bin/keyboard_ru.js \
+        /data/local/bin/voyahtune_keyboard_en_config.json \
+        /data/local/bin/voyahtune_keyboard_ru_config.json \
+        /data/local/bin/voyahtune_skb_qwerty_ru.json \
+        /data/local/tmp/voyahtune_keyboard.pid \
+        /data/local/tmp/voyahtune_keyboard.attempt \
+        /data/local/tmp/voyahtune_keyboard.txt \
+        /data/local/tmp/voyahtune_keyboard.txt.try \
         /data/local/tmp/voyahtune_apollo.pid \
         /data/local/tmp/voyahtune_apollo.attempt \
         /data/local/tmp/voyahtune_apollo.txt \
@@ -411,6 +431,7 @@ if ! adb shell '
         open_voyah_apollo_master open_voyah_apollo_legacy_hook_enabled \
         open_voyah_apollo_asc open_voyah_apollo_sdb \
         open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat \
+        voyahtune_keyboard_mode \
         enable_freeform_support force_resizable_activities; do
         settings delete global "$setting_name" >/dev/null 2>&1 || exit 1
     done

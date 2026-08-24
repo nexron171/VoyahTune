@@ -6,6 +6,7 @@
 #   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
 #   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами;
 #   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — entitlement как в voboost, без CAN.
+#   6) keyboard_*.js         в com.qinggan.app.qgime — только при явном opt-in из «Другого».
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
 #   • Каждая точная process identity (boot-id + pid + start-time) получает НЕ БОЛЕЕ ОДНОЙ попытки.
@@ -115,6 +116,8 @@ SWK=/data/local/bin/steeringwheelkeys.js
 LNCH=/data/local/bin/launcherdock.js
 MD=/data/local/bin/multidisplay.js
 APOLLO=/data/local/bin/apollo_tech.js
+KEYBOARD_EN=/data/local/bin/keyboard_lock_en.js
+KEYBOARD_RU=/data/local/bin/keyboard_ru.js
 VDMARK=/data/local/tmp/voyahtune_vd.pid          # exact identity system_server с vd_bypass
 SWK_KM_MARK=/data/local/tmp/voyahtune_swk_km.pid # exact identity keymanager со steeringwheelkeys
 SWK_KM_BUSY=/data/local/tmp/voyahtune_swk_km.busy # symlink: targetPid|startUptime|token
@@ -127,6 +130,12 @@ APOLLO_ATTEMPT=/data/local/tmp/voyahtune_apollo.attempt
 APOLLO_LOG=/data/local/tmp/voyahtune_apollo.txt
 APOLLO_TARGET=com.qinggan.app.vehiclesetting
 APOLLO_READY_MARKER='[apollo] hook ready'
+KEYBOARD_TARGET=com.qinggan.app.qgime
+KEYBOARD_SETTING=voyahtune_keyboard_mode
+KEYBOARD_MARK=/data/local/tmp/voyahtune_keyboard.pid
+KEYBOARD_ATTEMPT=/data/local/tmp/voyahtune_keyboard.attempt
+KEYBOARD_LOG=/data/local/tmp/voyahtune_keyboard.txt
+KEYBOARD_SEEN_ID=
 SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
 LNCH_MARK=/data/local/tmp/voyahtune_lnch.pid     # exact process identity лаунчера с launcherdock
 MD_MARK=/data/local/tmp/voyahtune_md.pid         # exact process identity systemservice с multidisplay
@@ -442,6 +451,32 @@ watchdog_cycle() {
         if [ "$(cat "$APOLLO_MARK" 2>/dev/null)" != "$APOLLO_ID" ] \
                 && [ "$(cat "$APOLLO_ATTEMPT" 2>/dev/null)" != "$APOLLO_ID" ]; then
             inject_apollo "$APOLLO_PID" "$APOLLO_ID"
+        fi
+    fi
+
+    # 6) Штатная Qinggan-клавиатура. Режим читается ровно один раз на новую process identity,
+    #    а не на каждом 10-секундном цикле. Native при изменении opt-in перезапускает только qgime,
+    #    поэтому новый режим получает новый PID/start-time; off/null/error безопасно лачится без hook.
+    KEYBOARD_PID=$(pidof "$KEYBOARD_TARGET" 2>/dev/null)
+    KEYBOARD_PID=${KEYBOARD_PID%% *}
+    KEYBOARD_ID=$(process_identity "$KEYBOARD_PID" "$KEYBOARD_TARGET" 2>/dev/null) || KEYBOARD_ID=
+    if [ -n "$KEYBOARD_ID" ] && [ "$KEYBOARD_SEEN_ID" != "$KEYBOARD_ID" ]; then
+        KEYBOARD_SEEN_ID=$KEYBOARD_ID
+        KEYBOARD_MODE=$(settings get global "$KEYBOARD_SETTING" 2>/dev/null) || KEYBOARD_MODE=off
+        case "$KEYBOARD_MODE" in
+            en) KEYBOARD_SCRIPT=$KEYBOARD_EN ;;
+            ru) KEYBOARD_SCRIPT=$KEYBOARD_RU ;;
+            *)
+                logi "keyboard hook disabled for qgime pid=$KEYBOARD_PID"
+                KEYBOARD_SCRIPT=
+                ;;
+        esac
+        if [ -n "$KEYBOARD_SCRIPT" ] && [ -f "$KEYBOARD_SCRIPT" ]; then
+            if [ "$(cat "$KEYBOARD_MARK" 2>/dev/null)" != "$KEYBOARD_ID" ] \
+                    && [ "$(cat "$KEYBOARD_ATTEMPT" 2>/dev/null)" != "$KEYBOARD_ID" ]; then
+                inject_ret "$KEYBOARD_PID" "$KEYBOARD_SCRIPT" "$KEYBOARD_LOG" \
+                    "$KEYBOARD_MARK" "$KEYBOARD_ATTEMPT" "$KEYBOARD_ID" "$KEYBOARD_TARGET"
+            fi
         fi
     fi
 }

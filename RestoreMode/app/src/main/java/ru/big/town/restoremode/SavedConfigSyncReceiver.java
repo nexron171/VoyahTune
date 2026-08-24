@@ -7,7 +7,7 @@ import android.content.SharedPreferences;
 import android.util.Log;
 
 /**
- * Event-driven publication of the persisted Dock/steering configuration. Native calls this exact
+ * Event-driven publication of the persisted Dock/steering/DPI/keyboard configuration. Native calls this exact
  * component once when SetModes starts and once per coalesced physical vehicle wake, so no screen
  * needs to be opened and no periodic reader is required.
  */
@@ -24,7 +24,7 @@ public final class SavedConfigSyncReceiver extends BroadcastReceiver {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             SplitConfigSync.pushAll(context, prefs);
-            Log.i(TAG, "saved Dock/steering/app-DPI configuration published");
+            Log.i(TAG, "saved Dock/steering/app-DPI/keyboard configuration published");
         } catch (RuntimeException e) {
             Log.e(TAG, "saved configuration publication failed", e);
         }

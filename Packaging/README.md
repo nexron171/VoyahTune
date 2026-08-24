@@ -20,13 +20,14 @@ Releases/dist/VoyahTune-3.2.2-light.zip
 
 ## Состав
 
-`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay и ADAS entitlement. `light` не
+`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, ADAS entitlement и
+опциональной штатной клавиатуры. `light` не
 содержит Frida и `load.bin`. Read-only диагностика Apollo входит в оба варианта.
 
 | Папка | Что | Куда идёт |
 |---|---|---|
 | `tools/` | ADB и `frida-inject-16.2.1-android-arm64` | full целиком; light — только ADB |
-| `inject/` | `vd_bypass.js`, `launcherdock.js`, `steeringwheelkeys.js`, `multidisplay.js` | только full |
+| `inject/` | основные hooks и opt-in keyboard agents/config | только full |
 | `system/` | `load.bin`, init RC/wrapper, permission whitelist | full; whitelist также в light |
 | `vendor-overlay/` | зафиксированный DNS RRO APK и provenance | full и light |
 | `installer/common/` | общие DNS helper-файлы | full и light |
@@ -54,6 +55,14 @@ Per-app DPI хранится в `DrivePreferences` и event-driven зеркал�
 `Settings.Global/voyahtune_dpi_<package>` при изменении, старте Native и пробуждении. `WIN_RELOAD`
 сбрасывает только кэш WindowManager hook; периодического чтения настроек нет. Переход в «Авто» явно
 публикует `0`, поэтому ранее выбранный DPI не остаётся зависшим.
+
+В разделе «Другое» full-варианта есть два выключенных по умолчанию взаимоисключающих режима штатной
+Qinggan-клавиатуры. «Английская раскладка» запрещает IME сохранять китайский input mode; «Русская
+клавиатура» переносит из voboost полноценную ЙЦУКЕН-раскладку и переключение EN ↔ RU. Выбор
+зеркалируется в `Settings.Global/voyahtune_keyboard_mode`. При изменении Native перезапускает только
+`com.qinggan.app.qgime`, чтобы выгрузить прежний eternalized hook. `load.bin` читает режим ровно один
+раз на новую exact process identity и делает не более одной попытки injection; постоянного Settings
+polling нет. Light и remove выгружают qgime, удаляют agents/config/markers и возвращают штатный IME.
 
 ## Зафиксированный DNS RRO
 
@@ -105,8 +114,9 @@ RestoreMode: смерть клиента освобождает transport без
 
 ## Full loader и нагрузка
 
-Постоянный 10-секундный watchdog full-варианта обслуживает VD, launcher, keymanager, multidisplay и
-обнаружение новой process identity VehicleSetting. Каждая точная identity получает не более одной
+Постоянный 10-секундный watchdog full-варианта обслуживает VD, launcher, keymanager, multidisplay,
+VehicleSetting и opt-in Qinggan IME. Режим клавиатуры читается только при появлении новой qgime
+identity; в выключенном по умолчанию состоянии это одно чтение на жизнь процесса. Каждая точная identity получает не более одной
 тяжёлой Frida-попытки; ошибка не создаёт повторяющийся injection loop, а новый процесс получает новую
 попытку. Owner/busy lock loops имеют sleep и конечный budget, поэтому повреждённый lock path не
 создаёт 100% CPU spin.

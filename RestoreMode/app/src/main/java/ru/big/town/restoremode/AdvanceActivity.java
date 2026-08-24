@@ -587,6 +587,39 @@ public class AdvanceActivity extends AppCompatActivity {
         switchDebugMode.setOnCheckedChangeListener((b, checked) ->
                 prefs.edit().putBoolean("debugMode", checked).apply());
 
+        // Keyboard modifications are optional full-only Frida agents. The agents overlap in the
+        // Qinggan IME, so the two switches expose one mutually-exclusive off/en/ru preference.
+        Switch switchKeyboardEnglish = findViewById(R.id.switchKeyboardEnglish);
+        Switch switchKeyboardRussian = findViewById(R.id.switchKeyboardRussian);
+        if (switchKeyboardEnglish != null && switchKeyboardRussian != null) {
+            String keyboardMode = BuildConfig.IS_FULL
+                    ? SplitConfigSync.normalizeKeyboardMode(prefs.getString("keyboardMode", "off"))
+                    : "off";
+            switchKeyboardEnglish.setChecked("en".equals(keyboardMode));
+            switchKeyboardRussian.setChecked("ru".equals(keyboardMode));
+            switchKeyboardEnglish.setEnabled(BuildConfig.IS_FULL);
+            switchKeyboardRussian.setEnabled(BuildConfig.IS_FULL);
+            final boolean[] updatingKeyboardSwitches = {false};
+            switchKeyboardEnglish.setOnCheckedChangeListener((button, checked) -> {
+                if (updatingKeyboardSwitches[0] || !BuildConfig.IS_FULL) return;
+                updatingKeyboardSwitches[0] = true;
+                if (checked) switchKeyboardRussian.setChecked(false);
+                String mode = checked ? "en" : (switchKeyboardRussian.isChecked() ? "ru" : "off");
+                prefs.edit().putString("keyboardMode", mode).apply();
+                SplitConfigSync.pushKeyboard(this, prefs);
+                updatingKeyboardSwitches[0] = false;
+            });
+            switchKeyboardRussian.setOnCheckedChangeListener((button, checked) -> {
+                if (updatingKeyboardSwitches[0] || !BuildConfig.IS_FULL) return;
+                updatingKeyboardSwitches[0] = true;
+                if (checked) switchKeyboardEnglish.setChecked(false);
+                String mode = checked ? "ru" : (switchKeyboardEnglish.isChecked() ? "en" : "off");
+                prefs.edit().putString("keyboardMode", mode).apply();
+                SplitConfigSync.pushKeyboard(this, prefs);
+                updatingKeyboardSwitches[0] = false;
+            });
+        }
+
         // Раздел «Другое»: показывать скрытый по умолчанию раздел «Собственные команды».
         Switch switchShowCustomCommands = findViewById(R.id.switchShowCustomCommands);
         switchShowCustomCommands.setChecked(prefs.getBoolean(PREF_SHOW_CUSTOM_COMMANDS, false));

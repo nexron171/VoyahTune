@@ -122,6 +122,14 @@ for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_ma
 done
 echo "  Apollo entitlement agent и его маркеры удалены; light остаётся без Frida-активации."
 
+# При переходе full -> light выгружаем optional keyboard agent из штатного IME и удаляем его
+# root-owned assets. Настройка RestoreMode может сохраниться, но light её не публикует/не исполняет.
+echo "=== Удаление keyboard hooks для light ==="
+adb shell am force-stop com.qinggan.app.qgime 2>/dev/null
+adb shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json /data/local/tmp/voyahtune_keyboard.pid /data/local/tmp/voyahtune_keyboard.attempt /data/local/tmp/voyahtune_keyboard.txt /data/local/tmp/voyahtune_keyboard.txt.try" 2>/dev/null
+adb shell settings delete global voyahtune_keyboard_mode 2>/dev/null
+echo "  Keyboard hooks удалены; штатный Qinggan IME работает без модификаций."
+
 # Оба флейвора Native владеют signature-разрешением прямой записи в CanBus. Чужой первый владелец
 # сделал бы установленный APK несовместимым, поэтому конфликт проверяется до изменения /system.
 echo "=== Preflight владельца com.qinggan.permission.WRITE_CANBUS ==="

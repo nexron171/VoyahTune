@@ -24,6 +24,12 @@ adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.
 for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
 echo   Apollo entitlement agent and markers removed. Light keeps read-only diagnostics only.
 
+echo === Removing keyboard hooks for light ===
+adb.exe shell am force-stop com.qinggan.app.qgime 1>nul 2>nul
+adb.exe shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json /data/local/tmp/voyahtune_keyboard.pid /data/local/tmp/voyahtune_keyboard.attempt /data/local/tmp/voyahtune_keyboard.txt /data/local/tmp/voyahtune_keyboard.txt.try" 1>nul 2>nul
+adb.exe shell settings delete global voyahtune_keyboard_mode 1>nul 2>nul
+echo   Keyboard hooks removed. Qinggan IME remains stock.
+
 echo === Preflight owner check for com.qinggan.permission.WRITE_CANBUS ===
 adb.exe shell dumpsys package permissions >nul 2>nul
 if errorlevel 1 (

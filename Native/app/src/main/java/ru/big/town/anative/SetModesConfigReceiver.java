@@ -1,9 +1,13 @@
 package ru.big.town.anative;
 
+import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.provider.Settings;
 import android.util.Log;
+
+import java.lang.reflect.Method;
 
 /**
  * Защищённый signature-permission вход для конфигурации из RestoreMode. Launcher/steering hooks
@@ -45,6 +49,38 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             SetModesReceiverDynamic.mirrorAppDpi(context, intent);
             SetModesReceiverDynamic.sendWinReload(context);
             Log.i(TAG, "APP_DPI_CONFIG зеркалирован + reload");
+        } else if ("ru.big.town.anative.KEYBOARD_CONFIG".equals(action)) {
+            applyKeyboardMode(context, intent.getStringExtra("keyboardMode"));
         }
+    }
+
+    private static void applyKeyboardMode(Context context, String requestedMode) {
+        String mode = normalizeKeyboardMode(requestedMode);
+        String previous = Settings.Global.getString(
+                context.getContentResolver(), "voyahtune_keyboard_mode");
+        String normalizedPrevious = normalizeKeyboardMode(previous);
+        if (!Settings.Global.putString(
+                context.getContentResolver(), "voyahtune_keyboard_mode", mode)) {
+            Log.e(TAG, "KEYBOARD_CONFIG: Settings.Global write failed");
+            return;
+        }
+        if (mode.equals(normalizedPrevious)) {
+            Log.i(TAG, "KEYBOARD_CONFIG unchanged: " + mode);
+            return;
+        }
+        // Hooks are eternalized inside qgime. An exact process restart is the only safe way to
+        // remove or replace them; load.bin injects at most once into the new Android 11 process.
+        try {
+            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            Method forceStopPackage = ActivityManager.class.getMethod("forceStopPackage", String.class);
+            forceStopPackage.invoke(am, "com.qinggan.app.qgime");
+            Log.i(TAG, "KEYBOARD_CONFIG=" + mode + "; Qinggan IME restarted");
+        } catch (Exception e) {
+            Log.e(TAG, "KEYBOARD_CONFIG saved, but Qinggan IME restart failed", e);
+        }
+    }
+
+    private static String normalizeKeyboardMode(String mode) {
+        return "en".equals(mode) || "ru".equals(mode) ? mode : "off";
     }
 }

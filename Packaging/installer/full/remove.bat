@@ -86,8 +86,9 @@ if errorlevel 1 echo   WARNING: some inactive transaction files remain; the boot
 adb.exe shell "pkill -f /data/local/bin/load.bin"
 adb.exe shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock"
 adb.exe shell "rm -rf /data/local/tmp/voyah_load.lock"
-adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech' | grep -v grep | awk '{print $2}' | xargs kill -9"
+adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|keyboard_lock_en|keyboard_ru' | grep -v grep | awk '{print $2}' | xargs kill -9"
 adb.exe shell "am force-stop com.qinggan.app.vehiclesetting"
+adb.exe shell "am force-stop com.qinggan.app.qgime"
 
 if exist "backup\load.bin" (
     adb.exe push backup\load.bin /data/local/bin/load.bin
@@ -98,6 +99,7 @@ adb.exe shell "rm -f /data/local/bin/vd_bypass.js"
 adb.exe shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"
 rem Obsolete Apollo hook is never restored, including backups from old releases.
 adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
+adb.exe shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json /data/local/tmp/voyahtune_keyboard.pid /data/local/tmp/voyahtune_keyboard.attempt /data/local/tmp/voyahtune_keyboard.txt /data/local/tmp/voyahtune_keyboard.txt.try"
 if exist "backup\frida-inject" (
     adb.exe push backup\frida-inject /data/local/bin/frida-inject
 ) else (
@@ -112,7 +114,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo === Cleaning Settings.Global ===
-adb.exe shell "for setting_name in voyahtune_dock1 voyahtune_dock2 voyahtune_dock1Dpi voyahtune_dock2Dpi voyahtune_steerStarShort voyahtune_steerStarLong voyahtune_steerDvrShort voyahtune_steerDvrLong voyahtune_steerVoiceShort voyahtune_steerVoiceLong voyahtune_steerPhoneShort voyahtune_steerPhoneLong open_voyah_apollo_master open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat enable_freeform_support force_resizable_activities; do settings delete global $setting_name >/dev/null 2>&1 || exit 1; done"
+adb.exe shell "for setting_name in voyahtune_dock1 voyahtune_dock2 voyahtune_dock1Dpi voyahtune_dock2Dpi voyahtune_steerStarShort voyahtune_steerStarLong voyahtune_steerDvrShort voyahtune_steerDvrLong voyahtune_steerVoiceShort voyahtune_steerVoiceLong voyahtune_steerPhoneShort voyahtune_steerPhoneLong open_voyah_apollo_master open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat voyahtune_keyboard_mode enable_freeform_support force_resizable_activities; do settings delete global $setting_name >/dev/null 2>&1 || exit 1; done"
 if errorlevel 1 (
     echo !!! Could not completely clean Settings.Global. Reboot was cancelled.
     exit /b 1

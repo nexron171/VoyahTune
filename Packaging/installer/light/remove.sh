@@ -63,6 +63,15 @@ if ! adb shell '
     rm -f \
         /data/local/bin/apollo_tech.js \
         /data/local/bin/apollo_tech.js.new \
+        /data/local/bin/keyboard_lock_en.js \
+        /data/local/bin/keyboard_ru.js \
+        /data/local/bin/voyahtune_keyboard_en_config.json \
+        /data/local/bin/voyahtune_keyboard_ru_config.json \
+        /data/local/bin/voyahtune_skb_qwerty_ru.json \
+        /data/local/tmp/voyahtune_keyboard.pid \
+        /data/local/tmp/voyahtune_keyboard.attempt \
+        /data/local/tmp/voyahtune_keyboard.txt \
+        /data/local/tmp/voyahtune_keyboard.txt.try \
         /data/local/tmp/voyahtune_apollo.pid \
         /data/local/tmp/voyahtune_apollo.attempt \
         /data/local/tmp/voyahtune_apollo.txt \
@@ -81,6 +90,15 @@ if ! adb shell '
     for path in \
         /data/local/bin/apollo_tech.js \
         /data/local/bin/apollo_tech.js.new \
+        /data/local/bin/keyboard_lock_en.js \
+        /data/local/bin/keyboard_ru.js \
+        /data/local/bin/voyahtune_keyboard_en_config.json \
+        /data/local/bin/voyahtune_keyboard_ru_config.json \
+        /data/local/bin/voyahtune_skb_qwerty_ru.json \
+        /data/local/tmp/voyahtune_keyboard.pid \
+        /data/local/tmp/voyahtune_keyboard.attempt \
+        /data/local/tmp/voyahtune_keyboard.txt \
+        /data/local/tmp/voyahtune_keyboard.txt.try \
         /data/local/tmp/voyahtune_apollo.pid \
         /data/local/tmp/voyahtune_apollo.attempt \
         /data/local/tmp/voyahtune_apollo.txt \
@@ -112,6 +130,7 @@ if ! adb shell '
         open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat; do
         settings delete global "$setting_name" >/dev/null 2>&1 || exit 1
     done
+    settings delete global voyahtune_keyboard_mode >/dev/null 2>&1 || exit 1
 '; then
     echo "!!! Не удалось полностью очистить Settings.Global — перезагрузка отменена."
     exit 1
