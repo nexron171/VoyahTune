@@ -4,7 +4,7 @@
 // На ПИ-прошивках класс com.qinggan.mainlauncher.navigation.NavigationBar ОБЩИЙ для обоих экранов, поэтому
 // каждый хук дополнительно гейтится isDriverBar() по mScreenId (фолбэк — displayId вьюхи).
 //
-// Механика: хук навигационного бара лаунчера, на нашей шине и с нашим запуском на VirtualDisplay:
+// Механика: хук навигационного бара и списка приложений штатного лаунчера:
 //   • КОНФИГ — живьём из Settings.Global: voyahtune_dock1 / voyahtune_dock2 (= packageName; "none" = слот
 //     не переопределён). Опц. voyahtune_dock1Dpi / voyahtune_dock2Dpi (per-app DPI для VD, int строкой).
 //     Пишет их Native (SetModesReceiverDynamic.mirrorDock), читаем как action() в steeringwheelkeys.js.
@@ -23,6 +23,13 @@
 //     чтобы родной лаунчер чекнул правильную кнопку. Косметика, не блокер.
 //   • RELOAD — приёмник ru.big.town.anative.DOCK_RELOAD перечитывает конфиг и перерисовывает иконки
 //     (иконки рисуются проактивно; клик читает конфиг живьём, ему reload не нужен).
+//   • ALL APPS — в списки обоих экранов один раз добавляются все launchable user-apps, которых
+//     штатный лаунчер не показывает. Полный PackageManager scan кэшируется на жизнь процесса launcher;
+//     клик идёт через OEM AppLauncher с screenId конкретного списка, поэтому top activity остаётся
+//     целевым package на соответствующем физическом display.
+//   • ВОЗВРАТ ИЗ FULLSCREEN — TOP_ACTIVITY_CHANGED повторно просит штатный LauncherModel показать
+//     главный navigation bar для нашего оконного приложения. Это закрывает возврат из угловой камеры,
+//     которая штатно скрывает док своим fullscreen-переходом.
 Java.perform(function () {
     // Слот → штатный pkg, который родной лаунчер умеет подсвечивать (oversea, главный экран).
     // ВНИМАНИЕ: значения версионно-хрупкие, подтвердить на живой голове H97C.
@@ -398,6 +405,169 @@ Java.perform(function () {
         } catch (e) { Log.e(TAG, "[dock] launchFreeform err: " + e); }
     }
 
+    // Штатный All Apps фильтрует почти все сторонние APK. Вариант voboost решает это хуком
+    // AllAppDataManager + AllAppAdapter. Здесь тот же контракт для обоих физических экранов;
+    // запуск делегируется OEM AppLauncher с screenId конкретного adapter/view.
+    // Никакого периодического PackageManager polling: снимок строится максимум один раз за процесс.
+    function installAllAppsHooks() {
+        try {
+            var AppBean = Java.use("com.qinggan.launcher.base.bean.AppBean");
+            var Data = Java.use("com.qinggan.launcher.base.allapp.AllAppDataManager");
+            var Adapter = Java.use("com.qinggan.launcher.base.adapter.AllAppAdapter");
+            var AppLauncher = Java.use("com.qinggan.launcher.base.utils.AppLauncher");
+            var JavaString = Java.use("java.lang.String");
+            var OnClick = Java.use("android.view.View$OnClickListener");
+            var pm = ctx().getPackageManager();
+            var installedSnapshot = null;
+            var iconCache = {};
+            var labelCache = {};
+            var clickCache = {};
+            var FLAG_SYSTEM = 0x00000001;
+
+            function launchAllApp(pkg, screenId) {
+                try {
+                    var intent = pm.getLaunchIntentForPackage(pkg);
+                    if (intent === null) return;
+                    intent.addFlags(0x10000000); // FLAG_ACTIVITY_NEW_TASK
+                    AppLauncher.startApp(ctx(), intent, screenId);
+                    Log.i(TAG, "[allapps] launch " + pkg + " display=" + screenId);
+                } catch (e) { Log.e(TAG, "[allapps] launch " + pkg + ": " + e); }
+            }
+
+            function fieldValue(obj, name) {
+                try { return obj[name].value; } catch (direct) {}
+                var c = obj.getClass();
+                while (c !== null) {
+                    try {
+                        var f = c.getDeclaredField(name);
+                        f.setAccessible(true);
+                        return f.get(obj);
+                    } catch (ignored) {
+                        try { c = c.getSuperclass(); } catch (end) { c = null; }
+                    }
+                }
+                return null;
+            }
+
+            function snapshotInstalled() {
+                if (installedSnapshot !== null) return installedSnapshot;
+                var result = [];
+                var installed = pm.getInstalledApplications(0);
+                for (var i = 0; i < installed.size(); i++) {
+                    try {
+                        var ai = installed.get(i);
+                        var pkg = "" + ai.packageName.value;
+                        var flags = Number(ai.flags.value);
+                        if ((flags & FLAG_SYSTEM) !== 0 || pkg === "com.qinggan.app.launcher") continue;
+                        if (pm.getLaunchIntentForPackage(pkg) === null) continue;
+                        result.push(pkg);
+                    } catch (ignored) {}
+                }
+                installedSnapshot = result;
+                Log.i(TAG, "[allapps] cached launchable user apps=" + result.length);
+                return installedSnapshot;
+            }
+
+            function addMissingApps(list) {
+                var existing = {};
+                for (var i = 0; i < list.size(); i++) {
+                    try {
+                        var current = Java.cast(list.get(i), AppBean);
+                        existing["" + current.getPackageName()] = true;
+                    } catch (ignored) {}
+                }
+                var apps = snapshotInstalled();
+                for (var j = 0; j < apps.length; j++) {
+                    var pkg = apps[j];
+                    if (existing[pkg]) continue;
+                    try {
+                        var bean = AppBean.$new(0, 0, pkg);
+                        bean.setSubType(pkg);
+                        list.add(bean);
+                        existing[pkg] = true;
+                    } catch (e) { Log.e(TAG, "[allapps] add " + pkg + ": " + e); }
+                }
+            }
+
+            var Click = Java.registerClass({
+                name: "ru.big.town.dock.AllAppsClick",
+                implements: [OnClick],
+                fields: { packageName: "java.lang.String", screenId: "int" },
+                methods: {
+                    onClick: {
+                        returnType: "void",
+                        argumentTypes: ["android.view.View"],
+                        implementation: function () {
+                            try {
+                                var pkg = this.packageName.value;
+                                if (pkg !== null) launchAllApp("" + pkg, Number(this.screenId.value));
+                            } catch (e) { Log.e(TAG, "[allapps] click: " + e); }
+                        }
+                    }
+                }
+            });
+
+            function clickFor(pkg, screenId) {
+                var key = screenId + "|" + pkg;
+                if (clickCache[key]) return clickCache[key];
+                var listener = Click.$new();
+                listener.packageName.value = JavaString.$new(pkg);
+                listener.screenId.value = screenId;
+                try { listener = Java.retain(listener); } catch (ignored) {}
+                clickCache[key] = listener;
+                return listener;
+            }
+
+            var getAll = Data.getAllApps.overload('int');
+            getAll.implementation = function (screenId) {
+                var list = getAll.call(Data, screenId);
+                if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list);
+                return list;
+            };
+
+            var bind = Adapter.onBindViewHolder.overload(
+                    'com.qinggan.launcher.base.adapter.AllAppAdapter$AppViewHolder', 'int');
+            bind.implementation = function (holder, position) {
+                bind.call(this, holder, position);
+                try {
+                    var beans = fieldValue(this, "mAppBeans");
+                    if (beans === null || position < 0 || position >= beans.size()) return;
+                    var bean = Java.cast(beans.get(position), AppBean);
+                    if (Number(bean.getIcon()) !== 0) return; // только наши synthetic entries
+                    var pkg = "" + bean.getPackageName();
+                    if (!pkg) return;
+
+                    var icon = iconCache[pkg];
+                    if (!icon) {
+                        icon = pm.getApplicationIcon(pkg);
+                        try { icon = Java.retain(icon); } catch (ignored) {}
+                        iconCache[pkg] = icon;
+                    }
+                    var label = labelCache[pkg];
+                    if (!label) {
+                        label = "" + pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
+                        labelCache[pkg] = label;
+                    }
+                    var iconView = fieldValue(holder, "iconView");
+                    var nameView = fieldValue(holder, "nameView");
+                    var itemView = fieldValue(holder, "itemView");
+                    var screenId = Number(fieldValue(this, "mScreenId"));
+                    if (screenId !== 0 && screenId !== 1 && itemView !== null) {
+                        try { screenId = itemView.getDisplay().getDisplayId(); } catch (ignored) {}
+                    }
+                    if (screenId !== 0 && screenId !== 1) return;
+                    if (iconView !== null && icon) iconView.setBackground(icon);
+                    if (nameView !== null) nameView.setText(JavaString.$new(label));
+                    if (itemView !== null) itemView.setOnClickListener(clickFor(pkg, screenId));
+                } catch (e) { Log.e(TAG, "[allapps] bind: " + e); }
+            };
+            Log.i(TAG, "[allapps] both physical display list hooks installed");
+        } catch (e) {
+            // Firmware variant without these launcher-base classes: dock remains fully functional.
+            Log.e(TAG, "[allapps] hooks unavailable: " + e);
+        }
+    }
+
     try {
         var NavigationBarMain = Java.use(NAV_MAIN);
 
@@ -516,6 +686,40 @@ Java.perform(function () {
         pinDock(NAV_MAIN, "bar");
         pinDock(NAV_MAIN.replace(/\.[^.]+$/, ".NavigationBarController"), "controller");
 
+        // 4b) Fullscreen OEM UI (угловая камера и т.п.) штатно скрывает navigation bar. Блокировка
+        // dismiss не помогает, если скрытие произошло ДО возврата к нашему приложению. LauncherModel
+        // уже получает TOP_ACTIVITY_CHANGED; после его оригинальной обработки повторно просим показать
+        // водительский bar, когда top activity снова относится к приложению с оконным viewport.
+        try {
+            var TopLM = Java.use("com.qinggan.app.launcher.LauncherModel");
+            var AppUtils = Java.use("com.qinggan.launcher.base.utils.AppUtils");
+            var AccountConstantUtil = Java.use("com.qinggan.account.AccountConstantUtil");
+            var topReceive = TopLM.onReceive.overload('android.content.Context', 'android.content.Intent');
+            topReceive.implementation = function (context, intent) {
+                var result = topReceive.call(this, context, intent);
+                try {
+                    if (intent === null || ("" + intent.getAction()) !==
+                            "android.intent.action.TOP_ACTIVITY_CHANGED") return result;
+                    var displayId = intent.getIntExtra("displayId", -1);
+                    if (displayId !== 0) return result;
+                    var top = "" + AppUtils.getTopAppInfo(context, displayId, 4);
+                    var separator = "|";
+                    try { separator = "" + AccountConstantUtil.SEPARATOR.value; } catch (ignored) {}
+                    var parts = top.split(separator);
+                    var pkg = parts.length > 0 ? parts[0] : "";
+                    var act = parts.length > 1 ? parts[1] : "";
+                    fgByScreen[0].pkg = pkg;
+                    fgByScreen[0].act = act;
+                    if (dockKept(pkg, act)) {
+                        this.handleUpdateMainNavigationBar(pkg, act, true);
+                        Log.i("voyahdock", "TOP_ACTIVITY_CHANGED restored main dock for " + pkg);
+                    }
+                } catch (e) { Log.e(TAG, "[dock] TOP_ACTIVITY_CHANGED recovery: " + e); }
+                return result;
+            };
+            Log.i(TAG, "[dock] TOP_ACTIVITY_CHANGED recovery installed");
+        } catch (e) { Log.e(TAG, "[dock] TOP_ACTIVITY_CHANGED recovery unavailable: " + e); }
+
         // 5) ПЛАВАЮЩАЯ HOME — подавление ВОЗВРАЩЕНО.
         //    Снимать его было ошибкой. Обоснование при снятии («во freeform-окне кнопка и так не
         //    всплывает») оказалось ложным: наш оконный режим НЕ переводит окно в настоящий freeform —
@@ -607,6 +811,7 @@ Java.perform(function () {
         // Первичная загрузка конфига + отрисовка иконок на уже живых навбарах. Повторы — на случай,
         // если навбар создаётся чуть позже инъекции (на буте load.bin инжектит рано).
         refreshCache();
+        installAllAppsHooks();
         setImmediate(updateAllNavbars);
         setTimeout(updateAllNavbars, 800);
         setTimeout(updateAllNavbars, 2500);

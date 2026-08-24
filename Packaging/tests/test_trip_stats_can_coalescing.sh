@@ -4,6 +4,8 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/TripStatsService.java"
+MODE_POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ModeSyncPolicy.java"
+APPLY_ENGINE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApplyEngine.java"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -41,5 +43,14 @@ fi
 if grep -Fq 'postDelayed(this' "$SERVICE"; then
     fail "TripStatsService must not create a self-rearming poll"
 fi
+
+# OEM Eco/EV published during wake is feedback, but must not overwrite the restored source of truth.
+# After the finite 30-second guard the car is again allowed to become the source of truth.
+require_fixed "$MODE_POLICY" 'POST_RESTORE_SETTLE_MS = 30_000L'
+require_fixed "$MODE_POLICY" \
+    'if (restoreCompleted && nowUptime >= acceptAfterUptime) return Decision.ACCEPT;'
+require_fixed "$APPLY_ENGINE" 'MODE_SYNC_POLICY.canPersist('
+require_fixed "$SERVICE" \
+    'ApplyEngine.persistModeFeedbackIfAllowed(getApplicationContext(), energy, mode);'
 
 echo "PASS: TripStats preserves Gear transitions and coalesces CAN-driven disk/broadcast work"

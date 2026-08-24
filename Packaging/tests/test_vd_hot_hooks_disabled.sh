@@ -48,6 +48,18 @@ grep -Fq 'return !isStockPkg(pkg);' "$DOCK" \
     || fail "Dock pinning is not global for all non-stock apps"
 grep -Fq 'var floatHomeOff = function () { return cfg("floathome") !== "0"; };' "$DOCK" \
     || fail "floating Home suppression is not restored globally"
+grep -Fq 'android.intent.action.TOP_ACTIVITY_CHANGED' "$DOCK" \
+    || fail "launcher does not re-evaluate the dock after fullscreen activity transitions"
+grep -Fq 'this.handleUpdateMainNavigationBar(pkg, act, true);' "$DOCK" \
+    || fail "return from a fullscreen OEM activity cannot restore the main dock"
+grep -Fq 'com.qinggan.launcher.base.allapp.AllAppDataManager' "$DOCK" \
+    || fail "third-party launchable apps are not added to the stock launcher"
+grep -Fq 'if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list);' "$DOCK" \
+    || fail "All Apps injection must cover both physical displays"
+[ "$(grep -Fc 'pm.getInstalledApplications(0)' "$DOCK")" -eq 1 ] \
+    || fail "installed app discovery must be a single cached snapshot, not polling"
+grep -Fq 'AppLauncher.startApp(ctx(), intent, screenId);' "$DOCK" \
+    || fail "All Apps click does not preserve the selected physical display"
 if grep -Fq 'android.activity.windowingMode' "$RECEIVER"; then
     fail "single-app launch must remain a normal task for WindowManager frame clamping"
 fi
