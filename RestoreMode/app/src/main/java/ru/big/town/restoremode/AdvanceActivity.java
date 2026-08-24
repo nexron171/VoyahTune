@@ -81,7 +81,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
     // Диагностика ресурсов — только пока Activity RESUMED и открыт раздел «Другое».
     private static final long SYSTEM_METRICS_INTERVAL_MS = 5_000L;
-    private TextView textRamStatus, textCpuStatus;
+    private TextView textRamStatus, textCpuStatus, textHookStatus;
     private boolean activityResumed;
     private volatile boolean systemMetricsActive;
     private volatile long systemMetricsGeneration;
@@ -494,6 +494,7 @@ public class AdvanceActivity extends AppCompatActivity {
         pageOther          = findViewById(R.id.pageOther);
         textRamStatus      = findViewById(R.id.textRamStatus);
         textCpuStatus      = findViewById(R.id.textCpuStatus);
+        textHookStatus     = findViewById(R.id.textHookStatus);
         navMainScreen.setOnClickListener(v -> setSection(0));
         navDriveModes.setOnClickListener(v -> setSection(1));
         navSplitScreen.setOnClickListener(v -> setSection(2));
@@ -1315,6 +1316,7 @@ public class AdvanceActivity extends AppCompatActivity {
         if (shouldRun) {
             if (textRamStatus != null) textRamStatus.setText("Используется: …\nДоступно: …");
             if (textCpuStatus != null) textCpuStatus.setText("Измерение…");
+            if (textHookStatus != null) textHookStatus.setText("Чтение состояния…");
             uiHandler.post(systemMetricsTick);
         }
     }
@@ -1343,6 +1345,9 @@ public class AdvanceActivity extends AppCompatActivity {
                                     ? String.format(Locale.getDefault(), "%.0f%%", snapshot.cpuPercent)
                                     : "Недоступно"));
                     }
+                    if (textHookStatus != null) {
+                        textHookStatus.setText(snapshot.hookStatusText);
+                    }
                     uiHandler.postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS);
                 });
             });
@@ -1366,7 +1371,12 @@ public class AdvanceActivity extends AppCompatActivity {
             Log.w("SystemMetrics", "RAM read failed: " + e.getMessage());
         }
         double cpu = readCpuPercent(generation);
-        return new SystemMetricsSnapshot(total, Math.max(0L, total - available), available, cpu);
+        String hookPayload = getSharedPreferences(
+                HookStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .getString(HookStatusContract.PAYLOAD_KEY, null);
+        String hookStatus = HookStatusContract.renderForUi(hookPayload, BuildConfig.IS_FULL);
+        return new SystemMetricsSnapshot(total, Math.max(0L, total - available), available, cpu,
+                hookStatus);
     }
 
     /** `/proc/stat` хранит cumulative jiffies; процент — дельта busy/total между измерениями. */
@@ -1421,11 +1431,14 @@ public class AdvanceActivity extends AppCompatActivity {
         final long usedMemoryBytes;
         final long availableMemoryBytes;
         final double cpuPercent;
-        SystemMetricsSnapshot(long total, long used, long available, double cpu) {
+        final String hookStatusText;
+        SystemMetricsSnapshot(long total, long used, long available, double cpu,
+                              String hookStatusText) {
             totalMemoryBytes = total;
             usedMemoryBytes = used;
             availableMemoryBytes = available;
             cpuPercent = cpu;
+            this.hookStatusText = hookStatusText;
         }
     }
 

@@ -1825,6 +1825,36 @@
 
         </LinearLayout>
 
+        <!-- Снимок root hook-loader читается тем же 5-секундным tick, что RAM/CPU, и только пока
+             этот раздел видим. Сам loader публикует новое значение лишь при смене состояния. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:background="@drawable/layout_category_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Состояние системных хуков"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <TextView
+                android:id="@+id/textHookStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:fontFamily="monospace"
+                android:text="Состояние ещё не опубликовано"
+                android:textColor="#AAAAAA"
+                android:textSize="19px" />
+
+        </LinearLayout>
+
         <!-- Режим отладки -->
         <LinearLayout
             android:layout_width="match_parent"

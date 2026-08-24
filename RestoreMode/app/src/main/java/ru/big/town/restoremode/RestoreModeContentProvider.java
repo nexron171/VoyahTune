@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
+import android.os.Binder;
+import android.os.Bundle;
 import android.util.Log;
 
 public class RestoreModeContentProvider extends ContentProvider {
@@ -55,6 +57,34 @@ public class RestoreModeContentProvider extends ContentProvider {
     public boolean onCreate() {
         sharedPreferences = getContext().getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
         return true;
+    }
+
+    /**
+     * Root-only, state-change delivery from {@code /data/local/bin/load.bin}. The CLI never runs on
+     * a permanent cadence: load.bin calls it after its bounded status record changes and allows at
+     * most three delivery attempts for that revision. SharedPreferences uses Android's AtomicFile
+     * implementation, so the diagnostics screen never sees a torn value.
+     */
+    @Override
+    public Bundle call(String method, String arg, Bundle extras) {
+        if (!HookStatusContract.METHOD_PUBLISH.equals(method)) {
+            return super.call(method, arg, extras);
+        }
+        if (Binder.getCallingUid() != 0) {
+            throw new SecurityException("Hook status may only be published by the root loader");
+        }
+        Bundle result = new Bundle();
+        if (!HookStatusContract.isValidPayload(arg) || getContext() == null) {
+            result.putBoolean("stored", false);
+            return result;
+        }
+        boolean stored = getContext()
+                .getSharedPreferences(HookStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(HookStatusContract.PAYLOAD_KEY, arg)
+                .commit();
+        result.putBoolean("stored", stored);
+        return result;
     }
 
     @Override

@@ -111,6 +111,10 @@ PREVIOUS_V2_LOAD_OWNER=$(previous_v2_load_owner)
 other_loader_pid_is_live "$PREVIOUS_V2_LOAD_OWNER" && exit 0
 
 FI=/data/local/bin/frida-inject
+HOOK_MANIFEST=/data/local/bin/voyahtune-hook-manifest.json
+HOOK_STATUS_FILE=/data/local/tmp/voyahtune-hook-status.v1
+HOOK_STATUS_URI=content://ru.big.town.restoremode.restoremodecontentprovider
+HOOK_STATUS_METHOD=publishHookStatusV1
 VD=/data/local/bin/vd_bypass.js
 SWK=/data/local/bin/steeringwheelkeys.js
 LNCH=/data/local/bin/launcherdock.js
@@ -136,9 +140,159 @@ KEYBOARD_MARK=/data/local/tmp/voyahtune_keyboard.pid
 KEYBOARD_ATTEMPT=/data/local/tmp/voyahtune_keyboard.attempt
 KEYBOARD_LOG=/data/local/tmp/voyahtune_keyboard.txt
 KEYBOARD_SEEN_ID=
+KEYBOARD_MODE_CURRENT=unknown
 SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
 LNCH_MARK=/data/local/tmp/voyahtune_lnch.pid     # exact process identity лаунчера с launcherdock
 MD_MARK=/data/local/tmp/voyahtune_md.pid         # exact process identity systemservice с multidisplay
+
+# Status publication is state-change-only. The local file is the root/ADB source of truth; the
+# existing RestoreMode provider receives the same bounded payload so Android 11 app sandboxing does
+# not require direct /data/local/tmp access. Provider delivery is bounded after a transient failure.
+HOOK_STATUS_LOCAL_PAYLOAD=
+HOOK_STATUS_PROVIDER_PAYLOAD=
+HOOK_STATUS_PROVIDER_ATTEMPTS=0
+HOOK_STATUS_PROVIDER_MAX_ATTEMPTS=3
+
+sha256_path() {
+    HASH_PATH=$1
+    if command -v sha256sum >/dev/null 2>&1; then
+        HASH_VALUE=$(sha256sum "$HASH_PATH" 2>/dev/null | awk '{print $1}')
+    elif command -v toybox >/dev/null 2>&1; then
+        HASH_VALUE=$(toybox sha256sum "$HASH_PATH" 2>/dev/null | awk '{print $1}')
+    else
+        return 1
+    fi
+    case "$HASH_VALUE" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+        *) return 1 ;;
+    esac
+    [ "${#HASH_VALUE}" -eq 64 ] || return 1
+    printf '%s\n' "$HASH_VALUE"
+}
+
+# The tracked manifest is generated in a strict one-record-per-line form. We parse only our fixed
+# ids and never evaluate its contents as shell code.
+manifest_script_integrity() {
+    INTEGRITY_ID=$1
+    INTEGRITY_PROCESS=$2
+    INTEGRITY_SCRIPT=$3
+    INTEGRITY_PATH=$4
+    [ -r "$HOOK_MANIFEST" ] && [ -r "$INTEGRITY_PATH" ] || {
+        printf 'invalid\n'
+        return
+    }
+    INTEGRITY_PATTERN="\"id\":\"$INTEGRITY_ID\""
+    [ "$(grep -F -c "$INTEGRITY_PATTERN" "$HOOK_MANIFEST" 2>/dev/null)" = 1 ] \
+        || { printf 'invalid\n'; return; }
+    INTEGRITY_LINE=$(grep -F "$INTEGRITY_PATTERN" "$HOOK_MANIFEST" 2>/dev/null)
+    INTEGRITY_PREFIX='    {"id":"'"$INTEGRITY_ID"'","process":"'"$INTEGRITY_PROCESS"'","script":"'"$INTEGRITY_SCRIPT"'","sha256":"'
+    case "$INTEGRITY_LINE" in
+        "$INTEGRITY_PREFIX"*) ;;
+        *) printf 'invalid\n'; return ;;
+    esac
+    INTEGRITY_EXPECTED=${INTEGRITY_LINE#"$INTEGRITY_PREFIX"}
+    INTEGRITY_EXPECTED=${INTEGRITY_EXPECTED%%\"*}
+    [ "${#INTEGRITY_EXPECTED}" -eq 64 ] || {
+        printf 'invalid\n'
+        return
+    }
+    INTEGRITY_SUFFIX=${INTEGRITY_LINE#"$INTEGRITY_PREFIX$INTEGRITY_EXPECTED"}
+    case "$INTEGRITY_SUFFIX" in
+        '"},'|'"}') ;;
+        *) printf 'invalid\n'; return ;;
+    esac
+    INTEGRITY_ACTUAL=$(sha256_path "$INTEGRITY_PATH" 2>/dev/null) || {
+        printf 'invalid\n'
+        return
+    }
+    if [ "$INTEGRITY_ACTUAL" = "$INTEGRITY_EXPECTED" ]; then
+        printf 'ok\n'
+    else
+        printf 'invalid\n'
+    fi
+}
+
+load_runtime_hook_state() {
+    RUNTIME_INTEGRITY=$1
+    RUNTIME_ID=$2
+    RUNTIME_MARK=$3
+    RUNTIME_ATTEMPT=$4
+    RUNTIME_MARK_VALUE=
+    RUNTIME_ATTEMPT_VALUE=
+    [ ! -r "$RUNTIME_MARK" ] || IFS= read -r RUNTIME_MARK_VALUE < "$RUNTIME_MARK"
+    [ ! -r "$RUNTIME_ATTEMPT" ] || IFS= read -r RUNTIME_ATTEMPT_VALUE < "$RUNTIME_ATTEMPT"
+    if [ "$RUNTIME_INTEGRITY" != ok ]; then
+        RUNTIME_STATE=invalid
+    elif [ -z "$RUNTIME_ID" ]; then
+        RUNTIME_STATE=waiting
+    elif [ "$RUNTIME_MARK_VALUE" = "$RUNTIME_ID" ]; then
+        RUNTIME_STATE=active
+    elif [ "$RUNTIME_ATTEMPT_VALUE" = "$RUNTIME_ID" ]; then
+        RUNTIME_STATE=failed
+    else
+        RUNTIME_STATE=waiting
+    fi
+}
+
+publish_hook_status() {
+    STATUS_LOADER_STATE=$1
+    STATUS_LOADER_PID=$$
+    [ "$STATUS_LOADER_STATE" != stopped ] || STATUS_LOADER_PID=0
+    STATUS_VD=$VD_STATE
+    STATUS_SWK=$SWK_STATE
+    STATUS_LNCH=$LNCH_STATE
+    STATUS_MD=$MD_STATE
+    STATUS_APOLLO=$APOLLO_STATE
+    STATUS_KEYBOARD_EN=$KEYBOARD_EN_STATE
+    STATUS_KEYBOARD_RU=$KEYBOARD_RU_STATE
+
+    STATUS_SS_PID=${SS:-0}; [ -n "$STATUS_SS_PID" ] || STATUS_SS_PID=0
+    STATUS_KMP_PID=${KMP:-0}; [ -n "$STATUS_KMP_PID" ] || STATUS_KMP_PID=0
+    STATUS_LP_PID=${LP:-0}; [ -n "$STATUS_LP_PID" ] || STATUS_LP_PID=0
+    STATUS_MDP_PID=${MDP:-0}; [ -n "$STATUS_MDP_PID" ] || STATUS_MDP_PID=0
+    STATUS_APOLLO_PID=${APOLLO_PID:-0}; [ -n "$STATUS_APOLLO_PID" ] || STATUS_APOLLO_PID=0
+    STATUS_KEYBOARD_PID=${KEYBOARD_PID:-0}; [ -n "$STATUS_KEYBOARD_PID" ] || STATUS_KEYBOARD_PID=0
+
+    HOOK_STATUS_PAYLOAD="v=1;loader=$STATUS_LOADER_STATE;pid=$STATUS_LOADER_PID;manifest=$MANIFEST_SHA"\
+";vd-bypass=$STATUS_VD:$STATUS_SS_PID"\
+";steering-wheel=$STATUS_SWK:$STATUS_KMP_PID"\
+";launcher-dock=$STATUS_LNCH:$STATUS_LP_PID"\
+";multi-display=$STATUS_MD:$STATUS_MDP_PID"\
+";apollo-tech=$STATUS_APOLLO:$STATUS_APOLLO_PID"\
+";keyboard-en=$STATUS_KEYBOARD_EN:$STATUS_KEYBOARD_PID"\
+";keyboard-ru=$STATUS_KEYBOARD_RU:$STATUS_KEYBOARD_PID"
+
+    if [ "$HOOK_STATUS_LOCAL_PAYLOAD" != "$HOOK_STATUS_PAYLOAD" ]; then
+        STATUS_STAGE="$HOOK_STATUS_FILE.$$.new"
+        if printf '%s\n' "$HOOK_STATUS_PAYLOAD" > "$STATUS_STAGE" \
+                && chmod 0644 "$STATUS_STAGE" \
+                && mv -f "$STATUS_STAGE" "$HOOK_STATUS_FILE"; then
+            HOOK_STATUS_LOCAL_PAYLOAD=$HOOK_STATUS_PAYLOAD
+            HOOK_STATUS_PROVIDER_ATTEMPTS=0
+        else
+            rm -f "$STATUS_STAGE"
+            loge "hook status atomic publish failed"
+            return
+        fi
+    fi
+
+    if [ "$HOOK_STATUS_PROVIDER_PAYLOAD" != "$HOOK_STATUS_PAYLOAD" ] \
+            && [ "$HOOK_STATUS_PROVIDER_ATTEMPTS" -lt "$HOOK_STATUS_PROVIDER_MAX_ATTEMPTS" ]; then
+        HOOK_STATUS_PROVIDER_ATTEMPTS=$((HOOK_STATUS_PROVIDER_ATTEMPTS + 1))
+        STATUS_CALL_OUTPUT=$(timeout -k 1 4 /system/bin/content call --user 0 \
+            --uri "$HOOK_STATUS_URI" --method "$HOOK_STATUS_METHOD" \
+            --arg "$HOOK_STATUS_PAYLOAD" 2>&1) || STATUS_CALL_OUTPUT=
+        case "$STATUS_CALL_OUTPUT" in
+            *'stored=true'*) HOOK_STATUS_PROVIDER_PAYLOAD=$HOOK_STATUS_PAYLOAD ;;
+            *)
+                if [ "$HOOK_STATUS_PROVIDER_ATTEMPTS" -eq \
+                        "$HOOK_STATUS_PROVIDER_MAX_ATTEMPTS" ]; then
+                    loge "hook status provider unavailable after bounded retries"
+                fi
+                ;;
+        esac
+    fi
+}
 
 # Persistent PID-only markers are unsafe on Android: /data/local/tmp survives reboot, while
 # zygote can assign the same numeric PID to a fresh process. Bind every returning hook marker to
@@ -397,11 +551,14 @@ watchdog_cycle() {
     SS=$(pidof system_server)
     SS=${SS%% *}
     SS_ID=$(process_identity "$SS" system_server 2>/dev/null) || SS_ID=
-    if [ -n "$SS_ID" ] && [ -f "$VD" ]; then
-        if [ "$(cat "$VDMARK" 2>/dev/null)" != "$SS_ID" ]; then
-            if [ "$(cat "$VD_ATTEMPT" 2>/dev/null)" != "$SS_ID" ]; then
-                inject_ret "$SS" "$VD" /data/local/tmp/voyahtune_vd_bypass.txt "$VDMARK" "$VD_ATTEMPT" "$SS_ID" system_server
-            fi
+    load_runtime_hook_state "$VD_INTEGRITY" "$SS_ID" "$VDMARK" "$VD_ATTEMPT"
+    VD_STATE=$RUNTIME_STATE
+    if [ -n "$SS_ID" ] && [ "$VD_STATE" = waiting ]; then
+        if inject_ret "$SS" "$VD" /data/local/tmp/voyahtune_vd_bypass.txt \
+                "$VDMARK" "$VD_ATTEMPT" "$SS_ID" system_server; then
+            VD_STATE=active
+        else
+            VD_STATE=failed
         fi
     fi
 
@@ -410,11 +567,14 @@ watchdog_cycle() {
     LP=$(pidof com.qinggan.app.launcher)
     LP=${LP%% *}
     LP_ID=$(process_identity "$LP" com.qinggan.app.launcher 2>/dev/null) || LP_ID=
-    if [ -n "$LP_ID" ] && [ -f "$LNCH" ]; then
-        if [ "$(cat "$LNCH_MARK" 2>/dev/null)" != "$LP_ID" ]; then
-            if [ "$(cat "$LNCH_ATTEMPT" 2>/dev/null)" != "$LP_ID" ]; then
-                inject_ret "$LP" "$LNCH" /data/local/tmp/voyahtune_lnch.txt "$LNCH_MARK" "$LNCH_ATTEMPT" "$LP_ID" com.qinggan.app.launcher
-            fi
+    load_runtime_hook_state "$LNCH_INTEGRITY" "$LP_ID" "$LNCH_MARK" "$LNCH_ATTEMPT"
+    LNCH_STATE=$RUNTIME_STATE
+    if [ -n "$LP_ID" ] && [ "$LNCH_STATE" = waiting ]; then
+        if inject_ret "$LP" "$LNCH" /data/local/tmp/voyahtune_lnch.txt \
+                "$LNCH_MARK" "$LNCH_ATTEMPT" "$LP_ID" com.qinggan.app.launcher; then
+            LNCH_STATE=active
+        else
+            LNCH_STATE=failed
         fi
     fi
 
@@ -422,10 +582,15 @@ watchdog_cycle() {
     KMP=$(pidof com.qinggan.keymanager.service 2>/dev/null)
     KMP=${KMP%% *}
     KMP_ID=$(process_identity "$KMP" com.qinggan.keymanager.service 2>/dev/null) || KMP_ID=
-    if [ -n "$KMP_ID" ] && [ -f "$SWK" ]; then
-        if [ "$(cat "$SWK_KM_MARK" 2>/dev/null)" != "$KMP_ID" ] \
-                && [ "$(cat "$SWK_KM_ATTEMPT" 2>/dev/null)" != "$KMP_ID" ]; then
-            inject_keymanager_bg "$KMP" "$KMP_ID"
+    load_runtime_hook_state "$SWK_INTEGRITY" "$KMP_ID" "$SWK_KM_MARK" "$SWK_KM_ATTEMPT"
+    SWK_STATE=$RUNTIME_STATE
+    if [ -n "$KMP_ID" ] && [ "$SWK_STATE" = waiting ]; then
+        inject_keymanager_bg "$KMP" "$KMP_ID"
+        STATUS_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
+        if [ "${STATUS_BUSY_RECORD%%|*}" = "$KMP" ]; then
+            SWK_STATE=injecting
+        elif [ -r "$SWK_KM_ATTEMPT" ]; then
+            SWK_STATE=failed
         fi
     fi
 
@@ -434,11 +599,14 @@ watchdog_cycle() {
     MDP=$(pidof com.qinggan.systemservice)
     MDP=${MDP%% *}
     MDP_ID=$(process_identity "$MDP" com.qinggan.systemservice 2>/dev/null) || MDP_ID=
-    if [ -n "$MDP_ID" ] && [ -f "$MD" ]; then
-        if [ "$(cat "$MD_MARK" 2>/dev/null)" != "$MDP_ID" ]; then
-            if [ "$(cat "$MD_ATTEMPT" 2>/dev/null)" != "$MDP_ID" ]; then
-                inject_ret "$MDP" "$MD" /data/local/tmp/voyahtune_md.txt "$MD_MARK" "$MD_ATTEMPT" "$MDP_ID" com.qinggan.systemservice
-            fi
+    load_runtime_hook_state "$MD_INTEGRITY" "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
+    MD_STATE=$RUNTIME_STATE
+    if [ -n "$MDP_ID" ] && [ "$MD_STATE" = waiting ]; then
+        if inject_ret "$MDP" "$MD" /data/local/tmp/voyahtune_md.txt \
+                "$MD_MARK" "$MD_ATTEMPT" "$MDP_ID" com.qinggan.systemservice; then
+            MD_STATE=active
+        else
+            MD_STATE=failed
         fi
     fi
 
@@ -447,10 +615,14 @@ watchdog_cycle() {
     APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
     APOLLO_PID=${APOLLO_PID%% *}
     APOLLO_ID=$(process_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null) || APOLLO_ID=
-    if [ -n "$APOLLO_ID" ] && [ -f "$APOLLO" ]; then
-        if [ "$(cat "$APOLLO_MARK" 2>/dev/null)" != "$APOLLO_ID" ] \
-                && [ "$(cat "$APOLLO_ATTEMPT" 2>/dev/null)" != "$APOLLO_ID" ]; then
-            inject_apollo "$APOLLO_PID" "$APOLLO_ID"
+    load_runtime_hook_state "$APOLLO_INTEGRITY" "$APOLLO_ID" \
+        "$APOLLO_MARK" "$APOLLO_ATTEMPT"
+    APOLLO_STATE=$RUNTIME_STATE
+    if [ -n "$APOLLO_ID" ] && [ "$APOLLO_STATE" = waiting ]; then
+        if inject_apollo "$APOLLO_PID" "$APOLLO_ID"; then
+            APOLLO_STATE=active
+        else
+            APOLLO_STATE=failed
         fi
     fi
 
@@ -464,22 +636,150 @@ watchdog_cycle() {
         KEYBOARD_SEEN_ID=$KEYBOARD_ID
         KEYBOARD_MODE=$(settings get global "$KEYBOARD_SETTING" 2>/dev/null) || KEYBOARD_MODE=off
         case "$KEYBOARD_MODE" in
-            en) KEYBOARD_SCRIPT=$KEYBOARD_EN ;;
-            ru) KEYBOARD_SCRIPT=$KEYBOARD_RU ;;
+            en|ru) KEYBOARD_MODE_CURRENT=$KEYBOARD_MODE ;;
             *)
+                KEYBOARD_MODE_CURRENT=off
                 logi "keyboard hook disabled for qgime pid=$KEYBOARD_PID"
-                KEYBOARD_SCRIPT=
                 ;;
         esac
-        if [ -n "$KEYBOARD_SCRIPT" ] && [ -f "$KEYBOARD_SCRIPT" ]; then
-            if [ "$(cat "$KEYBOARD_MARK" 2>/dev/null)" != "$KEYBOARD_ID" ] \
-                    && [ "$(cat "$KEYBOARD_ATTEMPT" 2>/dev/null)" != "$KEYBOARD_ID" ]; then
-                inject_ret "$KEYBOARD_PID" "$KEYBOARD_SCRIPT" "$KEYBOARD_LOG" \
-                    "$KEYBOARD_MARK" "$KEYBOARD_ATTEMPT" "$KEYBOARD_ID" "$KEYBOARD_TARGET"
+    fi
+    case "$KEYBOARD_MODE_CURRENT" in
+        en)
+            KEYBOARD_RU_STATE=disabled
+            load_runtime_hook_state "$KEYBOARD_EN_INTEGRITY" "$KEYBOARD_ID" \
+                "$KEYBOARD_MARK" "$KEYBOARD_ATTEMPT"
+            KEYBOARD_EN_STATE=$RUNTIME_STATE
+            KEYBOARD_SCRIPT=$KEYBOARD_EN
+            ;;
+        ru)
+            KEYBOARD_EN_STATE=disabled
+            load_runtime_hook_state "$KEYBOARD_RU_INTEGRITY" "$KEYBOARD_ID" \
+                "$KEYBOARD_MARK" "$KEYBOARD_ATTEMPT"
+            KEYBOARD_RU_STATE=$RUNTIME_STATE
+            KEYBOARD_SCRIPT=$KEYBOARD_RU
+            ;;
+        off)
+            KEYBOARD_EN_STATE=disabled
+            KEYBOARD_RU_STATE=disabled
+            KEYBOARD_SCRIPT=
+            ;;
+        *)
+            KEYBOARD_EN_STATE=unknown
+            KEYBOARD_RU_STATE=unknown
+            KEYBOARD_SCRIPT=
+            ;;
+    esac
+    if [ -n "$KEYBOARD_ID" ] && [ -n "$KEYBOARD_SCRIPT" ]; then
+        if [ "$KEYBOARD_EN_STATE" = waiting ] || [ "$KEYBOARD_RU_STATE" = waiting ]; then
+            if inject_ret "$KEYBOARD_PID" "$KEYBOARD_SCRIPT" "$KEYBOARD_LOG" \
+                    "$KEYBOARD_MARK" "$KEYBOARD_ATTEMPT" "$KEYBOARD_ID" "$KEYBOARD_TARGET"; then
+                [ "$KEYBOARD_MODE_CURRENT" = en ] && KEYBOARD_EN_STATE=active
+                [ "$KEYBOARD_MODE_CURRENT" = ru ] && KEYBOARD_RU_STATE=active
+            else
+                [ "$KEYBOARD_MODE_CURRENT" = en ] && KEYBOARD_EN_STATE=failed
+                [ "$KEYBOARD_MODE_CURRENT" = ru ] && KEYBOARD_RU_STATE=failed
             fi
         fi
     fi
+
+    publish_hook_status running
 }
+
+SS=; SS_ID=
+LP=; LP_ID=
+KMP=; KMP_ID=
+MDP=; MDP_ID=
+APOLLO_PID=; APOLLO_ID=
+KEYBOARD_PID=; KEYBOARD_ID=
+VD_STATE=unknown
+SWK_STATE=unknown
+LNCH_STATE=unknown
+MD_STATE=unknown
+APOLLO_STATE=unknown
+KEYBOARD_EN_STATE=unknown
+KEYBOARD_RU_STATE=unknown
+
+MANIFEST_SHA=$(sha256_path "$HOOK_MANIFEST" 2>/dev/null) || MANIFEST_SHA=unavailable
+HOOK_MANIFEST_STRUCTURE=ok
+[ "$(grep -F -x -c '  "schemaVersion": 1,' "$HOOK_MANIFEST" 2>/dev/null)" = 1 ] \
+    || HOOK_MANIFEST_STRUCTURE=invalid
+[ "$(grep -F -c '{"id":' "$HOOK_MANIFEST" 2>/dev/null)" = 7 ] \
+    || HOOK_MANIFEST_STRUCTURE=invalid
+
+VD_INTEGRITY=$(manifest_script_integrity vd-bypass system_server vd_bypass.js "$VD")
+SWK_INTEGRITY=$(manifest_script_integrity steering-wheel com.qinggan.keymanager.service \
+    steeringwheelkeys.js "$SWK")
+LNCH_INTEGRITY=$(manifest_script_integrity launcher-dock com.qinggan.app.launcher \
+    launcherdock.js "$LNCH")
+MD_INTEGRITY=$(manifest_script_integrity multi-display com.qinggan.systemservice \
+    multidisplay.js "$MD")
+APOLLO_INTEGRITY=$(manifest_script_integrity apollo-tech com.qinggan.app.vehiclesetting \
+    apollo_tech.js "$APOLLO")
+KEYBOARD_EN_INTEGRITY=$(manifest_script_integrity keyboard-en com.qinggan.app.qgime \
+    keyboard_lock_en.js "$KEYBOARD_EN")
+KEYBOARD_RU_INTEGRITY=$(manifest_script_integrity keyboard-ru com.qinggan.app.qgime \
+    keyboard_ru.js "$KEYBOARD_RU")
+
+# A manifest is one atomic hook-set contract, not seven independent hints. Any structural,
+# mapping, or digest error fails the complete set closed so a partial update cannot mix versions.
+HOOK_SET_VALID=ok
+for SET_INTEGRITY in "$HOOK_MANIFEST_STRUCTURE" "$VD_INTEGRITY" "$SWK_INTEGRITY" \
+        "$LNCH_INTEGRITY" "$MD_INTEGRITY" "$APOLLO_INTEGRITY" \
+        "$KEYBOARD_EN_INTEGRITY" "$KEYBOARD_RU_INTEGRITY"; do
+    [ "$SET_INTEGRITY" = ok ] || HOOK_SET_VALID=invalid
+done
+if [ "$HOOK_SET_VALID" != ok ]; then
+    VD_INTEGRITY=invalid
+    SWK_INTEGRITY=invalid
+    LNCH_INTEGRITY=invalid
+    MD_INTEGRITY=invalid
+    APOLLO_INTEGRITY=invalid
+    KEYBOARD_EN_INTEGRITY=invalid
+    KEYBOARD_RU_INTEGRITY=invalid
+fi
+
+for INTEGRITY_RECORD in \
+        "vd-bypass:$VD_INTEGRITY" \
+        "steering-wheel:$SWK_INTEGRITY" \
+        "launcher-dock:$LNCH_INTEGRITY" \
+        "multi-display:$MD_INTEGRITY" \
+        "apollo-tech:$APOLLO_INTEGRITY" \
+        "keyboard-en:$KEYBOARD_EN_INTEGRITY" \
+        "keyboard-ru:$KEYBOARD_RU_INTEGRITY"; do
+    case "$INTEGRITY_RECORD" in
+        *:ok) ;;
+        *) loge "hook integrity FAIL $INTEGRITY_RECORD; injection disabled" ;;
+    esac
+done
+
+# Publish a cheap startup snapshot before any potentially slow Frida injection. The first watchdog
+# pass replaces these provisional states with exact process/marker states, but the diagnostics UI
+# never has to wait behind a sequence of bounded injector timeouts just to learn that the loader and
+# manifest are alive. Keyboard mode remains unknown until qgime gets its one per-identity opt-in read.
+if [ "$HOOK_SET_VALID" = ok ]; then
+    VD_STATE=waiting
+    SWK_STATE=waiting
+    LNCH_STATE=waiting
+    MD_STATE=waiting
+    APOLLO_STATE=waiting
+    KEYBOARD_EN_STATE=unknown
+    KEYBOARD_RU_STATE=unknown
+else
+    VD_STATE=invalid
+    SWK_STATE=invalid
+    LNCH_STATE=invalid
+    MD_STATE=invalid
+    APOLLO_STATE=invalid
+    KEYBOARD_EN_STATE=invalid
+    KEYBOARD_RU_STATE=invalid
+fi
+publish_hook_status running
+
+cleanup_loader() {
+    publish_hook_status stopped
+    cleanup_load_lock
+}
+trap 'cleanup_loader' 0
 
 logi "voyah load.bin start"
 

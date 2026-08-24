@@ -1,28 +1,32 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
+set "HOOK_UPDATE_BARRIER_ARMED=0"
+call :install_main
+set "FULL_INSTALL_RESULT=%ERRORLEVEL%"
+if "%HOOK_UPDATE_BARRIER_ARMED%"=="1" if not "%FULL_INSTALL_RESULT%"=="0" (
+    echo   WARNING: installation stopped after hook freeze; trying to restart voyahtune_load.
+    adb.exe shell "setprop ctl.start voyahtune_load 2>/dev/null || true" 1>nul 2>nul
+)
+exit /b %FULL_INSTALL_RESULT%
+
+:install_main
 cd /d "%~dp0" || exit /b 1
-for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
+for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune-hook-manifest.json voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
+    exit /b 1
+)
+
+rem Manifest is the exact atomic commit record. Built-in certutil hashes every source, then a fixed
+rem twelve-line v1 document is normalized and compared byte-for-byte before the first ADB call.
+call :verify_hook_manifest
+if errorlevel 1 (
+    echo !!! Hook manifest does not match the injected scripts. The device was not changed.
     exit /b 1
 )
 
 adb.exe root
 adb.exe wait-for-device
 adb.exe root
-
-echo === Removing old Apollo VehicleSetting hook ===
-call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
-if errorlevel 1 exit /b 1
-call :put_apollo_safe_key open_voyah_apollo_master
-if errorlevel 1 exit /b 1
-call :put_apollo_safe_key open_voyah_apollo_profile_supported
-if errorlevel 1 exit /b 1
-call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
-if errorlevel 1 exit /b 1
-adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
-adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
-for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
-echo   Old agent, markers, and keys removed. Installing the minimal voboost entitlement hook.
 
 echo === Preflight owner check for com.qinggan.permission.WRITE_CANBUS ===
 adb.exe shell dumpsys package permissions >nul 2>nul
@@ -106,6 +110,28 @@ if errorlevel 1 exit /b 1
 call :backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml
 if errorlevel 1 exit /b 1
 
+echo === Stopping hook-loader for the atomic update ===
+set "HOOK_UPDATE_BARRIER_ARMED=1"
+call :stop_hook_runtime_for_update
+if errorlevel 1 (
+    echo !!! Hook-loader or its in-flight injector did not stop. Hook files were not changed.
+    exit /b 1
+)
+
+echo === Removing old Apollo VehicleSetting hook ===
+call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_master
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_profile_supported
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
+if errorlevel 1 exit /b 1
+adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
+adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
+for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
+echo   Old agent, markers, and keys removed. Installing the minimal voboost entitlement hook.
+
 echo === Frida infrastructure ^(steering wheel + VirtualDisplay + Apollo entitlement^) ===
 adb.exe shell "mkdir -p /data/local/bin"
 if errorlevel 1 exit /b 1
@@ -132,6 +158,9 @@ if errorlevel 1 exit /b 1
 call :install_required_data_file voyahtune_skb_qwerty_ru.json /data/local/bin/voyahtune_skb_qwerty_ru.json 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject 755
+if errorlevel 1 exit /b 1
+rem Commit point: publish the already host-verified manifest after every script.
+call :install_required_data_file voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json 644
 if errorlevel 1 exit /b 1
 
 echo === Migrating the previous full-release boot hook ===
@@ -182,6 +211,7 @@ if errorlevel 1 (
     echo !!! The installation is prepared, but ADB could not reboot the device. Reboot it manually.
     exit /b 1
 )
+set "HOOK_UPDATE_BARRIER_ARMED=0"
 call :wait_android_boot
 if errorlevel 1 (
     echo !!! The head unit did not finish booting. Check ADB and run the installer again.
@@ -201,6 +231,97 @@ echo Installation complete and verified.
 echo Run install-yandex-dns.bat separately if Yandex DNS is required.
 exit /b 0
 goto :eof
+
+:verify_hook_manifest
+setlocal DisableDelayedExpansion
+set "HOOK_VERIFY_PREFIX=%TEMP%\voyahtune-hook-%RANDOM%-%RANDOM%"
+set "HOOK_EXPECTED_MANIFEST=%HOOK_VERIFY_PREFIX%.expected"
+set "HOOK_ACTUAL_NORMALIZED=%HOOK_VERIFY_PREFIX%.actual.norm"
+set "HOOK_EXPECTED_NORMALIZED=%HOOK_VERIFY_PREFIX%.expected.norm"
+del "%HOOK_EXPECTED_MANIFEST%" "%HOOK_ACTUAL_NORMALIZED%" "%HOOK_EXPECTED_NORMALIZED%" 1>nul 2>nul
+call :compute_sha256 vd_bypass.js HOOK_HASH_VD
+if errorlevel 1 goto :verify_hook_manifest_failed
+call :compute_sha256 steeringwheelkeys.js HOOK_HASH_SW
+if errorlevel 1 goto :verify_hook_manifest_failed
+call :compute_sha256 launcherdock.js HOOK_HASH_LAUNCHER
+if errorlevel 1 goto :verify_hook_manifest_failed
+call :compute_sha256 multidisplay.js HOOK_HASH_MULTI
+if errorlevel 1 goto :verify_hook_manifest_failed
+call :compute_sha256 apollo_tech.js HOOK_HASH_APOLLO
+if errorlevel 1 goto :verify_hook_manifest_failed
+call :compute_sha256 keyboard_lock_en.js HOOK_HASH_KEYBOARD_EN
+if errorlevel 1 goto :verify_hook_manifest_failed
+call :compute_sha256 keyboard_ru.js HOOK_HASH_KEYBOARD_RU
+if errorlevel 1 goto :verify_hook_manifest_failed
+> "%HOOK_EXPECTED_MANIFEST%" (
+    echo {
+    echo   "schemaVersion": 1,
+    echo   "hooks": [
+    echo     {"id":"vd-bypass","process":"system_server","script":"vd_bypass.js","sha256":"%HOOK_HASH_VD%"},
+    echo     {"id":"steering-wheel","process":"com.qinggan.keymanager.service","script":"steeringwheelkeys.js","sha256":"%HOOK_HASH_SW%"},
+    echo     {"id":"launcher-dock","process":"com.qinggan.app.launcher","script":"launcherdock.js","sha256":"%HOOK_HASH_LAUNCHER%"},
+    echo     {"id":"multi-display","process":"com.qinggan.systemservice","script":"multidisplay.js","sha256":"%HOOK_HASH_MULTI%"},
+    echo     {"id":"apollo-tech","process":"com.qinggan.app.vehiclesetting","script":"apollo_tech.js","sha256":"%HOOK_HASH_APOLLO%"},
+    echo     {"id":"keyboard-en","process":"com.qinggan.app.qgime","script":"keyboard_lock_en.js","sha256":"%HOOK_HASH_KEYBOARD_EN%"},
+    echo     {"id":"keyboard-ru","process":"com.qinggan.app.qgime","script":"keyboard_ru.js","sha256":"%HOOK_HASH_KEYBOARD_RU%"}
+    echo   ]
+    echo }
+)
+if errorlevel 1 goto :verify_hook_manifest_failed
+findstr.exe /N "^" "voyahtune-hook-manifest.json" > "%HOOK_ACTUAL_NORMALIZED%"
+if errorlevel 1 goto :verify_hook_manifest_failed
+findstr.exe /N "^" "%HOOK_EXPECTED_MANIFEST%" > "%HOOK_EXPECTED_NORMALIZED%"
+if errorlevel 1 goto :verify_hook_manifest_failed
+findstr.exe /R /N "^$" "voyahtune-hook-manifest.json" 1>nul 2>nul
+if not errorlevel 1 goto :verify_hook_manifest_failed
+set /a HOOK_MANIFEST_SOURCE_LINES=0
+for /f "usebackq delims=" %%L in ("%HOOK_ACTUAL_NORMALIZED%") do set /a HOOK_MANIFEST_SOURCE_LINES+=1
+if not "%HOOK_MANIFEST_SOURCE_LINES%"=="12" goto :verify_hook_manifest_failed
+findstr.exe /R /X "[0-9][0-9]*:" "%HOOK_ACTUAL_NORMALIZED%" 1>nul 2>nul
+if not errorlevel 1 goto :verify_hook_manifest_failed
+fc.exe /B "%HOOK_ACTUAL_NORMALIZED%" "%HOOK_EXPECTED_NORMALIZED%" 1>nul 2>nul
+if errorlevel 1 goto :verify_hook_manifest_failed
+del "%HOOK_EXPECTED_MANIFEST%" "%HOOK_ACTUAL_NORMALIZED%" "%HOOK_EXPECTED_NORMALIZED%" 1>nul 2>nul
+endlocal
+exit /b 0
+
+:verify_hook_manifest_failed
+del "%HOOK_EXPECTED_MANIFEST%" "%HOOK_ACTUAL_NORMALIZED%" "%HOOK_EXPECTED_NORMALIZED%" 1>nul 2>nul
+endlocal
+exit /b 1
+
+:compute_sha256
+setlocal EnableDelayedExpansion
+set "HOOK_HASH_TEMP=%TEMP%\voyahtune-hash-%RANDOM%-%RANDOM%.tmp"
+del "!HOOK_HASH_TEMP!" 1>nul 2>nul
+certutil.exe -hashfile "%~1" SHA256 > "!HOOK_HASH_TEMP!" 2>nul
+if errorlevel 1 goto :compute_sha256_failed
+set "HOOK_HASH_LINE="
+for /f "usebackq skip=1 delims=" %%H in ("!HOOK_HASH_TEMP!") do if not defined HOOK_HASH_LINE set "HOOK_HASH_LINE=%%H"
+set "HOOK_HASH_LINE=!HOOK_HASH_LINE: =!"
+if "!HOOK_HASH_LINE:~63,1!"=="" goto :compute_sha256_failed
+if not "!HOOK_HASH_LINE:~64,1!"=="" goto :compute_sha256_failed
+set "HOOK_HASH_REMAINDER=!HOOK_HASH_LINE!"
+for %%C in (0 1 2 3 4 5 6 7 8 9 a b c d e f A B C D E F) do set "HOOK_HASH_REMAINDER=!HOOK_HASH_REMAINDER:%%C=!"
+if defined HOOK_HASH_REMAINDER goto :compute_sha256_failed
+set "HOOK_HASH_LINE=!HOOK_HASH_LINE:A=a!"
+set "HOOK_HASH_LINE=!HOOK_HASH_LINE:B=b!"
+set "HOOK_HASH_LINE=!HOOK_HASH_LINE:C=c!"
+set "HOOK_HASH_LINE=!HOOK_HASH_LINE:D=d!"
+set "HOOK_HASH_LINE=!HOOK_HASH_LINE:E=e!"
+set "HOOK_HASH_LINE=!HOOK_HASH_LINE:F=f!"
+del "!HOOK_HASH_TEMP!" 1>nul 2>nul
+endlocal & set "%~2=%HOOK_HASH_LINE%"
+exit /b 0
+
+:compute_sha256_failed
+del "!HOOK_HASH_TEMP!" 1>nul 2>nul
+endlocal
+exit /b 1
+
+:stop_hook_runtime_for_update
+adb.exe shell "command -v pgrep >/dev/null 2>&1 || exit 1; command -v pkill >/dev/null 2>&1 || exit 1; setprop ctl.stop voyahtune_load 2>/dev/null || true; pkill -TERM -f '/data/local/bin/load[.]bin' 2>/dev/null || true; pkill -TERM -f '/data/local/bin/frida[-]inject' 2>/dev/null || true; stop_wait=0; while pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; do if [ $stop_wait -ge 10 ]; then break; fi; sleep 1; stop_wait=$((stop_wait + 1)); done; if pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; then pkill -KILL -f '/data/local/bin/load[.]bin' 2>/dev/null || true; pkill -KILL -f '/data/local/bin/frida[-]inject' 2>/dev/null || true; kill_wait=0; while pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; do if [ $kill_wait -ge 5 ]; then exit 1; fi; sleep 1; kill_wait=$((kill_wait + 1)); done; fi; rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock; rm -rf /data/local/tmp/voyah_load.lock"
+exit /b %ERRORLEVEL%
 
 :wait_android_boot
 adb.exe wait-for-device

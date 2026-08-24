@@ -268,6 +268,7 @@ adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdo
 # Apollo entitlement hook принадлежит Open Voyah и при remove удаляется без восстановления backup.
 adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
 adb shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"
+adb shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1 /data/local/tmp/voyahtune-hook-status.v1.*.new"
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
 # Project-owned Frida scripts, PID/lock markers and diagnostic logs. Generic CUNBA/Frida files
 # are deliberately not touched: only paths created by Open Voyah installers/runtime are listed.
@@ -416,6 +417,10 @@ if ! adb shell '
     done
 '; then
     echo "!!! Не удалось полностью удалить файлы Open Voyah — перезагрузка отменена."
+    exit 1
+fi
+if ! adb shell 'test ! -e /data/local/bin/voyahtune-hook-manifest.json && test ! -e /data/local/tmp/voyahtune-hook-status.v1'; then
+    echo "!!! Hook manifest/status не удалены — перезагрузка отменена."
     exit 1
 fi
 # Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка

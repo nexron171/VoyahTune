@@ -68,6 +68,8 @@ if ! adb shell '
         /data/local/bin/voyahtune_keyboard_en_config.json \
         /data/local/bin/voyahtune_keyboard_ru_config.json \
         /data/local/bin/voyahtune_skb_qwerty_ru.json \
+        /data/local/bin/voyahtune-hook-manifest.json \
+        /data/local/tmp/voyahtune-hook-status.v1 \
         /data/local/tmp/voyahtune_keyboard.pid \
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
@@ -95,6 +97,8 @@ if ! adb shell '
         /data/local/bin/voyahtune_keyboard_en_config.json \
         /data/local/bin/voyahtune_keyboard_ru_config.json \
         /data/local/bin/voyahtune_skb_qwerty_ru.json \
+        /data/local/bin/voyahtune-hook-manifest.json \
+        /data/local/tmp/voyahtune-hook-status.v1 \
         /data/local/tmp/voyahtune_keyboard.pid \
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \

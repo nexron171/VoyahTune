@@ -1,5 +1,16 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
+set "LIGHT_HOOK_BARRIER_PHASE=0"
+call :install_main
+set "LIGHT_INSTALL_RESULT=%ERRORLEVEL%"
+if "%LIGHT_HOOK_BARRIER_PHASE%"=="1" if not "%LIGHT_INSTALL_RESULT%"=="0" (
+    echo   WARNING: Light install stopped before teardown; trying to restart voyahtune_load.
+    adb.exe shell "setprop ctl.start voyahtune_load 2>/dev/null || true" 1>nul 2>nul
+)
+if "%LIGHT_HOOK_BARRIER_PHASE%"=="2" if not "%LIGHT_INSTALL_RESULT%"=="0" echo   WARNING: teardown was left fail-closed; hook-loader is not restarted.
+exit /b %LIGHT_INSTALL_RESULT%
+
+:install_main
 cd /d "%~dp0" || exit /b 1
 for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
@@ -9,26 +20,6 @@ for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll native.apk restore_mode.apk p
 adb.exe root
 adb.exe wait-for-device
 adb.exe root
-
-echo === Removing old Apollo VehicleSetting hook ===
-call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
-if errorlevel 1 exit /b 1
-call :put_apollo_safe_key open_voyah_apollo_master
-if errorlevel 1 exit /b 1
-call :put_apollo_safe_key open_voyah_apollo_profile_supported
-if errorlevel 1 exit /b 1
-call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
-if errorlevel 1 exit /b 1
-adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
-adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
-for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
-echo   Apollo entitlement agent and markers removed. Light keeps read-only diagnostics only.
-
-echo === Removing keyboard hooks for light ===
-adb.exe shell am force-stop com.qinggan.app.qgime 1>nul 2>nul
-adb.exe shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json /data/local/tmp/voyahtune_keyboard.pid /data/local/tmp/voyahtune_keyboard.attempt /data/local/tmp/voyahtune_keyboard.txt /data/local/tmp/voyahtune_keyboard.txt.try" 1>nul 2>nul
-adb.exe shell settings delete global voyahtune_keyboard_mode 1>nul 2>nul
-echo   Keyboard hooks removed. Qinggan IME remains stock.
 
 echo === Preflight owner check for com.qinggan.permission.WRITE_CANBUS ===
 adb.exe shell dumpsys package permissions >nul 2>nul
@@ -92,15 +83,59 @@ echo === Backing up files to %BACKUP_DIR%\ ===
 call :backup_pull /system/priv-app/Native/Native.apk     Native.apk
 call :backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml
 
-echo === Native.apk in /system/priv-app ^(privileged permissions required for CAN features^) ===
-adb.exe shell mkdir -p /system/priv-app/Native
-adb.exe shell chmod 755 /system/priv-app/Native
-adb.exe push native.apk /system/priv-app/Native/Native.apk
-adb.exe shell "ls -all /system/priv-app/Native"
+set "LEGACY_FULL_BOOT_STATE="
+for /f "delims=" %%i in ('adb.exe shell "if [ ! -e /system/etc/init.logcat.sh ]; then echo CLEAN; elif [ ! -f /system/etc/init.logcat.sh ]; then echo ERROR; else grep -qF '# init.logcat.sh Open Voyah:' /system/etc/init.logcat.sh 2>/dev/null; legacy_grep_status=$?; if [ $legacy_grep_status -eq 0 ]; then echo LEGACY; elif [ $legacy_grep_status -eq 1 ]; then echo CLEAN; else echo ERROR; fi; fi" 2^>nul') do set "LEGACY_FULL_BOOT_STATE=%%i"
+if not "%LEGACY_FULL_BOOT_STATE%"=="CLEAN" (
+    echo !!! A legacy Full hook was found in init.logcat.sh.
+    echo     Run full remove first, then run Light install; Light will not rewrite an unknown OEM file.
+    exit /b 1
+)
 
-adb.exe shell "mkdir -p /system/etc/permissions"
-adb.exe push privapp-permissions-ru.big.town.anative.xml /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml
-adb.exe shell "chmod 644 /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"
+echo === Full to Light: stopping root hook runtime ===
+set "LIGHT_HOOK_BARRIER_PHASE=1"
+call :stop_full_hook_runtime_for_light
+if errorlevel 1 (
+    echo !!! Full hook-loader or its in-flight injector did not stop. Teardown was cancelled.
+    exit /b 1
+)
+
+call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_master
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_profile_supported
+if errorlevel 1 exit /b 1
+call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
+if errorlevel 1 exit /b 1
+adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
+adb.exe shell am force-stop com.qinggan.app.qgime 1>nul 2>nul
+
+set "LIGHT_HOOK_BARRIER_PHASE=2"
+call :remove_full_hook_runtime_for_light
+if errorlevel 1 (
+    echo !!! Full hook runtime was not removed completely. Do not reboot; run Light install again.
+    exit /b 1
+)
+for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat voyahtune_keyboard_mode) do adb.exe shell settings delete global %%K 1>nul 2>nul
+echo   Full boot path, project Frida scripts and runtime markers were removed.
+
+echo === Native.apk in /system/priv-app ^(privileged permissions required for CAN features^) ===
+adb.exe shell "mkdir -p /system/priv-app/Native && chown 0:0 /system/priv-app/Native && chmod 755 /system/priv-app/Native && restorecon /system/priv-app/Native"
+if errorlevel 1 (
+    echo !!! Could not prepare /system/priv-app/Native. Final reboot was cancelled.
+    exit /b 1
+)
+call :install_required_system_file native.apk /system/priv-app/.Native.apk.voyahtune.new /system/priv-app/Native/Native.apk 644
+if errorlevel 1 exit /b 1
+
+adb.exe shell "mkdir -p /system/etc/permissions && chown 0:0 /system/etc/permissions && chmod 755 /system/etc/permissions && restorecon /system/etc/permissions"
+if errorlevel 1 (
+    echo !!! Could not prepare /system/etc/permissions. Final reboot was cancelled.
+    exit /b 1
+)
+call :install_required_system_file privapp-permissions-ru.big.town.anative.xml /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml 644
+if errorlevel 1 exit /b 1
+set "LIGHT_HOOK_BARRIER_PHASE=0"
 
 set LEAVECAR=
 for /f "delims=" %%i in ('adb.exe shell getprop persist.app.feature.leavecar') do set LEAVECAR=%%i
@@ -134,6 +169,36 @@ echo Installation complete and verified.
 echo Run install-yandex-dns.bat separately if Yandex DNS is required.
 exit /b 0
 goto :eof
+
+:stop_full_hook_runtime_for_light
+adb.exe shell "command -v pgrep >/dev/null 2>&1 || exit 1; command -v pkill >/dev/null 2>&1 || exit 1; setprop ctl.stop voyahtune_load 2>/dev/null || true; pkill -TERM -f '/data/local/bin/load[.]bin' 2>/dev/null || true; pkill -TERM -f '/data/local/bin/frida[-]inject' 2>/dev/null || true; stop_wait=0; while pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; do if [ $stop_wait -ge 10 ]; then break; fi; sleep 1; stop_wait=$((stop_wait + 1)); done; if pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; then pkill -KILL -f '/data/local/bin/load[.]bin' 2>/dev/null || true; pkill -KILL -f '/data/local/bin/frida[-]inject' 2>/dev/null || true; kill_wait=0; while pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; do if [ $kill_wait -ge 5 ]; then exit 1; fi; sleep 1; kill_wait=$((kill_wait + 1)); done; fi"
+exit /b %ERRORLEVEL%
+
+:remove_full_hook_runtime_for_light
+adb.exe shell "ACTIVE_RC=/system/etc/init/voyahtune.load.rc; DISABLED_RC=/system/etc/init/voyahtune.load.rc.voyahtune-light-disabled; rm -f $DISABLED_RC || exit 1; if [ -e $ACTIVE_RC ] || [ -L $ACTIVE_RC ]; then mv -f $ACTIVE_RC $DISABLED_RC || exit 1; fi; [ ! -e $ACTIVE_RC ] && [ ! -L $ACTIVE_RC ] || exit 1; rm -f /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.load.sh /system/etc/init/voyahtune.setenforce.rc /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.load.sh.rollback /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.setenforce.rc.rollback $DISABLED_RC || exit 1"
+if errorlevel 1 exit /b 1
+adb.exe shell "if [ -f /data/local/bin/load.bin ] && grep -qF 'LOG_TAG=\"vt_load_bin\"' /data/local/bin/load.bin 2>/dev/null && grep -qF 'HOOK_MANIFEST=/data/local/bin/voyahtune-hook-manifest.json' /data/local/bin/load.bin 2>/dev/null; then rm -f /data/local/bin/load.bin || exit 1; fi; rm -f /data/local/bin/load.bin.voyahtune.new /data/local/bin/frida-inject.voyahtune.new"
+if errorlevel 1 exit /b 1
+adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/bin/apollo_tech.js.voyahtune.new /data/local/bin/vd_bypass.js /data/local/bin/vd_bypass.js.voyahtune.new /data/local/bin/steeringwheelkeys.js /data/local/bin/steeringwheelkeys.js.voyahtune.new /data/local/bin/launcherdock.js /data/local/bin/launcherdock.js.voyahtune.new /data/local/bin/multidisplay.js /data/local/bin/multidisplay.js.voyahtune.new /data/local/bin/keymng2.js /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_lock_en.js.voyahtune.new /data/local/bin/keyboard_ru.js /data/local/bin/keyboard_ru.js.voyahtune.new /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_en_config.json.voyahtune.new /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_keyboard_ru_config.json.voyahtune.new /data/local/bin/voyahtune_skb_qwerty_ru.json /data/local/bin/voyahtune_skb_qwerty_ru.json.voyahtune.new /data/local/bin/voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json.voyahtune.new"
+if errorlevel 1 exit /b 1
+adb.exe shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock /data/local/tmp/voyahtune_vd.pid /data/local/tmp/voyahtune_vd.attempt /data/local/tmp/voyahtune_vd_bypass.txt /data/local/tmp/voyahtune_vd_bypass.txt.try /data/local/tmp/voyahtune_swk_km.pid /data/local/tmp/voyahtune_swk_km.busy /data/local/tmp/voyahtune_swk_km.attempt /data/local/tmp/voyahtune_swk.txt /data/local/tmp/voyahtune_swk.try /data/local/tmp/voyahtune_lnch.pid /data/local/tmp/voyahtune_lnch.attempt /data/local/tmp/voyahtune_lnch.txt /data/local/tmp/voyahtune_lnch.txt.try /data/local/tmp/voyahtune_md.pid /data/local/tmp/voyahtune_md.attempt /data/local/tmp/voyahtune_md.txt /data/local/tmp/voyahtune_md.txt.try /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_keyboard.pid /data/local/tmp/voyahtune_keyboard.attempt /data/local/tmp/voyahtune_keyboard.txt /data/local/tmp/voyahtune_keyboard.txt.try /data/local/tmp/voyahtune_load.txt /data/local/tmp/voyahtune-hook-status.v1 /data/local/tmp/voyahtune-hook-status.v1.*.new"
+if errorlevel 1 exit /b 1
+adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_load.txt /data/local/tmp/voyah_vd_bypass.txt /data/local/tmp/voyah_vd_bypass.txt.try /data/local/tmp/voyah_keymng.txt /data/local/tmp/voyah_swk.txt /data/local/tmp/voyah_swk.txt.try /data/local/tmp/voyah_lnch.txt /data/local/tmp/voyah_lnch.txt.try /data/local/tmp/voyah_md.txt /data/local/tmp/voyah_md.txt.try /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try; rm -rf /data/local/tmp/voyah_load.lock"
+if errorlevel 1 exit /b 1
+adb.exe shell "for removed_path in /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.load.sh /data/local/bin/vd_bypass.js /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/apollo_tech.js /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1; do [ ! -e $removed_path ] && [ ! -L $removed_path ] || exit 1; done; ! pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || exit 1; ! pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1 || exit 1; sync"
+exit /b %ERRORLEVEL%
+
+:install_required_system_file
+adb.exe push "%~1" "%~2"
+if errorlevel 1 goto :install_required_system_file_failed
+adb.exe shell "chown 0:0 '%~2' && chmod '%~4' '%~2' && restorecon '%~2' && mv -f '%~2' '%~3' && restorecon '%~3' && sync && test -f '%~3'"
+if errorlevel 1 goto :install_required_system_file_failed
+exit /b 0
+
+:install_required_system_file_failed
+adb.exe shell "rm -f '%~2'" 1>nul 2>nul
+echo !!! Could not atomically install %~3. Final reboot was cancelled.
+exit /b 1
 
 :wait_android_boot
 adb.exe wait-for-device

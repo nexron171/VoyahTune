@@ -125,6 +125,35 @@ identity; в выключенном по умолчанию состоянии �
 возврата целевого состояния, сохраняются. Оптимизация направлена прежде всего на работу,
 размножаемую входящим потоком CAN-событий.
 
+Набор Frida-агентов зафиксирован в `system/voyahtune-hook-manifest.json`: для каждого hook указаны
+точные `id`, process, script и SHA-256. После изменения JS manifest обновляется командой
+`Packaging/update_hook_manifest.sh`. Unix/Windows installer проверяет все семь отображений и хэшей
+до первого изменения устройства, останавливает прежний loader, устанавливает scripts и только затем
+атомарно публикует manifest. При старте `load.bin` повторно проверяет schema, полный exact mapping и
+все hashes. Любая ошибка отключает весь набор fail-closed — смешанная версия hooks не запускается.
+
+`load.bin` также ведёт единый bounded status-contract в
+`/data/local/tmp/voyahtune-hook-status.v1`. Файл заменяется через temp + `mv` и только при реальном
+изменении состояния. То же значение event-driven передаётся root-only методом существующего
+RestoreMode ContentProvider и атомарно сохраняется в отдельные preferences; `Settings.Global` для
+этого не используется. Экран «Другое» показывает loader, manifest и семь hooks, читая snapshot в
+уже существующем цикле RAM/CPU раз в 5 секунд. Вне видимого раздела ни timer, ни чтение status не
+работают. Ошибка доставки provider получает максимум три попытки для данной revision, а не вечный
+retry-loop.
+
+Для безопасной host-проверки exact process identity добавлен
+`Utils/android11-oem-stubs`. Harness рассчитан только на Android 11/API 30 emulator, требует явный
+ADB serial и отказывается заменять или удалять не принадлежащие ему OEM packages. Статический guard:
+
+```bash
+bash Utils/android11-oem-stubs/tests/static-checks.sh
+```
+
+Исследовательские функции из Voboost намеренно не добавлены в hook-set без проверки OEM ABI:
+результаты аудита `phone-num`/`weather-widget` находятся в
+`Docs/voboost-phone-weather-audit.md`, а поэтапный безопасный план телефонных номеров — в
+`Docs/phone-number-improvement-plan.md`.
+
 Режимы вождения/энергии защищены от стартового OEM Eco/EV: после успешного wake-restore CAN-feedback
 30 секунд не может заменить сохранённое значение и при несовпадении допускает не более одной
 корректирующей restore-попытки. После этого окна стабильное изменение со стороны машины снова считается

@@ -27,7 +27,8 @@ fi
 
 # Полный локальный preflight до первого ADB-вызова.
 for FULL_REQUIRED_ASSET in load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js \
-        apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json \
+        apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune-hook-manifest.json \
+        voyahtune_keyboard_en_config.json \
         voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json \
         frida-inject-16.2.1-android-arm64 voyahtune.load.rc \
         voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk \
@@ -38,9 +39,94 @@ for FULL_REQUIRED_ASSET in load.bin steeringwheelkeys.js launcherdock.js multidi
     fi
 done
 
+# The manifest is the commit record for the exact hook set. Validate every script before the first
+# ADB call; it is installed last so a partial copy can never publish a new manifest as complete.
+host_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+verify_hook_manifest_entry() {
+    HOOK_ID=$1
+    HOOK_PROCESS=$2
+    HOOK_SCRIPT=$3
+    HOOK_EXPECTED=$(sed -n \
+        's/.*"id":"'"$HOOK_ID"'","process":"'"$HOOK_PROCESS"'","script":"'"$HOOK_SCRIPT"'","sha256":"\([0-9a-f]*\)".*/\1/p' \
+        voyahtune-hook-manifest.json)
+    [ "${#HOOK_EXPECTED}" -eq 64 ] || return 1
+    HOOK_ACTUAL=$(host_sha256 "$HOOK_SCRIPT") || return 1
+    [ "$HOOK_ACTUAL" = "$HOOK_EXPECTED" ]
+}
+
+if [ "$(grep -F -x -c '  "schemaVersion": 1,' voyahtune-hook-manifest.json)" -ne 1 ] \
+        || [ "$(grep -F -c '{"id":' voyahtune-hook-manifest.json)" -ne 7 ] \
+        || ! verify_hook_manifest_entry vd-bypass system_server vd_bypass.js \
+        || ! verify_hook_manifest_entry steering-wheel com.qinggan.keymanager.service steeringwheelkeys.js \
+        || ! verify_hook_manifest_entry launcher-dock com.qinggan.app.launcher launcherdock.js \
+        || ! verify_hook_manifest_entry multi-display com.qinggan.systemservice multidisplay.js \
+        || ! verify_hook_manifest_entry apollo-tech com.qinggan.app.vehiclesetting apollo_tech.js \
+        || ! verify_hook_manifest_entry keyboard-en com.qinggan.app.qgime keyboard_lock_en.js \
+        || ! verify_hook_manifest_entry keyboard-ru com.qinggan.app.qgime keyboard_ru.js; then
+    echo "!!! Hook manifest не совпадает с exact process/script/hash contract — устройство не изменялось."
+    exit 1
+fi
+
 adb root
 adb wait-for-device
 adb root
+
+# После этого barrier ни один код до финального reboot не имеет права перезапускать голову.
+# Exact path с bracket-escape не матчится на саму команду pgrep/pkill. В ожидание включён и
+# frida-inject: фоновый keymanager worker может пережить shell load.bin и иначе открыть уже новый
+# script под старым manifest contract.
+stop_hook_runtime_for_update() {
+    adb shell '
+        command -v pgrep >/dev/null 2>&1 || exit 1
+        command -v pkill >/dev/null 2>&1 || exit 1
+        setprop ctl.stop voyahtune_load 2>/dev/null || true
+        pkill -TERM -f "/data/local/bin/load[.]bin" 2>/dev/null || true
+        pkill -TERM -f "/data/local/bin/frida[-]inject" 2>/dev/null || true
+        stop_wait=0
+        while pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
+                || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; do
+            [ "$stop_wait" -lt 10 ] || break
+            sleep 1
+            stop_wait=$((stop_wait + 1))
+        done
+        if pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
+                || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; then
+            pkill -KILL -f "/data/local/bin/load[.]bin" 2>/dev/null || true
+            pkill -KILL -f "/data/local/bin/frida[-]inject" 2>/dev/null || true
+            kill_wait=0
+            while pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
+                    || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; do
+                [ "$kill_wait" -lt 5 ] || exit 1
+                sleep 1
+                kill_wait=$((kill_wait + 1))
+            done
+        fi
+        rm -f /data/local/tmp/voyahtune_load.v2.lock \
+            /data/local/tmp/voyah_load.v2.lock
+        rm -rf /data/local/tmp/voyah_load.lock
+    '
+}
+
+HOOK_UPDATE_BARRIER_ARMED=0
+full_install_exit() {
+    FULL_INSTALL_EXIT_STATUS=$?
+    trap - 0
+    if [ "$HOOK_UPDATE_BARRIER_ARMED" = 1 ]; then
+        echo "  ПРЕДУПРЕЖДЕНИЕ: установка прервана после stop; пробуем вернуть hook-loader."
+        adb shell 'setprop ctl.start voyahtune_load 2>/dev/null || true' >/dev/null 2>&1 || true
+    fi
+    exit "$FULL_INSTALL_EXIT_STATUS"
+}
+trap full_install_exit 0
 
 # Android 11 package data is owned by PackageManager/installd and mirrored through /data_mirror.
 # After a clean remove, Native can remain a known-but-uninstalled system package until the new
@@ -132,34 +218,6 @@ ensure_apollo_entitlement_ready() {
     echo "    Проверьте /data/local/tmp/voyahtune_apollo.txt и повторите installer."
     return 1
 }
-
-# Одноразовая миграция: сначала заставляем старый eternalized agent уйти в pass-through,
-# затем останавливаем его host-процесс и удаляем скрипт/маркеры/устаревшие Settings.Global.
-echo "=== Удаление старого Apollo VehicleSetting hook ==="
-for APOLLO_SAFE_KEY in \
-        open_voyah_apollo_legacy_hook_enabled \
-        open_voyah_apollo_master \
-        open_voyah_apollo_profile_supported \
-        open_voyah_apollo_profile_heartbeat; do
-    if ! adb shell settings put global "$APOLLO_SAFE_KEY" 0; then
-        echo "!!! Не удалось записать $APOLLO_SAFE_KEY=0 — установка прервана до записи в /system."
-        exit 1
-    fi
-    APOLLO_SAFE_STATE=$(adb shell settings get global "$APOLLO_SAFE_KEY" 2>/dev/null \
-        | tr -d '\r')
-    if [ "$APOLLO_SAFE_STATE" != "0" ]; then
-        echo "!!! $APOLLO_SAFE_KEY не подтвердил 0 — установка прервана до записи в /system."
-        exit 1
-    fi
-done
-adb shell am force-stop com.qinggan.app.vehiclesetting 2>/dev/null
-adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
-for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master \
-        open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported \
-        open_voyah_apollo_profile_heartbeat; do
-    adb shell settings delete global "$APOLLO_OLD_KEY" 2>/dev/null
-done
-echo "  Старый agent, маркеры и ключи удалены; будет установлен минимальный voboost entitlement hook."
 
 # Native in both flavors self-owns the signature permission needed by its fail-closed CAN writer. Android keeps
 # the first installed declaration: an old VoyahTweaks owner would silently make our Native incompatible.
@@ -606,6 +664,43 @@ backup_pull /data/local/bin/frida-inject           frida-inject || exit 1
 backup_pull /system/priv-app/Native/Native.apk     Native.apk || exit 1
 backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml || exit 1
 
+# Последний возможный verity-reboot уже позади, все read-only preflight/backup завершены. Армим
+# exit-recovery ДО stop: даже частичный stop обязан попытаться вернуть прежний/новый init-service.
+echo "=== Остановка hook-loader на время атомарного обновления ==="
+HOOK_UPDATE_BARRIER_ARMED=1
+if ! stop_hook_runtime_for_update; then
+    echo "!!! Hook-loader или его in-flight injector не остановился; hook-файлы не изменялись."
+    exit 1
+fi
+
+# Одноразовая миграция: сначала заставляем старый eternalized agent уйти в pass-through,
+# затем выгружаем его host-процесс и удаляем скрипт/маркеры/устаревшие Settings.Global.
+echo "=== Удаление старого Apollo VehicleSetting hook ==="
+for APOLLO_SAFE_KEY in \
+        open_voyah_apollo_legacy_hook_enabled \
+        open_voyah_apollo_master \
+        open_voyah_apollo_profile_supported \
+        open_voyah_apollo_profile_heartbeat; do
+    if ! adb shell settings put global "$APOLLO_SAFE_KEY" 0; then
+        echo "!!! Не удалось записать $APOLLO_SAFE_KEY=0 — hook-loader будет возвращён."
+        exit 1
+    fi
+    APOLLO_SAFE_STATE=$(adb shell settings get global "$APOLLO_SAFE_KEY" 2>/dev/null \
+        | tr -d '\r')
+    if [ "$APOLLO_SAFE_STATE" != "0" ]; then
+        echo "!!! $APOLLO_SAFE_KEY не подтвердил 0 — hook-loader будет возвращён."
+        exit 1
+    fi
+done
+adb shell am force-stop com.qinggan.app.vehiclesetting 2>/dev/null
+adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
+for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master \
+        open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported \
+        open_voyah_apollo_profile_heartbeat; do
+    adb shell settings delete global "$APOLLO_OLD_KEY" 2>/dev/null
+done
+echo "  Старый agent, маркеры и ключи удалены; будет установлен минимальный voboost entitlement hook."
+
 # ВАЖНО: всё в /data/local/bin доступно загрузочному RC-сервису.
 # /sdcard монтируется позже, поэтому load.bin ТАМ держать нельзя (не запустится на буте).
 echo "=== Frida-инфраструктура (руль + VirtualDisplay + Apollo entitlement) ==="
@@ -625,6 +720,8 @@ install_required_data_file voyahtune_keyboard_en_config.json /data/local/bin/voy
 install_required_data_file voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_keyboard_ru_config.json 644 || exit 1
 install_required_data_file voyahtune_skb_qwerty_ru.json /data/local/bin/voyahtune_skb_qwerty_ru.json 644 || exit 1
 install_required_data_file frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject 755 || exit 1
+# Commit point exact hook-set: scripts above are complete and their hashes were verified locally.
+install_required_data_file voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json 644 || exit 1
 
 echo "=== Миграция boot-hook предыдущего full-релиза ==="
 if ! migrate_legacy_init_logcat; then
@@ -744,7 +841,13 @@ case "${YDNS_REQUEST:-keep}" in
         ;;
 esac
 
-adb reboot
+if ! adb reboot; then
+    echo "!!! ADB не смог перезагрузить ГУ; пробуем запустить установленный hook-loader без reboot."
+    exit 1
+fi
+# После принятого reboot init сам поднимет полностью зафиксированный set; host-side recovery больше
+# не нужен и не должен гоняться с загрузкой устройства.
+HOOK_UPDATE_BARRIER_ARMED=0
 if ! wait_for_android_boot; then
     echo "!!! ГУ не завершило загрузку после установки; проверьте ADB и повторите installer."
     exit 1

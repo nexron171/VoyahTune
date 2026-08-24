@@ -41,8 +41,9 @@ require "$NATIVE" 'return "en".equals(mode) || "ru".equals(mode) ? mode : "off";
     || fail "loader must contain exactly one keyboard Settings read"
 require "$LOADER" '[ "$KEYBOARD_SEEN_ID" != "$KEYBOARD_ID" ]'
 require "$LOADER" 'KEYBOARD_SEEN_ID=$KEYBOARD_ID'
-require "$LOADER" 'en) KEYBOARD_SCRIPT=$KEYBOARD_EN'
-require "$LOADER" 'ru) KEYBOARD_SCRIPT=$KEYBOARD_RU'
+require "$LOADER" 'KEYBOARD_MODE_CURRENT=$KEYBOARD_MODE'
+require "$LOADER" 'KEYBOARD_SCRIPT=$KEYBOARD_EN'
+require "$LOADER" 'KEYBOARD_SCRIPT=$KEYBOARD_RU'
 require "$LOADER" 'KEYBOARD_SCRIPT='
 require "$LOADER" 'inject_ret "$KEYBOARD_PID" "$KEYBOARD_SCRIPT"'
 
