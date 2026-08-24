@@ -17,6 +17,7 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -67,6 +68,9 @@ public class TripStatsService extends Service {
     // Порог: поездки суммарно короче — не сохраняем
     private static final long MIN_TRIP_MS = 5 * 60 * 1000L;
     private static final int  MAX_TRIPS   = 10;
+    // Входящий Gear callback может дать переходный burst. Стейт-машина принимает каждый переход,
+    // но disk apply + глобальный UI broadcast публикуют только последний снимок окна.
+    private static final long CAN_STATE_PUBLISH_COALESCE_MS = 250L;
 
     private static final int    GEAR_DRIVE = 3;
     private static final int DOOR_OPEN        = 1;
@@ -89,6 +93,11 @@ public class TripStatsService extends Service {
     private long    tripStartWall = 0L;     // wall-clock первого Drive (для даты)
     private int     lastGear = -1;
     private int     lastFLDoor = -1;        // последнее состояние водительской двери
+    private boolean canStatePublishPending;
+    private final Runnable canStatePublishRunnable = () -> {
+        canStatePublishPending = false;
+        persistAndBroadcast();
+    };
 
     private void onTripCanBusEvent(CanBusEvent event) {
         if (destroyed) return;
@@ -144,7 +153,7 @@ public class TripStatsService extends Service {
             inDrive = false;
             Log.i(TAG, "gear=" + gearVal + " → пауза, накоплено=" + fmt(accumMs));
         }
-        persistAndBroadcast();
+        scheduleCanStatePublish();
     }
 
     /** Открытие водительской двери → финализируем поездку («приехал, выхожу»). */
@@ -262,7 +271,20 @@ public class TripStatsService extends Service {
     // Persist текущего состояния + broadcast
     // -------------------------------------------------------------------------
 
+    private void scheduleCanStatePublish() {
+        canStatePublishPending = true;
+        timerHandler.removeCallbacks(canStatePublishRunnable);
+        timerHandler.postDelayed(canStatePublishRunnable, CAN_STATE_PUBLISH_COALESCE_MS);
+    }
+
     private void persistAndBroadcast() {
+        canStatePublishPending = false;
+        timerHandler.removeCallbacks(canStatePublishRunnable);
+        persistState();
+        broadcastUpdate();
+    }
+
+    private void persistState() {
         prefs().edit()
                 .putBoolean("curActive", tripActive)
                 .putBoolean("curInDrive", inDrive)
@@ -271,7 +293,6 @@ public class TripStatsService extends Service {
                 .putLong("curStartWall", tripStartWall)
                 .putInt("lastGear", lastGear)
                 .apply();
-        broadcastUpdate();
     }
 
     private void restoreState() {
@@ -420,7 +441,8 @@ public class TripStatsService extends Service {
         reqFilter.addAction(ACTION_TRIP_RESET);
         reqFilter.addAction(ACTION_TRIP_DELETE);
         reqFilter.addAction(ACTION_TRIP_HISTORY);
-        registerReceiver(requestReceiver, reqFilter, RECEIVER_EXPORTED);
+        ContextCompat.registerReceiver(this, requestReceiver, reqFilter,
+                ContextCompat.RECEIVER_EXPORTED);
 
         CanBusEventHub hub = CanBusEventHub.get(this);
         modeCanBusSubscription = hub.subscribe(
@@ -452,6 +474,11 @@ public class TripStatsService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        if (canStatePublishPending) {
+            timerHandler.removeCallbacks(canStatePublishRunnable);
+            canStatePublishPending = false;
+            persistState();
+        }
         destroyed = true;
         CanBusEventHub.Subscription tripSubscription = tripCanBusSubscription;
         CanBusEventHub.Subscription modeSubscription = modeCanBusSubscription;
