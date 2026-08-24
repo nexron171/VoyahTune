@@ -10,7 +10,7 @@ adb.exe root
 adb.exe wait-for-device
 adb.exe root
 
-echo === Preflight direct-only Apollo ^(VehicleSetting hook OFF^) ===
+echo === Removing old Apollo VehicleSetting hook ===
 call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
 if errorlevel 1 exit /b 1
 call :put_apollo_safe_key open_voyah_apollo_master
@@ -19,7 +19,10 @@ call :put_apollo_safe_key open_voyah_apollo_profile_supported
 if errorlevel 1 exit /b 1
 call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
 if errorlevel 1 exit /b 1
-echo   Legacy opt-in, master, profile, and heartbeat are disabled.
+adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
+adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
+for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
+echo   Old agent, markers, and keys removed. Apollo is Native-only.
 
 echo === Preflight owner check for com.qinggan.permission.WRITE_CANBUS ===
 adb.exe shell dumpsys package permissions >nul 2>nul

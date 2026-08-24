@@ -34,9 +34,8 @@ adb root
 adb wait-for-device
 adb root
 
-# Direct Apollo не использует legacy VehicleSetting hook. Закрываем старые opt-in/liveness ключи
-# до disable-verity и любых изменений /system, в том числе при переходе с full на light.
-echo "=== Preflight direct-only Apollo (VehicleSetting hook OFF) ==="
+# Одноразовая миграция со старого VehicleSetting hook, в том числе при переходе full -> light.
+echo "=== Удаление старого Apollo VehicleSetting hook ==="
 for APOLLO_SAFE_KEY in \
         open_voyah_apollo_legacy_hook_enabled \
         open_voyah_apollo_master \
@@ -53,7 +52,14 @@ for APOLLO_SAFE_KEY in \
         exit 1
     fi
 done
-echo "  Legacy opt-in, master, profile и heartbeat закрыты."
+adb shell am force-stop com.qinggan.app.vehiclesetting 2>/dev/null
+adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
+for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master \
+        open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported \
+        open_voyah_apollo_profile_heartbeat; do
+    adb shell settings delete global "$APOLLO_OLD_KEY" 2>/dev/null
+done
+echo "  Старый agent, маркеры и ключи удалены; Apollo работает только через Native."
 
 # Оба флейвора Native владеют signature-разрешением прямой записи в CanBus. Чужой первый владелец
 # сделал бы установленный APK несовместимым, поэтому конфликт проверяется до изменения /system.

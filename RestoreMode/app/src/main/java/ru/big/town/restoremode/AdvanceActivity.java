@@ -99,7 +99,6 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_APPLY_FORCED_EV    = 35;
     static final int MSG_APOLLO_QUERY       = 36;
     static final int MSG_APOLLO_SET_TLC     = 37;
-    static final int MSG_APOLLO_SET_MASTER  = 38;
     static final int MSG_APOLLO_SET_GLA     = 39;
     static final int MSG_APOLLO_SET_GLA_SOUND = 40;
     static final int MSG_APOLLO_SET_TSR     = 41;
@@ -125,10 +124,8 @@ public class AdvanceActivity extends AppCompatActivity {
 
     // Apollo Tech всегда отображает только подтверждённое Native состояние. Значения не сохраняются
     // в RestoreMode prefs: при каждом открытии раздела выполняется read-only запрос к автомобилю.
-    private Switch switchApolloMaster, switchApolloTlc, switchApolloTrafficLights,
-            switchApolloTrafficSigns;
+    private Switch switchApolloTlc, switchApolloTrafficLights, switchApolloTrafficSigns;
     private RadioGroup apolloGreenSoundGroup;
-    private Button buttonApolloForceOff;
     private TextView textApolloStatus, textApolloDiagnostics, textApolloFullOnly;
     private View apolloControls;
     private View apolloGreenSoundContainer;
@@ -137,8 +134,6 @@ public class AdvanceActivity extends AppCompatActivity {
     private boolean apolloCanConnected;
     private boolean apolloProfileSupported;
     private boolean apolloDirectTlcMode;
-    private boolean apolloMasterKnown;
-    private boolean apolloMasterEnabled;
     private boolean apolloPending;
     private long apolloDemandSession;
     private int apolloPlcSwitch = APOLLO_UNKNOWN;
@@ -160,8 +155,6 @@ public class AdvanceActivity extends AppCompatActivity {
             apolloCanConnected = intent.getBooleanExtra("canConnected", false);
             apolloProfileSupported = intent.getBooleanExtra("profileSupported", false);
             apolloDirectTlcMode = intent.getBooleanExtra("directTlcMode", false);
-            apolloMasterKnown = intent.getBooleanExtra("masterKnown", false);
-            apolloMasterEnabled = intent.getBooleanExtra("masterEnabled", false);
             apolloPending = intent.getBooleanExtra("pending", false);
             apolloPlcSwitch = intent.getIntExtra("plcSwitch", APOLLO_UNKNOWN);
             apolloPlcStatus = intent.getIntExtra("plcStatus", APOLLO_UNKNOWN);
@@ -1267,13 +1260,11 @@ public class AdvanceActivity extends AppCompatActivity {
     // -------------------------------------------------------------------------
 
     private void initApolloTech() {
-        switchApolloMaster = findViewById(R.id.switchApolloMaster);
         switchApolloTlc = findViewById(R.id.switchApolloTlc);
         switchApolloTrafficLights = findViewById(R.id.switchApolloTrafficLights);
         switchApolloTrafficSigns = findViewById(R.id.switchApolloTrafficSigns);
         apolloGreenSoundGroup = findViewById(R.id.apolloGreenSoundGroup);
         apolloGreenSoundContainer = findViewById(R.id.apolloGreenSoundContainer);
-        buttonApolloForceOff = findViewById(R.id.buttonApolloForceOff);
         textApolloStatus = findViewById(R.id.textApolloStatus);
         textApolloDiagnostics = findViewById(R.id.textApolloDiagnostics);
         textApolloFullOnly = findViewById(R.id.textApolloFullOnly);
@@ -1281,10 +1272,6 @@ public class AdvanceActivity extends AppCompatActivity {
 
         syncingApolloUi = true;
         try {
-            if (switchApolloMaster != null) {
-                switchApolloMaster.setChecked(false);
-                switchApolloMaster.setEnabled(false);
-            }
             if (switchApolloTlc != null) {
                 switchApolloTlc.setChecked(false);
                 switchApolloTlc.setEnabled(false);
@@ -1305,18 +1292,6 @@ public class AdvanceActivity extends AppCompatActivity {
             syncingApolloUi = false;
         }
 
-        if (switchApolloMaster != null) {
-            switchApolloMaster.setOnCheckedChangeListener((button, checked) -> {
-                if (syncingApolloUi) return;
-                if (!canChangeApolloMaster(checked)) {
-                    updateApolloUi();
-                    return;
-                }
-                updateApolloUi();
-                if (checked) showApolloMasterEnableDialog();
-                else sendApolloCommand(MSG_APOLLO_SET_MASTER, false);
-            });
-        }
         if (switchApolloTlc != null) {
             switchApolloTlc.setOnCheckedChangeListener((button, checked) -> {
                 if (syncingApolloUi) return;
@@ -1360,13 +1335,6 @@ public class AdvanceActivity extends AppCompatActivity {
                 }
                 boolean enabled = checkedId == R.id.apolloGreenSoundOn;
                 sendApolloCommand(MSG_APOLLO_SET_GLA_SOUND, enabled);
-            });
-        }
-        if (buttonApolloForceOff != null) {
-            buttonApolloForceOff.setOnClickListener(v -> {
-                if (canForceApolloMasterOff()) {
-                    sendApolloCommand(MSG_APOLLO_SET_MASTER, false);
-                }
             });
         }
         updateApolloUi();
@@ -1467,16 +1435,6 @@ public class AdvanceActivity extends AppCompatActivity {
         return GlobalVars.isBound && GlobalVars.serviceMessenger != null;
     }
 
-    private boolean canChangeApolloMaster(boolean desiredEnabled) {
-        return false;
-    }
-
-    /** Separate emergency path: an unreadable master must never remove the ability to force OFF. */
-    private boolean canForceApolloMasterOff() {
-        return BuildConfig.HAS_DIRECT_APOLLO && apolloHasState && !apolloMasterKnown
-                && isApolloServiceReady();
-    }
-
     private boolean canChangeApolloTlc(boolean desiredEnabled) {
         return BuildConfig.HAS_DIRECT_APOLLO && apolloHasState && isApolloServiceReady()
                 && apolloCanConnected && apolloProfileSupported && apolloDirectTlcMode
@@ -1514,8 +1472,7 @@ public class AdvanceActivity extends AppCompatActivity {
         return isApolloPlcStatusValid()
                 && (apolloPlcSwitch == 1 || apolloPlcSwitch == 2)
                 && (apolloAnpSwitch == 1 || apolloAnpSwitch == 2)
-                // На точном H97X-профиле entitlement-поля равны -1 до первой master-активации.
-                // Это допустимо только для master; TLC ниже всё равно требует подтверждённые 2/2.
+                // На точном H97X-профиле entitlement-поля могут быть -1 до первой прямой записи.
                 && (apolloTlcCapability == -1
                     || apolloTlcCapability == 1 || apolloTlcCapability == 2)
                 && (apolloPlcCapabilitySa == -1
@@ -1534,10 +1491,6 @@ public class AdvanceActivity extends AppCompatActivity {
 
         syncingApolloUi = true;
         try {
-            if (switchApolloMaster != null) {
-                switchApolloMaster.setChecked(false);
-                switchApolloMaster.setEnabled(false);
-            }
             if (switchApolloTlc != null) {
                 switchApolloTlc.setChecked(apolloHasState && apolloPlcSwitch == 2);
                 switchApolloTlc.setEnabled(canChangeApolloTlc(apolloPlcSwitch != 2));
@@ -1570,10 +1523,6 @@ public class AdvanceActivity extends AppCompatActivity {
             syncingApolloUi = false;
         }
 
-        if (buttonApolloForceOff != null) {
-            buttonApolloForceOff.setVisibility(View.GONE);
-            buttonApolloForceOff.setEnabled(false);
-        }
         if (apolloGreenSoundContainer != null) {
             apolloGreenSoundContainer.setAlpha(
                     apolloHasState && apolloGlaSwitch == 2 ? 1f : 0.45f);
@@ -1653,41 +1602,22 @@ public class AdvanceActivity extends AppCompatActivity {
                 return "Функция недоступна в этой версии VoyahTune.";
             case "profile_check_pending":
                 return "Проверяем совместимость с автомобилем…";
-            case "profile_hash_mismatch":
-            case "profile_vehicle_setting_hash_mismatch":
-            case "profile_canbus_hash_mismatch":
-            case "profile_apk_not_found":
-            case "profile_vehicle_setting_apk_not_found":
             case "profile_canbus_apk_not_found":
-            case "profile_hash_failed":
-            case "profile_vehicle_setting_hash_failed":
-            case "profile_canbus_hash_failed":
             case "profile_canbus_revalidation_pending":
-            case "profile_vehicle_setting_hash_unavailable":
-                return "Функция пока недоступна для этой версии автомобиля.";
-            case "profile_heartbeat_missing":
-            case "profile_heartbeat_future":
-            case "profile_heartbeat_stale":
-            case "profile_heartbeat_read_failed":
-            case "profile_not_confirmed":
+            case "profile_canbus_schema_mismatch":
+            case "profile_canbus_schema_unavailable":
+            case "profile_executor_unavailable":
             case "profile_unsupported":
                 return "Функция пока недоступна для этой версии автомобиля.";
             case "profile_runtime_mismatch":
-            case "profile_callback_mismatch":
-            case "profile_callback_malformed":
             case "profile_binder_descriptor_mismatch":
             case "profile_gear_parcel_mismatch":
                 return "Функция пока недоступна для этой версии автомобиля.";
             case "can_disconnected":
             case "can_descriptor_failed":
                 return "Нет связи с автомобилем.";
-            case "callback_unavailable":
-            case "callback_register_failed":
-                return "Не удалось получить подтверждение состояния от автомобиля.";
             case "write_permission_missing":
                 return "Функция установлена некорректно. Переустановите VoyahTune.";
-            case "master_disabled":
-                return "Основной переключатель Apollo Tech выключен.";
             case "write_pending":
                 return "Предыдущая команда ещё ожидает подтверждения автомобиля.";
             case "state_read_failed":
@@ -1731,33 +1661,11 @@ public class AdvanceActivity extends AppCompatActivity {
                 return "Автомобиль не принял настройку. Попробуйте ещё раз.";
             case "invalid_argument":
                 return "Получена некорректная команда; запись не выполнялась.";
-            case "master_write_failed":
-            case "master_clear_failed":
-                return "Не удалось безопасно изменить основной переключатель Apollo Tech. "
-                        + "Показано фактически прочитанное состояние; повторите выключение.";
-            case "master_read_failed":
-                return "Состояние основного переключателя Apollo Tech неизвестно. TLC заблокирован; "
-                        + "используйте кнопку «Принудительно выключить Apollo».";
             case "request_receiver_failed":
                 return "Не удалось запустить защищённый канал диагностики Apollo Tech.";
             default:
                 return "Не удалось выполнить операцию. Попробуйте ещё раз.";
         }
-    }
-
-    private void showApolloMasterEnableDialog() {
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
-                .setTitle("Включить Apollo Tech?")
-                .setMessage("Штатному менеджеру Baidu Apollo будет передано состояние активной "
-                        + "подписки, после чего он обновит пакет из 18 разрешений доступности. "
-                        + "Это меняет доступность комплекта функций интеллектуального вождения. "
-                        + "Используйте их только там, где это безопасно и разрешено. Продолжить?")
-                .setPositiveButton("Включить", (dialog, which) -> {
-                    if (canChangeApolloMaster(true)) sendApolloCommand(MSG_APOLLO_SET_MASTER, true);
-                    else updateApolloUi();
-                })
-                .setNegativeButton("Отмена", null)
-                .show();
     }
 
     private void showApolloTlcEnableDialog() {

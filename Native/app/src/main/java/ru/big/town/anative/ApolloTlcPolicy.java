@@ -26,7 +26,6 @@ final class ApolloTlcPolicy {
     static final String ERROR_INVALID_PLC_SWITCH = "invalid_plc_switch";
     static final String ERROR_INVALID_SWITCH_STATE = "invalid_switch_state";
     static final String ERROR_ANP_MUST_BE_OFF = "anp_must_be_off";
-    static final String ERROR_MASTER_NOT_USED_DIRECT = "master_not_used_direct_h97x";
 
     /** Stable VehicleState IDs; ordinals are resolved from the installed CanBusService at runtime. */
     enum Signal {
@@ -104,11 +103,6 @@ final class ApolloTlcPolicy {
                                        boolean writePermissionGranted) {
         return fullBuild && schemaCheckComplete && canBusSchemaMatches
                 && writePermissionGranted;
-    }
-
-    /** Value bit paired with masterKnown; unknown must never look like a confirmed ON or OFF. */
-    static boolean reportedMasterEnabled(boolean masterKnown, boolean persistedMaster) {
-        return masterKnown && persistedMaster;
     }
 
     static int requestedPlcState(boolean enabled) {

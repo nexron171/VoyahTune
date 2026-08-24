@@ -1524,63 +1524,6 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/layout_category_bg"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="12dp"
-                    android:visibility="gone">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="Основной переключатель Apollo Tech"
-                            android:textColor="#FFFFFF"
-                            android:textSize="27px" />
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="Разрешает пакет функций Baidu Apollo. Новое положение показывается только после подтверждения Native. Если состояние прочитать нельзя, используйте отдельную кнопку принудительного выключения."
-                            android:textColor="#aaaaaa"
-                            android:textSize="20px" />
-
-                    </LinearLayout>
-
-                    <Switch
-                        android:id="@+id/switchApolloMaster"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:enabled="false"
-                        android:thumb="@drawable/switch_thumb"
-                        android:track="@drawable/switch_track" />
-
-                </LinearLayout>
-
-                <Button
-                    android:id="@+id/buttonApolloForceOff"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:backgroundTint="#a33a3a"
-                    android:enabled="false"
-                    android:text="Принудительно выключить Apollo"
-                    android:textAllCaps="false"
-                    android:textColor="#FFFFFF"
-                    android:textSize="21px"
-                    android:visibility="gone" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:background="@drawable/layout_category_bg"
                     android:gravity="center_vertical"

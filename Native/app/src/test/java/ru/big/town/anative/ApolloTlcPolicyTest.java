@@ -75,13 +75,6 @@ public class ApolloTlcPolicyTest {
     }
 
     @Test
-    public void reportedMasterValueRequiresKnownBit() {
-        assertTrue(ApolloTlcPolicy.reportedMasterEnabled(true, true));
-        assertFalse(ApolloTlcPolicy.reportedMasterEnabled(true, false));
-        assertFalse(ApolloTlcPolicy.reportedMasterEnabled(false, true));
-    }
-
-    @Test
     public void binderLifecycleRequiresCompletedMatchingSchema() {
         assertTrue(ApolloTlcPolicy.binderProfilePinned(true, true, true, true));
         assertFalse(ApolloTlcPolicy.binderProfilePinned(false, true, true, true));

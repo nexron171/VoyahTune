@@ -57,7 +57,6 @@ public class SetModesService extends Service {
     static final int MSG_SPLIT_LAUNCH_VD            = 34; // сплит на VirtualDisplay (data left/right, arg1=ratio, data leftDpi/rightDpi)
     static final int MSG_APOLLO_TLC_QUERY           = 36; // запрос read-only снимка PLC/TLC
     static final int MSG_APOLLO_TLC_SET             = 37; // PLC_SWITCH (arg1: 1=вкл, 0=выкл)
-    static final int MSG_APOLLO_MASTER_SET          = 38; // Apollo master (arg1: 1=вкл, 0=выкл)
     static final int MSG_APOLLO_GLA_SET             = 39; // распознавание светофоров
     static final int MSG_APOLLO_GLA_SOUND_SET       = 40; // звук при зелёном сигнале
     static final int MSG_APOLLO_TSR_SET             = 41; // распознавание дорожных знаков
@@ -204,11 +203,6 @@ public class SetModesService extends Service {
                             msg.arg1 == 0 || msg.arg1 == 1);
                     break;
 
-                case MSG_APOLLO_MASTER_SET:
-                    Log.i(TAG, "handleMessage() MSG_APOLLO_MASTER_SET arg1=" + msg.arg1);
-                    ApolloTlcService.requestMasterSet(SetModesService.this, msg.arg1 == 1,
-                            msg.arg1 == 0 || msg.arg1 == 1);
-                    break;
 
                 case MSG_APOLLO_GLA_SET:
                     ApolloTlcService.requestGlaSet(SetModesService.this, msg.arg1 == 1,

@@ -3,7 +3,6 @@
 # Ставит: Native (priv-app) + RestoreMode, whitelist привилегий, freeform, и Frida-обвязку —
 #   1) кнопки руля (steeringwheelkeys.js в keymanager: звёздочка 3090 и DVR 173, один onKeyEvent),
 #   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS),
-#   3) dormant legacy Apollo diagnostic (direct-only не инжектит VehicleSetting).
 # Boot-хук = свои RC-сервисы /system/etc/init/voyahtune.*.rc (setenforce 0 + load.bin watchdog).
 # Штатный /system/etc/init.logcat.sh не меняем, кроме узкой миграции нашего legacy-файла.
 if [ ! -f ./dns-overlay.sh ]; then
@@ -25,9 +24,9 @@ if ! ydns_prepare_helper; then
     exit 1
 fi
 
-# Полный локальный preflight до первого ADB-вызова: legacy-hook нельзя убирать, если архив неполон.
+# Полный локальный preflight до первого ADB-вызова.
 for FULL_REQUIRED_ASSET in load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js \
-        apollo_tech.js frida-inject-16.2.1-android-arm64 voyahtune.load.rc \
+        frida-inject-16.2.1-android-arm64 voyahtune.load.rc \
         voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk \
         privapp-permissions-ru.big.town.anative.xml; do
     if [ ! -s "$FULL_REQUIRED_ASSET" ]; then
@@ -40,9 +39,9 @@ adb root
 adb wait-for-device
 adb root
 
-# Direct-only update не наследует legacy opt-in/stale gate. До disable-verity и любых
-# /system mutations принудительно пишем и читаем обратно все fail-closed ключи.
-echo "=== Preflight direct-only Apollo (VehicleSetting hook OFF) ==="
+# Одноразовая миграция: сначала заставляем старый eternalized agent уйти в pass-through,
+# затем останавливаем его host-процесс и удаляем скрипт/маркеры/устаревшие Settings.Global.
+echo "=== Удаление старого Apollo VehicleSetting hook ==="
 for APOLLO_SAFE_KEY in \
         open_voyah_apollo_legacy_hook_enabled \
         open_voyah_apollo_master \
@@ -59,7 +58,14 @@ for APOLLO_SAFE_KEY in \
         exit 1
     fi
 done
-echo "  Legacy opt-in, master, profile и heartbeat закрыты."
+adb shell am force-stop com.qinggan.app.vehiclesetting 2>/dev/null
+adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
+for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master \
+        open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported \
+        open_voyah_apollo_profile_heartbeat; do
+    adb shell settings delete global "$APOLLO_OLD_KEY" 2>/dev/null
+done
+echo "  Старый agent, маркеры и ключи удалены; Apollo работает только через Native."
 
 # Native in both flavors self-owns the signature permission needed by its fail-closed CAN writer. Android keeps
 # the first installed declaration: an old VoyahTweaks owner would silently make our Native incompatible.
@@ -502,17 +508,13 @@ backup_pull /data/local/bin/steeringwheelkeys.js   steeringwheelkeys.js || exit 
 backup_pull /data/local/bin/launcherdock.js        launcherdock.js || exit 1
 backup_pull /data/local/bin/multidisplay.js        multidisplay.js || exit 1
 backup_pull /data/local/bin/vd_bypass.js           vd_bypass.js || exit 1
-if ! backup_pull_with_absent /data/local/bin/apollo_tech.js apollo_tech.js; then
-    echo "!!! Apollo backup не создан — установка прервана до перезаписи файла."
-    exit 1
-fi
 backup_pull /data/local/bin/frida-inject           frida-inject || exit 1
 backup_pull /system/priv-app/Native/Native.apk     Native.apk || exit 1
 backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml || exit 1
 
 # ВАЖНО: всё в /data/local/bin доступно загрузочному RC-сервису.
 # /sdcard монтируется позже, поэтому load.bin ТАМ держать нельзя (не запустится на буте).
-echo "=== Frida-инфраструктура (руль + VirtualDisplay + dormant Apollo diagnostic) ==="
+echo "=== Frida-инфраструктура (руль + VirtualDisplay) ==="
 if ! adb shell "mkdir -p /data/local/bin"; then
     echo "!!! Не удалось подготовить /data/local/bin — установка прервана."
     exit 1
@@ -522,7 +524,6 @@ install_required_data_file steeringwheelkeys.js /data/local/bin/steeringwheelkey
 install_required_data_file launcherdock.js /data/local/bin/launcherdock.js 644 || exit 1
 install_required_data_file multidisplay.js /data/local/bin/multidisplay.js 644 || exit 1
 install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644 || exit 1
-install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644 || exit 1
 install_required_data_file frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject 755 || exit 1
 
 echo "=== Миграция boot-hook предыдущего full-релиза ==="

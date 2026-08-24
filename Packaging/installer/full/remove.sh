@@ -264,30 +264,8 @@ adb shell "am force-stop com.qinggan.app.vehiclesetting" 2>/dev/null
 if [ -f backup/load.bin ]; then adb push backup/load.bin /data/local/bin/load.bin; else adb shell "rm -f /data/local/bin/load.bin"; fi
 adb shell "rm -f /data/local/bin/vd_bypass.js"
 adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"   # keymng2 — легаси до объединения хуков руля
-# Apollo-файл имеет симметричный backup: восстанавливаем прежний либо подтверждённое отсутствие.
-if [ -f backup/apollo_tech.js ]; then
-    if ! adb push backup/apollo_tech.js /data/local/bin/apollo_tech.js.new; then
-        adb shell "rm -f /data/local/bin/apollo_tech.js.new" 2>/dev/null
-        echo "!!! Не удалось восстановить backup/apollo_tech.js — удаление прервано."
-        exit 1
-    fi
-    if ! adb shell "chmod 644 /data/local/bin/apollo_tech.js.new && mv -f /data/local/bin/apollo_tech.js.new /data/local/bin/apollo_tech.js"; then
-        adb shell "rm -f /data/local/bin/apollo_tech.js.new" 2>/dev/null
-        echo "!!! Не удалось завершить восстановление apollo_tech.js — удаление прервано."
-        exit 1
-    fi
-elif [ -f backup/apollo_tech.js.absent ]; then
-    if ! adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"; then
-        echo "!!! Не удалось вернуть подтверждённо отсутствовавший apollo_tech.js — удаление прервано."
-        exit 1
-    fi
-else
-    echo "Backup metadata для apollo_tech.js нет — неизвестный существующий файл оставлен без изменений"
-    if ! adb shell "rm -f /data/local/bin/apollo_tech.js.new"; then
-        echo "!!! Не удалось удалить временный apollo_tech.js.new — удаление прервано."
-        exit 1
-    fi
-fi
+# Устаревший Apollo hook никогда не восстанавливаем, включая backup старых релизов.
+adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
 # Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
 adb shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_swk.*.try /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"

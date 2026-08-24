@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
-for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
+for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
     exit /b 1
 )
@@ -10,7 +10,7 @@ adb.exe root
 adb.exe wait-for-device
 adb.exe root
 
-echo === Preflight direct-only Apollo ^(VehicleSetting hook OFF^) ===
+echo === Removing old Apollo VehicleSetting hook ===
 call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
 if errorlevel 1 exit /b 1
 call :put_apollo_safe_key open_voyah_apollo_master
@@ -19,7 +19,10 @@ call :put_apollo_safe_key open_voyah_apollo_profile_supported
 if errorlevel 1 exit /b 1
 call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
 if errorlevel 1 exit /b 1
-echo   Legacy opt-in, master, profile, and heartbeat are disabled.
+adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
+adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
+for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
+echo   Old agent, markers, and keys removed. Apollo is Native-only.
 
 echo === Preflight owner check for com.qinggan.permission.WRITE_CANBUS ===
 adb.exe shell dumpsys package permissions >nul 2>nul
@@ -96,11 +99,6 @@ call :backup_pull /data/local/bin/multidisplay.js        multidisplay.js
 if errorlevel 1 exit /b 1
 call :backup_pull /data/local/bin/vd_bypass.js           vd_bypass.js
 if errorlevel 1 exit /b 1
-call :backup_pull_with_absent /data/local/bin/apollo_tech.js apollo_tech.js
-if errorlevel 1 (
-    echo !!! Apollo backup could not be created. Installation stopped before replacing the file.
-    exit /b 1
-)
 call :backup_pull /data/local/bin/frida-inject           frida-inject
 if errorlevel 1 exit /b 1
 call :backup_pull /system/priv-app/Native/Native.apk     Native.apk
@@ -108,7 +106,7 @@ if errorlevel 1 exit /b 1
 call :backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml
 if errorlevel 1 exit /b 1
 
-echo === Frida infrastructure ^(steering wheel + VirtualDisplay + dormant Apollo diagnostic^) ===
+echo === Frida infrastructure ^(steering wheel + VirtualDisplay^) ===
 adb.exe shell "mkdir -p /data/local/bin"
 if errorlevel 1 exit /b 1
 call :install_required_data_file load.bin /data/local/bin/load.bin 755
@@ -120,8 +118,6 @@ if errorlevel 1 exit /b 1
 call :install_required_data_file multidisplay.js /data/local/bin/multidisplay.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644
-if errorlevel 1 exit /b 1
-call :install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject 755
 if errorlevel 1 exit /b 1

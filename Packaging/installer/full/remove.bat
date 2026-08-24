@@ -96,35 +96,8 @@ if exist "backup\load.bin" (
 )
 adb.exe shell "rm -f /data/local/bin/vd_bypass.js"
 adb.exe shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"
-if exist "backup\apollo_tech.js" (
-    adb.exe push backup\apollo_tech.js /data/local/bin/apollo_tech.js.new
-    if errorlevel 1 (
-        adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new" 1>nul 2>nul
-        echo !!! Could not restore backup\apollo_tech.js. Removal stopped.
-        exit /b 1
-    )
-    adb.exe shell "chmod 644 /data/local/bin/apollo_tech.js.new && mv -f /data/local/bin/apollo_tech.js.new /data/local/bin/apollo_tech.js"
-    if errorlevel 1 (
-        adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new" 1>nul 2>nul
-        echo !!! Could not finish restoring apollo_tech.js. Removal stopped.
-        exit /b 1
-    )
-) else (
-    if exist "backup\apollo_tech.js.absent" (
-        adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
-        if errorlevel 1 (
-            echo !!! Could not restore the confirmed-absent apollo_tech.js state. Removal stopped.
-            exit /b 1
-        )
-    ) else (
-        echo No backup metadata exists for apollo_tech.js. An unknown existing file was left unchanged.
-        adb.exe shell "rm -f /data/local/bin/apollo_tech.js.new"
-        if errorlevel 1 (
-            echo !!! Could not remove temporary apollo_tech.js.new. Removal stopped.
-            exit /b 1
-        )
-    )
-)
+rem Obsolete Apollo hook is never restored, including backups from old releases.
+adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
 if exist "backup\frida-inject" (
     adb.exe push backup\frida-inject /data/local/bin/frida-inject
 ) else (

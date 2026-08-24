@@ -5,14 +5,13 @@
 #   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
 #   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
 #   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами.
-#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — одноразовый explicit legacy attach
-#      при старте loader; вечный watchdog Apollo намеренно не опрашивает.
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
 #   • system_server и launcher: frida-inject -e ВОЗВРАЩАЕТ управление. Ставим по ТОЧНОМУ -p pid и пишем
 #     pid-маркер ТОЛЬКО ЕСЛИ frida-inject не сообщил об ошибке (нет 'not found'/'unable to find'/…). Если
-#     инъекция не удалась (гонка на буте — процесс ещё поднимается) → маркер НЕ трогаем → следующая
-#     итерация (10с) повторит с уже готовым процессом. Раньше маркер писался безусловно в фоне, поэтому
+#     инъекция не удалась (гонка на буте — процесс ещё поднимается) → маркер НЕ трогаем → тот же PID
+#     повторяется с bounded 10/20/40/60с backoff, а новый PID — сразу. Раньше маркер писался
+#     безусловно в фоне, поэтому
 #     разовый промах ('Process not found') НЕ повторялся и launcherdock молча не грузился после ребута.
 #   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление). Запускаем одну
 #     фоновую попытку на PID под timeout; успех подтверждаем exit-code либо точным лог-маркером агента.
@@ -48,6 +47,8 @@ legacy_load_owner() {
 LEGACY_LOAD_OWNER=$(legacy_load_owner)
 loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
 
+LOAD_LOCK_ATTEMPTS=0
+LOAD_LOCK_MAX_ATTEMPTS=30
 while [ 1 ]; do
     if ln -s "$$" "$LOAD_LOCK" 2>/dev/null; then
         LOAD_LOCK_OWNER=$$
@@ -66,6 +67,13 @@ while [ 1 ]; do
         # Миграция с legacy regular-file lock.
         rm -f "$LOAD_LOCK"
     fi
+    LOAD_LOCK_ATTEMPTS=$((LOAD_LOCK_ATTEMPTS + 1))
+    if [ "$LOAD_LOCK_ATTEMPTS" -ge "$LOAD_LOCK_MAX_ATTEMPTS" ]; then
+        log -p e -t vt_load_bin \
+            "owner lock unavailable after ${LOAD_LOCK_ATTEMPTS}s; stop without spinning"
+        exit 1
+    fi
+    sleep 1
 done
 
 cleanup_load_lock() {
@@ -88,153 +96,25 @@ VD=/data/local/bin/vd_bypass.js
 SWK=/data/local/bin/steeringwheelkeys.js
 LNCH=/data/local/bin/launcherdock.js
 MD=/data/local/bin/multidisplay.js
-APOLLO=/data/local/bin/apollo_tech.js
 VDMARK=/data/local/tmp/voyah_vd.pid          # pid system_server, куда поставлен vd_bypass
 SWK_KM_MARK=/data/local/tmp/voyah_swk_km.pid # pid keymanager, куда поставлен steeringwheelkeys
 SWK_KM_BUSY=/data/local/tmp/voyah_swk_km.busy # symlink: targetPid|startUptime|token
 SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
+SWK_KM_RETRY_DELAY=60                         # same-PID failure/in-flight retry delay
 LNCH_MARK=/data/local/tmp/voyah_lnch.pid     # pid лаунчера, куда поставлен launcherdock
 MD_MARK=/data/local/tmp/voyah_md.pid         # pid systemservice, куда поставлен multidisplay
-APOLLO_MARK=/data/local/tmp/voyah_apollo.pid # v2|boot_uuid|pid|starttime exact Apollo agent identity
-APOLLO_DOWN_MARK=/data/local/tmp/voyah_apollo.down
-APOLLO_LOG=/data/local/tmp/voyah_apollo.txt
-APOLLO_TARGET=com.qinggan.app.vehiclesetting
-APOLLO_READY_MARKER='[apollo] hook ready'
-APOLLO_LEGACY_OPT_IN_KEY=open_voyah_apollo_legacy_hook_enabled
-APOLLO_DISABLED_MARK=/data/local/tmp/voyah_apollo.disabled
-APOLLO_SETTINGS_TIMEOUT=5
-APOLLO_FORCE_STOP_TIMEOUT=10
 
-apollo_settings_get() {
-    timeout -k 2 "$APOLLO_SETTINGS_TIMEOUT" settings get global "$1" 2>/dev/null
-}
-
-apollo_settings_put_zero() {
-    timeout -k 2 "$APOLLO_SETTINGS_TIMEOUT" settings put global "$1" 0 >/dev/null 2>&1
-}
-
-apollo_force_stop_target() {
-    timeout -k 2 "$APOLLO_FORCE_STOP_TIMEOUT" am force-stop "$APOLLO_TARGET" \
-        >/dev/null 2>&1
-}
-
-reset_apollo_liveness() {
-    # Оба сброса независимы: отказ первого не должен мешать попытке обнулить второй ключ. Legacy
-    # heartbeat пишем первым, чтобы потребитель перестал доверять stale profile=1 как можно раньше.
-    # Этот primitive сам readback не делает: direct-only cleanup ниже проверяет одной bounded фазой
-    # все три записанных ключа, а новая legacy-инъекция подтверждается exact agent-ready marker.
-    APOLLO_RESET_OK=1
-    apollo_settings_put_zero open_voyah_apollo_profile_heartbeat \
-        || APOLLO_RESET_OK=0
-    apollo_settings_put_zero open_voyah_apollo_profile_supported \
-        || APOLLO_RESET_OK=0
-    [ "$APOLLO_RESET_OK" -eq 1 ]
-}
-
-verify_apollo_liveness_reset() {
-    APOLLO_VERIFY_OK=1
-    APOLLO_VERIFY_PROFILE=$(apollo_settings_get open_voyah_apollo_profile_supported) \
-        || APOLLO_VERIFY_OK=0
-    APOLLO_VERIFY_HEARTBEAT=$(apollo_settings_get open_voyah_apollo_profile_heartbeat) \
-        || APOLLO_VERIFY_OK=0
-    [ "$APOLLO_VERIFY_PROFILE" = "0" ] || APOLLO_VERIFY_OK=0
-    [ "$APOLLO_VERIFY_HEARTBEAT" = "0" ] || APOLLO_VERIFY_OK=0
-    [ "$APOLLO_VERIFY_OK" -eq 1 ]
-}
-
-# Direct-only релиз не использует VehicleSetting/Frida profile. При отсутствии
-# точного opt-in закрываем и master, и публикуемый legacy-profile. Если marker
-# доказывает, что агент живёт в текущей process identity, force-stop однократно
-# выгружает eternalized hook. Чужой/протухший PID процесс не затрагивает.
-disable_apollo_legacy_hook() {
-    # Сначала фиксируем ownership proof. Даже полный отказ Settings не должен перескочить выгрузку
-    # exact-owned eternalized agent. Нечитаемая identity остаётся unresolved: такой marker нельзя ни
-    # использовать для force-stop, ни объявлять успешно очищенным.
-    APOLLO_ATTACHED_ID=$(cat "$APOLLO_MARK" 2>/dev/null)
-    APOLLO_DISABLE_PID=
-    APOLLO_DISABLE_ID=
-    APOLLO_MARKER_KEEP=0
-    APOLLO_EXACT_AGENT=0
-    if [ -n "$APOLLO_ATTACHED_ID" ]; then
-        APOLLO_DISABLE_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
-        APOLLO_DISABLE_PID=${APOLLO_DISABLE_PID%% *}
-        if [ -n "$APOLLO_DISABLE_PID" ]; then
-            APOLLO_DISABLE_ID=$(target_identity \
-                "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)
-            if [ -z "$APOLLO_DISABLE_ID" ]; then
-                APOLLO_MARKER_KEEP=1
-            elif [ "$APOLLO_ATTACHED_ID" = "$APOLLO_DISABLE_ID" ]; then
-                APOLLO_EXACT_AGENT=1
-                APOLLO_MARKER_KEEP=1
-            fi
-        fi
-    fi
-
-    APOLLO_DISABLE_OK=1
-    rm -f "$APOLLO_DISABLED_MARK" || APOLLO_DISABLE_OK=0
-    if [ "$APOLLO_EXACT_AGENT" -eq 1 ]; then
-        # Revalidate immediately before the package-level stop. In particular, do this before the
-        # three bounded Settings writes: their latency must never let a replaced clean process inherit
-        # the old ownership proof. A changed identity is stale metadata and is never force-stopped.
-        APOLLO_PRE_STOP_ID=$(target_identity \
-            "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)
-        if [ "$APOLLO_PRE_STOP_ID" = "$APOLLO_DISABLE_ID" ]; then
-            # Command status alone is not authoritative: if the exact identity has already disappeared,
-            # cleanup succeeded even when `am` raced with process death. A still-live exact identity
-            # keeps its marker and makes the one-shot cleanup fail closed.
-            apollo_force_stop_target || :
-            APOLLO_AFTER_STOP_ID=$(target_identity \
-                "$APOLLO_DISABLE_PID" "$APOLLO_TARGET" 2>/dev/null)
-            if [ "$APOLLO_AFTER_STOP_ID" = "$APOLLO_DISABLE_ID" ]; then
-                APOLLO_DISABLE_OK=0
-            elif kill -0 "$APOLLO_DISABLE_PID" 2>/dev/null \
-                    && [ -z "$APOLLO_AFTER_STOP_ID" ]; then
-                # PID всё ещё существует, но exact identity после stop прочитать не удалось.
-                APOLLO_DISABLE_OK=0
-            else
-                APOLLO_MARKER_KEEP=0
-            fi
-        elif kill -0 "$APOLLO_DISABLE_PID" 2>/dev/null \
-                && [ -z "$APOLLO_PRE_STOP_ID" ]; then
-            # Живой PID с нечитаемой identity нельзя ни убивать, ни объявлять очищенным.
-            APOLLO_DISABLE_OK=0
-        else
-            # Saved identity уже исчезла или сменилась: новый процесс не трогаем, старый marker stale.
-            APOLLO_MARKER_KEEP=0
-        fi
-    elif [ "$APOLLO_MARKER_KEEP" -eq 1 ]; then
-        APOLLO_DISABLE_OK=0
-    fi
-
-    # Settings cleanup остаётся независимым и выполняется даже после неуспешного stop/ownership
-    # revalidation. AOSP SettingsCmd может напечатать RemoteException и всё равно завершиться с 0,
-    # поэтому после всех трёх put делаем ровно одну bounded verification-фазу. Это startup cleanup,
-    # не часть вечного watchdog.
-    apollo_settings_put_zero open_voyah_apollo_master \
-        || APOLLO_DISABLE_OK=0
-    reset_apollo_liveness || APOLLO_DISABLE_OK=0
-    APOLLO_DISABLE_MASTER=$(apollo_settings_get open_voyah_apollo_master) \
-        || APOLLO_DISABLE_OK=0
-    [ "$APOLLO_DISABLE_MASTER" = "0" ] || APOLLO_DISABLE_OK=0
-    verify_apollo_liveness_reset || APOLLO_DISABLE_OK=0
-
-    if [ "$APOLLO_MARKER_KEEP" -eq 0 ]; then
-        rm -f "$APOLLO_MARK" || APOLLO_DISABLE_OK=0
-    fi
-    rm -f "$APOLLO_DOWN_MARK" || APOLLO_DISABLE_OK=0
-
-    [ "$APOLLO_DISABLE_OK" -eq 1 ] || return 1
-    APOLLO_DISABLED_TMP="$APOLLO_DISABLED_MARK.$$"
-    if ! echo 1 > "$APOLLO_DISABLED_TMP" \
-            || ! mv -f "$APOLLO_DISABLED_TMP" "$APOLLO_DISABLED_MARK"; then
-        rm -f "$APOLLO_DISABLED_TMP"
-        return 1
-    fi
-    return 0
-}
+# Same-process injection failures retain the watchdog, but no longer launch a 30-second Frida
+# attempt every cycle. The delay resets immediately when the target PID changes.
+INJECT_RETRY_INITIAL=10
+INJECT_RETRY_MAX=60
+VD_RETRY_PID= VD_RETRY_AT=0 VD_RETRY_DELAY=$INJECT_RETRY_INITIAL
+LNCH_RETRY_PID= LNCH_RETRY_AT=0 LNCH_RETRY_DELAY=$INJECT_RETRY_INITIAL
+MD_RETRY_PID= MD_RETRY_AT=0 MD_RETRY_DELAY=$INJECT_RETRY_INITIAL
+KM_RETRY_PID= KM_RETRY_AT=0
 
 # Инъекция в цель, которая ВОЗВРАЩАЕТ управление. Маркер пишем ТОЛЬКО при успехе.
-#   $1=pid  $2=script  $3=logfile  $4=markerfile
+#   $1=pid  $2=script  $3=logfile  $4=markerfile  $5=retry-slot
 inject_ret() {
     TRY="$3.try"
     : > "$TRY"
@@ -242,15 +122,18 @@ inject_ret() {
     RC=$?
     cat "$TRY" >> "$3"
     if [ "$RC" -ne 0 ]; then
-        loge "inject FAIL pid=$1 $2 rc=$RC (retry next loop)"
+        record_injection_failure "$5" "$1"
+        loge "inject FAIL pid=$1 $2 rc=$RC (bounded backoff)"
         return 1
     fi
     # Ошибки самого frida-inject (агент пишет свои сообщения через console.log/Log — их НЕ матчим).
     if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$TRY"; then
-        loge "inject FAIL pid=$1 $2 (retry next loop)"
+        record_injection_failure "$5" "$1"
+        loge "inject FAIL pid=$1 $2 (bounded backoff)"
         return 1
     fi
     echo "$1" > "$4"
+    record_injection_success "$5" "$1"
     logi "inject OK pid=$1 $2"
     return 0
 }
@@ -264,98 +147,57 @@ uptime_seconds() {
     esac
 }
 
-# Точная идентичность процесса: проверяем cmdline (не только число PID) и добавляем starttime из
-# /proc/<pid>/stat. Это исключает ложный «уже установлен» при повторном использовании старого PID.
-# Boot UUID обязателен: starttime отсчитывается заново после reboot, а marker в /data его переживает.
-# Prefix v2 не позволяет старому PID|starttime marker стать доказательством для force-stop.
-target_identity() {
-    IDENT_PID="$1"
-    IDENT_NAME="$2"
-    case "$IDENT_PID" in
-        ''|*[!0-9]*) return 1 ;;
+retry_state() {
+    case "$1" in
+        vd) echo "$VD_RETRY_PID|$VD_RETRY_AT|$VD_RETRY_DELAY" ;;
+        launcher) echo "$LNCH_RETRY_PID|$LNCH_RETRY_AT|$LNCH_RETRY_DELAY" ;;
+        multidisplay) echo "$MD_RETRY_PID|$MD_RETRY_AT|$MD_RETRY_DELAY" ;;
+        *) return 1 ;;
     esac
-    kill -0 "$IDENT_PID" 2>/dev/null || return 1
-    IDENT_CMD=$(tr '\000' '\n' < "/proc/$IDENT_PID/cmdline" 2>/dev/null | sed -n '1p')
-    [ "$IDENT_CMD" = "$IDENT_NAME" ] || return 1
-    IDENT_START=$(awk '{print $22}' "/proc/$IDENT_PID/stat" 2>/dev/null)
-    case "$IDENT_START" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    IDENT_BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
-    case "$IDENT_BOOT" in
-        ''|*[!0-9a-fA-F-]*) return 1 ;;
-    esac
-    echo "v2|$IDENT_BOOT|$IDENT_PID|$IDENT_START"
 }
 
-# Apollo требует не просто успешный exit frida-inject, а точный marker самого агента. Идентичность
-# цели проверяется до и после attach; marker публикуется атомарным mv только для того же живого процесса.
-#   $1=pid $2=target-name $3=script $4=logfile $5=markerfile $6=agent-ready-marker
-inject_verified_marker() {
-    VERIFIED_PID="$1"
-    VERIFIED_TARGET="$2"
-    VERIFIED_SCRIPT="$3"
-    VERIFIED_LOG="$4"
-    VERIFIED_MARK="$5"
-    VERIFIED_READY="$6"
-    VERIFIED_TRY="$VERIFIED_LOG.try"
-
-    VERIFIED_BEFORE=$(target_identity "$VERIFIED_PID" "$VERIFIED_TARGET") || {
-        loge "inject SKIP target changed pid=$VERIFIED_PID $VERIFIED_TARGET"
-        return 1
-    }
-
-    : > "$VERIFIED_TRY"
-    # На VehicleSetting `frida-inject -e` может не завершиться после успешной eternalize. Два pinned
-    # SHA-256 на проверенной голове занимают несколько секунд; 30s достаточно, а точный ready-marker
-    # агента является критерием успеха даже после штатного timeout/TERM обвязки.
-    timeout -k 5 30 "$FI" -p "$VERIFIED_PID" -s "$VERIFIED_SCRIPT" -e > "$VERIFIED_TRY" 2>&1
-    VERIFIED_RC=$?
-    if [ -f "$VERIFIED_LOG" ]; then
-        VERIFIED_LOG_SIZE=$(wc -c < "$VERIFIED_LOG" 2>/dev/null)
-    else
-        VERIFIED_LOG_SIZE=0
-    fi
-    case "$VERIFIED_LOG_SIZE" in
-        ''|*[!0-9]*) VERIFIED_LOG_SIZE=0 ;;
+retry_store() {
+    case "$1" in
+        vd) VD_RETRY_PID=$2; VD_RETRY_AT=$3; VD_RETRY_DELAY=$4 ;;
+        launcher) LNCH_RETRY_PID=$2; LNCH_RETRY_AT=$3; LNCH_RETRY_DELAY=$4 ;;
+        multidisplay) MD_RETRY_PID=$2; MD_RETRY_AT=$3; MD_RETRY_DELAY=$4 ;;
+        *) return 1 ;;
     esac
-    if [ "$VERIFIED_LOG_SIZE" -ge 1048576 ]; then
-        mv -f "$VERIFIED_LOG" "$VERIFIED_LOG.1"
-    fi
-    {
-        echo "event=inject_attempt target=$VERIFIED_TARGET identity=$VERIFIED_BEFORE rc=$VERIFIED_RC"
-        cat "$VERIFIED_TRY"
-    } >> "$VERIFIED_LOG"
+}
 
-    if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$VERIFIED_TRY"; then
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT engine-error (explicit loader restart required)"
-        return 1
+injection_retry_due() {
+    RETRY_SLOT=$1
+    RETRY_TARGET_PID=$2
+    RETRY_NOW=$(uptime_seconds)
+    RETRY_RECORD=$(retry_state "$RETRY_SLOT") || return 1
+    RETRY_SAVED_PID=${RETRY_RECORD%%|*}
+    RETRY_REST=${RETRY_RECORD#*|}
+    RETRY_AT=${RETRY_REST%%|*}
+    if [ "$RETRY_SAVED_PID" != "$RETRY_TARGET_PID" ]; then
+        retry_store "$RETRY_SLOT" "$RETRY_TARGET_PID" 0 "$INJECT_RETRY_INITIAL"
+        return 0
     fi
-    if ! grep -qF "$VERIFIED_READY" "$VERIFIED_TRY"; then
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT agent-marker-missing (explicit loader restart required)"
-        return 1
-    fi
-    if [ "$VERIFIED_RC" -ne 0 ]; then
-        logi "inject READY pid=$VERIFIED_PID $VERIFIED_SCRIPT rc=$VERIFIED_RC marker-confirmed"
-    fi
+    [ "$RETRY_NOW" -ge "$RETRY_AT" ]
+}
 
-    VERIFIED_AFTER=$(target_identity "$VERIFIED_PID" "$VERIFIED_TARGET") || {
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-exited (explicit loader restart required)"
-        return 1
-    }
-    if [ "$VERIFIED_AFTER" != "$VERIFIED_BEFORE" ]; then
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT target-changed (explicit loader restart required)"
-        return 1
-    fi
+record_injection_failure() {
+    RETRY_SLOT=$1
+    RETRY_TARGET_PID=$2
+    RETRY_NOW=$(uptime_seconds)
+    RETRY_RECORD=$(retry_state "$RETRY_SLOT") || return
+    RETRY_DELAY=${RETRY_RECORD##*|}
+    case "$RETRY_DELAY" in
+        ''|*[!0-9]*) RETRY_DELAY=$INJECT_RETRY_INITIAL ;;
+    esac
+    RETRY_AT=$((RETRY_NOW + RETRY_DELAY))
+    RETRY_NEXT_DELAY=$((RETRY_DELAY * 2))
+    [ "$RETRY_NEXT_DELAY" -le "$INJECT_RETRY_MAX" ] \
+        || RETRY_NEXT_DELAY=$INJECT_RETRY_MAX
+    retry_store "$RETRY_SLOT" "$RETRY_TARGET_PID" "$RETRY_AT" "$RETRY_NEXT_DELAY"
+}
 
-    VERIFIED_MARK_TMP="$VERIFIED_MARK.$$"
-    if ! echo "$VERIFIED_AFTER" > "$VERIFIED_MARK_TMP" || ! mv -f "$VERIFIED_MARK_TMP" "$VERIFIED_MARK"; then
-        rm -f "$VERIFIED_MARK_TMP"
-        loge "inject FAIL pid=$VERIFIED_PID $VERIFIED_SCRIPT marker-write (explicit loader restart required)"
-        return 1
-    fi
-    logi "inject OK pid=$VERIFIED_PID $VERIFIED_SCRIPT marker=$VERIFIED_AFTER"
-    return 0
+record_injection_success() {
+    retry_store "$1" "$2" 0 "$INJECT_RETRY_INITIAL"
 }
 
 # `timeout` uses a clock that may pause in suspend on some Toybox builds, while /proc/uptime can
@@ -376,6 +218,15 @@ keymanager_inject_is_live() {
 # Если worker был убит до cleanup, TTL освобождает stale busy после гарантированного TERM->KILL окна.
 inject_keymanager_bg() {
     KM_TARGET_PID="$1"
+    KM_NOW=$(uptime_seconds)
+    if [ "$KM_RETRY_PID" != "$KM_TARGET_PID" ]; then
+        KM_RETRY_PID=$KM_TARGET_PID
+        KM_RETRY_AT=0
+    fi
+    [ "$KM_NOW" -ge "$KM_RETRY_AT" ] || return 0
+
+    KM_BUSY_ATTEMPTS=0
+    KM_BUSY_MAX_ATTEMPTS=3
     while [ 1 ]; do
         KM_NOW=$(uptime_seconds)
         KM_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
@@ -417,8 +268,18 @@ inject_keymanager_bg() {
         if ln -s "$KM_RECORD" "$SWK_KM_BUSY" 2>/dev/null; then
             break
         fi
+        KM_BUSY_ATTEMPTS=$((KM_BUSY_ATTEMPTS + 1))
+        if [ "$KM_BUSY_ATTEMPTS" -ge "$KM_BUSY_MAX_ATTEMPTS" ]; then
+            loge "keymanager busy marker unavailable; defer without spinning"
+            KM_RETRY_AT=$((KM_NOW + SWK_KM_RETRY_DELAY))
+            return 0
+        fi
+        sleep 1
     done
 
+    # Reserve before forking: success publishes SWK_KM_MARK; every failure or lost worker waits one
+    # minute without another persistent state file or a recurring failure timer.
+    KM_RETRY_AT=$((KM_NOW + SWK_KM_RETRY_DELAY))
     logi "inject steeringwheelkeys -> keymanager $KM_TARGET_PID (eternalize,bounded-bg)"
     (
         # Не наследуем loader traps: worker живёт не дольше timeout+KILL и сам чистит busy.
@@ -429,12 +290,12 @@ inject_keymanager_bg() {
         KM_RC=$?
         cat "$KM_TRY" >> /data/local/tmp/voyah_swk.txt
         if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$KM_TRY"; then
-            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (retry next loop)"
+            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (60s backoff)"
         elif [ "$KM_RC" -eq 0 ] || grep -qF '[swk] keymanager hooks installed:' "$KM_TRY"; then
             echo "$KM_TARGET_PID" > "$SWK_KM_MARK"
             logi "inject OK keymanager pid=$KM_TARGET_PID"
         else
-            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (retry next loop)"
+            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (60s backoff)"
         fi
         rm -f "$KM_TRY"
         [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" = "$KM_RECORD" ] \
@@ -442,94 +303,27 @@ inject_keymanager_bg() {
     ) &
 }
 
-apollo_startup_once() {
-    # Opt-in читается ровно один раз на весь срок жизни loader. Остальные bounded Settings reads
-    # ниже только проверяют startup cleanup/reset; вечный watchdog Apollo-код не запускает. Null,
-    # timeout и любое значение кроме точного "1" выбирают fail-closed direct-only cleanup.
-    APOLLO_LEGACY_OPT_IN=$(apollo_settings_get "$APOLLO_LEGACY_OPT_IN_KEY")
-    if [ "$APOLLO_LEGACY_OPT_IN" != "1" ]; then
-        if disable_apollo_legacy_hook; then
-            logi "apollo direct-only: one-shot cleanup complete; no runtime polling"
-        else
-            loge "apollo direct-only: one-shot cleanup incomplete; explicit loader restart required"
-        fi
-        return
-    fi
-
-    # Диагностический legacy attach также одноразовый. Сначала проверяем уже запущенный
-    # VehicleSetting по exact process identity; exact already-attached агент оставляем полностью
-    # нетронутым. Отсутствие цели/скрипта и любая ошибка не создают retry: оператор готовит свежий
-    # target и явно рестартует voyahtune_load.
-    APOLLO_STARTUP_OK=1
-    rm -f "$APOLLO_DISABLED_MARK" || APOLLO_STARTUP_OK=0
-    rm -f "$APOLLO_DOWN_MARK" || APOLLO_STARTUP_OK=0
-    if [ "$APOLLO_STARTUP_OK" -ne 1 ]; then
-        loge "apollo legacy: stale state cleanup FAIL; explicit loader restart required"
-        return
-    fi
-
-    APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
-    APOLLO_PID=${APOLLO_PID%% *}
-    APOLLO_ID=
-    if [ -n "$APOLLO_PID" ]; then
-        APOLLO_ID=$(target_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null)
-    fi
-    APOLLO_ATTACHED_ID=$(cat "$APOLLO_MARK" 2>/dev/null)
-    if [ -n "$APOLLO_ID" ] && [ "$APOLLO_ATTACHED_ID" = "$APOLLO_ID" ]; then
-        logi "apollo legacy: exact agent identity already attached; no duplicate injection"
-        return
-    fi
-
-    # Во всех active-start исходах, кроме доказанного exact already-attached агента, stale liveness
-    # сбрасывается и тут же проверяется. Без вечного Apollo-watchdog отсутствие target иначе могло бы
-    # навсегда оставить profile=1 от уже умершего процесса.
-    if ! reset_apollo_liveness || ! verify_apollo_liveness_reset; then
-        loge "apollo legacy: one-shot liveness reset FAIL; explicit loader restart required"
-        return
-    fi
-
-    if [ -z "$APOLLO_PID" ]; then
-        if rm -f "$APOLLO_MARK"; then
-            logi "apollo legacy: VehicleSetting is not running; open a fresh target and restart loader"
-        else
-            loge "apollo legacy: stale marker cleanup FAIL; explicit loader restart required"
-        fi
-        return
-    fi
-    if [ -z "$APOLLO_ID" ]; then
-        loge "apollo legacy: VehicleSetting identity unavailable; explicit loader restart required"
-        return
-    fi
-
-    if ! rm -f "$APOLLO_MARK"; then
-        loge "apollo legacy: stale marker cleanup FAIL; explicit loader restart required"
-        return
-    fi
-    if [ ! -f "$APOLLO" ]; then
-        loge "apollo legacy: script missing; explicit loader restart required"
-        return
-    fi
-
-    inject_verified_marker "$APOLLO_PID" "$APOLLO_TARGET" "$APOLLO" \
-        "$APOLLO_LOG" "$APOLLO_MARK" "$APOLLO_READY_MARKER" \
-        || loge "apollo legacy: one-shot attach failed; explicit loader restart required"
-}
-
 watchdog_cycle() {
     # 1) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
     SS=$(pidof system_server)
+    SS=${SS%% *}
     if [ -n "$SS" ] && [ -f "$VD" ]; then
         if [ "$(cat "$VDMARK" 2>/dev/null)" != "$SS" ]; then
-            inject_ret "$SS" "$VD" /data/local/tmp/voyah_vd_bypass.txt "$VDMARK"
+            if injection_retry_due vd "$SS"; then
+                inject_ret "$SS" "$VD" /data/local/tmp/voyah_vd_bypass.txt "$VDMARK" vd
+            fi
         fi
     fi
 
     # 2) Переопределение дока — инъекция в процесс лаунчера (возвращает управление → verify-before-mark).
-    #    По -p pid (точнее -n, устойчивее к гонке имени на буте). При промахе повтор на след. итерации.
+    #    По -p pid (точнее -n, устойчивее к гонке имени на буте). При промахе действует same-PID backoff.
     LP=$(pidof com.qinggan.app.launcher)
+    LP=${LP%% *}
     if [ -n "$LP" ] && [ -f "$LNCH" ]; then
         if [ "$(cat "$LNCH_MARK" 2>/dev/null)" != "$LP" ]; then
-            inject_ret "$LP" "$LNCH" /data/local/tmp/voyah_lnch.txt "$LNCH_MARK"
+            if injection_retry_due launcher "$LP"; then
+                inject_ret "$LP" "$LNCH" /data/local/tmp/voyah_lnch.txt "$LNCH_MARK" launcher
+            fi
         fi
     fi
 
@@ -545,15 +339,17 @@ watchdog_cycle() {
     # 4) Перенос приложений между экранами — инъекция в systemservice (возвращает управление →
     #    verify-before-mark, как system_server и лаунчер).
     MDP=$(pidof com.qinggan.systemservice)
+    MDP=${MDP%% *}
     if [ -n "$MDP" ] && [ -f "$MD" ]; then
         if [ "$(cat "$MD_MARK" 2>/dev/null)" != "$MDP" ]; then
-            inject_ret "$MDP" "$MD" /data/local/tmp/voyah_md.txt "$MD_MARK"
+            if injection_retry_due multidisplay "$MDP"; then
+                inject_ret "$MDP" "$MD" /data/local/tmp/voyah_md.txt "$MD_MARK" multidisplay
+            fi
         fi
     fi
 }
 
 logi "voyah load.bin start"
-apollo_startup_once
 
 while [ 1 ]; do
     watchdog_cycle
