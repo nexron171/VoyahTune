@@ -4,15 +4,14 @@
 #   1) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
 #   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
 #   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
-#   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами.
+#   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами;
+#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — entitlement как в voboost, без CAN.
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
-#   • system_server и launcher: frida-inject -e ВОЗВРАЩАЕТ управление. Ставим по ТОЧНОМУ -p pid и пишем
-#     pid-маркер ТОЛЬКО ЕСЛИ frida-inject не сообщил об ошибке (нет 'not found'/'unable to find'/…). Если
-#     инъекция не удалась (гонка на буте — процесс ещё поднимается) → маркер НЕ трогаем → тот же PID
-#     повторяется с bounded 10/20/40/60с backoff, а новый PID — сразу. Раньше маркер писался
-#     безусловно в фоне, поэтому
-#     разовый промах ('Process not found') НЕ повторялся и launcherdock молча не грузился после ребута.
+#   • Каждая точная process identity (boot-id + pid + start-time) получает НЕ БОЛЕЕ ОДНОЙ попытки.
+#     Attempt-маркер резервируется ДО frida-inject и сохраняется при timeout/ошибке. Поэтому зависший
+#     eternalize не может каждые 10–60 секунд добавлять в живой OEM-процесс новые GumJS threads.
+#     Повтор разрешён только после реального перезапуска цели, когда изменится identity.
 #   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление). Запускаем одну
 #     фоновую попытку на PID под timeout; успех подтверждаем exit-code либо точным лог-маркером агента.
 
@@ -25,7 +24,8 @@ loge() { log -p e -t $LOG_TAG "$1"; }
 # being present in the target ROM. A new path avoids a takeover race with the legacy
 # directory lock: the legacy path is only inspected, never removed before v2 is owned.
 LEGACY_LOAD_LOCK=/data/local/tmp/voyah_load.lock
-LOAD_LOCK=/data/local/tmp/voyah_load.v2.lock
+PREVIOUS_V2_LOAD_LOCK=/data/local/tmp/voyah_load.v2.lock
+LOAD_LOCK=/data/local/tmp/voyahtune_load.v2.lock
 
 loader_pid_is_live() {
     case "$1" in
@@ -36,6 +36,12 @@ loader_pid_is_live() {
             | grep -q 'local/bin/load.bin'
 }
 
+other_loader_pid_is_live() {
+    # A persistent PID-only lock may coincidentally point to this process after reboot.
+    # Before we publish our own lock, $$ can only mean a stale lock from an earlier boot.
+    [ "$1" != "$$" ] && loader_pid_is_live "$1"
+}
+
 legacy_load_owner() {
     if [ -d "$LEGACY_LOAD_LOCK" ] && [ ! -L "$LEGACY_LOAD_LOCK" ]; then
         cat "$LEGACY_LOAD_LOCK/pid" 2>/dev/null
@@ -44,8 +50,18 @@ legacy_load_owner() {
     fi
 }
 
+previous_v2_load_owner() {
+    if [ -L "$PREVIOUS_V2_LOAD_LOCK" ]; then
+        readlink "$PREVIOUS_V2_LOAD_LOCK" 2>/dev/null
+    elif [ -f "$PREVIOUS_V2_LOAD_LOCK" ]; then
+        cat "$PREVIOUS_V2_LOAD_LOCK" 2>/dev/null
+    fi
+}
+
 LEGACY_LOAD_OWNER=$(legacy_load_owner)
-loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
+other_loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
+PREVIOUS_V2_LOAD_OWNER=$(previous_v2_load_owner)
+other_loader_pid_is_live "$PREVIOUS_V2_LOAD_OWNER" && exit 0
 
 LOAD_LOCK_ATTEMPTS=0
 LOAD_LOCK_MAX_ATTEMPTS=30
@@ -56,7 +72,7 @@ while [ 1 ]; do
     fi
 
     LOAD_LOCK_OWNER=$(readlink "$LOAD_LOCK" 2>/dev/null)
-    loader_pid_is_live "$LOAD_LOCK_OWNER" && exit 0
+    other_loader_pid_is_live "$LOAD_LOCK_OWNER" && exit 0
 
     # Remove only the stale owner we inspected; if another loader won the race,
     # its different PID target is left intact.
@@ -89,52 +105,157 @@ trap 'exit 143' TERM
 # An old loader could have acquired the legacy directory during an in-place update.
 # Recheck after winning v2; EXIT cleanup releases only our own v2 symlink.
 LEGACY_LOAD_OWNER=$(legacy_load_owner)
-loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
+other_loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
+PREVIOUS_V2_LOAD_OWNER=$(previous_v2_load_owner)
+other_loader_pid_is_live "$PREVIOUS_V2_LOAD_OWNER" && exit 0
 
 FI=/data/local/bin/frida-inject
 VD=/data/local/bin/vd_bypass.js
 SWK=/data/local/bin/steeringwheelkeys.js
 LNCH=/data/local/bin/launcherdock.js
 MD=/data/local/bin/multidisplay.js
-VDMARK=/data/local/tmp/voyah_vd.pid          # pid system_server, куда поставлен vd_bypass
-SWK_KM_MARK=/data/local/tmp/voyah_swk_km.pid # pid keymanager, куда поставлен steeringwheelkeys
-SWK_KM_BUSY=/data/local/tmp/voyah_swk_km.busy # symlink: targetPid|startUptime|token
+APOLLO=/data/local/bin/apollo_tech.js
+VDMARK=/data/local/tmp/voyahtune_vd.pid          # exact identity system_server с vd_bypass
+SWK_KM_MARK=/data/local/tmp/voyahtune_swk_km.pid # exact identity keymanager со steeringwheelkeys
+SWK_KM_BUSY=/data/local/tmp/voyahtune_swk_km.busy # symlink: targetPid|startUptime|token
+VD_ATTEMPT=/data/local/tmp/voyahtune_vd.attempt
+SWK_KM_ATTEMPT=/data/local/tmp/voyahtune_swk_km.attempt
+LNCH_ATTEMPT=/data/local/tmp/voyahtune_lnch.attempt
+MD_ATTEMPT=/data/local/tmp/voyahtune_md.attempt
+APOLLO_MARK=/data/local/tmp/voyahtune_apollo.pid
+APOLLO_ATTEMPT=/data/local/tmp/voyahtune_apollo.attempt
+APOLLO_LOG=/data/local/tmp/voyahtune_apollo.txt
+APOLLO_TARGET=com.qinggan.app.vehiclesetting
+APOLLO_READY_MARKER='[apollo] hook ready'
 SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
-SWK_KM_RETRY_DELAY=60                         # same-PID failure/in-flight retry delay
-LNCH_MARK=/data/local/tmp/voyah_lnch.pid     # pid лаунчера, куда поставлен launcherdock
-MD_MARK=/data/local/tmp/voyah_md.pid         # pid systemservice, куда поставлен multidisplay
+LNCH_MARK=/data/local/tmp/voyahtune_lnch.pid     # exact process identity лаунчера с launcherdock
+MD_MARK=/data/local/tmp/voyahtune_md.pid         # exact process identity systemservice с multidisplay
 
-# Same-process injection failures retain the watchdog, but no longer launch a 30-second Frida
-# attempt every cycle. The delay resets immediately when the target PID changes.
-INJECT_RETRY_INITIAL=10
-INJECT_RETRY_MAX=60
-VD_RETRY_PID= VD_RETRY_AT=0 VD_RETRY_DELAY=$INJECT_RETRY_INITIAL
-LNCH_RETRY_PID= LNCH_RETRY_AT=0 LNCH_RETRY_DELAY=$INJECT_RETRY_INITIAL
-MD_RETRY_PID= MD_RETRY_AT=0 MD_RETRY_DELAY=$INJECT_RETRY_INITIAL
-KM_RETRY_PID= KM_RETRY_AT=0
+# Persistent PID-only markers are unsafe on Android: /data/local/tmp survives reboot, while
+# zygote can assign the same numeric PID to a fresh process. Bind every returning hook marker to
+# boot id + /proc start time so a fresh launcher can never inherit a stale "already injected" mark.
+#   $1=pid  $2=expected cmdline
+process_identity() {
+    ID_PID=$1
+    ID_EXPECTED=$2
+    case "$ID_PID" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    ID_CMDLINE=$(tr '\000' ' ' < "/proc/$ID_PID/cmdline" 2>/dev/null) || return 1
+    case "$ID_CMDLINE" in
+        "$ID_EXPECTED"|"$ID_EXPECTED "*) ;;
+        *) return 1 ;;
+    esac
+    ID_START=$(awk '{print $22}' "/proc/$ID_PID/stat" 2>/dev/null)
+    case "$ID_START" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    ID_BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || return 1
+    [ -n "$ID_BOOT" ] || return 1
+    kill -0 "$ID_PID" 2>/dev/null || return 1
+    # ':' intentionally avoids the '|' delimiter used by the in-memory retry tuple.
+    echo "v2:$ID_BOOT:$ID_PID:$ID_START"
+}
 
-# Инъекция в цель, которая ВОЗВРАЩАЕТ управление. Маркер пишем ТОЛЬКО при успехе.
-#   $1=pid  $2=script  $3=logfile  $4=markerfile  $5=retry-slot
+# Инъекция в цель, которая ВОЗВРАЩАЕТ управление. Маркер пишем ТОЛЬКО при успехе
+# и только если после Frida это всё ещё тот же экземпляр процесса.
+# Atomic persistent one-shot reservation for an exact process identity.
+#   $1=identity  $2=attempt-marker
+reserve_injection_attempt() {
+    [ "$(cat "$2" 2>/dev/null)" = "$1" ] && return 1
+    ATTEMPT_TMP="$2.$$.new"
+    if ! printf '%s\n' "$1" > "$ATTEMPT_TMP" || ! mv -f "$ATTEMPT_TMP" "$2"; then
+        rm -f "$ATTEMPT_TMP"
+        loge "inject attempt marker write FAIL: $2"
+        return 1
+    fi
+    return 0
+}
+
+#   $1=pid  $2=script  $3=logfile  $4=success-marker  $5=attempt-marker
+#   $6=pre-injection identity  $7=expected cmdline
 inject_ret() {
+    reserve_injection_attempt "$6" "$5" || return 1
+    CURRENT_ID=$(process_identity "$1" "$7" 2>/dev/null) || CURRENT_ID=
+    if [ "$CURRENT_ID" != "$6" ]; then
+        loge "inject skipped pid=$1 $2 (target identity changed before launch)"
+        return 1
+    fi
     TRY="$3.try"
     : > "$TRY"
     timeout -k 5 30 "$FI" -p "$1" -s "$2" -e > "$TRY" 2>&1
     RC=$?
     cat "$TRY" >> "$3"
     if [ "$RC" -ne 0 ]; then
-        record_injection_failure "$5" "$1"
-        loge "inject FAIL pid=$1 $2 rc=$RC (bounded backoff)"
+        loge "inject FAIL pid=$1 $2 rc=$RC (latched for this process; no retry)"
         return 1
     fi
     # Ошибки самого frida-inject (агент пишет свои сообщения через console.log/Log — их НЕ матчим).
     if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$TRY"; then
-        record_injection_failure "$5" "$1"
-        loge "inject FAIL pid=$1 $2 (bounded backoff)"
+        loge "inject FAIL pid=$1 $2 (latched for this process; no retry)"
         return 1
     fi
-    echo "$1" > "$4"
-    record_injection_success "$5" "$1"
+    INJECTED_ID=$(process_identity "$1" "$7") || INJECTED_ID=
+    if [ -z "$INJECTED_ID" ] || [ "$INJECTED_ID" != "$6" ]; then
+        loge "inject result stale pid=$1 $2 (target identity changed; retry new target)"
+        return 1
+    fi
+    MARK_TMP="$4.$$.new"
+    printf '%s\n' "$INJECTED_ID" > "$MARK_TMP" && mv -f "$MARK_TMP" "$4"
+    if [ "$?" -ne 0 ]; then
+        rm -f "$MARK_TMP"
+        loge "inject marker write FAIL pid=$1 $2 (latched for this process; no retry)"
+        return 1
+    fi
     logi "inject OK pid=$1 $2"
+    return 0
+}
+
+# VehicleSetting может удержать eternalized Frida session после того, как обвязка timeout завершила
+# injector. Поэтому точный ready-marker агента также считается успехом. Попытка всё равно только одна
+# на process identity: неисправная прошивка не получает 10-секундный injection loop.
+#   $1=pid  $2=exact process identity
+inject_apollo() {
+    APOLLO_PID="$1"
+    APOLLO_ID="$2"
+    reserve_injection_attempt "$APOLLO_ID" "$APOLLO_ATTEMPT" || return 1
+    APOLLO_CURRENT_ID=$(process_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null) \
+        || APOLLO_CURRENT_ID=
+    if [ "$APOLLO_CURRENT_ID" != "$APOLLO_ID" ]; then
+        loge "apollo inject skipped: target identity changed before launch"
+        return 1
+    fi
+
+    APOLLO_TRY="$APOLLO_LOG.try"
+    : > "$APOLLO_TRY"
+    timeout -k 5 30 "$FI" -p "$APOLLO_PID" -s "$APOLLO" -e > "$APOLLO_TRY" 2>&1
+    APOLLO_RC=$?
+    cat "$APOLLO_TRY" >> "$APOLLO_LOG"
+    if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' \
+            "$APOLLO_TRY"; then
+        loge "apollo inject FAIL pid=$APOLLO_PID rc=$APOLLO_RC (latched for this process)"
+        return 1
+    fi
+    if ! grep -qF "$APOLLO_READY_MARKER" "$APOLLO_TRY"; then
+        loge "apollo inject FAIL pid=$APOLLO_PID rc=$APOLLO_RC (latched for this process)"
+        return 1
+    fi
+
+    APOLLO_AFTER_ID=$(process_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null) \
+        || APOLLO_AFTER_ID=
+    if [ "$APOLLO_AFTER_ID" != "$APOLLO_ID" ]; then
+        loge "apollo inject result stale pid=$APOLLO_PID"
+        return 1
+    fi
+    APOLLO_MARK_TMP="$APOLLO_MARK.$$.new"
+    if ! printf '%s\n' "$APOLLO_ID" > "$APOLLO_MARK_TMP" \
+            || ! mv -f "$APOLLO_MARK_TMP" "$APOLLO_MARK"; then
+        rm -f "$APOLLO_MARK_TMP"
+        loge "apollo marker write FAIL pid=$APOLLO_PID"
+        return 1
+    fi
+    rm -f "$APOLLO_TRY"
+    logi "apollo entitlement hook OK pid=$APOLLO_PID profile=voboost"
     return 0
 }
 
@@ -145,59 +266,6 @@ uptime_seconds() {
         ''|*[!0-9]*) date +%s ;;
         *) echo "$UPTIME_NOW" ;;
     esac
-}
-
-retry_state() {
-    case "$1" in
-        vd) echo "$VD_RETRY_PID|$VD_RETRY_AT|$VD_RETRY_DELAY" ;;
-        launcher) echo "$LNCH_RETRY_PID|$LNCH_RETRY_AT|$LNCH_RETRY_DELAY" ;;
-        multidisplay) echo "$MD_RETRY_PID|$MD_RETRY_AT|$MD_RETRY_DELAY" ;;
-        *) return 1 ;;
-    esac
-}
-
-retry_store() {
-    case "$1" in
-        vd) VD_RETRY_PID=$2; VD_RETRY_AT=$3; VD_RETRY_DELAY=$4 ;;
-        launcher) LNCH_RETRY_PID=$2; LNCH_RETRY_AT=$3; LNCH_RETRY_DELAY=$4 ;;
-        multidisplay) MD_RETRY_PID=$2; MD_RETRY_AT=$3; MD_RETRY_DELAY=$4 ;;
-        *) return 1 ;;
-    esac
-}
-
-injection_retry_due() {
-    RETRY_SLOT=$1
-    RETRY_TARGET_PID=$2
-    RETRY_NOW=$(uptime_seconds)
-    RETRY_RECORD=$(retry_state "$RETRY_SLOT") || return 1
-    RETRY_SAVED_PID=${RETRY_RECORD%%|*}
-    RETRY_REST=${RETRY_RECORD#*|}
-    RETRY_AT=${RETRY_REST%%|*}
-    if [ "$RETRY_SAVED_PID" != "$RETRY_TARGET_PID" ]; then
-        retry_store "$RETRY_SLOT" "$RETRY_TARGET_PID" 0 "$INJECT_RETRY_INITIAL"
-        return 0
-    fi
-    [ "$RETRY_NOW" -ge "$RETRY_AT" ]
-}
-
-record_injection_failure() {
-    RETRY_SLOT=$1
-    RETRY_TARGET_PID=$2
-    RETRY_NOW=$(uptime_seconds)
-    RETRY_RECORD=$(retry_state "$RETRY_SLOT") || return
-    RETRY_DELAY=${RETRY_RECORD##*|}
-    case "$RETRY_DELAY" in
-        ''|*[!0-9]*) RETRY_DELAY=$INJECT_RETRY_INITIAL ;;
-    esac
-    RETRY_AT=$((RETRY_NOW + RETRY_DELAY))
-    RETRY_NEXT_DELAY=$((RETRY_DELAY * 2))
-    [ "$RETRY_NEXT_DELAY" -le "$INJECT_RETRY_MAX" ] \
-        || RETRY_NEXT_DELAY=$INJECT_RETRY_MAX
-    retry_store "$RETRY_SLOT" "$RETRY_TARGET_PID" "$RETRY_AT" "$RETRY_NEXT_DELAY"
-}
-
-record_injection_success() {
-    retry_store "$1" "$2" 0 "$INJECT_RETRY_INITIAL"
 }
 
 # `timeout` uses a clock that may pause in suspend on some Toybox builds, while /proc/uptime can
@@ -218,12 +286,10 @@ keymanager_inject_is_live() {
 # Если worker был убит до cleanup, TTL освобождает stale busy после гарантированного TERM->KILL окна.
 inject_keymanager_bg() {
     KM_TARGET_PID="$1"
+    KM_TARGET_ID="$2"
     KM_NOW=$(uptime_seconds)
-    if [ "$KM_RETRY_PID" != "$KM_TARGET_PID" ]; then
-        KM_RETRY_PID=$KM_TARGET_PID
-        KM_RETRY_AT=0
-    fi
-    [ "$KM_NOW" -ge "$KM_RETRY_AT" ] || return 0
+    [ "$(cat "$SWK_KM_MARK" 2>/dev/null)" = "$KM_TARGET_ID" ] && return 0
+    [ "$(cat "$SWK_KM_ATTEMPT" 2>/dev/null)" = "$KM_TARGET_ID" ] && return 0
 
     KM_BUSY_ATTEMPTS=0
     KM_BUSY_MAX_ATTEMPTS=3
@@ -270,32 +336,46 @@ inject_keymanager_bg() {
         fi
         KM_BUSY_ATTEMPTS=$((KM_BUSY_ATTEMPTS + 1))
         if [ "$KM_BUSY_ATTEMPTS" -ge "$KM_BUSY_MAX_ATTEMPTS" ]; then
-            loge "keymanager busy marker unavailable; defer without spinning"
-            KM_RETRY_AT=$((KM_NOW + SWK_KM_RETRY_DELAY))
+            loge "keymanager busy marker unavailable; defer without injecting"
             return 0
         fi
         sleep 1
     done
 
-    # Reserve before forking: success publishes SWK_KM_MARK; every failure or lost worker waits one
-    # minute without another persistent state file or a recurring failure timer.
-    KM_RETRY_AT=$((KM_NOW + SWK_KM_RETRY_DELAY))
-    logi "inject steeringwheelkeys -> keymanager $KM_TARGET_PID (eternalize,bounded-bg)"
+    # Reserve before forking. Failure/timeout keeps the exact identity latched permanently; only a
+    # new keymanager process identity may get another attempt.
+    if ! reserve_injection_attempt "$KM_TARGET_ID" "$SWK_KM_ATTEMPT"; then
+        [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" = "$KM_RECORD" ] && rm -f "$SWK_KM_BUSY"
+        return 0
+    fi
+    logi "inject steeringwheelkeys -> keymanager $KM_TARGET_PID (eternalize,one-shot)"
     (
         # Не наследуем loader traps: worker живёт не дольше timeout+KILL и сам чистит busy.
         trap - 0 HUP INT TERM
-        KM_TRY="/data/local/tmp/voyah_swk.$KM_TOKEN.try"
+        KM_TRY="/data/local/tmp/voyahtune_swk.try"
         : > "$KM_TRY"
         timeout -k 5 30 "$FI" -p "$KM_TARGET_PID" -s "$SWK" -e > "$KM_TRY" 2>&1
         KM_RC=$?
-        cat "$KM_TRY" >> /data/local/tmp/voyah_swk.txt
+        cat "$KM_TRY" >> /data/local/tmp/voyahtune_swk.txt
         if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$KM_TRY"; then
-            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (60s backoff)"
+            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (latched; no retry)"
         elif [ "$KM_RC" -eq 0 ] || grep -qF '[swk] keymanager hooks installed:' "$KM_TRY"; then
-            echo "$KM_TARGET_PID" > "$SWK_KM_MARK"
-            logi "inject OK keymanager pid=$KM_TARGET_PID"
+            KM_ID_AFTER=$(process_identity "$KM_TARGET_PID" com.qinggan.keymanager.service 2>/dev/null) \
+                || KM_ID_AFTER=
+            if [ "$KM_ID_AFTER" = "$KM_TARGET_ID" ]; then
+                KM_MARK_TMP="$SWK_KM_MARK.$$.new"
+                if printf '%s\n' "$KM_TARGET_ID" > "$KM_MARK_TMP" \
+                        && mv -f "$KM_MARK_TMP" "$SWK_KM_MARK"; then
+                    logi "inject OK keymanager pid=$KM_TARGET_PID"
+                else
+                    rm -f "$KM_MARK_TMP"
+                    loge "inject marker write FAIL keymanager pid=$KM_TARGET_PID (latched; no retry)"
+                fi
+            else
+                loge "inject result stale keymanager pid=$KM_TARGET_PID (latched old identity)"
+            fi
         else
-            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (60s backoff)"
+            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (latched; no retry)"
         fi
         rm -f "$KM_TRY"
         [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" = "$KM_RECORD" ] \
@@ -307,32 +387,36 @@ watchdog_cycle() {
     # 1) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
     SS=$(pidof system_server)
     SS=${SS%% *}
-    if [ -n "$SS" ] && [ -f "$VD" ]; then
-        if [ "$(cat "$VDMARK" 2>/dev/null)" != "$SS" ]; then
-            if injection_retry_due vd "$SS"; then
-                inject_ret "$SS" "$VD" /data/local/tmp/voyah_vd_bypass.txt "$VDMARK" vd
+    SS_ID=$(process_identity "$SS" system_server 2>/dev/null) || SS_ID=
+    if [ -n "$SS_ID" ] && [ -f "$VD" ]; then
+        if [ "$(cat "$VDMARK" 2>/dev/null)" != "$SS_ID" ]; then
+            if [ "$(cat "$VD_ATTEMPT" 2>/dev/null)" != "$SS_ID" ]; then
+                inject_ret "$SS" "$VD" /data/local/tmp/voyahtune_vd_bypass.txt "$VDMARK" "$VD_ATTEMPT" "$SS_ID" system_server
             fi
         fi
     fi
 
     # 2) Переопределение дока — инъекция в процесс лаунчера (возвращает управление → verify-before-mark).
-    #    По -p pid (точнее -n, устойчивее к гонке имени на буте). При промахе действует same-PID backoff.
+    #    По -p pid; промах лачится для exact identity и не повторяется циклом.
     LP=$(pidof com.qinggan.app.launcher)
     LP=${LP%% *}
-    if [ -n "$LP" ] && [ -f "$LNCH" ]; then
-        if [ "$(cat "$LNCH_MARK" 2>/dev/null)" != "$LP" ]; then
-            if injection_retry_due launcher "$LP"; then
-                inject_ret "$LP" "$LNCH" /data/local/tmp/voyah_lnch.txt "$LNCH_MARK" launcher
+    LP_ID=$(process_identity "$LP" com.qinggan.app.launcher 2>/dev/null) || LP_ID=
+    if [ -n "$LP_ID" ] && [ -f "$LNCH" ]; then
+        if [ "$(cat "$LNCH_MARK" 2>/dev/null)" != "$LP_ID" ]; then
+            if [ "$(cat "$LNCH_ATTEMPT" 2>/dev/null)" != "$LP_ID" ]; then
+                inject_ret "$LP" "$LNCH" /data/local/tmp/voyahtune_lnch.txt "$LNCH_MARK" "$LNCH_ATTEMPT" "$LP_ID" com.qinggan.app.launcher
             fi
         fi
     fi
 
-    # 3) Кнопки руля в keymanager: фоновая, но bounded/verified попытка (см. inject_keymanager_bg).
+    # 3) Кнопки руля в keymanager: фоновая one-shot/verified попытка (см. inject_keymanager_bg).
     KMP=$(pidof com.qinggan.keymanager.service 2>/dev/null)
     KMP=${KMP%% *}
-    if [ -n "$KMP" ] && [ -f "$SWK" ]; then
-        if [ "$(cat "$SWK_KM_MARK" 2>/dev/null)" != "$KMP" ]; then
-            inject_keymanager_bg "$KMP"
+    KMP_ID=$(process_identity "$KMP" com.qinggan.keymanager.service 2>/dev/null) || KMP_ID=
+    if [ -n "$KMP_ID" ] && [ -f "$SWK" ]; then
+        if [ "$(cat "$SWK_KM_MARK" 2>/dev/null)" != "$KMP_ID" ] \
+                && [ "$(cat "$SWK_KM_ATTEMPT" 2>/dev/null)" != "$KMP_ID" ]; then
+            inject_keymanager_bg "$KMP" "$KMP_ID"
         fi
     fi
 
@@ -340,11 +424,24 @@ watchdog_cycle() {
     #    verify-before-mark, как system_server и лаунчер).
     MDP=$(pidof com.qinggan.systemservice)
     MDP=${MDP%% *}
-    if [ -n "$MDP" ] && [ -f "$MD" ]; then
-        if [ "$(cat "$MD_MARK" 2>/dev/null)" != "$MDP" ]; then
-            if injection_retry_due multidisplay "$MDP"; then
-                inject_ret "$MDP" "$MD" /data/local/tmp/voyah_md.txt "$MD_MARK" multidisplay
+    MDP_ID=$(process_identity "$MDP" com.qinggan.systemservice 2>/dev/null) || MDP_ID=
+    if [ -n "$MDP_ID" ] && [ -f "$MD" ]; then
+        if [ "$(cat "$MD_MARK" 2>/dev/null)" != "$MDP_ID" ]; then
+            if [ "$(cat "$MD_ATTEMPT" 2>/dev/null)" != "$MDP_ID" ]; then
+                inject_ret "$MDP" "$MD" /data/local/tmp/voyahtune_md.txt "$MD_MARK" "$MD_ATTEMPT" "$MDP_ID" com.qinggan.systemservice
             fi
+        fi
+    fi
+
+    # 5) ADAS entitlement: no Settings/CAN work. `pidof` only discovers a new exact VehicleSetting
+    #    process; successful or failed injection is latched until that process identity changes.
+    APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
+    APOLLO_PID=${APOLLO_PID%% *}
+    APOLLO_ID=$(process_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null) || APOLLO_ID=
+    if [ -n "$APOLLO_ID" ] && [ -f "$APOLLO" ]; then
+        if [ "$(cat "$APOLLO_MARK" 2>/dev/null)" != "$APOLLO_ID" ] \
+                && [ "$(cat "$APOLLO_ATTEMPT" 2>/dev/null)" != "$APOLLO_ID" ]; then
+            inject_apollo "$APOLLO_PID" "$APOLLO_ID"
         fi
     fi
 }

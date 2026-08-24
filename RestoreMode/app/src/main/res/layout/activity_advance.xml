@@ -1480,7 +1480,7 @@
     </ScrollView>
     <!-- конец pageSplitScreen -->
 
-    <!-- Раздел: Apollo Tech. Управление только через подтверждённое Native-состояние, без prefs. -->
+    <!-- Раздел: Apollo Tech. Full активирует entitlement как voboost; состояния CAN read-only. -->
     <ScrollView
         android:id="@+id/pageApolloTech"
         android:layout_width="match_parent"
@@ -1498,7 +1498,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Настройки интеллектуальных помощников водителя."
+                android:text="Full-версия автоматически открывает штатную подписку ADAS и статус обучения NOA способом voboost. Переключатели ниже показывают текущее состояние автомобиля и изменяются в штатных настройках автомобиля."
                 android:textColor="#FFFFFF"
                 android:textSize="24px" />
 
@@ -1509,7 +1509,7 @@
                 android:layout_marginTop="14dp"
                 android:background="@drawable/layout_category_bg"
                 android:padding="16dp"
-                android:text="Apollo Tech недоступен в этой сборке VoyahTune."
+                android:text="Light-версия не содержит Frida, поэтому активация подписки ADAS/NOA в ней недоступна. Диагностика текущего состояния остаётся доступной."
                 android:textColor="#ffb36b"
                 android:textSize="22px"
                 android:visibility="gone" />
@@ -1548,7 +1548,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
-                            android:text="Включает автоматическое перестроение при активном интеллектуальном круизе, включённом поворотнике и наличии условий для перестроения. Изменять настройку можно только на стоянке в положении P."
+                            android:text="Текущее штатное состояние функции; отображается только для диагностики."
                             android:textColor="#aaaaaa"
                             android:textSize="20px" />
 
@@ -1643,7 +1643,7 @@
                                 android:layout_width="220dp"
                                 android:layout_height="match_parent"
                                 android:background="@drawable/radio_group_button_70_bg"
-                                android:text="Выключить"
+                                android:text="Выключен"
                                 android:textColor="@color/radio_button_text_color_selector" />
 
                             <RadioButton
@@ -1652,7 +1652,7 @@
                                 android:layout_width="220dp"
                                 android:layout_height="match_parent"
                                 android:background="@drawable/radio_group_button_70_bg"
-                                android:text="Включить"
+                                android:text="Включён"
                                 android:textColor="@color/radio_button_text_color_selector" />
 
                         </RadioGroup>
@@ -1722,7 +1722,7 @@
                 android:layout_marginTop="8dp"
                 android:background="@drawable/layout_category_bg"
                 android:padding="16dp"
-                android:text="Состояние ещё не получено. Переключатели заблокированы."
+                android:text="Состояние ещё не получено. Раздел работает только для просмотра."
                 android:textColor="#FFFFFF"
                 android:textSize="22px" />
 
@@ -1735,7 +1735,7 @@
                 android:background="@drawable/layout_category_bg"
                 android:fontFamily="monospace"
                 android:padding="16dp"
-                android:text="Диагностика: CAN (автомобильная шина) — неизвестно; профиль — неизвестно; селектор передач — неизвестно; состояния TLC и ANP — неизвестно."
+                android:text="Диагностика: CAN (автомобильная шина) — неизвестно; профиль — неизвестно; состояния Apollo — неизвестны."
                 android:textColor="#aaaaaa"
                 android:textIsSelectable="true"
                 android:textSize="19px"
@@ -1760,10 +1760,76 @@
         android:paddingHorizontal="28dp"
         android:paddingVertical="20dp">
 
+        <!-- Диагностика ресурсов существует только пока открыт раздел «Другое». -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="@drawable/layout_category_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Оперативная память"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <TextView
+                    android:id="@+id/textRamStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Используется: —\nДоступно: —"
+                    android:textColor="#AAAAAA"
+                    android:textSize="21px" />
+
+            </LinearLayout>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:layout_marginHorizontal="20dp"
+                android:background="#59616c" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Загрузка CPU"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <TextView
+                    android:id="@+id/textCpuStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="—"
+                    android:textColor="#AAAAAA"
+                    android:textSize="30px" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
         <!-- Режим отладки -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:background="@drawable/layout_category_bg"

@@ -15,63 +15,111 @@ require_fixed() {
 }
 
 for REQUIRED in \
+        'LOAD_LOCK=/data/local/tmp/voyahtune_load.v2.lock' \
+        'VDMARK=/data/local/tmp/voyahtune_vd.pid' \
+        'SWK_KM_MARK=/data/local/tmp/voyahtune_swk_km.pid' \
+        'SWK_KM_BUSY=/data/local/tmp/voyahtune_swk_km.busy' \
+        'LNCH_MARK=/data/local/tmp/voyahtune_lnch.pid' \
+        'MD_MARK=/data/local/tmp/voyahtune_md.pid' \
+        'VD_ATTEMPT=/data/local/tmp/voyahtune_vd.attempt' \
+        'SWK_KM_ATTEMPT=/data/local/tmp/voyahtune_swk_km.attempt' \
+        'LNCH_ATTEMPT=/data/local/tmp/voyahtune_lnch.attempt' \
+        'MD_ATTEMPT=/data/local/tmp/voyahtune_md.attempt' \
+        'other_loader_pid_is_live "$LOAD_LOCK_OWNER" && exit 0' \
         'LOAD_LOCK_MAX_ATTEMPTS=30' \
         'owner lock unavailable after ${LOAD_LOCK_ATTEMPTS}s; stop without spinning' \
-        'sleep 1' \
-        'INJECT_RETRY_INITIAL=10' \
-        'INJECT_RETRY_MAX=60' \
-        'record_injection_failure "$5" "$1"' \
-        'injection_retry_due vd "$SS"' \
-        'injection_retry_due launcher "$LP"' \
-        'injection_retry_due multidisplay "$MDP"' \
-        'KM_BUSY_MAX_ATTEMPTS=3' \
-        'KM_RETRY_AT=$((KM_NOW + SWK_KM_RETRY_DELAY))'; do
+        'echo "v2:$ID_BOOT:$ID_PID:$ID_START"' \
+        'reserve_injection_attempt "$6" "$5"' \
+        'CURRENT_ID=$(process_identity "$1" "$7"' \
+        'printf '\''%s\n'\'' "$INJECTED_ID" > "$MARK_TMP" && mv -f "$MARK_TMP" "$4"' \
+        'latched for this process; no retry' \
+        'inject_keymanager_bg "$KMP" "$KMP_ID"' \
+        'latched; no retry'; do
     require_fixed "$LOAD_BIN" "$REQUIRED"
 done
 
-RETRY_FUNCTIONS=$(awk '
-    /^retry_state\(\) \{/ { capture = 1 }
-    /^# `timeout` uses a clock/ { capture = 0 }
+for FORBIDDEN in \
+        'INJECT_RETRY_INITIAL' \
+        'INJECT_RETRY_MAX' \
+        'injection_retry_due' \
+        'record_injection_failure' \
+        'record_injection_success' \
+        'retry next loop' \
+        'bounded backoff' \
+        '60s backoff'; do
+    if grep -Fq "$FORBIDDEN" "$LOAD_BIN"; then
+        fail "same-process recurring retry remains: $FORBIDDEN"
+    fi
+done
+
+if grep -Fq 'rm -f "$5"' "$LOAD_BIN" || grep -Fq 'rm -f "$SWK_KM_ATTEMPT"' "$LOAD_BIN"; then
+    fail "successful injection clears its one-shot latch and can be repeated after marker loss"
+fi
+
+# The persistent attempt reservation must precede every frida-inject execution.
+inject_function=$(awk '
+    /^inject_ret\(\) \{/ { capture = 1 }
+    /^# VehicleSetting/ { capture = 0 }
     capture { print }
 ' "$LOAD_BIN")
-[ -n "$RETRY_FUNCTIONS" ] || fail "cannot extract retry helpers"
+[ -n "$inject_function" ] || fail "cannot extract returning injector"
+reserve_line=$(printf '%s\n' "$inject_function" | grep -nF 'reserve_injection_attempt "$6" "$5"' | cut -d: -f1)
+frida_line=$(printf '%s\n' "$inject_function" | grep -nF 'timeout -k 5 30 "$FI"' | cut -d: -f1)
+[ "$reserve_line" -lt "$frida_line" ] || fail "returning injector reserves after frida-inject"
 
-INJECT_RETRY_INITIAL=10
-INJECT_RETRY_MAX=60
-VD_RETRY_PID= VD_RETRY_AT=0 VD_RETRY_DELAY=$INJECT_RETRY_INITIAL
-LNCH_RETRY_PID= LNCH_RETRY_AT=0 LNCH_RETRY_DELAY=$INJECT_RETRY_INITIAL
-MD_RETRY_PID= MD_RETRY_AT=0 MD_RETRY_DELAY=$INJECT_RETRY_INITIAL
-TEST_NOW=100
-uptime_seconds() { echo "$TEST_NOW"; }
-eval "$RETRY_FUNCTIONS"
+apollo_function=$(awk '
+    /^inject_apollo\(\) \{/ { capture = 1 }
+    /^# Монотонные секунды/ { capture = 0 }
+    capture { print }
+' "$LOAD_BIN")
+[ -n "$apollo_function" ] || fail "cannot extract Apollo injector"
+apollo_reserve_line=$(printf '%s\n' "$apollo_function" \
+    | grep -nF 'reserve_injection_attempt "$APOLLO_ID" "$APOLLO_ATTEMPT"' | cut -d: -f1)
+apollo_frida_line=$(printf '%s\n' "$apollo_function" \
+    | grep -nF 'timeout -k 5 30 "$FI"' | cut -d: -f1)
+[ "$apollo_reserve_line" -lt "$apollo_frida_line" ] \
+    || fail "Apollo injector reserves after frida-inject"
 
-injection_retry_due vd 101 || fail "new PID must be due immediately"
-record_injection_failure vd 101
-[ "$VD_RETRY_AT" -eq 110 ] || fail "first retry deadline must be +10s"
-[ "$VD_RETRY_DELAY" -eq 20 ] || fail "first retry must advance delay to 20s"
-TEST_NOW=109
-if injection_retry_due vd 101; then
-    fail "same PID must remain suppressed before its deadline"
+km_function=$(awk '
+    /^inject_keymanager_bg\(\) \{/ { capture = 1 }
+    /^watchdog_cycle\(\) \{/ { capture = 0 }
+    capture { print }
+' "$LOAD_BIN")
+[ -n "$km_function" ] || fail "cannot extract keymanager injector"
+km_reserve_line=$(printf '%s\n' "$km_function" | grep -nF 'reserve_injection_attempt "$KM_TARGET_ID"' | cut -d: -f1)
+km_frida_line=$(printf '%s\n' "$km_function" | grep -nF 'timeout -k 5 30 "$FI"' | cut -d: -f1)
+[ "$km_reserve_line" -lt "$km_frida_line" ] || fail "keymanager reserves after background frida-inject"
+
+# Execute the real reservation helper: same identity is permanently rejected; a new exact identity
+# replaces the latch and is allowed once.
+reserve_function=$(awk '
+    /^reserve_injection_attempt\(\) \{/ { capture = 1 }
+    /^#   \$1=pid/ { capture = 0 }
+    capture { print }
+' "$LOAD_BIN")
+[ -n "$reserve_function" ] || fail "cannot extract attempt reservation"
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
+ATTEMPT_FILE="$TMP_DIR/hook.attempt"
+loge() { :; }
+eval "$reserve_function"
+
+FIRST_ID='v2:boot-a:101:500'
+REPLACED_SAME_PID_ID='v2:boot-a:101:900'
+REBOOTED_SAME_PID_ID='v2:boot-b:101:500'
+
+reserve_injection_attempt "$FIRST_ID" "$ATTEMPT_FILE" \
+    || fail "first exact identity must be allowed"
+[ "$(cat "$ATTEMPT_FILE")" = "$FIRST_ID" ] || fail "first identity was not persisted"
+if reserve_injection_attempt "$FIRST_ID" "$ATTEMPT_FILE"; then
+    fail "same exact process identity received a second attempt"
 fi
-TEST_NOW=110
-injection_retry_due vd 101 || fail "same PID must become due at deadline"
-record_injection_failure vd 101
-[ "$VD_RETRY_AT" -eq 130 ] || fail "second retry deadline must be +20s"
-[ "$VD_RETRY_DELAY" -eq 40 ] || fail "second retry must advance delay to 40s"
-TEST_NOW=130
-record_injection_failure vd 101
-TEST_NOW=170
-record_injection_failure vd 101
-[ "$VD_RETRY_DELAY" -eq 60 ] || fail "retry delay must cap at 60s"
+reserve_injection_attempt "$REPLACED_SAME_PID_ID" "$ATTEMPT_FILE" \
+    || fail "same PID with a new start time must be allowed once"
+if reserve_injection_attempt "$REPLACED_SAME_PID_ID" "$ATTEMPT_FILE"; then
+    fail "replacement identity received a second attempt"
+fi
+reserve_injection_attempt "$REBOOTED_SAME_PID_ID" "$ATTEMPT_FILE" \
+    || fail "same PID after reboot must be a new exact identity"
 
-TEST_NOW=171
-injection_retry_due vd 202 || fail "PID replacement must reset backoff immediately"
-[ "$VD_RETRY_PID" = 202 ] || fail "PID replacement must become the tracked identity"
-[ "$VD_RETRY_AT" -eq 0 ] || fail "PID replacement must clear the deadline"
-[ "$VD_RETRY_DELAY" -eq 10 ] || fail "PID replacement must restore initial delay"
-
-record_injection_success vd 202
-[ "$VD_RETRY_AT" -eq 0 ] || fail "success must clear retry deadline"
-[ "$VD_RETRY_DELAY" -eq 10 ] || fail "success must restore initial delay"
-
-echo "PASS: loader fault loops are bounded and same-PID injection failures back off"
+echo "PASS: loader allows at most one Frida attempt per exact process identity"

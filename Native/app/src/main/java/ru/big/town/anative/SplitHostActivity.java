@@ -29,6 +29,7 @@ import android.widget.LinearLayout;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.lang.ref.WeakReference;
 
 /**
  * Хост одного приложения или сплита на VirtualDisplay: каждая видимая панель запускается на СВОЁМ
@@ -72,6 +73,8 @@ public class SplitHostActivity extends Activity {
     // Фолбэк без TRUSTED (если ADD_TRUSTED_DISPLAY не выдан, напр. на эмуляторе) — рендер будет,
     // запуск чужой активити может не пройти, но не роняем приложение.
     private static final int VD_FLAGS_FALLBACK = 1 | 8 | 256;
+    private static volatile WeakReference<SplitHostActivity> activeHost =
+            new WeakReference<>(null);
 
     private DisplayManager displayManager;
     private int defaultDpi = 213;
@@ -131,6 +134,7 @@ public class SplitHostActivity extends Activity {
         if (!BuildConfig.IS_FULL) { finish(); return; }
         taskLane = SplitHostTaskLane.get(getApplicationContext());
         workGate = new SplitHostGenerationGate(taskLane.registerHost(this));
+        activeHost = new WeakReference<>(this);
         // Поверх всего, не гаснуть, landscape. Edge-to-edge — чтобы получить реальные window insets
         // и самим задать отступы (иначе система инсетит контент и мы бы отступали повторно).
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -1020,11 +1024,26 @@ public class SplitHostActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        WeakReference<SplitHostActivity> current = activeHost;
+        if (current.get() == this) activeHost = new WeakReference<>(null);
         retireAsyncHostWork(true);
         cancelResizeGesture();
         releasePane(left);
         releasePane(right);
         super.onDestroy();
+    }
+
+    /**
+     * Finishes the Native VD host before a single application is launched as an ordinary physical
+     * task. Destroy-content-on-removal retires its VD activities; vd_bypass then clamps the new task.
+     */
+    static boolean closeActiveHost() {
+        SplitHostActivity host = activeHost.get();
+        if (host == null || host.isFinishing() || host.isDestroyed()) return false;
+        activeHost = new WeakReference<>(null);
+        host.runOnUiThread(host::finishAndRemoveTask);
+        Log.i(TAG, "active VD host closed before physical window launch");
+        return true;
     }
 
     /**

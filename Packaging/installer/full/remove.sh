@@ -184,9 +184,9 @@ stop_voyahtune_service() {
     return 1
 }
 
-adb root
+adb root >/dev/null 2>&1
 adb wait-for-device
-adb root
+adb root >/dev/null 2>&1
 # /system записываемым: снимаем verity (идемпотентно) + overlay-remount + сырой remount. Полный
 # ребут-цикл здесь не нужен (после install verity уже снята; если её вернул OTA — сначала прогнать
 # install.sh, он снимет verity и перезагрузит).
@@ -242,19 +242,19 @@ if ! stop_voyahtune_service; then
     fi
     exit 1
 fi
-if ! adb shell "rm -f /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.load.rc && test ! -e /system/etc/init.voyahtune.load.sh && test ! -e /system/etc/init/voyahtune.setenforce.rc"; then
+if ! adb shell "rm -f /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.load.sh /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.load.rc && test ! -e /system/etc/init.voyahtune.load.sh && test ! -e /system/etc/init/voyahtune.load.sh && test ! -e /system/etc/init/voyahtune.setenforce.rc"; then
     echo "!!! Не удалось удалить voyahtune RC-файлы — удаление прервано."
     echo "    Не перезагружайте ГУ; восстановите ADB и повторите remove."
     exit 1
 fi
 LEGACY_INIT_MIGRATED=0
-if ! adb shell "rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback"; then
+if ! adb shell "rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback /system/etc/init.logcat.sh.voyahtune.new /system/etc/init.logcat.sh.voyahtune.rollback"; then
     echo "  ПРЕДУПРЕЖДЕНИЕ: часть неактивных transaction-файлов не очищена; boot-hook уже удалён."
 fi
 
 # --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
 adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null
-adb shell "rm -f /data/local/tmp/voyah_load.v2.lock" 2>/dev/null
+adb shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock" 2>/dev/null
 adb shell "rm -rf /data/local/tmp/voyah_load.lock" 2>/dev/null
 adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
 # Eternalized agent живёт в target без frida-inject; force-stop выгружает его до финального reboot.
@@ -264,46 +264,187 @@ adb shell "am force-stop com.qinggan.app.vehiclesetting" 2>/dev/null
 if [ -f backup/load.bin ]; then adb push backup/load.bin /data/local/bin/load.bin; else adb shell "rm -f /data/local/bin/load.bin"; fi
 adb shell "rm -f /data/local/bin/vd_bypass.js"
 adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"   # keymng2 — легаси до объединения хуков руля
-# Устаревший Apollo hook никогда не восстанавливаем, включая backup старых релизов.
+# Apollo entitlement hook принадлежит Open Voyah и при remove удаляется без восстановления backup.
 adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
-# Маркеры переинжекта (pid-файлы) — чтобы следующая установка гарантированно переинжектила хуки
-adb shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_swk.*.try /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"
+# Project-owned Frida scripts, PID/lock markers and diagnostic logs. Generic CUNBA/Frida files
+# are deliberately not touched: only paths created by Open Voyah installers/runtime are listed.
+echo "=== Очистка файлов Open Voyah ==="
+if ! adb shell '
+    rm -f \
+        /data/local/bin/vd_bypass.js \
+        /data/local/bin/steeringwheelkeys.js \
+        /data/local/bin/launcherdock.js \
+        /data/local/bin/multidisplay.js \
+        /data/local/bin/keymng2.js \
+        /data/local/bin/apollo_tech.js \
+        /data/local/bin/apollo_tech.js.new \
+        /data/local/tmp/voyahtune_apollo.pid \
+        /data/local/tmp/voyahtune_apollo.attempt \
+        /data/local/tmp/voyahtune_apollo.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try \
+        /data/local/tmp/voyahtune_load.v2.lock \
+        /data/local/tmp/voyahtune_vd.pid \
+        /data/local/tmp/voyahtune_vd.attempt \
+        /data/local/tmp/voyahtune_swk_km.pid \
+        /data/local/tmp/voyahtune_swk_km.busy \
+        /data/local/tmp/voyahtune_swk_km.attempt \
+        /data/local/tmp/voyahtune_lnch.pid \
+        /data/local/tmp/voyahtune_lnch.attempt \
+        /data/local/tmp/voyahtune_md.pid \
+        /data/local/tmp/voyahtune_md.attempt \
+        /data/local/tmp/voyahtune_load.txt \
+        /data/local/tmp/voyahtune_vd_bypass.txt \
+        /data/local/tmp/voyahtune_vd_bypass.txt.try \
+        /data/local/tmp/voyahtune_swk.txt \
+        /data/local/tmp/voyahtune_swk.try \
+        /data/local/tmp/voyahtune_lnch.txt \
+        /data/local/tmp/voyahtune_lnch.txt.try \
+        /data/local/tmp/voyahtune_md.txt \
+        /data/local/tmp/voyahtune_md.txt.try \
+        /data/local/tmp/voyah_load.v2.lock \
+        /data/local/tmp/voyah_vd.pid \
+        /data/local/tmp/voyah_swk_ss.pid \
+        /data/local/tmp/voyah_swk_km.pid \
+        /data/local/tmp/voyah_swk_km.busy \
+        /data/local/tmp/voyah_km.pid \
+        /data/local/tmp/voyah_lnch.pid \
+        /data/local/tmp/voyah_md.pid \
+        /data/local/tmp/voyah_apollo.pid \
+        /data/local/tmp/voyah_apollo.down \
+        /data/local/tmp/voyah_apollo.disabled \
+        /data/local/tmp/voyah_load.txt \
+        /data/local/tmp/voyah_vd_bypass.txt \
+        /data/local/tmp/voyah_vd_bypass.txt.try \
+        /data/local/tmp/voyah_keymng.txt \
+        /data/local/tmp/voyah_swk.txt \
+        /data/local/tmp/voyah_swk.txt.try \
+        /data/local/tmp/voyah_lnch.txt \
+        /data/local/tmp/voyah_lnch.txt.try \
+        /data/local/tmp/voyah_md.txt \
+        /data/local/tmp/voyah_md.txt.try \
+        /data/local/tmp/voyah_apollo.txt \
+        /data/local/tmp/voyah_apollo.txt.1 \
+        /data/local/tmp/voyah_apollo.txt.try \
+        /data/local/tmp/open_voyah_dns_overlay.sh \
+        /data/local/tmp/open_voyah_yandex_dns.apk \
+        /sdcard/tmp/voyahtune_native_log.txt \
+        /sdcard/tmp/voyah_native_log.txt && \
+    rm -rf /data/local/tmp/voyah_load.lock /data/local/open_voyah && \
+    for path in \
+        /data/local/bin/vd_bypass.js \
+        /data/local/bin/steeringwheelkeys.js \
+        /data/local/bin/launcherdock.js \
+        /data/local/bin/multidisplay.js \
+        /data/local/bin/keymng2.js \
+        /data/local/bin/apollo_tech.js \
+        /data/local/bin/apollo_tech.js.new \
+        /data/local/tmp/voyahtune_apollo.pid \
+        /data/local/tmp/voyahtune_apollo.attempt \
+        /data/local/tmp/voyahtune_apollo.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try \
+        /data/local/tmp/voyahtune_load.v2.lock \
+        /data/local/tmp/voyahtune_vd.pid \
+        /data/local/tmp/voyahtune_vd.attempt \
+        /data/local/tmp/voyahtune_swk_km.pid \
+        /data/local/tmp/voyahtune_swk_km.busy \
+        /data/local/tmp/voyahtune_swk_km.attempt \
+        /data/local/tmp/voyahtune_lnch.pid \
+        /data/local/tmp/voyahtune_lnch.attempt \
+        /data/local/tmp/voyahtune_md.pid \
+        /data/local/tmp/voyahtune_md.attempt \
+        /data/local/tmp/voyahtune_load.txt \
+        /data/local/tmp/voyahtune_vd_bypass.txt \
+        /data/local/tmp/voyahtune_vd_bypass.txt.try \
+        /data/local/tmp/voyahtune_swk.txt \
+        /data/local/tmp/voyahtune_swk.try \
+        /data/local/tmp/voyahtune_lnch.txt \
+        /data/local/tmp/voyahtune_lnch.txt.try \
+        /data/local/tmp/voyahtune_md.txt \
+        /data/local/tmp/voyahtune_md.txt.try \
+        /data/local/tmp/voyah_load.v2.lock \
+        /data/local/tmp/voyah_load.lock \
+        /data/local/tmp/voyah_vd.pid \
+        /data/local/tmp/voyah_swk_ss.pid \
+        /data/local/tmp/voyah_swk_km.pid \
+        /data/local/tmp/voyah_swk_km.busy \
+        /data/local/tmp/voyah_km.pid \
+        /data/local/tmp/voyah_lnch.pid \
+        /data/local/tmp/voyah_md.pid \
+        /data/local/tmp/voyah_apollo.pid \
+        /data/local/tmp/voyah_apollo.down \
+        /data/local/tmp/voyah_apollo.disabled \
+        /data/local/tmp/voyah_load.txt \
+        /data/local/tmp/voyah_vd_bypass.txt \
+        /data/local/tmp/voyah_vd_bypass.txt.try \
+        /data/local/tmp/voyah_keymng.txt \
+        /data/local/tmp/voyah_swk.txt \
+        /data/local/tmp/voyah_swk.txt.try \
+        /data/local/tmp/voyah_lnch.txt \
+        /data/local/tmp/voyah_lnch.txt.try \
+        /data/local/tmp/voyah_md.txt \
+        /data/local/tmp/voyah_md.txt.try \
+        /data/local/tmp/voyah_apollo.txt \
+        /data/local/tmp/voyah_apollo.txt.1 \
+        /data/local/tmp/voyah_apollo.txt.try \
+        /data/local/tmp/open_voyah_dns_overlay.sh \
+        /data/local/tmp/open_voyah_yandex_dns.apk \
+        /data/local/open_voyah \
+        /sdcard/tmp/voyahtune_native_log.txt \
+        /sdcard/tmp/voyah_native_log.txt; do
+        if [ -e "$path" ] || [ -L "$path" ]; then exit 1; fi
+    done
+'; then
+    echo "!!! Не удалось полностью удалить файлы Open Voyah — перезагрузка отменена."
+    exit 1
+fi
 # Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка
 # не подхватила старые назначения до первой синхронизации из RestoreMode.
-adb shell settings delete global voyahtune_dock1 2>/dev/null
-adb shell settings delete global voyahtune_dock2 2>/dev/null
-adb shell settings delete global voyahtune_dock1Dpi 2>/dev/null
-adb shell settings delete global voyahtune_dock2Dpi 2>/dev/null
-adb shell settings delete global voyahtune_steerStarShort 2>/dev/null
-adb shell settings delete global voyahtune_steerStarLong 2>/dev/null
-adb shell settings delete global voyahtune_steerDvrShort 2>/dev/null
-adb shell settings delete global voyahtune_steerDvrLong 2>/dev/null
-adb shell settings delete global voyahtune_steerVoiceShort 2>/dev/null
-adb shell settings delete global voyahtune_steerVoiceLong 2>/dev/null
-adb shell settings delete global voyahtune_steerPhoneShort 2>/dev/null
-adb shell settings delete global voyahtune_steerPhoneLong 2>/dev/null
-adb shell settings delete global open_voyah_apollo_master 2>/dev/null
-adb shell settings delete global open_voyah_apollo_legacy_hook_enabled 2>/dev/null
-adb shell settings delete global open_voyah_apollo_asc 2>/dev/null
-adb shell settings delete global open_voyah_apollo_sdb 2>/dev/null
-adb shell settings delete global open_voyah_apollo_profile_supported 2>/dev/null
-adb shell settings delete global open_voyah_apollo_profile_heartbeat 2>/dev/null
+echo "=== Очистка Settings.Global ==="
+if ! adb shell '
+    for setting_name in \
+        voyahtune_dock1 voyahtune_dock2 voyahtune_dock1Dpi voyahtune_dock2Dpi \
+        voyahtune_steerStarShort voyahtune_steerStarLong \
+        voyahtune_steerDvrShort voyahtune_steerDvrLong \
+        voyahtune_steerVoiceShort voyahtune_steerVoiceLong \
+        voyahtune_steerPhoneShort voyahtune_steerPhoneLong \
+        open_voyah_apollo_master open_voyah_apollo_legacy_hook_enabled \
+        open_voyah_apollo_asc open_voyah_apollo_sdb \
+        open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat \
+        enable_freeform_support force_resizable_activities; do
+        settings delete global "$setting_name" >/dev/null 2>&1 || exit 1
+    done
+'; then
+    echo "!!! Не удалось полностью очистить Settings.Global — перезагрузка отменена."
+    exit 1
+fi
+echo "  Настройки Open Voyah очищены."
 
 # --- Whitelist + Native из /system/priv-app (+ снять /data-оверлей обновления) ---
-adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml"
-adb shell "rm -rf /system/priv-app/Native"
-adb shell "ls -all /system/priv-app/Native"
-adb shell pm uninstall ru.big.town.anative
-adb shell pm uninstall ru.big.town.restoremode
-adb shell am force-stop ru.big.town.anative
-# Полностью вычистить data-каталоги Native: pm uninstall системного priv-app не всегда их удаляет,
-# а протухшие данные ломают СЛЕДУЮЩУЮ установку (краш zygote при монтировании data_de/null/…).
-adb shell "rm -rf /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative /data/data/ru.big.town.anative"
-
-# --- Откат наших global settings (freeform для VirtualDisplay-сплита) ---
-adb shell settings delete global enable_freeform_support
-adb shell settings delete global force_resizable_activities
+echo "=== Удаление APK Open Voyah ==="
+adb shell am force-stop ru.big.town.anative >/dev/null 2>&1
+adb shell am force-stop ru.big.town.restoremode >/dev/null 2>&1
+# PackageManager/installd обязаны сами удалить CE/DE, profiles и external app data. На Android 11
+# нельзя делать rm -rf /data/user[_de] вручную: эти пути связаны с /data_mirror и encryption policy;
+# ручное удаление оставляет PackageManager в состоянии installed=true с отсутствующим DE source,
+# после чего zygote падает на каждом запуске Native.
+# Сначала снимаем возможный /data/app update системного Native, затем удаляем его для user 0.
+# RestoreMode — обычный data APK, его удаляет штатный pm uninstall.
+if ! adb shell '
+    pm uninstall ru.big.town.anative >/dev/null 2>&1 || true
+    pm uninstall --user 0 ru.big.town.anative >/dev/null 2>&1 || true
+    pm uninstall ru.big.town.restoremode >/dev/null 2>&1 || true
+    if pm path ru.big.town.anative 2>/dev/null | grep -q "^package:/data/app/"; then exit 1; fi
+    if pm path ru.big.town.restoremode 2>/dev/null | grep -q "^package:"; then exit 1; fi
+'; then
+    echo "!!! PackageManager не завершил удаление APK Open Voyah — перезагрузка отменена."
+    exit 1
+fi
+echo "  PackageManager удалил user-data, RestoreMode и Native update; raw app-data не трогаем."
+if ! adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new /system/priv-app/.Native.apk.voyahtune.new && rm -rf /system/priv-app/Native && test ! -e /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml && test ! -e /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new && test ! -e /system/priv-app/.Native.apk.voyahtune.new && test ! -e /system/priv-app/Native"; then
+    echo "!!! Не удалось полностью удалить системные файлы Open Voyah — перезагрузка отменена."
+    exit 1
+fi
 # Примечание: persist.app.feature.leavecar (power hold) НЕ откатываем — это штатная функция авто.
 
 adb reboot

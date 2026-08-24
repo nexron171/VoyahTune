@@ -34,8 +34,69 @@ adb root
 adb wait-for-device
 adb root
 
-# Одноразовая миграция со старого VehicleSetting hook, в том числе при переходе full -> light.
-echo "=== Удаление старого Apollo VehicleSetting hook ==="
+# Android 11 keeps app CE/DE state behind PackageManager/installd and /data_mirror. Never repair
+# these roots with mkdir/rm. After the reboot that scans the system APK, install-existing creates
+# the user state; a -k cycle self-heals packages damaged by older removers without deleting prefs.
+wait_for_android_boot() {
+    adb wait-for-device || return 1
+    BOOT_WAIT=0
+    while [ "$BOOT_WAIT" -lt 60 ]; do
+        [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+        sleep 5
+        BOOT_WAIT=$((BOOT_WAIT + 1))
+    done
+    [ "$BOOT_WAIT" -lt 60 ] || return 1
+    adb root >/dev/null 2>&1 || return 1
+    adb wait-for-device || return 1
+    adb root >/dev/null 2>&1 || return 1
+}
+
+native_user_data_ready() {
+    [ "$(adb shell '
+        if pm list packages --user 0 2>/dev/null | grep -qx "package:ru.big.town.anative" \
+                && pm path ru.big.town.anative 2>/dev/null | grep -q "^package:" \
+                && [ -d /data/user/0/ru.big.town.anative ] \
+                && [ -d /data/user_de/0/ru.big.town.anative ]; then
+            echo READY
+        else
+            echo BROKEN
+        fi
+    ' 2>/dev/null | tr -d '\r')" = "READY" ]
+}
+
+ensure_native_user_ready() {
+    echo "=== Проверка PackageManager data Native (Android 11 CE+DE) ==="
+    if ! native_user_data_ready; then
+        echo "  Native не зарегистрирован полностью — восстанавливаем через installd."
+        adb shell "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true" || return 1
+        NATIVE_INSTALL_RESULT=$(adb shell \
+            "cmd package install-existing --user 0 --wait ru.big.town.anative" 2>&1) || {
+            echo "!!! install-existing Native завершился ошибкой: $NATIVE_INSTALL_RESULT"
+            return 1
+        }
+        echo "  $NATIVE_INSTALL_RESULT"
+    fi
+    if ! native_user_data_ready; then
+        echo "!!! Native APK найден, но PackageManager не создал оба CE/DE data-каталога."
+        return 1
+    fi
+    adb shell "am broadcast -a com.qinggan.intent.QINGGAN_BOOT_COMPLETE -n ru.big.town.anative/.SetModesReceiverStatic >/dev/null" \
+        || return 1
+    NATIVE_START_WAIT=0
+    while [ "$NATIVE_START_WAIT" -lt 20 ]; do
+        [ -n "$(adb shell pidof ru.big.town.anative 2>/dev/null | tr -d '\r')" ] && {
+            echo "  Native запущен; CE/DE и process attach подтверждены."
+            return 0
+        }
+        sleep 1
+        NATIVE_START_WAIT=$((NATIVE_START_WAIT + 1))
+    done
+    echo "!!! Native не запустился после восстановления package data; установка не подтверждена."
+    return 1
+}
+
+# Light не содержит Frida: удаляем entitlement hook при переходе full -> light.
+echo "=== Удаление Apollo VehicleSetting hook для light ==="
 for APOLLO_SAFE_KEY in \
         open_voyah_apollo_legacy_hook_enabled \
         open_voyah_apollo_master \
@@ -53,13 +114,13 @@ for APOLLO_SAFE_KEY in \
     fi
 done
 adb shell am force-stop com.qinggan.app.vehiclesetting 2>/dev/null
-adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
+adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
 for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master \
         open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported \
         open_voyah_apollo_profile_heartbeat; do
     adb shell settings delete global "$APOLLO_OLD_KEY" 2>/dev/null
 done
-echo "  Старый agent, маркеры и ключи удалены; Apollo работает только через Native."
+echo "  Apollo entitlement agent и его маркеры удалены; light остаётся без Frida-активации."
 
 # Оба флейвора Native владеют signature-разрешением прямой записи в CanBus. Чужой первый владелец
 # сделал бы установленный APK несовместимым, поэтому конфликт проверяется до изменения /system.
@@ -219,3 +280,12 @@ esac
 
 # Ребут нужен, чтобы менеджер пакетов перечитал privapp-whitelist для /system/priv-app.
 adb reboot
+if ! wait_for_android_boot; then
+    echo "!!! ГУ не завершило загрузку после установки; проверьте ADB и повторите installer."
+    exit 1
+fi
+if ! ensure_native_user_ready; then
+    echo "!!! Установка файлов завершена, но Native lifecycle не восстановлен."
+    exit 1
+fi
+echo "Установка завершена и проверена."

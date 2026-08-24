@@ -54,18 +54,18 @@ public class SetModesService extends Service {
     static final int MSG_SET_THEME                  = 28; // тема системы/приложений (arg1: 0 авто, 1 светлая, 2 тёмная)
     static final int MSG_LOGGING_ENABLE             = 32; // вкл/выкл захват логов в файл (arg1: 1=вкл)
     static final int MSG_LOGGING_SHARE              = 33; // «Выгрузить логи» → share лог-файла
-    static final int MSG_SPLIT_LAUNCH_VD            = 34; // сплит на VirtualDisplay (data left/right, arg1=ratio, data leftDpi/rightDpi)
+    static final int MSG_SPLIT_LAUNCH_VD            = 34; // single → physical WM-clamped task; pair → VD split
     static final int MSG_APOLLO_TLC_QUERY           = 36; // запрос read-only снимка PLC/TLC
-    static final int MSG_APOLLO_TLC_SET             = 37; // PLC_SWITCH (arg1: 1=вкл, 0=выкл)
-    static final int MSG_APOLLO_GLA_SET             = 39; // распознавание светофоров
-    static final int MSG_APOLLO_GLA_SOUND_SET       = 40; // звук при зелёном сигнале
-    static final int MSG_APOLLO_TSR_SET             = 41; // распознавание дорожных знаков
     static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
     static final String ACTION_LOG_UPDATE  = "ru.big.town.anative.LOG_UPDATE";
     static final String ACTION_LOGGING_SET   = "ru.big.town.anative.LOGGING_SET";   // extra "on" bool
     static final String ACTION_LOGGING_SHARE = "ru.big.town.anative.LOGGING_SHARE";
     static final String RESTOREMODE_PKG   = "ru.big.town.restoremode";
     static final String RESTOREMODE_MAIN  = "ru.big.town.restoremode.MainActivity";
+    private static final String RESTOREMODE_CONFIG_SYNC_ACTION =
+            "ru.big.town.restoremode.SYNC_SAVED_CONFIG";
+    private static final String RESTOREMODE_CONFIG_SYNC_RECEIVER =
+            "ru.big.town.restoremode.SavedConfigSyncReceiver";
     static final String TAG = "$$$ SetModesService $$$";
     private static final long CAR_POWER_RECONNECT_DELAY_MS = 5_000L;
     private static final long CAR_POWER_CONNECT_WATCHDOG_MS = 15_000L;
@@ -92,13 +92,12 @@ public class SetModesService extends Service {
                 case MSG_AUTO_LIGHT_ENABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_ENABLE");
                     saveAutoLightState(true);
-                    startLightSensorService(true);
+                    startLightSensorService();
                     break;
 
                 case MSG_AUTO_LIGHT_DISABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_DISABLE");
                     saveAutoLightState(false);
-                    LightSensorService.cancelExplicitAutoResume();
                     stopLightSensorService();
                     break;
 
@@ -175,7 +174,22 @@ public class SetModesService extends Service {
                             + " ratio=" + msg.arg1 + " lDpi=" + lDpi + " rDpi=" + rDpi
                             + " resizable=" + resizable + " split=" + split + " preset=" + presetIdx
                             + " presetId=" + presetId);
-                    launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi, resizable, split, presetIdx, presetId);
+                    if (right == null || right.isEmpty()) {
+                        boolean dpiReloaded = SetModesReceiverDynamic.ensureAppDpi(
+                                SetModesService.this, left, lDpi);
+                        Runnable launch = () -> SetModesReceiverDynamic.openFreeformApp(
+                                SetModesService.this, left, 0);
+                        if (dpiReloaded) {
+                            // WIN_RELOAD is asynchronous in system_server; let it clear the DPI cache
+                            // and reattach the config hook before ActivityRecord is first configured.
+                            mainHandler.postDelayed(launch, 300L);
+                        } else {
+                            launch.run();
+                        }
+                    } else {
+                        launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi,
+                                resizable, split, presetIdx, presetId);
+                    }
                     break;
                 }
 
@@ -195,28 +209,6 @@ public class SetModesService extends Service {
                     ApolloTlcService.requestQuery(SetModesService.this,
                             apolloQuery.getLong(ApolloTlcService.EXTRA_DEMAND_SESSION, 0L),
                             apolloQuery.getBinder(ApolloTlcService.EXTRA_DEMAND_OWNER));
-                    break;
-
-                case MSG_APOLLO_TLC_SET:
-                    Log.i(TAG, "handleMessage() MSG_APOLLO_TLC_SET arg1=" + msg.arg1);
-                    ApolloTlcService.requestTlcSet(SetModesService.this, msg.arg1 == 1,
-                            msg.arg1 == 0 || msg.arg1 == 1);
-                    break;
-
-
-                case MSG_APOLLO_GLA_SET:
-                    ApolloTlcService.requestGlaSet(SetModesService.this, msg.arg1 == 1,
-                            msg.arg1 == 0 || msg.arg1 == 1);
-                    break;
-
-                case MSG_APOLLO_GLA_SOUND_SET:
-                    ApolloTlcService.requestGlaSoundSet(SetModesService.this, msg.arg1 == 1,
-                            msg.arg1 == 0 || msg.arg1 == 1);
-                    break;
-
-                case MSG_APOLLO_TSR_SET:
-                    ApolloTlcService.requestTsrSet(SetModesService.this, msg.arg1 == 1,
-                            msg.arg1 == 0 || msg.arg1 == 1);
                     break;
 
                 default:
@@ -422,15 +414,13 @@ public class SetModesService extends Service {
         launchVirtualSplit(leftPkg, rightPkg, ratio, leftDpi, rightDpi, false, 0f, -1, "");
     }
 
-    /**
-     * ВНИМАНИЕ: пустой rightPkg — это ШТАТНЫЙ одиночный режим (ярлык приложения с главного экрана
-     * VoyahTune), а не ошибка. Именно поэтому запуск идёт здесь, а не через
-     * SplitHostActivity.launchSplit — тот пустой правый пакет отвергает и ярлыки молча не открывались.
-     */
+    /** Только двухпанельный VD split. Одиночный пакет маршрутизируется в обычную physical task. */
     private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi,
                                     boolean resizable, float split, int presetIdx, String presetId) {
-        if (leftPkg == null || leftPkg.isEmpty()) return; // rightPkg пуст = одиночный полноэкранный режим
-        if (rightPkg == null) rightPkg = "";
+        if (leftPkg == null || leftPkg.isEmpty() || rightPkg == null || rightPkg.isEmpty()) {
+            Log.w(TAG, "launchVirtualSplit: нужны два пакета");
+            return;
+        }
         try {
             android.provider.Settings.Global.putInt(getContentResolver(), "enable_freeform_support", 1);
             android.provider.Settings.Global.putInt(getContentResolver(), "force_resizable_activities", 1);
@@ -571,7 +561,7 @@ public class SetModesService extends Service {
         boolean autoLight = prefs().getBoolean("autoLight", false);
         Log.i(TAG, "restoreAutoLightState: autoLight=" + autoLight);
         if (autoLight) {
-            startLightSensorService(false);
+            startLightSensorService();
         }
     }
 
@@ -637,13 +627,9 @@ public class SetModesService extends Service {
         }
     }
 
-    private void startLightSensorService(boolean explicitUserEnable) {
-        if (explicitUserEnable) {
-            LightSensorService.requestExplicitAutoResume(this);
-        } else {
-            Intent intent = new Intent(this, LightSensorService.class);
-            startForegroundService(intent);
-        }
+    private void startLightSensorService() {
+        Intent intent = new Intent(this, LightSensorService.class);
+        startForegroundService(intent);
         Log.i(TAG, "LightSensorService started");
     }
 
@@ -712,15 +698,30 @@ public class SetModesService extends Service {
         mainHandler.removeCallbacks(floatingBackEnableRunnable);
     }
 
+    /**
+     * Просит RestoreMode повторно опубликовать сохранённые Dock/steering настройки. Это одно
+     * explicit событие на startup/wake, а не polling: receiver читает локальные prefs и отправляет
+     * их существующему signature-protected SetModesConfigReceiver.
+     */
+    private void requestSavedConfigSync(String source) {
+        Intent intent = new Intent(RESTOREMODE_CONFIG_SYNC_ACTION);
+        intent.setClassName(RESTOREMODE_PKG, RESTOREMODE_CONFIG_SYNC_RECEIVER);
+        intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+        try {
+            sendBroadcast(intent);
+            Log.i(TAG, "saved config sync requested by " + source);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "saved config sync request failed: " + e.getMessage());
+        }
+    }
+
     private void runWakeSideEffects(String source) {
         if (serviceDestroyed) return;
         if (beginWakeSession()) {
+            requestSavedConfigSync("physical wake");
             resetWiperColdOnPowerOn();
             forwardPowerOnToTripStats();
             BatteryHeatService.requestPhysicalWake(this);
-            if (prefs().getBoolean("autoLight", false)) {
-                LightSensorService.requestPhysicalWake(this);
-            }
             scheduleAncillaryWakeTasks();
             Log.i(TAG, "wake side-effects started by " + source);
         } else {
@@ -758,9 +759,6 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
-        // Manual steering-wheel light commands must be ready even when automatic light is off.
-        // Transport recovery is finite/event-scoped; there is no periodic Binder work here.
-        HeadlightCanTransport.initialize(this);
         screenOffObserved = !isScreenInteractive();
         initializeCarPowerManager();
         setModesReceiverDynamic = new SetModesReceiverDynamic(
@@ -1121,6 +1119,7 @@ public class SetModesService extends Service {
         // зависимостей и delayed-задач нужна один раз; повторный onStartCommand не должен плодить bind/UI.
         if (!startupInitialized) {
             startupInitialized = true;
+            requestSavedConfigSync("service start");
             ApplyEngine.scheduleApply("service start");
             restoreAutoLightState();
             restoreWiperColdState();

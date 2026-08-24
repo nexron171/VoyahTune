@@ -5,29 +5,30 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 VD="$ROOT/Packaging/inject/vd_bypass.js"
 DOCK="$ROOT/Packaging/inject/launcherdock.js"
 RECEIVER="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java"
+SERVICE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 HOST="$ROOT/Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java"
 MANIFEST="$ROOT/Native/app/src/main/AndroidManifest.xml"
+RESTORE_MAIN="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/MainActivity.java"
 
 fail() {
-    echo "vd hot-hook safety test failed: $*" >&2
+    echo "vd/freeform hook contract test failed: $*" >&2
     exit 1
 }
 
 node --check "$VD"
 node --check "$DOCK"
 
-[ "$(grep -Fxc '    var SYSTEM_SERVER_FREEFORM_HOT_HOOKS = false;' "$VD")" -eq 1 ] \
-    || fail "vd_bypass safety literal must be false and unique"
-[ "$(grep -Fxc '    var SYSTEM_SERVER_FREEFORM_HOT_HOOKS = false;' "$DOCK")" -eq 1 ] \
-    || fail "launcherdock safety literal must be false and unique"
+[ "$(grep -Fxc '    var SYSTEM_SERVER_FREEFORM_HOT_HOOKS = true;' "$VD")" -eq 1 ] \
+    || fail "global Android 11 physical-window hooks must be enabled"
+if grep -Fq 'SYSTEM_SERVER_FREEFORM_HOT_HOOKS' "$DOCK"; then
+    fail "launcher must not independently disable global WindowManager windowing"
+fi
 
 attach_line=$(grep -nF '    function attachFreeformHotHooks(reason) {' "$VD" | cut -d: -f1)
-guard_line=$(grep -nF '        if (!SYSTEM_SERVER_FREEFORM_HOT_HOOKS) return;' "$VD" | head -1 | cut -d: -f1)
 layout_attach_line=$(grep -nF 'ffLayoutMethod.implementation = ffLayoutImplementation;' "$VD" | cut -d: -f1)
 config_attach_line=$(grep -nF 'ffConfigMethod.implementation = ffConfigImplementation;' "$VD" | cut -d: -f1)
-[ "$guard_line" -gt "$attach_line" ] || fail "hot-hook guard must be inside attach function"
-[ "$guard_line" -lt "$layout_attach_line" ] || fail "layout hook can attach before safety guard"
-[ "$guard_line" -lt "$config_attach_line" ] || fail "config hook can attach before safety guard"
+[ "$layout_attach_line" -gt "$attach_line" ] || fail "layout hook attach is outside attach function"
+[ "$config_attach_line" -gt "$attach_line" ] || fail "config hook attach is outside attach function"
 [ "$(grep -Fc 'ffLayoutMethod.implementation = ffLayoutImplementation;' "$VD")" -eq 1 ] \
     || fail "unexpected layout attach path"
 [ "$(grep -Fc 'ffConfigMethod.implementation = ffConfigImplementation;' "$VD")" -eq 1 ] \
@@ -43,25 +44,44 @@ do
     grep -Fq "$core_hook" "$VD" || fail "missing core VD hook: $core_hook"
 done
 
-grep -Fq 'return SYSTEM_SERVER_FREEFORM_HOT_HOOKS' "$DOCK" \
-    || fail "floating-home policy is not tied to hot-hook safety flag"
-grep -Fq 'SplitHostActivity.launchSingle(app, pkg, dpi, displayId)' "$RECEIVER" \
-    || fail "single-app launch does not use one-pane VD"
-grep -Fq 'public static void launchSingle' "$HOST" \
-    || fail "one-pane VD entry point missing"
-grep -Fq 'i.putExtra(EXTRA_RIGHT, "")' "$HOST" \
-    || fail "one-pane VD must keep the right pane empty"
+grep -Fq 'return !isStockPkg(pkg);' "$DOCK" \
+    || fail "Dock pinning is not global for all non-stock apps"
+grep -Fq 'var floatHomeOff = function () { return cfg("floathome") !== "0"; };' "$DOCK" \
+    || fail "floating Home suppression is not restored globally"
+if grep -Fq 'android.activity.windowingMode' "$RECEIVER"; then
+    fail "single-app launch must remain a normal task for WindowManager frame clamping"
+fi
+if grep -Fq 'setLaunchBounds' "$RECEIVER"; then
+    fail "Native must not bypass the global WindowManager bounds contract"
+fi
+grep -Fq 'app.startActivity(launchIntent, optionBundle)' "$RECEIVER" \
+    || fail "target package is not launched as the real top activity"
+grep -Fq 'SetModesReceiverDynamic.ensureAppDpi(' "$SERVICE" \
+    || fail "single-app launch discards its configured DPI"
+grep -Fq 'mainHandler.postDelayed(launch, 300L)' "$SERVICE" \
+    || fail "single-app launch can race the asynchronous WindowManager DPI cache reload"
+if grep -Fq 'SplitHostActivity.launchSingle' "$RECEIVER"; then
+    fail "single-app launch still routes through one-pane VirtualDisplay"
+fi
+grep -Fq 'if (right == null || right.isEmpty())' "$SERVICE" \
+    || fail "single app Messenger request is not separated from VD split"
+grep -Fq 'SetModesReceiverDynamic.openFreeformApp(' "$SERVICE" \
+    || fail "VoyahTune single app request does not use physical target task"
+grep -Fq 'sendAppWindow(pkg)' "$RESTORE_MAIN" \
+    || fail "VoyahTune app tile still uses the old single-VD path"
+if grep -Fq 'sendAppVd' "$RESTORE_MAIN"; then
+    fail "obsolete single-app VD sender remains reachable"
+fi
 grep -Fq 'android:launchMode="singleTop"' "$MANIFEST" \
-    || fail "one-pane VD host must reuse the active instance"
+    || fail "VD split host must reuse the active instance"
 if grep -Fq 'closeActiveSplit' "$RECEIVER" "$HOST"; then
     fail "obsolete delayed split handoff is still reachable"
 fi
-if grep -Fq 'postDelayed' "$RECEIVER"; then
-    fail "single-app receiver must not queue a stale delayed launch"
-fi
+grep -Fq 'static boolean closeActiveHost()' "$HOST" \
+    || fail "physical launch cannot retire an active VD split"
 grep -Fq 'VD_FLAGS_TRUSTED  = 1 | 8 | 256 | 1024' "$HOST" \
     || fail "trusted VD must destroy content when removed"
 grep -Fq 'VD_FLAGS_FALLBACK = 1 | 8 | 256' "$HOST" \
     || fail "fallback VD must destroy content when removed"
 
-echo "vd hot-hook safety test: OK"
+echo "vd/freeform hook contract test: OK"

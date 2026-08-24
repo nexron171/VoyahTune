@@ -55,9 +55,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         }
 
-        // Одиночное приложение из дока снова идёт через однопанельный VirtualDisplay. Это сохраняет рамку
-        // и per-app DPI, но убирает два глобальных Frida hot-hook из WindowManager system_server.
-        // Уже живой host получает новый intent и сам пересоздаёт VD без delayed handoff. Только full.
+        // Одиночное приложение из дока открываем обычной задачей целевого пакета на физическом дисплее.
+        // Глобальный WindowManager hook ужмёт её рамку; VD остаётся только для split-пресетов. Только full.
         if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && BuildConfig.IS_FULL) {
             // display: на каком экране открыть. Отсутствует → 0 (водительский), т.е. прежнее поведение.
             String pkg = intent.getStringExtra("pkg");
@@ -161,8 +160,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             android.content.ContentResolver cr = ctx.getContentResolver();
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot, pkg);
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "Dpi", String.valueOf(dpi));
-            // Per-package DPI читает one-pane VD launcher: 0 тоже обязательно зеркалируем. Иначе после
-            // выбора «Авто» в Settings.Global навсегда оставалось старое ненулевое значение.
+            // Per-package DPI остаётся для VD split-панелей: 0 тоже обязательно зеркалируем. Иначе
+            // после выбора «Авто» в Settings.Global навсегда оставалось старое ненулевое значение.
             if (!"none".equals(pkg)) {
                 android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
             }
@@ -188,6 +187,78 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         } catch (Exception e) {
             Log.w(TAG, "mirrorDock " + slot + ": " + e.getMessage());
         }
+    }
+
+    /** Полный event-driven снимок per-app DPI. Никакого polling: вызывается при изменении и startup/wake. */
+    static void mirrorAppDpi(Context ctx, Intent intent) {
+        String json = intent.getStringExtra("appDpiJson");
+        if (json == null) return;
+        try {
+            android.content.ContentResolver cr = ctx.getContentResolver();
+            org.json.JSONObject values = new org.json.JSONObject(json);
+            java.util.LinkedHashSet<String> next = new java.util.LinkedHashSet<>();
+            java.util.Iterator<String> keys = values.keys();
+            while (keys.hasNext()) {
+                String pkg = keys.next();
+                if (!validPackageName(pkg)) continue;
+                int dpi = sanitizeDpi(values.optInt(pkg, 0));
+                if (dpi <= 0) continue;
+                android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg,
+                        String.valueOf(dpi));
+                next.add(pkg);
+            }
+
+            String previous = android.provider.Settings.Global.getString(cr,
+                    "voyahtune_dpi_packages");
+            if (previous != null && !previous.isEmpty()) {
+                for (String pkg : previous.split(",")) {
+                    if (validPackageName(pkg) && !next.contains(pkg)) {
+                        android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg, "0");
+                    }
+                }
+            }
+
+            // Explicit delta closes the first-migration hole when the user changes a previously
+            // unindexed package to «Авто» and the authoritative JSON no longer contains that key.
+            String changedPkg = intent.getStringExtra("changedPkg");
+            if (validPackageName(changedPkg)) {
+                int changedDpi = sanitizeDpi(intent.getIntExtra("changedDpi", 0));
+                android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + changedPkg,
+                        String.valueOf(changedDpi));
+                if (changedDpi > 0) next.add(changedPkg); else next.remove(changedPkg);
+            }
+            android.provider.Settings.Global.putString(cr, "voyahtune_dpi_packages",
+                    android.text.TextUtils.join(",", next));
+        } catch (Exception e) {
+            Log.w(TAG, "mirrorAppDpi: " + e.getMessage());
+        }
+    }
+
+    /** Launch-time fallback for an app tile if the earlier config broadcast was missed. */
+    static boolean ensureAppDpi(Context ctx, String pkg, int dpi) {
+        if (!validPackageName(pkg)) return false;
+        dpi = sanitizeDpi(dpi);
+        try {
+            android.content.ContentResolver cr = ctx.getContentResolver();
+            String key = "voyahtune_dpi_" + pkg;
+            String wanted = String.valueOf(dpi);
+            String current = android.provider.Settings.Global.getString(cr, key);
+            if (wanted.equals(current)) return false;
+            android.provider.Settings.Global.putString(cr, key, wanted);
+            sendWinReload(ctx);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "ensureAppDpi " + pkg + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean validPackageName(String pkg) {
+        return pkg != null && !pkg.isEmpty() && pkg.matches("[A-Za-z0-9_.]+") && pkg.indexOf('.') > 0;
+    }
+
+    private static int sanitizeDpi(int dpi) {
+        return dpi >= 100 && dpi <= 640 ? dpi : 0;
     }
 
     private static String nz(String s) { return s == null ? "" : s; }
@@ -224,8 +295,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         return false;
     }
 
-    /** Legacy флаг + bounds физического «оконного режима» → Settings.Global.
-     *  Два system_server hot-hook теперь compile-time disabled; значения оставляем для rollback/debug.
+    /** Флаг + bounds физического «оконного режима» → Settings.Global.
+     *  Два system_server hook читают их в кэш только при attach/WIN_RELOAD, не на каждом layout.
      *  extras: on(boolean, опц.), left/top/right/bottom(int, опц., пишем только >=0). */
     static void mirrorFreeform(Context ctx, Intent intent) {
         try {
@@ -242,8 +313,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         } catch (Exception e) { Log.w(TAG, "mirrorFreeform: " + e.getMessage()); }
     }
 
-    /** Разбудить vd_bypass config receiver. Hot-hook attach compile-time запрещён, но reload сохраняем
-     *  для совместимости и диагностики; receiver гейтится WRITE_SECURE_SETTINGS. */
+    /** Разбудить vd_bypass config receiver: перечитать кэш и переустановить WindowManager hooks.
+     *  Receiver гейтится WRITE_SECURE_SETTINGS. */
     static void sendWinReload(Context ctx) {
         try {
             Intent w = new Intent("ru.big.town.anative.WIN_RELOAD");
@@ -319,8 +390,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
     }
 
-    /** Открыть приложение однопанельным VD-хостом на указанном физическом экране. Общий путь для
-     *  OPEN_FREEFORM (клик слота дока) и действия кнопки руля «app:». */
+    /** Открыть приложение обычной задачей на физическом экране; vd_bypass.js ужмёт рамку окна. */
     static void openFreeformApp(Context context, String pkg) {
         openFreeformApp(context, pkg, 0);
     }
@@ -337,18 +407,25 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     static void openFreeformApp(Context context, String pkg, int displayId) {
         if (pkg == null || pkg.isEmpty()) return;
         final Context app = context.getApplicationContext();
-        int dpi = 0;
-        try {
-            dpi = parseIntSafe(android.provider.Settings.Global.getString(
-                    app.getContentResolver(), "voyahtune_dpi_" + pkg), 0);
-        } catch (Exception e) {
-            Log.w(TAG, "openFreeformApp dpi: " + e.getMessage());
+        Intent launchIntent = app.getPackageManager().getLaunchIntentForPackage(pkg);
+        if (launchIntent == null) { Log.w(TAG, "openFreeformApp: нет launch intent для " + pkg); return; }
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        DockLaunchGuard.arm(app, displayId, pkg);
+        boolean closedVdHost = SplitHostActivity.closeActiveHost();
+        android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+        options.setLaunchDisplayId(displayId);
+        final android.os.Bundle optionBundle = options.toBundle();
+        Runnable launch = () -> {
+            try { app.startActivity(launchIntent, optionBundle); }
+            catch (Exception e) { Log.w(TAG, "openFreeformApp: " + e.getMessage()); }
+        };
+        if (closedVdHost) {
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(launch, 500L);
+        } else {
+            launch.run();
         }
-        // SplitHostActivity is singleTop: an existing single/split host receives onNewIntent and
-        // recreate() releases old VDs before building the latest request. No stale delayed launch.
-        SplitHostActivity.launchSingle(app, pkg, dpi, displayId);
-        Log.i(TAG, "openFreeformApp one-pane VD pkg=" + pkg + " display=" + displayId
-                + " dpi=" + dpi);
+        Log.i(TAG, "openFreeformApp window-managed pkg=" + pkg + " display=" + displayId
+                + " closedVdHost=" + closedVdHost);
     }
 
     /**

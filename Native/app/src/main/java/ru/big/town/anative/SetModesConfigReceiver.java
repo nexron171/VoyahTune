@@ -41,6 +41,10 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             SetModesReceiverDynamic.mirrorFreeform(context, intent);
             SetModesReceiverDynamic.sendWinReload(context);
             Log.i(TAG, "FREEFORM_CONFIG зеркалирован + reload");
+        } else if ("ru.big.town.anative.APP_DPI_CONFIG".equals(action)) {
+            SetModesReceiverDynamic.mirrorAppDpi(context, intent);
+            SetModesReceiverDynamic.sendWinReload(context);
+            Log.i(TAG, "APP_DPI_CONFIG зеркалирован + reload");
         }
     }
 }

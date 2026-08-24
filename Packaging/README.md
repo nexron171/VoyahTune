@@ -20,8 +20,8 @@ Releases/dist/VoyahTune-3.2.2-light.zip
 
 ## Состав
 
-`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher и multidisplay. `light` не
-содержит Frida и `load.bin`. Прямой Native Binder-контур Apollo входит в оба варианта.
+`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay и ADAS entitlement. `light` не
+содержит Frida и `load.bin`. Read-only диагностика Apollo входит в оба варианта.
 
 | Папка | Что | Куда идёт |
 |---|---|---|
@@ -36,6 +36,18 @@ Light всё равно требует `adb root` и запись в `/system` �
 заменяет штатный `/system/etc/init.logcat.sh`: загрузочная обвязка живёт в собственном
 `voyahtune.load.rc`. `init.logcat.original.sh` нужен только для безопасной миграции старого релиза.
 
+Одиночное стороннее приложение запускается обычной задачей целевого пакета на физическом дисплее,
+поэтому системный top activity принадлежит этому пакету. Два кэшированных WindowManager hook в
+`system_server` глобально ужимают окна всех сторонних приложений в настроенный прямоугольник и применяют
+per-app DPI независимо от источника запуска. На `SCREEN_OFF` hooks снимаются, после пробуждения ставятся
+обратно. Native перед одиночным запуском закрывает активный VD-host; VirtualDisplay остаётся только для
+split двух приложений.
+
+Per-app DPI хранится в `DrivePreferences` и event-driven зеркалируется в
+`Settings.Global/voyahtune_dpi_<package>` при изменении, старте Native и пробуждении. `WIN_RELOAD`
+сбрасывает только кэш WindowManager hook; периодического чтения настроек нет. Переход в «Авто» явно
+публикует `0`, поэтому ранее выбранный DPI не остаётся зависшим.
+
 ## Зафиксированный DNS RRO
 
 `vendor-overlay/framework-res__config_ethernet_interfaces_yandexdns.apk` — статический RRO для
@@ -49,24 +61,33 @@ Device-helper проверяет checksum, Android API 30, ожидаемую к
 Неизвестный чужой overlay не перезаписывается и не удаляется. Windows-установщики DNS не меняют;
 для этого отдельно запускается `install-yandex-dns.bat`.
 
-## Apollo/ADAS: только прямой Native-контур
+## Apollo/ADAS: entitlement как в voboost + read-only диагностика
 
-Legacy VehicleSetting/Frida hook удалён. В релизе нет `apollo_tech.js`, opt-in, Apollo PID-marker,
-profile heartbeat и master-переключателя. `load.bin` не читает Apollo Settings, не ищет
-`com.qinggan.app.vehiclesetting` и не выполняет Apollo-инъекцию.
+Full-релиз содержит минимальный `apollo_tech.js`, повторяющий
+`tmp/voboost-script/agents/adas-activation-mod.js`: в процессе
+`com.qinggan.app.vehiclesetting` он подменяет только `BaiduProviderUtil.doQuerySubscribeInfo()`
+(активная, не истёкшая подписка на 30 дней) и `doQueryNOALearnInfo()` (`"1"`, обучение NOA
+завершено). Hook не отправляет CAN-команды, не подписывается на CAN callback и не вызывает прежний
+`DriveAssistanceAdasStatusManager.asyncQueryAdasSubData()`.
 
-Установщики один раз очищают следы старых версий: записывают безопасные нули в прежние ключи,
-останавливают VehicleSetting, удаляют старый agent/marker/log и затем удаляют устаревшие
-`Settings.Global`. Это миграция, а не runtime polling. Скрипты удаления также никогда не
-восстанавливают `apollo_tech.js` из backup старого релиза.
+`load.bin` не читает Apollo Settings. В уже существующем 10-секундном watchdog добавлена только
+проверка process identity VehicleSetting через `pidof`: каждая identity получает не более одной
+попытки Frida-injection, успешной или неуспешной. После штатного перезапуска VehicleSetting новая
+identity получает новую попытку, поэтому entitlement восстанавливается без открытия Apollo Tech.
+Full installer перезагружает ГУ; VehicleSetting штатно стартует при загрузке. Light-релиз не содержит
+Frida и удаляет hook при переходе full → light.
+
+Старые opt-in/master/profile/heartbeat ключи по-прежнему удаляются установщиками как одноразовая
+миграция. Remove останавливает VehicleSetting, выгружает eternalized agent и удаляет новый exact
+PID/attempt marker и лог, поэтому цикл remove → install начинает работу с чистого состояния.
 
 Прямой H97X Binder-контур:
 
-- работает в full и light без VehicleSetting и Frida;
+- работает в full и light как независимая read-only диагностика; entitlement доступен только в full;
 - перед подключением проверяет установленную CanBus schema и `WRITE_CANBUS` permission;
 - не подписывается на общий поток CAN callback (`TX28/TX29`);
-- читает состояние при подключении, явном запросе UI и непосредственно перед записью;
-- не делает delayed `TX57` confirmation и автоматические фоновые entitlement-resync;
+- при открытом разделе читает текущие PLC/GLA/TSR через `TX57` и положение селектора через `TX6`;
+- не содержит команд активации, `TX58`, `TX77`, entitlement-вектора или delayed confirmation;
 - изолирован в приватном процессе `:apollo`.
 
 Каждый синхронный vendor Binder call имеет одноразовый 15-секундный deadline. При зависании
@@ -77,23 +98,29 @@ RestoreMode: смерть клиента освобождает transport без
 
 ## Full loader и нагрузка
 
-Постоянный 10-секундный watchdog full-варианта обслуживает только VD, launcher, keymanager и
-multidisplay. Повторная тяжёлая Frida-инъекция в тот же PID после ошибки ограничена backoff
-10/20/40/60 секунд; новый PID сбрасывает задержку. Owner/busy lock loops имеют sleep и конечный
-budget, поэтому повреждённый lock path не создаёт 100% CPU spin.
+Постоянный 10-секундный watchdog full-варианта обслуживает VD, launcher, keymanager, multidisplay и
+обнаружение новой process identity VehicleSetting. Каждая точная identity получает не более одной
+тяжёлой Frida-попытки; ошибка не создаёт повторяющийся injection loop, а новый процесс получает новую
+попытку. Owner/busy lock loops имеют sleep и конечный budget, поэтому повреждённый lock path не
+создаёт 100% CPU spin.
 
 Это не меняет политику внутренних автомобильных watchdog: редкие собственные проверки, нужные для
 возврата целевого состояния, сохраняются. Оптимизация направлена прежде всего на работу,
 размножаемую входящим потоком CAN-событий.
 
+Сохранённые настройки Dock и кнопок руля не зависят от открытия экранов RestoreMode. Native
+запрашивает их публикацию один раз при старте `SetModesService` и один раз внутри coalesced-сессии
+физического пробуждения автомобиля. Запрос explicit и защищён signature-permission; периодического
+опроса для этой синхронизации нет.
+
 ## Установка и диагностика Apollo
 
-После установки достаточно открыть раздел Apollo Tech. В `logcat` должны быть сообщения
-`ApolloTlcService`; `[apollo] hook ready` больше не существует и не ожидается. Старые ключи
-`open_voyah_apollo_legacy_hook_enabled`, `open_voyah_apollo_master`, profile/heartbeat и файл
-`/data/local/bin/apollo_tech.js` после миграции отсутствуют.
-
-Первичные проверки выполняются на неподвижном автомобиле в `P` со стояночным тормозом.
+Full installer сам перезагружает ГУ; открывать Apollo Tech или штатные настройки для загрузки hook
+не требуется. Успех виден по `[apollo] hook ready profile=voboost` в
+`/data/local/tmp/voyahtune_apollo.txt` или logcat tag `VoyahApollo`. Раздел Apollo Tech показывает
+штатные состояния функций, но CAN-команды не отправляет: после открытия entitlement сами функции
+включаются и настраиваются через штатный экран автомобиля. В light `[apollo] hook ready` не
+ожидается.
 
 ## Версия и структура релиза
 

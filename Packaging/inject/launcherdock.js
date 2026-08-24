@@ -13,9 +13,8 @@
 //     pm.getApplicationIcon → Bitmap → 50x50 → BitmapDrawable + Java.retain. Всё на main-треде + invalidate.
 //     Хук updateTheme переустанавливает иконки после каждой перекраски темы (иначе фон сбрасывается).
 //   • КЛИК — onClick сравнивает view.getId() с getId() закэшированных полей mScreenUpItemView1/2. При
-//     совпадении и если pkg установлен — делегируем Native. Native запускает one-pane SplitHostActivity:
-//     рамка и per-app DPI задаются VirtualDisplay без layoutWindowLw/ensureActivityConfiguration в
-//     system_server. Те два legacy hot-hook жёстко выключены тем же флагом ниже.
+//     совпадении и если pkg установлен — делегируем Native. Native запускает обычную задачу целевого
+//     пакета на display 0, а vd_bypass ужимает её WindowManager-рамку. VD — только для split-пресетов.
 //   • ДОЛГИЙ ТАП по слоту — если слоту назначен сплит (voyahtune_dockN HasSplit=="1"), шлём Native
 //     broadcast OPEN_DOCK_SPLIT (slot) → Native читает детали сплита из Settings.Global и стартует его на
 //     VD. Если сплит не назначен — слушатель возвращает false (штатное долгое поведение лаунчера). Назначение
@@ -32,9 +31,6 @@ Java.perform(function () {
     var RELOAD_ACT = "ru.big.town.anative.DOCK_RELOAD";
     var OUR_PKG    = "ru.big.town.anative";           // наш VD-хост (SplitHostActivity) для подсветки
     var RESTORE_PKG = "ru.big.town.restoremode";      // VoyahTune (UI) — открывается долгим тапом по «меню»
-    // Keep in sync with vd_bypass.js. External physical-window pinning is unsafe without its legacy
-    // WindowManager hot hooks; our own inset-aware SplitHost/RestoreMode screens remain pinnable.
-    var SYSTEM_SERVER_FREEFORM_HOT_HOOKS = false;
 
     var ActivityThread = Java.use("android.app.ActivityThread");
     var SettingsGlobal = Java.use("android.provider.Settings$Global");
@@ -144,10 +140,9 @@ Java.perform(function () {
     // ЕДИНОЕ условие «док должен остаться под этим окном». Одно на всех потребителей — раньше их было
     // три с разными предикатами, и они противоречили друг другу.
     function dockKept(pkg, act) {
+        if (cfg("dockpin") === "0" || cfg("freeform") === "0") return false;
         if (!pkg) return false;                                  // неизвестно → не мешаем штатному
         if (pkg.indexOf("ru.big.town") === 0) return ourInsetActivity(act);
-        if (!SYSTEM_SERVER_FREEFORM_HOT_HOOKS
-                || cfg("dockpin") === "0" || cfg("freeform") === "0") return false;
         return !isStockPkg(pkg);
     }
 
@@ -155,6 +150,7 @@ Java.perform(function () {
     // startActivity. Это закрывает окно гонки dismiss → updateSelectedApp при запуске со звёздочки:
     // foreground-кэш в этот момент ещё закономерно содержит Launcher/старое приложение.
     function pendingDockLaunch(screenId) {
+        if (cfg("dockpin") === "0" || cfg("freeform") === "0") return null;
         try {
             var raw = cfg("dockLaunchGuard" + screenId);
             if (raw === "none") return null;
@@ -167,12 +163,9 @@ Java.perform(function () {
             // elapsedRealtime снова начинается с нуля. Штатный guard держится 5 секунд.
             if (isNaN(deadline) || remaining <= 0 || remaining > 10000) return null;
             var pkg = raw.substring(sep + 1);
-            var ownInsetHost = pkg === OUR_PKG || pkg === RESTORE_PKG;
-            if (!ownInsetHost && (!SYSTEM_SERVER_FREEFORM_HOT_HOOKS
-                    || cfg("dockpin") === "0" || cfg("freeform") === "0")) return null;
             // Guard не должен удержать док поверх полноэкранного штатного приложения, которому
             // штатный dismiss как раз нужен. Для наших двух inset-экранов activity заранее известна.
-            var keep = ownInsetHost
+            var keep = (pkg === OUR_PKG || pkg === RESTORE_PKG)
                     || (pkg.indexOf("ru.big.town") !== 0 && !isStockPkg(pkg));
             if (!keep) return null;
             return { pkg: pkg, remaining: remaining };
@@ -392,9 +385,8 @@ Java.perform(function () {
         } catch (e) { Log.e(TAG, "[dock] choose err: " + e); }
     }
 
-    // Одиночный запуск из слота делегируем Native (broadcast OPEN_FREEFORM): Native закроет активный
-    // VD-сплит и поднимет тот же пакет в one-pane SplitHostActivity. Так bounds/DPI остаются свойством
-    // VirtualDisplay, а не глобальных WindowManager hooks в system_server.
+    // Freeform-запуск приложения из слота дока делегируем Native: Native закроет активный VD-сплит и
+    // запустит обычную задачу целевого пакета на display 0. Системный vd_bypass затем ужмёт её рамку.
     function launchFreeform(pkg) {
         try {
             var i = Intent.$new("ru.big.town.anative.OPEN_FREEFORM");
@@ -459,7 +451,7 @@ Java.perform(function () {
         };
 
         // 3) КЛИК: слот определяем сравнением view.getId() с getId() закэшированных полей (НЕ по индексу).
-        //    Совпал + pkg установлен → one-pane VD на display 0 и return; иначе штатный onClick.
+        //    Совпал + pkg установлен → обычная задача на display 0 + системный frame clamp; иначе штатный onClick.
         NavigationBarMain.onClick.implementation = function (view) {
             // Пассажирский бар: НЕ перехватываем клик. Иначе тап по пассажирскому доку уходил в
             // launchFreeform → Native запускал приложение на display 0, т.е. на водительском экране.
@@ -480,15 +472,14 @@ Java.perform(function () {
             this.onClick(view);
         };
 
-        // 4) ДОК НЕ ДОЛЖЕН САМ УЕЗЖАТЬ ИЗ-ПОД НАШЕГО INSET-AWARE VD-ХОСТА.
+        // 4) ДОК НЕ ДОЛЖЕН САМ УЕЗЖАТЬ ИЗ-ПОД НАШЕГО FREEFORM-ОКНА/VD-СПЛИТА.
         //    При переносе приложения между экранами система вызывает dismiss() у навбара, и док
         //    анимированно скрывается. Для стороннего приложения это тупик: наш оконный режим оставляет
         //    полосу дока свободной, окно её не перекрывает — но самого дока уже нет, и свернуть
         //    приложение или уйти на главный экран нечем.
         //
-        //    Legacy external-window ветка жёстко выключена вместе с hot hooks. Гасим dismiss для наших
-        //    экранов, которые сами оставляют место под док; у обычных fullscreen приложений сохраняем
-        //    штатное скрытие. Аварийно отключить legacy-ветку целиком:
+        //    Гасим dismiss для любого стороннего приложения, потому что глобальный WindowManager hook
+        //    оставляет под ним полосу дока независимо от источника запуска. Аварийно отключить pinning:
         //      settings put global voyahtune_dockpin 0
         //
         //    Хукаем ДВА класса: систему устраивает дёрнуть как сам бар, так и его контроллер.
@@ -535,26 +526,19 @@ Java.perform(function () {
         //
         //    Аварийно вернуть штатное поведение: settings put global voyahtune_floathome 0
         try {
-            var floatHomeOff = function () {
-                return SYSTEM_SERVER_FREEFORM_HOT_HOOKS
-                        && cfg("freeform") !== "0" && cfg("floathome") !== "0";
-            };
+            var floatHomeOff = function () { return cfg("floathome") !== "0"; };
             var LM = Java.use("com.qinggan.app.launcher.LauncherModel");
             LM.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
                 return floatHomeOff() ? false : this.isThirdShowFloatApp(cn);
             };
-            Log.i(TAG, "[dock] floating home policy installed (LauncherModel), legacyHotHooks="
-                    + SYSTEM_SERVER_FREEFORM_HOT_HOOKS);
+            Log.i(TAG, "[dock] floating home suppressed (LauncherModel)");
         } catch (e) { Log.e(TAG, "[dock] LauncherModel.isThirdShowFloatApp skip: " + e); }
         try {
             var TAU = Java.use("com.qinggan.launcher.base.drag.ThirdAppUtil");
             TAU.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
-                return SYSTEM_SERVER_FREEFORM_HOT_HOOKS
-                        && cfg("freeform") !== "0" && cfg("floathome") !== "0"
-                        ? false : this.isThirdShowFloatApp(cn);
+                return cfg("floathome") !== "0" ? false : this.isThirdShowFloatApp(cn);
             };
-            Log.i(TAG, "[dock] floating home policy installed (ThirdAppUtil), legacyHotHooks="
-                    + SYSTEM_SERVER_FREEFORM_HOT_HOOKS);
+            Log.i(TAG, "[dock] floating home suppressed (ThirdAppUtil)");
         } catch (e) { Log.e(TAG, "[dock] ThirdAppUtil.isThirdShowFloatApp skip: " + e); }
 
         // 6) РАЗВЕДКА пути скрытия дока при переносе окна между экранами.

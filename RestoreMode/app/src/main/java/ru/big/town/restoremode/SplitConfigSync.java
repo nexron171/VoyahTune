@@ -17,8 +17,20 @@ final class SplitConfigSync {
     private SplitConfigSync() {}
 
     static void pushAll(Context context, SharedPreferences prefs) {
+        pushAppDpi(context, prefs, null, 0);
         pushDock(context, prefs);
         pushSteering(context, prefs);
+    }
+
+    /** Публикует полный DPI snapshot; changedPkg нужен, чтобы надёжно передать переход в «Авто» (0). */
+    static void pushAppDpi(Context context, SharedPreferences prefs, String changedPkg, int changedDpi) {
+        Intent i = configIntent("ru.big.town.anative.APP_DPI_CONFIG");
+        i.putExtra("appDpiJson", AppDpiStore.snapshotJson(prefs));
+        if (changedPkg != null && !changedPkg.isEmpty()) {
+            i.putExtra("changedPkg", changedPkg);
+            i.putExtra("changedDpi", Math.max(0, changedDpi));
+        }
+        context.sendBroadcast(i);
     }
 
     static void pushDock(Context context, SharedPreferences prefs) {

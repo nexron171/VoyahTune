@@ -6,8 +6,8 @@ import org.json.JSONObject;
 
 /**
  * Per-app DPI: карта «пакет → densityDpi» в DrivePreferences ("appDpi", JSON-объект).
- * 0 / отсутствие ключа = авто (дефолтный DPI дисплея). Значение берётся при открытии сплита и
- * применяется к виртуальному дисплею того окна, где запущено это приложение.
+ * 0 / отсутствие ключа = авто (дефолтный DPI дисплея). Значение применяется как к VD-панели,
+ * так и к обычной physical task через кэшированный WindowManager hook.
  */
 public class AppDpiStore {
 
@@ -32,5 +32,11 @@ public class AppDpiStore {
             p.edit().putString(KEY, o.toString()).apply();
         } catch (Exception ignored) {
         }
+    }
+
+    /** Полный авторитетный снимок для event-driven зеркалирования в Native/Settings.Global. */
+    static String snapshotJson(SharedPreferences p) {
+        String value = p.getString(KEY, "{}");
+        return (value == null || value.isEmpty()) ? "{}" : value;
     }
 }
