@@ -16,9 +16,13 @@ final class ManualAutoGate {
     private boolean manualAutoSelected;
 
     synchronized Ticket reserveManualCommand() {
+        return reserveManualCommand(null);
+    }
+
+    synchronized Ticket reserveManualCommand(Runnable onClosed) {
         pendingManualCommands++;
         revision++;
-        return new Ticket(this);
+        return new Ticket(this, onClosed);
     }
 
     synchronized boolean setSelected(boolean selected) {
@@ -30,6 +34,19 @@ final class ManualAutoGate {
 
     synchronized boolean blocksAntiAuto() {
         return manualAutoSelected || pendingManualCommands > 0;
+    }
+
+    synchronized boolean hasPendingManualCommands() {
+        return pendingManualCommands > 0;
+    }
+
+    /** Snapshot for work that has not created an automatic action token yet. */
+    synchronized long currentRevision() {
+        return revision;
+    }
+
+    synchronized boolean isRevisionCurrent(long candidate) {
+        return revision == candidate;
     }
 
     /**
@@ -56,16 +73,21 @@ final class ManualAutoGate {
     private synchronized void release(Ticket ticket) {
         if (ticket.closed) return;
         ticket.closed = true;
+        // Publish the ingress-time fence before pendingManualCommands reaches zero. Otherwise a
+        // delayed sensor event could enter beginAutomaticDecision in the unlock/callback gap.
+        if (ticket.onClosed != null) ticket.onClosed.run();
         if (pendingManualCommands > 0) pendingManualCommands--;
         revision++;
     }
 
     static final class Ticket implements AutoCloseable {
         private final ManualAutoGate owner;
+        private final Runnable onClosed;
         private boolean closed;
 
-        private Ticket(ManualAutoGate owner) {
+        private Ticket(ManualAutoGate owner, Runnable onClosed) {
             this.owner = owner;
+            this.onClosed = onClosed;
         }
 
         @Override

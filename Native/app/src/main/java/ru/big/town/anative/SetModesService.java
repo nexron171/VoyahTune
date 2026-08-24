@@ -26,6 +26,7 @@ import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 import java.util.Arrays;
 import java.util.List;
@@ -92,12 +93,13 @@ public class SetModesService extends Service {
                 case MSG_AUTO_LIGHT_ENABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_ENABLE");
                     saveAutoLightState(true);
-                    startLightSensorService();
+                    startLightSensorService(true);
                     break;
 
                 case MSG_AUTO_LIGHT_DISABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_DISABLE");
                     saveAutoLightState(false);
+                    LightSensorService.cancelExplicitAutoResume();
                     stopLightSensorService();
                     break;
 
@@ -575,7 +577,7 @@ public class SetModesService extends Service {
         boolean autoLight = prefs().getBoolean("autoLight", false);
         Log.i(TAG, "restoreAutoLightState: autoLight=" + autoLight);
         if (autoLight) {
-            startLightSensorService();
+            startLightSensorService(false);
         }
     }
 
@@ -641,9 +643,13 @@ public class SetModesService extends Service {
         }
     }
 
-    private void startLightSensorService() {
-        Intent intent = new Intent(this, LightSensorService.class);
-        startForegroundService(intent);
+    private void startLightSensorService(boolean explicitUserEnable) {
+        if (explicitUserEnable) {
+            LightSensorService.requestExplicitAutoResume(this);
+        } else {
+            Intent intent = new Intent(this, LightSensorService.class);
+            startForegroundService(intent);
+        }
         Log.i(TAG, "LightSensorService started");
     }
 
@@ -718,6 +724,9 @@ public class SetModesService extends Service {
             resetWiperColdOnPowerOn();
             forwardPowerOnToTripStats();
             BatteryHeatService.requestPhysicalWake(this);
+            if (prefs().getBoolean("autoLight", false)) {
+                LightSensorService.requestPhysicalWake(this);
+            }
             scheduleAncillaryWakeTasks();
             Log.i(TAG, "wake side-effects started by " + source);
         } else {
@@ -755,6 +764,8 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        // Manual steering-wheel light commands must be ready even when automatic light is off.
+        // Transport recovery is finite/event-scoped; there is no periodic Binder work here.
         HeadlightCanTransport.initialize(this);
         screenOffObserved = !isScreenInteractive();
         initializeCarPowerManager();
@@ -767,7 +778,8 @@ public class SetModesService extends Service {
             IntentFilter logFilter = new IntentFilter(ACTION_REQUEST_LOG);
             logFilter.addAction(ACTION_LOGGING_SET);
             logFilter.addAction(ACTION_LOGGING_SHARE);
-            registerReceiver(logRequestReceiver, logFilter, RECEIVER_EXPORTED);
+            ContextCompat.registerReceiver(this, logRequestReceiver, logFilter,
+                    ContextCompat.RECEIVER_EXPORTED);
         } catch (Exception e) {
             Log.w(TAG, "register logRequestReceiver: " + e.getMessage());
         }
@@ -1106,7 +1118,8 @@ public class SetModesService extends Service {
             filter.addAction("com.android.server.jobscheduler.GARAGE_MODE_OFF");
             filter.addAction("android.intent.action.SCREEN_ON");
             filter.addAction("android.intent.action.SCREEN_OFF");
-            getApplicationContext().registerReceiver(setModesReceiverDynamic, filter, RECEIVER_EXPORTED);
+            ContextCompat.registerReceiver(getApplicationContext(), setModesReceiverDynamic,
+                    filter, ContextCompat.RECEIVER_EXPORTED);
             receiverRegistered = true;
         }
 

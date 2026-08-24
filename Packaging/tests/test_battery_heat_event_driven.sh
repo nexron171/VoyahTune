@@ -30,8 +30,8 @@ assert_before() {
     [ "$BEFORE" -lt "$AFTER" ] || fail "$2 must appear before $3 in $1"
 }
 
-# No permanent cadence or delayed Settings retry remains. The other delayed operations are finite:
-# one connection snapshot, one UI broadcast coalescer and ApplyEngine's existing command settle.
+# Incoming CAN callbacks must not create a permanent cadence or delayed Settings retry. One
+# independent internal safety watchdog is retained for CAN activation recovery.
 for FORBIDDEN in POLL_MS FULL_QUERY_MIN_INTERVAL_MS lastFullQueryAttemptElapsed \
         pollRunnable SETTINGS_RETRY_MS settingsRetryRunnable scheduleSettingsRetry \
         'refreshGate.retry()' '"poll"'; do
@@ -39,6 +39,33 @@ for FORBIDDEN in POLL_MS FULL_QUERY_MIN_INTERVAL_MS lastFullQueryAttemptElapsed 
         fail "BatteryHeatService must remain event-driven: $FORBIDDEN"
     fi
 done
+require_fixed "$SERVICE" 'BATTERY_SAFETY_WATCHDOG_MS = 30_000L'
+require_fixed "$SERVICE" 'INCOMPLETE_SNAPSHOT_RETRY_MS = 5 * 60_000L'
+require_fixed "$SERVICE" \
+    'handler.postDelayed(batterySafetyWatchdog, BATTERY_SAFETY_WATCHDOG_MS);'
+require_fixed "$SERVICE" 'handler.postDelayed(this, BATTERY_SAFETY_WATCHDOG_MS);'
+require_fixed "$SERVICE" 'maybeAutoActivate("safety-watchdog");'
+[ "$(grep -F -c 'handler.postDelayed(this, BATTERY_SAFETY_WATCHDOG_MS);' "$SERVICE")" -eq 1 ] \
+    || fail "battery safety watchdog must have exactly one self-rearm site"
+CAN_EVENT_BLOCK=$(awk '
+    /private void onCanBusEvent\(CanBusEvent event\)/ { capture = 1 }
+    capture { print }
+    capture && /^    }$/ { exit }
+' "$SERVICE")
+if printf '%s\n' "$CAN_EVENT_BLOCK" | grep -Fq 'batterySafetyWatchdog'; then
+    fail "incoming CAN events must not schedule the battery safety watchdog"
+fi
+BATTERY_WATCHDOG_BLOCK=$(awk '
+    /private final Runnable batterySafetyWatchdog = new Runnable\(\)/ { capture = 1 }
+    capture { print }
+    capture && /^    };$/ { exit }
+' "$SERVICE")
+printf '%s\n' "$BATTERY_WATCHDOG_BLOCK" | grep -Fq \
+    'maybeAutoActivate("safety-watchdog");' \
+    || fail "battery watchdog must reevaluate cached automatic activation"
+if printf '%s\n' "$BATTERY_WATCHDOG_BLOCK" | grep -Fq 'requestSettingsRefresh'; then
+    fail "battery watchdog must not poll Settings/provider"
+fi
 if grep -Fq 'synchronized Request retry()' "$GATE"; then
     fail "rejected Settings work must wait for the next real event, not a retry timer"
 fi
@@ -86,7 +113,8 @@ assert_before "$ADVANCE" \
 # Every inbound request/toggle is protected by the existing signature permission. UI snapshot
 # requests stay cached-only, while AUTO_CHANGED directly invalidates provider/decision revisions.
 require_fixed "$SERVICE" \
-    'registerReceiver(uiReceiver, filter, BIND_PERMISSION, handler, RECEIVER_EXPORTED);'
+    'ContextCompat.registerReceiver(this, uiReceiver, filter, BIND_PERMISSION, handler,'
+require_fixed "$SERVICE" 'ContextCompat.RECEIVER_EXPORTED);'
 require_fixed "$SERVICE" 'filter.addAction(ACTION_BATTERY_HEAT_AUTO_CHANGED);'
 UI_RECEIVER=$(awk '
     /private final BroadcastReceiver uiReceiver = new BroadcastReceiver\(\)/ { capture = 1 }
@@ -143,4 +171,4 @@ for REQUIRED in activeInstance expectedCanBusEpoch ambientTemperatureEpoch \
     require_fixed "$POLICY" "$REQUIRED"
 done
 
-echo "PASS: BatteryHeatService uses bounded event-driven refresh and guarded automatic CAN"
+echo "PASS: BatteryHeat CAN events are bounded; one independent activation watchdog is retained"

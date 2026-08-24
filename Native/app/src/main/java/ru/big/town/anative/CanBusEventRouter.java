@@ -94,6 +94,10 @@ final class CanBusEventRouter {
             if (!closed.get()) mailbox.offer(event);
         }
 
+        void forgetSignal(CanBusEvent.Kind kind) {
+            if (!closed.get()) mailbox.forgetSignal(kind);
+        }
+
         @Override
         public void close() {
             if (closed.compareAndSet(false, true)) owner.remove(mailbox);
@@ -130,6 +134,10 @@ final class CanBusEventRouter {
 
         boolean hasInterest(int interest) {
             return !closed && (interestMask & interest) != 0;
+        }
+
+        synchronized void forgetSignal(CanBusEvent.Kind kind) {
+            if (kind != null) lastAccepted.remove(kind.ordinal() << 24);
         }
 
         boolean acceptsVehicleState(int stableId) {

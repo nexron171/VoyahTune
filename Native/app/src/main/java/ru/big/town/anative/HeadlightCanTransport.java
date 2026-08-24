@@ -11,8 +11,10 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.util.Log;
 
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
 import java.util.EnumMap;
 import java.util.concurrent.ExecutorService;
@@ -37,8 +39,13 @@ final class HeadlightCanTransport {
     private static final String WRITE_CANBUS_PERMISSION = "com.qinggan.permission.WRITE_CANBUS";
     private static final int TX_SET_VEHICLE_STATE = 58;
     private static final long REBIND_DELAY_MS = 5_000L;
+    private static final int MAX_REBIND_RETRIES_PER_EVENT = 1;
 
     private static final HeadlightCanTransport INSTANCE = new HeadlightCanTransport();
+
+    interface ReadyListener {
+        void onHeadlightTransportReady();
+    }
 
     private final Object lock = new Object();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -54,59 +61,142 @@ final class HeadlightCanTransport {
     private boolean initialized;
     private boolean schemaReady;
     private boolean connectionRegistered;
+    private BindConnection connection;
+    private long nextBindingGeneration;
+    private long activeBindingGeneration;
     private IBinder canBusBinder;
+    private long connectionRequestedAtElapsed;
+    private final EventRetryBudget rebindRetryBudget =
+            new EventRetryBudget(MAX_REBIND_RETRIES_PER_EVENT);
+    private long recoveryScope;
+    private long scheduledRecoveryScope;
+    private boolean recoveryInProgress;
+    private BindConnection scheduledStuckConnection;
+    private long scheduledStuckGeneration;
+    private long scheduledStuckRequestedAt;
+    private WeakReference<ReadyListener> readyListener = new WeakReference<>(null);
 
-    private final Runnable rebindRunnable = this::bindCanBus;
+    private final Runnable rebindRunnable = () -> {
+        long scope = scheduledRecoveryScope;
+        if (rebindRetryBudget.isCurrent(scope)) bindCanBus();
+    };
+    private final Runnable stuckBindRunnable = () -> {
+        final BindConnection candidate;
+        final long generation;
+        final long requestedAt;
+        synchronized (lock) {
+            candidate = scheduledStuckConnection;
+            generation = scheduledStuckGeneration;
+            requestedAt = scheduledStuckRequestedAt;
+            scheduledStuckConnection = null;
+            scheduledStuckGeneration = 0L;
+            scheduledStuckRequestedAt = 0L;
+        }
+        restartStuckPendingBind(candidate, generation, requestedAt);
+    };
 
-    private final ServiceConnection connection = new ServiceConnection() {
+    private final class BindConnection implements ServiceConnection {
+        private final long generation;
+
+        BindConnection(long generation) {
+            this.generation = generation;
+        }
+
+        private boolean isCurrent() {
+            synchronized (lock) {
+                return connection == this && activeBindingGeneration == generation;
+            }
+        }
+
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
+            if (!isCurrent()) return;
             try {
                 String descriptor = service.getInterfaceDescriptor();
                 if (!CANBUS_DESCRIPTOR.equals(descriptor)) {
                     Log.e(TAG, "Unexpected Binder descriptor: " + descriptor);
-                    rejectBinding();
+                    restartBindingAfterFailure(this);
                     return;
                 }
             } catch (RemoteException | RuntimeException e) {
                 Log.e(TAG, "Cannot verify CanBus Binder descriptor", e);
-                restartBinding();
+                restartBindingAfterFailure(this);
                 return;
             }
             synchronized (lock) {
+                if (connection != this || activeBindingGeneration != generation) return;
                 canBusBinder = service;
+                connectionRequestedAtElapsed = 0L;
+                recoveryInProgress = false;
+                scheduledStuckConnection = null;
+                scheduledStuckGeneration = 0L;
+                scheduledStuckRequestedAt = 0L;
             }
             mainHandler.removeCallbacks(rebindRunnable);
+            mainHandler.removeCallbacks(stuckBindRunnable);
             Log.i(TAG, "CanBusService connected; headlight TX58 ready");
+            notifyReadyListener();
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
+            if (!isCurrent()) return;
+            openRecoveryScope();
+            final long requestedAt = SystemClock.elapsedRealtime();
             synchronized (lock) {
                 canBusBinder = null;
+                connectionRequestedAtElapsed = requestedAt;
             }
             // Android keeps the binding and reconnects it automatically when the service returns.
             Log.w(TAG, "CanBusService disconnected; waiting for reconnect");
+            scheduleStuckBindCheck(this, generation, requestedAt, REBIND_DELAY_MS);
         }
 
         @Override
         public void onBindingDied(ComponentName name) {
+            if (!isCurrent()) return;
             Log.w(TAG, "CanBusService binding died");
-            restartBinding();
+            restartBindingForEvent(this);
         }
 
         @Override
         public void onNullBinding(ComponentName name) {
+            if (!isCurrent()) return;
             Log.e(TAG, "CanBusService returned a null binding");
-            restartBinding();
+            restartBindingAfterFailure(this);
         }
-    };
+    }
 
     private HeadlightCanTransport() {}
 
     /** Starts schema verification and binding once per process. Safe to call from multiple services. */
     static void initialize(Context context) {
         INSTANCE.initializeInternal(context);
+    }
+
+    /** Rearms one finite connection recovery cycle after a real wake/light decision. */
+    static void requestRecovery(Context context) {
+        INSTANCE.initializeInternal(context);
+        INSTANCE.mainHandler.post(INSTANCE::recoverForExternalEvent);
+    }
+
+    /** Waits for the current finite recovery cycle without opening another retry budget. */
+    static void awaitReadyAfterFailure(Context context) {
+        INSTANCE.initializeInternal(context);
+        INSTANCE.mainHandler.post(INSTANCE::recoverAfterFailure);
+    }
+
+    static void setReadyListener(ReadyListener listener) {
+        synchronized (INSTANCE.lock) {
+            INSTANCE.readyListener = new WeakReference<>(listener);
+        }
+    }
+
+    static void clearReadyListener(ReadyListener listener) {
+        synchronized (INSTANCE.lock) {
+            ReadyListener current = INSTANCE.readyListener.get();
+            if (current == listener) INSTANCE.readyListener = new WeakReference<>(null);
+        }
     }
 
     /** Sends LOW_BEAM for true and explicit OUT_LAMP_OFF for false. */
@@ -180,28 +270,66 @@ final class HeadlightCanTransport {
             return;
         }
         Log.i(TAG, "VehicleState schema verified for LOW_BEAM, OUT_LAMP_OFF and AUTO_LAMP_SWITCH");
+        openRecoveryScope();
         bindCanBus();
     }
 
     private void bindCanBus() {
         final Context context;
+        final BindConnection candidate;
         synchronized (lock) {
-            if (!schemaReady || connectionRegistered || appContext == null) return;
+            if (!schemaReady || connection != null || appContext == null) return;
             context = appContext;
+            candidate = new BindConnection(++nextBindingGeneration);
+            connection = candidate;
+            activeBindingGeneration = candidate.generation;
         }
         try {
             Intent intent = new Intent(CANBUS_ACTION);
             intent.setPackage(CANBUS_PACKAGE);
-            boolean bound = context.bindService(intent, connection, Context.BIND_AUTO_CREATE);
+            boolean bound = context.bindService(intent, candidate, Context.BIND_AUTO_CREATE);
+            final boolean stale;
             synchronized (lock) {
-                connectionRegistered = bound;
+                stale = connection != candidate
+                        || activeBindingGeneration != candidate.generation;
+                if (!stale) {
+                    connectionRegistered = bound;
+                    connectionRequestedAtElapsed = bound ? SystemClock.elapsedRealtime() : 0L;
+                    if (!bound) {
+                        connection = null;
+                        activeBindingGeneration = 0L;
+                    }
+                }
+            }
+            if (stale) {
+                if (bound) safeUnbind(context, candidate);
+                return;
             }
             Log.i(TAG, "bindService returned " + bound);
-            if (!bound) scheduleRebind();
+            if (!bound) {
+                scheduleRebind();
+            } else {
+                final long requestedAt;
+                synchronized (lock) {
+                    requestedAt = connection == candidate
+                            && activeBindingGeneration == candidate.generation
+                            ? connectionRequestedAtElapsed : 0L;
+                }
+                if (requestedAt > 0L) {
+                    scheduleStuckBindCheck(
+                            candidate, candidate.generation, requestedAt, REBIND_DELAY_MS);
+                }
+            }
         } catch (RuntimeException e) {
             Log.e(TAG, "CanBus bind failed", e);
             synchronized (lock) {
-                connectionRegistered = false;
+                if (connection == candidate
+                        && activeBindingGeneration == candidate.generation) {
+                    connectionRegistered = false;
+                    connection = null;
+                    activeBindingGeneration = 0L;
+                    connectionRequestedAtElapsed = 0L;
+                }
             }
             scheduleRebind();
         }
@@ -214,9 +342,11 @@ final class HeadlightCanTransport {
             binder = canBusBinder;
             ordinal = ordinals.get(command);
         }
-        if (binder == null || ordinal == null || !binder.isBinderAlive()) {
+        boolean binderAlive = binder != null && binder.isBinderAlive();
+        if (!binderAlive || ordinal == null) {
             Log.w(TAG, "TX58 unavailable for " + command.vehicleStateName);
-            mainHandler.post(this::bindCanBus);
+            if (!binderAlive) markBindingPendingAfterFailure(binder);
+            mainHandler.post(this::recoverAfterFailure);
             return false;
         }
 
@@ -228,6 +358,7 @@ final class HeadlightCanTransport {
             data.writeInt(ordinal.intValue());
             data.writeInt(command.stableId);
             data.writeInt(HeadlightCanPolicy.ACTIVATE);
+            if (!CanSender.beginFrameAttemptForCurrentGuard()) return false;
             if (!binder.transact(TX_SET_VEHICLE_STATE, data, reply, 0)) {
                 Log.e(TAG, "TX58 rejected for " + command.vehicleStateName);
                 return false;
@@ -238,10 +369,8 @@ final class HeadlightCanTransport {
             return true;
         } catch (RemoteException | RuntimeException e) {
             Log.e(TAG, "TX58 failed for " + command.vehicleStateName, e);
-            synchronized (lock) {
-                if (canBusBinder == binder) canBusBinder = null;
-            }
-            mainHandler.post(this::restartBinding);
+            markBindingPendingAfterFailure(binder);
+            mainHandler.post(this::recoverAfterFailure);
             return false;
         } finally {
             reply.recycle();
@@ -249,41 +378,223 @@ final class HeadlightCanTransport {
         }
     }
 
-    private void rejectBinding() {
+    /** Starts the grace age for a registered connection whose usable Binder just failed. */
+    private void markBindingPendingAfterFailure(IBinder failedBinder) {
         synchronized (lock) {
+            if (canBusBinder != failedBinder || !connectionRegistered || connection == null) {
+                return;
+            }
             canBusBinder = null;
+            if (connectionRequestedAtElapsed <= 0L) {
+                connectionRequestedAtElapsed = SystemClock.elapsedRealtime();
+            }
         }
-        unbindCurrent();
     }
 
-    private void restartBinding() {
-        synchronized (lock) {
-            canBusBinder = null;
-        }
+    private void restartBindingForEvent(BindConnection failed) {
+        if (!failed.isCurrent()) return;
+        openRecoveryScope();
+        unbindCurrent();
+        bindCanBus();
+    }
+
+    private void restartBindingAfterFailure(BindConnection failed) {
+        if (!failed.isCurrent()) return;
         unbindCurrent();
         scheduleRebind();
+    }
+
+    private void recoverForExternalEvent() {
+        final boolean ready;
+        final boolean registered;
+        final IBinder binder;
+        final BindConnection pendingConnection;
+        final long pendingGeneration;
+        final long requestedAt;
+        synchronized (lock) {
+            ready = schemaReady;
+            registered = connectionRegistered;
+            binder = canBusBinder;
+            pendingConnection = connection;
+            pendingGeneration = activeBindingGeneration;
+            requestedAt = connectionRequestedAtElapsed;
+        }
+        if (!ready || (binder != null && binder.isBinderAlive())) return;
+        openRecoveryScope();
+        if (registered) {
+            restartStuckPendingBind(
+                    pendingConnection, pendingGeneration, requestedAt);
+            return;
+        }
+        bindCanBus();
+    }
+
+    private void recoverAfterFailure() {
+        final boolean ready;
+        final boolean registered;
+        final IBinder binder;
+        final BindConnection pendingConnection;
+        final long pendingGeneration;
+        final long requestedAt;
+        final boolean alreadyRecovering;
+        synchronized (lock) {
+            ready = schemaReady;
+            registered = connectionRegistered;
+            binder = canBusBinder;
+            pendingConnection = connection;
+            pendingGeneration = activeBindingGeneration;
+            requestedAt = connectionRequestedAtElapsed;
+            alreadyRecovering = recoveryInProgress;
+        }
+        if (!ready) return;
+        if (binder != null && binder.isBinderAlive()) {
+            notifyReadyListener();
+            return;
+        }
+        if (!alreadyRecovering) openRecoveryScope();
+        if (registered) {
+            restartStuckPendingBind(
+                    pendingConnection, pendingGeneration, requestedAt);
+            return;
+        }
+        if (alreadyRecovering) return;
+        bindCanBus();
+    }
+
+    /**
+     * Replaces a bindService(true) request only after its finite, event-scoped grace interval.
+     * The actual replacement consumes the already-open retry budget; the named one-shot never
+     * opens or renews a recovery scope.
+     */
+    private void restartStuckPendingBind(BindConnection pendingConnection,
+                                         long pendingGeneration, long requestedAt) {
+        if (pendingConnection == null || pendingGeneration <= 0L || requestedAt <= 0L) {
+            return;
+        }
+        long remaining = requestedAt + REBIND_DELAY_MS - SystemClock.elapsedRealtime();
+        if (remaining > 0L) {
+            scheduleStuckBindCheck(
+                    pendingConnection, pendingGeneration, requestedAt, remaining);
+            return;
+        }
+        final long scope;
+        synchronized (lock) {
+            if (connection != pendingConnection
+                    || activeBindingGeneration != pendingGeneration
+                    || !connectionRegistered || canBusBinder != null
+                    || connectionRequestedAtElapsed != requestedAt) {
+                return;
+            }
+            scope = recoveryScope;
+        }
+        if (!rebindRetryBudget.claim(scope)) {
+            synchronized (lock) {
+                if (recoveryScope == scope) recoveryInProgress = false;
+            }
+            Log.w(TAG, "Stuck CanBus bind retry exhausted; waiting for next wake/light event");
+            return;
+        }
+
+        final Context context;
+        synchronized (lock) {
+            if (connection != pendingConnection
+                    || activeBindingGeneration != pendingGeneration
+                    || !connectionRegistered || canBusBinder != null
+                    || connectionRequestedAtElapsed != requestedAt) {
+                return;
+            }
+            context = appContext;
+            connectionRegistered = false;
+            connection = null;
+            activeBindingGeneration = 0L;
+            connectionRequestedAtElapsed = 0L;
+        }
+        if (context != null) safeUnbind(context, pendingConnection);
+        Log.w(TAG, "Replacing stuck CanBus bind generation=" + pendingGeneration);
+        bindCanBus();
+    }
+
+    private void scheduleStuckBindCheck(BindConnection candidate, long generation,
+                                        long requestedAt, long delayMs) {
+        synchronized (lock) {
+            if (connection != candidate || activeBindingGeneration != generation
+                    || !connectionRegistered || canBusBinder != null
+                    || connectionRequestedAtElapsed != requestedAt) {
+                return;
+            }
+            scheduledStuckConnection = candidate;
+            scheduledStuckGeneration = generation;
+            scheduledStuckRequestedAt = requestedAt;
+        }
+        mainHandler.removeCallbacks(stuckBindRunnable);
+        mainHandler.postDelayed(stuckBindRunnable, Math.max(1L, delayMs));
+    }
+
+    private void openRecoveryScope() {
+        synchronized (lock) {
+            long scope = ++recoveryScope;
+            rebindRetryBudget.reset(scope);
+            scheduledRecoveryScope = scope;
+            recoveryInProgress = true;
+        }
+        mainHandler.removeCallbacks(rebindRunnable);
+        mainHandler.removeCallbacks(stuckBindRunnable);
     }
 
     private void unbindCurrent() {
         final Context context;
         final boolean registered;
+        final BindConnection current;
         synchronized (lock) {
             context = appContext;
             registered = connectionRegistered;
+            current = connection;
             connectionRegistered = false;
+            connection = null;
+            activeBindingGeneration = 0L;
+            canBusBinder = null;
+            connectionRequestedAtElapsed = 0L;
+            scheduledStuckConnection = null;
+            scheduledStuckGeneration = 0L;
+            scheduledStuckRequestedAt = 0L;
         }
-        if (registered && context != null) {
-            try {
-                context.unbindService(connection);
-            } catch (RuntimeException e) {
-                Log.w(TAG, "CanBus unbind failed", e);
-            }
-        }
+        mainHandler.removeCallbacks(stuckBindRunnable);
+        if (registered && context != null && current != null) safeUnbind(context, current);
     }
 
     private void scheduleRebind() {
+        long scope = recoveryScope;
+        if (!rebindRetryBudget.claim(scope)) {
+            synchronized (lock) {
+                if (recoveryScope == scope) recoveryInProgress = false;
+            }
+            Log.w(TAG, "CanBus bind retry exhausted; waiting for next wake/light event");
+            return;
+        }
+        scheduledRecoveryScope = scope;
         mainHandler.removeCallbacks(rebindRunnable);
         mainHandler.postDelayed(rebindRunnable, REBIND_DELAY_MS);
+    }
+
+    private void notifyReadyListener() {
+        final ReadyListener listener;
+        synchronized (lock) {
+            listener = readyListener.get();
+        }
+        if (listener == null) return;
+        try {
+            listener.onHeadlightTransportReady();
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Headlight readiness callback failed", e);
+        }
+    }
+
+    private static void safeUnbind(Context context, ServiceConnection connection) {
+        try {
+            context.unbindService(connection);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "CanBus unbind failed", e);
+        }
     }
 
     private static final class SchemaResult {

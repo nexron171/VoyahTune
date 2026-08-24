@@ -4,6 +4,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Test;
@@ -51,6 +53,17 @@ public class ManualAutoGateTest {
 
         long automatic = gate.beginAutomaticDecision();
         assertTrue(gate.isAutomaticActionCurrent(automatic));
+    }
+
+    @Test
+    public void pendingManualStateIsVisibleUntilTicketCloses() {
+        ManualAutoGate gate = new ManualAutoGate();
+        ManualAutoGate.Ticket ticket = gate.reserveManualCommand();
+
+        assertTrue(gate.hasPendingManualCommands());
+        ticket.close();
+
+        assertFalse(gate.hasPendingManualCommands());
     }
 
     @Test
@@ -129,5 +142,32 @@ public class ManualAutoGateTest {
 
         assertTrue(gate.isAutomaticActionCurrent(automatic));
         assertFalse(gate.blocksAntiAuto());
+    }
+
+    @Test
+    public void queuedAndCompletedManualCommandInvalidatePreCommitWork() {
+        ManualAutoGate gate = new ManualAutoGate();
+        long beforeManual = gate.currentRevision();
+
+        ManualAutoGate.Ticket ticket = gate.reserveManualCommand();
+        assertFalse(gate.isRevisionCurrent(beforeManual));
+        long whileQueued = gate.currentRevision();
+
+        ticket.close();
+
+        assertFalse(gate.isRevisionCurrent(whileQueued));
+        assertTrue(gate.isRevisionCurrent(gate.currentRevision()));
+    }
+
+    @Test
+    public void manualCompletionFenceRunsExactlyOnce() {
+        ManualAutoGate gate = new ManualAutoGate();
+        AtomicInteger completions = new AtomicInteger();
+        ManualAutoGate.Ticket ticket = gate.reserveManualCommand(completions::incrementAndGet);
+
+        ticket.close();
+        ticket.close();
+
+        assertEquals(1, completions.get());
     }
 }

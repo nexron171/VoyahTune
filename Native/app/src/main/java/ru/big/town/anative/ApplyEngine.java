@@ -103,6 +103,20 @@ public final class ApplyEngine {
                 + " runGen=" + runGeneration + " reason=" + reason);
     }
 
+    /** Snapshot used by finite event adjudication which must fail closed across physical sleep. */
+    static long capturePhysicalWakeGeneration() {
+        synchronized (RESTORE_LOCK) {
+            return RESTORE_RUN_STATE.currentGeneration();
+        }
+    }
+
+    /** True only while the exact captured physical-wake lifetime is still active. */
+    static boolean isPhysicalWakeGenerationActive(long candidate) {
+        synchronized (RESTORE_LOCK) {
+            return RESTORE_RUN_STATE.isActionAllowed(candidate);
+        }
+    }
+
     /** Полный снимок источника истины, прочитанный MainActivity из provider/cache. */
     static void noteLoadedModes(String drive, String energy,
                                 boolean driveEnabled, boolean energyEnabled) {

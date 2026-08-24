@@ -19,6 +19,7 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 import java.lang.ref.WeakReference;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -73,6 +74,11 @@ public class BatteryHeatService extends Service {
     // Значение уличной температуры, трактуемое как «нет данных» (так отдаёт CanBusService).
     private static final int TEMP_INVALID = -9999;
 
+    // Independent internal watchdog. Its cadence does not depend on incoming CAN callbacks: it
+    // keeps automatic activation recoverable after a missed event/failed frame without allowing
+    // an input storm to multiply work.
+    private static final long BATTERY_SAFETY_WATCHDOG_MS = 30_000L;
+    private static final long INCOMPLETE_SNAPSHOT_RETRY_MS = 5 * 60_000L;
     // Через это время после коннекта форсируем queryVehicleState (снимок статусов).
     private static final long FORCE_QUERY_MS = 6_000L;
     // Анти-спам активации: не пытаемся включать прогрев чаще, чем раз в эти мс.
@@ -165,6 +171,7 @@ public class BatteryHeatService extends Service {
     private long lastActivateElapsed = Long.MIN_VALUE / 2;
     private long lastActivateAttemptElapsed = Long.MIN_VALUE / 2;
     private boolean activationPending = false;
+    private long lastVehicleSnapshotRequestElapsed = Long.MIN_VALUE / 2;
 
     private CanBusEventHub canBusEventHub;
     private CanBusEventHub.Subscription canBusSubscription;
@@ -198,6 +205,7 @@ public class BatteryHeatService extends Service {
     /** Requests a filtered callback snapshot; TX20 itself runs on the hub query thread. */
     private void requestVehicleStateSnapshot() {
         if (destroyed || canBusEventHub == null || !isVehicleSnapshotIncomplete()) return;
+        lastVehicleSnapshotRequestElapsed = SystemClock.elapsedRealtime();
         canBusEventHub.requestVehicleStateSnapshot();
         Log.i(TAG, "queryVehicleState requested, fields="
                 + Integer.bitCount(vehicleFieldsSeenMask) + "/" + VEHICLE_FIELD_COUNT);
@@ -635,6 +643,7 @@ public class BatteryHeatService extends Service {
         Handler worker = handler;
         HandlerThread thread = workerThread;
         if (worker != null && thread != null) {
+            worker.removeCallbacks(batterySafetyWatchdog);
             boolean queued = worker.postAtFrontOfQueue(() -> {
                 try {
                     CanBusEventHub.Subscription subscription = canBusSubscription;
@@ -662,7 +671,8 @@ public class BatteryHeatService extends Service {
         filter.addAction(ACTION_BATTERY_HEAT_ACTIVATE);
         filter.addAction(ACTION_BATTERY_HEAT_AUTO_CHANGED);
         try {
-            registerReceiver(uiReceiver, filter, BIND_PERMISSION, handler, RECEIVER_EXPORTED);
+            ContextCompat.registerReceiver(this, uiReceiver, filter, BIND_PERMISSION, handler,
+                    ContextCompat.RECEIVER_EXPORTED);
             receiverRegistered = true;
         } catch (Exception e) {
             Log.w(TAG, "registerReceiver: " + e.getMessage());
@@ -678,7 +688,30 @@ public class BatteryHeatService extends Service {
                         ID_DRIVER_PREHEAT_SET, ID_PREHEAT_FAIL_STATE, ID_BMS_STATE},
                 handler, this::onCanBusEvent);
         requestBroadcastUpdate();
+        handler.postDelayed(batterySafetyWatchdog, BATTERY_SAFETY_WATCHDOG_MS);
     }
+
+    private final Runnable batterySafetyWatchdog = new Runnable() {
+        @Override
+        public void run() {
+            if (destroyed) return;
+            try {
+                long now = SystemClock.elapsedRealtime();
+                if (isVehicleSnapshotIncomplete()
+                        && now - lastVehicleSnapshotRequestElapsed
+                        >= INCOMPLETE_SNAPSHOT_RETRY_MS) {
+                    requestVehicleStateSnapshot();
+                }
+                // Uses only cached, generation-fenced state. Settings/provider reads remain tied
+                // to startup, wake, and the explicit setting-change event.
+                maybeAutoActivate("safety-watchdog");
+            } finally {
+                if (!destroyed) {
+                    handler.postDelayed(this, BATTERY_SAFETY_WATCHDOG_MS);
+                }
+            }
+        }
+    };
 
     private void resetVehicleSnapshotTracking() {
         vehicleFieldsSeenMask = 0;

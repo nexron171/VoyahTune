@@ -793,6 +793,15 @@ final class CanBusEventHub {
             return true;
         }
 
+        void forgetLightStatus() {
+            CanBusEventRouter.Subscription current;
+            synchronized (this) {
+                if (closed) return;
+                current = routed;
+            }
+            if (current != null) current.forgetSignal(CanBusEvent.Kind.LIGHT_STATUS);
+        }
+
         @Override
         public void close() {
             CanBusEventRouter.Subscription toClose;
