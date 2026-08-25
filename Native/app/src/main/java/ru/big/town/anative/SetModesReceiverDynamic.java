@@ -444,10 +444,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             if (next == null) return;
             boolean sent = "driveMode".equals(modeKey)
                     ? MainActivity.sendDriveModeCommand(app, next)
-                    : MainActivity.setCanValues(1,
-                            "energy".equals(modeKey) ? MainActivity.getEnergyCanCommand(next)
-                                    : MainActivity.getRecEnergyCanCommand(next),
-                            "steer " + modeKey + " → " + next);
+                    : "energy".equals(modeKey)
+                            ? MainActivity.sendEnergyModeCommand(app, next)
+                            : MainActivity.sendRecuperationModeCommand(app, next);
             if (!sent) {
                 Log.w(TAG, "STEER_ACTION " + modeKey + ": CAN failed, selection not persisted");
                 return;

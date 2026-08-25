@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class CanRestorePlanTest {
     @Test
@@ -80,6 +81,71 @@ public class CanRestorePlanTest {
                     return true;
                 }));
         assertEquals(4, calls.get());
+    }
+
+    @Test
+    public void acceptedOemOperationIsNotReplayedByNativeStabilizationPasses() {
+        CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
+        AtomicInteger nativeCalls = new AtomicInteger();
+        AtomicInteger oemCalls = new AtomicInteger();
+        builder.add("energy", frame(1));
+        builder.addOnce("OEM drive", () -> {
+            oemCalls.incrementAndGet();
+            return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+        });
+        CanRestorePlan plan = builder.build();
+
+        assertEquals(CanRestorePlan.AttemptResult.ACCEPTED_UNCONFIRMED,
+                plan.sendPending((frames, label) -> {
+                    nativeCalls.incrementAndGet();
+                    return true;
+                }));
+        plan.resetForNextPass();
+        assertEquals(CanRestorePlan.AttemptResult.ACCEPTED_UNCONFIRMED,
+                plan.sendPending((frames, label) -> {
+                    nativeCalls.incrementAndGet();
+                    return true;
+                }));
+
+        assertEquals(2, nativeCalls.get());
+        assertEquals(1, oemCalls.get());
+    }
+
+    @Test
+    public void repeatableOemOperationRunsOnEveryBoundedPass() {
+        CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
+        AtomicInteger oemCalls = new AtomicInteger();
+        builder.addOperation("OEM snapshot", () -> {
+            oemCalls.incrementAndGet();
+            return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+        }, true);
+        CanRestorePlan plan = builder.build();
+
+        assertTrue(plan.hasRepeatableCommands());
+        assertEquals(CanRestorePlan.AttemptResult.ACCEPTED_UNCONFIRMED,
+                plan.sendPending((frames, label) -> true));
+        plan.resetForNextPass();
+        assertEquals(CanRestorePlan.AttemptResult.ACCEPTED_UNCONFIRMED,
+                plan.sendPending((frames, label) -> true));
+        assertEquals(2, oemCalls.get());
+    }
+
+    @Test
+    public void oneShotOemOperationRetriesOnlyUntilAccepted() {
+        CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
+        AtomicInteger oemCalls = new AtomicInteger();
+        builder.addOnce("OEM drive", () -> oemCalls.incrementAndGet() == 1
+                ? CanRestorePlan.OperationResult.TRANSIENT_FAILURE
+                : CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED);
+        CanRestorePlan plan = builder.build();
+
+        assertEquals(CanRestorePlan.AttemptResult.TRANSIENT_FAILURE,
+                plan.sendPending((frames, label) -> true));
+        assertEquals(CanRestorePlan.AttemptResult.ACCEPTED_UNCONFIRMED,
+                plan.sendPending((frames, label) -> true));
+        assertEquals(CanRestorePlan.AttemptResult.ACCEPTED_UNCONFIRMED,
+                plan.sendPending((frames, label) -> true));
+        assertEquals(2, oemCalls.get());
     }
 
     @Test(expected = IllegalArgumentException.class)

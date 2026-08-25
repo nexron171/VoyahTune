@@ -34,35 +34,17 @@ adb root
 adb wait-for-device
 adb root
 
-# Full -> Light transition barrier. Match only the project-owned absolute runtime paths; bracket
-# classes prevent pgrep/pkill from matching their own remote command line. TERM gets a bounded grace
-# period, then KILL prevents an orphan keymanager injector from opening scripts during deletion.
+# Full -> Light transition: best-effort stop through Android init. Atomic file operations and the
+# mandatory final reboot make PID scanning/killing unnecessary and avoid Android 11 toybox false matches.
 stop_full_hook_runtime_for_light() {
     adb shell '
-        command -v pgrep >/dev/null 2>&1 || exit 1
-        command -v pkill >/dev/null 2>&1 || exit 1
-        setprop ctl.stop voyahtune_load 2>/dev/null || true
-        pkill -TERM -f "/data/local/bin/load[.]bin" 2>/dev/null || true
-        pkill -TERM -f "/data/local/bin/frida[-]inject" 2>/dev/null || true
+        setprop ctl.stop voyahtune_load 2>/dev/null || exit 1
         stop_wait=0
-        while pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
-                || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; do
-            [ "$stop_wait" -lt 10 ] || break
+        while [ "$(getprop init.svc.voyahtune_load)" != "stopped" ]; do
+            [ "$stop_wait" -lt 5 ] || exit 1
             sleep 1
             stop_wait=$((stop_wait + 1))
         done
-        if pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
-                || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; then
-            pkill -KILL -f "/data/local/bin/load[.]bin" 2>/dev/null || true
-            pkill -KILL -f "/data/local/bin/frida[-]inject" 2>/dev/null || true
-            kill_wait=0
-            while pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
-                    || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; do
-                [ "$kill_wait" -lt 5 ] || exit 1
-                sleep 1
-                kill_wait=$((kill_wait + 1))
-            done
-        fi
     '
 }
 
@@ -199,8 +181,6 @@ remove_full_hook_runtime_for_light() {
                 /data/local/tmp/voyahtune-hook-status.v1; do
             [ ! -e "$removed_path" ] && [ ! -L "$removed_path" ] || exit 1
         done
-        ! pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 || exit 1
-        ! pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1 || exit 1
         sync
     '
 }
@@ -420,8 +400,7 @@ fi
 echo "=== Переход Full → Light: остановка root hook runtime ==="
 LIGHT_HOOK_BARRIER_PHASE=1
 if ! stop_full_hook_runtime_for_light; then
-    echo "!!! Full hook-loader или его in-flight injector не остановился; teardown отменён."
-    exit 1
+    echo "  ПРЕДУПРЕЖДЕНИЕ: init не подтвердил остановку Full hook-loader; продолжаем teardown и обязательный reboot."
 fi
 
 for APOLLO_SAFE_KEY in \

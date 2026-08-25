@@ -80,36 +80,18 @@ adb root
 adb wait-for-device
 adb root
 
-# После этого barrier ни один код до финального reboot не имеет права перезапускать голову.
-# Exact path с bracket-escape не матчится на саму команду pgrep/pkill. В ожидание включён и
-# frida-inject: фоновый keymanager worker может пережить shell load.bin и иначе открыть уже новый
-# script под старым manifest contract.
+# Просим Android init остановить текущий loader перед публикацией нового комплекта. Это best-effort:
+# каждый файл публикуется atomic mv, manifest идёт последним, а финальный reboot гарантирует запуск
+# уже новой версии. Не сканируем/не убиваем PID: Android 11 toybox даёт ложные self/zombie matches.
 stop_hook_runtime_for_update() {
     adb shell '
-        command -v pgrep >/dev/null 2>&1 || exit 1
-        command -v pkill >/dev/null 2>&1 || exit 1
-        setprop ctl.stop voyahtune_load 2>/dev/null || true
-        pkill -TERM -f "/data/local/bin/load[.]bin" 2>/dev/null || true
-        pkill -TERM -f "/data/local/bin/frida[-]inject" 2>/dev/null || true
+        setprop ctl.stop voyahtune_load 2>/dev/null || exit 1
         stop_wait=0
-        while pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
-                || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; do
-            [ "$stop_wait" -lt 10 ] || break
+        while [ "$(getprop init.svc.voyahtune_load)" != "stopped" ]; do
+            [ "$stop_wait" -lt 5 ] || exit 1
             sleep 1
             stop_wait=$((stop_wait + 1))
         done
-        if pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
-                || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; then
-            pkill -KILL -f "/data/local/bin/load[.]bin" 2>/dev/null || true
-            pkill -KILL -f "/data/local/bin/frida[-]inject" 2>/dev/null || true
-            kill_wait=0
-            while pgrep -f "/data/local/bin/load[.]bin" >/dev/null 2>&1 \
-                    || pgrep -f "/data/local/bin/frida[-]inject" >/dev/null 2>&1; do
-                [ "$kill_wait" -lt 5 ] || exit 1
-                sleep 1
-                kill_wait=$((kill_wait + 1))
-            done
-        fi
         rm -f /data/local/tmp/voyahtune_load.v2.lock \
             /data/local/tmp/voyah_load.v2.lock
         rm -rf /data/local/tmp/voyah_load.lock
@@ -669,8 +651,7 @@ backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml 
 echo "=== Остановка hook-loader на время атомарного обновления ==="
 HOOK_UPDATE_BARRIER_ARMED=1
 if ! stop_hook_runtime_for_update; then
-    echo "!!! Hook-loader или его in-flight injector не остановился; hook-файлы не изменялись."
-    exit 1
+    echo "  ПРЕДУПРЕЖДЕНИЕ: init не подтвердил остановку hook-loader; продолжаем атомарную публикацию и обязательный reboot."
 fi
 
 # Одноразовая миграция: сначала заставляем старый eternalized agent уйти в pass-through,

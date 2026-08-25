@@ -783,6 +783,208 @@
                 </RadioGroup>
             </LinearLayout>
 
+            <!-- Ароматизатор: отдельная opt-in настройка, применяется только при ручном
+                 «Применить» или при wake-restore. Изменения машины намеренно не отслеживаем. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:animateLayoutChanges="true"
+                android:background="@drawable/layout_category_bg"
+                android:orientation="vertical"
+                android:paddingBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginBottom="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Восстанавливать ароматизатор"
+                            android:textColor="#ffffff"
+                            android:textSize="26px" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Выбранные параметры применяются при старте и пробуждении"
+                            android:textColor="#888888"
+                            android:textSize="19px" />
+
+                    </LinearLayout>
+
+                    <Switch
+                        android:id="@+id/switchFragrance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="8dp"
+                    android:layout_marginTop="4dp"
+                    android:text="Аромат"
+                    android:textColor="#aaaaaa"
+                    android:textSize="22px" />
+
+                <RadioGroup
+                    android:id="@+id/fragranceTasteGroup"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="70dp"
+                    android:layout_marginHorizontal="6dp"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/fragranceTaste1"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="1"
+                        android:text="1 · Бамбук"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/fragranceTaste2"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="2"
+                        android:text="2 · Пион"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/fragranceTaste3"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="3"
+                        android:text="3 · Водяной туман"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="8dp"
+                    android:layout_marginTop="10dp"
+                    android:text="Длительность"
+                    android:textColor="#aaaaaa"
+                    android:textSize="22px" />
+
+                <RadioGroup
+                    android:id="@+id/fragranceDurationGroup"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="70dp"
+                    android:layout_marginHorizontal="6dp"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/fragranceDurationUnlimited"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="0"
+                        android:text="Без таймера"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/fragranceDuration30"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="1"
+                        android:text="30 минут"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/fragranceDuration60"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="2"
+                        android:text="60 минут"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="8dp"
+                    android:layout_marginTop="10dp"
+                    android:text="Интенсивность"
+                    android:textColor="#aaaaaa"
+                    android:textSize="22px" />
+
+                <RadioGroup
+                    android:id="@+id/fragranceIntensityGroup"
+                    style="@style/radio_group_height_70_style"
+                    android:layout_width="match_parent"
+                    android:layout_height="70dp"
+                    android:layout_marginHorizontal="6dp"
+                    android:background="@drawable/radio_group_height_70_bg"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/fragranceIntensityLow"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="1"
+                        android:text="Низкая"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/fragranceIntensityMedium"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="2"
+                        android:text="Средняя"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                    <RadioButton
+                        android:id="@+id/fragranceIntensityHigh"
+                        style="@style/radio_button_height_70_style"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/radio_group_button_70_bg"
+                        android:tag="3"
+                        android:text="Высокая"
+                        android:textColor="@color/radio_button_text_color_selector" />
+
+                </RadioGroup>
+
+            </LinearLayout>
+
             <!-- Режим использования энергии -->
             <LinearLayout
                 android:layout_width="match_parent"

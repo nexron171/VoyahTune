@@ -13,6 +13,9 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import ru.big.town.anative.databinding.ActivityMainBinding;
 
 public class MainActivity extends AppCompatActivity {
@@ -30,6 +33,10 @@ public class MainActivity extends AppCompatActivity {
     private static boolean disablePedestrianSound = false;
     /** Форсированный электрорежим (колонка 19 провайдера RestoreMode). */
     private static boolean forcedEv = false;
+    private static boolean fragranceEnabled = false;
+    private static int fragranceTaste = FragranceRestorePolicy.DEFAULT_TASTE;
+    private static int fragranceDuration = FragranceRestorePolicy.DEFAULT_DURATION;
+    private static int fragranceIntensity = FragranceRestorePolicy.DEFAULT_INTENSITY;
 
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
@@ -112,7 +119,7 @@ public class MainActivity extends AppCompatActivity {
 
     private ActivityMainBinding binding;
 
-    //------------- Метод получения команд CAN режимов энергии  -------------------------------------
+    //------------- OEM VehicleState-команды режимов энергии ----------------------------------------
     public static byte[][] getCustomCommand() {
         if (customCommand == null || customCommand.isEmpty()) return new byte[][]{{}};
         String[] cmds = customCommand.split("\n");
@@ -130,78 +137,64 @@ public class MainActivity extends AppCompatActivity {
         return arraysStr2arraysBytes(cmds);
     }
 
-    public static byte[][] getEnergyCanCommand(String mode) {
-        Bundle energyMode = new Bundle();
-        // Интеллектуальный режим: тег радио в UI = "SMART" (в верхнем регистре, см. activity_advance.xml),
-        // а сохранённое значение попадает сюда как есть → ключ ДОЛЖЕН быть "SMART". "Smart" — алиас на
-        // случай иного написания/легаси (Bundle-ключи регистрозависимы; раньше был только "Smart" → NPE).
-        String[] smart = new String[]{"68 08 03 00 00 f0 2c 14 18 00"};
-        energyMode.putStringArray("SMART", smart);
-        energyMode.putStringArray("Smart", smart);
-        energyMode.putStringArray("EV", new String[]{"68 08 03 00 00 f0 2c 24 18 00"});
-        energyMode.putStringArray("REV", new String[]{"68 08 03 00 00 f0 2c 34 18 00"});
-        energyMode.putStringArray("SREV", new String[]{"68 08 03 00 00 f0 2c 44 18 00"});
-
-        String[] cmds = energyMode.getStringArray(mode);
-        return arraysStr2arraysBytes(cmds);
+    public static boolean sendEnergyModeCommand(Context context, String mode) {
+        return sendOemBundleState(context,
+                VehicleRestorePolicy.SOC_MODE, VehicleRestorePolicy.SOC_MODE_ID,
+                VehicleRestorePolicy.requireEnergy(mode), "energy mode: " + mode);
     }
 
-    //------------- Нативные CAN-команды режимов вождения -------------------------------------------
+    //------------- OEM VehicleState-команды режимов вождения ---------------------------------------
     public static boolean sendDriveModeCommand(Context context, String mode) {
-        return NativeDriveModeTransport.send(mode);
+        return DriveModeCanTransport.send(context, mode);
     }
 
-    /** Вариант для wake-restore; все native-записи сериализуются внутри CanSender. */
+    /** Вариант для совместимости; transport использует общий OEM Binder без фонового retry. */
     public static boolean sendDriveModeCommand(String mode) {
-        return NativeDriveModeTransport.send(mode);
+        return DriveModeCanTransport.send(GlobalVars.SAVE_CONTEXT, mode);
     }
 
-    //------------- Метод получения команд CAN режимов рекуперации  ---------------------------------
-    public static byte[][] getRecEnergyCanCommand(String mode) {
-        Bundle energyMode = new Bundle();
-        energyMode.putStringArray("LOW", new String[]{
-                "6c 08 40 3e 5a 01 88 01 00 00"
-        });
-        energyMode.putStringArray("MEDIUM", new String[]{
-                "6c 08 60 3e 5a 01 88 01 00 00"
-        });
-        energyMode.putStringArray("HIGH", new String[]{
-                "6c 08 80 3e 5a 01 88 01 00 00"
-        });
-
-        String[] cmds = energyMode.getStringArray(mode);
-        return arraysStr2arraysBytes(cmds);
-    }
-
-    //------------- Метод получения команд CAN «Отключить звук для пешеходов»  ----------------------
-    public static byte[][] getPedestrianSoundCanCommand(boolean disabled) {
-        Log.i("$$$ MainActivity getPedestrianSoundCanCommand $$$",
-                "pedestrian sound " + (disabled ? "DISABLED (mute)" : "ENABLED (default)"));
-        if (disabled) {
-            // Звук оповещения пешеходов ВЫКЛ
-            return arraysStr2arraysBytes(new String[]{"6a 08 00 03 00 00 00 10 7c 00"});
-        } else {
-            // Звук оповещения пешеходов ВКЛ
-            return arraysStr2arraysBytes(new String[]{"6a 08 00 03 00 00 00 20 7c 00"});
+    //------------- OEM VehicleState-команды рекуперации --------------------------------------------
+    public static boolean sendRecuperationModeCommand(Context context, String mode) {
+        if (context == null) return false;
+        if (!VehicleRestorePolicy.allowsRecuperationRestore(
+                currentSavedMode(context, "driveMode"))) {
+            Log.i("$$$ MainActivity recuperation $$$",
+                    "Snow owns minimum recuperation; storing selection without CAN send");
+            return true;
         }
+        return sendOemBundleState(context,
+                VehicleRestorePolicy.REGEN_LEVEL, VehicleRestorePolicy.REGEN_LEVEL_ID,
+                VehicleRestorePolicy.requireRecycle(mode), "recuperation level: " + mode);
     }
 
-    //------------- Метод получения команд CAN «Форсированный EV»  ---------------------------------
-    /**
-     * Принудительный электрорежим: держит машину на электротяге, не давая запуститься генератору.
-     * Это НЕ то же самое, что режим энергии «Электро» — тот лишь выбирает приоритет, а этот форсирует.
-     * Байты из Docs/CAN-команды.odt («Форсе EV»); та же группа сообщений 0x68, что и режим энергии.
-     */
-    public static byte[][] getForcedEvCanCommand(boolean on) {
-        Log.i("$$$ MainActivity getForcedEvCanCommand $$$", "forced EV " + (on ? "ON" : "OFF"));
-        return arraysStr2arraysBytes(new String[]{
-                on ? "68 08 02 00 00 f0 2c 54 08 00"
-                   : "68 08 02 00 00 f0 2c 24 08 00"});
+    private static boolean sendOemBundleState(Context context, String name, int stableId,
+                                              int value, String label) {
+        Map<String, Integer> values = new LinkedHashMap<>();
+        values.put(name, value);
+        Map<String, Integer> stableIds = new LinkedHashMap<>();
+        stableIds.put(name, stableId);
+        return OemVehicleStateTransport.sendBundle(
+                context, values, stableIds, label).accepted();
     }
 
     /** Немедленно применить форсированный EV (тоггл с главного экрана / из настроек). */
     public static boolean sendForcedEvCommand(boolean on) {
-        return setCanValues(1, getForcedEvCanCommand(on), "forced EV " + (on ? "on" : "off"));
+        Context context = GlobalVars.SAVE_CONTEXT;
+        if (context == null) return false;
+        int target = VehicleRestorePolicy.SOC_FORCE_EV;
+        if (!on) {
+            String savedEnergy = currentSavedMode(context, "energy");
+            try {
+                target = VehicleRestorePolicy.requireEnergy(savedEnergy);
+            } catch (IllegalArgumentException e) {
+                Log.w("$$$ MainActivity forced EV $$$",
+                        "Invalid saved energy target; falling back to EV", e);
+                target = VehicleRestorePolicy.SOC_EV;
+            }
+        }
+        return sendOemBundleState(context,
+                VehicleRestorePolicy.SOC_MODE, VehicleRestorePolicy.SOC_MODE_ID, target,
+                "forced EV " + (on ? "on" : "off / restore saved energy"));
     }
 
     //------------- Управление режимом наружного света через штатный CanBusService -------------------
@@ -305,6 +298,17 @@ public class MainActivity extends AppCompatActivity {
                 // col 11 — «Отключить звук для пешеходов» (1=отключить, fallback=false)
                 disablePedestrianSound = cursor.getColumnCount() > 11 && cursor.getInt(11) == 1;
                 forcedEv = cursor.getColumnCount() > 19 && cursor.getInt(19) == 1;
+                fragranceEnabled = cursor.getColumnCount() > 20 && cursor.getInt(20) == 1;
+                FragranceRestorePolicy.Settings fragrance = FragranceRestorePolicy.normalize(
+                        cursor.getColumnCount() > 21 ? cursor.getInt(21)
+                                : FragranceRestorePolicy.DEFAULT_TASTE,
+                        cursor.getColumnCount() > 22 ? cursor.getInt(22)
+                                : FragranceRestorePolicy.DEFAULT_DURATION,
+                        cursor.getColumnCount() > 23 ? cursor.getInt(23)
+                                : FragranceRestorePolicy.DEFAULT_INTENSITY);
+                fragranceTaste = fragrance.taste;
+                fragranceDuration = fragrance.duration;
+                fragranceIntensity = fragrance.intensity;
                 // col 12 — «Режим отладки»: эмуляция CAN в логи вместо реальной отправки
                 boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
                 // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
@@ -320,6 +324,9 @@ public class MainActivity extends AppCompatActivity {
                 Log.i(MODES_LOG, "FRESH: driveEnabled=" + driveEnabled
                         + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
                         + " disablePedestrianSound=" + disablePedestrianSound
+                        + " fragranceEnabled=" + fragranceEnabled
+                        + " fragrance=" + fragranceTaste + "/" + fragranceDuration
+                        + "/" + fragranceIntensity
                         + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
                         + " pauseMediaOnDoor=" + pauseMediaOnDoor);
                 return 2;
@@ -359,6 +366,10 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheEnergyEnabled", energyEnabled)
                 .putBoolean("cacheDisablePedestrianSound", disablePedestrianSound)
                 .putBoolean("cacheForcedEv", forcedEv)
+                .putBoolean("cacheFragranceEnabled", fragranceEnabled)
+                .putInt("cacheFragranceTaste", fragranceTaste)
+                .putInt("cacheFragranceDuration", fragranceDuration)
+                .putInt("cacheFragranceIntensity", fragranceIntensity)
                 .putBoolean("cacheDebugMode", debugMode)
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
@@ -383,6 +394,14 @@ public class MainActivity extends AppCompatActivity {
         energyEnabled      = p.getBoolean("cacheEnergyEnabled", false);
         disablePedestrianSound = p.getBoolean("cacheDisablePedestrianSound", false);
         forcedEv = p.getBoolean("cacheForcedEv", false);
+        fragranceEnabled = p.getBoolean("cacheFragranceEnabled", false);
+        FragranceRestorePolicy.Settings fragrance = FragranceRestorePolicy.normalize(
+                p.getInt("cacheFragranceTaste", FragranceRestorePolicy.DEFAULT_TASTE),
+                p.getInt("cacheFragranceDuration", FragranceRestorePolicy.DEFAULT_DURATION),
+                p.getInt("cacheFragranceIntensity", FragranceRestorePolicy.DEFAULT_INTENSITY));
+        fragranceTaste = fragrance.taste;
+        fragranceDuration = fragrance.duration;
+        fragranceIntensity = fragrance.intensity;
         boolean debugMode     = p.getBoolean("cacheDebugMode", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
@@ -391,6 +410,9 @@ public class MainActivity extends AppCompatActivity {
         Log.i(MODES_LOG, "CACHE: driveEnabled=" + driveEnabled
                 + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound
+                + " fragranceEnabled=" + fragranceEnabled
+                + " fragrance=" + fragranceTaste + "/" + fragranceDuration
+                + "/" + fragranceIntensity
                 + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
                 + " pauseMediaOnDoor=" + pauseMediaOnDoor);
         return true;
@@ -451,8 +473,12 @@ public class MainActivity extends AppCompatActivity {
 
     /** Немедленно применить звук пешеходов (тоггл с главного экрана). disabled=true → заглушить. */
     public static boolean sendPedestrianSoundCommand(boolean disabled) {
-        return setCanValues(1, getPedestrianSoundCanCommand(disabled),
-                "pedestrian sound " + (disabled ? "off" : "on"));
+        return OemVehicleStateTransport.sendVehicleState(
+                GlobalVars.SAVE_CONTEXT,
+                VehicleRestorePolicy.PEDESTRIAN_SOUND,
+                VehicleRestorePolicy.PEDESTRIAN_SOUND_ID,
+                VehicleRestorePolicy.pedestrianSoundState(disabled),
+                "pedestrian sound " + (disabled ? "off" : "on")).accepted();
     }
 
     /**
@@ -479,42 +505,79 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Builds one validated pass before the first frame is sent. */
-    static CanRestorePlan createCanRestorePlan() {
+    /** Builds one validated pass before the first OEM request is submitted. */
+    static CanRestorePlan createCanRestorePlan(boolean repeatOemOnNextPass) {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
-                + " disablePedestrianSound=" + disablePedestrianSound);
+                + " disablePedestrianSound=" + disablePedestrianSound
+                + " fragranceEnabled=" + fragranceEnabled);
         CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
-        int energyStep = -1;
-        if (energyEnabled) {
-            energyStep = plan.add("energy mode: " + energy, getEnergyCanCommand(energy));
-        }
+        final Context context = GlobalVars.SAVE_CONTEXT;
+        final Map<String, Integer> primaryValues = new LinkedHashMap<>();
+        final Map<String, Integer> trailingValues = new LinkedHashMap<>();
+        final Map<String, Integer> stableIds = new LinkedHashMap<>();
+
         if (driveEnabled) {
-            plan.add("drive mode: " + driveMode, NativeDriveModeFrames.forMode(driveMode));
+            if (!DriveModeCanTransport.appendStates(
+                    context, driveMode, primaryValues, stableIds)) {
+                throw new IllegalArgumentException("Unsupported drive mode: " + driveMode);
+            }
         }
-        if (recycleEnabled) {
-            plan.add("recuperation level: " + recycle, getRecEnergyCanCommand(recycle));
+        VehicleRestorePolicy.appendPrimaryTo(
+                primaryValues, energyEnabled, energy, forcedEv);
+        VehicleRestorePolicy.appendRecuperationTo(
+                trailingValues, recycleEnabled, recycle, driveMode);
+        stableIds.putAll(VehicleRestorePolicy.stableIds());
+
+        OemVehicleStateTransport.StateValue fragranceDurationState = null;
+        if (fragranceEnabled) {
+            FragranceRestorePolicy.Settings fragrance = FragranceRestorePolicy.normalize(
+                    fragranceTaste, fragranceDuration, fragranceIntensity);
+            primaryValues.putAll(FragranceRestorePolicy.fragranceBundle(fragrance));
+            stableIds.putAll(FragranceRestorePolicy.stableIds());
+            fragranceDurationState = new OemVehicleStateTransport.StateValue(
+                    new OemVehicleStateTransport.StateKey(
+                            FragranceRestorePolicy.DURATION_STATE,
+                            FragranceRestorePolicy.DURATION_STATE_ID),
+                    fragrance.duration);
         }
-        // «Отключить звук для пешеходов» — независимое бинарное состояние, применяем всегда.
-        plan.add("pedestrian sound mode " + (disablePedestrianSound ? "off" : "on"),
-                getPedestrianSoundCanCommand(disablePedestrianSound));
-        // Форсированный EV применяем ТОЛЬКО когда он включён — и обязательно ПОСЛЕ команды энергии,
-        // чтобы он её перекрыл. Команду «выкл» здесь не шлём намеренно: её байты (…2c 24 08 00)
-        // содержат значение энергии «Электро», т.е. отправка на каждом применении переводила бы
-        // энергорежим в электро и затирала выбор пользователя (Авто/Топливо/Сохранение).
-        // Выключение уходит явным действием пользователя — см. sendForcedEvCommand(false).
-        if (forcedEv) {
-            plan.addAfter("forced EV on", getForcedEvCanCommand(true), energyStep);
+
+        if (!primaryValues.isEmpty() || !trailingValues.isEmpty()) {
+            final OemVehicleStateTransport.StateValue firstState = fragranceDurationState;
+            plan.addOperation("OEM vehicle restore snapshot", () ->
+                    OemVehicleStateTransport.sendRestoreSequence(
+                            context, firstState, primaryValues, trailingValues, stableIds,
+                            "drive/energy/fragrance then recuperation").accepted()
+                            ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
+                            : CanRestorePlan.OperationResult.TRANSIENT_FAILURE,
+                    repeatOemOnNextPass);
         }
+
+        // Independent TX58: the OEM setter preserves the neighbouring VSP frame fields.
+        final boolean pedestrianDisabled = disablePedestrianSound;
+        plan.addOperation(
+                "pedestrian sound mode " + (pedestrianDisabled ? "off" : "on"),
+                () -> OemVehicleStateTransport.sendVehicleState(
+                        context,
+                        VehicleRestorePolicy.PEDESTRIAN_SOUND,
+                        VehicleRestorePolicy.PEDESTRIAN_SOUND_ID,
+                        VehicleRestorePolicy.pedestrianSoundState(pedestrianDisabled),
+                        "pedestrian sound restore").accepted()
+                        ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
+                        : CanRestorePlan.OperationResult.TRANSIENT_FAILURE,
+                repeatOemOnNextPass);
         return plan.build();
+    }
+
+    static CanRestorePlan createCanRestorePlan() {
+        return createCanRestorePlan(false);
     }
 
     /** Compatibility one-shot; ApplyEngine keeps the plan across transient retries. */
     public static boolean runCmds() {
         try {
             return createCanRestorePlan().sendPending(
-                    (frames, label) -> setCanValues(1, frames, label))
-                    == CanRestorePlan.AttemptResult.SUCCESS;
+                    (frames, label) -> setCanValues(1, frames, label)).isComplete();
         } catch (IllegalArgumentException e) {
             Log.e("$$$ MainActivity runCmds $$$", "Permanent CAN plan error: " + e.getMessage());
             return false;

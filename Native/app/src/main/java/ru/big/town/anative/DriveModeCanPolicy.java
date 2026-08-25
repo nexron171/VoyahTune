@@ -9,7 +9,6 @@ final class DriveModeCanPolicy {
     enum VehicleStateKey {
         DRIVING_MODE_SET(545),
         EPS_MODE_SET(722),
-        FCM_SW_REQ(774),
         PROP_MODE_SET(782);
 
         final int stableId;
@@ -62,7 +61,6 @@ final class DriveModeCanPolicy {
         final int driveMode;
         final int steering;
         final int accelerator;
-        boolean sportFcm = false;
         switch (mode) {
             case "ECO":
                 driveMode = 1;
@@ -78,7 +76,6 @@ final class DriveModeCanPolicy {
                 driveMode = 3;
                 steering = 3;
                 accelerator = 3;
-                sportFcm = true;
                 break;
             case "OUTING":
                 driveMode = 4;
@@ -105,7 +102,6 @@ final class DriveModeCanPolicy {
         values.put(VehicleStateKey.DRIVING_MODE_SET, driveMode);
         values.put(VehicleStateKey.EPS_MODE_SET, steering);
         values.put(VehicleStateKey.PROP_MODE_SET, accelerator);
-        if (sportFcm) values.put(VehicleStateKey.FCM_SW_REQ, 2);
         return new Plan(values);
     }
 }

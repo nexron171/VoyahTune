@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * One restore pass split into independently retryable native CAN commands.
+ * One restore pass split into independently retryable CAN/OEM commands.
  *
  * <p>A failed command remains pending while later independent commands are still attempted. This
  * prevents a permanently failing middle command from replaying the already successful prefix on
@@ -14,6 +14,18 @@ import java.util.List;
 final class CanRestorePlan {
     enum AttemptResult {
         SUCCESS,
+        /** Every command was submitted, but an asynchronous OEM API cannot prove CAN completion. */
+        ACCEPTED_UNCONFIRMED,
+        TRANSIENT_FAILURE;
+
+        boolean isComplete() {
+            return this != TRANSIENT_FAILURE;
+        }
+    }
+
+    enum OperationResult {
+        CONFIRMED,
+        ACCEPTED_UNCONFIRMED,
         TRANSIENT_FAILURE
     }
 
@@ -21,34 +33,60 @@ final class CanRestorePlan {
         boolean send(byte[][] frames, String label);
     }
 
+    interface Operation {
+        OperationResult send();
+    }
+
     private static final int NO_DEPENDENCY = -1;
 
     private final List<Command> commands;
-    private final boolean[] completed;
+    private final OperationResult[] results;
 
     private CanRestorePlan(List<Command> commands) {
         this.commands = commands;
-        this.completed = new boolean[commands.size()];
+        this.results = new OperationResult[commands.size()];
     }
 
     AttemptResult sendPending(Sender sender) {
         for (int i = 0; i < commands.size(); i++) {
-            if (completed[i]) continue;
+            if (results[i] != null) continue;
             Command command = commands.get(i);
-            if (command.dependency >= 0 && !completed[command.dependency]) continue;
-            if (sender.send(command.frames, command.label)) completed[i] = true;
+            if (command.dependency >= 0 && results[command.dependency] == null) continue;
+            OperationResult result;
+            if (command.operation != null) {
+                result = command.operation.send();
+            } else {
+                result = sender.send(command.frames, command.label)
+                        ? OperationResult.CONFIRMED : OperationResult.TRANSIENT_FAILURE;
+            }
+            if (result != OperationResult.TRANSIENT_FAILURE) results[i] = result;
         }
-        return isComplete() ? AttemptResult.SUCCESS : AttemptResult.TRANSIENT_FAILURE;
+        if (!isComplete()) return AttemptResult.TRANSIENT_FAILURE;
+        for (OperationResult result : results) {
+            if (result == OperationResult.ACCEPTED_UNCONFIRMED) {
+                return AttemptResult.ACCEPTED_UNCONFIRMED;
+            }
+        }
+        return AttemptResult.SUCCESS;
     }
 
     void resetForNextPass() {
-        Arrays.fill(completed, false);
+        for (int i = 0; i < commands.size(); i++) {
+            if (commands.get(i).repeatOnNextPass) results[i] = null;
+        }
     }
 
     int pendingCount() {
         int pending = 0;
-        for (boolean done : completed) if (!done) pending++;
+        for (OperationResult result : results) if (result == null) pending++;
         return pending;
+    }
+
+    boolean hasRepeatableCommands() {
+        for (Command command : commands) {
+            if (command.repeatOnNextPass) return true;
+        }
+        return false;
     }
 
     private boolean isComplete() {
@@ -67,7 +105,29 @@ final class CanRestorePlan {
             if (dependency < NO_DEPENDENCY || dependency >= commands.size()) {
                 throw new IllegalArgumentException("Invalid dependency for " + label);
             }
-            commands.add(new Command(label, copy(frames), dependency));
+            commands.add(new Command(label, copy(frames), null, dependency, true));
+            return commands.size() - 1;
+        }
+
+        /**
+         * Adds an operation which is retried until accepted, then stays completed for the rest of
+         * this ApplyEngine plan. This prevents an asynchronous TX77 acceptance from being replayed
+         * by the three intentional native-CAN stabilization passes in the same wake.
+         */
+        int addOnce(String label, Operation operation) {
+            return addOperation(label, operation, false);
+        }
+
+        /** Adds an OEM operation which may join the existing bounded stabilization passes. */
+        int addOperation(String label, Operation operation, boolean repeatOnNextPass) {
+            if (label == null || label.isEmpty()) {
+                throw new IllegalArgumentException("CAN command label is empty");
+            }
+            if (operation == null) {
+                throw new IllegalArgumentException("CAN operation is null for " + label);
+            }
+            commands.add(new Command(
+                    label, null, operation, NO_DEPENDENCY, repeatOnNextPass));
             return commands.size() - 1;
         }
 
@@ -104,12 +164,17 @@ final class CanRestorePlan {
     private static final class Command {
         final String label;
         final byte[][] frames;
+        final Operation operation;
         final int dependency;
+        final boolean repeatOnNextPass;
 
-        Command(String label, byte[][] frames, int dependency) {
+        Command(String label, byte[][] frames, Operation operation, int dependency,
+                boolean repeatOnNextPass) {
             this.label = label;
             this.frames = frames;
+            this.operation = operation;
             this.dependency = dependency;
+            this.repeatOnNextPass = repeatOnNextPass;
         }
     }
 }

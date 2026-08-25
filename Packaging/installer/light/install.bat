@@ -95,8 +95,7 @@ echo === Full to Light: stopping root hook runtime ===
 set "LIGHT_HOOK_BARRIER_PHASE=1"
 call :stop_full_hook_runtime_for_light
 if errorlevel 1 (
-    echo !!! Full hook-loader or its in-flight injector did not stop. Teardown was cancelled.
-    exit /b 1
+    echo WARNING: init did not confirm Full hook-loader stop. Continuing teardown and mandatory reboot.
 )
 
 call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
@@ -171,7 +170,7 @@ exit /b 0
 goto :eof
 
 :stop_full_hook_runtime_for_light
-adb.exe shell "command -v pgrep >/dev/null 2>&1 || exit 1; command -v pkill >/dev/null 2>&1 || exit 1; setprop ctl.stop voyahtune_load 2>/dev/null || true; pkill -TERM -f '/data/local/bin/load[.]bin' 2>/dev/null || true; pkill -TERM -f '/data/local/bin/frida[-]inject' 2>/dev/null || true; stop_wait=0; while pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; do if [ $stop_wait -ge 10 ]; then break; fi; sleep 1; stop_wait=$((stop_wait + 1)); done; if pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; then pkill -KILL -f '/data/local/bin/load[.]bin' 2>/dev/null || true; pkill -KILL -f '/data/local/bin/frida[-]inject' 2>/dev/null || true; kill_wait=0; while pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; do if [ $kill_wait -ge 5 ]; then exit 1; fi; sleep 1; kill_wait=$((kill_wait + 1)); done; fi"
+adb.exe shell "setprop ctl.stop voyahtune_load 2>/dev/null || exit 1; stop_wait=0; hook_state=$(getprop init.svc.voyahtune_load); while [ x$hook_state != xstopped ]; do if [ $stop_wait -ge 5 ]; then exit 1; fi; sleep 1; stop_wait=$((stop_wait + 1)); hook_state=$(getprop init.svc.voyahtune_load); done"
 exit /b %ERRORLEVEL%
 
 :remove_full_hook_runtime_for_light
@@ -185,7 +184,7 @@ adb.exe shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voya
 if errorlevel 1 exit /b 1
 adb.exe shell "rm -f /data/local/tmp/voyah_vd.pid /data/local/tmp/voyah_swk_ss.pid /data/local/tmp/voyah_swk_km.pid /data/local/tmp/voyah_swk_km.busy /data/local/tmp/voyah_km.pid /data/local/tmp/voyah_lnch.pid /data/local/tmp/voyah_md.pid /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_load.txt /data/local/tmp/voyah_vd_bypass.txt /data/local/tmp/voyah_vd_bypass.txt.try /data/local/tmp/voyah_keymng.txt /data/local/tmp/voyah_swk.txt /data/local/tmp/voyah_swk.txt.try /data/local/tmp/voyah_lnch.txt /data/local/tmp/voyah_lnch.txt.try /data/local/tmp/voyah_md.txt /data/local/tmp/voyah_md.txt.try /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try; rm -rf /data/local/tmp/voyah_load.lock"
 if errorlevel 1 exit /b 1
-adb.exe shell "for removed_path in /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.load.sh /data/local/bin/vd_bypass.js /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/apollo_tech.js /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1; do [ ! -e $removed_path ] && [ ! -L $removed_path ] || exit 1; done; ! pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || exit 1; ! pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1 || exit 1; sync"
+adb.exe shell "for removed_path in /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.load.sh /data/local/bin/vd_bypass.js /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/apollo_tech.js /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1; do [ ! -e $removed_path ] && [ ! -L $removed_path ] || exit 1; done; sync"
 exit /b %ERRORLEVEL%
 
 :install_required_system_file

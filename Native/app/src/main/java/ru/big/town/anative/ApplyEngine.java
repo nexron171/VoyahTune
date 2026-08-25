@@ -251,7 +251,7 @@ public final class ApplyEngine {
                     return;
                 }
                 applyInternal(WAKE_REPEAT, WAKE_PAUSE, null, gateGeneration,
-                        wakeGeneration, restoreEpoch);
+                        wakeGeneration, restoreEpoch, true);
             }, DEBOUNCE_TOKEN, scheduledAt + DEBOUNCE_MS);
         }
     }
@@ -273,7 +273,7 @@ public final class ApplyEngine {
             final long gateGeneration = beginRestoreGate("manual apply");
             h.removeCallbacksAndMessages(DEBOUNCE_TOKEN);
             h.post(() -> applyInternal(repeat, pause, onDone, gateGeneration,
-                    wakeGeneration, restoreEpoch));
+                    wakeGeneration, restoreEpoch, false));
         }
     }
 
@@ -450,10 +450,11 @@ public final class ApplyEngine {
     // Выполняется строго на bg-потоке — сериализация даёт single-flight без флагов/локов.
     private static void applyInternal(int repeat, long pause, Runnable onDone,
                                       long gateGeneration, long wakeGeneration,
-                                      long restoreEpoch) {
+                                      long restoreEpoch, boolean repeatOemOnNextPass) {
         CycleResult result = CycleResult.FAILED;
         try {
-            result = runCycle(repeat, pause, wakeGeneration, restoreEpoch);
+            result = runCycle(
+                    repeat, pause, wakeGeneration, restoreEpoch, repeatOemOnNextPass);
         } catch (Throwable t) {
             Log.e(TAG, "runCycle failed: " + t.getMessage(), t);
         } finally {
@@ -464,10 +465,11 @@ public final class ApplyEngine {
                 // Повторная проверка закрывает race cancel между последней отправкой/ожиданием и
                 // completion. Устаревший цикл не считается coverage даже если раньше успел в CAN.
                 if (result != CycleResult.CANCELLED) {
+                    boolean restoreAccepted = result.completesRestore();
                     completionAccepted = RESTORE_RUN_STATE.completeCycle(
                             wakeGeneration, restoreEpoch,
-                            result == CycleResult.SUCCESS, endedAt);
-                    if (completionAccepted && result == CycleResult.SUCCESS) {
+                            restoreAccepted, endedAt);
+                    if (completionAccepted && restoreAccepted) {
                         gateSettling = MODE_SYNC_POLICY.completeRestore(gateGeneration, endedAt);
                     } else if (completionAccepted && result == CycleResult.FAILED) {
                         MODE_SYNC_POLICY.failRestore(gateGeneration);
@@ -477,6 +479,13 @@ public final class ApplyEngine {
             if (!completionAccepted) {
                 Log.i(TAG, "restore wakeGen=" + wakeGeneration + " epoch=" + restoreEpoch
                         + " cancelled/stale; coverage and gate unchanged");
+            } else if (result == CycleResult.ACCEPTED_UNCONFIRMED && gateSettling) {
+                Log.w(TAG, "mode restore accepted by asynchronous OEM transport without CAN "
+                        + "completion proof; gate SETTLING gen=" + gateGeneration + " for "
+                        + ModeSyncPolicy.POST_RESTORE_SETTLE_MS + "ms");
+            } else if (result == CycleResult.ACCEPTED_UNCONFIRMED) {
+                Log.w(TAG, "mode restore accepted-unconfirmed, but gate generation "
+                        + gateGeneration + " was superseded");
             } else if (result == CycleResult.SUCCESS && gateSettling) {
                 Log.i(TAG, "mode sync gate SETTLING gen=" + gateGeneration + " for "
                         + ModeSyncPolicy.POST_RESTORE_SETTLE_MS + "ms");
@@ -492,7 +501,7 @@ public final class ApplyEngine {
     }
 
     private static CycleResult runCycle(int repeat, long pause, long wakeGeneration,
-                                        long restoreEpoch) {
+                                        long restoreEpoch, boolean repeatOemOnNextPass) {
         if (!RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch)) {
             return CycleResult.CANCELLED;
         }
@@ -532,7 +541,7 @@ public final class ApplyEngine {
             // Validate every required command before sending the first frame. Unknown modes and
             // malformed mappings are permanent configuration errors, not a reason for 120 seconds
             // of CAN retries.
-            canPlan = MainActivity.createCanRestorePlan();
+            canPlan = MainActivity.createCanRestorePlan(repeatOemOnNextPass);
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "runCycle: permanent CAN plan error — " + e.getMessage());
             return CycleResult.FAILED;
@@ -548,8 +557,14 @@ public final class ApplyEngine {
         long nowElapsed = SystemClock.elapsedRealtime();
         long deadline = WAKE_CAN_DEADLINE_MS > Long.MAX_VALUE - nowElapsed
                 ? Long.MAX_VALUE : nowElapsed + WAKE_CAN_DEADLINE_MS;
+        // A manual Apply uses one OEM snapshot: repeating an asynchronous TX77 eight times at
+        // 250 ms would only queue duplicate ModeSettingTasks. Physical wake keeps the established
+        // three 5-second stabilization passes, each containing real OEM transactions.
+        int requiredPasses = canPlan.hasRepeatableCommands() ? repeat : 1;
         int okPasses = 0, tries = 0;
+        boolean acceptedUnconfirmed = false;
         long lastSuccessfulPassCoverage = -1L;
+        long currentPassCoverage = -1L;
         while (true) {
             // Повторно проверяем ДО следующей отправки: elapsedRealtime мог перескочить дедлайн,
             // пока процесс был в deep sleep без доставленного freeze callback.
@@ -562,28 +577,41 @@ public final class ApplyEngine {
             // Snapshot the trigger boundary BEFORE sending. A wake signal that arrives while this
             // pass is in flight (or immediately after it) must not be declared covered by CAN that
             // had already started; it will enqueue one conservative follow-up cycle instead.
-            long passCoverage = RESTORE_RUN_STATE.coverageBoundary(
-                    wakeGeneration, restoreEpoch);
-            if (passCoverage < 0L) return CycleResult.CANCELLED;
+            if (currentPassCoverage < 0L) {
+                currentPassCoverage = RESTORE_RUN_STATE.coverageBoundary(
+                        wakeGeneration, restoreEpoch);
+                if (currentPassCoverage < 0L) return CycleResult.CANCELLED;
+            }
+            final CanRestorePlan.AttemptResult[] attemptResult = {
+                    CanRestorePlan.AttemptResult.TRANSIENT_FAILURE
+            };
             boolean ok = CanSender.runGuardedSend(
                     () -> RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch),
-                    () -> canPlan.sendPending(
-                            (frames, label) -> MainActivity.setCanValues(1, frames, label))
-                            == CanRestorePlan.AttemptResult.SUCCESS);
+                    () -> {
+                        attemptResult[0] = canPlan.sendPending(
+                                (frames, label) -> MainActivity.setCanValues(1, frames, label));
+                        return attemptResult[0].isComplete();
+                    });
             if (!RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch)) {
                 return CycleResult.CANCELLED;
             }
             tries++;
             if (ok) {
+                if (attemptResult[0] == CanRestorePlan.AttemptResult.ACCEPTED_UNCONFIRMED) {
+                    acceptedUnconfirmed = true;
+                }
                 okPasses++;
-                lastSuccessfulPassCoverage = passCoverage;
-                if (okPasses < repeat) canPlan.resetForNextPass();
+                lastSuccessfulPassCoverage = currentPassCoverage;
+                if (okPasses < requiredPasses) {
+                    canPlan.resetForNextPass();
+                    currentPassCoverage = -1L;
+                }
             } else {
                 Log.w(TAG, "runCycle: CAN не готов, проход " + tries
                         + " не прошёл (успешных=" + okPasses
                         + ", осталось команд=" + canPlan.pendingCount() + ")");
             }
-            if (okPasses >= repeat) break;                             // набрали нужное число успешных
+            if (okPasses >= requiredPasses) break;                     // набрали нужное число успешных
             if (SystemClock.elapsedRealtime() >= deadline) break;      // CAN так и не поднялся вовремя
             if (!waitWhileCurrent(pause, wakeGeneration, restoreEpoch)) {
                 return CycleResult.CANCELLED;
@@ -594,10 +622,10 @@ public final class ApplyEngine {
         }
         if (okPasses == 0) {
             Log.e(TAG, "runCycle: CAN не поднялся за " + (WAKE_CAN_DEADLINE_MS / 1000) + "с — режим НЕ применён");
-        } else if (okPasses < repeat) {
-            Log.w(TAG, "runCycle: применено частично — успешных проходов " + okPasses + "/" + repeat + " (tries=" + tries + ")");
+        } else if (okPasses < requiredPasses) {
+            Log.w(TAG, "runCycle: применено частично — успешных проходов " + okPasses + "/" + requiredPasses + " (tries=" + tries + ")");
         } else {
-            Log.i(TAG, "runCycle: режим применён, успешных проходов " + okPasses + "/" + repeat + " (tries=" + tries + ")");
+            Log.i(TAG, "runCycle: режим применён, успешных проходов " + okPasses + "/" + requiredPasses + " (tries=" + tries + ")");
         }
 
         // Custom-команды могут разблокировать/разбудить узлы автомобиля. Не исполняем их, если
@@ -654,8 +682,9 @@ public final class ApplyEngine {
         if (!RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch)) {
             return CycleResult.CANCELLED;
         }
-        Log.i(TAG, "runCycle: done (source=" + (status == 2 ? "provider" : "cache") + ")");
-        return CycleResult.SUCCESS;
+        Log.i(TAG, "runCycle: done (source=" + (status == 2 ? "provider" : "cache")
+                + (acceptedUnconfirmed ? ", OEM accepted-unconfirmed" : "") + ")");
+        return acceptedUnconfirmed ? CycleResult.ACCEPTED_UNCONFIRMED : CycleResult.SUCCESS;
     }
 
     /** Cooperative wait: reset never interrupts the HandlerThread and cancellation latency is bounded. */
@@ -704,8 +733,13 @@ public final class ApplyEngine {
 
     private enum CycleResult {
         SUCCESS,
+        ACCEPTED_UNCONFIRMED,
         FAILED,
-        CANCELLED
+        CANCELLED;
+
+        boolean completesRestore() {
+            return this == SUCCESS || this == ACCEPTED_UNCONFIRMED;
+        }
     }
 
     /** Android-free cancellation/coverage state, kept package-visible for deterministic unit tests. */

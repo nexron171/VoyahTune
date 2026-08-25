@@ -93,8 +93,11 @@ watchdog_loop_line=$(grep -n '^while \[ 1 \]; do$' "$LOADER" | tail -n1 | cut -d
 script_line=$(grep -n 'install_required_data_file keyboard_ru.js' "$FULL_INSTALL" | cut -d: -f1)
 manifest_line=$(grep -n 'install_required_data_file voyahtune-hook-manifest.json' "$FULL_INSTALL" | tail -n1 | cut -d: -f1)
 [ "$manifest_line" -gt "$script_line" ] || fail "manifest is not published after all scripts"
-require "$FULL_INSTALL" "pkill -TERM -f \"/data/local/bin/load[.]bin\""
-require "$FULL_INSTALL" "pkill -KILL -f \"/data/local/bin/frida[-]inject\""
+require "$FULL_INSTALL" 'setprop ctl.stop voyahtune_load'
+require "$FULL_INSTALL" 'getprop init.svc.voyahtune_load'
+forbid "$FULL_INSTALL" 'pgrep -f'
+forbid "$FULL_INSTALL" 'pkill -'
+forbid "$FULL_INSTALL" 'signal_hook_runtime'
 
 # Full update safety: the process freeze is after the only possible verity reboot, before the first
 # hook-state mutation, and an abort can restart the old/new init service. The manifest stays last.
@@ -115,8 +118,11 @@ full_bat_barrier=$(line_first "$FULL_INSTALL_BAT" 'set "HOOK_UPDATE_BARRIER_ARME
 full_bat_mutation=$(line_first "$FULL_INSTALL_BAT" 'call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled')
 [ "$full_bat_verity" -lt "$full_bat_barrier" ] && [ "$full_bat_barrier" -lt "$full_bat_mutation" ] \
     || fail "full install.bat freeze is not after verity reboot and before hook mutation"
-require "$FULL_INSTALL_BAT" "pkill -TERM -f '/data/local/bin/load[.]bin'"
-require "$FULL_INSTALL_BAT" "pkill -KILL -f '/data/local/bin/frida[-]inject'"
+require "$FULL_INSTALL_BAT" 'setprop ctl.stop voyahtune_load'
+require "$FULL_INSTALL_BAT" 'getprop init.svc.voyahtune_load'
+forbid "$FULL_INSTALL_BAT" 'pgrep -f'
+forbid "$FULL_INSTALL_BAT" 'pkill -'
+forbid "$FULL_INSTALL_BAT" 'signal_hook_runtime'
 require "$FULL_INSTALL_BAT" 'setprop ctl.start voyahtune_load'
 forbid_ci "$FULL_INSTALL_BAT" 'powershell'
 forbid_ci "$FULL_INSTALL_BAT" 'pwsh'
@@ -171,7 +177,11 @@ require "$LIGHT_INSTALL" 'LOG_TAG="vt_load_bin"'
 require "$LIGHT_INSTALL" 'HOOK_MANIFEST=/data/local/bin/voyahtune-hook-manifest.json'
 require "$LIGHT_INSTALL" '/data/local/bin/voyahtune-hook-manifest.json'
 require "$LIGHT_INSTALL" '/data/local/tmp/voyahtune-hook-status.v1'
-require "$LIGHT_INSTALL" "pkill -KILL -f \"/data/local/bin/frida[-]inject\""
+require "$LIGHT_INSTALL" 'setprop ctl.stop voyahtune_load'
+require "$LIGHT_INSTALL" 'getprop init.svc.voyahtune_load'
+forbid "$LIGHT_INSTALL" 'pgrep -f'
+forbid "$LIGHT_INSTALL" 'pkill -'
+forbid "$LIGHT_INSTALL" 'signal_hook_runtime'
 require "$LIGHT_INSTALL" 'LIGHT_HOOK_BARRIER_PHASE=0'
 require "$LIGHT_INSTALL" 'install_required_system_file() {'
 require "$LIGHT_INSTALL" "restorecon '\$SYSTEM_STAGE' && mv -f '\$SYSTEM_STAGE' '\$SYSTEM_TARGET' && restorecon '\$SYSTEM_TARGET' && sync && test -f '\$SYSTEM_TARGET'"
@@ -213,7 +223,11 @@ require "$LIGHT_INSTALL_BAT" "LOG_TAG=\\\"vt_load_bin\\\""
 require "$LIGHT_INSTALL_BAT" 'HOOK_MANIFEST=/data/local/bin/voyahtune-hook-manifest.json'
 require "$LIGHT_INSTALL_BAT" '/data/local/bin/voyahtune-hook-manifest.json'
 require "$LIGHT_INSTALL_BAT" '/data/local/tmp/voyahtune-hook-status.v1'
-require "$LIGHT_INSTALL_BAT" "pkill -KILL -f '/data/local/bin/frida[-]inject'"
+require "$LIGHT_INSTALL_BAT" 'setprop ctl.stop voyahtune_load'
+require "$LIGHT_INSTALL_BAT" 'getprop init.svc.voyahtune_load'
+forbid "$LIGHT_INSTALL_BAT" 'pgrep -f'
+forbid "$LIGHT_INSTALL_BAT" 'pkill -'
+forbid "$LIGHT_INSTALL_BAT" 'signal_hook_runtime'
 require "$LIGHT_INSTALL_BAT" 'set "LIGHT_HOOK_BARRIER_PHASE=0"'
 require "$LIGHT_INSTALL_BAT" ':install_required_system_file'
 require "$LIGHT_INSTALL_BAT" "restorecon '%~2' && mv -f '%~2' '%~3' && restorecon '%~3' && sync && test -f '%~3'"

@@ -546,6 +546,7 @@ public class AdvanceActivity extends AppCompatActivity {
         // Раздел «Настройки автомобиля» (режимы + безопасность + комфорт слиты в один раздел)
         initModeRadios();
         initModeEnableToggles();
+        initFragranceSettings();
         initCheckBox34();
         initPedestrianSoundGroup();
         initForcedEvGroup();
@@ -1948,6 +1949,62 @@ public class AdvanceActivity extends AppCompatActivity {
         setupEnableSwitch(R.id.switchDriveMode,  R.id.drive_modes_group,   "driveEnabled");
         setupEnableSwitch(R.id.switchEnergy,     R.id.energy_modes_group,  "energyEnabled");
         setupEnableSwitch(R.id.switchRecycle,    R.id.recycle_modes_group, "recycleEnabled");
+    }
+
+    /**
+     * Отдельный opt-in снимок ароматизатора. Селекторы только сохраняют желаемые параметры:
+     * никаких CAN-подписок и немедленной отправки здесь нет. Native прочитает снимок через provider
+     * при «Применить» либо на пробуждении.
+     */
+    private void initFragranceSettings() {
+        Switch enabledSwitch = findViewById(R.id.switchFragrance);
+        RadioGroup tasteGroup = findViewById(R.id.fragranceTasteGroup);
+        RadioGroup durationGroup = findViewById(R.id.fragranceDurationGroup);
+        RadioGroup intensityGroup = findViewById(R.id.fragranceIntensityGroup);
+
+        int taste = FragranceSettings.normalizeTaste(prefs.getInt(
+                FragranceSettings.TASTE, FragranceSettings.DEFAULT_TASTE));
+        int duration = FragranceSettings.normalizeDuration(prefs.getInt(
+                FragranceSettings.DURATION, FragranceSettings.DEFAULT_DURATION));
+        int intensity = FragranceSettings.normalizeIntensity(prefs.getInt(
+                FragranceSettings.INTENSITY, FragranceSettings.DEFAULT_INTENSITY));
+        checkRadioByTag(tasteGroup, String.valueOf(taste));
+        checkRadioByTag(durationGroup, String.valueOf(duration));
+        checkRadioByTag(intensityGroup, String.valueOf(intensity));
+
+        bindIntRadio(tasteGroup, FragranceSettings.TASTE);
+        bindIntRadio(durationGroup, FragranceSettings.DURATION);
+        bindIntRadio(intensityGroup, FragranceSettings.INTENSITY);
+
+        boolean enabled = prefs.getBoolean(
+                FragranceSettings.ENABLED, FragranceSettings.DEFAULT_ENABLED);
+        if (enabledSwitch != null) {
+            enabledSwitch.setChecked(enabled);
+            enabledSwitch.setOnCheckedChangeListener((button, checked) -> {
+                prefs.edit().putBoolean(FragranceSettings.ENABLED, checked).apply();
+                applyFragranceEnabled(checked);
+            });
+        }
+        applyFragranceEnabled(enabled);
+    }
+
+    private void bindIntRadio(RadioGroup group, String key) {
+        if (group == null) return;
+        group.setOnCheckedChangeListener((g, checkedId) -> {
+            View selected = findViewById(checkedId);
+            if (selected == null || selected.getTag() == null) return;
+            try {
+                prefs.edit().putInt(key, Integer.parseInt(selected.getTag().toString())).apply();
+            } catch (NumberFormatException e) {
+                Log.e("$$$ Advance fragrance $$$", "Invalid " + key + " tag", e);
+            }
+        });
+    }
+
+    private void applyFragranceEnabled(boolean enabled) {
+        applyModeToggle(R.id.fragranceTasteGroup, enabled);
+        applyModeToggle(R.id.fragranceDurationGroup, enabled);
+        applyModeToggle(R.id.fragranceIntensityGroup, enabled);
     }
 
     private void setupEnableSwitch(int switchId, int groupId, String key) {

@@ -114,8 +114,7 @@ echo === Stopping hook-loader for the atomic update ===
 set "HOOK_UPDATE_BARRIER_ARMED=1"
 call :stop_hook_runtime_for_update
 if errorlevel 1 (
-    echo !!! Hook-loader or its in-flight injector did not stop. Hook files were not changed.
-    exit /b 1
+    echo WARNING: init did not confirm hook-loader stop. Continuing atomic publish and mandatory reboot.
 )
 
 echo === Removing old Apollo VehicleSetting hook ===
@@ -320,7 +319,7 @@ endlocal
 exit /b 1
 
 :stop_hook_runtime_for_update
-adb.exe shell "command -v pgrep >/dev/null 2>&1 || exit 1; command -v pkill >/dev/null 2>&1 || exit 1; setprop ctl.stop voyahtune_load 2>/dev/null || true; pkill -TERM -f '/data/local/bin/load[.]bin' 2>/dev/null || true; pkill -TERM -f '/data/local/bin/frida[-]inject' 2>/dev/null || true; stop_wait=0; while pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; do if [ $stop_wait -ge 10 ]; then break; fi; sleep 1; stop_wait=$((stop_wait + 1)); done; if pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; then pkill -KILL -f '/data/local/bin/load[.]bin' 2>/dev/null || true; pkill -KILL -f '/data/local/bin/frida[-]inject' 2>/dev/null || true; kill_wait=0; while pgrep -f '/data/local/bin/load[.]bin' >/dev/null 2>&1 || pgrep -f '/data/local/bin/frida[-]inject' >/dev/null 2>&1; do if [ $kill_wait -ge 5 ]; then exit 1; fi; sleep 1; kill_wait=$((kill_wait + 1)); done; fi; rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock; rm -rf /data/local/tmp/voyah_load.lock"
+adb.exe shell "setprop ctl.stop voyahtune_load 2>/dev/null || exit 1; stop_wait=0; hook_state=$(getprop init.svc.voyahtune_load); while [ x$hook_state != xstopped ]; do if [ $stop_wait -ge 5 ]; then exit 1; fi; sleep 1; stop_wait=$((stop_wait + 1)); hook_state=$(getprop init.svc.voyahtune_load); done; rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock; rm -rf /data/local/tmp/voyah_load.lock"
 exit /b %ERRORLEVEL%
 
 :wait_android_boot
