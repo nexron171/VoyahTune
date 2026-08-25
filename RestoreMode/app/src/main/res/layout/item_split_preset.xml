@@ -88,13 +88,15 @@
         android:layout_marginTop="8dp"
         android:text="Изменяемая пропорция (тянуть делитель)"
         android:textColor="#FFFFFF"
-        android:textSize="22px" />
+        android:textSize="22px"
+        android:visibility="gone" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Пропорция меняется только когда делитель отпущен, поэтому приложение переживает одну смену размера вместо десятков. Выставленное вручную соотношение запоминается в пресете."
         android:textColor="#888888"
-        android:textSize="18px" />
+        android:textSize="18px"
+        android:visibility="gone" />
 
 </LinearLayout>
