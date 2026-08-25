@@ -5,22 +5,19 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.BroadcastReceiver;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.ServiceConnection;
 import android.content.SharedPreferences;
-import android.os.Binder;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.Parcel;
-import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -71,47 +68,22 @@ public class TripStatsService extends Service {
     // Порог: поездки суммарно короче — не сохраняем
     private static final long MIN_TRIP_MS = 5 * 60 * 1000L;
     private static final int  MAX_TRIPS   = 10;
+    // Входящий Gear callback может дать переходный burst. Стейт-машина принимает каждый переход,
+    // но disk apply + глобальный UI broadcast публикуют только последний снимок окна.
+    private static final long CAN_STATE_PUBLISH_COALESCE_MS = 250L;
 
-    // ICanBusService — статус КПП
-    private static final String CANBUS_DESCRIPTOR    = "com.qinggan.canbus.ICanBusService";
-    private static final String CANBUS_CB_DESCRIPTOR = "com.qinggan.canbus.ICanBusServiceCallback";
-    private static final int    TX_addCallback    = 28;
-    private static final int    TX_removeCallback = 29;
-    private static final int    CB_onGearStatusChanged = 12;
-    private static final int    CB_onDoorStatusChanged = 1;   // финализация поездки по открытию двери
-    private static final int    CB_onVehicleStateChanged = 36; // диагностика: все VehicleState (в т.ч. RSM уличного датчика света)
-    private static final int    CB_onLightStatusChanged  = 10; // диагностика фар: autoLamp/ближний/фары
-    // LightStatus: флаг + 17 int'ов; нужные индексы
-    private static final int LS_FIELD_COUNT    = 17;
-    private static final int LS_IDX_DIPPED_BEAM = 7;
-    private static final int LS_IDX_HEAD_LIGHT  = 13;
-    private static final int LS_IDX_AUTO_LAMP   = 16;
-    private static final String CANBUS_ACTION  = "com.qinggan.canbus.CanBusService";
-    private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
     private static final int    GEAR_DRIVE = 3;
-    // DoorStatus: флаг наличия + 10 int'ов; водительская = fLDoor (индекс 1), OPEN=1
-    private static final int DOOR_FIELD_COUNT = 10;
-    private static final int DOOR_IDX_FL      = 1;
     private static final int DOOR_OPEN        = 1;
-
-    private static final long SAFETY_POLL_MS = 30_000L;
-    private static final long BIND_RETRY_MS  = 5_000L;
 
     // Persist
     private static final String PREFS = "TripStats";
 
     private Handler timerHandler;
-
-    private IBinder canBusBinder = null;
-    // bindService(true) registers a binding reference even while the remote process is down.
-    // Keep that lifecycle separate from the momentary binder connection so safety-poll never
-    // stacks another bindService reference after onServiceDisconnected.
-    private boolean canBusBindingRequested = false;
-    private boolean canBusConnected = false;
-    private boolean canBusCallbackAdded   = false;
-    private long    lastCanBusBindAttempt = -BIND_RETRY_MS;
+    private HandlerThread modeFeedbackThread;
+    private Handler modeFeedbackHandler;
+    private CanBusEventHub.Subscription tripCanBusSubscription;
+    private CanBusEventHub.Subscription modeCanBusSubscription;
     private volatile boolean destroyed = false;
-    private final Runnable canBusRebindRunnable = this::ensureCanBusBound;
 
     // Состояние текущей поездки
     private boolean tripActive = false;     // был ли первый Drive в этом цикле
@@ -121,210 +93,39 @@ public class TripStatsService extends Service {
     private long    tripStartWall = 0L;     // wall-clock первого Drive (для даты)
     private int     lastGear = -1;
     private int     lastFLDoor = -1;        // последнее состояние водительской двери
-
-    // -------------------------------------------------------------------------
-    // ICanBusServiceCallback — stub (обрабатываем только код 12, gear)
-    // -------------------------------------------------------------------------
-
-    private final IBinder canBusCallbackBinder = new Binder() {
-        @Override
-        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
-                throws RemoteException {
-            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
-                    && code <= IBinder.LAST_CALL_TRANSACTION) {
-                return true;
-            }
-            if (code == CB_onGearStatusChanged) {
-                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                int gearVal = -1;
-                if (data.readInt() != 0) {
-                    data.readInt();            // ordinal (не нужен)
-                    gearVal = data.readInt();  // value
-                }
-                final int fVal = gearVal;
-                timerHandler.post(() -> onGear(fVal));
-                return true;
-            }
-            if (code == CB_onDoorStatusChanged) {
-                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                int fl = -1;
-                if (data.readInt() != 0) {
-                    for (int i = 0; i < DOOR_FIELD_COUNT; i++) {
-                        int v = data.readInt();
-                        if (i == DOOR_IDX_FL) fl = v;
-                    }
-                }
-                final int fFl = fl;
-                timerHandler.post(() -> onDoor(fFl));
-                return true;
-            }
-            if (code == CB_onLightStatusChanged) {
-                // Диагностика фар: LightStatus (флаг + 17 int'ов). autoLamp/ближний/фары.
-                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                int dipped = -1, head = -1, auto = -1;
-                if (data.readInt() != 0) {
-                    for (int i = 0; i < LS_FIELD_COUNT; i++) {
-                        int v = data.readInt();
-                        if (i == LS_IDX_DIPPED_BEAM) dipped = v;
-                        else if (i == LS_IDX_HEAD_LIGHT) head = v;
-                        else if (i == LS_IDX_AUTO_LAMP) auto = v;
-                    }
-                }
-                if (NativeLog.get().isRunning()) {
-                    Log.i(TAG, "LIGHTSTATUS autoLamp=" + auto + " dippedBeam=" + dipped + " headLight=" + head);
-                }
-                return true;
-            }
-            if (code == CB_onVehicleStateChanged) {
-                // Диагностика уличного датчика света (RSM) и прочих VehicleState.
-                // Parcel: флаг наличия → VehicleState(ordinal,value=id) → int state.
-                data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                int id = -1;
-                if (data.readInt() != 0) {
-                    data.readInt();          // ordinal (не нужен)
-                    id = data.readInt();     // стабильный id сигнала (1070/1071/1072/1073 = RSM)
-                }
-                int state = data.readInt();  // значение сигнала
-                // req 3: синк «последнего активированного» режима при ВНЕШНЕЙ смене (штатное меню машины)
-                // → pref RestoreMode. ИНЕРТНО до снятия value-ID на голове (см. maybeSyncMode).
-                maybeSyncMode(id, state);
-                // Логируем только когда включён захват логов — иначе это «пожарный шланг».
-                if (NativeLog.get().isRunning()) {
-                    logVehicleState(id, state);
-                }
-                return true;
-            }
-            // Прочие oneway-колбэки CanBus (скорость/одометр/…) тихо поглощаем: иначе Binder
-            // спамит "UNKNOWN_TRANSACTION" на КАЖДЫЙ (тысячи строк/сек). Спец-коды — в super.
-            if (code >= IBinder.FIRST_CALL_TRANSACTION && code <= IBinder.LAST_CALL_TRANSACTION) {
-                return true;
-            }
-            return super.onTransact(code, data, reply, flags);
-        }
+    private boolean canStatePublishPending;
+    private final Runnable canStatePublishRunnable = () -> {
+        canStatePublishPending = false;
+        persistAndBroadcast();
     };
 
-    private final ServiceConnection canBusConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            if (destroyed) return;
-            timerHandler.removeCallbacks(canBusRebindRunnable);
-            canBusBindingRequested = true;
-            canBusBinder = service;
-            canBusConnected = true;
-            // A reconnect gives us a new remote registration table even though the local
-            // ServiceConnection/bind reference stayed alive.
-            canBusCallbackAdded = false;
-            Log.i(TAG, "CanBusService connected");
-            // Закрываем sync ДО регистрации callback: первый snapshot после (ре)коннекта часто содержит
-            // системный wake-дефолт. Одновременно просим восстановить сохранённый snapshot.
-            ApplyEngine.scheduleApply("CanBus connected");
-            addCanBusCallback();
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            markCanBusDisconnected();
-            Log.w(TAG, "CanBusService disconnected — waiting for automatic reconnect");
-        }
-
-        @Override
-        public void onBindingDied(ComponentName name) {
-            restartCanBusBinding("binding died");
-        }
-
-        @Override
-        public void onNullBinding(ComponentName name) {
-            restartCanBusBinding("null binding");
-        }
-    };
-
-    private void ensureCanBusBound() {
-        if (destroyed || canBusBindingRequested) return;
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
-        lastCanBusBindAttempt = now;
-        try {
-            Intent intent = new Intent(CANBUS_ACTION);
-            intent.setPackage(CANBUS_PACKAGE);
-            boolean ok = bindService(intent, canBusConnection, Context.BIND_AUTO_CREATE);
-            canBusBindingRequested = ok;
-            Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
-            if (!ok) scheduleCanBusRebind();
-        } catch (Exception e) {
-            canBusBindingRequested = false;
-            Log.e(TAG, "ensureCanBusBound: " + e.getMessage(), e);
-            scheduleCanBusRebind();
-        }
-    }
-
-    private void markCanBusDisconnected() {
-        canBusBinder = null;
-        canBusConnected = false;
-        canBusCallbackAdded = false;
-    }
-
-    private void restartCanBusBinding(String reason) {
-        Log.w(TAG, "CanBusService " + reason + " — replacing binding");
-        releaseCanBusBinding(reason);
-        scheduleCanBusRebind();
-    }
-
-    private void scheduleCanBusRebind() {
+    private void onTripCanBusEvent(CanBusEvent event) {
         if (destroyed) return;
-        lastCanBusBindAttempt = SystemClock.elapsedRealtime();
-        timerHandler.removeCallbacks(canBusRebindRunnable);
-        timerHandler.postDelayed(canBusRebindRunnable, BIND_RETRY_MS);
-    }
-
-    private void releaseCanBusBinding(String reason) {
-        timerHandler.removeCallbacks(canBusRebindRunnable);
-        if (canBusConnected) removeCanBusCallback();
-        if (canBusBindingRequested) {
-            try {
-                unbindService(canBusConnection);
-            } catch (Exception e) {
-                Log.w(TAG, reason + ": unbindService failed: " + e.getMessage());
-            }
-        }
-        canBusBindingRequested = false;
-        markCanBusDisconnected();
-    }
-
-    private void addCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null || canBusCallbackAdded) return;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallbackBinder);
-            canBusBinder.transact(TX_addCallback, data, reply, 0);
-            reply.readException();
-            reply.readInt();
-            canBusCallbackAdded = true;
-            Log.i(TAG, "addCanBusCallback: OK");
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "addCanBusCallback: " + e.getMessage());
-        } finally {
-            data.recycle();
-            reply.recycle();
+        switch (event.kind) {
+            case GEAR:
+                onGear(event.first);
+                break;
+            case DOOR:
+                // Door snapshots are levels for Wiper only, never a real trip-finalization edge.
+                if (event.origin == CanBusEvent.Origin.LIVE) onDoor(event.first);
+                break;
+            default:
+                break;
         }
     }
 
-    private void removeCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null || !canBusCallbackAdded) return;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallbackBinder);
-            canBusBinder.transact(TX_removeCallback, data, reply, 0);
-            reply.readException();
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "removeCanBusCallback: " + e.getMessage());
-        } finally {
-            data.recycle();
-            reply.recycle();
-            canBusCallbackAdded = false;
+    private void onModeCanBusEvent(CanBusEvent event) {
+        if (destroyed) return;
+        if (event.kind == CanBusEvent.Kind.CONNECTION) {
+            // CONNECTION and mode feedback share this serial Handler. The hub queues the barrier
+            // first, so the restore gate closes before any buffered OEM mode value is accepted.
+            ApplyEngine.scheduleApply("CanBus connected");
+            return;
+        }
+        if (event.kind != CanBusEvent.Kind.VEHICLE_STATE) return;
+        maybeSyncMode(event.first, event.second);
+        if (NativeLog.get().isRunning()) {
+            Log.i(TAG, "VSTATE mode id=" + event.first + " state=" + event.second);
         }
     }
 
@@ -352,7 +153,7 @@ public class TripStatsService extends Service {
             inDrive = false;
             Log.i(TAG, "gear=" + gearVal + " → пауза, накоплено=" + fmt(accumMs));
         }
-        persistAndBroadcast();
+        scheduleCanStatePublish();
     }
 
     /** Открытие водительской двери → финализируем поездку («приехал, выхожу»). */
@@ -470,7 +271,20 @@ public class TripStatsService extends Service {
     // Persist текущего состояния + broadcast
     // -------------------------------------------------------------------------
 
+    private void scheduleCanStatePublish() {
+        canStatePublishPending = true;
+        timerHandler.removeCallbacks(canStatePublishRunnable);
+        timerHandler.postDelayed(canStatePublishRunnable, CAN_STATE_PUBLISH_COALESCE_MS);
+    }
+
     private void persistAndBroadcast() {
+        canStatePublishPending = false;
+        timerHandler.removeCallbacks(canStatePublishRunnable);
+        persistState();
+        broadcastUpdate();
+    }
+
+    private void persistState() {
         prefs().edit()
                 .putBoolean("curActive", tripActive)
                 .putBoolean("curInDrive", inDrive)
@@ -479,7 +293,6 @@ public class TripStatsService extends Service {
                 .putLong("curStartWall", tripStartWall)
                 .putInt("lastGear", lastGear)
                 .apply();
-        broadcastUpdate();
     }
 
     private void restoreState() {
@@ -528,27 +341,13 @@ public class TripStatsService extends Service {
         long s = ms / 1000; return (s / 60) + "м " + (s % 60) + "с";
     }
 
-    /** Диагностический лог VehicleState. RSM = лобовой датчик дождя/света (управляет автосветом). */
-    private void logVehicleState(int id, int state) {
-        String name;
-        switch (id) {
-            case 1070: name = "RSM_FwBrightness";   break; // фронтальная уличная яркость
-            case 1071: name = "RSM_AmbBrightness";  break; // окружающая яркость (авто день/ночь: <346 ночь, <675 сумерки)
-            case 1072: name = "RSM_lightSWReason";  break; // причина авто-переключения света
-            case 1073: name = "RSM_IRBrightness";   break; // ИК / солнечная нагрузка
-            default:   name = "id" + id;            break;
-        }
-        Log.i(TAG, "VSTATE " + name + " (" + id + ") = " + state);
-    }
-
     // ------------------------------------------------------------------------
-    // req 3: СИНХРОНИЗАЦИЯ РЕЖИМА ПРИ ВНЕШНЕЙ СМЕНЕ (штатное меню машины и пр.).
+    // FEEDBACK РЕЖИМОВ ОТ МАШИНЫ — С ОКНОМ ЗАЩИТЫ WAKE-RESTORE.
     //
-    // Наше приложение раньше не узнавало о смене режима вождения/энергии извне → сохранённый режим
-    // (который восстанавливается на пробуждении и показан в UI) устаревал. Здесь ловим VehicleState и,
-    // если это сигнал режима, пишем «последний активированный» в источник истины (MainActivity.persistSavedMode
-    // → pref RestoreMode). Тогда: пробуждение восстановит реальный последний режим, а кнопка руля циклирует
-    // относительно него (без «клика в пустоту»).
+    // На пробуждении машина сначала публикует дефолтные ECO/EV, и их нельзя сохранять поверх последнего
+    // режима. Первые 30 секунд после успешного restore feedback может запросить одну bounded-коррекцию,
+    // но не пишется в prefs. После защитного окна машина снова является допустимым источником истины:
+    // устойчивое внешнее изменение сохраняется так же, как команда руля или VoyahTune.
     //
     // Value-ID сняты на голове H97C (2026-07). ВАЖНО про режим вождения: берём сигнал ВЫБРАННОГО ПУНКТА
     // меню DRIVING_MODE_SET (id 545), а НЕ DRIVING_MODE_SET_FB (id 787) — последний это параметр «режим
@@ -579,10 +378,8 @@ public class TripStatsService extends Service {
                 }
                 return;
             }
-            // Во время restore+settle policy либо игнорирует ожидаемое эхо, либо сама запускает
-            // корректирующее применение при ECO/другом несовпадении. Provider здесь остаётся неизменным.
-            // Проверка policy и запись выполняются под одним restore-lock: shutdown/reset не может
-            // вклиниться между ACCEPT и persist и сохранить wake-дефолт как новый source of truth.
+            // Во время restore+30s policy либо игнорирует ожидаемое эхо, либо запускает одну
+            // корректирующую попытку. После окна стабильный feedback разрешено сохранить.
             ApplyEngine.persistModeFeedbackIfAllowed(getApplicationContext(), energy, mode);
         } catch (Exception e) {
             Log.w(TAG, "maybeSyncMode: " + e.getMessage());
@@ -624,6 +421,9 @@ public class TripStatsService extends Service {
         super.onCreate();
         Log.i(TAG, "onCreate()");
         timerHandler = new Handler(Looper.getMainLooper());
+        modeFeedbackThread = new HandlerThread("TripModeFeedback");
+        modeFeedbackThread.start();
+        modeFeedbackHandler = new Handler(modeFeedbackThread.getLooper());
         restoreState();
 
         createNotificationChannel();
@@ -638,10 +438,19 @@ public class TripStatsService extends Service {
         reqFilter.addAction(ACTION_TRIP_RESET);
         reqFilter.addAction(ACTION_TRIP_DELETE);
         reqFilter.addAction(ACTION_TRIP_HISTORY);
-        registerReceiver(requestReceiver, reqFilter, RECEIVER_EXPORTED);
+        ContextCompat.registerReceiver(this, requestReceiver, reqFilter,
+                ContextCompat.RECEIVER_EXPORTED);
 
-        ensureCanBusBound();
-        timerHandler.postDelayed(safetyRunnable, 2_000L);
+        CanBusEventHub hub = CanBusEventHub.get(this);
+        modeCanBusSubscription = hub.subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                new int[]{DRIVE_MODE_VSTATE_ID, ENERGY_MODE_VSTATE_ID},
+                modeFeedbackHandler, this::onModeCanBusEvent);
+        tripCanBusSubscription = hub.subscribe(
+                CanBusEventRouter.INTEREST_DOOR
+                        | CanBusEventRouter.INTEREST_GEAR,
+                null, timerHandler, this::onTripCanBusEvent);
     }
 
     @Override
@@ -662,23 +471,24 @@ public class TripStatsService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        if (canStatePublishPending) {
+            timerHandler.removeCallbacks(canStatePublishRunnable);
+            canStatePublishPending = false;
+            persistState();
+        }
         destroyed = true;
+        CanBusEventHub.Subscription tripSubscription = tripCanBusSubscription;
+        CanBusEventHub.Subscription modeSubscription = modeCanBusSubscription;
+        tripCanBusSubscription = null;
+        modeCanBusSubscription = null;
+        if (tripSubscription != null) tripSubscription.close();
+        if (modeSubscription != null) modeSubscription.close();
         try { unregisterReceiver(requestReceiver); } catch (Exception ignored) {}
-        timerHandler.removeCallbacks(safetyRunnable);
-        releaseCanBusBinding("onDestroy");
-        // В Binder callbacks используются анонимные Runnable, которые нельзя снять по имени.
         timerHandler.removeCallbacksAndMessages(null);
+        if (modeFeedbackHandler != null) modeFeedbackHandler.removeCallbacksAndMessages(null);
+        if (modeFeedbackThread != null) modeFeedbackThread.quitSafely();
         super.onDestroy();
     }
-
-    private final Runnable safetyRunnable = new Runnable() {
-        @Override
-        public void run() {
-            ensureCanBusBound();
-            addCanBusCallback();
-            timerHandler.postDelayed(this, SAFETY_POLL_MS);
-        }
-    };
 
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(

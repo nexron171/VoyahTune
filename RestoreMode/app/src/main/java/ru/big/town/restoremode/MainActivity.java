@@ -58,7 +58,7 @@ public class MainActivity extends AppCompatActivity {
     static final int MSG_LEAVE_CAR          = 20;
     static final int MSG_APPLY_PEDESTRIAN   = 21;
     static final int MSG_WASH_MODE          = 23;
-    static final int MSG_SPLIT_LAUNCH_VD    = 34; // сплит/одиночное приложение на VirtualDisplay (per-app DPI)
+    static final int MSG_SPLIT_LAUNCH_VD    = 34; // single → physical WM-clamped task; pair → VD split
     static final int MSG_APPLY_FORCED_EV    = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int REQUEST_CODE           = 1;
     private Intent resultIntent=null;
@@ -741,7 +741,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // Плитки-ярлыки приложений (в full — на VD, в light — обычный запуск), в той же сетке
+        // Плитки-ярлыки приложений (full — окно на физическом display, light — обычный запуск)
         for (String pkg : AppShortcutStore.load(sharedPreferences)) {
             final String p = pkg;
             View tile = inf.inflate(R.layout.item_app_tile, splitTilesGrid, false);
@@ -771,13 +771,13 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Клик по плитке-ярлыку приложения:
-     *  - full  → открыть на нашем VirtualDisplay (per-app DPI, те же отступы, док);
+     *  - full  → открыть обычной задачей, которую системный hook ужмёт в окно;
      *  - light → обычный запуск приложения (без VD/root).
      */
     private void onAppTileClick(String pkg) {
         if (BuildConfig.IS_FULL) {
             if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
-            sendAppVd(pkg);
+            sendAppWindow(pkg);
         } else {
             launchAppNormally(pkg);
         }
@@ -797,21 +797,21 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Запуск одиночного приложения полноэкранно на нашем VirtualDisplay (пустой right = single mode). */
-    private void sendAppVd(String pkg) {
+    /** Native трактует пустой right как отдельную physical task целевого пакета. */
+    private void sendAppWindow(String pkg) {
         if (pkg == null || pkg.isEmpty()) return;
         int dpi = AppDpiStore.get(sharedPreferences, pkg);
         try {
             Message m = Message.obtain(null, MSG_SPLIT_LAUNCH_VD, 1, 0);
             Bundle b = new Bundle();
             b.putString("left", pkg);
-            b.putString("right", "");     // пусто = одиночное полноэкранное окно на VD
-            b.putInt("leftDpi", dpi);
+            b.putString("right", "");     // пусто = не VD, а physical task + системный frame clamp
+            b.putInt("leftDpi", dpi);      // hook использует зеркальный Settings.Global per-package DPI
             b.putInt("rightDpi", 0);
             m.setData(b);
             m.replyTo = GlobalVars.clientMessenger;
             GlobalVars.serviceMessenger.send(m);
-            Log.i(TAG, "sendAppVd " + pkg + " dpi=" + dpi);
+            Log.i(TAG, "sendAppWindow " + pkg);
         } catch (RemoteException e) {
             e.printStackTrace();
         }

@@ -27,11 +27,14 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.lang.ref.WeakReference;
 
 /**
- * Хост сплита на VirtualDisplay: каждое из двух приложений запускается на СВОЁМ
- * VirtualDisplay, картинка которого рендерится в свой SurfaceView. Даёт то, чего не может
- * freeform:
+ * Хост одного приложения или сплита на VirtualDisplay: каждая видимая панель запускается на СВОЁМ
+ * VirtualDisplay, картинка которого рендерится в SurfaceView. Однопанельный режим заменяет legacy
+ * system_server freeform hot-hooks; двухпанельный даёт полноценный сплит. Оба режима поддерживают:
  *  - per-app DPI: плотность задаётся на каждый VirtualDisplay ({@code createVirtualDisplay(...,densityDpi,...)});
  *  - ресайз пропорций: во время жеста двигаем безопасное превью, на отпускании один раз меняем веса
  *    SurfaceView → {@code vd.resize(w,h,dpi)}. Activity стороннего приложения при этом может штатно
@@ -43,6 +46,9 @@ import java.lang.reflect.Method;
  * бросит SecurityException. Рабочая доставка ввода — отдельная задача (root+Frida-инъекция вызова
  * injectInputEvent в system_server ЛИБО роутинг ввода самим WM для
  * trusted-дисплея). Рендер, per-app DPI и живой ресайз работают независимо от ввода.
+ *
+ * Process-wide invariant: одновременно жив только один host. Новый запрос на другой физический
+ * дисплей получает новую generation и завершает старый host; это делает быстрый handoff latest-wins.
  *
  * Extras: leftPkg, rightPkg (String), ratio (int 0..4), leftDpi, rightDpi (int, 0=дефолт дисплея).
  */
@@ -67,6 +73,8 @@ public class SplitHostActivity extends Activity {
     // Фолбэк без TRUSTED (если ADD_TRUSTED_DISPLAY не выдан, напр. на эмуляторе) — рендер будет,
     // запуск чужой активити может не пройти, но не роняем приложение.
     private static final int VD_FLAGS_FALLBACK = 1 | 8 | 256;
+    private static volatile WeakReference<SplitHostActivity> activeHost =
+            new WeakReference<>(null);
 
     private DisplayManager displayManager;
     private int defaultDpi = 213;
@@ -83,6 +91,7 @@ public class SplitHostActivity extends Activity {
         int w, h;
         long resizeVersion; // успешные vd.resize; нужен для снятия маски после реального layout обеих панелей
         boolean launched;
+        boolean launchInFlight;
         long launchedAt;    // когда стартовали приложение — надзирателю нужно дать ему подняться
         int restarts;       // сколько раз надзиратель уже перезапускал панель за эту сессию сплита
         Pane(String side) { this.side = side; }
@@ -96,11 +105,20 @@ public class SplitHostActivity extends Activity {
     private static final long WATCH_PERIOD_MS  = 2500;  // период опроса
     private static final long WATCH_GRACE_MS   = 8000;  // столько не трогаем панель после запуска (старт приложения)
     private static final int  WATCH_MAX_RESTARTS = 3;   // предохранитель от бесконечного цикла перезапусков
-    private final android.os.Handler watchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Handler watchHandler = new Handler(Looper.getMainLooper());
+    private SplitHostTaskLane taskLane;
+    private SplitHostGenerationGate workGate;
+    private boolean watchActive;
+    private boolean hostDestroyed;
     private final Runnable watchTick = new Runnable() {
         @Override public void run() {
-            try { supervisePanes(); } catch (Exception e) { Log.w(TAG, "supervise: " + e.getMessage()); }
-            watchHandler.postDelayed(this, WATCH_PERIOD_MS);
+            if (!watchActive || hostDestroyed) return;
+            try {
+                requestSupervisionSnapshot();
+            } catch (Exception e) {
+                Log.w(TAG, "supervise: " + e.getMessage());
+            }
+            if (watchActive && !hostDestroyed) watchHandler.postDelayed(this, WATCH_PERIOD_MS);
         }
     };
 
@@ -109,15 +127,14 @@ public class SplitHostActivity extends Activity {
     private final Pane left  = new Pane("L");
     private final Pane right = new Pane("R");
 
-    // Ссылка на активный сплит-хост — чтобы Native мог закрыть сплит, когда пользователь открывает
-    // приложение из дока во freeform (иначе приложение-панель «уехало» бы с VD с глитчем). См. closeActiveSplit.
-    private static volatile SplitHostActivity sCurrent;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         // LIGHT-сборка: VD-сплит-хост отключён (нет Frida/trusted-display) — сразу закрываемся.
         if (!BuildConfig.IS_FULL) { finish(); return; }
+        taskLane = SplitHostTaskLane.get(getApplicationContext());
+        workGate = new SplitHostGenerationGate(taskLane.registerHost(this));
+        activeHost = new WeakReference<>(this);
         // Поверх всего, не гаснуть, landscape. Edge-to-edge — чтобы получить реальные window insets
         // и самим задать отступы (иначе система инсетит контент и мы бы отступали повторно).
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -132,7 +149,6 @@ public class SplitHostActivity extends Activity {
         Intent in = getIntent();
         left.pkg   = in.getStringExtra(EXTRA_LEFT);
         right.pkg  = in.getStringExtra(EXTRA_RIGHT);
-        sCurrent = this;   // этот сплит теперь активный (для закрытия из Native при OPEN_FREEFORM)
         left.dpi   = in.getIntExtra(EXTRA_LEFT_DPI, 0);
         right.dpi  = in.getIntExtra(EXTRA_RIGHT_DPI, 0);
         int ratio  = in.getIntExtra(EXTRA_RATIO, 1);
@@ -182,6 +198,8 @@ public class SplitHostActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        // Fence the old package/display before recreate posts a new Activity instance.
+        retireAsyncHostWork(false);
         setIntent(intent);
         recreate();
     }
@@ -315,12 +333,16 @@ public class SplitHostActivity extends Activity {
     }
 
     private void launchApp(Pane pane) {
-        if (pane.vd == null || pane.launched || pane.pkg == null || pane.pkg.isEmpty()) return;
-        final Intent li = getPackageManager().getLaunchIntentForPackage(pane.pkg);
-        if (li == null) {
-            Log.w(TAG, "нет launch intent для " + pane.pkg);
+        if (pane.vd == null || pane.launched || pane.launchInFlight
+                || pane.pkg == null || pane.pkg.isEmpty() || taskLane == null || workGate == null) {
             return;
         }
+        Integer displayId = paneDisplayId(pane);
+        if (displayId == null) return;
+        int paneIndex = paneIndex(pane);
+        long paneGeneration = workGate.nextPaneGeneration(paneIndex);
+        if (paneGeneration == SplitHostGenerationGate.REJECTED) return;
+
         // ВАЖНО (фикс «пустая панель + уехавшее приложение»): приложение-одиночка (launchMode
         // singleTask/singleInstance или общий taskAffinity), УЖЕ открытое на другом дисплее (freeform на
         // display 0/1 или в другом сплите), при setLaunchDisplayId НЕ дублируется, а ПЕРЕЕЗЖАЕТ на наш VD —
@@ -328,105 +350,95 @@ public class SplitHostActivity extends Activity {
         // приложение с исходного дисплея — но НЕ force-stop процесса (иначе музыка глохнет), а завершаем
         // только его ЗАДАЧУ (removeTask): активити умирает, процесс + foreground-плейбек живут → музыка
         // продолжает играть, а окно стартует ЗАНОВО на нашем VD. Teardown асинхронный → запуск с задержкой.
-        finishTasksForPackage(pane.pkg);
         pane.launched = true;   // помечаем сразу — повторные проходы (surface recreate) не запустят дважды
+        pane.launchInFlight = true;
         pane.launchedAt = System.currentTimeMillis();   // отсчёт «времени на подъём» для надзирателя
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            if (pane.vd == null) return;   // сплит закрыли/пересоздали за время задержки
-            try {
-                int displayId = pane.vd.getDisplay().getDisplayId();
-                li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
-                ActivityOptions o = ActivityOptions.makeBasic();
-                o.setLaunchDisplayId(displayId);
-                startActivity(li, o.toBundle());
-                Log.i(TAG, "launched " + pane.pkg + " on display " + displayId + " (после force-stop)");
-            } catch (Exception e) {
-                pane.launched = false;
-                Log.e(TAG, "launchApp " + pane.pkg + " failed: " + e.getMessage());
-            }
-        }, 450);
+        taskLane.requestPaneLaunch(this, new SplitHostTaskLane.PaneTicket(
+                workGate.hostGeneration(), paneIndex, paneGeneration, pane.pkg, displayId));
     }
 
-    /**
-     * Завершает ЗАДАЧИ приложения (по всем дисплеям) через {@code IActivityTaskManager.removeTask},
-     * НЕ убивая процесс. Активити приложения финишируются и освобождают исходный дисплей (снимается
-     * коллизия «одиночка на двух дисплеях»), но процесс с foreground-сервисом жив → плейбек музыки НЕ
-     * прерывается. Требует REAL_GET_TASKS (перечислить чужие задачи) + REMOVE_TASKS (завершить их) —
-     * оба в privapp-whitelist. Не найдено задач → дешёвый no-op (приложение нигде не открыто, коллизии нет).
-     * @return число завершённых задач.
-     */
-    private int finishTasksForPackage(String pkg) {
-        if (pkg == null || pkg.isEmpty()) return 0;
-        int removed = 0;
-        try {
-            android.app.ActivityManager am =
-                    (android.app.ActivityManager) getSystemService(android.content.Context.ACTIVITY_SERVICE);
-            Object atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null);
-            java.lang.reflect.Method removeTask = atm.getClass().getMethod("removeTask", int.class);
-            for (android.app.ActivityManager.RunningTaskInfo t : am.getRunningTasks(1000)) {
-                String p = (t.topActivity != null) ? t.topActivity.getPackageName()
-                        : (t.baseActivity != null ? t.baseActivity.getPackageName() : null);
-                if (pkg.equals(p)) {
-                    try { removeTask.invoke(atm, t.taskId); removed++; }
-                    catch (Exception e) { Log.w(TAG, "removeTask " + t.taskId + " (" + pkg + "): " + e.getMessage()); }
-                }
-            }
-            Log.i(TAG, "finishTasksForPackage " + pkg + " → завершено задач: " + removed + " (процесс жив)");
-        } catch (Exception e) {
-            Throwable c = (e instanceof java.lang.reflect.InvocationTargetException
-                    && e.getCause() != null) ? e.getCause() : e;
-            Log.w(TAG, "finishTasksForPackage " + pkg + ": " + c);
+    /** Worker resolved launch intent and removed old tasks; only the UI launch remains on main. */
+    void onPaneLaunchPrepared(SplitHostTaskLane.PaneLaunchRequest request, Intent launchIntent) {
+        if (!isPaneTicketCurrent(request.pane)) return;
+        Pane pane = paneForIndex(request.pane.paneIndex);
+        if (launchIntent == null) {
+            pane.launchInFlight = false;
+            pane.launched = false;
+            Log.w(TAG, "нет launch intent для " + request.pane.packageName);
+            return;
         }
-        return removed;
-    }
-
-    /**
-     * Жива ли задача приложения панели ИМЕННО НА ЕЁ дисплее. Проверяем привязку к дисплею, а не просто
-     * «процесс есть»: приложение могло уехать на другой экран — для панели это равносильно пропаже.
-     * Не смогли определить (нет доступа к задачам/полю displayId) — считаем живым, чтобы не перезапускать
-     * вслепую.
-     */
-    private boolean paneAppAlive(Pane pane) {
-        if (pane.vd == null || pane.pkg == null || pane.pkg.isEmpty()) return true;
-        int paneDisplay;
-        try { paneDisplay = pane.vd.getDisplay().getDisplayId(); } catch (Exception e) { return true; }
-        try {
-            android.app.ActivityManager am =
-                    (android.app.ActivityManager) getSystemService(android.content.Context.ACTIVITY_SERVICE);
-            for (android.app.ActivityManager.RunningTaskInfo t : am.getRunningTasks(1000)) {
-                String p = (t.topActivity != null) ? t.topActivity.getPackageName()
-                        : (t.baseActivity != null ? t.baseActivity.getPackageName() : null);
-                if (!pane.pkg.equals(p)) continue;
-                // TaskInfo.displayId — hidden-поле; для priv-app на /system доступно рефлексией.
-                try {
-                    java.lang.reflect.Field f = t.getClass().getField("displayId");
-                    if (f.getInt(t) == paneDisplay) return true;
-                } catch (Exception noField) {
-                    return true;   // поля нет — судить не о чем, панель не трогаем
-                }
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "paneAppAlive " + pane.pkg + ": " + e.getMessage());
-            return true;
+        Intent prepared = new Intent(launchIntent);
+        if (!watchHandler.postDelayed(() -> startPreparedPane(request, prepared), 450)) {
+            pane.launchInFlight = false;
+            pane.launched = false;
+            Log.w(TAG, "main Handler rejected delayed launch for " + request.pane.packageName);
         }
-        return false;
     }
 
-    /** Один проход надзирателя: поднять панели, чьё приложение исчезло со своего дисплея. */
-    private void supervisePanes() {
-        if (!watchEnabled()) return;
+    private void startPreparedPane(SplitHostTaskLane.PaneLaunchRequest request, Intent launchIntent) {
+        if (!isPaneTicketCurrent(request.pane)) return;
+        Pane pane = paneForIndex(request.pane.paneIndex);
+        try {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+            ActivityOptions options = ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(request.pane.displayId);
+            startActivity(launchIntent, options.toBundle());
+            pane.launchInFlight = false;
+            pane.launchedAt = System.currentTimeMillis();
+            Log.i(TAG, "launched " + request.pane.packageName + " on display "
+                    + request.pane.displayId + " (after removeTask)");
+        } catch (Exception e) {
+            pane.launchInFlight = false;
+            pane.launched = false;
+            Log.e(TAG, "launchApp " + request.pane.packageName + " failed: " + e.getMessage());
+        }
+    }
+
+    /** Build one immutable two-pane request; Settings/task enumeration happen on the process lane. */
+    private void requestSupervisionSnapshot() {
+        if (taskLane == null || workGate == null) return;
         // Во время ресайза приложение получает смену конфигурации и может пересоздаться — в этот
         // момент его задачи на дисплее нет. Без этой паузы надзиратель принял бы это за падение и
         // перезапустил приложение прямо под рукой пользователя.
         if (dragging || System.currentTimeMillis() < resizeUntil) return;
-        supervisePane(left);
-        supervisePane(right);
+        long now = System.currentTimeMillis();
+        List<SplitHostTaskLane.PaneTicket> panes = new ArrayList<>(2);
+        addSupervisionTicket(panes, left, now);
+        addSupervisionTicket(panes, right, now);
+        if (panes.isEmpty()) return;
+        taskLane.requestSupervision(this, workGate.hostGeneration(),
+                workGate.currentSupervisionGeneration(), panes);
     }
 
-    private void supervisePane(Pane pane) {
-        if (pane.vd == null || !pane.launched) return;                       // панель не запущена — нечего стеречь
-        if (System.currentTimeMillis() - pane.launchedAt < WATCH_GRACE_MS) return;  // даём приложению подняться
-        if (paneAppAlive(pane)) { pane.restarts = 0; return; }               // живо → счётчик попыток сбрасываем
+    private void addSupervisionTicket(List<SplitHostTaskLane.PaneTicket> tickets,
+                                      Pane pane, long now) {
+        if (pane.vd == null || !pane.launched || pane.launchInFlight) return;
+        if (now - pane.launchedAt < WATCH_GRACE_MS) return;
+        Integer displayId = paneDisplayId(pane);
+        if (displayId == null || pane.pkg == null || pane.pkg.isEmpty()) return;
+        int index = paneIndex(pane);
+        tickets.add(new SplitHostTaskLane.PaneTicket(workGate.hostGeneration(), index,
+                workGate.currentPaneGeneration(index), pane.pkg, displayId));
+    }
+
+    /** One worker snapshot is applied to both panes only if its lifecycle generation is current. */
+    void onSupervisionSnapshot(SplitHostTaskLane.SupervisionRequest request, boolean enabled,
+                               SplitHostTaskSnapshot snapshot) {
+        if (workGate == null || !workGate.acceptsSupervision(
+                request.hostGeneration, request.supervisionGeneration)) return;
+        if (!enabled || dragging || System.currentTimeMillis() < resizeUntil) return;
+        for (SplitHostTaskLane.PaneTicket ticket : request.panes) {
+            if (!isPaneTicketCurrent(ticket)) continue;
+            Pane pane = paneForIndex(ticket.paneIndex);
+            if (pane.launchInFlight || System.currentTimeMillis() - pane.launchedAt < WATCH_GRACE_MS) {
+                continue;
+            }
+            supervisePane(pane, snapshot.isAlive(ticket.packageName, ticket.displayId));
+        }
+    }
+
+    private void supervisePane(Pane pane, boolean alive) {
+        if (alive) { pane.restarts = 0; return; }
         if (pane.restarts >= WATCH_MAX_RESTARTS) {
             // Приложение стабильно не живёт на VirtualDisplay — дальнейшие попытки только мигали бы
             // экраном. Останавливаемся и оставляем след в логе, чтобы причину можно было найти.
@@ -444,12 +456,30 @@ public class SplitHostActivity extends Activity {
         launchApp(pane);
     }
 
-    /** Аварийное отключение надзирателя: settings put global voyahtune_splitwatch 0 */
-    private boolean watchEnabled() {
+    private boolean isPaneTicketCurrent(SplitHostTaskLane.PaneTicket ticket) {
+        if (workGate == null || hostDestroyed || !workGate.acceptsPane(
+                ticket.hostGeneration, ticket.paneIndex, ticket.paneGeneration)) return false;
+        Pane pane = paneForIndex(ticket.paneIndex);
+        if (pane.vd == null || !ticket.packageName.equals(pane.pkg)) return false;
+        Integer displayId = paneDisplayId(pane);
+        return displayId != null && displayId == ticket.displayId;
+    }
+
+    private Integer paneDisplayId(Pane pane) {
         try {
-            String v = android.provider.Settings.Global.getString(getContentResolver(), "voyahtune_splitwatch");
-            return !"0".equals(v);
-        } catch (Exception e) { return true; }
+            return pane.vd != null && pane.vd.getDisplay() != null
+                    ? pane.vd.getDisplay().getDisplayId() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private int paneIndex(Pane pane) {
+        return pane == left ? SplitHostGenerationGate.LEFT : SplitHostGenerationGate.RIGHT;
+    }
+
+    private Pane paneForIndex(int paneIndex) {
+        return paneIndex == SplitHostGenerationGate.LEFT ? left : right;
     }
 
     private int effectiveDpi(Pane pane) {
@@ -457,14 +487,16 @@ public class SplitHostActivity extends Activity {
     }
 
     private void releasePane(Pane pane) {
+        if (workGate != null) workGate.invalidatePane(paneIndex(pane));
+        pane.launchInFlight = false;
+        pane.launched = false;
+        // Счётчик попыток — свойство ПОПЫТКИ, а не панели: пересоздание (своп, новый сплит) начинает
+        // с чистого листа. Иначе исчерпанный лимит переезжал бы на другое приложение и надзиратель
+        // молча отказывался бы его поднимать.
+        pane.restarts = 0;
         if (pane.vd != null) {
             try { pane.vd.release(); } catch (Exception ignored) {}
             pane.vd = null;
-            pane.launched = false;
-            // Счётчик попыток — свойство ПОПЫТКИ, а не панели: пересоздание (своп, новый сплит) начинает
-            // с чистого листа. Иначе исчерпанный лимит переезжал бы на другое приложение и надзиратель
-            // молча отказывался бы его поднимать.
-            pane.restarts = 0;
         }
     }
 
@@ -944,29 +976,107 @@ public class SplitHostActivity extends Activity {
         }
     }
 
+    /** The app supports one process-wide VD host; a newer display handoff retires this instance. */
+    void onSupersededByHost(long newHostGeneration) {
+        if (hostDestroyed || workGate == null
+                || workGate.hostGeneration() >= newHostGeneration) return;
+        retireAsyncHostWork(true);
+        Log.i(TAG, "host generation " + workGate.hostGeneration()
+                + " superseded by " + newHostGeneration + " — finishing old host");
+        finish();
+    }
+
+    private void retireAsyncHostWork(boolean releaseLease) {
+        hostDestroyed = true;
+        watchActive = false;
+        watchHandler.removeCallbacksAndMessages(null);
+        if (workGate != null) {
+            workGate.close();
+            if (taskLane != null) {
+                if (releaseLease) taskLane.cancelHost(workGate.hostGeneration());
+                else taskLane.cancelHostWork(workGate.hostGeneration());
+            }
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        if (hostDestroyed) return;
         // Стережём панели только пока сплит на переднем плане: свёрнутый сплит приложения не показывает,
         // и «пропажа» там ожидаема — перезапускать нечего.
+        watchActive = true;
+        if (workGate != null) workGate.resumeSupervision();
         watchHandler.removeCallbacks(watchTick);
         watchHandler.postDelayed(watchTick, WATCH_PERIOD_MS);
     }
 
     @Override
     protected void onPause() {
+        watchActive = false;
         watchHandler.removeCallbacks(watchTick);
+        if (workGate != null) {
+            workGate.pauseSupervision();
+            if (taskLane != null) taskLane.cancelSupervision(workGate.hostGeneration());
+        }
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
-        watchHandler.removeCallbacks(watchTick);
+        WeakReference<SplitHostActivity> current = activeHost;
+        if (current.get() == this) activeHost = new WeakReference<>(null);
+        retireAsyncHostWork(true);
         cancelResizeGesture();
-        if (sCurrent == this) sCurrent = null;
         releasePane(left);
         releasePane(right);
         super.onDestroy();
+    }
+
+    /**
+     * Finishes the Native VD host before a single application is launched as an ordinary physical
+     * task. Destroy-content-on-removal retires its VD activities; vd_bypass then clamps the new task.
+     */
+    static boolean closeActiveHost() {
+        SplitHostActivity host = activeHost.get();
+        if (host == null || host.isFinishing() || host.isDestroyed()) return false;
+        activeHost = new WeakReference<>(null);
+        host.runOnUiThread(host::finishAndRemoveTask);
+        Log.i(TAG, "active VD host closed before physical window launch");
+        return true;
+    }
+
+    /**
+     * Открыть одно приложение в VD-панели на физическом экране. Геометрия задаётся layout хоста,
+     * DPI — самим VirtualDisplay, поэтому WindowManager system_server не требует hot-path hooks.
+     */
+    public static void launchSingle(android.content.Context ctx, String pkg, int dpi, int displayId) {
+        if (ctx == null || pkg == null || pkg.isEmpty()) {
+            Log.w(TAG, "launchSingle: пустой пакет — пропуск");
+            return;
+        }
+        if (displayId != 0 && displayId != 1) displayId = 0;
+        SplitHostTaskLane.get(ctx).requestSingleHost(pkg, Math.max(0, dpi), displayId);
+    }
+
+    /** Called on main only after the process lane has resolved the target package. */
+    static void startSingleHost(android.content.Context ctx, String pkg, int dpi, int displayId) {
+        try {
+            Intent i = new Intent(ctx, SplitHostActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            i.putExtra(EXTRA_LEFT, pkg);
+            i.putExtra(EXTRA_RIGHT, "");
+            i.putExtra(EXTRA_RATIO, 1);
+            i.putExtra(EXTRA_LEFT_DPI, Math.max(0, dpi));
+            i.putExtra(EXTRA_RIGHT_DPI, 0);
+            ActivityOptions options = ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(displayId);
+            ctx.startActivity(i, options.toBundle());
+            Log.i(TAG, "launchSingle host started pkg=" + pkg + " dpi=" + dpi
+                    + " display=" + displayId);
+        } catch (Exception e) {
+            Log.e(TAG, "launchSingle failed: " + e.getMessage());
+        }
     }
 
     /** Запустить сплит на VirtualDisplay из статического контекста (напр. из {@link SetModesReceiverDynamic}
@@ -1017,21 +1127,4 @@ public class SplitHostActivity extends Activity {
         }
     }
 
-    /** Закрыть активный сплит, если есть: завершаем ЗАДАЧИ обеих панелей (removeTask, без убийства
-     *  процессов → музыка не глохнет), чтобы приложения не остались «застрявшими» на VD и открылись
-     *  заново ЧИСТО там, где их запросили из дока, + finish хоста. Зовёт Native при OPEN_FREEFORM
-     *  (пользователь открыл приложение из дока во freeform поверх сплита).
-     *  @return true, если сплит был активен (тогда запуск во freeform стоит отложить на teardown). */
-    static boolean closeActiveSplit() {
-        final SplitHostActivity a = sCurrent;
-        if (a == null) return false;
-        sCurrent = null;
-        try {
-            if (a.left.pkg  != null && !a.left.pkg.isEmpty())  a.finishTasksForPackage(a.left.pkg);
-            if (a.right.pkg != null && !a.right.pkg.isEmpty()) a.finishTasksForPackage(a.right.pkg);
-            a.runOnUiThread(a::finish);
-            Log.i(TAG, "closeActiveSplit: сплит закрыт (removeTask панелей + finish)");
-        } catch (Exception e) { Log.w(TAG, "closeActiveSplit: " + e.getMessage()); }
-        return true;
-    }
 }

@@ -14,7 +14,7 @@ import java.util.ArrayDeque;
  * Захват ВСЕГО вывода процесса Native в файл + кольцевой буфер для живого просмотра.
  *
  * Механика: запускаем `logcat --pid=<наш pid> -v time` и построчно пишем в файл на
- * sdcard (по умолчанию /sdcard/tmp/voyah_native_log.txt) и в кольцевой буфер (последние
+ * sdcard (по умолчанию /sdcard/tmp/voyahtune_native_log.txt) и в кольцевой буфер (последние
  * {@link #RING_MAX} строк) — RestoreMode опрашивает снимок буфера для «живой» ленты.
  * `--pid` ловит весь наш процесс (все сервисы Native в одном процессе), поэтому править
  * каждый Log.* не нужно. Требует READ_LOGS (есть у priv-app по whitelist).
@@ -26,7 +26,7 @@ final class NativeLog {
     private static final String TAG = "$$$ NativeLog $$$";
     private static final int RING_MAX = 600;          // строк в живой ленте
     private static final int FLUSH_EVERY = 25;        // сброс на диск каждые N строк
-    static final String FILE_NAME = "voyah_native_log.txt";
+    static final String FILE_NAME = "voyahtune_native_log.txt";
 
     private static final NativeLog INSTANCE = new NativeLog();
     static NativeLog get() { return INSTANCE; }
@@ -143,7 +143,7 @@ final class NativeLog {
         while (ring.size() > RING_MAX) ring.pollFirst();
     }
 
-    /** /sdcard/tmp/voyah_native_log.txt, при недоступности — app-specific external. */
+    /** /sdcard/tmp/voyahtune_native_log.txt, при недоступности — app-specific external. */
     private File resolveFile(Context ctx) {
         File tmp = new File(Environment.getExternalStorageDirectory(), "tmp");
         if (tmp.exists() || tmp.mkdirs()) {

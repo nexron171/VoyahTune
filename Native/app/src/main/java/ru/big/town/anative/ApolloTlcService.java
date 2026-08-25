@@ -13,31 +13,21 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.Parcel;
+import android.os.Process;
 import android.os.RemoteException;
-import android.os.SystemClock;
-import android.provider.Settings;
 import android.util.Log;
 import dalvik.system.PathClassLoader;
 
 import java.lang.reflect.Method;
 import java.util.EnumMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-/**
- * Fail-closed, schema-pinned bridge for the OEM triggered lane-change switch.
- *
- * <p>User switches are written through the OEM ICanBusService TX58. TLC and traffic-light
- * recognition share one complete TX77 entitlement vector, so every enable preserves the other
- * feature instead of clearing it. Commands are deliberately fire-and-forget after a successful
- * synchronous Binder call: this service neither registers a global CanBus callback nor performs
- * delayed verification reads. A later explicit UI query refreshes the displayed state.</p>
- */
+/** Demand-scoped, read-only Apollo diagnostics for the allow-listed OEM Binder ABI. */
 public final class ApolloTlcService extends Service {
     private static final String TAG = "$$$ ApolloTlcService $$$";
     private static final String RESTOREMODE_PACKAGE = "ru.big.town.restoremode";
@@ -48,64 +38,37 @@ public final class ApolloTlcService extends Service {
             "ru.big.town.anative.APOLLO_TLC_UPDATE";
     public static final String ACTION_REQUEST_APOLLO_TLC_UPDATE =
             "ru.big.town.anative.REQUEST_APOLLO_TLC_UPDATE";
+    public static final String ACTION_RELEASE_APOLLO_TLC_DEMAND =
+            "ru.big.town.anative.RELEASE_APOLLO_TLC_DEMAND";
 
     public static final String EXTRA_CAN_CONNECTED = "canConnected";
     public static final String EXTRA_PROFILE_SUPPORTED = "profileSupported";
     public static final String EXTRA_DIRECT_TLC_MODE = "directTlcMode";
-    public static final String EXTRA_MASTER_KNOWN = "masterKnown";
-    public static final String EXTRA_MASTER_ENABLED = "masterEnabled";
-    public static final String EXTRA_PENDING = "pending";
     public static final String EXTRA_GEAR = "gear";
     public static final String EXTRA_PLC_SWITCH = "plcSwitch";
-    public static final String EXTRA_PLC_STATUS = "plcStatus";
-    public static final String EXTRA_ANP_SWITCH = "anpSwitch";
-    public static final String EXTRA_TLC_CAPABILITY = "tlcCapability";
-    public static final String EXTRA_PLC_CAPABILITY_SA = "plcCapabilitySa";
     public static final String EXTRA_GLA_SWITCH = "glaSwitch";
     public static final String EXTRA_GLA_LIGHT_CHANGE_SWITCH = "glaLightChangeSwitch";
     public static final String EXTRA_TSR_SWITCH = "tsrSwitch";
     public static final String EXTRA_ERROR = "error";
-
-    public static final String GLOBAL_MASTER_KEY = "open_voyah_apollo_master";
+    public static final String EXTRA_DEMAND_SESSION = "apolloDemandSession";
+    public static final String EXTRA_DEMAND_OWNER = "apolloDemandOwner";
 
     private static final String ACTION_INTERNAL_QUERY =
             "ru.big.town.anative.internal.APOLLO_TLC_QUERY";
-    private static final String ACTION_INTERNAL_SET =
-            "ru.big.town.anative.internal.APOLLO_TLC_SET";
-    private static final String ACTION_INTERNAL_MASTER_SET =
-            "ru.big.town.anative.internal.APOLLO_MASTER_SET";
-    private static final String ACTION_INTERNAL_GLA_SET =
-            "ru.big.town.anative.internal.APOLLO_GLA_SET";
-    private static final String ACTION_INTERNAL_GLA_SOUND_SET =
-            "ru.big.town.anative.internal.APOLLO_GLA_SOUND_SET";
-    private static final String ACTION_INTERNAL_TSR_SET =
-            "ru.big.town.anative.internal.APOLLO_TSR_SET";
-    private static final String EXTRA_ENABLED = "enabled";
-    private static final String EXTRA_ARGUMENT_VALID = "argumentValid";
-
     private static final String CANBUS_DESCRIPTOR = "com.qinggan.canbus.ICanBusService";
-    private static final String WRITE_CANBUS_PERMISSION =
+    private static final String CANBUS_PERMISSION =
             "com.qinggan.permission.WRITE_CANBUS";
     private static final String CANBUS_ACTION = "com.qinggan.canbus.CanBusService";
     private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
     private static final int TX_GET_GEAR_STATUS = 6;
     private static final int TX_GET_VEHICLE_STATE = 57;
-    private static final int TX_SET_VEHICLE_STATE = 58;
-    private static final int TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE = 77;
 
     private static final long BIND_RETRY_MS = 5_000L;
     private static final long BIND_RETRY_MAX_MS = 60_000L;
     private static final long BIND_CONNECT_TIMEOUT_MS = 20_000L;
-    private static final long ENTITLEMENT_SETTLE_MS = 1_000L;
-    private static final long METRICS_INTERVAL_MS = 30_000L;
-    private static final int MAX_TRACKED_TRANSACTION =
-            TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE;
-    private static final int[] TRACKED_TRANSACTIONS = {
-            TX_GET_GEAR_STATUS,
-            TX_GET_VEHICLE_STATE,
-            TX_SET_VEHICLE_STATE,
-            TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE
-    };
+    private static final long IDLE_UNBIND_GRACE_MS = 5_000L;
+    private static final long VENDOR_BINDER_CALL_TIMEOUT_MS = 15_000L;
+    private static final long SCHEMA_THREAD_IDLE_TIMEOUT_SECONDS = 30L;
 
     /**
      * Owns the complete mutable Apollo/CanBus state machine. Service lifecycle, UI requests
@@ -114,25 +77,20 @@ public final class ApolloTlcService extends Service {
      */
     private HandlerThread canBusWorkerThread;
     private volatile Handler handler;
-    private final ExecutorService schemaExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "ApolloTlcSchema");
-        thread.setDaemon(true);
-        return thread;
-    });
-
-    private final AtomicBoolean queryInFlight = new AtomicBoolean();
-    private final AtomicLong queryCoalesced = new AtomicLong();
-    private final AtomicLong bindTimeouts = new AtomicLong();
-    private final AtomicLong workerDispatchMaxUs = new AtomicLong();
-    private final AtomicLong descriptorCount = new AtomicLong();
-    private final AtomicLong descriptorTotalUs = new AtomicLong();
-    private final AtomicLong descriptorMaxUs = new AtomicLong();
-    private final AtomicLongArray transactionCount =
-            new AtomicLongArray(MAX_TRACKED_TRANSACTION + 1);
-    private final AtomicLongArray transactionTotalUs =
-            new AtomicLongArray(MAX_TRACKED_TRANSACTION + 1);
-    private final AtomicLongArray transactionMaxUs =
-            new AtomicLongArray(MAX_TRACKED_TRANSACTION + 1);
+    private final ApolloCanBusDemandGate canBusDemandGate =
+            new ApolloCanBusDemandGate();
+    private final Object demandOwnerLock = new Object();
+    private DemandOwnerLink demandOwnerLink;
+    /**
+     * APK/ClassLoader verification is latest-only. A reconnect flap may leave one task running and
+     * one newer task queued, but can never grow the default unbounded executor queue. The thread is
+     * also allowed to disappear while Apollo has no schema work.
+     */
+    private final ThreadPoolExecutor schemaExecutor = createSchemaExecutor();
+    private final Handler processWatchdogHandler = new Handler(Looper.getMainLooper());
+    private final Object vendorBinderWatchdogLock = new Object();
+    private int vendorBinderWatchdogGeneration;
+    private Runnable vendorBinderWatchdog;
 
     private IBinder canBusBinder;
     private ServiceConnection canBusConnection;
@@ -140,53 +98,81 @@ public final class ApolloTlcService extends Service {
     private boolean canBusConnected;
     private volatile boolean destroyed;
     private boolean requestReceiverRegistered;
-    private boolean canBusVerificationPending;
-    private int canBusVerificationGeneration;
-    private IBinder pendingCanBusBinder;
+    private volatile boolean canBusVerificationPending;
+    private volatile int canBusVerificationGeneration;
+    private volatile IBinder pendingCanBusBinder;
     private int bindEpoch;
     private int activeBindEpoch;
     private int rebindAttempt;
-    private long metricsWindowStartedAtMs;
     private Runnable bindConnectWatchdog;
+    private Runnable idleUnbindRunnable;
+
+    /** Exact death registration belonging to one accepted UI demand tuple. */
+    private final class DemandOwnerLink implements IBinder.DeathRecipient {
+        final long sessionToken;
+        final IBinder owner;
+
+        DemandOwnerLink(long sessionToken, IBinder owner) {
+            this.sessionToken = sessionToken;
+            this.owner = owner;
+        }
+
+        @Override
+        public void binderDied() {
+            postWorker(() -> handleDemandOwnerDeath(this));
+        }
+    }
 
     private boolean schemaCheckComplete;
+    private boolean schemaCheckPending;
     private boolean canBusSchemaMatches;
     private boolean runtimeProfileValid = true;
     private String canBusSchemaError = "profile_check_pending";
     private final EnumMap<ApolloTlcPolicy.Signal, Integer> runtimeSignalOrdinals =
             new EnumMap<>(ApolloTlcPolicy.Signal.class);
     private String lastError = ApolloTlcPolicy.ERROR_NONE;
-    /** Sticky until a Settings.Global master write succeeds; prevents false OFF confirmation. */
-    private String masterPersistenceError = ApolloTlcPolicy.ERROR_NONE;
 
     private int gear = ApolloTlcPolicy.UNKNOWN;
     private int plcSwitch = ApolloTlcPolicy.UNKNOWN;
-    private int plcStatus = ApolloTlcPolicy.UNKNOWN;
-    private int anpSwitch = ApolloTlcPolicy.UNKNOWN;
-    private int tlcCapability = ApolloTlcPolicy.UNKNOWN;
-    private int plcCapabilitySa = ApolloTlcPolicy.UNKNOWN;
     private int glaSwitch = ApolloTlcPolicy.UNKNOWN;
     private int glaLightChangeSwitch = ApolloTlcPolicy.UNKNOWN;
     private int tsrSwitch = ApolloTlcPolicy.UNKNOWN;
 
-    private boolean pending;
-    private int pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-    private ApolloTlcPolicy.Signal pendingSignal;
-    private int pendingBindEpoch;
-    private int writeGeneration;
-    /** Prevents automatic retries if the full-only vendor permission is unexpectedly unavailable. */
-    private boolean writePermissionFailureHandled;
-
     private final Runnable rebindRunnable = () -> runWorkerSafely(
             "scheduled rebind", () -> revalidateCanBusAndBind("scheduled rebind"));
-    private final Runnable metricsRunnable = () -> runWorkerSafely(
-            "metrics", this::logAndRescheduleMetrics);
+
+    private static ThreadPoolExecutor createSchemaExecutor() {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                1, 1,
+                SCHEMA_THREAD_IDLE_TIMEOUT_SECONDS, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(1),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "ApolloTlcSchema");
+                    thread.setDaemon(true);
+                    return thread;
+                },
+                (latest, target) -> {
+                    if (target.isShutdown()) {
+                        throw new RejectedExecutionException("Apollo schema executor is shut down");
+                    }
+                    target.getQueue().poll();
+                    if (!target.getQueue().offer(latest)) {
+                        throw new RejectedExecutionException("Apollo schema latest-only queue full");
+                    }
+                });
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
 
     private final BroadcastReceiver requestReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            long sessionToken = intent.getLongExtra(EXTRA_DEMAND_SESSION, 0L);
+            IBinder owner = binderExtra(intent, EXTRA_DEMAND_OWNER);
             if (ACTION_REQUEST_APOLLO_TLC_UPDATE.equals(intent.getAction())) {
-                enqueueQuery();
+                enqueueQuery(sessionToken, owner);
+            } else if (ACTION_RELEASE_APOLLO_TLC_DEMAND.equals(intent.getAction())) {
+                postWorker(() -> releaseClientDemand(sessionToken, owner, "lifecycle release"));
             }
         }
     };
@@ -204,6 +190,10 @@ public final class ApolloTlcService extends Service {
                     cancelBindConnectWatchdog();
                     handler.removeCallbacks(rebindRunnable);
                     canBusBindingRequested = true;
+                    if (!hasClientDemand()) {
+                        releaseCanBusTransportWithoutDemand("connected after UI release");
+                        return;
+                    }
                     verifyConnectedCanBus(service);
                 });
             }
@@ -213,6 +203,10 @@ public final class ApolloTlcService extends Service {
                 ServiceConnection source = this;
                 postWorker(() -> {
                     if (!isCurrentConnection(connectionEpoch, source)) return;
+                    if (!hasClientDemand()) {
+                        releaseCanBusTransportWithoutDemand("disconnected while idle");
+                        return;
+                    }
                     invalidateCanBusIdentity("can_disconnected");
                     scheduleCanBusRebind();
                 });
@@ -254,17 +248,11 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /** Posts immediate work to the serial state-machine thread and records queue pressure. */
+    /** Posts immediate work to the serial state-machine thread. */
     private boolean postWorker(Runnable action) {
         Handler target = handler;
         if (destroyed || target == null) return false;
-        final long enqueuedAtNs = SystemClock.elapsedRealtimeNanos();
-        return target.post(() -> {
-            long delayUs = Math.max(0L,
-                    (SystemClock.elapsedRealtimeNanos() - enqueuedAtNs) / 1_000L);
-            updateMax(workerDispatchMaxUs, delayUs);
-            runWorkerSafely("queued work", action);
-        });
+        return target.post(() -> runWorkerSafely("queued work", action));
     }
 
     /** Keeps one unexpected task failure from terminating the authoritative HandlerThread. */
@@ -275,13 +263,6 @@ public final class ApolloTlcService extends Service {
         } catch (RuntimeException e) {
             Log.e(TAG, source + " failed", e);
             if (destroyed) return;
-            if (pending) {
-                ++writeGeneration;
-                pending = false;
-                pendingSignal = null;
-                pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-                pendingBindEpoch = 0;
-            }
             failRuntimeProfileClosed("worker_task_failed");
             try {
                 publishState();
@@ -291,77 +272,221 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /** Coalesces Messenger, broadcast and sticky-service queries into one full CAN refresh. */
-    private void enqueueQuery() {
+    /**
+     * Acquires every versioned UI session even when its expensive CAN refresh is coalesced.
+     * One trailing refresh guarantees that a newer visible session receives a snapshot after an
+     * older synchronous Binder read completes.
+     */
+    private void enqueueQuery(long sessionToken, IBinder owner) {
         if (destroyed) return;
-        if (!queryInFlight.compareAndSet(false, true)) {
-            queryCoalesced.incrementAndGet();
+        if (sessionToken <= 0L || owner == null) {
+            Log.w(TAG, "Ignoring Apollo query without a valid demand owner/session");
             return;
         }
+        postWorker(() -> {
+            int acquired = acquireClientDemand(sessionToken, owner);
+            if (acquired == ApolloCanBusDemandGate.ACQUIRE_REJECTED) return;
+            if (!canBusDemandGate.beginQuery(sessionToken, owner)) return;
+            postQueryWork(sessionToken, owner);
+        });
+    }
+
+    private void postQueryWork(long sessionToken, IBinder owner) {
         if (!postWorker(() -> {
             try {
-                handleQuery();
+                if (canBusDemandGate.isActive(sessionToken, owner)) {
+                    handleQuery();
+                }
             } finally {
-                queryInFlight.set(false);
+                long trailingSession = canBusDemandGate.finishQuery(sessionToken);
+                if (trailingSession != ApolloCanBusDemandGate.NO_QUERY_SESSION) {
+                    IBinder trailingOwner = activeDemandOwner(trailingSession);
+                    if (trailingOwner != null) {
+                        postQueryWork(trailingSession, trailingOwner);
+                    } else {
+                        canBusDemandGate.abandonQuery(trailingSession);
+                    }
+                }
             }
         })) {
-            queryInFlight.set(false);
+            canBusDemandGate.abandonQuery(sessionToken);
         }
     }
 
-    private static void updateMax(AtomicLong target, long value) {
-        long current = target.get();
-        while (value > current && !target.compareAndSet(current, value)) {
-            current = target.get();
+    /** A real UI query opens one idempotent, monotonically versioned CanBus demand session. */
+    private int acquireClientDemand(long sessionToken, IBinder owner) {
+        boolean existing = false;
+        synchronized (demandOwnerLock) {
+            DemandOwnerLink current = demandOwnerLink;
+            if (!destroyed && current != null && current.sessionToken == sessionToken
+                    && current.owner == owner
+                    && canBusDemandGate.isActive(sessionToken, owner)) {
+                existing = true;
+            }
+        }
+        if (existing) {
+            cancelIdleUnbind();
+            return ApolloCanBusDemandGate.ACQUIRE_EXISTING;
+        }
+
+        DemandOwnerLink candidate = new DemandOwnerLink(sessionToken, owner);
+        try {
+            owner.linkToDeath(candidate, 0);
+        } catch (RemoteException | RuntimeException e) {
+            unlinkDemandOwner(candidate);
+            Log.w(TAG, "Apollo demand owner unavailable; session=" + sessionToken, e);
+            releaseClientDemand(sessionToken, owner, "owner unavailable");
+            return ApolloCanBusDemandGate.ACQUIRE_REJECTED;
+        }
+
+        int result = ApolloCanBusDemandGate.ACQUIRE_REJECTED;
+        DemandOwnerLink previous = null;
+        boolean adopted = false;
+        synchronized (demandOwnerLock) {
+            if (!destroyed) {
+                result = canBusDemandGate.acquire(sessionToken, owner);
+                if (result == ApolloCanBusDemandGate.ACQUIRE_NEW) {
+                    previous = demandOwnerLink;
+                    demandOwnerLink = candidate;
+                    adopted = true;
+                } else if (result == ApolloCanBusDemandGate.ACQUIRE_EXISTING) {
+                    DemandOwnerLink current = demandOwnerLink;
+                    if (current == null || current.sessionToken != sessionToken
+                            || current.owner != owner) {
+                        previous = current;
+                        demandOwnerLink = candidate;
+                        adopted = true;
+                    }
+                }
+            }
+        }
+        if (!adopted) unlinkDemandOwner(candidate);
+        if (previous != null) unlinkDemandOwner(previous);
+        if (result == ApolloCanBusDemandGate.ACQUIRE_REJECTED) return result;
+        cancelIdleUnbind();
+        if (result == ApolloCanBusDemandGate.ACQUIRE_NEW) {
+            // A new UI session must not inherit a minute-long backoff from an older one.
+            rebindAttempt = 0;
+            Log.i(TAG, "Apollo UI demand acquired; session=" + sessionToken);
+        }
+        return result;
+    }
+
+    /** Called by the permission-gated RestoreMode lifecycle broadcast. */
+    private void releaseClientDemand(long sessionToken, IBinder owner, String reason) {
+        if (sessionToken <= 0L || owner == null) return;
+        DemandOwnerLink released;
+        synchronized (demandOwnerLock) {
+            if (destroyed || !canBusDemandGate.release(sessionToken, owner)) return;
+            released = demandOwnerLink;
+            demandOwnerLink = null;
+        }
+        if (released != null) unlinkDemandOwner(released);
+        handler.removeCallbacks(rebindRunnable);
+        Log.i(TAG, "Apollo UI demand released (" + reason + "); session=" + sessionToken
+                + " idle grace=" + IDLE_UNBIND_GRACE_MS + "ms");
+        maybeScheduleIdleUnbind();
+    }
+
+    private void handleDemandOwnerDeath(DemandOwnerLink dead) {
+        DemandOwnerLink released;
+        synchronized (demandOwnerLock) {
+            if (destroyed || demandOwnerLink != dead
+                    || !canBusDemandGate.ownerDied(dead.sessionToken, dead.owner)) return;
+            released = demandOwnerLink;
+            demandOwnerLink = null;
+        }
+        unlinkDemandOwner(released);
+        handler.removeCallbacks(rebindRunnable);
+        Log.i(TAG, "Apollo UI process died; session=" + dead.sessionToken
+                + " idle grace=" + IDLE_UNBIND_GRACE_MS + "ms");
+        maybeScheduleIdleUnbind();
+    }
+
+    private IBinder activeDemandOwner(long sessionToken) {
+        synchronized (demandOwnerLock) {
+            DemandOwnerLink current = demandOwnerLink;
+            if (destroyed || current == null || current.sessionToken != sessionToken
+                    || !canBusDemandGate.isActive(sessionToken, current.owner)) return null;
+            return current.owner;
         }
     }
 
-    private static void updateMax(AtomicLongArray target, int index, long value) {
-        long current = target.get(index);
-        while (value > current && !target.compareAndSet(index, current, value)) {
-            current = target.get(index);
+    private static void unlinkDemandOwner(DemandOwnerLink link) {
+        if (link == null) return;
+        try {
+            link.owner.unlinkToDeath(link, 0);
+        } catch (RuntimeException ignored) {
+            // Already dead/unlinked is an idempotent terminal state.
         }
     }
 
-    public static void requestQuery(Context context) {
-        start(context, ACTION_INTERNAL_QUERY, false, true);
+    private boolean hasClientDemand() {
+        synchronized (demandOwnerLock) {
+            DemandOwnerLink current = demandOwnerLink;
+            return !destroyed && current != null
+                    && canBusDemandGate.isActive(current.sessionToken, current.owner);
+        }
     }
 
-    public static void requestTlcSet(Context context, boolean enabled, boolean argumentValid) {
-        start(context, ACTION_INTERNAL_SET, enabled, argumentValid);
+    private void cancelIdleUnbind() {
+        Runnable idle = idleUnbindRunnable;
+        idleUnbindRunnable = null;
+        Handler target = handler;
+        if (idle != null && target != null) target.removeCallbacks(idle);
     }
 
-    public static void requestMasterSet(Context context, boolean enabled, boolean argumentValid) {
-        start(context, ACTION_INTERNAL_MASTER_SET, enabled, argumentValid);
+    /** Keeps a short grace for Activity recreation without maintaining a recurring poll. */
+    private void maybeScheduleIdleUnbind() {
+        if (destroyed) return;
+        int generation = canBusDemandGate.armIdleRelease(false);
+        if (generation == ApolloCanBusDemandGate.REJECTED_GENERATION) return;
+        cancelIdleUnbind();
+        Runnable idle = () -> runWorkerSafely("idle CanBus release", () -> {
+            if (!canBusDemandGate.isIdleReleaseCurrent(generation, false)) return;
+            idleUnbindRunnable = null;
+            releaseCanBusTransportWithoutDemand("Apollo UI idle");
+        });
+        idleUnbindRunnable = idle;
+        handler.postDelayed(idle, IDLE_UNBIND_GRACE_MS);
     }
 
-    public static void requestGlaSet(Context context, boolean enabled, boolean argumentValid) {
-        start(context, ACTION_INTERNAL_GLA_SET, enabled, argumentValid);
+    /** Intentional release: fence late callbacks without turning idle into a profile failure. */
+    private void releaseCanBusTransportWithoutDemand(String reason) {
+        boolean hadTransport = canBusBindingRequested || canBusConnected || canBusBinder != null;
+        canBusDemandGate.invalidateIdleRelease();
+        cancelIdleUnbind();
+        ++canBusVerificationGeneration;
+        canBusVerificationPending = false;
+        pendingCanBusBinder = null;
+        releaseCanBusBinding(reason);
+        invalidateCanSnapshot();
+        if (hadTransport) Log.i(TAG, "CanBus transport released: " + reason);
+        publishState();
     }
 
-    public static void requestGlaSoundSet(Context context, boolean enabled,
-                                          boolean argumentValid) {
-        start(context, ACTION_INTERNAL_GLA_SOUND_SET, enabled, argumentValid);
-    }
-
-    public static void requestTsrSet(Context context, boolean enabled, boolean argumentValid) {
-        start(context, ACTION_INTERNAL_TSR_SET, enabled, argumentValid);
+    public static void requestQuery(Context context, long sessionToken, IBinder owner) {
+        start(context, ACTION_INTERNAL_QUERY, sessionToken, owner);
     }
 
     public static void ensureStarted(Context context) {
-        start(context, null, false, true);
+        start(context, null, 0L, null);
     }
 
-    private static void start(Context context, String action, boolean enabled,
-                              boolean argumentValid) {
+    private static void start(Context context, String action,
+                              long sessionToken, IBinder owner) {
         Intent intent = new Intent(context, ApolloTlcService.class);
         intent.setAction(action);
-        intent.putExtra(EXTRA_ENABLED, enabled);
-        intent.putExtra(EXTRA_ARGUMENT_VALID, argumentValid);
+        if (sessionToken > 0L) intent.putExtra(EXTRA_DEMAND_SESSION, sessionToken);
+        if (owner != null) {
+            Bundle ownerExtra = new Bundle();
+            ownerExtra.putBinder(EXTRA_DEMAND_OWNER, owner);
+            intent.putExtras(ownerExtra);
+        }
         try {
             context.startService(intent);
         } catch (RuntimeException e) {
-            Log.e(TAG, "Cannot start ApolloTlcService for " + action, e);
+            Log.e(TAG, "Cannot start read-only Apollo diagnostics for " + action, e);
         }
     }
 
@@ -374,8 +499,10 @@ public final class ApolloTlcService extends Service {
         handler = new Handler(canBusWorkerThread.getLooper());
         boolean receiverFailed = false;
         try {
-            registerReceiver(requestReceiver,
-                    new IntentFilter(ACTION_REQUEST_APOLLO_TLC_UPDATE),
+            IntentFilter requestFilter =
+                    new IntentFilter(ACTION_REQUEST_APOLLO_TLC_UPDATE);
+            requestFilter.addAction(ACTION_RELEASE_APOLLO_TLC_DEMAND);
+            registerReceiver(requestReceiver, requestFilter,
                     BIND_PERMISSION, null, RECEIVER_EXPORTED);
             requestReceiverRegistered = true;
         } catch (RuntimeException e) {
@@ -387,53 +514,25 @@ public final class ApolloTlcService extends Service {
             if (requestReceiverFailed) {
                 lastError = "request_receiver_failed";
             }
-            if (!BuildConfig.HAS_DIRECT_APOLLO) {
-                forceMasterOff("direct Apollo disabled at build time");
-            }
-            // Direct Apollo binds only after the installed CanBus VehicleState schema matches.
-            if (BuildConfig.HAS_DIRECT_APOLLO) {
-                if (hasWriteCanBusPermission()) {
-                    startSchemaCheck();
-                } else {
-                    failWritePermissionClosed();
-                }
+            // Keep the signature-protected fallback receiver available after boot, but do not run
+            // PackageManager/PathClassLoader work until a real Apollo UI query owns demand.
+            if (BuildConfig.HAS_DIRECT_APOLLO && !hasCanBusPermission()) {
+                failCanBusPermissionClosed();
             }
             publishState();
-            metricsWindowStartedAtMs = SystemClock.elapsedRealtime();
-            handler.postDelayed(metricsRunnable, METRICS_INTERVAL_MS);
         });
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         final String action = intent == null ? null : intent.getAction();
-        final boolean enabled = intent != null
-                && intent.getBooleanExtra(EXTRA_ENABLED, false);
-        final boolean valid = intent != null
-                && intent.getBooleanExtra(EXTRA_ARGUMENT_VALID, false);
-        if (ACTION_INTERNAL_SET.equals(action)
-                || ACTION_INTERNAL_MASTER_SET.equals(action)
-                || ACTION_INTERNAL_GLA_SET.equals(action)
-                || ACTION_INTERNAL_GLA_SOUND_SET.equals(action)
-                || ACTION_INTERNAL_TSR_SET.equals(action)) {
-            postWorker(() -> {
-                if (!BuildConfig.HAS_DIRECT_APOLLO) {
-                    forceMasterOff("direct Apollo disabled command");
-                }
-                if (ACTION_INTERNAL_SET.equals(action)) {
-                    handleTlcSet(enabled, valid);
-                } else if (ACTION_INTERNAL_MASTER_SET.equals(action)) {
-                    handleMasterSet(enabled, valid);
-                } else if (ACTION_INTERNAL_GLA_SET.equals(action)) {
-                    handleGlaSet(enabled, valid);
-                } else if (ACTION_INTERNAL_GLA_SOUND_SET.equals(action)) {
-                    handleGlaSoundSet(enabled, valid);
-                } else {
-                    handleTsrSet(enabled, valid);
-                }
-            });
-        } else {
-            enqueueQuery();
+        final long sessionToken = intent == null
+                ? 0L : intent.getLongExtra(EXTRA_DEMAND_SESSION, 0L);
+        final IBinder owner = binderExtra(intent, EXTRA_DEMAND_OWNER);
+        if (ACTION_INTERNAL_QUERY.equals(action)) {
+            enqueueQuery(sessionToken, owner);
+        } else if (action != null) {
+            Log.w(TAG, "Ignoring unknown read-only Apollo action: " + action);
         }
         return BuildConfig.HAS_DIRECT_APOLLO ? START_STICKY : START_NOT_STICKY;
     }
@@ -446,7 +545,13 @@ public final class ApolloTlcService extends Service {
     @Override
     public void onDestroy() {
         destroyed = true;
-        queryInFlight.set(false);
+        DemandOwnerLink releasedOwner;
+        synchronized (demandOwnerLock) {
+            canBusDemandGate.close();
+            releasedOwner = demandOwnerLink;
+            demandOwnerLink = null;
+        }
+        unlinkDemandOwner(releasedOwner);
         if (requestReceiverRegistered) {
             try {
                 unregisterReceiver(requestReceiver);
@@ -463,11 +568,6 @@ public final class ApolloTlcService extends Service {
                 // A synchronous vendor transaction may have returned after onDestroy began and
                 // queued delayed work. Invalidate every generation and clear the queue again here.
                 ++canBusVerificationGeneration;
-                ++writeGeneration;
-                pending = false;
-                pendingSignal = null;
-                pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-                pendingBindEpoch = 0;
                 worker.removeCallbacksAndMessages(null);
                 releaseCanBusBinding("destroy");
                 if (thread != null) thread.quitSafely();
@@ -479,15 +579,24 @@ public final class ApolloTlcService extends Service {
         super.onDestroy();
     }
 
+    private static IBinder binderExtra(Intent intent, String key) {
+        Bundle extras = intent == null ? null : intent.getExtras();
+        return extras == null ? null : extras.getBinder(key);
+    }
+
     private void handleQuery() {
         if (!BuildConfig.HAS_DIRECT_APOLLO) {
-            forceMasterOff("direct Apollo disabled query");
             invalidateCanSnapshot();
             publishState();
             return;
         }
-        if (!hasWriteCanBusPermission()) {
-            failWritePermissionClosed();
+        if (!hasCanBusPermission()) {
+            failCanBusPermissionClosed();
+            publishState();
+            return;
+        }
+        if (!schemaCheckComplete) {
+            startSchemaCheck();
             publishState();
             return;
         }
@@ -517,395 +626,8 @@ public final class ApolloTlcService extends Service {
         publishState();
     }
 
-    private void handleMasterSet(boolean enabled, boolean argumentValid) {
-        if (!argumentValid) {
-            lastError = "invalid_argument";
-            publishState();
-            return;
-        }
-        if (!BuildConfig.HAS_DIRECT_APOLLO) {
-            forceMasterOff("direct Apollo disabled master command");
-            lastError = ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
-            publishState();
-            return;
-        }
-        // This release is deliberately direct-only. It must never invoke the OEM subscription
-        // manager that writes the unrelated 18-field Apollo entitlement bundle.
-        writeMaster(false);
-        lastError = enabled
-                ? ApolloTlcPolicy.ERROR_MASTER_NOT_USED_DIRECT
-                : ApolloTlcPolicy.ERROR_NONE;
-        publishState();
-        return;
-    }
-
-    private void handleTlcSet(boolean enabled, boolean argumentValid) {
-        if (!argumentValid) {
-            lastError = "invalid_argument";
-            publishState();
-            return;
-        }
-        if (!BuildConfig.HAS_DIRECT_APOLLO) {
-            forceMasterOff("direct Apollo disabled TLC command");
-            lastError = ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
-            publishState();
-            return;
-        }
-        if (!hasWriteCanBusPermission()) {
-            failWritePermissionClosed();
-            publishState();
-            return;
-        }
-        if (!canBusConnected) {
-            lastError = ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
-            publishState();
-            return;
-        }
-
-        // Read only the direct TLC inputs. The single parking gate is checked here; independent
-        // GLA/TSR commands never read gear.
-        if (!refreshTlcPrewrite(enabled)) {
-            if (runtimeProfileValid) {
-                lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
-            }
-            publishState();
-            return;
-        }
-        boolean directTlcMode = isDirectTlcSupported();
-        if (enabled && !hasCompleteCompositeSwitchSnapshot()) {
-            lastError = "composite_switch_state_unknown";
-            publishState();
-            return;
-        }
-        String blocked = ApolloTlcPolicy.directTlcBlockReason(
-                true, directTlcMode, canBusConnected,
-                pending, gear, plcSwitch);
-        if (!blocked.isEmpty()) {
-            lastError = blocked;
-            Log.w(TAG, "PLC_SWITCH write blocked: " + blocked);
-            publishState();
-            return;
-        }
-
-        int desiredState = ApolloTlcPolicy.requestedPlcState(enabled);
-        if (enabled) {
-            queueEntitledFeatureEnable(
-                    ApolloTlcPolicy.Signal.PLC_SWITCH, desiredState, "PLC_SWITCH",
-                    true, glaSwitch == ApolloTlcPolicy.MODULE_ON);
-        } else {
-            queueSignalWrite(ApolloTlcPolicy.Signal.PLC_SWITCH,
-                    desiredState, "PLC_SWITCH");
-        }
-    }
-
-    private void handleGlaSet(boolean enabled, boolean argumentValid) {
-        handleIndependentSwitchSet(ApolloTlcPolicy.Signal.GLA_SWITCH,
-                ApolloTlcPolicy.requestedPlcState(enabled), argumentValid,
-                false, enabled);
-    }
-
-    private void handleGlaSoundSet(boolean enabled, boolean argumentValid) {
-        handleIndependentSwitchSet(ApolloTlcPolicy.Signal.GLA_LIGHT_CHANGE_SWITCH,
-                ApolloTlcPolicy.requestedPlcState(enabled), argumentValid,
-                true, false);
-    }
-
-    private void handleTsrSet(boolean enabled, boolean argumentValid) {
-        handleIndependentSwitchSet(ApolloTlcPolicy.Signal.TSR_SWITCH,
-                ApolloTlcPolicy.requestedTsrState(enabled), argumentValid,
-                false, false);
-    }
-
-    private void handleIndependentSwitchSet(ApolloTlcPolicy.Signal signal, int desiredState,
-                                            boolean argumentValid,
-                                            boolean requiresRecognition,
-                                            boolean enableTrafficLightEntitlements) {
-        if (!argumentValid) {
-            lastError = "invalid_argument";
-            publishState();
-            return;
-        }
-        if (!BuildConfig.HAS_DIRECT_APOLLO) {
-            lastError = ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
-            publishState();
-            return;
-        }
-        if (!hasWriteCanBusPermission()) {
-            failWritePermissionClosed();
-            publishState();
-            return;
-        }
-        if (!canBusConnected) {
-            lastError = ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
-            publishState();
-            return;
-        }
-        if (!refreshIndependentPrewrite(
-                signal, requiresRecognition, enableTrafficLightEntitlements)) {
-            if (runtimeProfileValid) lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
-            publishState();
-            return;
-        }
-        String blocked = ApolloTlcPolicy.directSwitchBlockReason(
-                true, isDirectTlcSupported(), canBusConnected,
-                pending, cachedState(signal));
-        if (blocked.isEmpty() && requiresRecognition
-                && glaSwitch != ApolloTlcPolicy.MODULE_ON) {
-            blocked = "traffic_light_recognition_disabled";
-        }
-        if (!blocked.isEmpty()) {
-            lastError = blocked;
-            publishState();
-            return;
-        }
-        if (enableTrafficLightEntitlements) {
-            if (!hasCompleteCompositeSwitchSnapshot()) {
-                lastError = "composite_switch_state_unknown";
-                publishState();
-                return;
-            }
-            queueEntitledFeatureEnable(
-                    ApolloTlcPolicy.Signal.GLA_SWITCH, desiredState, "GLA_SWITCH",
-                    plcSwitch == ApolloTlcPolicy.MODULE_ON, true);
-        } else {
-            queueSignalWrite(signal, desiredState, signal.name());
-        }
-    }
-
-    /**
-     * Sends one complete 18-key entitlement vector before enabling a dependent user switch.
-     * TX77 returning zero means only that the OEM AsyncTask accepted the request, so TX58 is
-     * delayed long enough for command 126 to leave the head unit. Neither stage is retried.
-     */
-    private void queueEntitledFeatureEnable(ApolloTlcPolicy.Signal signal, int desiredState,
-                                            String logName, boolean tlcEnabled,
-                                            boolean trafficLightEnabled) {
-        int generation = beginPendingWrite(signal, desiredState);
-        if (!hasWriteCanBusPermission()) {
-            clearPendingWrite(generation);
-            failWritePermissionClosed();
-            publishState();
-            return;
-        }
-        if (!runtimeProfileValid || !canBusConnected || canBusBinder == null) {
-            failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
-            return;
-        }
-        try {
-            int result = setCompositeEntitlements(tlcEnabled, trafficLightEnabled);
-            if (result != 0) {
-                failPendingWrite(generation, "feature_entitlement_rejected");
-                Log.e(TAG, "Composite TX77 rejected; result=" + result);
-                return;
-            }
-            Log.i(TAG, "Composite TX77 queued before " + logName
-                    + ": tlc=" + tlcEnabled + " trafficLight=" + trafficLightEnabled
-                    + " generation=" + generation);
-        } catch (RemoteException | RuntimeException e) {
-            failPendingWrite(generation, "feature_entitlement_tx_failed");
-            Log.e(TAG, "Composite TX77 failed; no retry", e);
-            return;
-        }
-        handler.postDelayed(() -> runWorkerSafely("entitlement settle",
-                        () -> continueEntitledFeatureEnable(
-                                generation, signal, desiredState, logName)),
-                ENTITLEMENT_SETTLE_MS);
-    }
-
-    private void continueEntitledFeatureEnable(int generation, ApolloTlcPolicy.Signal signal,
-                                               int desiredState, String logName) {
-        if (!ApolloTlcPolicy.writeSessionCurrent(
-                destroyed, pending, writeGeneration, generation,
-                activeBindEpoch, pendingBindEpoch)) {
-            if (!destroyed && generation == writeGeneration && pending
-                    && pendingBindEpoch != activeBindEpoch) {
-                failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
-            }
-            return;
-        }
-        if (pendingSignal != signal || pendingDesiredState != desiredState) return;
-        if (!hasWriteCanBusPermission()) {
-            clearPendingWrite(generation);
-            failWritePermissionClosed();
-            publishState();
-            return;
-        }
-        if (!canBusConnected || canBusBinder == null) {
-            failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
-            return;
-        }
-        transmitPendingSignal(generation, signal, desiredState, logName);
-    }
-
-    private void queueSignalWrite(ApolloTlcPolicy.Signal signal, int desiredState,
-                                  String logName) {
-        int generation = beginPendingWrite(signal, desiredState);
-        transmitPendingSignal(generation, signal, desiredState, logName);
-    }
-
-    private int beginPendingWrite(ApolloTlcPolicy.Signal signal, int desiredState) {
-        int generation = ++writeGeneration;
-        pending = true;
-        pendingSignal = signal;
-        pendingDesiredState = desiredState;
-        pendingBindEpoch = activeBindEpoch;
-        lastError = ApolloTlcPolicy.ERROR_NONE;
-        publishState();
-        return generation;
-    }
-
-    private void transmitPendingSignal(int generation, ApolloTlcPolicy.Signal signal,
-                                       int desiredState, String logName) {
-        if (!ApolloTlcPolicy.writeSessionCurrent(
-                destroyed, pending, writeGeneration, generation,
-                activeBindEpoch, pendingBindEpoch)) {
-            if (!destroyed && generation == writeGeneration && pending
-                    && pendingBindEpoch != activeBindEpoch) {
-                failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
-            }
-            return;
-        }
-        if (pendingSignal != signal || pendingDesiredState != desiredState) return;
-        // Re-check immediately before TX58 in case package permissions changed while this command
-        // was being validated. No Binder write is attempted on an ungranted permission.
-        if (!hasWriteCanBusPermission()) {
-            clearPendingWrite(generation);
-            failWritePermissionClosed();
-            publishState();
-            return;
-        }
-        if (!runtimeProfileValid || !canBusConnected || canBusBinder == null) {
-            failPendingWrite(generation, ApolloTlcPolicy.ERROR_CAN_DISCONNECTED);
-            return;
-        }
-
-        try {
-            setVehicleState(signal, desiredState);
-            Log.i(TAG, logName + " TX58 queued; desired=" + desiredState
-                    + " generation=" + generation);
-        } catch (RemoteException | RuntimeException e) {
-            failPendingWrite(generation, "tx58_failed");
-            Log.e(TAG, logName + " TX58 failed; no retry", e);
-            return;
-        }
-
-        // Fire-and-forget by design: a successful synchronous TX58 means only that the OEM service
-        // accepted the command. Do not subscribe globally or issue a delayed verification read.
-        setCachedState(signal, desiredState);
-        clearPendingWrite(generation);
-        lastError = ApolloTlcPolicy.ERROR_NONE;
-        publishState();
-    }
-
-    private void failPendingWrite(int generation, String error) {
-        if (generation != writeGeneration) return;
-        clearPendingWrite(generation);
-        lastError = error;
-        publishState();
-    }
-
-    private void clearPendingWrite(int generation) {
-        if (generation != writeGeneration) return;
-        pending = false;
-        pendingSignal = null;
-        pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-        pendingBindEpoch = 0;
-    }
-
-    private boolean hasCompleteCompositeSwitchSnapshot() {
-        return ApolloTlcPolicy.compositeSwitchStatesValid(plcSwitch, glaSwitch);
-    }
-
-    private int cachedState(ApolloTlcPolicy.Signal signal) {
-        switch (signal) {
-            case PLC_FUNCTION_STATUS:
-                return plcStatus;
-            case PLC_SWITCH:
-                return plcSwitch;
-            case ANP_SWITCH:
-                return anpSwitch;
-            case GLA_SWITCH:
-                return glaSwitch;
-            case GLA_LIGHT_CHANGE_SWITCH:
-                return glaLightChangeSwitch;
-            case TSR_SWITCH:
-                return tsrSwitch;
-            case TLC_FUNC_ENABLE:
-                return tlcCapability;
-            case PLC_FUNC_ENABLE_SA:
-                return plcCapabilitySa;
-            default:
-                return ApolloTlcPolicy.UNKNOWN;
-        }
-    }
-
-    /** Reads only the state required by an independent GLA/GLA-sound/TSR command. */
-    private boolean refreshIndependentPrewrite(ApolloTlcPolicy.Signal signal,
-                                               boolean requiresRecognition,
-                                               boolean requiresCompositeSwitches) {
-        if (!runtimeProfileValid || !hasWriteCanBusPermission()
-                || !canBusConnected || canBusBinder == null) {
-            invalidateCanSnapshot();
-            return false;
-        }
-        try {
-            setCachedState(signal, getVehicleState(signal));
-            if (requiresRecognition && signal != ApolloTlcPolicy.Signal.GLA_SWITCH) {
-                glaSwitch = getVehicleState(ApolloTlcPolicy.Signal.GLA_SWITCH);
-            }
-            if (requiresCompositeSwitches) {
-                if (signal != ApolloTlcPolicy.Signal.PLC_SWITCH) {
-                    plcSwitch = getVehicleState(ApolloTlcPolicy.Signal.PLC_SWITCH);
-                }
-                if (signal != ApolloTlcPolicy.Signal.GLA_SWITCH) {
-                    glaSwitch = getVehicleState(ApolloTlcPolicy.Signal.GLA_SWITCH);
-                }
-            }
-            Log.i(TAG, "targeted prewrite: signal=" + signal
-                    + " state=" + cachedState(signal)
-                    + " plc=" + plcSwitch + " gla=" + glaSwitch);
-            return true;
-        } catch (RemoteException | RuntimeException e) {
-            invalidateCanSnapshot();
-            lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
-            Log.e(TAG, "Targeted prewrite failed for " + signal, e);
-            return false;
-        }
-    }
-
-    /** Reads PLC, the shared GLA entitlement peer when enabling, and the one TLC gear gate. */
-    private boolean refreshTlcPrewrite(boolean enabling) {
-        if (!runtimeProfileValid || !hasWriteCanBusPermission()
-                || !canBusConnected || canBusBinder == null) {
-            invalidateCanSnapshot();
-            return false;
-        }
-        try {
-            plcSwitch = getVehicleState(ApolloTlcPolicy.Signal.PLC_SWITCH);
-            if (enabling) {
-                glaSwitch = getVehicleState(ApolloTlcPolicy.Signal.GLA_SWITCH);
-            }
-            GearReading reading = getGearStatus();
-            if (!reading.valid) {
-                failRuntimeProfileClosed("profile_gear_parcel_mismatch");
-                Log.e(TAG, "Invalid GearState parcel during TLC prewrite ordinal="
-                        + reading.ordinal + " value=" + reading.value);
-                return false;
-            }
-            gear = reading.value;
-            Log.i(TAG, "targeted TLC prewrite: gear=" + gear + " plc=" + plcSwitch
-                    + (enabling ? " gla=" + glaSwitch : ""));
-            return true;
-        } catch (RemoteException | RuntimeException e) {
-            invalidateCanSnapshot();
-            lastError = ApolloTlcPolicy.ERROR_STATE_READ_FAILED;
-            Log.e(TAG, "Targeted TLC prewrite failed", e);
-            return false;
-        }
-    }
-
     private boolean refreshFromCan(String reason) {
-        if (!runtimeProfileValid || !hasWriteCanBusPermission()
+        if (!runtimeProfileValid || !hasCanBusPermission()
                 || !canBusConnected || canBusBinder == null) {
             invalidateCanSnapshot();
             return false;
@@ -936,88 +658,28 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /**
-     * Permanently closes this service instance after a pinned protocol mismatch. The durable
-     * entitlement is cleared once, without retry; a failed clear remains visible through
-     * masterPersistenceError while runtimeProfileValid blocks every TX58 in memory.
-     */
+    /** Permanently closes this service instance after a pinned protocol mismatch. */
     private void failRuntimeProfileClosed(String error) {
         if (!runtimeProfileValid) return;
         runtimeProfileValid = false;
         invalidateCanSnapshot();
-        if (pending) {
-            ++writeGeneration;
-            pending = false;
-            pendingSignal = null;
-            pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-            pendingBindEpoch = 0;
-        }
         lastError = error;
-        if (!writeMaster(false)) {
-            Log.e(TAG, "Cannot clear Apollo master after permanent runtime mismatch: " + error);
-        }
         releaseCanBusBinding(error);
     }
 
-    /** Closes entitlement and all Binder gates once; there is deliberately no automatic retry. */
-    private void failWritePermissionClosed() {
-        lastError = ApolloTlcPolicy.ERROR_WRITE_PERMISSION_MISSING;
+    /** Closes the read-only Binder gate once when the vendor permission is unavailable. */
+    private void failCanBusPermissionClosed() {
+        lastError = ApolloTlcPolicy.ERROR_CAN_PERMISSION_MISSING;
         invalidateCanSnapshot();
-        if (pending) {
-            ++writeGeneration;
-            pending = false;
-            pendingSignal = null;
-            pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-            pendingBindEpoch = 0;
-        }
-        boolean shouldClearMaster = !writePermissionFailureHandled;
-        writePermissionFailureHandled = true;
-        releaseCanBusBinding("WRITE_CANBUS permission missing");
-        if (!shouldClearMaster) return;
-        if (!writeMaster(false)) {
-            Log.e(TAG, "Cannot clear Apollo master after WRITE_CANBUS permission loss");
-        }
+        releaseCanBusBinding("CanBus permission missing");
     }
 
     private void invalidateCanSnapshot() {
         gear = ApolloTlcPolicy.UNKNOWN;
         plcSwitch = ApolloTlcPolicy.UNKNOWN;
-        plcStatus = ApolloTlcPolicy.UNKNOWN;
-        anpSwitch = ApolloTlcPolicy.UNKNOWN;
-        tlcCapability = ApolloTlcPolicy.UNKNOWN;
-        plcCapabilitySa = ApolloTlcPolicy.UNKNOWN;
         glaSwitch = ApolloTlcPolicy.UNKNOWN;
         glaLightChangeSwitch = ApolloTlcPolicy.UNKNOWN;
         tsrSwitch = ApolloTlcPolicy.UNKNOWN;
-    }
-
-    private void setCachedState(ApolloTlcPolicy.Signal signal, int state) {
-        switch (signal) {
-            case PLC_FUNCTION_STATUS:
-                plcStatus = state;
-                break;
-            case PLC_SWITCH:
-                plcSwitch = state;
-                break;
-            case ANP_SWITCH:
-                anpSwitch = state;
-                break;
-            case GLA_SWITCH:
-                glaSwitch = state;
-                break;
-            case GLA_LIGHT_CHANGE_SWITCH:
-                glaLightChangeSwitch = state;
-                break;
-            case TSR_SWITCH:
-                tsrSwitch = state;
-                break;
-            case TLC_FUNC_ENABLE:
-                tlcCapability = state;
-                break;
-            case PLC_FUNC_ENABLE_SA:
-                plcCapabilitySa = state;
-                break;
-        }
     }
 
     private int getVehicleState(ApolloTlcPolicy.Signal signal) throws RemoteException {
@@ -1025,7 +687,7 @@ public final class ApolloTlcService extends Service {
         Parcel reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            writeVehicleState(data, signal);
+            appendVehicleStateIdentity(data, signal);
             if (!transactCanBus(TX_GET_VEHICLE_STATE, data, reply)) {
                 throw new RemoteException("TX57 rejected");
             }
@@ -1037,60 +699,8 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    private void setVehicleState(ApolloTlcPolicy.Signal signal, int state)
-            throws RemoteException {
-        Parcel data = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            writeVehicleState(data, signal);
-            data.writeInt(state);
-            if (!transactCanBus(TX_SET_VEHICLE_STATE, data, reply)) {
-                throw new RemoteException("TX58 rejected");
-            }
-            reply.readException();
-        } finally {
-            reply.recycle();
-            data.recycle();
-        }
-    }
-
-    /**
-     * OEM TX77 argument order is air-condition bundle first, vehicle bundle second.
-     * The vehicle bundle is intentionally complete because the vendor implementation starts its
-     * shared entitlement bit buffer at zero before applying supplied keys.
-     */
-    private int setCompositeEntitlements(boolean tlcEnabled, boolean trafficLightEnabled)
-            throws RemoteException {
-        Bundle vehicleBundle = new Bundle();
-        for (ApolloTlcPolicy.Entitlement entitlement
-                : ApolloTlcPolicy.Entitlement.values()) {
-            vehicleBundle.putInt(
-                    entitlement.name(),
-                    entitlement.compositeValue(tlcEnabled, trafficLightEnabled));
-        }
-
-        Parcel data = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeInt(0); // air-condition bundle is null
-            data.writeInt(1); // vehicle bundle is present
-            vehicleBundle.writeToParcel(data, 0);
-            if (!transactCanBus(
-                    TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE, data, reply)) {
-                throw new RemoteException("TX77 rejected");
-            }
-            reply.readException();
-            return reply.readInt();
-        } finally {
-            reply.recycle();
-            data.recycle();
-        }
-    }
-
-    /** Presence marker + runtime-resolved VehicleState.writeToParcel(ordinal, stable id). */
-    private void writeVehicleState(Parcel data, ApolloTlcPolicy.Signal signal) {
+    /** Presence marker plus runtime-resolved VehicleState ordinal and stable id. */
+    private void appendVehicleStateIdentity(Parcel data, ApolloTlcPolicy.Signal signal) {
         Integer ordinal = runtimeSignalOrdinals.get(signal);
         if (ordinal == null) {
             throw new IllegalStateException("VehicleState schema not resolved for " + signal);
@@ -1136,7 +746,7 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /** Performs one measured synchronous transaction, always from the serial worker thread. */
+    /** Performs one synchronous transaction, always from the serial worker thread. */
     private boolean transactCanBus(int transactionCode, Parcel data, Parcel reply)
             throws RemoteException {
         if (destroyed) {
@@ -1144,44 +754,85 @@ public final class ApolloTlcService extends Service {
         }
         IBinder binder = canBusBinder;
         if (binder == null) throw new RemoteException("CanBus binder unavailable");
-        long startedAtNs = SystemClock.elapsedRealtimeNanos();
+        int watchdogGeneration = armVendorBinderWatchdog("transact " + transactionCode);
         try {
             return binder.transact(transactionCode, data, reply, 0);
         } finally {
-            long durationUs = Math.max(0L,
-                    (SystemClock.elapsedRealtimeNanos() - startedAtNs) / 1_000L);
-            if (transactionCode >= 0 && transactionCode <= MAX_TRACKED_TRANSACTION) {
-                transactionCount.incrementAndGet(transactionCode);
-                transactionTotalUs.addAndGet(transactionCode, durationUs);
-                updateMax(transactionMaxUs, transactionCode, durationUs);
-            }
+            cancelVendorBinderWatchdog(watchdogGeneration);
         }
     }
 
     private String readCanBusDescriptor(IBinder service) throws RemoteException {
-        long startedAtNs = SystemClock.elapsedRealtimeNanos();
+        int watchdogGeneration = armVendorBinderWatchdog("getInterfaceDescriptor");
         try {
             return service.getInterfaceDescriptor();
         } finally {
-            long durationUs = Math.max(0L,
-                    (SystemClock.elapsedRealtimeNanos() - startedAtNs) / 1_000L);
-            descriptorCount.incrementAndGet();
-            descriptorTotalUs.addAndGet(durationUs);
-            updateMax(descriptorMaxUs, durationUs);
+            cancelVendorBinderWatchdog(watchdogGeneration);
         }
+    }
+
+    /**
+     * A kernel Binder call cannot be interrupted from Java. Apollo therefore lives in the private
+     * {@code :apollo} process and a deadline kills only that process if the vendor service never
+     * replies. The timer exists solely for one in-flight call; it is not a recurring watchdog.
+     */
+    private int armVendorBinderWatchdog(String operation) {
+        final int generation;
+        final Runnable watchdog;
+        synchronized (vendorBinderWatchdogLock) {
+            generation = ++vendorBinderWatchdogGeneration;
+            watchdog = () -> {
+                synchronized (vendorBinderWatchdogLock) {
+                    if (generation != vendorBinderWatchdogGeneration) {
+                        return;
+                    }
+                    vendorBinderWatchdog = null;
+                }
+                Log.wtf(TAG, "Vendor Binder call timed out: " + operation
+                        + "; terminating private Apollo process");
+                Process.killProcess(Process.myPid());
+            };
+            vendorBinderWatchdog = watchdog;
+        }
+        processWatchdogHandler.postDelayed(watchdog, VENDOR_BINDER_CALL_TIMEOUT_MS);
+        return generation;
+    }
+
+    private void cancelVendorBinderWatchdog(int generation) {
+        Runnable watchdog = null;
+        synchronized (vendorBinderWatchdogLock) {
+            if (generation == vendorBinderWatchdogGeneration) {
+                ++vendorBinderWatchdogGeneration;
+                watchdog = vendorBinderWatchdog;
+                vendorBinderWatchdog = null;
+            }
+        }
+        if (watchdog != null) processWatchdogHandler.removeCallbacks(watchdog);
     }
 
     /** Re-resolves the installed VehicleState table before the first Binder transaction. */
     private void verifyConnectedCanBus(IBinder candidate) {
+        if (!hasClientDemand()) {
+            releaseCanBusTransportWithoutDemand("verification started after UI release");
+            return;
+        }
         if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete) {
             rejectCanBusVerification("profile_canbus_schema_unavailable");
             return;
         }
         final int generation = beginCanBusVerification(candidate);
         if (!submitSchemaTask("connected CanBus verification", () -> {
+            // A newer disconnect/reconnect may have superseded this task while it was queued.
+            // Drop it before PackageManager/PathClassLoader work, not only after resolution.
+            if (!verificationResultCurrent(generation, candidate)) return;
             VehicleStateSchemaResult result = resolveVehicleStateSchema();
             postWorker(() -> {
                 if (!verificationResultCurrent(generation, candidate)) return;
+                if (!hasClientDemand()) {
+                    releaseCanBusTransportWithoutDemand(
+                            "verification completed after UI release");
+                    return;
+                }
                 canBusVerificationPending = false;
                 pendingCanBusBinder = null;
                 applyVehicleStateSchema(result);
@@ -1189,17 +840,21 @@ public final class ApolloTlcService extends Service {
                     rejectCanBusVerification(result.error);
                     return;
                 }
-                activateVerifiedCanBus(candidate);
+                attachVerifiedCanBus(candidate);
             });
         }) && !destroyed && verificationResultCurrent(generation, candidate)) {
             rejectCanBusVerification("profile_executor_unavailable");
         }
     }
 
-    private void activateVerifiedCanBus(IBinder service) {
+    private void attachVerifiedCanBus(IBinder service) {
         if (destroyed) return;
-        if (!hasWriteCanBusPermission()) {
-            failWritePermissionClosed();
+        if (!hasClientDemand()) {
+            releaseCanBusTransportWithoutDemand("attachment after UI release");
+            return;
+        }
+        if (!hasCanBusPermission()) {
+            failCanBusPermissionClosed();
             publishState();
             return;
         }
@@ -1233,8 +888,8 @@ public final class ApolloTlcService extends Service {
     /** Re-resolves the runtime VehicleState schema, then creates a fresh binding on success. */
     private void revalidateCanBusAndBind(String reason) {
         if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete
-                || !hasWriteCanBusPermission()
-                || canBusVerificationPending) {
+                || !hasCanBusPermission()
+                || canBusVerificationPending || !hasClientDemand()) {
             return;
         }
         // This path is entered only after disconnect/death/rejection. Mark disconnected before
@@ -1245,9 +900,15 @@ public final class ApolloTlcService extends Service {
 
         final int generation = beginCanBusVerification(null);
         if (!submitSchemaTask("CanBus revalidation", () -> {
+            if (!verificationResultCurrent(generation, null)) return;
             VehicleStateSchemaResult result = resolveVehicleStateSchema();
             postWorker(() -> {
                 if (!verificationResultCurrent(generation, null)) return;
+                if (!hasClientDemand()) {
+                    releaseCanBusTransportWithoutDemand(
+                            "revalidation completed after UI release");
+                    return;
+                }
                 canBusVerificationPending = false;
                 pendingCanBusBinder = null;
                 applyVehicleStateSchema(result);
@@ -1296,13 +957,13 @@ public final class ApolloTlcService extends Service {
         canBusBinder = null;
         canBusConnected = false;
         invalidateCanSnapshot();
-        writeMaster(false);
         releaseCanBusBinding("CanBus schema verification failed");
         publishState();
     }
 
     private void ensureCanBusBound() {
-        if (destroyed || canBusBindingRequested || !isBinderProfilePinned()) return;
+        if (destroyed || !hasClientDemand()
+                || canBusBindingRequested || !isBinderProfilePinned()) return;
         final int connectionEpoch = ++bindEpoch;
         activeBindEpoch = connectionEpoch;
         ServiceConnection connection = createCanBusConnection(connectionEpoch);
@@ -1332,10 +993,10 @@ public final class ApolloTlcService extends Service {
 
     private void scheduleCanBusRebind() {
         if (destroyed || !BuildConfig.HAS_DIRECT_APOLLO || !schemaCheckComplete
-                || !hasWriteCanBusPermission()) return;
+                || !hasCanBusPermission() || !hasClientDemand()) return;
         handler.removeCallbacks(rebindRunnable);
-        int exponent = Math.min(rebindAttempt, 4);
-        long delayMs = Math.min(BIND_RETRY_MAX_MS, BIND_RETRY_MS << exponent);
+        long delayMs = ApolloCanBusDemandGate.reconnectDelayMs(
+                rebindAttempt, BIND_RETRY_MS, BIND_RETRY_MAX_MS);
         rebindAttempt = Math.min(rebindAttempt + 1, 5);
         handler.postDelayed(rebindRunnable, delayMs);
         Log.w(TAG, "CanBus rebind scheduled in " + delayMs
@@ -1351,7 +1012,10 @@ public final class ApolloTlcService extends Service {
                 return;
             }
             bindConnectWatchdog = null;
-            bindTimeouts.incrementAndGet();
+            if (!hasClientDemand()) {
+                releaseCanBusTransportWithoutDemand("bind timeout while idle");
+                return;
+            }
             Log.e(TAG, "CanBus bind timed out before onServiceConnected");
             restartCanBusBinding("bind_timeout");
         });
@@ -1366,6 +1030,10 @@ public final class ApolloTlcService extends Service {
     }
 
     private void restartCanBusBinding(String reason) {
+        if (!hasClientDemand()) {
+            releaseCanBusTransportWithoutDemand(reason + " while idle");
+            return;
+        }
         invalidateCanBusIdentity(reason);
         releaseCanBusBinding(reason);
         scheduleCanBusRebind();
@@ -1381,13 +1049,6 @@ public final class ApolloTlcService extends Service {
         canBusBinder = null;
         canBusConnected = false;
         invalidateCanSnapshot();
-        if (pending) {
-            ++writeGeneration;
-            pending = false;
-            pendingSignal = null;
-            pendingDesiredState = ApolloTlcPolicy.UNKNOWN;
-            pendingBindEpoch = 0;
-        }
         lastError = error;
         publishState();
     }
@@ -1412,22 +1073,19 @@ public final class ApolloTlcService extends Service {
     }
 
     private void startSchemaCheck() {
+        if (destroyed || schemaCheckComplete || schemaCheckPending) return;
+        schemaCheckPending = true;
         if (!submitSchemaTask("startup schema verification", () -> {
             VehicleStateSchemaResult schema = resolveVehicleStateSchema();
             postWorker(() -> {
                 if (destroyed) return;
+                schemaCheckPending = false;
                 schemaCheckComplete = true;
                 applyVehicleStateSchema(schema);
-                if (BuildConfig.HAS_DIRECT_APOLLO && !hasWriteCanBusPermission()) {
-                    failWritePermissionClosed();
-                } else if (!schema.matches && BuildConfig.HAS_DIRECT_APOLLO) {
-                    writeMaster(false);
-                } else if (schema.matches) {
-                    // This release exposes only direct TLC. Keep the unrelated global Apollo
-                    // entitlement switch off even when an older installation persisted it as ON.
-                    forceMasterOff("direct TLC startup");
+                if (BuildConfig.HAS_DIRECT_APOLLO && !hasCanBusPermission()) {
+                    failCanBusPermissionClosed();
                 }
-                if (isBinderProfilePinned()) {
+                if (isBinderProfilePinned() && hasClientDemand()) {
                     ensureCanBusBound();
                 } else {
                     invalidateCanSnapshot();
@@ -1435,6 +1093,7 @@ public final class ApolloTlcService extends Service {
                 publishState();
             });
         }) && !destroyed) {
+            schemaCheckPending = false;
             schemaCheckComplete = true;
             canBusSchemaMatches = false;
             canBusSchemaError = "profile_executor_unavailable";
@@ -1481,17 +1140,6 @@ public final class ApolloTlcService extends Service {
                 }
                 ordinals.put(signal, value.ordinal());
             }
-            for (ApolloTlcPolicy.Entitlement entitlement
-                    : ApolloTlcPolicy.Entitlement.values()) {
-                Enum value = Enum.valueOf(enumClass, entitlement.name());
-                Object stableId = getValue.invoke(value);
-                if (!(stableId instanceof Integer)
-                        || ((Integer) stableId) != entitlement.id) {
-                    Log.e(TAG, "VehicleState id mismatch for " + entitlement.name());
-                    return VehicleStateSchemaResult.failed(
-                            "profile_canbus_schema_mismatch");
-                }
-            }
             return new VehicleStateSchemaResult(
                     true, ApolloTlcPolicy.ERROR_NONE, ordinals);
         } catch (PackageManager.NameNotFoundException e) {
@@ -1528,80 +1176,29 @@ public final class ApolloTlcService extends Service {
         }
     }
 
-    /** Direct TLC needs only the allow-listed OEM Binder ABI; it does not use the Frida profile. */
+    /** Read-only diagnostics use only the allow-listed OEM Binder ABI. */
     private boolean isDirectTlcSupported() {
         return BuildConfig.HAS_DIRECT_APOLLO && schemaCheckComplete && canBusSchemaMatches
-                && runtimeProfileValid && hasWriteCanBusPermission();
+                && runtimeProfileValid && hasCanBusPermission();
     }
 
     private boolean isBinderProfilePinned() {
-        boolean writePermissionGranted = BuildConfig.HAS_DIRECT_APOLLO
-                && hasWriteCanBusPermission();
+        boolean canBusPermissionGranted = BuildConfig.HAS_DIRECT_APOLLO
+                && hasCanBusPermission();
         return ApolloTlcPolicy.binderProfilePinned(
                 BuildConfig.HAS_DIRECT_APOLLO, schemaCheckComplete, canBusSchemaMatches,
-                writePermissionGranted);
+                canBusPermissionGranted);
     }
 
-    private boolean hasWriteCanBusPermission() {
-        return checkSelfPermission(WRITE_CANBUS_PERMISSION)
+    private boolean hasCanBusPermission() {
+        return checkSelfPermission(CANBUS_PERMISSION)
                 == PackageManager.PERMISSION_GRANTED;
     }
 
-    private static final class MasterSetting {
-        final boolean known;
-        final boolean enabled;
-
-        MasterSetting(boolean known, boolean enabled) {
-            this.known = known;
-            this.enabled = enabled;
-        }
-    }
-
-    private MasterSetting readPersistedMaster() {
-        try {
-            boolean enabled = Settings.Global.getInt(
-                    getContentResolver(), GLOBAL_MASTER_KEY, 0) == 1;
-            if ("master_read_failed".equals(masterPersistenceError)) {
-                masterPersistenceError = ApolloTlcPolicy.ERROR_NONE;
-            }
-            return new MasterSetting(true, enabled);
-        } catch (RuntimeException e) {
-            masterPersistenceError = "master_read_failed";
-            Log.e(TAG, "Cannot read Apollo master", e);
-            return new MasterSetting(false, false);
-        }
-    }
-
-    private boolean writeMaster(boolean enabled) {
-        try {
-            boolean ok = Settings.Global.putInt(
-                    getContentResolver(), GLOBAL_MASTER_KEY, enabled ? 1 : 0);
-            if (ok) {
-                masterPersistenceError = ApolloTlcPolicy.ERROR_NONE;
-            } else {
-                masterPersistenceError = "master_write_failed";
-                lastError = "master_write_failed";
-            }
-            return ok;
-        } catch (RuntimeException e) {
-            masterPersistenceError = "master_write_failed";
-            lastError = "master_write_failed";
-            Log.e(TAG, "Cannot write Apollo master", e);
-            return false;
-        }
-    }
-
-    private void forceMasterOff(String reason) {
-        if (writeMaster(false)) {
-            Log.w(TAG, reason + ": direct-only fail-safe forces " + GLOBAL_MASTER_KEY + "=0");
-        }
-    }
-
     private String reportedError(boolean directTlcSupported) {
-        if (!masterPersistenceError.isEmpty()) return masterPersistenceError;
         if (!BuildConfig.HAS_DIRECT_APOLLO) return ApolloTlcPolicy.ERROR_UNSUPPORTED_LIGHT;
-        if (!hasWriteCanBusPermission()) {
-            return ApolloTlcPolicy.ERROR_WRITE_PERMISSION_MISSING;
+        if (!hasCanBusPermission()) {
+            return ApolloTlcPolicy.ERROR_CAN_PERMISSION_MISSING;
         }
         if (!schemaCheckComplete) return "profile_check_pending";
         if (!canBusSchemaMatches) return canBusSchemaError;
@@ -1611,77 +1208,18 @@ public final class ApolloTlcService extends Service {
         if (!directTlcSupported) return ApolloTlcPolicy.ERROR_PROFILE_UNSUPPORTED;
         if (!canBusConnected) return ApolloTlcPolicy.ERROR_CAN_DISCONNECTED;
         if (!lastError.isEmpty()) return lastError;
-        return ApolloTlcPolicy.directTlcStateError(plcSwitch);
-    }
-
-    /** Emits one compact interval summary for command/query Binder pressure. */
-    private void logAndRescheduleMetrics() {
-        if (destroyed) return;
-        long nowMs = SystemClock.elapsedRealtime();
-        long actualWindowMs = metricsWindowStartedAtMs <= 0L
-                ? METRICS_INTERVAL_MS : Math.max(0L, nowMs - metricsWindowStartedAtMs);
-        metricsWindowStartedAtMs = nowMs;
-        long coalescedQueries = queryCoalesced.getAndSet(0L);
-        long timedOutBinds = bindTimeouts.getAndSet(0L);
-        long maxDispatchUs = workerDispatchMaxUs.getAndSet(0L);
-        long descriptors = descriptorCount.getAndSet(0L);
-        long descriptorDurationUs = descriptorTotalUs.getAndSet(0L);
-        long descriptorLongestUs = descriptorMaxUs.getAndSet(0L);
-        StringBuilder transactions = new StringBuilder();
-        long transactionEvents = 0L;
-        for (int code : TRACKED_TRANSACTIONS) {
-            long count = transactionCount.getAndSet(code, 0L);
-            long totalUs = transactionTotalUs.getAndSet(code, 0L);
-            long maxUs = transactionMaxUs.getAndSet(code, 0L);
-            if (count == 0L) continue;
-            transactionEvents += count;
-            if (transactions.length() > 0) transactions.append(',');
-            transactions.append(code)
-                    .append(':').append(count)
-                    .append('/').append(totalUs / count)
-                    .append('/').append(maxUs);
-        }
-        if (descriptors != 0L) {
-            transactionEvents += descriptors;
-            if (transactions.length() > 0) transactions.append(',');
-            transactions.append("descriptor:").append(descriptors)
-                    .append('/').append(descriptorDurationUs / descriptors)
-                    .append('/').append(descriptorLongestUs);
-        }
-        if (transactionEvents != 0L || coalescedQueries != 0L || maxDispatchUs != 0L
-                || timedOutBinds != 0L) {
-            Log.i(TAG, "metrics window_ms=" + actualWindowMs
-                    + " query_coalesced=" + coalescedQueries
-                    + " bind_timeouts=" + timedOutBinds
-                    + " worker_delay_max_us=" + maxDispatchUs
-                    + " tx_code_count_avg_max_us={" + transactions + '}');
-        }
-        Handler target = handler;
-        if (target != null && !destroyed) {
-            target.postDelayed(metricsRunnable, METRICS_INTERVAL_MS);
-        }
+        return ApolloTlcPolicy.ERROR_NONE;
     }
 
     private void publishState() {
         if (destroyed) return;
         boolean directTlcSupported = isDirectTlcSupported();
-        MasterSetting master = readPersistedMaster();
         Intent update = new Intent(ACTION_APOLLO_TLC_UPDATE);
         update.putExtra(EXTRA_CAN_CONNECTED, canBusConnected);
         update.putExtra(EXTRA_PROFILE_SUPPORTED, directTlcSupported);
         update.putExtra(EXTRA_DIRECT_TLC_MODE, directTlcSupported);
-        // masterEnabled is meaningful only when masterKnown is true. Never turn a failed
-        // Settings.Global read into a known OFF state; the UI keeps emergency OFF available.
-        update.putExtra(EXTRA_MASTER_KNOWN, master.known);
-        update.putExtra(EXTRA_MASTER_ENABLED,
-                ApolloTlcPolicy.reportedMasterEnabled(master.known, master.enabled));
-        update.putExtra(EXTRA_PENDING, pending);
         update.putExtra(EXTRA_GEAR, gear);
         update.putExtra(EXTRA_PLC_SWITCH, plcSwitch);
-        update.putExtra(EXTRA_PLC_STATUS, plcStatus);
-        update.putExtra(EXTRA_ANP_SWITCH, anpSwitch);
-        update.putExtra(EXTRA_TLC_CAPABILITY, tlcCapability);
-        update.putExtra(EXTRA_PLC_CAPABILITY_SA, plcCapabilitySa);
         update.putExtra(EXTRA_GLA_SWITCH, glaSwitch);
         update.putExtra(EXTRA_GLA_LIGHT_CHANGE_SWITCH, glaLightChangeSwitch);
         update.putExtra(EXTRA_TSR_SWITCH, tsrSwitch);

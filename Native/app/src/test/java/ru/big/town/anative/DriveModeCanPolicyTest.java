@@ -20,19 +20,14 @@ public class DriveModeCanPolicyTest {
     }
 
     @Test
-    public void sportAlsoRequestsOemFcmSportState() {
-        Map<DriveModeCanPolicy.VehicleStateKey, Integer> values =
-                DriveModeCanPolicy.planFor("SPORT", null).values();
-
-        assertEquals(Integer.valueOf(2),
-                values.get(DriveModeCanPolicy.VehicleStateKey.FCM_SW_REQ));
-    }
-
-    @Test
-    public void nonSportModesDoNotTouchFcmState() {
-        for (String mode : new String[]{"ECO", "COMFORT", "OUTING", "SNOW"}) {
-            assertFalse(DriveModeCanPolicy.planFor(mode, null).values()
-                    .containsKey(DriveModeCanPolicy.VehicleStateKey.FCM_SW_REQ));
+    public void driveModesOnlyTouchDriveProfileStates() {
+        for (String mode : new String[]{"ECO", "COMFORT", "SPORT", "OUTING", "SNOW"}) {
+            Map<DriveModeCanPolicy.VehicleStateKey, Integer> values =
+                    DriveModeCanPolicy.planFor(mode, null).values();
+            assertEquals(3, values.size());
+            assertTrue(values.containsKey(DriveModeCanPolicy.VehicleStateKey.DRIVING_MODE_SET));
+            assertTrue(values.containsKey(DriveModeCanPolicy.VehicleStateKey.EPS_MODE_SET));
+            assertTrue(values.containsKey(DriveModeCanPolicy.VehicleStateKey.PROP_MODE_SET));
         }
     }
 
@@ -49,7 +44,7 @@ public class DriveModeCanPolicyTest {
                 values.get(DriveModeCanPolicy.VehicleStateKey.EPS_MODE_SET));
         assertEquals(Integer.valueOf(3),
                 values.get(DriveModeCanPolicy.VehicleStateKey.PROP_MODE_SET));
-        assertFalse(values.containsKey(DriveModeCanPolicy.VehicleStateKey.FCM_SW_REQ));
+        assertEquals(3, values.size());
     }
 
     @Test
@@ -74,7 +69,6 @@ public class DriveModeCanPolicyTest {
     public void vehicleStateStableIdsMatchOemContract() {
         assertEquals(545, DriveModeCanPolicy.VehicleStateKey.DRIVING_MODE_SET.stableId);
         assertEquals(722, DriveModeCanPolicy.VehicleStateKey.EPS_MODE_SET.stableId);
-        assertEquals(774, DriveModeCanPolicy.VehicleStateKey.FCM_SW_REQ.stableId);
         assertEquals(782, DriveModeCanPolicy.VehicleStateKey.PROP_MODE_SET.stableId);
     }
 

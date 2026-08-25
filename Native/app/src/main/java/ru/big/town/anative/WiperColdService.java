@@ -5,26 +5,18 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.BroadcastReceiver;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
 import android.media.AudioManager;
-import android.os.Binder;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.Parcel;
-import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.KeyEvent;
 
 import androidx.core.app.NotificationCompat;
-
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
 
 /**
  * Сервис «Сервисный режим дворников» (для холодного сезона).
@@ -53,10 +45,10 @@ import java.util.Set;
  * <p><b>Сигнал</b> берём из {@code CanBusService} (тот же сервис, что и автосвет,
  * проверен декомпиляцией — см. память reference-canbus-door-temp):
  * <ul>
- *   <li>подписка addCallback (TX=28), колбэк {@code ICanBusServiceCallback}:
- *       {@code onDoorStatusChanged(DoorStatus)} код 1;</li>
- *   <li>синхронный seed на коннекте: {@code getDoorStatus()} TX=2 —
- *       колбэки дельта-only, начальное значение не отдают.</li>
+ *   <li>единая process-wide подписка {@link CanBusEventHub} фильтрует коды двери и передачи
+ *       до ограниченной очереди;</li>
+ *   <li>seed двери TX=2 выполняется изолированно в фоновом query-потоке hub — колбэки
+ *       delta-only, начальное значение не отдают.</li>
  * </ul>
  * Логика <i>level-triggered</i> с guard'ом по флагу активности: это заодно ловит
  * сценарий, когда голова просыпается именно от открытия двери — на seed мы уже видим
@@ -89,6 +81,8 @@ public class WiperColdService extends Service {
     // нулевую громкость держим дольше типичного 1–1.5-секундного буфера wireless CarPlay/AndroidAuto.
     private static final int  FADE_STEPS = 12;      // шагов затухания
     private static final long FADE_TOTAL_MS = 500;  // общая длительность затухания
+    private static final long FADE_BACKPRESSURE_MS =
+            (FADE_TOTAL_MS + FADE_STEPS - 1L) / FADE_STEPS;
     private static final long REMOTE_AUDIO_DRAIN_MS = 2_200L;
 
     // Native не может вызвать оригинальный Qinggan KeyManagerReader напрямую. В full-сборке это
@@ -103,48 +97,26 @@ public class WiperColdService extends Service {
     private static final String WIPER_TOGGLE_FRAME = "65 08 00 00 c1 c0 00 00 40 00";
     private static final int    CAN_CMD_NUM        = 1;
 
-    // ICanBusService — статус дверей
-    private static final String CANBUS_DESCRIPTOR    = "com.qinggan.canbus.ICanBusService";
-    private static final String CANBUS_CB_DESCRIPTOR = "com.qinggan.canbus.ICanBusServiceCallback";
-    private static final int    TX_addCallback    = 28;
-    private static final int    TX_removeCallback = 29;
-    private static final int    TX_getDoorStatus  = 2;
-    private static final int    CB_onDoorStatusChanged = 1;
-    private static final int    CB_onGearStatusChanged = 12;
-    private static final String CANBUS_ACTION  = "com.qinggan.canbus.CanBusService";
-    private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
-
     // GearState.value: Parking=0, Reverse=1, Neutral=2, Drive=3, Battery=4, Unknown=-1.
     // «Готов ехать» = передача из Parking (>=1). Это единственный надёжный сигнал зажигания
     // на этой голове: ACC/engine/vehicleKey/ignition-колбэки CanBus не шлёт вообще (проверено логами).
-    private static final int    GEAR_UNKNOWN     = -1;
     private static final int    GEAR_MIN_MOVING  = 1;
 
-    // DoorStatus: флаг наличия + 10 int'ов; водительская = fLDoor (индекс 1)
-    private static final int DOOR_FIELD_COUNT = 10;
-    private static final int DOOR_IDX_FL      = 1;
-    private static final int DOOR_OPEN        = 1;
-    private static final int DOOR_CLOSED      = 0;
-
-    // Периодичность страховочной проверки коннекта/подписки
-    private static final long SAFETY_POLL_MS = 30_000L;
-    private static final long BIND_RETRY_MS  = 5_000L;
+    // DoorStatus: флаг наличия, bonnet, затем водительская fLDoor.
+    private static final int DOOR_OPEN = 1;
     // Окно после power-on reset, в течение которого не поднимаем дворники заново: гасит
     // гонку «сбросили флаг → seed видит дверь всё ещё открытой → снова включает».
     private static final long POWER_ON_RESET_SUPPRESS_MS = 10_000L;
 
-    private Handler timerHandler;
+    private volatile Handler timerHandler;
+    private volatile Handler mediaHandler;
+    private HandlerThread mediaThread;
+    private CanBusEventHub.Subscription canBusSubscription;
 
     private final DoorPauseRunState mediaPauseState = new DoorPauseRunState();
+    private final DoorPauseWorkGate mediaPauseWorkGate = new DoorPauseWorkGate();
     private AudioManager mediaFadeAudioManager = null;
-
-    private IBinder canBusBinder = null;
-    private boolean canBusBindingRequested = false;
-    private boolean canBusConnected = false;
-    private boolean canBusCallbackAdded   = false;
-    private long    lastCanBusBindAttempt = -BIND_RETRY_MS;
     private volatile boolean destroyed = false;
-    private final Runnable canBusRebindRunnable = this::ensureCanBusBound;
     private boolean wiperTogglePending = false;
     private Boolean queuedWiperTarget = null;
 
@@ -152,235 +124,33 @@ public class WiperColdService extends Service {
     private int  lastFLDoor = -1;
     private long lastPowerOnResetElapsed = 0L; // когда последний раз возвращали дворники по power on
 
-    // DEBUG: какие коды колбэков уже видели (лог каждого кода один раз — понять, приходят ли события)
-    private final Set<Integer> seenCodes = new HashSet<>();
-
-    // -------------------------------------------------------------------------
-    // ICanBusServiceCallback — stub (получает ВСЕ колбэки, обрабатываем только двери)
-    // -------------------------------------------------------------------------
-
-    private final IBinder canBusCallbackBinder = new Binder() {
-        @Override
-        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
-                throws RemoteException {
-            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
-                    && code <= IBinder.LAST_CALL_TRANSACTION) {
-                return true;
-            }
-            // DEBUG: логируем каждый код колбэка один раз — видно, приходят ли события вообще.
-            // Только при включённом захвате логов: иначе seenCodes копит все коды CanBus впустую.
-            if (NativeLog.get().isRunning() && seenCodes.add(code)) Log.i(TAG, "CB code first-seen: " + code);
-            switch (code) {
-                case CB_onDoorStatusChanged: { // 1
-                    data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                    int fl = -1;
-                    int[] doors = new int[DOOR_FIELD_COUNT];
-                    Arrays.fill(doors, -999);
-                    if (data.readInt() != 0) {
-                        for (int i = 0; i < DOOR_FIELD_COUNT; i++) {
-                            int v = data.readInt();
-                            doors[i] = v;
-                            if (i == DOOR_IDX_FL) fl = v;
-                        }
-                    }
-                    // Порядок: bonnet(0) fL(1) fR(2) loadSpace(3) rL(4) rR(5) +4 замка(6-9)
-                    Log.i(TAG, "onDoorStatusChanged RAW=" + Arrays.toString(doors) + " → fL(idx1)=" + fl);
-                    final int fFl = fl;
-                    timerHandler.post(() -> {
-                        if (!destroyed) onDoorState(fFl);
-                    });
-                    return true;
-                }
-                case CB_onGearStatusChanged: { // 12 — передача (parcel: presence, ordinal, value)
-                    data.enforceInterface(CANBUS_CB_DESCRIPTOR);
-                    int gearVal = GEAR_UNKNOWN;
-                    if (data.readInt() != 0) {
-                        data.readInt();            // ordinal (не используем)
-                        gearVal = data.readInt();  // value: Parking=0,Reverse=1,Neutral=2,Drive=3,Battery=4,Unknown=-1
-                    }
-                    final int fVal = gearVal;
-                    timerHandler.post(() -> {
-                        if (!destroyed) onGearState(fVal);
-                    });
-                    return true;
-                }
-                default:
-                    // Прочие oneway-колбэки CanBus (скорость/одометр/десятки сигналов) ТИХО поглощаем:
-                    // иначе на КАЖДЫЙ Binder отдаёт UNKNOWN_TRANSACTION и фреймворк спамит в logcat
-                    // "oneway function results will be dropped …" (~14 строк/сек — забивает кольцевой лог,
-                    // вымывает реальную диагностику). Так же сделано в TripStatsService. Спец-коды (dump/
-                    // interface и пр. вне диапазона вызовов) — в super.
-                    if (code >= IBinder.FIRST_CALL_TRANSACTION && code <= IBinder.LAST_CALL_TRANSACTION) {
-                        return true;
-                    }
-                    return super.onTransact(code, data, reply, flags);
-            }
-        }
-    };
-
-    // -------------------------------------------------------------------------
-    // ServiceConnection
-    // -------------------------------------------------------------------------
-
-    private final ServiceConnection canBusConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            if (destroyed) return;
-            timerHandler.removeCallbacks(canBusRebindRunnable);
-            canBusBindingRequested = true;
-            canBusBinder = service;
-            canBusConnected = true;
-            canBusCallbackAdded = false;
-            Log.i(TAG, "CanBusService connected, alive=" + service.isBinderAlive());
-            addCanBusCallback();
-            seedFromSyncReads();
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            markCanBusDisconnected();
-            Log.w(TAG, "CanBusService disconnected — waiting for automatic reconnect");
-        }
-
-        @Override
-        public void onBindingDied(ComponentName name) {
-            restartCanBusBinding("binding died");
-        }
-
-        @Override
-        public void onNullBinding(ComponentName name) {
-            restartCanBusBinding("null binding");
-        }
-    };
-
-    private void ensureCanBusBound() {
-        if (destroyed || canBusBindingRequested) return;
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastCanBusBindAttempt < BIND_RETRY_MS) return;
-        lastCanBusBindAttempt = now;
-        try {
-            Intent intent = new Intent(CANBUS_ACTION);
-            intent.setPackage(CANBUS_PACKAGE);
-            boolean ok = bindService(intent, canBusConnection, Context.BIND_AUTO_CREATE);
-            canBusBindingRequested = ok;
-            Log.i(TAG, "ensureCanBusBound: bindService returned " + ok);
-            if (!ok) scheduleCanBusRebind();
-        } catch (Exception e) {
-            canBusBindingRequested = false;
-            Log.e(TAG, "ensureCanBusBound: exception: " + e.getMessage(), e);
-            scheduleCanBusRebind();
-        }
-    }
-
-    private void markCanBusDisconnected() {
-        canBusBinder = null;
-        canBusConnected = false;
-        canBusCallbackAdded = false;
-    }
-
-    private void restartCanBusBinding(String reason) {
-        Log.w(TAG, "CanBusService " + reason + " — replacing binding");
-        releaseCanBusBinding(reason);
-        scheduleCanBusRebind();
-    }
-
-    private void scheduleCanBusRebind() {
+    private void onCanBusEvent(CanBusEvent event) {
         if (destroyed) return;
-        lastCanBusBindAttempt = SystemClock.elapsedRealtime();
-        timerHandler.removeCallbacks(canBusRebindRunnable);
-        timerHandler.postDelayed(canBusRebindRunnable, BIND_RETRY_MS);
-    }
-
-    private void releaseCanBusBinding(String reason) {
-        timerHandler.removeCallbacks(canBusRebindRunnable);
-        if (canBusConnected) removeCanBusCallback();
-        if (canBusBindingRequested) {
-            try {
-                unbindService(canBusConnection);
-            } catch (Exception e) {
-                Log.w(TAG, reason + ": unbindService failed: " + e.getMessage());
-            }
-        }
-        canBusBindingRequested = false;
-        markCanBusDisconnected();
-    }
-
-    private void addCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null || canBusCallbackAdded) return;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallbackBinder);
-            canBusBinder.transact(TX_addCallback, data, reply, 0);
-            reply.readException();
-            int result = reply.readInt();
-            canBusCallbackAdded = true;
-            Log.i(TAG, "addCanBusCallback: OK (TX=" + TX_addCallback + ") result=" + result);
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "addCanBusCallback: error: " + e.getMessage());
-        } finally {
-            data.recycle();
-            reply.recycle();
+        switch (event.kind) {
+            case CONNECTION:
+                CanBusEventHub.get(this).requestDriverDoorSeed();
+                break;
+            case DOOR:
+                if (event.origin == CanBusEvent.Origin.LIVE) {
+                    onDoorState(event.first);
+                } else {
+                    applyDoorSeed(event.first);
+                }
+                break;
+            case GEAR:
+                onGearState(event.first);
+                break;
+            default:
+                break;
         }
     }
 
-    private void removeCanBusCallback() {
-        if (!canBusConnected || canBusBinder == null || !canBusCallbackAdded) return;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            data.writeStrongBinder(canBusCallbackBinder);
-            canBusBinder.transact(TX_removeCallback, data, reply, 0);
-            reply.readException();
-            Log.i(TAG, "removeCanBusCallback: OK");
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "removeCanBusCallback: error: " + e.getMessage());
-        } finally {
-            data.recycle();
-            reply.recycle();
-            canBusCallbackAdded = false;
-        }
-    }
-
-    /** Синхронно читает статус водительской двери (колбэки дельта-only — старт нужно засеять). */
-    private void seedFromSyncReads() {
-        int fl = readDriverDoor();
-        if (fl >= 0) lastFLDoor = fl;
+    private void applyDoorSeed(int frontLeft) {
+        if (frontLeft < 0) return;
+        lastFLDoor = frontLeft;
         Log.i(TAG, "seed: fLDoor=" + lastFLDoor + " active=" + isServiceActive());
-        // На seed трогаем только дворники (level-triggered); паузу музыки НЕ шлём — это состояние на
-        // момент коннекта/пробуждения, а не событие открытия двери.
+        // A snapshot establishes the level but is not a real open edge: never pause media here.
         if (isWiperEnabled()) evaluate("seed");
-    }
-
-    /** Синхронно читает статус водительской двери (TX=2, DoorStatus.fLDoor). -1 при ошибке. */
-    private int readDriverDoor() {
-        if (!canBusConnected || canBusBinder == null) return -1;
-        Parcel data  = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-            canBusBinder.transact(TX_getDoorStatus, data, reply, 0);
-            reply.readException();
-            if (reply.readInt() == 0) { Log.i(TAG, "readDriverDoor: null DoorStatus"); return -1; }
-            int fl = -1;
-            int[] doors = new int[DOOR_FIELD_COUNT];
-            Arrays.fill(doors, -999);
-            for (int i = 0; i < DOOR_FIELD_COUNT; i++) {
-                int v = reply.readInt();
-                doors[i] = v;
-                if (i == DOOR_IDX_FL) fl = v;
-            }
-            Log.i(TAG, "readDriverDoor RAW=" + Arrays.toString(doors) + " → fL(idx1)=" + fl);
-            return fl;
-        } catch (RemoteException | RuntimeException e) {
-            Log.w(TAG, "readDriverDoor: error: " + e.getMessage());
-            return -1;
-        } finally {
-            data.recycle();
-            reply.recycle();
-        }
     }
 
     // -------------------------------------------------------------------------
@@ -397,7 +167,7 @@ public class WiperColdService extends Service {
         boolean mediaOn = isMediaPauseEnabled();
         Log.i(TAG, "door: fLDoor=" + fLDoor + " openedNow=" + openedNow + " mediaPause=" + mediaOn
                 + " wiper=" + isWiperEnabled() + " active=" + isServiceActive());
-        if (openedNow && mediaOn) pauseActiveMediaWithFade();
+        if (openedNow && mediaOn) requestDoorMediaPause();
         if (isWiperEnabled()) evaluate("door");
     }
 
@@ -527,14 +297,36 @@ public class WiperColdService extends Service {
      * её лишь после {@link #REMOTE_AUDIO_DRAIN_MS}. Это скрывает уже буферизованный wireless-звук, но
      * не откладывает саму команду паузы. За один door-open команда отправляется ровно один раз.
      */
-    private void pauseActiveMediaWithFade() {
-        final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
-        // Не запускаем второй ramp и не повторяем команду: повторный PLAY_PAUSE после задержки мог бы
-        // снова запустить уже остановившийся bridge-плеер.
-        if (mediaPauseState.isBusy()) {
+    private void requestDoorMediaPause() {
+        int workGeneration = mediaPauseWorkGate.tryAcquire();
+        if (workGeneration == DoorPauseWorkGate.REJECTED_GENERATION) {
             Log.i(TAG, "pauseActiveMediaWithFade: duplicate suppressed");
             return;
         }
+        Handler worker = mediaHandler;
+        if (destroyed || worker == null
+                || !worker.post(() -> pauseActiveMediaWithFadeOnWorker(workGeneration))) {
+            mediaPauseWorkGate.release(workGeneration);
+        }
+    }
+
+    /** Runs all AudioManager, MediaSession and ordered-broadcast work off the main looper. */
+    private void pauseActiveMediaWithFadeOnWorker(int workGeneration) {
+        try {
+            runMediaPauseAndFade(workGeneration);
+        } catch (Throwable error) {
+            Log.w(TAG, "pauseActiveMediaWithFade: " + error.getMessage());
+            cancelMediaFadeAndRestoreVolume();
+            mediaPauseWorkGate.release(workGeneration);
+        }
+    }
+
+    private void runMediaPauseAndFade(int workGeneration) {
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            mediaPauseWorkGate.release(workGeneration);
+            return;
+        }
+        final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
 
         int startVol;
         try {
@@ -543,43 +335,100 @@ public class WiperColdService extends Service {
             Log.w(TAG, "pauseActiveMedia: getStreamVolume: " + e.getMessage());
             startVol = -1;
         }
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            mediaPauseWorkGate.release(workGeneration);
+            return;
+        }
 
         Log.i(TAG, "pauseActiveMediaWithFade: startVol=" + startVol + " (дверь водителя открыта)");
         final int generation = mediaPauseState.begin(startVol);
-        if (generation == DoorPauseRunState.REJECTED_GENERATION) return;
+        if (generation == DoorPauseRunState.REJECTED_GENERATION) {
+            mediaPauseWorkGate.release(workGeneration);
+            return;
+        }
         mediaFadeAudioManager = am;
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            finishMediaFade(generation, workGeneration, true);
+            return;
+        }
 
         // Главное исправление AutoKit: команда уходит в t=0 по тому же keymanager-пути, по которому
         // работает физическая кнопка, а не после fade через глобальный PAUSE=127.
-        dispatchDoorPause(am);
+        dispatchDoorPause(am, workGeneration);
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            finishMediaFade(generation, workGeneration, true);
+            return;
+        }
 
         if (am == null || startVol <= 0) {
             // Даже без ramp держим debounce до конца remote drain window: быстрый повтор 85 до
             // обновления bridge-state мог бы снова включить уже остановленное воспроизведение.
-            timerHandler.postDelayed(() -> finishMediaFade(generation, false),
-                    REMOTE_AUDIO_DRAIN_MS);
+            Handler worker = mediaHandler;
+            if (worker == null || !worker.postDelayed(
+                    () -> finishMediaFade(generation, workGeneration, false),
+                    REMOTE_AUDIO_DRAIN_MS)) {
+                finishMediaFade(generation, workGeneration, false);
+            }
             return;
         }
 
-        final int startVolF = startVol;
-        for (int i = 1; i <= FADE_STEPS; i++) {
-            final int target = DoorPauseTimeline.fadeStepVolume(startVolF, i, FADE_STEPS);
-            timerHandler.postDelayed(() -> {
-                if (!mediaPauseState.isCurrent(generation)) return;
-                try { am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0); }
-                catch (Exception ignored) {}
-            }, DoorPauseTimeline.fadeStepDelayMs(i, FADE_STEPS, FADE_TOTAL_MS));
-        }
-
-        // Не возвращаем громкость сразу после fade: удалённый CP/AA endpoint может ещё 1–1.5 с
-        // выдавать уже буферизованный звук после принятия pause.
-        timerHandler.postDelayed(() -> {
-            if (!mediaPauseState.isCurrent(generation)) return;
-            finishMediaFade(generation, true);
-        }, DoorPauseTimeline.restoreDelayMs(FADE_TOTAL_MS, REMOTE_AUDIO_DRAIN_MS));
+        DoorPauseFadeCursor cursor = new DoorPauseFadeCursor(
+                startVol, FADE_STEPS, FADE_TOTAL_MS, REMOTE_AUDIO_DRAIN_MS);
+        scheduleMediaFadeTick(generation, workGeneration, am, cursor,
+                SystemClock.uptimeMillis());
     }
 
-    private void finishMediaFade(int generation, boolean restore) {
+    /** Keeps at most one fade tick queued and jumps directly to the level due at absolute time. */
+    private void scheduleMediaFadeTick(int generation, int workGeneration, AudioManager am,
+                                       DoorPauseFadeCursor cursor, long startedUptime) {
+        if (!mediaPauseState.isCurrent(generation)) return;
+        if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) {
+            finishMediaFade(generation, workGeneration, true);
+            return;
+        }
+
+        long elapsed = SystemClock.uptimeMillis() - startedUptime;
+        DoorPauseFadeCursor.Action action = cursor.actionAt(elapsed);
+        if (action.kind == DoorPauseFadeCursor.Kind.RESTORE) {
+            finishMediaFade(generation, workGeneration, true);
+            return;
+        }
+        boolean attemptedWrite = false;
+        if (action.kind == DoorPauseFadeCursor.Kind.WRITE) {
+            attemptedWrite = true;
+            try {
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, action.volume, 0);
+            } catch (Exception e) {
+                Log.w(TAG, "media fade volume=" + action.volume + ": " + e.getMessage());
+            } finally {
+                // A failed AudioService call must advance the cursor too; immediate retries could
+                // otherwise turn one vendor failure into a tight Binder loop.
+                cursor.markAttempted(action.volume);
+            }
+            elapsed = SystemClock.uptimeMillis() - startedUptime;
+            action = cursor.actionAt(elapsed);
+            if (action.kind == DoorPauseFadeCursor.Kind.RESTORE) {
+                finishMediaFade(generation, workGeneration, true);
+                return;
+            }
+        }
+
+        // If AudioService itself is slower than the nominal fade cadence, do not immediately issue
+        // another overdue Binder call. Yield one quantum, then recompute and jump to the latest step.
+        long delay = action.kind == DoorPauseFadeCursor.Kind.WRITE
+                ? (attemptedWrite ? FADE_BACKPRESSURE_MS : 0L)
+                : action.delayMs;
+        delay = cursor.capDelayToRestore(elapsed, delay);
+        Handler worker = mediaHandler;
+        long executeAt = startedUptime + elapsed + delay;
+        if (worker == null || !worker.postAtTime(
+                () -> scheduleMediaFadeTick(generation, workGeneration, am, cursor, startedUptime),
+                executeAt)) {
+            finishMediaFade(generation, workGeneration, true);
+        }
+    }
+
+    private void finishMediaFade(int generation, int workGeneration, boolean restore) {
         if (!mediaPauseState.isCurrent(generation)) return;
         int restoreVolume = mediaPauseState.finishAndTakeRestoreVolume(generation);
         if (restore && mediaFadeAudioManager != null && restoreVolume >= 0) {
@@ -593,10 +442,11 @@ public class WiperColdService extends Service {
                     + " after " + REMOTE_AUDIO_DRAIN_MS + "ms drain window");
         }
         mediaFadeAudioManager = null;
+        mediaPauseWorkGate.release(workGeneration);
     }
 
     /** Выбирает ровно одну семантическую команду; direct/noop уже полностью обработаны роутером. */
-    private void dispatchDoorPause(AudioManager am) {
+    private void dispatchDoorPause(AudioManager am, int workGeneration) {
         MediaControlRouter.Result result = MediaControlRouter.dispatch(
                 this, MediaControlPolicy.Command.PAUSE_ONLY);
         Log.i(TAG, "dispatchDoorPause: route=" + result.route + " key=" + result.keyCode
@@ -617,17 +467,18 @@ public class WiperColdService extends Service {
             if (keyCode != result.keyCode) {
                 Log.i(TAG, "dispatchDoorPause: active music stream confirms safe PLAY_PAUSE fallback");
             }
-            sendMediaProxy(keyCode, false, am);
+            sendMediaProxy(keyCode, false, am, workGeneration);
             return;
         }
         if (MediaControlRouter.ROUTE_NATIVE.equals(result.route)) {
             // NATIVE_QG is returned for a confirmed active OEM/Bluetooth target. Recreate QG6 in
             // keymanager; the completion fallback uses standard 85 if the hook is unavailable.
-            sendMediaProxy(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, true, am);
+            sendMediaProxy(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, true, am, workGeneration);
         }
     }
 
-    private void sendMediaProxy(int keyCode, boolean nativeQinggan, AudioManager fallbackAudioManager) {
+    private void sendMediaProxy(int keyCode, boolean nativeQinggan,
+                                AudioManager fallbackAudioManager, int workGeneration) {
         if (keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
                 && keyCode != KeyEvent.KEYCODE_MEDIA_NEXT
                 && keyCode != KeyEvent.KEYCODE_MEDIA_PREVIOUS
@@ -640,17 +491,34 @@ public class WiperColdService extends Service {
         intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
         intent.putExtra("keyCode", keyCode);
         intent.putExtra("nativeQG", nativeQinggan);
+        Handler callbackHandler = mediaHandler;
+        if (destroyed || callbackHandler == null) return;
         try {
             sendOrderedBroadcast(intent, null, new BroadcastReceiver() {
                 @Override public void onReceive(Context context, Intent deliveredIntent) {
-                    if (getResultCode() == MEDIA_PROXY_ACK) return;
+                    if (destroyed || !mediaPauseWorkGate.isLatest(workGeneration)) return;
+                    if (getResultCode() == MEDIA_PROXY_ACK) {
+                        mediaPauseWorkGate.acknowledgeProxy(workGeneration);
+                        return;
+                    }
+                    if (!mediaPauseWorkGate.tryClaimFallback(workGeneration)) return;
                     Log.w(TAG, "sendMediaProxy: hook unavailable, standard fallback key=" + keyCode);
-                    dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+                    try {
+                        dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+                    } finally {
+                        mediaPauseWorkGate.finishFallback(workGeneration);
+                    }
                 }
-            }, timerHandler, MEDIA_PROXY_UNHANDLED, null, null);
+            }, callbackHandler, MEDIA_PROXY_UNHANDLED, null, null);
         } catch (Exception e) {
             Log.w(TAG, "sendMediaProxy: " + e.getMessage());
-            dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+            if (!destroyed && mediaPauseWorkGate.tryClaimFallback(workGeneration)) {
+                try {
+                    dispatchGlobalMediaKey(fallbackAudioManager, keyCode);
+                } finally {
+                    mediaPauseWorkGate.finishFallback(workGeneration);
+                }
+            }
         }
     }
 
@@ -691,8 +559,15 @@ public class WiperColdService extends Service {
                 .build();
         startForeground(3, notification);
 
-        ensureCanBusBound();
-        timerHandler.postDelayed(safetyRunnable, 2_000L);
+        mediaThread = new HandlerThread("WiperDoorMedia");
+        mediaThread.start();
+        mediaHandler = new Handler(mediaThread.getLooper());
+
+        canBusSubscription = CanBusEventHub.get(this).subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_DOOR
+                        | CanBusEventRouter.INTEREST_GEAR,
+                null, timerHandler, this::onCanBusEvent);
     }
 
     @Override
@@ -714,6 +589,35 @@ public class WiperColdService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
         destroyed = true;
+        mediaPauseWorkGate.close();
+        CanBusEventHub.Subscription subscription = canBusSubscription;
+        canBusSubscription = null;
+        if (subscription != null) subscription.close();
+        if (timerHandler != null) timerHandler.removeCallbacksAndMessages(null);
+        Handler media = mediaHandler;
+        HandlerThread thread = mediaThread;
+        if (media != null && thread != null) {
+            boolean queued = media.postAtFrontOfQueue(() -> {
+                try {
+                    cancelMediaFadeAndRestoreVolume();
+                } finally {
+                    media.removeCallbacksAndMessages(null);
+                    mediaHandler = null;
+                    thread.quitSafely();
+                }
+            });
+            if (!queued) {
+                mediaPauseState.cancelAndTakeRestoreVolume();
+                mediaHandler = null;
+                thread.quitSafely();
+            }
+        } else {
+            mediaPauseState.cancelAndTakeRestoreVolume();
+        }
+        super.onDestroy();
+    }
+
+    private void cancelMediaFadeAndRestoreVolume() {
         int restoreVolume = mediaPauseState.cancelAndTakeRestoreVolume();
         if (mediaFadeAudioManager != null && restoreVolume >= 0) {
             try {
@@ -724,20 +628,7 @@ public class WiperColdService extends Service {
             }
         }
         mediaFadeAudioManager = null;
-        releaseCanBusBinding("onDestroy");
-        if (timerHandler != null) timerHandler.removeCallbacksAndMessages(null);
-        super.onDestroy();
     }
-
-    // Страховка: держим коннект/подписку
-    private final Runnable safetyRunnable = new Runnable() {
-        @Override
-        public void run() {
-            ensureCanBusBound();
-            addCanBusCallback(); // no-op если уже добавлен
-            timerHandler.postDelayed(this, SAFETY_POLL_MS);
-        }
-    };
 
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(

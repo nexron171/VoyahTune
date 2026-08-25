@@ -1,5 +1,5 @@
 // Frida-хук в system_server: разрешает нашему приложению (ru.big.town.anative) создавать trusted
-// VirtualDisplay и инжектить касания — единственный путь VD-хостинга на release-keys голове
+// VirtualDisplay и инжектить касания — путь двухпанельного VD-hosting на release-keys голове
 // (ADD_TRUSTED_DISPLAY/INJECT_EVENTS — чистый signature, whitelist их не выдаёт).
 //
 // ВАЖНО: хукаем ТОЧЕЧНЫЕ РЕДКИЕ методы, НЕ общий checkComponentPermission (тот на горячем пути —
@@ -14,6 +14,10 @@
 Java.perform(function () {
     var TAG = "vt_vdbypass";
     var OUR_PKG = "ru.big.town.anative";
+    // The OEM Android 11 launcher expects ordinary physical-display tasks whose frames are clamped
+    // by the two WindowManager hooks below. This is intentionally global for all non-stock apps:
+    // launch source does not matter (Dock, VoyahTune, steering action or another intent).
+    var SYSTEM_SERVER_FREEFORM_HOT_HOOKS = true;
     var Log = Java.use("android.util.Log");
     var Binder = Java.use("android.os.Binder");
     var ourUid = -1;
@@ -103,10 +107,9 @@ Java.perform(function () {
     //      появляется) для ЛЮБОГО запуска — WM ловит окно независимо от источника (док/список/интент). Наш
     //      VD (сплит двух приложений) и прочие дисплеи НЕ трогаются. Пассажирский док НЕ переопределяем.
     //  ⚠️ ЭТО ГОРЯЧИЙ ПУТЬ И SYSTEM_SERVER. Требования безопасности:
-    //   • ВСЕГДА ВКЛючено для сторонних приложений (это штатный режим запуска: одиночное приложение →
-    //     окно справа от дока; сплит двух приложений остаётся на VD). Флаг voyahtune_freeform по умолчанию
-    //     1; служит АВАРИЙНЫМ ВЫКЛЮЧАТЕЛЕМ через adb (`settings put global voyahtune_freeform 0` +
-    //     WIN_RELOAD) на случай проблемной прошивки. Проверяется ПЕРВЫМ, fast-path без рефлексии.
+    //   • ВСЕГДА ВКЛючено для сторонних приложений (штатный одиночный режим: обычная задача целевого
+    //     пакета на физическом display, затем WindowManager ужимает её справа от дока). Флаг
+    //     voyahtune_freeform по умолчанию 1 остаётся аварийным выключателем через WIN_RELOAD.
     //   • Конфиг КЭШируется (в layoutWindowLw НЕТ чтений Settings.Global), обновляется по broadcast
     //     ru.big.town.anative.WIN_RELOAD.
     //   • ВЕСЬ код хука в try/catch → при ЛЮБОЙ ошибке (в т.ч. неверные имена приватных полей WM на
@@ -227,6 +230,9 @@ Java.perform(function () {
 
     refreshFreeformCfg();
     resolveFreeformTraversalRequester();
+    if (SYSTEM_SERVER_FREEFORM_HOT_HOOKS) {
+        installed.push("system_server freeform hot hooks enabled");
+    }
 
     // reload-ресивер: Native шлёт WIN_RELOAD при смене флага/bounds/DPI → перечитать кэш.
     try {
@@ -376,6 +382,7 @@ Java.perform(function () {
     }
 
     function attachFreeformHotHooks(reason) {
+        if (!SYSTEM_SERVER_FREEFORM_HOT_HOOKS) return;
         if (!FF.on || !FF.screenOn) return;
         var changed = false;
         if (!ffLayoutAttached && ffLayoutMethod !== null && ffLayoutImplementation !== null) {
@@ -403,6 +410,7 @@ Java.perform(function () {
         var epoch = ++FF.hookEpoch;
         // Даже если SCREEN_OFF был пропущен, SCREEN_ON сначала снимает replacements синхронно.
         detachFreeformHotHooks(reason + " stabilization");
+        if (!SYSTEM_SERVER_FREEFORM_HOT_HOOKS) return;
         setTimeout(function () {
             if (FF.hookEpoch === epoch && FF.screenOn && FF.on) {
                 attachFreeformHotHooks(reason);

@@ -9,4 +9,4 @@ logi () { /system/bin/log -t $LOG_TAG -p i "$@"; }
 mkdir -p /data/local/bin/
 
 logi "starting load.bin watchdog"
-exec /system/bin/sh /data/local/bin/load.bin >> /data/local/tmp/voyah_load.txt 2>&1
+exec /system/bin/sh /data/local/bin/load.bin >> /data/local/tmp/voyahtune_load.txt 2>&1

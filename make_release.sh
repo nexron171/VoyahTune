@@ -195,6 +195,29 @@ sha256_file() {
 
 # Проверяем общие готовые артефакты ДО запуска Gradle и создания содержимого релиза.
 verify_common_release_assets() {
+    # A clean remove -> install cycle is safety-critical on Android 11: raw deletion of CE/DE
+    # desynchronizes PackageManager from /data_mirror and makes Native crash in zygote.
+    if ! sh "$COMMON/tests/test_android11_package_lifecycle.sh"; then
+        echo "Android 11 package lifecycle guard failed; release was not created." >&2
+        exit 1
+    fi
+    if ! sh "$COMMON/tests/test_saved_config_startup_wake.sh"; then
+        echo "Startup/wake saved-config guard failed; release was not created." >&2
+        exit 1
+    fi
+    if ! sh "$COMMON/tests/test_keyboard_modes.sh"; then
+        echo "Keyboard opt-in lifecycle guard failed; release was not created." >&2
+        exit 1
+    fi
+    if ! sh "$COMMON/tests/test_hook_manifest_status.sh"; then
+        echo "Hook manifest/status contract guard failed; release was not created." >&2
+        exit 1
+    fi
+    if ! bash "$ROOT/Utils/android11-oem-stubs/tests/static-checks.sh"; then
+        echo "Android 11 OEM stub harness guard failed; release was not created." >&2
+        exit 1
+    fi
+
     if [ ! -f "$DNS_OVERLAY" ]; then
         echo "Нет $DNS_OVERLAY — добавьте зафиксированный DNS RRO APK." >&2
         exit 1
@@ -346,7 +369,7 @@ verify_release_payload() {
     flavor="$2"
     required="README.txt native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
     if [ "$flavor" = full ]; then
-        required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
+        required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune-hook-manifest.json voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
     fi
     for payload in $required; do
         if [ ! -s "$out/$payload" ]; then
@@ -354,6 +377,8 @@ verify_release_payload() {
             exit 1
         fi
     done
+    sh -n "$out/install.sh"
+    sh -n "$out/remove.sh"
 }
 
 # Собрать APK одного флейвора и положить в папку релиза под финальными именами.
@@ -480,6 +505,7 @@ if [ "$DO_FULL" = 1 ]; then
 
     cp "$COMMON/tools/"*                                    "$STAGE/"
     cp "$COMMON/inject/"*.js                                "$STAGE/"
+    cp "$COMMON/inject/"*.json                              "$STAGE/"
     cp "$COMMON/system/"*                                   "$STAGE/"
     copy_common_release_assets "$STAGE"
     for f in "$COMMON/installer/full/"*; do
@@ -494,7 +520,7 @@ if [ "$DO_FULL" = 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------------------------
-# LIGHT: сокращённый набор — direct Apollo, но без инжекта, frida, load.bin и boot-хука.
+# LIGHT: сокращённый набор — read-only Apollo без entitlement hook, frida, load.bin и boot-хука.
 # Инструменты берём НЕ целиком: нужен только adb (его требуют .bat на Windows; на Unix .sh
 # рассчитывает на системный adb). frida-inject в light не кладём — он весит 53M и здесь не нужен.
 # ---------------------------------------------------------------------------------------------

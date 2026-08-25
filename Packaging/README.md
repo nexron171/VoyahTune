@@ -1,160 +1,185 @@
 # Packaging — источник комплекта релиза
 
-Здесь лежит всё, что попадает в релиз **кроме APK (Android application package, пакетов Android),
-собираемых из `Native/` и `RestoreMode/`**. Зафиксированный vendor RRO APK хранится здесь же как
-проверяемый prebuilt. Раньше файлы копировались из предыдущей папки релиза вручную, поэтому одни и
-те же бинарники лежали в 15 копиях, а инжект-скрипты приходилось править прямо внутри уже выпущенного
-релиза (файл был одновременно исходником и артефактом).
-
-**Правим здесь.** `Releases/` — сборочный вывод, он целиком в `.gitignore` и в репозитории не хранится.
+Здесь лежит всё, что попадает в релиз, кроме APK, собираемых из `Native/` и `RestoreMode/`.
+`Releases/` — сборочный вывод; править релизные файлы вручную там не нужно.
 
 ```bash
 ./make_release.sh 3.2.2
 ```
 
-даёт:
+Результат:
 
-```
-Releases/build/VoyahTune-3.2.2/         ← готовая папка (плоская, как её видит пользователь)
+```text
+Releases/build/VoyahTune-3.2.2/
 Releases/build/VoyahTune-3.2.2-light/
-Releases/dist/VoyahTune-3.2.2.zip       ← архив для раздачи
+Releases/dist/VoyahTune-3.2.2.zip
 Releases/dist/VoyahTune-3.2.2-light.zip
 ```
 
-Флаги: `--full-only`, `--light-only`, `--no-build` (только переразложить файлы), `--no-zip`.
+Флаги: `--full-only`, `--light-only`, `--no-build`, `--no-zip`.
 
-## Что где
+## Состав
 
-ADB/`adb` (Android Debug Bridge) — служебный интерфейс управления Android-устройством с компьютера.
-`full` — полный комплект с Frida-перехватами; `light` — сокращённый комплект без них. Прямой
-Binder-контур Apollo входит в оба варианта и Frida не использует.
+`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, ADAS entitlement и
+опциональной штатной клавиатуры. `light` не
+содержит Frida и `load.bin`. Read-only диагностика Apollo входит в оба варианта.
 
 | Папка | Что | Куда идёт |
 |---|---|---|
-| `tools/` | `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll`, `frida-inject-16.2.1-android-arm64` | full — целиком; light — только adb-трио (frida там не нужна) |
-| `inject/` | Frida-скрипты: `vd_bypass.js`, `launcherdock.js`, `steeringwheelkeys.js`, `multidisplay.js`, `apollo_tech.js` | только full |
-| `system/` | `load.bin`, атомарный composite `voyahtune.load.rc`, `voyahtune.load.sh`, переходный чистый `init.logcat.original.sh`, `privapp-permissions-…xml` | full целиком; в light — только `privapp-permissions` |
-| `vendor-overlay/` | Зафиксированный DNS RRO APK и его provenance | APK — в full и light; README в релиз не копируется |
-| `installer/common/` | Четыре общих helper-файла для установки/отката DNS RRO, включая отдельный Windows `install-yandex-dns.bat` | full и light, плоско рядом с основными установщиками |
-| `README.txt` | Пользовательская инструкция по установке и устранению ошибок на Windows/macOS | в корень каждого full/light-релиза и ZIP-архива |
-| `installer/full/` | `install.sh`, `install.bat`, `remove.sh`, `remove.bat` | full |
-| `installer/light/` | `install.sh`, `install.bat`, `remove.sh`, `remove.bat` | light |
+| `tools/` | ADB и `frida-inject-16.2.1-android-arm64` | full целиком; light — только ADB |
+| `inject/` | основные hooks и opt-in keyboard agents/config | только full |
+| `system/` | `load.bin`, init RC/wrapper, permission whitelist | full; whitelist также в light |
+| `vendor-overlay/` | зафиксированный DNS RRO APK и provenance | full и light |
+| `installer/common/` | общие DNS helper-файлы | full и light |
+| `installer/full/`, `installer/light/` | установщики и удаление | соответствующий вариант |
 
-Light — набор без Frida-инъекции, `load.bin` и загрузочного перехвата, поэтому у него **свои**, более
-короткие установщики. Он не является вариантом без прав суперпользователя: установка APK и списка
-разрешений всё равно требует команды `adb root` и записи
-в `/system`. `.bat` требуют `adb.exe` рядом с собой, поэтому adb кладётся и в light (список файлов —
-`LIGHT_TOOLS` в `make_release.sh`); на Unix `.sh` рассчитывают на системный adb.
+Light всё равно требует `adb root` и запись в `/system` для APK и permission whitelist. Full не
+заменяет штатный `/system/etc/init.logcat.sh`: загрузочная обвязка живёт в собственном
+`voyahtune.load.rc`. `init.logcat.original.sh` нужен только для безопасной миграции старого релиза.
 
-Full-установщик больше не заменяет штатный `/system/etc/init.logcat.sh`: загрузочная обвязка живёт в
-одном composite `voyahtune.load.rc`. `init.logcat.original.sh` остаётся в full-комплекте как безопасный
-переход с непосредственного предыдущего релиза, установившего файл с явным marker `init.logcat.sh Open
-Voyah`. Неизвестный OEM-файл миграция не перезаписывает; при наличии `backup/init.logcat.sh`
-приоритет имеет сохранённый с конкретной головы оригинал.
+Одиночное стороннее приложение запускается обычной задачей целевого пакета на физическом дисплее,
+поэтому системный top activity принадлежит этому пакету. Два кэшированных WindowManager hook в
+`system_server` глобально ужимают окна всех сторонних приложений в настроенный прямоугольник и применяют
+per-app DPI независимо от источника запуска. На `SCREEN_OFF` hooks снимаются, после пробуждения ставятся
+обратно. Native перед одиночным запуском закрывает активный VD-host; VirtualDisplay остаётся только для
+split двух приложений.
+
+`launcherdock.js` также добавляет в штатные списки «Все приложения» обоих физических экранов launchable
+сторонние APK, которые OEM launcher скрывает. PackageManager сканируется один раз за процесс launcher,
+без polling. Клик передаёт OEM AppLauncher идентификатор выбранного экрана, после чего приложение
+попадает в тот же physical-window путь. Плавающая кнопка Home
+подавляется штатными launcher-предикатами, а событие `TOP_ACTIVITY_CHANGED` повторно показывает док
+при возврате из fullscreen OEM-экрана (например угловой камеры) к оконному приложению.
+
+Per-app DPI хранится в `DrivePreferences` и event-driven зеркалируется в
+`Settings.Global/voyahtune_dpi_<package>` при изменении, старте Native и пробуждении. `WIN_RELOAD`
+сбрасывает только кэш WindowManager hook; периодического чтения настроек нет. Переход в «Авто» явно
+публикует `0`, поэтому ранее выбранный DPI не остаётся зависшим.
+
+В разделе «Другое» full-варианта есть два выключенных по умолчанию взаимоисключающих режима штатной
+Qinggan-клавиатуры. «Английская раскладка» запрещает IME сохранять китайский input mode; «Русская
+клавиатура» переносит из voboost полноценную ЙЦУКЕН-раскладку и переключение EN ↔ RU. Выбор
+зеркалируется в `Settings.Global/voyahtune_keyboard_mode`. При изменении Native перезапускает только
+`com.qinggan.app.qgime`, чтобы выгрузить прежний eternalized hook. `load.bin` читает режим ровно один
+раз на новую exact process identity и делает не более одной попытки injection; постоянного Settings
+polling нет. Light и remove выгружают qgime, удаляют agents/config/markers и возвращают штатный IME.
 
 ## Зафиксированный DNS RRO
 
 `vendor-overlay/framework-res__config_ethernet_interfaces_yandexdns.apk` — статический RRO для
-`/vendor/overlay`, заменяющий DNS в конфигурации Ethernet-интерфейсов VoyahOS. Его происхождение,
-manifest и подпись описаны в `vendor-overlay/README.md`.
+`/vendor/overlay`. Его SHA-256:
 
-Перед любым запуском Gradle `make_release.sh` проверяет точный SHA-256 APK:
-
-```
+```text
 c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d
 ```
 
-Проверка использует доступный `sha256sum` либо `shasum`. Отсутствующий APK, несовпавший checksum,
-отсутствующая `installer/common/`, `README.txt` или любой из четырёх обязательных helper-файлов
-останавливают сборку. APK, инструкция и все четыре helper-файла копируются в плоский корень обоих
-вариантов релиза.
+Device-helper проверяет checksum, Android API 30, ожидаемую конфигурацию `eth0` и ownership-marker.
+Неизвестный чужой overlay не перезаписывается и не удаляется. Windows-установщики DNS не меняют;
+для этого отдельно запускается `install-yandex-dns.bat`.
 
-Full/light Windows `install.bat` полностью неинтерактивны и DNS не меняют. Для явной установки
-Yandex DNS пользователь после успешной основной установки отдельно запускает
-`install-yandex-dns.bat`; он проверяет состояние overlay, не перезаписывает чужой/неоднозначный
-overlay, устанавливает управляемый RRO и перезагружает устройство. PowerShell Windows-процессу не
-требуется. Все `.bat` используют только ASCII/английские сообщения, чтобы не зависеть от code page
-стандартного `cmd.exe`. Unix-`install.sh` и его меню DNS остаются без изменений.
+## Apollo/ADAS: entitlement как в voboost + read-only диагностика
 
-Device-helper хранит ownership/rollback-состояние в `/data/local/open_voyah/qgdns`, проверяет
-checksum, Android API 30, наличие ожидаемых адресов `172.16.{104,110,120}.40/24` на `eth0`,
-возможность записи в `/vendor/overlay` и выполняет замену через временный файл + атомарный `mv`.
-Чужой overlay без ownership-marker не удаляется. При remove исходный файл
-восстанавливается, а если его до Open Voyah не было — удаляется только известный установленный hash.
-Прошивки с `/vendor/overlay/config/config.xml` намеренно отклоняются: автоматически редактировать
-OEM-порядок RRO небезопасно.
+Full-релиз содержит минимальный `apollo_tech.js`, повторяющий
+`tmp/voboost-script/agents/adas-activation-mod.js`: в процессе
+`com.qinggan.app.vehiclesetting` он подменяет только `BaiduProviderUtil.doQuerySubscribeInfo()`
+(активная, не истёкшая подписка на 30 дней) и `doQueryNOALearnInfo()` (`"1"`, обучение NOA
+завершено). Hook не отправляет CAN-команды, не подписывается на CAN callback и не вызывает прежний
+`DriveAssistanceAdasStatusManager.asyncQueryAdasSubData()`.
 
-## Apollo/ADAS: прямой режим в full и light
+`load.bin` не читает Apollo Settings. В уже существующем 10-секундном watchdog добавлена только
+проверка process identity VehicleSetting через `pidof`: каждая identity получает не более одной
+попытки Frida-injection, успешной или неуспешной. После штатного перезапуска VehicleSetting новая
+identity получает новую попытку, поэтому entitlement восстанавливается без открытия Apollo Tech.
+Full installer перезагружает ГУ; VehicleSetting штатно стартует при загрузке. Light-релиз не содержит
+Frida и удаляет hook при переходе full → light.
 
-Прямой H97X Binder-контур Native доступен в full и light, от VehicleSetting/Frida profile не
-зависит и проверяет установленную схему CanBus до подключения. `apollo_tech.js` остаётся только в
-full-архиве как legacy/диагностический инструмент, но обычный direct-only режим не инжектит его в
-`com.qinggan.app.vehiclesetting`.
+Старые opt-in/master/profile/heartbeat ключи по-прежнему удаляются установщиками как одноразовая
+миграция. Remove останавливает VehicleSetting, выгружает eternalized agent и удаляет новый exact
+PID/attempt marker и лог, поэтому цикл remove → install начинает работу с чистого состояния.
 
-Native Apollo работает без постоянной подписки `ICanBusServiceCallback`: он не вызывает OEM
-`TX28/TX29` и поэтому не добавляет получателя в глобальную рассылку всех CAN-событий. Состояние
-читается только при подключении/явном запросе UI и непосредственно перед командой. После успешного
-`TX58` команда считается принятой без отложенного проверочного `TX57`; UI получает оптимистическое
-состояние, а следующий явный запрос при необходимости обновит его из автомобиля. Автоматических
-повторов и фонового восстановления Apollo-entitlement после сна также нет.
+Прямой H97X Binder-контур:
 
-`load.bin` разрешает attach только при точном
-`Settings.Global open_voyah_apollo_legacy_hook_enabled=1`. Отсутствующее, нечитаемое, `0`
-или любое другое значение fail-closed: master, profile и heartbeat сбрасываются, attach не
-выполняется. Если PID-marker доказывает наличие нашего агента в точно той же process
-identity, переход `1` → `0` однократно выгружает его через `am force-stop`. Сам JS повторяет
-проверку opt-in до SHA-256 и разрешения OEM-классов. PID-marker v2 включает boot UUID;
-старый marker без UUID никогда не является основанием для `force-stop` после reboot.
+- работает в full и light как независимая read-only диагностика; entitlement доступен только в full;
+- перед подключением проверяет установленную CanBus schema и `WRITE_CANBUS` permission;
+- не подписывается на общий поток CAN callback (`TX28/TX29`);
+- при открытом разделе читает текущие PLC/GLA/TSR через `TX57` и положение селектора через `TX6`;
+- не содержит команд активации, `TX58`, `TX77`, entitlement-вектора или delayed confirmation;
+- изолирован в приватном процессе `:apollo`.
 
-При явном opt-in остаются legacy-gate: `open_voyah_apollo_master=1`, точные pinned SHA-256
-VehicleSetting/CanBusService и поддерживаемый профиль. На direct H97X generic `onVehicleStateChanged` не
-хукается даже в диагностическом режиме. На legacy 97C callback фильтруется до main queue
-только для `HUM_VCU_READY=1`/`BMS_STATE=3`; CAN burst ограничен текущим и одним latest
-trailing dispatch. Сам legacy generic hook всё ещё входит в GumJS на каждом callback;
-числовой фильтр убирает лишь строки, main Runnable и тяжёлую работу для нецелевых events.
+Каждый синхронный vendor Binder call имеет одноразовый 15-секундный deadline. При зависании
+завершается только процесс `:apollo`, основной Native/SetModes продолжает работать. Schema
+PM/ClassLoader-проверка начинается при первом UI demand, имеет latest-only очередь глубиной один,
+а её worker завершается после 30 секунд простоя. Demand принадлежит Binder-owner процесса
+RestoreMode: смерть клиента освобождает transport без TTL, heartbeat или lease polling.
 
-### Установка и диагностика
+## Full loader и нагрузка
 
-1. Оба установщика до `disable-verity` и любых `/system` mutations записывают и читают обратно `0`
-   для legacy opt-in, master, profile и heartbeat, а также отклоняют чужого владельца
-   `com.qinggan.permission.WRITE_CANBUS`. Любая ошибка останавливает установку до записи в `/system`.
-2. После перезагрузки `open_voyah_apollo_legacy_hook_enabled`, master, profile и heartbeat должны
-   быть равны `0`. В full `/data/local/tmp/voyah_apollo.disabled` создан, а `voyah_apollo.pid`
-   отсутствует; light вообще не устанавливает Apollo loader/Frida-файлы. `[apollo] hook ready` в
-   direct-only режиме не ожидается: агент не загружался.
-3. Legacy-перехват доступен только в full и включается только для отдельной стояночной диагностики:
+Постоянный 10-секундный watchdog full-варианта обслуживает VD, launcher, keymanager, multidisplay,
+VehicleSetting и opt-in Qinggan IME. Режим клавиатуры читается только при появлении новой qgime
+identity; в выключенном по умолчанию состоянии это одно чтение на жизнь процесса. Каждая точная identity получает не более одной
+тяжёлой Frida-попытки; ошибка не создаёт повторяющийся injection loop, а новый процесс получает новую
+попытку. Owner/busy lock loops имеют sleep и конечный budget, поэтому повреждённый lock path не
+создаёт 100% CPU spin.
 
-   ```sh
-   adb shell settings put global open_voyah_apollo_legacy_hook_enabled 1
-   adb shell am force-stop com.qinggan.app.vehiclesetting
-   ```
+Это не меняет политику внутренних автомобильных watchdog: редкие собственные проверки, нужные для
+возврата целевого состояния, сохраняются. Оптимизация направлена прежде всего на работу,
+размножаемую входящим потоком CAN-событий.
 
-   После этого открыть VehicleSetting и проверять `logcat -s VoyahApollo VOYAH`,
-   `/data/local/tmp/voyah_apollo.txt` и `[apollo] hook ready`. Этот opt-in не нужен для direct TLC/GLA/TSR.
-4. Выключение legacy-диагностики:
+Набор Frida-агентов зафиксирован в `system/voyahtune-hook-manifest.json`: для каждого hook указаны
+точные `id`, process, script и SHA-256. После изменения JS manifest обновляется командой
+`Packaging/update_hook_manifest.sh`. Unix/Windows installer проверяет все семь отображений и хэшей
+до первого изменения устройства, останавливает прежний loader, устанавливает scripts и только затем
+атомарно публикует manifest. При старте `load.bin` повторно проверяет schema, полный exact mapping и
+все hashes. Любая ошибка отключает весь набор fail-closed — смешанная версия hooks не запускается.
 
-   ```sh
-   adb shell settings put global open_voyah_apollo_legacy_hook_enabled 0
-   ```
+`load.bin` также ведёт единый bounded status-contract в
+`/data/local/tmp/voyahtune-hook-status.v1`. Файл заменяется через temp + `mv` и только при реальном
+изменении состояния. То же значение event-driven передаётся root-only методом существующего
+RestoreMode ContentProvider и атомарно сохраняется в отдельные preferences; `Settings.Global` для
+этого не используется. Экран «Другое» показывает loader, manifest и семь hooks, читая snapshot в
+уже существующем цикле RAM/CPU раз в 5 секунд. Вне видимого раздела ни timer, ни чтение status не
+работают. Ошибка доставки provider получает максимум три попытки для данной revision, а не вечный
+retry-loop.
 
-   Watchdog закроет gate и выгрузит подтверждённый агент. Для отката запустить full
-   `remove.sh`/`remove.bat` из той же папки рядом с её `backup/`.
+Для безопасной host-проверки exact process identity добавлен
+`Utils/android11-oem-stubs`. Harness рассчитан только на Android 11/API 30 emulator, требует явный
+ADB serial и отказывается заменять или удалять не принадлежащие ему OEM packages. Статический guard:
 
-Все первичные проверки выполняются на неподвижном автомобиле в `P` со стояночным тормозом.
+```bash
+bash Utils/android11-oem-stubs/tests/static-checks.sh
+```
 
-## Версия в установщиках
+Исследовательские функции из Voboost намеренно не добавлены в hook-set без проверки OEM ABI:
+результаты аудита `phone-num`/`weather-widget` находятся в
+`Docs/voboost-phone-weather-audit.md`, а поэтапный безопасный план телефонных номеров — в
+`Docs/phone-number-improvement-plan.md`.
 
-В шапке каждого установщика стоит плейсхолдер `@VERSION@` — `make_release.sh` подставляет туда номер
-релиза при копировании. Руками номер версии в этих файлах **не проставлять**, иначе он «застынет».
+Режимы вождения/энергии защищены от стартового OEM Eco/EV: после успешного wake-restore CAN-feedback
+30 секунд не может заменить сохранённое значение и при несовпадении допускает не более одной
+корректирующей restore-попытки. После этого окна стабильное изменение со стороны машины снова считается
+источником истины и сохраняется; руль и VoyahTune сохраняют выбор сразу.
 
-## Папка релиза — плоская
+Сохранённые настройки Dock и кнопок руля не зависят от открытия экранов RestoreMode. Native
+запрашивает их публикацию один раз при старте `SetModesService` и один раз внутри coalesced-сессии
+физического пробуждения автомобиля. Запрос explicit и защищён signature-permission; периодического
+опроса для этой синхронизации нет.
 
-Установщики ищут APK и helper-файлы рядом с собой, поэтому `make_release.sh` раскладывает содержимое
-нужных подпапок в одну плоскую папку сборки. Подпапки существуют только здесь, для навигации.
+## Установка и диагностика Apollo
 
-## Где брать старые релизы
+Full installer сам перезагружает ГУ; открывать Apollo Tech или штатные настройки для загрузки hook
+не требуется. Успех виден по `[apollo] hook ready profile=voboost` в
+`/data/local/tmp/voyahtune_apollo.txt` или logcat tag `VoyahApollo`. Раздел Apollo Tech показывает
+штатные состояния функций, но CAN-команды не отправляет: после открытия entitlement сами функции
+включаются и настраиваются через штатный экран автомобиля. В light `[apollo] hook ready` не
+ожидается.
 
-Начиная с 3.2.2 собранные релизы в git не хранятся. Всё, что выпускалось раньше, лежит в истории
-репозитория по тегам (`git tag`) — например `git show v3.2:Releases/v3.2/install.sh`.
-Если история будет переписана (вырезание `Releases/`), старые сборки останутся только в архивной
-копии репозитория — см. заметку о рерайте в описании релизного процесса.
+## Версия и структура релиза
+
+В установщиках стоит плейсхолдер `@VERSION@`; номер подставляет `make_release.sh`. Папка готового
+релиза плоская, потому что установщики ищут APK и helper-файлы рядом с собой.
+
+Начиная с 3.2.2 собранные релизы в git не хранятся. Старые варианты доступны по тегам, например:
+
+```bash
+git show v3.2:Releases/v3.2/install.sh
+```

@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
+import android.os.Binder;
+import android.os.Bundle;
 import android.util.Log;
 
 public class RestoreModeContentProvider extends ContentProvider {
@@ -31,6 +33,10 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  boolean autoLaunchOnWake=false;
     private  boolean batteryHeatAuto=false;
     private  boolean pauseMediaOnDoor=false;
+    private  boolean fragranceEnabled=FragranceSettings.DEFAULT_ENABLED;
+    private  int fragranceTaste=FragranceSettings.DEFAULT_TASTE;
+    private  int fragranceDuration=FragranceSettings.DEFAULT_DURATION;
+    private  int fragranceIntensity=FragranceSettings.DEFAULT_INTENSITY;
     public RestoreModeContentProvider() {
     }
 
@@ -57,6 +63,34 @@ public class RestoreModeContentProvider extends ContentProvider {
         return true;
     }
 
+    /**
+     * Root-only, state-change delivery from {@code /data/local/bin/load.bin}. The CLI never runs on
+     * a permanent cadence: load.bin calls it after its bounded status record changes and allows at
+     * most three delivery attempts for that revision. SharedPreferences uses Android's AtomicFile
+     * implementation, so the diagnostics screen never sees a torn value.
+     */
+    @Override
+    public Bundle call(String method, String arg, Bundle extras) {
+        if (!HookStatusContract.METHOD_PUBLISH.equals(method)) {
+            return super.call(method, arg, extras);
+        }
+        if (Binder.getCallingUid() != 0) {
+            throw new SecurityException("Hook status may only be published by the root loader");
+        }
+        Bundle result = new Bundle();
+        if (!HookStatusContract.isValidPayload(arg) || getContext() == null) {
+            result.putBoolean("stored", false);
+            return result;
+        }
+        boolean stored = getContext()
+                .getSharedPreferences(HookStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(HookStatusContract.PAYLOAD_KEY, arg)
+                .commit();
+        result.putBoolean("stored", stored);
+        return result;
+    }
+
     @Override
     public Cursor query(Uri uri, String[] projection, String selection,
                         String[] selectionArgs, String sortOrder) {
@@ -81,6 +115,14 @@ public class RestoreModeContentProvider extends ContentProvider {
         autoLaunchOnWake        = sharedPreferences.getBoolean("autoLaunchOnWake",         false);
         batteryHeatAuto         = sharedPreferences.getBoolean("batteryHeatAuto",          false);
         pauseMediaOnDoor        = sharedPreferences.getBoolean("pauseMediaOnDoor",         false);
+        fragranceEnabled        = sharedPreferences.getBoolean(
+                FragranceSettings.ENABLED, FragranceSettings.DEFAULT_ENABLED);
+        fragranceTaste          = FragranceSettings.normalizeTaste(sharedPreferences.getInt(
+                FragranceSettings.TASTE, FragranceSettings.DEFAULT_TASTE));
+        fragranceDuration       = FragranceSettings.normalizeDuration(sharedPreferences.getInt(
+                FragranceSettings.DURATION, FragranceSettings.DEFAULT_DURATION));
+        fragranceIntensity      = FragranceSettings.normalizeIntensity(sharedPreferences.getInt(
+                FragranceSettings.INTENSITY, FragranceSettings.DEFAULT_INTENSITY));
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
@@ -103,6 +145,10 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "batteryHeatAuto",         // 17
                 "pauseMediaOnDoor",        // 18
                 "forcedEv",                // 19 — форсированный электрорежим
+                FragranceSettings.ENABLED,  // 20 — opt-in восстановление ароматизатора
+                FragranceSettings.TASTE,    // 21 — 1..3
+                FragranceSettings.DURATION, // 22 — 0=без таймера, 1=30 мин, 2=60 мин
+                FragranceSettings.INTENSITY,// 23 — 1=низкая, 2=средняя, 3=высокая
         });
 
         cursor.addRow(new Object[]{
@@ -122,6 +168,10 @@ public class RestoreModeContentProvider extends ContentProvider {
                 batteryHeatAuto ? 1 : 0,
                 pauseMediaOnDoor ? 1 : 0,
                 forcedEv ? 1 : 0,
+                fragranceEnabled ? 1 : 0,
+                fragranceTaste,
+                fragranceDuration,
+                fragranceIntensity,
         });
        return cursor;
 

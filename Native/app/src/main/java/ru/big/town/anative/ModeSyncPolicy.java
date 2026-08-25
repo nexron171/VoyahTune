@@ -9,12 +9,12 @@ package ru.big.town.anative;
  * it is never allowed to replace the saved source of truth.</p>
  */
 final class ModeSyncPolicy {
-    static final long POST_RESTORE_SETTLE_MS = 20_000L;
+    static final long POST_RESTORE_SETTLE_MS = 30_000L;
     static final long CORRECTION_COOLDOWN_MS = 3_000L;
     static final int MAX_CORRECTIONS_PER_WAKE = 1;
 
     enum Decision {
-        /** Stable awake state: feedback may be persisted as an external user selection. */
+        /** Stable awake state: feedback may be persisted as an external user/car selection. */
         ACCEPT,
         /** Expected restore echo, disabled mode, invalid input, or correction already in flight. */
         IGNORE,
@@ -138,6 +138,7 @@ final class ModeSyncPolicy {
 
     synchronized Decision evaluate(boolean energy, String observedMode, long nowUptime) {
         if (!valid(observedMode)) return Decision.IGNORE;
+        // The car is a valid source of truth only after the wake-default window has elapsed.
         if (restoreCompleted && nowUptime >= acceptAfterUptime) return Decision.ACCEPT;
 
         String expected = energy ? expectedEnergy : expectedDrive;
