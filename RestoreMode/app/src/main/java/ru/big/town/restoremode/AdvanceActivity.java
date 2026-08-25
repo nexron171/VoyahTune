@@ -8,15 +8,12 @@ import android.content.SharedPreferences;
 import android.app.ActivityManager;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
-import android.os.Binder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
-import android.os.IBinder;
 import android.os.RemoteException;
-import android.os.SystemClock;
 import android.text.Editable;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -51,7 +48,6 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicLong;
 
 
 public class AdvanceActivity extends AppCompatActivity {
@@ -118,65 +114,18 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_CLOSE_ALL          = 27;
     static final int MSG_SET_THEME          = 28;
     static final int MSG_APPLY_FORCED_EV    = 35;
-    static final int MSG_APOLLO_QUERY       = 36;
-
-    private static final String ACTION_APOLLO_TLC_UPDATE =
-            "ru.big.town.anative.APOLLO_TLC_UPDATE";
-    private static final String ACTION_REQUEST_APOLLO_TLC_UPDATE =
-            "ru.big.town.anative.REQUEST_APOLLO_TLC_UPDATE";
-    private static final String ACTION_RELEASE_APOLLO_TLC_DEMAND =
-            "ru.big.town.anative.RELEASE_APOLLO_TLC_DEMAND";
-    private static final String EXTRA_APOLLO_DEMAND_SESSION = "apolloDemandSession";
-    private static final String EXTRA_APOLLO_DEMAND_OWNER = "apolloDemandOwner";
-    /** Process-liveness owner: contains no Activity reference and dies with RestoreMode. */
-    private static final IBinder APOLLO_DEMAND_OWNER = new Binder();
     private static final String NATIVE_PACKAGE = "ru.big.town.anative";
-    private static final String NATIVE_BIND_PERMISSION =
-            "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
+
     private static final String ACTION_BATTERY_HEAT_AUTO_CHANGED =
             "ru.big.town.anative.BATTERY_HEAT_AUTO_CHANGED";
     private static final String EXTRA_BATTERY_HEAT_AUTO_ENABLED = "autoEnabled";
-    private static final int APOLLO_UNKNOWN = Integer.MIN_VALUE;
-    private static final AtomicLong APOLLO_DEMAND_SEQUENCE = new AtomicLong();
 
-    // Apollo Tech отображает подтверждённое Native состояние и не отправляет CAN-команды.
-    // Full entitlement hook применяется loader-ом независимо от открытия этого Activity.
-    private Switch switchApolloTlc, switchApolloTrafficLights, switchApolloTrafficSigns;
+    // Apollo Tech owns persisted targets, including the stock subscription/exam UI.
+    private Switch switchApolloSettingsActivation, switchApolloTlc, switchApolloTrafficLights,
+            switchApolloTrafficSigns;
     private RadioGroup apolloGreenSoundGroup;
-    private TextView textApolloStatus, textApolloDiagnostics, textApolloFullOnly;
-    private View apolloControls;
+    private TextView textApolloSettingsActivationStatus, textApolloStatus, textApolloFullOnly;
     private View apolloGreenSoundContainer;
-    private boolean apolloHasState;
-    private boolean apolloCanConnected;
-    private boolean apolloProfileSupported;
-    private boolean apolloDirectTlcMode;
-    private long apolloDemandSession;
-    private int apolloPlcSwitch = APOLLO_UNKNOWN;
-    private int apolloGear = -1;
-    private int apolloGlaSwitch = APOLLO_UNKNOWN;
-    private int apolloGlaLightChangeSwitch = APOLLO_UNKNOWN;
-    private int apolloTsrSwitch = APOLLO_UNKNOWN;
-    private String apolloError = "";
-
-    private final BroadcastReceiver apolloReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (!ACTION_APOLLO_TLC_UPDATE.equals(intent.getAction())) return;
-            apolloHasState = true;
-            apolloCanConnected = intent.getBooleanExtra("canConnected", false);
-            apolloProfileSupported = intent.getBooleanExtra("profileSupported", false);
-            apolloDirectTlcMode = intent.getBooleanExtra("directTlcMode", false);
-            apolloPlcSwitch = intent.getIntExtra("plcSwitch", APOLLO_UNKNOWN);
-            apolloGear = intent.getIntExtra("gear", -1);
-            apolloGlaSwitch = intent.getIntExtra("glaSwitch", APOLLO_UNKNOWN);
-            apolloGlaLightChangeSwitch = intent.getIntExtra(
-                    "glaLightChangeSwitch", APOLLO_UNKNOWN);
-            apolloTsrSwitch = intent.getIntExtra("tsrSwitch", APOLLO_UNKNOWN);
-            String error = intent.getStringExtra("error");
-            apolloError = error == null ? "" : error;
-            updateApolloUi();
-        }
-    };
 
     // Кнопка «Применить» (верхняя панель) — блокировка + прогресс на время цикла отправки
     private Button buttonApplyAdvance;
@@ -733,7 +682,7 @@ public class AdvanceActivity extends AppCompatActivity {
         applying = on;
         if (buttonApplyAdvance != null) buttonApplyAdvance.setEnabled(!on);
         if (applyProgressAdvance != null) {
-            applyProgressAdvance.setVisibility(on && currentSection != 3 ? View.VISIBLE : View.GONE);
+            applyProgressAdvance.setVisibility(on ? View.VISIBLE : View.GONE);
         }
         uiHandler.removeCallbacks(applyTimeout);
         if (on) uiHandler.postDelayed(applyTimeout, 12000); // страховка, если MSG_RESULT не придёт
@@ -1271,9 +1220,7 @@ public class AdvanceActivity extends AppCompatActivity {
     /** Переключение разделов (0 главный экран, 1 настройки автомобиля, 2 приложения и разделение экрана,
      *  3 Apollo Tech, 4 собственные команды, 5 кнопки на руле, 6 другое). */
     private void setSection(int index) {
-        int previousSection = currentSection;
         currentSection = index;
-        if (previousSection == 3 && index != 3) releaseApolloDemand();
         if (sectionTitle != null && index >= 0 && index < SECTION_TITLES.length)
             sectionTitle.setText(SECTION_TITLES[index]);
         if (pageMainScreen != null)      pageMainScreen.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
@@ -1291,14 +1238,12 @@ public class AdvanceActivity extends AppCompatActivity {
         if (navSteeringButtons != null)  navSteeringButtons.setSelected(index == 5);
         if (navOther != null)            navOther.setSelected(index == 6);
 
-        // Apollo Tech is read-only and is refreshed only while its page is visible.
         if (buttonApplyAdvance != null) {
-            buttonApplyAdvance.setVisibility(index == 3 ? View.GONE : View.VISIBLE);
+            buttonApplyAdvance.setVisibility(View.VISIBLE);
         }
         if (applyProgressAdvance != null) {
-            applyProgressAdvance.setVisibility(index != 3 && applying ? View.VISIBLE : View.GONE);
+            applyProgressAdvance.setVisibility(applying ? View.VISIBLE : View.GONE);
         }
-        if (index == 3) requestApolloState();
         updateSystemMetricsPolling();
     }
 
@@ -1444,232 +1389,93 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     // -------------------------------------------------------------------------
-    // Apollo Tech — full entitlement как voboost + read-only Native/VehicleState состояние.
+    // Apollo Tech — persisted subscription/exam reveal + persisted VoyahTune targets.
     // -------------------------------------------------------------------------
 
     private void initApolloTech() {
+        switchApolloSettingsActivation = findViewById(R.id.switchApolloSettingsActivation);
         switchApolloTlc = findViewById(R.id.switchApolloTlc);
         switchApolloTrafficLights = findViewById(R.id.switchApolloTrafficLights);
         switchApolloTrafficSigns = findViewById(R.id.switchApolloTrafficSigns);
         apolloGreenSoundGroup = findViewById(R.id.apolloGreenSoundGroup);
         apolloGreenSoundContainer = findViewById(R.id.apolloGreenSoundContainer);
+        textApolloSettingsActivationStatus = findViewById(
+                R.id.textApolloSettingsActivationStatus);
         textApolloStatus = findViewById(R.id.textApolloStatus);
-        textApolloDiagnostics = findViewById(R.id.textApolloDiagnostics);
         textApolloFullOnly = findViewById(R.id.textApolloFullOnly);
-        apolloControls = findViewById(R.id.apolloControls);
 
-        if (switchApolloTlc != null) switchApolloTlc.setEnabled(false);
-        if (switchApolloTrafficLights != null) switchApolloTrafficLights.setEnabled(false);
-        if (switchApolloTrafficSigns != null) switchApolloTrafficSigns.setEnabled(false);
-        if (apolloGreenSoundGroup != null) apolloGreenSoundGroup.setEnabled(false);
-        View soundOff = findViewById(R.id.apolloGreenSoundOff);
-        View soundOn = findViewById(R.id.apolloGreenSoundOn);
-        if (soundOff != null) soundOff.setEnabled(false);
-        if (soundOn != null) soundOn.setEnabled(false);
+        if (switchApolloSettingsActivation != null) {
+            switchApolloSettingsActivation.setChecked(prefs.getBoolean(
+                    ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED));
+            switchApolloSettingsActivation.setEnabled(BuildConfig.IS_FULL);
+            switchApolloSettingsActivation.setOnCheckedChangeListener((button, checked) -> {
+                prefs.edit().putBoolean(ApolloSettings.STOCK_UI, checked).apply();
+                updateApolloUi();
+            });
+        }
+        bindApolloSwitch(switchApolloTlc, ApolloSettings.TLC);
+        bindApolloSwitch(switchApolloTrafficSigns, ApolloSettings.TRAFFIC_SIGNS);
+        bindApolloSwitch(switchApolloTrafficLights, ApolloSettings.TRAFFIC_LIGHTS);
+
+        boolean greenSound = prefs.getBoolean(
+                ApolloSettings.GREEN_SOUND, ApolloSettings.DEFAULT_ENABLED);
+        if (apolloGreenSoundGroup != null) {
+            apolloGreenSoundGroup.check(greenSound
+                    ? R.id.apolloGreenSoundOn : R.id.apolloGreenSoundOff);
+            apolloGreenSoundGroup.setOnCheckedChangeListener((group, checkedId) -> {
+                if (checkedId != R.id.apolloGreenSoundOn
+                        && checkedId != R.id.apolloGreenSoundOff) return;
+                prefs.edit().putBoolean(ApolloSettings.GREEN_SOUND,
+                        checkedId == R.id.apolloGreenSoundOn).apply();
+            });
+        }
         updateApolloUi();
     }
 
-    /** Read-only запрос при открытии Apollo Tech: Messenger основной, broadcast — fallback. */
-    private void requestApolloState() {
-        if (!BuildConfig.HAS_DIRECT_APOLLO) {
-            updateApolloUi();
-            return;
-        }
-        long sessionToken = ensureApolloDemandSession();
-        if (!apolloHasState && textApolloStatus != null) {
-            textApolloStatus.setText("Запрашиваем состояние Apollo Tech у Native…");
-        }
-        boolean messengerReady = GlobalVars.isBound && GlobalVars.serviceMessenger != null;
-        boolean messengerDelivered = false;
-        if (messengerReady) {
-            try {
-                Message query = Message.obtain(null, MSG_APOLLO_QUERY);
-                Bundle data = new Bundle();
-                data.putLong(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
-                data.putBinder(EXTRA_APOLLO_DEMAND_OWNER, APOLLO_DEMAND_OWNER);
-                query.setData(data);
-                GlobalVars.serviceMessenger.send(query);
-                messengerDelivered = true;
-            } catch (RemoteException e) {
-                Log.w("$$$ Advance Apollo $$$", "Не удалось отправить MSG_APOLLO_QUERY", e);
-            }
-        }
-        if (shouldUseApolloBroadcastFallback(messengerReady, messengerDelivered)) {
-            Intent request = apolloDemandIntent(
-                    ACTION_REQUEST_APOLLO_TLC_UPDATE, sessionToken);
-            sendBroadcast(request);
-        }
-    }
-
-    /** Releases Native's CanBus UI-session lease; Native keeps a short recreation grace. */
-    private void releaseApolloDemand() {
-        if (!BuildConfig.HAS_DIRECT_APOLLO) return;
-        long sessionToken = apolloDemandSession;
-        if (sessionToken <= 0L) return;
-        apolloDemandSession = 0L;
-        Intent release = apolloDemandIntent(
-                ACTION_RELEASE_APOLLO_TLC_DEMAND, sessionToken);
-        sendBroadcast(release);
-    }
-
-    private static Intent apolloDemandIntent(String action, long sessionToken) {
-        Bundle extras = new Bundle();
-        extras.putLong(EXTRA_APOLLO_DEMAND_SESSION, sessionToken);
-        extras.putBinder(EXTRA_APOLLO_DEMAND_OWNER, APOLLO_DEMAND_OWNER);
-        return new Intent(action).setPackage(NATIVE_PACKAGE).putExtras(extras);
-    }
-
-    /** One token survives duplicate refreshes but never an Apollo-page pause/leave boundary. */
-    private long ensureApolloDemandSession() {
-        if (apolloDemandSession > 0L) return apolloDemandSession;
-        while (true) {
-            long observed = APOLLO_DEMAND_SEQUENCE.get();
-            long candidate = Math.max(
-                    Math.max(1L, SystemClock.elapsedRealtimeNanos()), observed + 1L);
-            if (APOLLO_DEMAND_SEQUENCE.compareAndSet(observed, candidate)) {
-                apolloDemandSession = candidate;
-                return apolloDemandSession;
-            }
-        }
-    }
-
-    static boolean shouldUseApolloBroadcastFallback(boolean messengerReady,
-                                                     boolean messengerDelivered) {
-        return !messengerReady || !messengerDelivered;
-    }
-
-    private boolean isApolloServiceReady() {
-        return GlobalVars.isBound && GlobalVars.serviceMessenger != null;
+    private void bindApolloSwitch(Switch target, String preference) {
+        if (target == null) return;
+        target.setChecked(prefs.getBoolean(preference, ApolloSettings.DEFAULT_ENABLED));
+        target.setEnabled(true);
+        target.setOnCheckedChangeListener((button, checked) -> {
+            prefs.edit().putBoolean(preference, checked).apply();
+            if (ApolloSettings.TRAFFIC_LIGHTS.equals(preference)) updateApolloUi();
+        });
     }
 
     private void updateApolloUi() {
-        boolean directApolloAvailable = BuildConfig.HAS_DIRECT_APOLLO;
         if (textApolloFullOnly != null) {
             textApolloFullOnly.setVisibility(BuildConfig.IS_FULL ? View.GONE : View.VISIBLE);
         }
-        if (apolloControls != null) {
-            apolloControls.setAlpha(directApolloAvailable ? 1f : 0.45f);
-        }
 
-        if (switchApolloTlc != null) {
-            switchApolloTlc.setChecked(apolloHasState && apolloPlcSwitch == 2);
-            switchApolloTlc.setEnabled(false);
-        }
-        if (switchApolloTrafficLights != null) {
-            switchApolloTrafficLights.setChecked(apolloHasState && apolloGlaSwitch == 2);
-            switchApolloTrafficLights.setEnabled(false);
-        }
-        if (switchApolloTrafficSigns != null) {
-            // TSR has the inverse OEM encoding: 1=enabled, 2=disabled.
-            switchApolloTrafficSigns.setChecked(apolloHasState && apolloTsrSwitch == 1);
-            switchApolloTrafficSigns.setEnabled(false);
-        }
-        if (apolloGreenSoundGroup != null) {
-            if (apolloGlaLightChangeSwitch == 1) {
-                apolloGreenSoundGroup.check(R.id.apolloGreenSoundOff);
-            } else if (apolloGlaLightChangeSwitch == 2) {
-                apolloGreenSoundGroup.check(R.id.apolloGreenSoundOn);
+        if (textApolloSettingsActivationStatus != null) {
+            if (!BuildConfig.IS_FULL) {
+                textApolloSettingsActivationStatus.setText(
+                        "Недоступно в Light-версии: в ней нет Frida hook-loader.");
+            } else if (switchApolloSettingsActivation != null
+                    && switchApolloSettingsActivation.isChecked()) {
+                textApolloSettingsActivationStatus.setText(
+                        "Включено. Применяется вместе с остальными настройками.");
             } else {
-                apolloGreenSoundGroup.clearCheck();
+                textApolloSettingsActivationStatus.setText(
+                        "Выключено. Применяется вместе с остальными настройками.");
             }
-            apolloGreenSoundGroup.setEnabled(false);
         }
 
-        if (apolloGreenSoundContainer != null) {
-            apolloGreenSoundContainer.setAlpha(
-                    apolloHasState && apolloGlaSwitch == 2 ? 1f : 0.45f);
+        boolean trafficLightsEnabled = switchApolloTrafficLights != null
+                && switchApolloTrafficLights.isChecked();
+        if (apolloGreenSoundGroup != null) apolloGreenSoundGroup.setEnabled(trafficLightsEnabled);
+        if (apolloGreenSoundContainer != null && apolloGreenSoundGroup != null) {
+            apolloGreenSoundContainer.setAlpha(trafficLightsEnabled ? 1f : 0.45f);
+            for (int i = 0; i < apolloGreenSoundGroup.getChildCount(); i++) {
+                apolloGreenSoundGroup.getChildAt(i).setEnabled(trafficLightsEnabled);
+            }
         }
 
         if (textApolloStatus != null) {
-            textApolloStatus.setText(buildApolloStatus(directApolloAvailable));
-        }
-        if (textApolloDiagnostics != null) textApolloDiagnostics.setText(buildApolloDiagnostics());
-    }
-
-    private String buildApolloStatus(boolean directApolloAvailable) {
-        if (!directApolloAvailable) return "Функция недоступна в этой версии VoyahTune.";
-        if (!apolloHasState) return "Получаем состояние автомобиля…";
-        if (!apolloError.isEmpty()) return formatApolloError(apolloError);
-        if (!isApolloServiceReady()) return "Нет связи с автомобилем.";
-        if (!apolloCanConnected) {
-            return "Нет связи с автомобилем.";
-        }
-        if (!apolloProfileSupported || !apolloDirectTlcMode)
-            return "Функция пока недоступна для этой версии автомобиля.";
-        if (apolloPlcSwitch != 1 && apolloPlcSwitch != 2) {
-            return "Не удалось определить состояние TLC.";
-        }
-        if ((apolloGlaSwitch != 1 && apolloGlaSwitch != 2)
-                || (apolloGlaLightChangeSwitch != 1
-                && apolloGlaLightChangeSwitch != 2)) {
-            return "Не удалось определить состояние распознавания светофоров.";
-        }
-        if (apolloTsrSwitch != 1 && apolloTsrSwitch != 2) {
-            return "Не удалось определить состояние распознавания дорожных знаков.";
-        }
-        return BuildConfig.IS_FULL
-                ? "Текущее состояние получено. Подписка ADAS/NOA открывается автоматически; переключатели меняются в штатных настройках автомобиля."
-                : "Текущее состояние получено. Light показывает диагностику без активации подписки ADAS/NOA.";
-    }
-
-    private String buildApolloDiagnostics() {
-        if (!apolloHasState) {
-            return "Диагностика: соединение, селектор передач и состояние TLC ещё неизвестны.";
-        }
-        return "Диагностика Native:\n"
-                + "CAN (автомобильная шина): " + (apolloCanConnected ? "подключена" : "нет подключения")
-                + " · режим диагностики: " + (apolloDirectTlcMode ? "доступен" : "недоступен") + "\n"
-                + "Селектор передач: " + formatApolloGear(apolloGear)
-                + " · PLC_SWITCH (штатное состояние TLC): "
-                + formatApolloSwitch(apolloPlcSwitch)
-                + (apolloError.isEmpty() ? "" : "\nДиагностика: " + formatApolloError(apolloError));
-    }
-
-    private String formatApolloGear(int value) {
-        if (value == 0) return "Parking/P (0)";
-        if (value == -1) return "неизвестно (-1)";
-        return String.valueOf(value);
-    }
-
-    private String formatApolloSwitch(int value) {
-        if (value == 1) return "выкл (1)";
-        if (value == 2) return "вкл (2)";
-        return formatApolloValue(value);
-    }
-
-    private String formatApolloValue(int value) {
-        return value < 0 ? "неизвестно" : String.valueOf(value);
-    }
-
-    /** Переводит внутренние fail-closed коды Native в понятное сообщение для водителя. */
-    private String formatApolloError(String error) {
-        switch (error) {
-            case "unsupported_light":
-                return "Диагностика недоступна в этой версии VoyahTune.";
-            case "profile_check_pending":
-                return "Проверяем совместимость с автомобилем…";
-            case "profile_canbus_apk_not_found":
-            case "profile_canbus_revalidation_pending":
-            case "profile_canbus_schema_mismatch":
-            case "profile_canbus_schema_unavailable":
-            case "profile_executor_unavailable":
-            case "profile_unsupported":
-                return "Функция пока недоступна для этой версии автомобиля.";
-            case "profile_runtime_mismatch":
-            case "profile_binder_descriptor_mismatch":
-            case "profile_gear_parcel_mismatch":
-                return "Функция пока недоступна для этой версии автомобиля.";
-            case "can_disconnected":
-            case "can_descriptor_failed":
-                return "Нет связи с автомобилем.";
-            case "can_permission_missing":
-                return "Функция установлена некорректно. Переустановите VoyahTune.";
-            case "state_read_failed":
-                return "Не удалось прочитать текущее состояние автомобиля.";
-            case "request_receiver_failed":
-                return "Не удалось запустить защищённый канал диагностики Apollo Tech.";
-            default:
-                return "Не удалось прочитать состояние Apollo Tech.";
+            textApolloStatus.setText(
+                    "VoyahTune хранит выбранные значения без чтения текущего состояния автомобиля. "
+                            + "Они применяются кнопкой «Применить» и автоматически через 10 секунд "
+                            + "после пробуждения.");
         }
     }
 
@@ -2101,14 +1907,9 @@ public class AdvanceActivity extends AppCompatActivity {
         registerReceiver(modeSyncReceiver, new IntentFilter("ru.big.town.anative.MODE_SYNCED"), RECEIVER_EXPORTED);
         registerReceiver(settingSyncReceiver, new IntentFilter("ru.big.town.anative.SETTING_SYNCED"),
                 "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", null, RECEIVER_EXPORTED);
-        if (BuildConfig.HAS_DIRECT_APOLLO) {
-            registerReceiver(apolloReceiver, new IntentFilter(ACTION_APOLLO_TLC_UPDATE),
-                    NATIVE_BIND_PERMISSION, null, RECEIVER_EXPORTED);
-        }
         Intent req = new Intent("ru.big.town.anative.REQUEST_LUX_UPDATE");
         req.setPackage("ru.big.town.anative");
         sendBroadcast(req);
-        if (currentSection == 3) requestApolloState();
     }
 
     @Override
@@ -2116,11 +1917,9 @@ public class AdvanceActivity extends AppCompatActivity {
         activityResumed = false;
         updateSystemMetricsPolling();
         super.onPause();
-        if (currentSection == 3) releaseApolloDemand();
         try { unregisterReceiver(luxReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(modeSyncReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(settingSyncReceiver); } catch (Exception ignored) {}
-        try { unregisterReceiver(apolloReceiver); } catch (Exception ignored) {}
     }
 
     @Override

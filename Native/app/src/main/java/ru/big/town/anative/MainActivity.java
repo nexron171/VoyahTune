@@ -37,6 +37,11 @@ public class MainActivity extends AppCompatActivity {
     private static int fragranceTaste = FragranceRestorePolicy.DEFAULT_TASTE;
     private static int fragranceDuration = FragranceRestorePolicy.DEFAULT_DURATION;
     private static int fragranceIntensity = FragranceRestorePolicy.DEFAULT_INTENSITY;
+    private static boolean apolloTlcEnabled = false;
+    private static boolean apolloTrafficLightsEnabled = false;
+    private static boolean apolloGreenSoundEnabled = false;
+    private static boolean apolloTrafficSignsEnabled = false;
+    private static boolean apolloStockUiEnabled = false;
 
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
@@ -309,6 +314,15 @@ public class MainActivity extends AppCompatActivity {
                 fragranceTaste = fragrance.taste;
                 fragranceDuration = fragrance.duration;
                 fragranceIntensity = fragrance.intensity;
+                apolloTlcEnabled = cursor.getColumnCount() > 24 && cursor.getInt(24) == 1;
+                apolloTrafficLightsEnabled = cursor.getColumnCount() > 25
+                        && cursor.getInt(25) == 1;
+                apolloGreenSoundEnabled = cursor.getColumnCount() > 26
+                        && cursor.getInt(26) == 1;
+                apolloTrafficSignsEnabled = cursor.getColumnCount() > 27
+                        && cursor.getInt(27) == 1;
+                apolloStockUiEnabled = cursor.getColumnCount() > 28
+                        && cursor.getInt(28) == 1;
                 // col 12 — «Режим отладки»: эмуляция CAN в логи вместо реальной отправки
                 boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
                 // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
@@ -327,6 +341,9 @@ public class MainActivity extends AppCompatActivity {
                         + " fragranceEnabled=" + fragranceEnabled
                         + " fragrance=" + fragranceTaste + "/" + fragranceDuration
                         + "/" + fragranceIntensity
+                        + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
+                        + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
+                        + " stockUi=" + apolloStockUiEnabled
                         + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
                         + " pauseMediaOnDoor=" + pauseMediaOnDoor);
                 return 2;
@@ -370,6 +387,11 @@ public class MainActivity extends AppCompatActivity {
                 .putInt("cacheFragranceTaste", fragranceTaste)
                 .putInt("cacheFragranceDuration", fragranceDuration)
                 .putInt("cacheFragranceIntensity", fragranceIntensity)
+                .putBoolean("cacheApolloTlcEnabled", apolloTlcEnabled)
+                .putBoolean("cacheApolloTrafficLightsEnabled", apolloTrafficLightsEnabled)
+                .putBoolean("cacheApolloGreenSoundEnabled", apolloGreenSoundEnabled)
+                .putBoolean("cacheApolloTrafficSignsEnabled", apolloTrafficSignsEnabled)
+                .putBoolean("cacheApolloStockUiEnabled", apolloStockUiEnabled)
                 .putBoolean("cacheDebugMode", debugMode)
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
@@ -402,6 +424,11 @@ public class MainActivity extends AppCompatActivity {
         fragranceTaste = fragrance.taste;
         fragranceDuration = fragrance.duration;
         fragranceIntensity = fragrance.intensity;
+        apolloTlcEnabled = p.getBoolean("cacheApolloTlcEnabled", false);
+        apolloTrafficLightsEnabled = p.getBoolean("cacheApolloTrafficLightsEnabled", false);
+        apolloGreenSoundEnabled = p.getBoolean("cacheApolloGreenSoundEnabled", false);
+        apolloTrafficSignsEnabled = p.getBoolean("cacheApolloTrafficSignsEnabled", false);
+        apolloStockUiEnabled = p.getBoolean("cacheApolloStockUiEnabled", false);
         boolean debugMode     = p.getBoolean("cacheDebugMode", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
@@ -413,6 +440,9 @@ public class MainActivity extends AppCompatActivity {
                 + " fragranceEnabled=" + fragranceEnabled
                 + " fragrance=" + fragranceTaste + "/" + fragranceDuration
                 + "/" + fragranceIntensity
+                + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
+                + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
+                + " stockUi=" + apolloStockUiEnabled
                 + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
                 + " pauseMediaOnDoor=" + pauseMediaOnDoor);
         return true;
@@ -510,12 +540,29 @@ public class MainActivity extends AppCompatActivity {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound
-                + " fragranceEnabled=" + fragranceEnabled);
+                + " fragranceEnabled=" + fragranceEnabled
+                + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
+                + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled);
         CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
         final Context context = GlobalVars.SAVE_CONTEXT;
         final Map<String, Integer> primaryValues = new LinkedHashMap<>();
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
+
+        if (BuildConfig.IS_FULL) {
+            final boolean stockUiTarget = apolloStockUiEnabled;
+            plan.addOnce("Apollo stock subscription/exam UI", () -> {
+                ApolloSettingsRuntimeState.TargetApplyResult result =
+                        ApolloSettingsRuntimeState.applyTarget(context, stockUiTarget);
+                if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
+                    return CanRestorePlan.OperationResult.CONFIRMED;
+                }
+                if (result == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
+                    return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+                }
+                return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+            });
+        }
 
         if (driveEnabled) {
             if (!DriveModeCanTransport.appendStates(
@@ -528,6 +575,13 @@ public class MainActivity extends AppCompatActivity {
         VehicleRestorePolicy.appendRecuperationTo(
                 trailingValues, recycleEnabled, recycle, driveMode);
         stableIds.putAll(VehicleRestorePolicy.stableIds());
+
+        // Entitlements belong to the primary TX77 task; actual switches are submitted in the
+        // following OEM task so ADCU capability bits are in place before PLC/GLA/TSR are changed.
+        ApolloRestorePolicy.appendTo(primaryValues, trailingValues,
+                apolloTlcEnabled, apolloTrafficLightsEnabled,
+                apolloGreenSoundEnabled, apolloTrafficSignsEnabled);
+        stableIds.putAll(ApolloRestorePolicy.stableIds());
 
         OemVehicleStateTransport.StateValue fragranceDurationState = null;
         if (fragranceEnabled) {
@@ -547,7 +601,8 @@ public class MainActivity extends AppCompatActivity {
             plan.addOperation("OEM vehicle restore snapshot", () ->
                     OemVehicleStateTransport.sendRestoreSequence(
                             context, firstState, primaryValues, trailingValues, stableIds,
-                            "drive/energy/fragrance then recuperation").accepted()
+                            "drive/energy/fragrance/Apollo entitlements then switches/recuperation")
+                            .accepted()
                             ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
                             : CanRestorePlan.OperationResult.TRANSIENT_FAILURE,
                     repeatOemOnNextPass);

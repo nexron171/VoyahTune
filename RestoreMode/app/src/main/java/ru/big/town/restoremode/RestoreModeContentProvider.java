@@ -37,6 +37,11 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  int fragranceTaste=FragranceSettings.DEFAULT_TASTE;
     private  int fragranceDuration=FragranceSettings.DEFAULT_DURATION;
     private  int fragranceIntensity=FragranceSettings.DEFAULT_INTENSITY;
+    private boolean apolloTlcEnabled=ApolloSettings.DEFAULT_ENABLED;
+    private boolean apolloTrafficLightsEnabled=ApolloSettings.DEFAULT_ENABLED;
+    private boolean apolloGreenSoundEnabled=ApolloSettings.DEFAULT_ENABLED;
+    private boolean apolloTrafficSignsEnabled=ApolloSettings.DEFAULT_ENABLED;
+    private boolean apolloStockUiEnabled=ApolloSettings.DEFAULT_ENABLED;
     public RestoreModeContentProvider() {
     }
 
@@ -123,6 +128,16 @@ public class RestoreModeContentProvider extends ContentProvider {
                 FragranceSettings.DURATION, FragranceSettings.DEFAULT_DURATION));
         fragranceIntensity      = FragranceSettings.normalizeIntensity(sharedPreferences.getInt(
                 FragranceSettings.INTENSITY, FragranceSettings.DEFAULT_INTENSITY));
+        apolloTlcEnabled        = sharedPreferences.getBoolean(
+                ApolloSettings.TLC, ApolloSettings.DEFAULT_ENABLED);
+        apolloTrafficLightsEnabled = sharedPreferences.getBoolean(
+                ApolloSettings.TRAFFIC_LIGHTS, ApolloSettings.DEFAULT_ENABLED);
+        apolloGreenSoundEnabled = sharedPreferences.getBoolean(
+                ApolloSettings.GREEN_SOUND, ApolloSettings.DEFAULT_ENABLED);
+        apolloTrafficSignsEnabled = sharedPreferences.getBoolean(
+                ApolloSettings.TRAFFIC_SIGNS, ApolloSettings.DEFAULT_ENABLED);
+        apolloStockUiEnabled = sharedPreferences.getBoolean(
+                ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED);
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
@@ -149,6 +164,11 @@ public class RestoreModeContentProvider extends ContentProvider {
                 FragranceSettings.TASTE,    // 21 — 1..3
                 FragranceSettings.DURATION, // 22 — 0=без таймера, 1=30 мин, 2=60 мин
                 FragranceSettings.INTENSITY,// 23 — 1=низкая, 2=средняя, 3=высокая
+                ApolloSettings.TLC,          // 24 — желаемое состояние TLC
+                ApolloSettings.TRAFFIC_LIGHTS, // 25 — распознавание светофоров
+                ApolloSettings.GREEN_SOUND, // 26 — звук зелёного сигнала
+                ApolloSettings.TRAFFIC_SIGNS,// 27 — распознавание дорожных знаков
+                ApolloSettings.STOCK_UI,      // 28 — подписка/экзамен в штатном UI
         });
 
         cursor.addRow(new Object[]{
@@ -172,6 +192,11 @@ public class RestoreModeContentProvider extends ContentProvider {
                 fragranceTaste,
                 fragranceDuration,
                 fragranceIntensity,
+                apolloTlcEnabled ? 1 : 0,
+                apolloTrafficLightsEnabled ? 1 : 0,
+                apolloGreenSoundEnabled ? 1 : 0,
+                apolloTrafficSignsEnabled ? 1 : 0,
+                apolloStockUiEnabled ? 1 : 0,
         });
        return cursor;
 

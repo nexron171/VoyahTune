@@ -1682,7 +1682,7 @@
     </ScrollView>
     <!-- конец pageSplitScreen -->
 
-    <!-- Раздел: Apollo Tech. Full активирует entitlement как voboost; состояния CAN read-only. -->
+    <!-- Раздел: Apollo Tech. Штатный UI показывает только подписку/экзамен; функции хранит VoyahTune. -->
     <ScrollView
         android:id="@+id/pageApolloTech"
         android:layout_width="match_parent"
@@ -1700,9 +1700,55 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Full-версия автоматически открывает штатную подписку ADAS и статус обучения NOA способом voboost. Переключатели ниже показывают текущее состояние автомобиля и изменяются в штатных настройках автомобиля."
+                android:text="VoyahTune управляет выбранными Apollo-функциями без чтения текущего состояния автомобиля. Настройки применяются кнопкой «Применить» и автоматически через 10 секунд после пробуждения."
                 android:textColor="#FFFFFF"
                 android:textSize="24px" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:background="@drawable/layout_category_bg"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="14dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Показывать подписку и экзамен Apollo в штатных настройках"
+                        android:textColor="#FFFFFF"
+                        android:textSize="27px" />
+
+                    <TextView
+                        android:id="@+id/textApolloSettingsActivationStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Выключено. Применяется вместе с остальными настройками."
+                        android:textColor="#aaaaaa"
+                        android:textSize="20px" />
+
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/switchApolloSettingsActivation"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:checked="false"
+                    android:enabled="false"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/textApolloFullOnly"
@@ -1711,7 +1757,7 @@
                 android:layout_marginTop="14dp"
                 android:background="@drawable/layout_category_bg"
                 android:padding="16dp"
-                android:text="Light-версия не содержит Frida, поэтому активация подписки ADAS/NOA в ней недоступна. Диагностика текущего состояния остаётся доступной."
+                android:text="Light-версия не содержит Frida, поэтому статус подписки и экзамен в штатном меню в ней недоступны. Управление функциями ниже остаётся доступным."
                 android:textColor="#ffb36b"
                 android:textSize="22px"
                 android:visibility="gone" />
@@ -1750,7 +1796,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
-                            android:text="Текущее штатное состояние функции; отображается только для диагностики."
+                            android:text="Сохранённое целевое значение VoyahTune. Проверка Parking не выполняется."
                             android:textColor="#aaaaaa"
                             android:textSize="20px" />
 
@@ -1761,7 +1807,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="16dp"
-                        android:enabled="false"
+                        android:enabled="true"
                         android:thumb="@drawable/switch_thumb"
                         android:track="@drawable/switch_track" />
 
@@ -1810,7 +1856,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="16dp"
-                            android:enabled="false"
+                            android:enabled="true"
                             android:thumb="@drawable/switch_thumb"
                             android:track="@drawable/switch_track" />
 
@@ -1901,7 +1947,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="16dp"
-                        android:enabled="false"
+                        android:enabled="true"
                         android:thumb="@drawable/switch_thumb"
                         android:track="@drawable/switch_track" />
 
@@ -1924,24 +1970,9 @@
                 android:layout_marginTop="8dp"
                 android:background="@drawable/layout_category_bg"
                 android:padding="16dp"
-                android:text="Состояние ещё не получено. Раздел работает только для просмотра."
+                android:text="Сохранённые значения применяются кнопкой «Применить» и на пробуждении автомобиля."
                 android:textColor="#FFFFFF"
                 android:textSize="22px" />
-
-            <TextView
-                android:id="@+id/textApolloDiagnostics"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="20dp"
-                android:background="@drawable/layout_category_bg"
-                android:fontFamily="monospace"
-                android:padding="16dp"
-                android:text="Диагностика: CAN (автомобильная шина) — неизвестно; профиль — неизвестно; состояния Apollo — неизвестны."
-                android:textColor="#aaaaaa"
-                android:textIsSelectable="true"
-                android:textSize="19px"
-                android:visibility="gone" />
 
         </LinearLayout>
     </ScrollView>

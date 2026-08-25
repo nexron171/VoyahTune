@@ -185,13 +185,6 @@
             android:exported="false"
             />
 
-        <!-- Demand-scoped read-only Apollo diagnostics, isolated from the main Native process. -->
-        <service
-            android:name=".ApolloTlcService"
-            android:enabled="true"
-            android:exported="false"
-            android:process=":apollo" />
-
         <service
             android:name=".NowPlayingService"
             android:enabled="true"

@@ -5,7 +5,7 @@
 #   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
 #   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
 #   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами;
-#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — entitlement как в voboost, без CAN.
+#   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — по сохранённой настройке VoyahTune.
 #   6) keyboard_*.js         в com.qinggan.app.qgime — только при явном opt-in из «Другого».
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
@@ -134,6 +134,8 @@ APOLLO_ATTEMPT=/data/local/tmp/voyahtune_apollo.attempt
 APOLLO_LOG=/data/local/tmp/voyahtune_apollo.txt
 APOLLO_TARGET=com.qinggan.app.vehiclesetting
 APOLLO_READY_MARKER='[apollo] hook ready'
+APOLLO_RUNTIME_FLAG=/data/user_de/0/ru.big.town.anative/files/apollo_settings_runtime.v1
+APOLLO_BOOT_ID_FILE=/proc/sys/kernel/random/boot_id
 KEYBOARD_TARGET=com.qinggan.app.qgime
 KEYBOARD_SETTING=voyahtune_keyboard_mode
 KEYBOARD_MARK=/data/local/tmp/voyahtune_keyboard.pid
@@ -418,8 +420,53 @@ inject_apollo() {
         return 1
     fi
     rm -f "$APOLLO_TRY"
-    logi "apollo entitlement hook OK pid=$APOLLO_PID profile=voboost"
+    logi "apollo VehicleSetting hook OK pid=$APOLLO_PID profile=persisted-target"
     return 0
+}
+
+# Exact parser for Native's app-private current-boot transport. The UUID changes every Linux boot,
+# so a stale file cannot activate Apollo before Native restores the persisted target. Unknown,
+# duplicate and partial fields fail closed.
+apollo_runtime_flag_enabled() {
+    [ -r "$APOLLO_RUNTIME_FLAG" ] || return 1
+    APOLLO_CURRENT_BOOT=
+    IFS= read -r APOLLO_CURRENT_BOOT < "$APOLLO_BOOT_ID_FILE" || return 1
+    [ -n "$APOLLO_CURRENT_BOOT" ] || return 1
+
+    APOLLO_FLAG_V=
+    APOLLO_FLAG_BOOT=
+    APOLLO_FLAG_ENABLED=
+    APOLLO_FLAG_SEEN_V=0
+    APOLLO_FLAG_SEEN_BOOT=0
+    APOLLO_FLAG_SEEN_ENABLED=0
+    while IFS='=' read -r APOLLO_FLAG_KEY APOLLO_FLAG_VALUE; do
+        [ -n "$APOLLO_FLAG_KEY" ] || continue
+        case "$APOLLO_FLAG_KEY" in
+            v)
+                [ "$APOLLO_FLAG_SEEN_V" = 0 ] || return 1
+                APOLLO_FLAG_SEEN_V=1
+                APOLLO_FLAG_V=$APOLLO_FLAG_VALUE
+                ;;
+            boot)
+                [ "$APOLLO_FLAG_SEEN_BOOT" = 0 ] || return 1
+                APOLLO_FLAG_SEEN_BOOT=1
+                APOLLO_FLAG_BOOT=$APOLLO_FLAG_VALUE
+                ;;
+            enabled)
+                [ "$APOLLO_FLAG_SEEN_ENABLED" = 0 ] || return 1
+                APOLLO_FLAG_SEEN_ENABLED=1
+                APOLLO_FLAG_ENABLED=$APOLLO_FLAG_VALUE
+                ;;
+            *) return 1 ;;
+        esac
+    done < "$APOLLO_RUNTIME_FLAG"
+
+    [ "$APOLLO_FLAG_SEEN_V" = 1 ] \
+        && [ "$APOLLO_FLAG_SEEN_BOOT" = 1 ] \
+        && [ "$APOLLO_FLAG_SEEN_ENABLED" = 1 ] \
+        && [ "$APOLLO_FLAG_V" = 1 ] \
+        && [ "$APOLLO_FLAG_BOOT" = "$APOLLO_CURRENT_BOOT" ] \
+        && [ "$APOLLO_FLAG_ENABLED" = 1 ]
 }
 
 # Монотонные секунды с boot; после reboot старый timestamp автоматически выглядит протухшим.
@@ -610,20 +657,24 @@ watchdog_cycle() {
         fi
     fi
 
-    # 5) ADAS entitlement: no Settings/CAN work. `pidof` only discovers a new exact VehicleSetting
-    #    process; successful or failed injection is latched until that process identity changes.
-    APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
-    APOLLO_PID=${APOLLO_PID%% *}
-    APOLLO_ID=$(process_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null) || APOLLO_ID=
-    load_runtime_hook_state "$APOLLO_INTEGRITY" "$APOLLO_ID" \
-        "$APOLLO_MARK" "$APOLLO_ATTEMPT"
-    APOLLO_STATE=$RUNTIME_STATE
-    if [ -n "$APOLLO_ID" ] && [ "$APOLLO_STATE" = waiting ]; then
-        if inject_apollo "$APOLLO_PID" "$APOLLO_ID"; then
-            APOLLO_STATE=active
-        else
-            APOLLO_STATE=failed
+    # 5) Apollo/ADAS follows the persisted VoyahTune target. Native republishes the exact current-
+    #    boot transport from the delayed restore chain; only then do we discover VehicleSetting.
+    if apollo_runtime_flag_enabled; then
+        APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
+        APOLLO_PID=${APOLLO_PID%% *}
+        APOLLO_ID=$(process_identity "$APOLLO_PID" "$APOLLO_TARGET" 2>/dev/null) || APOLLO_ID=
+        load_runtime_hook_state "$APOLLO_INTEGRITY" "$APOLLO_ID" \
+            "$APOLLO_MARK" "$APOLLO_ATTEMPT"
+        APOLLO_STATE=$RUNTIME_STATE
+        if [ -n "$APOLLO_ID" ] && [ "$APOLLO_STATE" = waiting ]; then
+            if inject_apollo "$APOLLO_PID" "$APOLLO_ID"; then
+                APOLLO_STATE=active
+            else
+                APOLLO_STATE=failed
+            fi
         fi
+    else
+        APOLLO_STATE=disabled
     fi
 
     # 6) Штатная Qinggan-клавиатура. Режим читается ровно один раз на новую process identity,
@@ -761,7 +812,11 @@ if [ "$HOOK_SET_VALID" = ok ]; then
     SWK_STATE=waiting
     LNCH_STATE=waiting
     MD_STATE=waiting
-    APOLLO_STATE=waiting
+    if apollo_runtime_flag_enabled; then
+        APOLLO_STATE=waiting
+    else
+        APOLLO_STATE=disabled
+    fi
     KEYBOARD_EN_STATE=unknown
     KEYBOARD_RU_STATE=unknown
 else

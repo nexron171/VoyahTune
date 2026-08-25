@@ -129,9 +129,9 @@ if errorlevel 1 exit /b 1
 adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
 adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
 for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
-echo   Old agent, markers, and keys removed. Installing the minimal voboost entitlement hook.
+echo   Old agent, markers, and keys removed. The new Apollo hook stays off until explicit opt-in.
 
-echo === Frida infrastructure ^(steering wheel + VirtualDisplay + Apollo entitlement^) ===
+echo === Frida infrastructure ^(steering wheel + VirtualDisplay + boot-scoped Apollo^) ===
 adb.exe shell "mkdir -p /data/local/bin"
 if errorlevel 1 exit /b 1
 call :install_required_data_file load.bin /data/local/bin/load.bin 755
@@ -219,11 +219,6 @@ if errorlevel 1 (
 call :ensure_native_user_ready
 if errorlevel 1 (
     echo !!! Files were installed, but the Native Android 11 package lifecycle was not restored.
-    exit /b 1
-)
-call :ensure_apollo_entitlement_ready
-if errorlevel 1 (
-    echo !!! Files were installed, but the Apollo entitlement hook was not activated.
     exit /b 1
 )
 echo Installation complete and verified.
@@ -369,20 +364,6 @@ set /a NATIVE_START_WAIT+=1
 if %NATIVE_START_WAIT% GEQ 20 exit /b 1
 timeout /t 1 /nobreak >nul
 goto :wait_native_process_loop
-
-:ensure_apollo_entitlement_ready
-echo === Checking Apollo entitlement hook ===
-set /a APOLLO_READY_WAIT=0
-:wait_apollo_entitlement_loop
-adb.exe shell "test -s /data/local/tmp/voyahtune_apollo.pid && grep -qF '[apollo] hook ready' /data/local/tmp/voyahtune_apollo.txt" 1>nul 2>nul
-if not errorlevel 1 (
-    echo   Apollo entitlement hook is ready; VehicleSetting does not need to be opened.
-    exit /b 0
-)
-set /a APOLLO_READY_WAIT+=1
-if %APOLLO_READY_WAIT% GEQ 35 exit /b 1
-timeout /t 2 /nobreak >nul
-goto :wait_apollo_entitlement_loop
 
 :put_apollo_safe_key
 adb.exe shell settings put global %~1 0

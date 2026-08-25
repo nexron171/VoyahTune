@@ -20,9 +20,9 @@ Releases/dist/VoyahTune-3.2.2-light.zip
 
 ## Состав
 
-`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, ADAS entitlement и
+`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, статуса Apollo и
 опциональной штатной клавиатуры. `light` не
-содержит Frida и `load.bin`. Read-only диагностика Apollo входит в оба варианта.
+содержит Frida и `load.bin`. Управление сохранёнными Apollo-функциями входит в оба варианта.
 
 | Папка | Что | Куда идёт |
 |---|---|---|
@@ -77,40 +77,49 @@ Device-helper проверяет checksum, Android API 30, ожидаемую к
 Неизвестный чужой overlay не перезаписывается и не удаляется. Windows-установщики DNS не меняют;
 для этого отдельно запускается `install-yandex-dns.bat`.
 
-## Apollo/ADAS: entitlement как в voboost + read-only диагностика
+## Apollo/ADAS: сохранённые подписка/экзамен и функции VoyahTune
 
-Full-релиз содержит минимальный `apollo_tech.js`, повторяющий
-`tmp/voboost-script/agents/adas-activation-mod.js`: в процессе
-`com.qinggan.app.vehiclesetting` он подменяет только `BaiduProviderUtil.doQuerySubscribeInfo()`
-(активная, не истёкшая подписка на 30 дней) и `doQueryNOALearnInfo()` (`"1"`, обучение NOA
-завершено). Hook не отправляет CAN-команды, не подписывается на CAN callback и не вызывает прежний
-`DriveAssistanceAdasStatusManager.asyncQueryAdasSubData()`.
+Full-релиз содержит `apollo_tech.js`. Переключатель «Показывать подписку и экзамен Apollo в штатных
+настройках» в разделе Apollo Tech хранится в `DrivePreferences`, как остальные настройки автомобиля,
+и по умолчанию выключен. Кнопка «Применить» применяет его сразу, а автоматическая restore-цепочка —
+через 10 секунд после старта/пробуждения.
 
-`load.bin` не читает Apollo Settings. В уже существующем 10-секундном watchdog добавлена только
-проверка process identity VehicleSetting через `pidof`: каждая identity получает не более одной
-попытки Frida-injection, успешной или неуспешной. После штатного перезапуска VehicleSetting новая
-identity получает новую попытку, поэтому entitlement восстанавливается без открытия Apollo Tech.
-Full installer перезагружает ГУ; VehicleSetting штатно стартует при загрузке. Light-релиз не содержит
-Frida и удаляет hook при переходе full → light.
+Loader по-прежнему получает технический app-private файл с текущим Linux `boot_id`, однако этот файл
+больше не является пользовательским источником истины. Native заново публикует его на каждом запуске
+из сохранённого значения. Такая граница не позволяет старому файлу преждевременно активировать hook
+до загрузки актуальных настроек.
+
+При включённой настройке hook повторяет ответы подписки и экзамена voboost
+(`BaiduProviderUtil.doQuerySubscribeInfo()` и `doQueryNOALearnInfo()`) и показывает только штатный
+баннер подписки/обучения. Скрытые на 97X строки отдельных функций не раскрываются. Глобальный
+`AppCommonUtils.is97X()` и локальные селекторы 97X/97XY не подменяются. Hook не отправляет
+CAN-команды, не проверяет Parking, не подписывается на CAN callback и не запускает TSP/polling
+менеджера.
+
+В уже существующем 10-секундном watchdog loader сначала дешёво проверяет exact `boot_id` transport-
+файла. В состоянии off он не вызывает даже `pidof` VehicleSetting. После изменения сохранённой
+настройки Native перезапускает только `com.qinggan.app.vehiclesetting`, и новая process identity получает одну попытку
+Frida-injection. При выключении процесс также перезапускается, чтобы eternalized hook не оставался в
+памяти. Light-релиз не содержит Frida и держит переключатель недоступным.
 
 Старые opt-in/master/profile/heartbeat ключи по-прежнему удаляются установщиками как одноразовая
 миграция. Remove останавливает VehicleSetting, выгружает eternalized agent и удаляет новый exact
 PID/attempt marker и лог, поэтому цикл remove → install начинает работу с чистого состояния.
 
-Прямой H97X Binder-контур:
+Сами функции TLC, распознавания светофоров, звука зелёного сигнала и дорожных знаков принадлежат
+VoyahTune. Переключатели сохраняют только целевые значения и не читают текущее состояние машины.
+При ручном «Применить» и в автоматической цепочке пробуждения Native передаёт OEM CanBusService два
+упорядоченных `TX77` bundle: сначала полный 18-битный capability/entitlement-снимок штатного формата,
+затем пользовательские PLC/GLA/TSR switches. Полный снимок обязателен, потому что H97X собирает общий
+кадр `0x40A` с нуля; частичный bundle выключил бы соседние ACC/ICA/NOA-возможности. Это позволяет как
+включить, так и выключить функцию, не раскрывая штатные
+97X-строки и не вводя отдельные CAN subscriptions, Parking gate или фоновый опрос. Автоматическое
+восстановление начинается через 10 секунд после wake-события, чтобы Android 11 и OEM CanBus успели
+полностью подняться; ручное применение остаётся немедленным.
 
-- работает в full и light как независимая read-only диагностика; entitlement доступен только в full;
-- перед подключением проверяет установленную CanBus schema и `WRITE_CANBUS` permission;
-- не подписывается на общий поток CAN callback (`TX28/TX29`);
-- при открытом разделе читает текущие PLC/GLA/TSR через `TX57` и положение селектора через `TX6`;
-- не содержит команд активации, `TX58`, `TX77`, entitlement-вектора или delayed confirmation;
-- изолирован в приватном процессе `:apollo`.
-
-Каждый синхронный vendor Binder call имеет одноразовый 15-секундный deadline. При зависании
-завершается только процесс `:apollo`, основной Native/SetModes продолжает работать. Schema
-PM/ClassLoader-проверка начинается при первом UI demand, имеет latest-only очередь глубиной один,
-а её worker завершается после 30 секунд простоя. Demand принадлежит Binder-owner процесса
-RestoreMode: смерть клиента освобождает transport без TTL, heartbeat или lease polling.
+Полный entitlement-снимок отправляется только когда включена хотя бы одна Apollo-функция и повторяет
+штатный all-on вектор активной подписки. При всех выключенных функциях VoyahTune посылает только
+выключенные PLC/GLA/TSR switches и не формирует all-off `0x40A`, который мог бы затронуть ACC/ICA.
 
 ## Full loader и нагрузка
 
@@ -166,12 +175,12 @@ bash Utils/android11-oem-stubs/tests/static-checks.sh
 
 ## Установка и диагностика Apollo
 
-Full installer сам перезагружает ГУ; открывать Apollo Tech или штатные настройки для загрузки hook
-не требуется. Успех виден по `[apollo] hook ready profile=voboost` в
-`/data/local/tmp/voyahtune_apollo.txt` или logcat tag `VoyahApollo`. Раздел Apollo Tech показывает
-штатные состояния функций, но CAN-команды не отправляет: после открытия entitlement сами функции
-включаются и настраиваются через штатный экран автомобиля. В light `[apollo] hook ready` не
-ожидается.
+Full installer сам перезагружает ГУ. При сохранённой включённой настройке успех виден
+по `[apollo] hook ready profile=persisted-target` в `/data/local/tmp/voyahtune_apollo.txt` или logcat tag
+`VoyahApollo`; затем в штатном разделе помощи при вождении доступны баннер подписки и экзамен, но не
+скрытые строки функций. Перезагрузка ГУ не сбрасывает пользовательский выбор: Native восстанавливает
+его вместе с функциональными переключателями VoyahTune. В light `[apollo] hook ready` не
+ожидается, но функциональные переключатели продолжают работать.
 
 ## Версия и структура релиза
 

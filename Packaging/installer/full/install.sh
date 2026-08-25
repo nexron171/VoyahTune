@@ -3,7 +3,7 @@
 # Ставит: Native (priv-app) + RestoreMode, whitelist привилегий, freeform, и Frida-обвязку —
 #   1) кнопки руля (steeringwheelkeys.js в keymanager: звёздочка 3090 и DVR 173, один onKeyEvent),
 #   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS),
-#   3) ADAS entitlement как voboost (apollo_tech.js в VehicleSetting; без CAN-вызовов).
+#   3) boot-scoped Apollo UI hook (apollo_tech.js; включается вручную в VoyahTune).
 # Boot-хук = свои RC-сервисы /system/etc/init/voyahtune.*.rc (setenforce 0 + load.bin watchdog).
 # Штатный /system/etc/init.logcat.sh не меняем, кроме узкой миграции нашего legacy-файла.
 if [ ! -f ./dns-overlay.sh ]; then
@@ -173,31 +173,6 @@ ensure_native_user_ready() {
         NATIVE_START_WAIT=$((NATIVE_START_WAIT + 1))
     done
     echo "!!! Native не запустился после восстановления package data; установка не подтверждена."
-    return 1
-}
-
-ensure_apollo_entitlement_ready() {
-    echo "=== Проверка Apollo entitlement hook ==="
-    APOLLO_READY_WAIT=0
-    while [ "$APOLLO_READY_WAIT" -lt 35 ]; do
-        APOLLO_READY_STATE=$(adb shell '
-            if [ -s /data/local/tmp/voyahtune_apollo.pid ] \
-                    && grep -qF "[apollo] hook ready" \
-                        /data/local/tmp/voyahtune_apollo.txt 2>/dev/null; then
-                echo READY
-            else
-                echo WAIT
-            fi
-        ' 2>/dev/null | tr -d '\r')
-        if [ "$APOLLO_READY_STATE" = "READY" ]; then
-            echo "  Apollo entitlement hook установлен автоматически; VehicleSetting открывать не нужно."
-            return 0
-        fi
-        sleep 2
-        APOLLO_READY_WAIT=$((APOLLO_READY_WAIT + 1))
-    done
-    echo "!!! Apollo entitlement hook не подтвердил [apollo] hook ready после загрузки."
-    echo "    Проверьте /data/local/tmp/voyahtune_apollo.txt и повторите installer."
     return 1
 }
 
@@ -680,11 +655,11 @@ for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_ma
         open_voyah_apollo_profile_heartbeat; do
     adb shell settings delete global "$APOLLO_OLD_KEY" 2>/dev/null
 done
-echo "  Старый agent, маркеры и ключи удалены; будет установлен минимальный voboost entitlement hook."
+echo "  Старый agent, маркеры и ключи удалены; новый Apollo hook будет выключен до явного opt-in."
 
 # ВАЖНО: всё в /data/local/bin доступно загрузочному RC-сервису.
 # /sdcard монтируется позже, поэтому load.bin ТАМ держать нельзя (не запустится на буте).
-echo "=== Frida-инфраструктура (руль + VirtualDisplay + Apollo entitlement) ==="
+echo "=== Frida-инфраструктура (руль + VirtualDisplay + boot-scoped Apollo) ==="
 if ! adb shell "mkdir -p /data/local/bin"; then
     echo "!!! Не удалось подготовить /data/local/bin — установка прервана."
     exit 1
@@ -835,10 +810,6 @@ if ! wait_for_android_boot; then
 fi
 if ! ensure_native_user_ready; then
     echo "!!! Установка файлов завершена, но Native lifecycle не восстановлен."
-    exit 1
-fi
-if ! ensure_apollo_entitlement_ready; then
-    echo "!!! Установка файлов завершена, но Apollo entitlement не активирован."
     exit 1
 fi
 echo "Установка завершена и проверена."

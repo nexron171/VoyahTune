@@ -55,7 +55,6 @@ public class SetModesService extends Service {
     static final int MSG_LOGGING_ENABLE             = 32; // вкл/выкл захват логов в файл (arg1: 1=вкл)
     static final int MSG_LOGGING_SHARE              = 33; // «Выгрузить логи» → share лог-файла
     static final int MSG_SPLIT_LAUNCH_VD            = 34; // single → physical WM-clamped task; pair → VD split
-    static final int MSG_APOLLO_TLC_QUERY           = 36; // запрос read-only снимка PLC/TLC
     static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
     static final String ACTION_LOG_UPDATE  = "ru.big.town.anative.LOG_UPDATE";
     static final String ACTION_LOGGING_SET   = "ru.big.town.anative.LOGGING_SET";   // extra "on" bool
@@ -201,14 +200,6 @@ public class SetModesService extends Service {
                 case MSG_LOGGING_SHARE:
                     Log.i(TAG, "handleMessage() MSG_LOGGING_SHARE");
                     shareLogFile();
-                    break;
-
-                case MSG_APOLLO_TLC_QUERY:
-                    Log.i(TAG, "handleMessage() MSG_APOLLO_TLC_QUERY");
-                    android.os.Bundle apolloQuery = msg.getData();
-                    ApolloTlcService.requestQuery(SetModesService.this,
-                            apolloQuery.getLong(ApolloTlcService.EXTRA_DEMAND_SESSION, 0L),
-                            apolloQuery.getBinder(ApolloTlcService.EXTRA_DEMAND_OWNER));
                     break;
 
                 default:
@@ -603,11 +594,6 @@ public class SetModesService extends Service {
         BatteryHeatService.requestStartup(this);
     }
 
-    /** Starts the read-mostly, fail-closed Apollo PLC/TLC bridge for both full and light reports. */
-    private void startApolloTlcService() {
-        ApolloTlcService.ensureStarted(this);
-    }
-
     /** Стартует NowPlayingService (ридер метаданных активной медиа-сессии для наших поверхностей). */
     private void startNowPlayingService() {
         Intent intent = new Intent(this, NowPlayingService.class);
@@ -759,6 +745,8 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        // A stale file from an earlier boot is fail-closed and removed on first service creation.
+        ApolloSettingsRuntimeState.isEnabled(this);
         screenOffObserved = !isScreenInteractive();
         initializeCarPowerManager();
         setModesReceiverDynamic = new SetModesReceiverDynamic(
@@ -1125,7 +1113,6 @@ public class SetModesService extends Service {
             restoreWiperColdState();
             startTripStatsService();
             startBatteryHeatService();
-            startApolloTlcService();
             scheduleAncillaryWakeTasks();
             Log.i(TAG, "onStartCommand(): startup initialized");
         } else {
