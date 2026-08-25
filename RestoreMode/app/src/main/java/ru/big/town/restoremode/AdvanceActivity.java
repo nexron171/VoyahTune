@@ -916,17 +916,37 @@ public class AdvanceActivity extends AppCompatActivity {
             String pkg = ri.activityInfo.packageName;
             if (!map.containsKey(pkg)) map.put(pkg, ri.loadLabel(pm).toString());
         }
+
         final java.util.List<String> pkgs = new java.util.ArrayList<>(map.keySet());
-        java.util.Collections.sort(pkgs, (a, b) -> map.get(a).compareToIgnoreCase(map.get(b)));
+
+        // Кастомная сортировка: системные в конце
+        java.util.Collections.sort(pkgs, (a, b) -> {
+            boolean aIsCom = isSystemApp(a);
+            boolean bIsCom = isSystemApp(b);
+
+            if (aIsCom && !bIsCom) return 1;  // a (com) после b (не com)
+            if (!aIsCom && bIsCom) return -1; // a (не com) перед b (com)
+
+            // Если оба com.* или оба не com.* — сортируем по имени
+            return map.get(a).compareToIgnoreCase(map.get(b));
+        });
 
         final CharSequence[] items = new CharSequence[pkgs.size()];
-        for (int i = 0; i < pkgs.size(); i++) items[i] = map.get(pkgs.get(i)) + "  ·  " + pkgs.get(i);
+        for (int i = 0; i < pkgs.size(); i++) {
+            items[i] = map.get(pkgs.get(i)) + "  ·  " + pkgs.get(i);
+        }
 
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
                 .setTitle(title)
                 .setItems(items, (d, which) -> cb.onPicked(pkgs.get(which), map.get(pkgs.get(which))))
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+    private boolean isSystemApp(String packageName) {
+        return packageName.startsWith("com.qinggan")  || packageName.startsWith("com.bz")  || packageName.startsWith("com.android")
+                || packageName.startsWith("com.tencent")  || packageName.startsWith("com.huawei")  || packageName.startsWith("com.mega")
+                || packageName.startsWith("com.thunder")  || packageName.startsWith("com.pateo")   || packageName.startsWith("com.baidu")
+                || packageName.startsWith("com.richauto");
     }
 
     /**
