@@ -186,6 +186,22 @@ bash Utils/android11-oem-stubs/tests/static-checks.sh
 физического пробуждения автомобиля. Запрос explicit и защищён signature-permission; периодического
 опроса для этой синхронизации нет.
 
+## Power Hold (Leave Car)
+
+Power Hold не является сохраняемой настройкой и не восстанавливается при пробуждении. После
+подтверждения в VoyahTune карточка переходит в `ACTIVATING`, а Native выполняет штатную Android 11
+цепочку: TX6 проверяет точный `P`, TX57 читает `BMS_SOC_DISPLAY` и допускает заряд не ниже 15%, затем
+один TX77 отправляет только `POWER_HOLD_MODE_TIME=15`, `SCENE_MODE_EXTENDER_SET=1` и
+`POWER_HOLD_MODE_SWITCH=1`. Сырые кадры `0x6c/0x77` не используются, поэтому VoyahTune не подменяет
+соседние значения заряда, рекуперации или режима движения.
+
+Принятый TX77 означает только «команда отправлена». Статус `ACTIVE` появляется исключительно после
+feedback `POWER_HOLD_MODE_SWITCH=1` из общего process-wide `CanBusEventHub`. Feedback switch `0`
+возвращает карточку в `INACTIVE`, а `POWER_HOLD_MODE_WARNING` уточняет выход по низкому заряду или
+истечению времени. При потере CAN-сессии состояние становится `UNKNOWN`; после reconnect выполняется
+один узкий TX57 seed. Подтверждение имеет единственный 10-секундный timeout, без periodic polling,
+отдельной callback-регистрации, sleep-cleanup или app-owned lease.
+
 ## Установка и диагностика Apollo
 
 Full installer сам перезагружает ГУ. При сохранённой включённой настройке успех виден

@@ -190,7 +190,8 @@ final class CanBusEventHub {
             CanBusEventRouter.Subscription routed = router.subscribe(
                     subscription.interestMask, subscription.vehicleStateIds,
                     deliveryExecutor, event -> {
-                        if (event.connectionEpoch == activeEpoch) {
+                        if (event.kind == CanBusEvent.Kind.CONNECTION_LOST
+                                || event.connectionEpoch == activeEpoch) {
                             subscription.listener.onCanBusEvent(event);
                         }
                     });
@@ -436,6 +437,10 @@ final class CanBusEventHub {
             if (closingEpoch != 0) {
                 doorRevision++;
                 router.invalidateThrough(closingEpoch);
+                long lostBarrierEpoch = ++nextEpoch;
+                router.dispatch(CanBusEvent.connectionLost(
+                        lostBarrierEpoch, ++nextSequence,
+                        SystemClock.elapsedRealtime(), closingEpoch));
             }
             pendingConnectionEvent = null;
             preReadyEvents.clear();

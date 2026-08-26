@@ -42,7 +42,9 @@ require_fixed "$POLICY" 'CLEANING_OFF = 0;'
 forbid_fixed "$POLICY" 'VEHICLE_TUNK'
 forbid_fixed "$POLICY" 'SELF_CAR_WASH_STS'
 
-forbid_fixed "$TRANSPORT" 'TX_GET_VEHICLE_STATE'
+# TX57 exists in the shared transport for Power Hold, but the wash path remains strict TX6/TX58.
+forbid_fixed "$CONTROLLER" 'readVehicleState'
+forbid_fixed "$CONTROLLER" 'TX_GET_VEHICLE_STATE'
 forbid_fixed "$TRANSPORT" 'postDelayed('
 forbid_fixed "$TRANSPORT" 'setInterval'
 

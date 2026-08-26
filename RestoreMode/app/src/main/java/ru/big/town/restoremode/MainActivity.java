@@ -61,6 +61,24 @@ public class MainActivity extends AppCompatActivity {
     static final int MSG_SPLIT_LAUNCH_VD    = 34; // single → physical WM-clamped task; pair → VD split
     static final int MSG_APPLY_FORCED_EV    = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int REQUEST_CODE           = 1;
+    static final String ACTION_REQUEST_POWER_HOLD_STATUS =
+            "ru.big.town.anative.REQUEST_POWER_HOLD_STATUS";
+    static final String ACTION_POWER_HOLD_STATUS_UPDATE =
+            "ru.big.town.anative.POWER_HOLD_STATUS_UPDATE";
+    private static final String BIND_SET_MODES_PERMISSION =
+            "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
+    private static final int POWER_HOLD_UNKNOWN = 0;
+    private static final int POWER_HOLD_INACTIVE = 1;
+    private static final int POWER_HOLD_ACTIVATING = 2;
+    private static final int POWER_HOLD_ACTIVE = 3;
+    private static final int POWER_HOLD_FAILED = 4;
+    private static final int POWER_HOLD_EXIT_LOW_BATTERY = 1;
+    private static final int POWER_HOLD_EXIT_TIME_UP = 2;
+    private static final int POWER_HOLD_REQUEST_ACCEPTED = 1;
+    private static final int POWER_HOLD_REQUEST_NOT_IN_PARK = 2;
+    private static final int POWER_HOLD_REQUEST_LOW_BATTERY = 3;
+    private static final int POWER_HOLD_REQUEST_STATE_UNAVAILABLE = 4;
+    private static final int POWER_HOLD_REQUEST_TRANSPORT_FAILURE = 5;
     private Intent resultIntent=null;
     private Intent resultIntentStarButton=null;
     private SharedPreferences.Editor editor=null;
@@ -82,6 +100,7 @@ public class MainActivity extends AppCompatActivity {
 
     // Тоггл-карточки на главном (автосвет / звук пешеходов): нейтральные, состояние — капсула-тег
     private TextView autoLightBadge, pedestrianBadge, forcedEvBadge;
+    private TextView powerHoldBadge;
     private boolean autoLightOn, pedestrianOn, forcedEvOn;
 
     // -------- Виджет «Прогрев батареи» --------
@@ -122,6 +141,72 @@ public class MainActivity extends AppCompatActivity {
             renderBatteryHeat(intent);
         }
     };
+
+    private final BroadcastReceiver powerHoldStatusReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            renderPowerHoldStatus(intent);
+        }
+    };
+
+    private void renderPowerHoldStatus(Intent intent) {
+        if (powerHoldBadge == null || intent == null) return;
+        int status = intent.getIntExtra("status", POWER_HOLD_UNKNOWN);
+        int exitReason = intent.getIntExtra("exitReason", 0);
+        int requestOutcome = intent.getIntExtra("requestOutcome", 0);
+        switch (status) {
+            case POWER_HOLD_INACTIVE:
+                if (exitReason == POWER_HOLD_EXIT_LOW_BATTERY) {
+                    powerHoldBadge.setText(R.string.power_hold_status_exit_low_battery);
+                } else if (exitReason == POWER_HOLD_EXIT_TIME_UP) {
+                    powerHoldBadge.setText(R.string.power_hold_status_exit_time_up);
+                } else {
+                    powerHoldBadge.setText(R.string.power_hold_status_inactive);
+                }
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_inactive);
+                break;
+            case POWER_HOLD_ACTIVATING:
+                powerHoldBadge.setText(R.string.power_hold_status_activating);
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_pending);
+                break;
+            case POWER_HOLD_ACTIVE:
+                powerHoldBadge.setText(R.string.power_hold_status_active);
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_active);
+                break;
+            case POWER_HOLD_FAILED:
+                powerHoldBadge.setText(R.string.power_hold_status_failed);
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_error);
+                break;
+            case POWER_HOLD_UNKNOWN:
+            default:
+                powerHoldBadge.setText(R.string.power_hold_status_unknown);
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_inactive);
+                break;
+        }
+        showPowerHoldRequestOutcome(requestOutcome);
+    }
+
+    private void showPowerHoldRequestOutcome(int outcome) {
+        switch (outcome) {
+            case POWER_HOLD_REQUEST_ACCEPTED:
+                showSnack(getString(R.string.power_hold_request_accepted));
+                break;
+            case POWER_HOLD_REQUEST_NOT_IN_PARK:
+                showSnack(getString(R.string.power_hold_request_not_in_park));
+                break;
+            case POWER_HOLD_REQUEST_LOW_BATTERY:
+                showSnack(getString(R.string.power_hold_request_low_battery));
+                break;
+            case POWER_HOLD_REQUEST_STATE_UNAVAILABLE:
+                showSnack(getString(R.string.power_hold_request_state_unavailable));
+                break;
+            case POWER_HOLD_REQUEST_TRANSPORT_FAILURE:
+                showSnack(getString(R.string.power_hold_request_transport_failure));
+                break;
+            default:
+                break;
+        }
+    }
 
     // Синхронизация карточек, когда Force EV или звук пешеходов переключены кнопкой руля.
     private final BroadcastReceiver settingSyncReceiver = new BroadcastReceiver() {
@@ -518,6 +603,7 @@ public class MainActivity extends AppCompatActivity {
         tripStatus = findViewById(R.id.tripStatus);
         tripCard   = findViewById(R.id.tripCard);
         cardPowerHold  = findViewById(R.id.cardLeaveCar);
+        powerHoldBadge = findViewById(R.id.powerHoldBadge);
         cardWashMode   = findViewById(R.id.cardWashMode);
         cardAutoLight  = findViewById(R.id.cardAutoLight);
         cardPedestrian = findViewById(R.id.cardPedestrian);
@@ -583,14 +669,14 @@ public class MainActivity extends AppCompatActivity {
     /** Power Hold (leave car): подтверждение → шлём в SetModesService, тот дёргает CAN. */
     public void onButtonLeaveCar(View v){
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
-                .setTitle("Power Hold")
-                .setMessage("Режим будет активен сразу после подтверждения, дополнительной индикации активности не последует - просто заприте машину и убедитесь, что она не уснула")
-                .setPositiveButton("Активировать", (d, w) -> {
+                .setTitle(R.string.power_hold_title)
+                .setMessage(R.string.power_hold_confirmation)
+                .setPositiveButton(R.string.power_hold_activate, (d, w) -> {
                     boolean ok = sendMessageToService(MSG_LEAVE_CAR);
-                    showSnack(ok ? "Power Hold режим активирован" : "Сервис не готов");
+                    if (!ok) showSnack(getString(R.string.service_not_ready));
                     Log.i(TAG, "onButtonLeaveCar sent=" + ok);
                 })
-                .setNegativeButton("Отмена", null)
+                .setNegativeButton(R.string.cancel, null)
                 .show();
     }
 
@@ -652,7 +738,13 @@ public class MainActivity extends AppCompatActivity {
         uiHandler.post(tripTick);
         registerReceiver(batteryHeatReceiver, new IntentFilter(ACTION_BATTERY_HEAT_UPDATE), RECEIVER_EXPORTED);
         registerReceiver(settingSyncReceiver, new IntentFilter("ru.big.town.anative.SETTING_SYNCED"),
-                "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", null, RECEIVER_EXPORTED);
+                BIND_SET_MODES_PERMISSION, null, RECEIVER_EXPORTED);
+        registerReceiver(powerHoldStatusReceiver,
+                new IntentFilter(ACTION_POWER_HOLD_STATUS_UPDATE),
+                BIND_SET_MODES_PERMISSION, null, RECEIVER_EXPORTED);
+        Intent powerHoldRequest = new Intent(ACTION_REQUEST_POWER_HOLD_STATUS);
+        powerHoldRequest.setPackage("ru.big.town.anative");
+        sendBroadcast(powerHoldRequest, BIND_SET_MODES_PERMISSION);
         Intent bhReq = new Intent(ACTION_REQUEST_BATTERY_HEAT);
         bhReq.setPackage("ru.big.town.anative");
         sendBroadcast(bhReq);
@@ -867,6 +959,7 @@ public class MainActivity extends AppCompatActivity {
         try { unregisterReceiver(tripReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(batteryHeatReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(settingSyncReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(powerHoldStatusReceiver); } catch (Exception ignored) {}
         uiHandler.removeCallbacks(tripTick);
     }
 

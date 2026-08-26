@@ -92,13 +92,17 @@ require_fixed "$PROVIDER" 'ApolloSettings.GREEN_SOUND, // 26'
 require_fixed "$PROVIDER" 'ApolloSettings.TRAFFIC_SIGNS,// 27'
 for SYMBOL in MSG_APOLLO_TLC_QUERY ACTION_APOLLO_TLC_UPDATE APOLLO_DEMAND_OWNER \
         requestQuery releaseApolloDemand ApolloTlcService ApolloCanBusDemandGate \
-        ApolloTlcPolicy TX_GET_GEAR_STATUS TX_GET_VEHICLE_STATE; do
+        ApolloTlcPolicy TX_GET_GEAR_STATUS; do
     if grep -R -Fq --exclude-dir=build --exclude-dir=.gradle \
             --exclude=test_apollo_direct_only.sh \
             "$SYMBOL" "$REPO_ROOT/Native" "$REPO_ROOT/RestoreMode"; then
         fail "obsolete read-only Apollo symbol remains: $SYMBOL"
     fi
 done
+# TX57 is now a shared transport capability for the unrelated Power Hold one-shot SOC/status
+# checks. Apollo itself must remain write-only and must not read current VehicleState.
+forbid_fixed "$RESTORE_POLICY" 'readVehicleState'
+forbid_fixed "$RESTORE_POLICY" 'TX_GET_VEHICLE_STATE'
 forbid_fixed "$NATIVE_MANIFEST" 'android:process=":apollo"'
 
 # The existing wake restore sends capability values first and switches second through ordered OEM

@@ -155,7 +155,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
-                android:text="Power Hold"
+                android:text="@string/power_hold_title"
                 android:textColor="#FFFFFF"
                 android:textStyle="bold"
                 android:textSize="26px" />
@@ -165,9 +165,20 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:gravity="center"
-                android:text="Не глушить машину при запирании"
+                android:text="@string/power_hold_description"
                 android:textColor="#aaaaaa"
                 android:textSize="15px" />
+
+            <TextView
+                android:id="@+id/powerHoldBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/pill_inactive"
+                android:gravity="center"
+                android:text="@string/power_hold_status_unknown"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp" />
 
         </LinearLayout>
 

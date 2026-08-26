@@ -9,6 +9,7 @@ import android.car.VehiclePropertyIds;
 import android.car.hardware.CarPropertyConfig;
 import android.car.hardware.CarPropertyValue;
 import android.car.hardware.property.CarPropertyManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -30,6 +31,7 @@ import androidx.core.content.ContextCompat;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 
 public class SetModesService extends Service {
@@ -59,6 +61,15 @@ public class SetModesService extends Service {
     static final String ACTION_LOG_UPDATE  = "ru.big.town.anative.LOG_UPDATE";
     static final String ACTION_LOGGING_SET   = "ru.big.town.anative.LOGGING_SET";   // extra "on" bool
     static final String ACTION_LOGGING_SHARE = "ru.big.town.anative.LOGGING_SHARE";
+    static final String ACTION_REQUEST_POWER_HOLD_STATUS =
+            "ru.big.town.anative.REQUEST_POWER_HOLD_STATUS";
+    static final String ACTION_POWER_HOLD_STATUS_UPDATE =
+            "ru.big.town.anative.POWER_HOLD_STATUS_UPDATE";
+    static final String EXTRA_POWER_HOLD_STATUS = "status";
+    static final String EXTRA_POWER_HOLD_EXIT_REASON = "exitReason";
+    static final String EXTRA_POWER_HOLD_REQUEST_OUTCOME = "requestOutcome";
+    private static final String BIND_PERMISSION =
+            "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
     static final String RESTOREMODE_PKG   = "ru.big.town.restoremode";
     static final String RESTOREMODE_MAIN  = "ru.big.town.restoremode.MainActivity";
     private static final String RESTOREMODE_CONFIG_SYNC_ACTION =
@@ -102,7 +113,22 @@ public class SetModesService extends Service {
 
                 case MSG_LEAVE_CAR:
                     Log.i(TAG, "handleMessage() MSG_LEAVE_CAR");
-                    ApplyEngine.postUserCommand("leave car", MainActivity::sendLeaveCarCommand);
+                    PowerHoldStatusTracker tracker = powerHoldStatusTracker;
+                    if (tracker == null) {
+                        Log.w(TAG, "Power Hold tracker is unavailable");
+                        break;
+                    }
+                    tracker.beginActivation(requestGeneration -> {
+                        AtomicReference<PowerHoldPolicy.Outcome> outcome =
+                                new AtomicReference<>(
+                                        PowerHoldPolicy.Outcome.TRANSPORT_FAILURE);
+                        ApplyEngine.postUserCommand("power hold", () -> {
+                            PowerHoldController controller = powerHoldController;
+                            if (controller != null) outcome.set(controller.activate());
+                            Log.i(TAG, "power hold activation outcome=" + outcome.get());
+                        }, () -> tracker.finishActivation(
+                                requestGeneration, outcome.get()));
+                    });
                     break;
 
                 case MSG_WASH_MODE:
@@ -641,6 +667,9 @@ public class SetModesService extends Service {
     private HandlerThread carPowerThread;
     private final CarPowerCallbackGate carPowerCallbackGate = new CarPowerCallbackGate();
     private WashModeController washModeController;
+    private PowerHoldController powerHoldController;
+    private PowerHoldStatusTracker powerHoldStatusTracker;
+    private boolean powerHoldStatusReceiverRegistered;
     private CarPropertyManager mCarPropertyManager;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean startupInitialized = false;
@@ -661,6 +690,31 @@ public class SetModesService extends Service {
     private final Runnable floatingBackEnableRunnable = () ->
             BackButtonService.setFloatingButtonEnabled(this, true);
     private final Runnable carPowerReconnectRunnable = this::reconnectCarPowerOnWorker;
+
+    private final BroadcastReceiver powerHoldStatusRequestReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!ACTION_REQUEST_POWER_HOLD_STATUS.equals(intent.getAction())) return;
+            PowerHoldStatusTracker tracker = powerHoldStatusTracker;
+            if (tracker != null) tracker.requestCurrentStatus();
+        }
+    };
+
+    private void publishPowerHoldStatus(PowerHoldStatusPolicy.Snapshot snapshot,
+                                        PowerHoldPolicy.Outcome requestOutcome,
+                                        boolean force) {
+        Intent update = new Intent(ACTION_POWER_HOLD_STATUS_UPDATE);
+        update.setPackage(RESTOREMODE_PKG);
+        update.putExtra(EXTRA_POWER_HOLD_STATUS, snapshot.status.ipcCode);
+        update.putExtra(EXTRA_POWER_HOLD_EXIT_REASON, snapshot.exitReason.ipcCode);
+        update.putExtra(EXTRA_POWER_HOLD_REQUEST_OUTCOME,
+                requestOutcome == null ? 0 : requestOutcome.ipcCode);
+        try {
+            sendBroadcast(update, BIND_PERMISSION);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "publishPowerHoldStatus failed: " + e.getMessage());
+        }
+    }
 
     /** Один набор недебаунсированных side-effects на физический wake, а не на каждый power state. */
     private boolean beginWakeSession() {
@@ -767,6 +821,17 @@ public class SetModesService extends Service {
         // A stale file from an earlier boot is fail-closed and removed on first service creation.
         ApolloSettingsRuntimeState.isEnabled(this);
         washModeController = WashModeController.create(this);
+        powerHoldController = PowerHoldController.create(this);
+        powerHoldStatusTracker = PowerHoldStatusTracker.create(
+                this, this::publishPowerHoldStatus);
+        try {
+            ContextCompat.registerReceiver(this, powerHoldStatusRequestReceiver,
+                    new IntentFilter(ACTION_REQUEST_POWER_HOLD_STATUS), BIND_PERMISSION,
+                    mainHandler, ContextCompat.RECEIVER_EXPORTED);
+            powerHoldStatusReceiverRegistered = true;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "register Power Hold status receiver: " + e.getMessage());
+        }
         screenOffObserved = !isScreenInteractive();
         initializeCarPowerManager();
         setModesReceiverDynamic = new SetModesReceiverDynamic(
@@ -1170,6 +1235,17 @@ public class SetModesService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
         serviceDestroyed = true;
+        if (powerHoldStatusReceiverRegistered) {
+            try {
+                unregisterReceiver(powerHoldStatusRequestReceiver);
+            } catch (IllegalArgumentException ignored) {
+            }
+            powerHoldStatusReceiverRegistered = false;
+        }
+        PowerHoldStatusTracker powerHoldTracker = powerHoldStatusTracker;
+        powerHoldStatusTracker = null;
+        if (powerHoldTracker != null) powerHoldTracker.close();
+        powerHoldController = null;
         releaseCarPowerManagerAsync();
         pendingPhysicalWake = false;
         endWakeSession();

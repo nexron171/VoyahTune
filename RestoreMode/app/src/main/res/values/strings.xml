@@ -5,6 +5,22 @@
     <string name="wash_mode_activate">Активировать</string>
     <string name="cancel">Отмена</string>
     <string name="service_not_ready">Сервис не готов</string>
+    <string name="power_hold_title">Power Hold</string>
+    <string name="power_hold_description">Не глушить машину при запирании</string>
+    <string name="power_hold_confirmation">Перед активацией включите P. Требуется заряд тяговой батареи не ниже 15%. Режим работает без ограничения времени; для поддержания заряда автомобиль может запустить ДВС. Для штатного выхода нажмите педаль тормоза или выведите селектор из P.</string>
+    <string name="power_hold_activate">Активировать</string>
+    <string name="power_hold_status_unknown">состояние неизвестно</string>
+    <string name="power_hold_status_inactive">выключен</string>
+    <string name="power_hold_status_activating">включается</string>
+    <string name="power_hold_status_active">активен</string>
+    <string name="power_hold_status_failed">не включился</string>
+    <string name="power_hold_status_exit_low_battery">выключен · низкий заряд</string>
+    <string name="power_hold_status_exit_time_up">выключен · истекло время</string>
+    <string name="power_hold_request_accepted">Команда отправлена, ожидаем подтверждение автомобиля</string>
+    <string name="power_hold_request_not_in_park">Для Power Hold включите P</string>
+    <string name="power_hold_request_low_battery">Power Hold недоступен: заряд батареи ниже 15%</string>
+    <string name="power_hold_request_state_unavailable">Не удалось прочитать заряд тяговой батареи</string>
+    <string name="power_hold_request_transport_failure">Не удалось отправить команду Power Hold</string>
 
     <string name="activity_advance_text">
         Эти команды будут выполнены при снятии с охраны\n

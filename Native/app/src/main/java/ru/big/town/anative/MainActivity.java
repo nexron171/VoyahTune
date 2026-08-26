@@ -454,15 +454,6 @@ public class MainActivity extends AppCompatActivity {
         applyDoorReactor(context, wiperColdMode, pauseMediaOnDoor);
     }
 
-    // Power Hold (leave car) — быстрая активация с главного экрана. Две CAN-команды активации.
-    private static final String[] LEAVE_CAR_FRAMES = {
-            "6c 08 00 3e 64 21 c7 00 00 00",
-            "77 08 00 00 00 00 00 1f 00 00",
-    };
-    public static boolean sendLeaveCarCommand() {
-        return setCanValues(1, arraysStr2arraysBytes(LEAVE_CAR_FRAMES), "leave car (power hold)");
-    }
-
     // ------------------------------------------------------------------------
     // Прогрев высоковольтной батареи.
     //
