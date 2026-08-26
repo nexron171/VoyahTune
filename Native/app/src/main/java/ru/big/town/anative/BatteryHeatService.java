@@ -26,6 +26,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -47,8 +48,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>queryVehicleState (TX=20) при коннекте — форсирует ре-броадкаст текущих статусов.</li>
  * </ul></p>
  *
- * <p>Активация прогрева — {@link MainActivity#sendBatteryHeatCommand()} (CAN-команду
- * пользователь задаёт отдельно). Здесь только РЕШЕНИЕ, когда её слать.</p>
+ * <p>Активация прогрева идёт через штатный {@code ICanBusService.setVehicleState}: H97X использует
+ * {@code DRIVER_PREHEAT_SET}, H97C — {@code BATTERY_TEP_CONTROL_SWITCH}. Жёстко заданный raw-кадр
+ * остаётся в {@link MainActivity} только как диагностический fallback и автоматически не вызывается.</p>
  */
 public class BatteryHeatService extends Service {
 
@@ -84,7 +86,17 @@ public class BatteryHeatService extends Service {
     // Анти-спам активации: не пытаемся включать прогрев чаще, чем раз в эти мс.
     private static final long ACTIVATE_REARM_MS = 5 * 60_000L;
     private static final long ACTIVATE_FAILURE_RETRY_MS = 30_000L;
+    // Как штатный VehicleSettings: одно контрольное чтение через 3 секунды после команды.
+    private static final long ACTIVATION_CONFIRM_QUERY_MS = 3_000L;
+    private static final long ACTIVATION_CONFIRM_TIMEOUT_MS = 3_000L;
     private static final long BROADCAST_COALESCE_MS = 250L;
+
+    static final int ACTIVATION_IDLE = 0;
+    static final int ACTIVATION_SENDING = 1;
+    static final int ACTIVATION_AWAITING_CONFIRMATION = 2;
+    static final int ACTIVATION_ACTIVE = 3;
+    static final int ACTIVATION_BLOCKED = 4;
+    static final int ACTIVATION_ENABLED = 5;
 
     private static final AtomicLong INSTANCE_SEQUENCE = new AtomicLong();
     private static final AtomicLong ACTIVE_INSTANCE = new AtomicLong();
@@ -130,16 +142,26 @@ public class BatteryHeatService extends Service {
     private static final int ID_PREHEAT_FAIL_STATE = 1265; // причина отказа прогрева (те же коды, что fail)
     private static final int ID_BMS_STATE          = 958;  // 9 = PREHEAT
 
-    // Логические поля snapshot; оба fail-ID считаются одним полем-источником причины отказа.
-    private static final int FIELD_SWITCH       = 0;
-    private static final int FIELD_STATUS       = 1;
-    private static final int FIELD_FAIL         = 2;
-    private static final int FIELD_AUTO_CTRL    = 3;
-    private static final int FIELD_AUTO_INFO    = 4;
-    private static final int FIELD_PREHEAT_SET  = 5;
-    private static final int FIELD_BMS_STATE    = 6;
-    private static final int VEHICLE_FIELD_COUNT = 7;
-    private static final int ALL_VEHICLE_FIELDS_MASK = (1 << VEHICLE_FIELD_COUNT) - 1;
+    // Профильные поля snapshot. H97X не обязан присылать H97C IDs и наоборот.
+    private static final int FIELD_H97C_SWITCH = 0;
+    private static final int FIELD_H97C_STATUS = 1;
+    private static final int FIELD_H97C_FAIL = 2;
+    private static final int FIELD_H97X_PREHEAT = 3;
+    private static final int FIELD_H97X_FAIL = 4;
+    private static final int FIELD_BMS_STATE = 5;
+    private static final int FIELD_AUTO_CTRL = 6;
+    private static final int FIELD_AUTO_INFO = 7;
+    private static final int H97X_REQUIRED_MASK = (1 << FIELD_H97X_PREHEAT)
+            | (1 << FIELD_H97X_FAIL) | (1 << FIELD_BMS_STATE);
+    private static final int H97C_REQUIRED_MASK = (1 << FIELD_H97C_SWITCH)
+            | (1 << FIELD_H97C_STATUS) | (1 << FIELD_H97C_FAIL)
+            | (1 << FIELD_BMS_STATE);
+
+    private static final OemVehicleStateTransport.StateKey H97X_PREHEAT_KEY =
+            new OemVehicleStateTransport.StateKey("DRIVER_PREHEAT_SET", ID_DRIVER_PREHEAT_SET);
+    private static final OemVehicleStateTransport.StateKey H97C_CONTROL_KEY =
+            new OemVehicleStateTransport.StateKey(
+                    "BATTERY_TEP_CONTROL_SWITCH", ID_TEP_CONTROL_SWITCH);
 
     // Значение «неизвестно» для статусов, которых ещё не приходило
     private static final int UNKNOWN = Integer.MIN_VALUE;
@@ -163,6 +185,8 @@ public class BatteryHeatService extends Service {
     private volatile int controlStatus = UNKNOWN;
     private volatile int switchState   = UNKNOWN;
     private volatile int failReason    = UNKNOWN;
+    private volatile int h97xFailReason = UNKNOWN;
+    private volatile int h97cFailReason = UNKNOWN;
     private volatile int autoCtrl      = UNKNOWN;
     private volatile int autoCtrlInfo  = UNKNOWN;
     private volatile int preheatSet    = UNKNOWN;
@@ -170,15 +194,33 @@ public class BatteryHeatService extends Service {
 
     private long lastActivateElapsed = Long.MIN_VALUE / 2;
     private long lastActivateAttemptElapsed = Long.MIN_VALUE / 2;
-    private boolean activationPending = false;
+    private volatile boolean activationPending = false;
+    private volatile boolean confirmationPending = false;
+    private int confirmationPlatform = BatteryHeatAutoPolicy.PLATFORM_UNKNOWN;
     private long lastVehicleSnapshotRequestElapsed = Long.MIN_VALUE / 2;
 
     private CanBusEventHub canBusEventHub;
     private CanBusEventHub.Subscription canBusSubscription;
     private volatile boolean destroyed = false;
-    private int vehicleFieldsSeenMask = 0;
+    private volatile int vehicleFieldsSeenMask = 0;
 
     private final Runnable forceQueryRunnable = this::requestVehicleStateSnapshot;
+    private final Runnable activationConfirmationTimeoutRunnable = () -> {
+        if (destroyed || !confirmationPending) return;
+        Log.w(TAG, "battery heat command was accepted but not confirmed by vehicle");
+        clearActivationConfirmation();
+        advanceAutoDecision();
+        requestBroadcastUpdate();
+    };
+    private final Runnable activationConfirmationQueryRunnable = () -> {
+        if (destroyed || !confirmationPending) return;
+        requestVehicleStateSnapshot(true, "activation-confirmation");
+        Handler worker = handler;
+        if (worker != null) {
+            worker.postDelayed(activationConfirmationTimeoutRunnable,
+                    ACTIVATION_CONFIRM_TIMEOUT_MS);
+        }
+    };
 
     private void onCanBusEvent(CanBusEvent event) {
         if (destroyed) return;
@@ -204,11 +246,17 @@ public class BatteryHeatService extends Service {
 
     /** Requests a filtered callback snapshot; TX20 itself runs on the hub query thread. */
     private void requestVehicleStateSnapshot() {
-        if (destroyed || canBusEventHub == null || !isVehicleSnapshotIncomplete()) return;
+        requestVehicleStateSnapshot(false, "incomplete-snapshot");
+    }
+
+    private void requestVehicleStateSnapshot(boolean force, String reason) {
+        if (destroyed || canBusEventHub == null
+                || (!force && !isVehicleSnapshotIncomplete())) return;
         lastVehicleSnapshotRequestElapsed = SystemClock.elapsedRealtime();
         canBusEventHub.requestVehicleStateSnapshot();
-        Log.i(TAG, "queryVehicleState requested, fields="
-                + Integer.bitCount(vehicleFieldsSeenMask) + "/" + VEHICLE_FIELD_COUNT);
+        Log.i(TAG, "queryVehicleState requested (" + reason + "), profile="
+                + platformName(currentPlatform()) + " fields="
+                + Integer.bitCount(vehicleFieldsSeenMask));
     }
 
     // -------------------------------------------------------------------------
@@ -216,21 +264,23 @@ public class BatteryHeatService extends Service {
     // -------------------------------------------------------------------------
 
     private void onVehicleState(int id, int state) {
+        final boolean busyBefore = controlBusy();
+        final int platformBefore = currentPlatform();
+        final boolean confirmedBefore = activationConfirmed(platformBefore);
+        final int failBefore = failReason;
         final int field;
-        boolean controlStatusChanged = false;
         switch (id) {
             case ID_TEP_CONTROL_SWITCH:
                 switchState = state;
-                field = FIELD_SWITCH;
+                field = FIELD_H97C_SWITCH;
                 break;
             case ID_TEP_CONTROL_STATUS:
-                controlStatusChanged = controlStatus != state;
                 controlStatus = state;
-                field = FIELD_STATUS;
+                field = FIELD_H97C_STATUS;
                 break;
             case ID_TEP_CONTROL_FAIL:
-                failReason = state;
-                field = FIELD_FAIL;
+                h97cFailReason = state;
+                field = FIELD_H97C_FAIL;
                 break;
             case ID_AUTO_CTRL:
                 autoCtrl = state;
@@ -242,12 +292,12 @@ public class BatteryHeatService extends Service {
                 break;
             case ID_DRIVER_PREHEAT_SET:
                 preheatSet = state;
-                field = FIELD_PREHEAT_SET;
+                field = FIELD_H97X_PREHEAT;
                 break;
             case ID_PREHEAT_FAIL_STATE:
-                // Резервный источник причины отказа, если основной (1296) не приходит.
-                if (failReason == UNKNOWN || failReason == 0) failReason = state;
-                field = FIELD_FAIL;
+                // Значение 0 обязательно снимает предыдущую H97X-ошибку.
+                h97xFailReason = state;
+                field = FIELD_H97X_FAIL;
                 break;
             case ID_BMS_STATE:
                 bmsState = state;
@@ -256,13 +306,29 @@ public class BatteryHeatService extends Service {
             default: return; // не наш сигнал
         }
         vehicleFieldsSeenMask |= 1 << field;
-        if (controlStatusChanged) {
+        final int platformAfter = currentPlatform();
+        failReason = BatteryHeatAutoPolicy.effectiveFailure(
+                platformAfter, h97xFailReason, h97cFailReason, UNKNOWN);
+        final boolean confirmedAfter = activationConfirmed(platformAfter);
+        final boolean busyAfter = controlBusy();
+        final boolean decisionChanged = platformBefore != platformAfter
+                || failBefore != failReason || busyBefore != busyAfter;
+        if (decisionChanged) {
             advanceAutoDecision();
+        }
+        if (confirmedAfter) {
+            if (!confirmedBefore || confirmationPending) {
+                lastActivateElapsed = SystemClock.elapsedRealtime();
+                clearActivationConfirmation();
+            }
+        } else if (BatteryHeatAutoPolicy.blockingFailure(failReason)
+                && confirmationPending) {
+            clearActivationConfirmation();
         }
         Log.i(TAG, "vehicleState id=" + id + " state=" + state);
         requestBroadcastUpdate();
-        if (controlStatusChanged) {
-            maybeAutoActivate("control-status");
+        if (decisionChanged) {
+            maybeAutoActivate("vehicle-state");
         }
     }
 
@@ -288,90 +354,124 @@ public class BatteryHeatService extends Service {
     /**
      * Если включён «Автоматический прогрев батареи» и на улице ниже порога — запускаем прогрев.
      * Не дёргаем, если прогрев уже активен, или недавно уже запускали (анти-спам), или температура
-     * неизвестна. Причина отказа (fail) от BCM отображается в виджете, но саму попытку это не блокирует
-     * — решение «можно ли греть» принимает автомобиль.
+     * неизвестна. Актуальная штатная причина отказа блокирует повторные попытки до следующего
+     * изменения состояния; окончательное решение «можно ли греть» всё равно принимает автомобиль.
      */
     private void maybeAutoActivate(String src) {
         final long activationEpoch = activeCanBusEpoch;
         final long activationDecision = autoDecisionGeneration;
+        final int activationPlatform = currentPlatform();
         if (!automaticActivationCurrent(
-                instanceGeneration, activationEpoch, activationDecision)) return;
+                instanceGeneration, activationEpoch, activationDecision,
+                activationPlatform)) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastActivateElapsed < ACTIVATE_REARM_MS) return;
         if (now - lastActivateAttemptElapsed < ACTIVATE_FAILURE_RETRY_MS) return;
         if (activationPending) return;
         Log.i(TAG, "AUTO прогрев: " + src + " ambient=" + ambientTemp + "°C < " + AUTO_TEMP_THRESHOLD_C);
         activate("auto <" + AUTO_TEMP_THRESHOLD_C + "°C", false,
-                activationEpoch, activationDecision);
+                activationEpoch, activationDecision, activationPlatform);
     }
 
-    /** Активация прогрева. Реальную CAN-команду задаёт пользователь в {@link MainActivity#sendBatteryHeatCommand()}. */
+    /** Активация прогрева через штатный OEM VehicleState API. */
     private void activate(String reason, boolean explicitUserAction,
-                          long automaticEpoch, long automaticDecision) {
+                          long automaticEpoch, long automaticDecision,
+                          int requestedPlatform) {
         if (destroyed) return;
+        final int platform = requestedPlatform == BatteryHeatAutoPolicy.PLATFORM_UNKNOWN
+                ? currentPlatform() : requestedPlatform;
+        if (platform == BatteryHeatAutoPolicy.PLATFORM_UNKNOWN) {
+            Log.w(TAG, "activate battery heat deferred: vehicle profile is not known");
+            requestVehicleStateSnapshot(true, "activation-profile");
+            requestBroadcastUpdate();
+            return;
+        }
+        if (controlBusy()) {
+            Log.i(TAG, "activate battery heat ignored: control is already active/pending");
+            requestBroadcastUpdate();
+            return;
+        }
+        if (BatteryHeatAutoPolicy.blockingFailure(failReason)) {
+            Log.i(TAG, "activate battery heat blocked by vehicle reason=" + failReason);
+            requestBroadcastUpdate();
+            return;
+        }
         if (activationPending) {
             Log.i(TAG, "activate battery heat coalesced — " + reason);
             return;
         }
         activationPending = true;
+        requestBroadcastUpdate();
         Log.i(TAG, "★ activate battery heat — " + reason);
         if (explicitUserAction) {
-            ApplyEngine.postIndependentUserCommand("battery heat " + reason, () -> {
-                final long attemptedAt = SystemClock.elapsedRealtime();
-                boolean sent = false;
-                try {
-                    sent = MainActivity.sendBatteryHeatCommand();
-                } finally {
-                    final ApplyEngine.WakeActionResult result = sent
-                            ? ApplyEngine.WakeActionResult.SUCCESS
-                            : ApplyEngine.WakeActionResult.FAILED;
-                    Handler worker = handler;
-                    if (!destroyed && worker != null) {
-                        worker.post(() -> finishActivation(
-                                result, attemptedAt, Long.MIN_VALUE));
-                    }
-                }
-            });
+            final AtomicLong attemptedAt = new AtomicLong();
+            final AtomicBoolean accepted = new AtomicBoolean();
+            ApplyEngine.postIndependentUserCommand("battery heat " + reason, () ->
+                            accepted.set(CanSender.runGuardedSend(
+                                    () -> !destroyed && currentPlatform() == platform
+                                            && !controlBusy()
+                                            && !BatteryHeatAutoPolicy.blockingFailure(failReason),
+                                    () -> attemptedAt.compareAndSet(
+                                            0L, SystemClock.elapsedRealtime()),
+                                    () -> sendOemBatteryHeatCommand(platform))),
+                    () -> {
+                        final ApplyEngine.WakeActionResult result = accepted.get()
+                                ? ApplyEngine.WakeActionResult.SUCCESS
+                                : ApplyEngine.WakeActionResult.FAILED;
+                        Handler worker = handler;
+                        if (!destroyed && worker != null) {
+                            worker.post(() -> finishActivation(
+                                    result, attemptedAt.get(), Long.MIN_VALUE, platform));
+                        }
+                    });
         } else {
             final long activationGeneration = instanceGeneration;
             final AtomicLong attemptedAt = new AtomicLong();
             ApplyEngine.postWakeAction("battery heat " + reason, () -> {
                 // ApplyEngine already installs its physical-wake guard. This nested guard adds the
                 // current automatic-decision fence to the same ThreadLocal and is therefore checked
-                // immediately before every frame in MainActivity.sendBatteryHeatCommand().
+                // immediately before the OEM TX58 Binder transaction.
                 return CanSender.runGuardedSend(
                         () -> automaticActivationCurrent(
-                                activationGeneration, automaticEpoch, automaticDecision),
+                                activationGeneration, automaticEpoch, automaticDecision,
+                                platform),
                         () -> attemptedAt.compareAndSet(
                                 0L, SystemClock.elapsedRealtime()),
-                        MainActivity::sendBatteryHeatCommand);
+                        () -> sendOemBatteryHeatCommand(platform));
             }, result -> {
                 final long attempt = attemptedAt.get();
                 Handler worker = handler;
                 if (!destroyed && worker != null) {
                     worker.post(() -> finishActivation(
-                            result, attempt, automaticDecision));
+                            result, attempt, automaticDecision, platform));
                 }
             });
         }
     }
 
     private void finishActivation(ApplyEngine.WakeActionResult result, long attemptedAt,
-                                  long automaticDecision) {
+                                  long automaticDecision, int platform) {
         if (destroyed) return;
         activationPending = false;
+        requestBroadcastUpdate();
+        final boolean staleAutomaticDecision = automaticDecision != Long.MIN_VALUE
+                && automaticDecision != autoDecisionGeneration;
         if (attemptedAt > 0L) {
             // The physical-wake guard may turn false after a failed JNI transaction and make the
             // terminal result SKIPPED. The exact per-frame marker still proves a real bus attempt,
             // so it must retain the failure cooldown and prevent an immediate duplicate command.
             lastActivateAttemptElapsed = attemptedAt;
-            if (result == ApplyEngine.WakeActionResult.SUCCESS) {
-                lastActivateElapsed = attemptedAt;
+            if (!staleAutomaticDecision && result == ApplyEngine.WakeActionResult.SUCCESS) {
+                if (activationConfirmed(platform)) {
+                    lastActivateElapsed = SystemClock.elapsedRealtime();
+                    clearActivationConfirmation();
+                } else {
+                    beginActivationConfirmation(platform);
+                }
             }
         }
 
-        if (automaticDecision != Long.MIN_VALUE
-                && automaticDecision != autoDecisionGeneration) {
+        if (staleAutomaticDecision) {
             // Exactly one completion handoff to the latest event decision. No timer/retry is armed;
             // anti-spam timestamps still apply if any frame was actually attempted.
             maybeAutoActivate("stale-completion-handoff");
@@ -384,21 +484,103 @@ public class BatteryHeatService extends Service {
         }
     }
 
+    private boolean sendOemBatteryHeatCommand(int platform) {
+        final OemVehicleStateTransport.StateKey key;
+        if (platform == BatteryHeatAutoPolicy.PLATFORM_H97C) {
+            key = H97C_CONTROL_KEY;
+        } else if (platform == BatteryHeatAutoPolicy.PLATFORM_H97X) {
+            key = H97X_PREHEAT_KEY;
+        } else {
+            return false;
+        }
+        return OemVehicleStateTransport.sendVehicleState(
+                getApplicationContext(), key, 1,
+                "battery temperature control " + platformName(platform)).accepted();
+    }
+
+    private void beginActivationConfirmation(int platform) {
+        confirmationPending = true;
+        confirmationPlatform = platform;
+        Handler worker = handler;
+        if (worker != null) {
+            worker.removeCallbacks(activationConfirmationQueryRunnable);
+            worker.removeCallbacks(activationConfirmationTimeoutRunnable);
+            worker.postDelayed(activationConfirmationQueryRunnable,
+                    ACTIVATION_CONFIRM_QUERY_MS);
+        }
+        requestBroadcastUpdate();
+    }
+
+    private void clearActivationConfirmation() {
+        confirmationPending = false;
+        confirmationPlatform = BatteryHeatAutoPolicy.PLATFORM_UNKNOWN;
+        Handler worker = handler;
+        if (worker != null) {
+            worker.removeCallbacks(activationConfirmationQueryRunnable);
+            worker.removeCallbacks(activationConfirmationTimeoutRunnable);
+        }
+    }
+
+    private boolean heatingActive() {
+        return BatteryHeatAutoPolicy.heatingActive(controlStatus, preheatSet, bmsState);
+    }
+
+    private boolean activationConfirmed(int platform) {
+        return BatteryHeatAutoPolicy.activationConfirmed(
+                platform, controlStatus, switchState, preheatSet, bmsState);
+    }
+
+    private boolean controlBusy() {
+        return BatteryHeatAutoPolicy.controlBusy(
+                controlStatus, switchState, preheatSet, bmsState, confirmationPending);
+    }
+
+    private int currentPlatform() {
+        final int xMask = (1 << FIELD_H97X_PREHEAT) | (1 << FIELD_H97X_FAIL);
+        // 1294 switch feedback is decoded by some mixed firmwares too; only the platform-specific
+        // status/failure IDs are authoritative evidence that the H97C setter must be used.
+        final int cMask = (1 << FIELD_H97C_STATUS) | (1 << FIELD_H97C_FAIL);
+        return BatteryHeatAutoPolicy.platform(
+                (vehicleFieldsSeenMask & xMask) != 0,
+                (vehicleFieldsSeenMask & cMask) != 0);
+    }
+
+    private static String platformName(int platform) {
+        if (platform == BatteryHeatAutoPolicy.PLATFORM_H97X) return "H97X";
+        if (platform == BatteryHeatAutoPolicy.PLATFORM_H97C) return "H97C";
+        return "unknown";
+    }
+
+    private int activationPhase() {
+        if (heatingActive()) return ACTIVATION_ACTIVE;
+        if (BatteryHeatAutoPolicy.blockingFailure(failReason)) return ACTIVATION_BLOCKED;
+        if (activationPending) return ACTIVATION_SENDING;
+        if (confirmationPending) return ACTIVATION_AWAITING_CONFIRMATION;
+        if (currentPlatform() == BatteryHeatAutoPolicy.PLATFORM_H97C
+                && switchState == 1) return ACTIVATION_ENABLED;
+        if (controlStatus == 2) return ACTIVATION_AWAITING_CONFIRMATION;
+        return ACTIVATION_IDLE;
+    }
+
     private void advanceAutoDecision() {
         ++autoDecisionGeneration;
     }
 
     private boolean automaticActivationCurrent(long activationInstance,
                                                long activationEpoch,
-                                               long activationDecision) {
+                                               long activationDecision,
+                                               int activationPlatform) {
         return BatteryHeatAutoPolicy.canSend(
-                !destroyed && ACTIVE_INSTANCE.get() == activationInstance,
+                !destroyed && ACTIVE_INSTANCE.get() == activationInstance
+                        && activationPlatform != BatteryHeatAutoPolicy.PLATFORM_UNKNOWN
+                        && activationPlatform == currentPlatform(),
                 activationEpoch, activeCanBusEpoch, ambientTempEpoch,
                 activationDecision, autoDecisionGeneration,
                 cachedAutoEnabled,
                 ambientTemp != TEMP_INVALID,
                 ambientTemp < AUTO_TEMP_THRESHOLD_C,
-                controlStatus == 1);
+                controlBusy(),
+                BatteryHeatAutoPolicy.blockingFailure(failReason));
     }
 
     // -------------------------------------------------------------------------
@@ -518,6 +700,9 @@ public class BatteryHeatService extends Service {
         i.putExtra("autoCtrlInfo",  autoCtrlInfo);
         i.putExtra("preheatSet",    preheatSet);
         i.putExtra("bmsState",      bmsState);
+        i.putExtra("vehiclePlatform", currentPlatform());
+        i.putExtra("activationPhase", activationPhase());
+        i.putExtra("confirmationPlatform", confirmationPlatform);
         i.putExtra("autoEnabled",   cachedAutoEnabled ? 1 : 0);
         i.putExtra("tempThreshold", AUTO_TEMP_THRESHOLD_C);
         Context app = getApplicationContext();
@@ -540,7 +725,8 @@ public class BatteryHeatService extends Service {
             String a = intent.getAction();
             if (ACTION_BATTERY_HEAT_ACTIVATE.equals(a)) {
                 // Ручная активация из виджета (в один клик).
-                activate("manual (виджет)", true, 0L, Long.MIN_VALUE);
+                activate("manual (виджет)", true, 0L, Long.MIN_VALUE,
+                        currentPlatform());
             } else if (ACTION_BATTERY_HEAT_AUTO_CHANGED.equals(a)) {
                 if (!intent.hasExtra(EXTRA_BATTERY_HEAT_AUTO_ENABLED)) return;
                 applyAutoSettingChange(intent.getBooleanExtra(
@@ -715,10 +901,22 @@ public class BatteryHeatService extends Service {
 
     private void resetVehicleSnapshotTracking() {
         vehicleFieldsSeenMask = 0;
+        controlStatus = UNKNOWN;
+        switchState = UNKNOWN;
+        h97cFailReason = UNKNOWN;
+        h97xFailReason = UNKNOWN;
+        failReason = UNKNOWN;
+        preheatSet = UNKNOWN;
+        bmsState = UNKNOWN;
+        autoCtrl = UNKNOWN;
+        autoCtrlInfo = UNKNOWN;
+        clearActivationConfirmation();
+        requestBroadcastUpdate();
     }
 
     private boolean isVehicleSnapshotIncomplete() {
-        return vehicleFieldsSeenMask != ALL_VEHICLE_FIELDS_MASK;
+        return !BatteryHeatAutoPolicy.snapshotComplete(
+                vehicleFieldsSeenMask, H97X_REQUIRED_MASK, H97C_REQUIRED_MASK);
     }
 
     private void createNotificationChannel() {

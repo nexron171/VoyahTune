@@ -41,19 +41,16 @@ android {
         buildConfig = true
     }
 
-    // Флейворы: full = VirtualDisplay/Frida; light = без них. Прямой Apollo через штатный
-    // CanBus Binder доступен в обоих флейворах и управляется отдельным build-флагом.
+    // Флейворы: full = VirtualDisplay/Frida; light = без них.
     flavorDimensions += "tier"
     productFlavors {
         create("full") {
             dimension = "tier"
             buildConfigField("boolean", "IS_FULL", "true")
-            buildConfigField("boolean", "HAS_DIRECT_APOLLO", "true")
         }
         create("light") {
             dimension = "tier"
             buildConfigField("boolean", "IS_FULL", "false")
-            buildConfigField("boolean", "HAS_DIRECT_APOLLO", "true")
         }
     }
     ndkVersion = "27.0.12077973"

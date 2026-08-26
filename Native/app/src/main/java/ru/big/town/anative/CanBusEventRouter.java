@@ -191,6 +191,7 @@ final class CanBusEventRouter {
         private boolean accepts(CanBusEvent event) {
             switch (event.kind) {
                 case CONNECTION: return hasInterest(INTEREST_CONNECTION);
+                case CONNECTION_LOST: return hasInterest(INTEREST_CONNECTION);
                 case DOOR: return hasInterest(INTEREST_DOOR);
                 case GEAR: return hasInterest(INTEREST_GEAR);
                 case LIGHT_STATUS: return hasInterest(INTEREST_LIGHT_STATUS);
@@ -217,6 +218,7 @@ final class CanBusEventRouter {
             while (iterator.hasNext()) {
                 CanBusEvent queued = iterator.next();
                 if (queued.kind != CanBusEvent.Kind.CONNECTION
+                        && queued.kind != CanBusEvent.Kind.CONNECTION_LOST
                         && !queued.isOrderedTransition()) {
                     iterator.remove();
                     return queued;
@@ -225,7 +227,8 @@ final class CanBusEventRouter {
             iterator = queue.iterator();
             while (iterator.hasNext()) {
                 CanBusEvent queued = iterator.next();
-                if (queued.kind != CanBusEvent.Kind.CONNECTION) {
+                if (queued.kind != CanBusEvent.Kind.CONNECTION
+                        && queued.kind != CanBusEvent.Kind.CONNECTION_LOST) {
                     iterator.remove();
                     return queued;
                 }

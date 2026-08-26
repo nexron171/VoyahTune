@@ -59,18 +59,15 @@ android {
     }
 
     // Флейворы: full = сплит/док/кнопки на руле/VirtualDisplay; light = без них.
-    // Прямой Apollo не использует Frida и доступен в обоих флейворах.
     flavorDimensions += "tier"
     productFlavors {
         create("full") {
             dimension = "tier"
             buildConfigField("boolean", "IS_FULL", "true")
-            buildConfigField("boolean", "HAS_DIRECT_APOLLO", "true")
         }
         create("light") {
             dimension = "tier"
             buildConfigField("boolean", "IS_FULL", "false")
-            buildConfigField("boolean", "HAS_DIRECT_APOLLO", "true")
         }
     }
     dependenciesInfo {

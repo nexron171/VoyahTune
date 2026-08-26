@@ -42,7 +42,8 @@ public final class ApplyEngine {
     }
 
     // Дебаунс пачки триггеров пробуждения.
-    private static final long DEBOUNCE_MS = 800;
+    /** Lets the Android 11 vehicle stack and OEM CanBus service finish waking before restore. */
+    private static final long DEBOUNCE_MS = 10_000L;
     // Ожидание готовности настроек: до READY_MAX_ATTEMPTS попыток с паузой READY_RETRY_MS.
     // Первые PROVIDER_ONLY_ATTEMPTS попыток кэш не принимаем — даём провайдеру шанс подняться,
     // чтобы не применить устаревший снимок, когда свежие данные вот-вот будут доступны.
@@ -427,8 +428,14 @@ public final class ApplyEngine {
 
     /** Explicit command unrelated to restored drive modes (for example battery preheating). */
     public static void postIndependentUserCommand(String reason, Runnable action) {
+        postIndependentUserCommand(reason, action, null);
+    }
+
+    /** Independent explicit command with exactly-once completion, including queue rejection. */
+    public static void postIndependentUserCommand(String reason, Runnable action,
+                                                  Runnable onTerminal) {
         Log.i(TAG, "postIndependentUserCommand: " + reason);
-        enqueueUserCommand(commandBg(), reason, action, null);
+        enqueueUserCommand(commandBg(), reason, action, onTerminal);
     }
 
     private static void enqueueUserCommand(Handler commandHandler, String reason, Runnable action,

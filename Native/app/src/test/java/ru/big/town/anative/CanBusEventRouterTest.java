@@ -68,6 +68,26 @@ public class CanBusEventRouterTest {
     }
 
     @Test
+    public void connectionLostIsAnOrderedEpochBarrier() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        ManualExecutor executor = new ManualExecutor();
+        List<String> delivered = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                new int[]{PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID}, executor,
+                event -> delivered.add(event.connectionEpoch + ":" + event.kind));
+
+        router.dispatch(CanBusEvent.connection(1, 1, 1));
+        router.dispatch(vehicle(2, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
+        router.invalidateThrough(1);
+        router.dispatch(CanBusEvent.connectionLost(2, 3, 3, 1));
+        router.dispatch(vehicle(4, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 0));
+        executor.runAll();
+
+        assertEquals(Arrays.asList("2:CONNECTION_LOST"), delivered);
+    }
+
+    @Test
     public void newEpochClearsQueuedEventsAndRejectsLateOldEpoch() {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();

@@ -2,147 +2,149 @@
 set -eu
 
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloTlcService.java"
-POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloTlcPolicy.java"
-GATE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloCanBusDemandGate.java"
-SET_MODES="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
-ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
-LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
-MANIFEST="$REPO_ROOT/Native/app/src/main/AndroidManifest.xml"
+HOOK="$REPO_ROOT/Packaging/inject/apollo_tech.js"
+HOOK_MANIFEST="$REPO_ROOT/Packaging/system/voyahtune-hook-manifest.json"
 LOAD_BIN="$REPO_ROOT/Packaging/system/load.bin"
-APOLLO_HOOK="$REPO_ROOT/Packaging/inject/apollo_tech.js"
-MAKE_RELEASE="$REPO_ROOT/make_release.sh"
 README="$REPO_ROOT/Packaging/README.md"
-FULL_INSTALL_SH="$REPO_ROOT/Packaging/installer/full/install.sh"
-FULL_INSTALL_BAT="$REPO_ROOT/Packaging/installer/full/install.bat"
-FULL_REMOVE_SH="$REPO_ROOT/Packaging/installer/full/remove.sh"
-FULL_REMOVE_BAT="$REPO_ROOT/Packaging/installer/full/remove.bat"
-LIGHT_INSTALL_SH="$REPO_ROOT/Packaging/installer/light/install.sh"
-LIGHT_INSTALL_BAT="$REPO_ROOT/Packaging/installer/light/install.bat"
-LIGHT_REMOVE_SH="$REPO_ROOT/Packaging/installer/light/remove.sh"
-LIGHT_REMOVE_BAT="$REPO_ROOT/Packaging/installer/light/remove.bat"
+ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
+APOLLO_SETTINGS="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/ApolloSettings.java"
+PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
+LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
+SET_MODES="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
+MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
+RESTORE_POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloRestorePolicy.java"
+APPLY_ENGINE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApplyEngine.java"
+NATIVE_MANIFEST="$REPO_ROOT/Native/app/src/main/AndroidManifest.xml"
+RUNTIME_FLAG="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloSettingsRuntimeFlag.java"
+RUNTIME_STATE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloSettingsRuntimeState.java"
 
-fail() {
-    echo "FAIL: $*" >&2
-    exit 1
-}
-
-require_fixed() {
-    grep -Fq -- "$2" "$1" || fail "missing '$2' in $1"
-}
-
+fail() { echo "FAIL: $*" >&2; exit 1; }
+require_fixed() { grep -Fq -- "$2" "$1" || fail "missing '$2' in $1"; }
 forbid_fixed() {
     if grep -Fq -- "$2" "$1"; then
         fail "forbidden '$2' remains in $1"
     fi
 }
 
-# Full entitlement hook exactly follows the two voboost provider replacements. It must not bring
-# back the former master/profile/async activation machinery or any CAN interaction.
-[ -s "$APOLLO_HOOK" ] || fail "minimal apollo_tech.js is missing"
-require_fixed "$APOLLO_HOOK" \
-    'com.qinggan.app.vehiclesetting.fragments.driveassistance.adas.BaiduProviderUtil'
-require_fixed "$APOLLO_HOOK" 'BaiduProviderUtil.doQuerySubscribeInfo'
-require_fixed "$APOLLO_HOOK" 'BaiduProviderUtil.doQueryNOALearnInfo'
-require_fixed "$APOLLO_HOOK" \
-    '{"expireStatus":"0","isMqtt":false,"remainDays":"30","subscriptionStatus":"1"}'
-require_fixed "$APOLLO_HOOK" 'var NOA_LEARNED = "1";'
-require_fixed "$APOLLO_HOOK" '[apollo] hook ready'
-for FORBIDDEN in DriveAssistanceAdasStatusManager asyncQueryAdasSubData onVehicleStateChanged \
-        ICanBusService SettingsGlobal setInterval setTimeout TX58 TX77; do
-    forbid_fixed "$APOLLO_HOOK" "$FORBIDDEN"
+# The Android 11 VehicleSettings hook overrides subscription/exam status without changing stock
+# view visibility. It never exposes hidden H97X rows, subscribes to CAN, or writes VehicleState.
+require_fixed "$HOOK" 'BaiduProviderUtil.doQuerySubscribeInfo.overload("android.content.Context")'
+require_fixed "$HOOK" 'BaiduProviderUtil.doQueryNOALearnInfo.overload('
+require_fixed "$HOOK" 'DriveAssistantConfig.isSupportSDB.overload()'
+require_fixed "$HOOK" 'DriveAssistanceAdasStatusManager'
+require_fixed "$HOOK" 'ui=stock_visibility'
+for SYMBOL in forceApolloBindingVisible FragmentDriveAssistanceBindingImpl \
+        'executeBindings.overload()' onHintSwitchAdasClick getGearStatus GearState Parking \
+        CanBusManager CanBusTool asyncQueryAllAdasStatus asyncQueryAdasSubData \
+        onVehicleStateChanged sendAdasSubStatusToADCU setVehicleState \
+        setVehicleAndAirConditionBundleState TX58 TX77 setInterval setTimeout \
+        forceSubscriptionUiVisible refreshExistingApolloFragments \
+        'DriveAssistantData.isShowAdas.overload()' 'setShowAdas(' \
+        'fragmentAdasSubStatusBg.value.setVisibility(' \
+        'DriveAssistanceFragment.updateAdasData.overload()' \
+        'DriveAssistanceFragment.getSDBState.overload()'; do
+    forbid_fixed "$HOOK" "$SYMBOL"
 done
-node --check "$APOLLO_HOOK"
+node --check "$HOOK"
 
-# Loader only discovers VehicleSetting and performs one latched attempt per exact process identity.
-# No Apollo Settings polling or activation CAN transaction is allowed.
-require_fixed "$LOAD_BIN" 'APOLLO_TARGET=com.qinggan.app.vehiclesetting'
-require_fixed "$LOAD_BIN" 'inject_apollo() {'
-require_fixed "$LOAD_BIN" 'reserve_injection_attempt "$APOLLO_ID" "$APOLLO_ATTEMPT"'
-require_fixed "$LOAD_BIN" 'APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)'
-require_fixed "$LOAD_BIN" 'APOLLO_READY_MARKER='
-for FORBIDDEN in APOLLO_LEGACY_OPT_IN apollo_startup_once open_voyah_apollo \
-        'settings put global' asyncQueryAdasSubData; do
-    forbid_fixed "$LOAD_BIN" "$FORBIDDEN"
+# The stock-menu target is a normal persisted setting. The boot-bound file is only a fail-closed
+# loader transport republished by the same delayed restore plan.
+require_fixed "$LAYOUT" 'android:text="Активация функций Apollo"'
+require_fixed "$LAYOUT" 'android:id="@+id/switchApolloSettingsActivation"'
+require_fixed "$LAYOUT" 'android:checked="false"'
+require_fixed "$APOLLO_SETTINGS" 'static final String STOCK_UI = "apolloStockUiEnabled";'
+require_fixed "$ADVANCE" 'ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED'
+require_fixed "$PROVIDER" 'ApolloSettings.STOCK_UI,      // 28'
+require_fixed "$MAIN" 'apolloStockUiEnabled = cursor.getColumnCount() > 28'
+require_fixed "$MAIN" 'plan.addOnce("Apollo stock subscription/exam UI"'
+require_fixed "$MAIN" 'ApolloSettingsRuntimeState.applyTarget(context, stockUiTarget)'
+require_fixed "$RUNTIME_STATE" 'static TargetApplyResult applyTarget(Context context, boolean enabled)'
+require_fixed "$RUNTIME_STATE" 'forceStop.invoke(am, "com.qinggan.app.vehiclesetting")'
+require_fixed "$RUNTIME_FLAG" 'boot='
+require_fixed "$RUNTIME_FLAG" 'isEnabledForBoot'
+require_fixed "$RUNTIME_STATE" 'createDeviceProtectedStorageContext()'
+require_fixed "$RUNTIME_STATE" 'new File("/proc/sys/kernel/random/boot_id")'
+require_fixed "$RUNTIME_STATE" 'StandardCopyOption.ATOMIC_MOVE'
+for FILE in "$RUNTIME_FLAG" "$RUNTIME_STATE"; do
+    forbid_fixed "$FILE" 'Settings.Global'
 done
-[ "$(grep -Fc 'settings get global' "$LOAD_BIN")" -eq 1 ] \
-    || fail "loader must contain only the one identity-latched keyboard Settings read"
-require_fixed "$LOAD_BIN" 'settings get global "$KEYBOARD_SETTING"'
-[ "$(grep -Fc 'APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)' "$LOAD_BIN")" -eq 1 ] \
-    || fail "Apollo process discovery is not a single watchdog call site"
+require_fixed "$LOAD_BIN" 'apollo_runtime_flag_enabled() {'
+require_fixed "$LOAD_BIN" '[ "$APOLLO_FLAG_BOOT" = "$APOLLO_CURRENT_BOOT" ]'
+require_fixed "$LOAD_BIN" 'if apollo_runtime_flag_enabled; then'
+require_fixed "$HOOK" 'profile=persisted-target'
+forbid_fixed "$ADVANCE" 'MSG_APOLLO_SETTINGS_SET'
+forbid_fixed "$ADVANCE" 'MSG_APOLLO_SETTINGS_STATE'
+forbid_fixed "$SET_MODES" 'MSG_APOLLO_SETTINGS_SET'
+forbid_fixed "$SET_MODES" 'MSG_APOLLO_SETTINGS_STATE'
 
-require_fixed "$MAKE_RELEASE" 'apollo_tech.js'
-require_fixed "$FULL_INSTALL_SH" \
-    'install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644'
-require_fixed "$FULL_INSTALL_BAT" \
-    'install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644'
-require_fixed "$FULL_INSTALL_SH" 'ensure_apollo_entitlement_ready()'
-require_fixed "$FULL_INSTALL_BAT" ':ensure_apollo_entitlement_ready'
-require_fixed "$FULL_INSTALL_SH" '/data/local/tmp/voyahtune_apollo.pid'
-require_fixed "$FULL_INSTALL_BAT" '/data/local/tmp/voyahtune_apollo.pid'
-for FILE in "$FULL_INSTALL_SH" "$FULL_INSTALL_BAT" "$LIGHT_INSTALL_SH" "$LIGHT_INSTALL_BAT"; do
-    require_fixed "$FILE" "rm -f /data/local/bin/apollo_tech.js"
+# VoyahTune owns five persisted targets. There is no current-state query or parking gate.
+for KEY in STOCK_UI TLC TRAFFIC_LIGHTS GREEN_SOUND TRAFFIC_SIGNS; do
+    require_fixed "$APOLLO_SETTINGS" "static final String $KEY"
 done
-for FILE in "$FULL_REMOVE_SH" "$FULL_REMOVE_BAT" "$LIGHT_REMOVE_SH" "$LIGHT_REMOVE_BAT"; do
-    require_fixed "$FILE" '/data/local/tmp/voyahtune_apollo.pid'
-    require_fixed "$FILE" '/data/local/tmp/voyahtune_apollo.attempt'
-    require_fixed "$FILE" '/data/local/tmp/voyahtune_apollo.txt'
+require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloTlc, ApolloSettings.TLC);'
+require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloTrafficLights, ApolloSettings.TRAFFIC_LIGHTS);'
+require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloTrafficSigns, ApolloSettings.TRAFFIC_SIGNS);'
+require_fixed "$ADVANCE" 'prefs.edit().putBoolean(ApolloSettings.GREEN_SOUND'
+require_fixed "$LAYOUT" 'android:id="@+id/switchApolloTlc"'
+require_fixed "$LAYOUT" 'android:id="@+id/switchApolloTrafficLights"'
+require_fixed "$LAYOUT" 'android:id="@+id/switchApolloTrafficSigns"'
+require_fixed "$PROVIDER" 'ApolloSettings.TLC,          // 24'
+require_fixed "$PROVIDER" 'ApolloSettings.TRAFFIC_LIGHTS, // 25'
+require_fixed "$PROVIDER" 'ApolloSettings.GREEN_SOUND, // 26'
+require_fixed "$PROVIDER" 'ApolloSettings.TRAFFIC_SIGNS,// 27'
+for SYMBOL in MSG_APOLLO_TLC_QUERY ACTION_APOLLO_TLC_UPDATE APOLLO_DEMAND_OWNER \
+        requestQuery releaseApolloDemand ApolloTlcService ApolloCanBusDemandGate \
+        ApolloTlcPolicy TX_GET_GEAR_STATUS; do
+    if grep -R -Fq --exclude-dir=build --exclude-dir=.gradle \
+            --exclude=test_apollo_direct_only.sh \
+            "$SYMBOL" "$REPO_ROOT/Native" "$REPO_ROOT/RestoreMode"; then
+        fail "obsolete read-only Apollo symbol remains: $SYMBOL"
+    fi
 done
-require_fixed "$README" "entitlement как в voboost"
+# TX57 is now a shared transport capability for the unrelated Power Hold one-shot SOC/status
+# checks. Apollo itself must remain write-only and must not read current VehicleState.
+forbid_fixed "$RESTORE_POLICY" 'readVehicleState'
+forbid_fixed "$RESTORE_POLICY" 'TX_GET_VEHICLE_STATE'
+forbid_fixed "$NATIVE_MANIFEST" 'android:process=":apollo"'
 
-# The section remains visible. Entitlement is automatic in full; all displayed CAN controls remain
-# read-only and therefore cannot duplicate stock VehicleSetting writes.
-require_fixed "$LAYOUT" 'android:id="@+id/pageApolloTech"'
-require_fixed "$LAYOUT" 'Full-версия автоматически открывает штатную подписку ADAS'
-require_fixed "$ADVANCE" 'private void requestApolloState()'
-require_fixed "$ADVANCE" 'switchApolloTlc.setEnabled(false);'
-require_fixed "$ADVANCE" 'switchApolloTrafficLights.setEnabled(false);'
-require_fixed "$ADVANCE" 'switchApolloTrafficSigns.setEnabled(false);'
-for SYMBOL in MSG_APOLLO_SET sendApolloCommand canChangeApollo showApolloTlcEnableDialog \
-        showApolloAnpDependencyDialog; do
-    forbid_fixed "$ADVANCE" "$SYMBOL"
+# The existing wake restore sends capability values first and switches second through ordered OEM
+# TX77 bundles. Disabled values are explicit too, so a target can actually be turned back off.
+for ENTRY in PLC_SWITCH GLA_SWITCH GLA_LIGHT_CHANGE_SWITCH TSR_SWITCH \
+        RPA_FUNC_ENABLE HPP_FUNC_ENABLE GLC_FUNC_ENABLE ISLC_FUNC_ENABLE TLC_FUNC_ENABLE \
+        NOA_FUNC_ENABLE ELK_FUNC_ENABLE ESA_FUNC_ENABLE APA_FUNC_ENABLE_SA \
+        RPA_FUNC_ENABLE_SA HAVP_FUNC_ENABLE_SA ACC_FUNC_ENABLE_SA ICA_FUNC_ENABLE_SA \
+        PLC_FUNC_ENABLE_SA HANP_FUNC_ENABLE_SA ISA_FUNC_ENABLE_SA ISLC_FUNC_ENABLE_SA \
+        TLA_FUNC_ENABLE_SA; do
+    require_fixed "$RESTORE_POLICY" "static final String $ENTRY"
 done
+require_fixed "$RESTORE_POLICY" 'if (tlc || trafficLights || trafficSigns) {'
+require_fixed "$RESTORE_POLICY" 'putAllEntitlements(entitlements, ENABLED);'
+require_fixed "$RESTORE_POLICY" 'target.put(RPA_FUNC_ENABLE, value);'
+require_fixed "$RESTORE_POLICY" 'target.put(TLA_FUNC_ENABLE_SA, value);'
+require_fixed "$RESTORE_POLICY" 'switches.put(PLC_SWITCH, state(tlc));'
+require_fixed "$RESTORE_POLICY" 'switches.put(GLA_LIGHT_CHANGE_SWITCH, state(trafficLights && greenSound));'
+require_fixed "$RESTORE_POLICY" 'switches.put(TSR_SWITCH, trafficSigns ? 1 : 2);'
+require_fixed "$MAIN" 'ApolloRestorePolicy.appendTo(primaryValues, trailingValues,'
+require_fixed "$MAIN" 'OemVehicleStateTransport.sendRestoreSequence('
+require_fixed "$MAIN" 'Apollo entitlements then switches/recuperation'
+forbid_fixed "$RESTORE_POLICY" 'getVehicleState'
+forbid_fixed "$RESTORE_POLICY" 'Parking'
 
-# Native accepts only a query and reads TX57/TX6. No activation message, TX58/TX77, entitlement
-# vector, write state machine or delayed write confirmation may remain.
-require_fixed "$SET_MODES" 'MSG_APOLLO_TLC_QUERY'
-for SYMBOL in MSG_APOLLO_TLC_SET MSG_APOLLO_GLA_SET MSG_APOLLO_GLA_SOUND_SET \
-        MSG_APOLLO_TSR_SET requestTlcSet requestGlaSet requestGlaSoundSet requestTsrSet; do
-    forbid_fixed "$SET_MODES" "$SYMBOL"
-done
-require_fixed "$SERVICE" 'TX_GET_GEAR_STATUS = 6'
-require_fixed "$SERVICE" 'TX_GET_VEHICLE_STATE = 57'
-require_fixed "$SERVICE" 'getVehicleState(ApolloTlcPolicy.Signal signal)'
-require_fixed "$SERVICE" 'return binder.transact(transactionCode, data, reply, 0);'
-for SYMBOL in TX_SET_VEHICLE_STATE TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE \
-        ACTION_INTERNAL_SET ACTION_INTERNAL_GLA_SET ACTION_INTERNAL_GLA_SOUND_SET \
-        ACTION_INTERNAL_TSR_SET setVehicleState setCompositeEntitlements Entitlement \
-        beginPendingWrite transmitPendingSignal writeGeneration pendingDesiredState \
-        requestTlcSet requestGlaSet requestGlaSoundSet requestTsrSet; do
-    forbid_fixed "$SERVICE" "$SYMBOL"
-done
-for SYMBOL in Entitlement requestedPlcState requestedTsrState directTlcBlockReason \
-        directSwitchBlockReason writeSessionCurrent; do
-    forbid_fixed "$POLICY" "$SYMBOL"
-done
+# Automatic startup/wake restore waits ten seconds; explicit Apply remains on applyNow().
+require_fixed "$APPLY_ENGINE" 'private static final long DEBOUNCE_MS = 10_000L;'
+require_fixed "$APPLY_ENGINE" 'scheduledAt + DEBOUNCE_MS'
+require_fixed "$APPLY_ENGINE" 'public static void applyNow('
+require_fixed "$README" 'Скрытые на 97X строки отдельных функций не раскрываются'
+require_fixed "$README" 'Автоматическое'
+require_fixed "$README" 'через 10 секунд после wake-события'
 
-# Android 11 containment and demand ownership stay intact for the read-only vendor Binder calls.
-require_fixed "$MANIFEST" 'android:name=".ApolloTlcService"'
-require_fixed "$MANIFEST" 'android:process=":apollo"'
-require_fixed "$SERVICE" 'VENDOR_BINDER_CALL_TIMEOUT_MS = 15_000L'
-require_fixed "$SERVICE" 'Process.killProcess(Process.myPid());'
-require_fixed "$SERVICE" 'new ArrayBlockingQueue<>(1)'
-require_fixed "$SERVICE" 'executor.allowCoreThreadTimeOut(true);'
-require_fixed "$ADVANCE" 'private static final IBinder APOLLO_DEMAND_OWNER = new Binder();'
-require_fixed "$ADVANCE" 'putBinder(EXTRA_APOLLO_DEMAND_OWNER, APOLLO_DEMAND_OWNER)'
-require_fixed "$SET_MODES" 'getBinder(ApolloTlcService.EXTRA_DEMAND_OWNER)'
-require_fixed "$SERVICE" 'implements IBinder.DeathRecipient'
-require_fixed "$SERVICE" 'owner.linkToDeath(candidate, 0);'
-require_fixed "$SERVICE" 'link.owner.unlinkToDeath(link, 0);'
-require_fixed "$GATE" 'final class ApolloCanBusDemandGate'
-for SYMBOL in onVehicleStateChanged TRANSACTION_addCallback registerCanBusCallback \
-        LEASE_TTL renewDemand demandHeartbeat periodicDemand; do
-    forbid_fixed "$SERVICE" "$SYMBOL"
-done
+# The manifest must commit the exact current hook bytes.
+if command -v shasum >/dev/null 2>&1; then
+    ACTUAL_SHA=$(shasum -a 256 "$HOOK" | awk '{print $1}')
+else
+    ACTUAL_SHA=$(sha256sum "$HOOK" | awk '{print $1}')
+fi
+require_fixed "$HOOK_MANIFEST" \
+    "{\"id\":\"apollo-tech\",\"process\":\"com.qinggan.app.vehiclesetting\",\"script\":\"apollo_tech.js\",\"sha256\":\"$ACTUAL_SHA\"}"
 
-echo "PASS: Apollo uses the minimal voboost entitlement hook; Native CAN UI remains read-only"
+echo "PASS: Apollo UI and functions use persisted event-driven restore targets"

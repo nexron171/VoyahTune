@@ -56,6 +56,12 @@ public class SplitHostActivity extends Activity {
 
     private static final String TAG = "$$$ SplitHostActivity $$$";
 
+    /**
+     * Временный feature gate: код изменения пропорции и сохранённые значения остаются на месте,
+     * но drag жест делителя отключён до отдельной проверки на автомобиле.
+     */
+    private static final boolean DIVIDER_RESIZE_GESTURE_ENABLED = false;
+
     public static final String EXTRA_LEFT     = "leftPkg";
     public static final String EXTRA_RIGHT    = "rightPkg";
     public static final String EXTRA_RATIO    = "ratio";
@@ -152,7 +158,8 @@ public class SplitHostActivity extends Activity {
         left.dpi   = in.getIntExtra(EXTRA_LEFT_DPI, 0);
         right.dpi  = in.getIntExtra(EXTRA_RIGHT_DPI, 0);
         int ratio  = in.getIntExtra(EXTRA_RATIO, 1);
-        resizable  = in.getBooleanExtra(EXTRA_RESIZABLE, false);
+        resizable  = DIVIDER_RESIZE_GESTURE_ENABLED
+                && in.getBooleanExtra(EXTRA_RESIZABLE, false);
         presetIdx  = in.getIntExtra(EXTRA_PRESET_IDX, -1);
         presetId   = in.getStringExtra(EXTRA_PRESET_ID);
         float startSplit = in.getFloatExtra(EXTRA_SPLIT, 0f);

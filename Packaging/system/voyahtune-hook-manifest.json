@@ -5,7 +5,7 @@
     {"id":"steering-wheel","process":"com.qinggan.keymanager.service","script":"steeringwheelkeys.js","sha256":"b66700bb177ae4a78966dd63d6f3839e8e308d026b317624cc11363c03bad1c5"},
     {"id":"launcher-dock","process":"com.qinggan.app.launcher","script":"launcherdock.js","sha256":"e6ea0327358b731e8721452fa01c50279c52106cb3d5810225e8891086d26f36"},
     {"id":"multi-display","process":"com.qinggan.systemservice","script":"multidisplay.js","sha256":"0cb711817c8c972662166a9023a0ed4269401057748f5f2b19713e598c034e20"},
-    {"id":"apollo-tech","process":"com.qinggan.app.vehiclesetting","script":"apollo_tech.js","sha256":"e0c35d02539c7d053672ed176f18823e2fb7fc2005d9253069ac196b8f2a38c2"},
+    {"id":"apollo-tech","process":"com.qinggan.app.vehiclesetting","script":"apollo_tech.js","sha256":"023ffe63abbe6e2653e9ea93a57b07bc0afedad3541792c0cfd82f0bc260a6ee"},
     {"id":"keyboard-en","process":"com.qinggan.app.qgime","script":"keyboard_lock_en.js","sha256":"9347786a1d979f422fe5f9dca34b4a8446c9927ea135608383c737212b17a44b"},
     {"id":"keyboard-ru","process":"com.qinggan.app.qgime","script":"keyboard_ru.js","sha256":"9237e8e9fb42c803621ed4ae936a5336f293522f83900e8ba19c9f7bde88e774"}
   ]

@@ -16,6 +16,7 @@ import android.util.Log;
 
 import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -38,6 +39,8 @@ final class OemVehicleStateTransport {
     private static final String CANBUS_ACTION = "com.qinggan.canbus.CanBusService";
     private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
     private static final String WRITE_CANBUS_PERMISSION = "com.qinggan.permission.WRITE_CANBUS";
+    private static final int TX_GEAR_STATUS = 6;
+    private static final int TX_GET_VEHICLE_STATE = 57;
     private static final int TX_SET_VEHICLE_STATE = 58;
     private static final int TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE = 77;
     private static final long BIND_WAIT_MS = 1_500L;
@@ -93,6 +96,30 @@ final class OemVehicleStateTransport {
             this.key = Objects.requireNonNull(key, "key");
             this.value = value;
         }
+    }
+
+    static final class GearStatus {
+        final int ordinal;
+        final int value;
+
+        GearStatus(int ordinal, int value) {
+            this.ordinal = ordinal;
+            this.value = value;
+        }
+    }
+
+    interface Session {
+        GearStatus readGearStatus();
+
+        Integer readVehicleState(StateKey key);
+
+        Result sendVehicleState(StateValue state, String label);
+
+        Result sendBundle(Map<StateKey, Integer> values, String label);
+    }
+
+    interface SessionOperation<T> {
+        T run(Session session);
     }
 
     private static final OemVehicleStateTransport INSTANCE =
@@ -179,8 +206,41 @@ final class OemVehicleStateTransport {
         return INSTANCE.sendSingleInternal(context, new StateValue(key, value), label);
     }
 
+    /**
+     * Runs a short OEM read/write operation against one verified Binder while holding the same
+     * transaction lock used by TX58/TX77. A null result means that the schema or Binder was not
+     * available before the operation started.
+     */
+    static <T> T withSession(Context context, Collection<StateKey> keys,
+                             SessionOperation<T> operation) {
+        return INSTANCE.withSessionInternal(
+                context, Objects.requireNonNull(keys, "VehicleState keys"),
+                Objects.requireNonNull(operation, "session operation"));
+    }
+
     static Result sendBundle(Context context, Map<StateKey, Integer> values, String label) {
         return INSTANCE.sendBundleInternal(context, immutableCopy(values), label);
+    }
+
+    /** Reads a narrow immutable TX57 snapshot once; a partial result is never published. */
+    static Map<StateKey, Integer> readVehicleStates(
+            Context context, Collection<StateKey> keys) {
+        if (keys == null || keys.isEmpty()) {
+            throw new IllegalArgumentException("VehicleState snapshot is empty");
+        }
+        LinkedHashMap<StateKey, Integer> requested = new LinkedHashMap<>();
+        for (StateKey key : keys) {
+            requested.put(Objects.requireNonNull(key, "VehicleState key"), 0);
+        }
+        return withSession(context, requested.keySet(), session -> {
+            LinkedHashMap<StateKey, Integer> result = new LinkedHashMap<>();
+            for (StateKey key : requested.keySet()) {
+                Integer value = session.readVehicleState(key);
+                if (value == null) return null;
+                result.put(key, value);
+            }
+            return Collections.unmodifiableMap(result);
+        });
     }
 
     static Result sendBundle(Context context, Map<String, Integer> values,
@@ -276,6 +336,67 @@ final class OemVehicleStateTransport {
         if (binder == null) return Result.TRANSIENT_FAILURE;
         synchronized (transactionLock) {
             return transactSingle(binder, state, label);
+        }
+    }
+
+    private <T> T withSessionInternal(Context context, Collection<StateKey> keys,
+                                      SessionOperation<T> operation) {
+        Context app = applicationContext(context);
+        if (app == null || !resolveStates(app, keys)) return null;
+
+        if (CanSender.isDebugMode()) {
+            synchronized (transactionLock) {
+                return operation.run(new BoundSession(null, true));
+            }
+        }
+
+        IBinder binder = acquireBinder(app);
+        if (binder == null) return null;
+        synchronized (transactionLock) {
+            if (!isCurrentBinder(binder)) return null;
+            return operation.run(new BoundSession(binder, false));
+        }
+    }
+
+    private final class BoundSession implements Session {
+        private final IBinder binder;
+        private final boolean emulated;
+
+        BoundSession(IBinder binder, boolean emulated) {
+            this.binder = binder;
+            this.emulated = emulated;
+        }
+
+        @Override
+        public GearStatus readGearStatus() {
+            if (emulated) {
+                Log.i(TAG, "EMULATE TX6 gear=Parking(0)");
+                return new GearStatus(0, 0);
+            }
+            return transactGearStatus(binder);
+        }
+
+        @Override
+        public Integer readVehicleState(StateKey key) {
+            Objects.requireNonNull(key, "VehicleState key");
+            if (emulated) {
+                int value = "BMS_SOC_DISPLAY".equals(key.name) ? 100 : 0;
+                Log.i(TAG, "EMULATE TX57 " + key + "=" + value);
+                return value;
+            }
+            return transactVehicleState(binder, key);
+        }
+
+        @Override
+        public Result sendVehicleState(StateValue state, String label) {
+            Objects.requireNonNull(state, "VehicleState value");
+            return emulated ? emulateSingle(state, label) : transactSingle(binder, state, label);
+        }
+
+        @Override
+        public Result sendBundle(Map<StateKey, Integer> values, String label) {
+            LinkedHashMap<StateKey, Integer> copy = immutableCopy(values);
+            return emulated ? emulateBundle(copy, label) : transactBundle(binder, copy, label);
         }
     }
 
@@ -564,6 +685,68 @@ final class OemVehicleStateTransport {
             Log.e(TAG, "TX58 failed [" + safeLabel(label) + "] " + state.key, e);
             dropBinding(null, binder);
             return Result.TRANSIENT_FAILURE;
+        } finally {
+            reply.recycle();
+            data.recycle();
+        }
+    }
+
+    private GearStatus transactGearStatus(IBinder binder) {
+        if (!isCurrentBinder(binder)) return null;
+
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+            if (!binder.transact(TX_GEAR_STATUS, data, reply, 0)) {
+                Log.e(TAG, "TX6 getGearStatus rejected");
+                return null;
+            }
+            reply.readException();
+            if (reply.readInt() == 0) {
+                Log.e(TAG, "TX6 getGearStatus returned null");
+                return null;
+            }
+            int ordinal = reply.readInt();
+            int value = reply.readInt();
+            Log.i(TAG, "TX6 getGearStatus ordinal=" + ordinal + " value=" + value);
+            return new GearStatus(ordinal, value);
+        } catch (RemoteException | RuntimeException e) {
+            Log.e(TAG, "TX6 getGearStatus failed", e);
+            dropBinding(null, binder);
+            return null;
+        } finally {
+            reply.recycle();
+            data.recycle();
+        }
+    }
+
+    private Integer transactVehicleState(IBinder binder, StateKey key) {
+        Integer ordinal;
+        synchronized (schemaLock) {
+            ordinal = resolvedOrdinals.get(key);
+        }
+        if (ordinal == null || !isCurrentBinder(binder)) return null;
+
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+            data.writeInt(1); // VehicleState object is present.
+            data.writeInt(ordinal);
+            data.writeInt(key.stableId);
+            if (!binder.transact(TX_GET_VEHICLE_STATE, data, reply, 0)) {
+                Log.e(TAG, "TX57 getVehicleState rejected " + key);
+                return null;
+            }
+            reply.readException();
+            int value = reply.readInt();
+            Log.i(TAG, "TX57 getVehicleState " + key + "=" + value);
+            return value;
+        } catch (RemoteException | RuntimeException e) {
+            Log.e(TAG, "TX57 getVehicleState failed " + key, e);
+            dropBinding(null, binder);
+            return null;
         } finally {
             reply.recycle();
             data.recycle();

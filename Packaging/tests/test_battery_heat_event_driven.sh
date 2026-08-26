@@ -77,7 +77,7 @@ FORCE_QUERY_POSTS=$(grep -F -c \
 require_fixed "$SERVICE" 'case CONNECTION:'
 require_fixed "$SERVICE" 'handler.removeCallbacks(forceQueryRunnable);'
 require_fixed "$SERVICE" \
-    'if (destroyed || canBusEventHub == null || !isVehicleSnapshotIncomplete()) return;'
+    '|| (!force && !isVehicleSnapshotIncomplete())) return;'
 
 # onStart owns startup/physical-wake provider reconciliation. Monitoring itself only subscribes
 # and publishes cached state; an unknown setting may get one more read on a real temperature event.
@@ -154,21 +154,42 @@ REJECTS=$(grep -F -c 'refreshGate.reject(request);' "$SERVICE")
 [ "$REJECTS" -eq 1 ] || fail "only executor-submit rejection may retain Settings work"
 
 # Automatic work composes a nested decision guard with ApplyEngine's wake guard. Manual activation
-# remains an independent direct user command. The pure policy covers every mutable send condition.
+# remains an independent direct user command. Both use the runtime-verified OEM VehicleState API;
+# the old raw frame is diagnostic-only and must not be reachable from the service.
 require_fixed "$SERVICE" 'private boolean automaticActivationCurrent('
 require_fixed "$SERVICE" 'return CanSender.runGuardedSend('
 require_fixed "$SERVICE" 'attemptedAt.compareAndSet('
 require_fixed "$SERVICE" 'if (attemptedAt > 0L) {'
 require_fixed "$SERVICE" 'ApplyEngine.postIndependentUserCommand("battery heat " + reason'
 require_fixed "$SERVICE" 'maybeAutoActivate("stale-completion-handoff");'
+require_fixed "$SERVICE" '"DRIVER_PREHEAT_SET", ID_DRIVER_PREHEAT_SET'
+require_fixed "$SERVICE" '"BATTERY_TEP_CONTROL_SWITCH", ID_TEP_CONTROL_SWITCH'
+require_fixed "$SERVICE" 'OemVehicleStateTransport.sendVehicleState('
+if grep -Fq 'MainActivity.sendBatteryHeatCommand' "$SERVICE"; then
+    fail "BatteryHeatService must not automatically use the diagnostic raw frame"
+fi
 require_fixed "$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/CanSender.java" \
     'private static final ThreadLocal<Runnable> FRAME_ATTEMPT'
 require_fixed "$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/CanSender.java" \
     'notifyFrameAttempt();'
 for REQUIRED in activeInstance expectedCanBusEpoch ambientTemperatureEpoch \
         expectedDecisionGeneration autoEnabled temperatureKnown temperatureCold \
-        controlAlreadyActive; do
+        controlBusy controlBlocked; do
     require_fixed "$POLICY" "$REQUIRED"
 done
+
+# H97X and H97C are separate protocols: a zero H97X failure clears the previous reason, active or
+# initializing feedback suppresses duplicate activation, and either complete profile stops TX20.
+for REQUIRED in 'h97xFailReason = state;' \
+        'BatteryHeatAutoPolicy.effectiveFailure(' \
+        'BatteryHeatAutoPolicy.heatingActive(' \
+        'BatteryHeatAutoPolicy.controlBusy(' \
+        'BatteryHeatAutoPolicy.snapshotComplete(' \
+        'H97X_REQUIRED_MASK' 'H97C_REQUIRED_MASK'; do
+    require_fixed "$SERVICE" "$REQUIRED"
+done
+require_fixed "$SERVICE" 'ACTIVATION_CONFIRM_QUERY_MS = 3_000L'
+require_fixed "$SERVICE" 'requestVehicleStateSnapshot(true, "activation-confirmation");'
+require_fixed "$SERVICE" 'battery heat command was accepted but not confirmed by vehicle'
 
 echo "PASS: BatteryHeat CAN events are bounded; one independent activation watchdog is retained"

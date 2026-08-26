@@ -4,6 +4,7 @@ package ru.big.town.anative;
 final class CanBusEvent {
     enum Kind {
         CONNECTION,
+        CONNECTION_LOST,
         DOOR,
         GEAR,
         LIGHT_STATUS,
@@ -41,6 +42,12 @@ final class CanBusEvent {
     static CanBusEvent connection(long epoch, long sequence, long elapsed) {
         return new CanBusEvent(Kind.CONNECTION, Origin.LIVE, epoch, sequence,
                 elapsed, 0, 0, 0);
+    }
+
+    static CanBusEvent connectionLost(long barrierEpoch, long sequence, long elapsed,
+                                      long closedEpoch) {
+        return new CanBusEvent(Kind.CONNECTION_LOST, Origin.LIVE, barrierEpoch, sequence,
+                elapsed, (int) Math.min(Integer.MAX_VALUE, closedEpoch), 0, 0);
     }
 
     static CanBusEvent door(Origin origin, long epoch, long sequence, long elapsed, int frontLeft) {
