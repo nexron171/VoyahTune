@@ -26,28 +26,30 @@ forbid_fixed() {
     fi
 }
 
-# The Android 11 VehicleSettings hook only reveals subscription/exam status. It never exposes the
-# hidden H97X function rows, changes Parking, subscribes to CAN, or writes VehicleState itself.
+# The Android 11 VehicleSettings hook overrides subscription/exam status without changing stock
+# view visibility. It never exposes hidden H97X rows, subscribes to CAN, or writes VehicleState.
 require_fixed "$HOOK" 'BaiduProviderUtil.doQuerySubscribeInfo.overload("android.content.Context")'
 require_fixed "$HOOK" 'BaiduProviderUtil.doQueryNOALearnInfo.overload('
 require_fixed "$HOOK" 'DriveAssistantConfig.isSupportSDB.overload()'
-require_fixed "$HOOK" 'DriveAssistantData.isShowAdas.overload()'
 require_fixed "$HOOK" 'DriveAssistanceAdasStatusManager'
-require_fixed "$HOOK" 'forceSubscriptionUiVisible(this);'
-require_fixed "$HOOK" 'binding.fragmentAdasSubStatusBg.value.setVisibility(0);'
-require_fixed "$HOOK" 'ui=subscription_exam'
+require_fixed "$HOOK" 'ui=stock_visibility'
 for SYMBOL in forceApolloBindingVisible FragmentDriveAssistanceBindingImpl \
         'executeBindings.overload()' onHintSwitchAdasClick getGearStatus GearState Parking \
         CanBusManager CanBusTool asyncQueryAllAdasStatus asyncQueryAdasSubData \
         onVehicleStateChanged sendAdasSubStatusToADCU setVehicleState \
-        setVehicleAndAirConditionBundleState TX58 TX77 setInterval setTimeout; do
+        setVehicleAndAirConditionBundleState TX58 TX77 setInterval setTimeout \
+        forceSubscriptionUiVisible refreshExistingApolloFragments \
+        'DriveAssistantData.isShowAdas.overload()' 'setShowAdas(' \
+        'fragmentAdasSubStatusBg.value.setVisibility(' \
+        'DriveAssistanceFragment.updateAdasData.overload()' \
+        'DriveAssistanceFragment.getSDBState.overload()'; do
     forbid_fixed "$HOOK" "$SYMBOL"
 done
 node --check "$HOOK"
 
 # The stock-menu target is a normal persisted setting. The boot-bound file is only a fail-closed
 # loader transport republished by the same delayed restore plan.
-require_fixed "$LAYOUT" 'android:text="Показывать подписку и экзамен Apollo в штатных настройках"'
+require_fixed "$LAYOUT" 'android:text="Активация функций Apollo"'
 require_fixed "$LAYOUT" 'android:id="@+id/switchApolloSettingsActivation"'
 require_fixed "$LAYOUT" 'android:checked="false"'
 require_fixed "$APOLLO_SETTINGS" 'static final String STOCK_UI = "apolloStockUiEnabled";'

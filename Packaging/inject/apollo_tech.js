@@ -1,10 +1,10 @@
-// Boot-scoped Apollo subscription/exam reveal for com.qinggan.app.vehiclesetting.
+// Boot-scoped Apollo subscription/exam status override for com.qinggan.app.vehiclesetting.
 //
 // Native/load.bin injects this script only after the user explicitly enables
-// “Активировать Apollo в настройках” for the current Linux boot. The hook is intentionally
+// “Активация функций Apollo” for the current Linux boot. The hook is intentionally
 // confined to Apollo/drive-assistance subscription classes: it never lies about the global 97X
-// platform, never reveals the OEM function switches, never checks the current gear, and never
-// sends CAN.
+// platform, never changes stock view visibility, never reveals the OEM function switches, never
+// checks the current gear, and never sends CAN.
 // Individual Apollo functions are configured and restored by VoyahTune itself.
 Java.perform(function () {
     "use strict";
@@ -24,41 +24,9 @@ Java.perform(function () {
         installedMethods.push(method);
     }
 
-    function forceSubscriptionUiVisible(fragment) {
-        try {
-            var datas = fragment.datas.value;
-            if (datas !== null) {
-                datas.setShowAdas(true);
-                datas.setStatusType(1002);
-                datas.setShowAIIntelligence(true);
-            }
-        } catch (ignoredData) {}
-        try {
-            var binding = fragment.binding.value;
-            if (binding !== null) {
-                binding.fragmentAdasSubStatusBg.value.setVisibility(0);
-            }
-        } catch (ignoredBinding) {}
-    }
-
     function ready(details) {
         try { Log.i(TAG, READY_MARKER + " " + details); } catch (ignoredLog) {}
         try { console.log(READY_MARKER + " " + details); } catch (ignoredConsole) {}
-    }
-
-    function refreshExistingApolloFragments() {
-        Java.choose(
-            "com.qinggan.app.vehiclesetting.fragments.driveassistance.DriveAssistanceFragment", {
-                onMatch: function (fragment) {
-                    Java.scheduleOnMainThread(function () {
-                        try {
-                            fragment.updateAdasData();
-                            fragment.getSDBState();
-                        } catch (ignoredRefresh) {}
-                    });
-                },
-                onComplete: function () {}
-            });
     }
 
     try {
@@ -84,7 +52,6 @@ Java.perform(function () {
 
         var DriveAssistantData = Java.use(
             "com.qinggan.app.vehiclesetting.fragments.driveassistance.DriveAssistantData");
-        install(DriveAssistantData.isShowAdas.overload(), function () { return true; });
         install(DriveAssistantData.getStatusType.overload(), function () { return 1002; });
         install(DriveAssistantData.isShowAIIntelligence.overload(), function () { return true; });
 
@@ -99,26 +66,8 @@ Java.perform(function () {
         install(AdasStatusManager.getRemainDay.overload(), function () { return 30; });
         install(AdasStatusManager.getLearnStatus.overload(), function () { return 1; });
 
-        // The OEM fragment has two explicit 97X early-outs. Run the stock method first, then repair
-        // only its subscription/exam view model. Function rows keep the stock H97X visibility.
-        var DriveAssistanceFragment = Java.use(
-            "com.qinggan.app.vehiclesetting.fragments.driveassistance.DriveAssistanceFragment");
-        var updateAdasData = DriveAssistanceFragment.updateAdasData.overload();
-        install(updateAdasData, function () {
-            updateAdasData.call(this);
-            forceSubscriptionUiVisible(this);
-        });
-        var getSDBState = DriveAssistanceFragment.getSDBState.overload();
-        install(getSDBState, function () {
-            getSDBState.call(this);
-            forceSubscriptionUiVisible(this);
-        });
-
-        // Injection can race the first fragment render. Refresh already-created instances once;
-        // future instances are covered by the method hooks above. There is no timer or polling.
-        refreshExistingApolloFragments();
         JavaSystem.setProperty(SENTINEL_KEY, "installed");
-        ready("profile=persisted-target ui=subscription_exam subscription=active noa_learned=1 can=none");
+        ready("profile=persisted-target ui=stock_visibility subscription=active noa_learned=1 can=none");
     } catch (e) {
         for (var i = installedMethods.length - 1; i >= 0; i--) {
             try { installedMethods[i].implementation = null; } catch (ignoredRollback) {}

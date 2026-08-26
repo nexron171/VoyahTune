@@ -1682,7 +1682,7 @@
     </ScrollView>
     <!-- конец pageSplitScreen -->
 
-    <!-- Раздел: Apollo Tech. Штатный UI показывает только подписку/экзамен; функции хранит VoyahTune. -->
+    <!-- Раздел: Apollo Tech. Hook меняет статусы, но не видимость штатного UI. -->
     <ScrollView
         android:id="@+id/pageApolloTech"
         android:layout_width="match_parent"
@@ -1723,7 +1723,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Показывать подписку и экзамен Apollo в штатных настройках"
+                        android:text="Активация функций Apollo"
                         android:textColor="#FFFFFF"
                         android:textSize="27px" />
 
@@ -1757,7 +1757,7 @@
                 android:layout_marginTop="14dp"
                 android:background="@drawable/layout_category_bg"
                 android:padding="16dp"
-                android:text="Light-версия не содержит Frida, поэтому статус подписки и экзамен в штатном меню в ней недоступны. Управление функциями ниже остаётся доступным."
+                android:text="Light-версия не содержит Frida, поэтому эмуляция подписки и экзамена для штатного меню в ней недоступна. Управление функциями ниже остаётся доступным."
                 android:textColor="#ffb36b"
                 android:textSize="22px"
                 android:visibility="gone" />

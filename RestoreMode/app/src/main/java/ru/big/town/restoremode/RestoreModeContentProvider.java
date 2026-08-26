@@ -168,7 +168,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 ApolloSettings.TRAFFIC_LIGHTS, // 25 — распознавание светофоров
                 ApolloSettings.GREEN_SOUND, // 26 — звук зелёного сигнала
                 ApolloSettings.TRAFFIC_SIGNS,// 27 — распознавание дорожных знаков
-                ApolloSettings.STOCK_UI,      // 28 — подписка/экзамен в штатном UI
+                ApolloSettings.STOCK_UI,      // 28 — эмуляция подписки/экзамена для штатного UI
         });
 
         cursor.addRow(new Object[]{
