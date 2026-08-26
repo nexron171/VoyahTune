@@ -597,14 +597,14 @@ public class MainActivity extends AppCompatActivity {
     /** Режим мойки — машина засыпает и не реагирует на открытие дверей. */
     public void onCardWashMode(View v){
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
-                .setTitle("Режим мойки")
-                .setMessage("Машина уснёт и не будет реагировать на открытие дверей. Активировать режим мойки?")
-                .setPositiveButton("Активировать", (d, w) -> {
+                .setTitle(R.string.wash_mode_title)
+                .setMessage(R.string.wash_mode_confirmation)
+                .setPositiveButton(R.string.wash_mode_activate, (d, w) -> {
                     boolean ok = sendMessageToService(MSG_WASH_MODE);
-                    showSnack(ok ? "Режим мойки активирован" : "Сервис не готов");
+                    if (!ok) showSnack(getString(R.string.service_not_ready));
                     Log.i(TAG, "onCardWashMode sent=" + ok);
                 })
-                .setNegativeButton("Отмена", null)
+                .setNegativeButton(R.string.cancel, null)
                 .show();
     }
 

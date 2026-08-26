@@ -463,26 +463,11 @@ public class MainActivity extends AppCompatActivity {
         return setCanValues(1, arraysStr2arraysBytes(LEAVE_CAR_FRAMES), "leave car (power hold)");
     }
 
-    // Режим мойки — машина засыпает и не реагирует на открытие дверей. Последовательность CAN-команд.
-    private static final String[] WASH_MODE_FRAMES = {
-            "1f 08 00 00 ff f8 00 01 02 ff",
-            "6f 08 04 00 80 11 43 01 00 40",
-            "76 08 01 00 00 00 00 00 00 00",
-            "6f 08 04 00 40 11 43 01 00 40",
-            "1f 08 00 00 ff f8 00 01 02 7f",
-            "73 08 00 00 f0 ff 3f ff ff 07",
-            "6f 08 04 00 80 11 43 00 00 40",
-            "76 08 00 00 00 00 00 00 00 00",
-    };
-    public static boolean sendWashModeCommand() {
-        return setCanValues(1, arraysStr2arraysBytes(WASH_MODE_FRAMES), "wash mode");
-    }
-
     // ------------------------------------------------------------------------
     // Прогрев высоковольтной батареи.
     //
     // CAN-команда активации прогрева ВВБ (предоставлена пользователем). Формат — как у остальных
-    // команд (LEAVE_CAR_FRAMES / WASH_MODE_FRAMES): 10-байтные строки hex через пробел.
+    // raw-команд: 10-байтные строки hex через пробел.
     private static final String[] BATTERY_HEAT_FRAMES = {
             "65 08 00 00 c1 c0 00 00 00 00",
     };

@@ -107,7 +107,13 @@ public class SetModesService extends Service {
 
                 case MSG_WASH_MODE:
                     Log.i(TAG, "handleMessage() MSG_WASH_MODE");
-                    ApplyEngine.postUserCommand("wash mode", MainActivity::sendWashModeCommand);
+                    ApplyEngine.postUserCommand("wash mode", () -> {
+                        WashModeController controller = washModeController;
+                        WashModePolicy.Outcome outcome = controller == null
+                                ? WashModePolicy.Outcome.TRANSPORT_FAILURE
+                                : controller.activate();
+                        Log.i(TAG, "wash mode activation outcome=" + outcome);
+                    });
                     break;
 
                 case MSG_FLOATING_BACK:
@@ -634,6 +640,7 @@ public class SetModesService extends Service {
     private volatile Handler carPowerHandler;
     private HandlerThread carPowerThread;
     private final CarPowerCallbackGate carPowerCallbackGate = new CarPowerCallbackGate();
+    private WashModeController washModeController;
     private CarPropertyManager mCarPropertyManager;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean startupInitialized = false;
@@ -715,15 +722,27 @@ public class SetModesService extends Service {
         }
     }
 
+    private void requestWashModeCleanup(String source) {
+        WashModeController controller = washModeController;
+        if (controller == null || !controller.hasArmedRequest()) return;
+        ApplyEngine.postIndependentUserCommand("wash mode cleanup: " + source, () -> {
+            boolean cleaned = controller.cleanupRequestBit(source);
+            Log.i(TAG, "wash mode request cleanup " + (cleaned ? "accepted" : "deferred")
+                    + " by " + source);
+        });
+    }
+
     private void handleScreenOffFallback() {
         screenOffObserved = true;
         pendingPhysicalWake = false;
         endWakeSession();
         cancelAncillaryWakeTasks();
+        requestWashModeCleanup("SCREEN_OFF");
     }
 
     private void handleScreenOnFallback() {
         screenOffObserved = false;
+        requestWashModeCleanup("SCREEN_ON");
         // SCREEN_ON сам по себе бывает обычным включением дисплея и не является границей поездки.
         // Выполняем физические side-effects только если до него реально пришёл CarPower wake.
         if (pendingPhysicalWake) {
@@ -747,6 +766,7 @@ public class SetModesService extends Service {
         super.onCreate();
         // A stale file from an earlier boot is fail-closed and removed on first service creation.
         ApolloSettingsRuntimeState.isEnabled(this);
+        washModeController = WashModeController.create(this);
         screenOffObserved = !isScreenInteractive();
         initializeCarPowerManager();
         setModesReceiverDynamic = new SetModesReceiverDynamic(
@@ -771,6 +791,7 @@ public class SetModesService extends Service {
         if (serviceDestroyed) return;
         Log.i(TAG, "Power state changed: " + state + " (" + powerStateName(state) + ")");
         if (isWakeState(state)) {
+            requestWashModeCleanup("power state " + powerStateName(state));
             ApplyEngine.scheduleApply("power state " + powerStateName(state));
             if (isScreenInteractive()
                     || state == CarPowerManager.CarPowerStateListener.ON
@@ -789,6 +810,7 @@ public class SetModesService extends Service {
             pendingPhysicalWake = false;
             endWakeSession();
             cancelAncillaryWakeTasks();
+            requestWashModeCleanup("power state " + powerStateName(state));
             ApplyEngine.resetRestoreGate("power state " + powerStateName(state));
         }
         Log.i(TAG, "onStateChanged() ignored state: " + state);
