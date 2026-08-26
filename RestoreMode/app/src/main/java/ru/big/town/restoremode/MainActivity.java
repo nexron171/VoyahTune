@@ -109,9 +109,18 @@ public class MainActivity extends AppCompatActivity {
     static final String ACTION_BATTERY_HEAT_ACTIVATE = "ru.big.town.anative.BATTERY_HEAT_ACTIVATE";
     private static final int BH_UNKNOWN = Integer.MIN_VALUE;
     private static final int BH_TEMP_INVALID = -9999;
+    private static final int BH_PLATFORM_H97X = 1;
+    private static final int BH_PLATFORM_H97C = 2;
+    private static final int BH_PHASE_IDLE = 0;
+    private static final int BH_PHASE_SENDING = 1;
+    private static final int BH_PHASE_AWAITING_CONFIRMATION = 2;
+    private static final int BH_PHASE_ACTIVE = 3;
+    private static final int BH_PHASE_BLOCKED = 4;
+    private static final int BH_PHASE_ENABLED = 5;
     private View cardBatteryHeat;
     private android.widget.ImageView batteryHeatIcon;
     private TextView batteryHeatState, batteryHeatTemp, batteryHeatStatus, batteryHeatFail;
+    private Button buttonBatteryHeat;
     // Палитра состояний прогрева (цвет = состояние термоменеджмента ВВБ)
     private static final int BH_COLOR_COLD    = 0xFF3D7FD0; // синий — на улице холодно, прогрев уместен
     private static final int BH_COLOR_HEATING = 0xFF35B06A; // зелёный — идёт прогрев
@@ -252,17 +261,21 @@ public class MainActivity extends AppCompatActivity {
         if (batteryHeatTemp == null) return;
         int temp    = intent.getIntExtra("ambientTemp",   BH_TEMP_INVALID);
         int status  = intent.getIntExtra("controlStatus", BH_UNKNOWN);
+        int switchState = intent.getIntExtra("switchState", BH_UNKNOWN);
         int preheat = intent.getIntExtra("preheatSet",    BH_UNKNOWN);
         int bms     = intent.getIntExtra("bmsState",      BH_UNKNOWN);
         int autoCtl = intent.getIntExtra("autoCtrl",      BH_UNKNOWN);
         int fail    = intent.getIntExtra("failReason",    BH_UNKNOWN);
+        int platform = intent.getIntExtra("vehiclePlatform", 0);
+        int phase = intent.getIntExtra("activationPhase", BH_PHASE_IDLE);
 
         int threshold = intent.getIntExtra("tempThreshold", 10);
         boolean tempValid = temp != BH_TEMP_INVALID && temp != BH_UNKNOWN;
 
         batteryHeatTemp.setText(tempValid ? "за бортом: " + temp + " °C" : "за бортом: —");
 
-        String preheatTxt = (bms == 9) ? "идёт" : bhOnOff(preheat);
+        String preheatTxt = (bms == 9) ? "идёт"
+                : bhControlState(platform, preheat, switchState);
         batteryHeatStatus.setText("Нагрев: " + bhHeating(status)
                 + "   ·   Pre-heat: " + preheatTxt
                 + "   ·   Автоподогрев: " + bhOnOff(autoCtl));
@@ -275,7 +288,26 @@ public class MainActivity extends AppCompatActivity {
             batteryHeatFail.setVisibility(View.GONE);
         }
 
-        applyBatteryHeatIndicator(status, bms, fail, temp, tempValid, threshold);
+        if (buttonBatteryHeat != null) {
+            boolean enabled = phase == BH_PHASE_IDLE;
+            buttonBatteryHeat.setEnabled(enabled);
+            buttonBatteryHeat.setAlpha(enabled ? 1.0f : 0.55f);
+            if (phase == BH_PHASE_SENDING) {
+                buttonBatteryHeat.setText("Отправка…");
+            } else if (phase == BH_PHASE_AWAITING_CONFIRMATION) {
+                buttonBatteryHeat.setText("Ожидаем ответ…");
+            } else if (phase == BH_PHASE_ACTIVE) {
+                buttonBatteryHeat.setText("Прогрев активен");
+            } else if (phase == BH_PHASE_ENABLED) {
+                buttonBatteryHeat.setText("Контроль включён");
+            } else if (phase == BH_PHASE_BLOCKED) {
+                buttonBatteryHeat.setText("Сейчас недоступно");
+            } else {
+                buttonBatteryHeat.setText("Запустить прогрев");
+            }
+        }
+
+        applyBatteryHeatIndicator(status, bms, fail, temp, tempValid, threshold, phase);
     }
 
     /**
@@ -289,15 +321,21 @@ public class MainActivity extends AppCompatActivity {
      *  серый    — норма / нет данных.
      */
     private void applyBatteryHeatIndicator(int status, int bms, int fail,
-                                           int temp, boolean tempValid, int threshold) {
+                                           int temp, boolean tempValid, int threshold,
+                                           int phase) {
         int color; String label;
         boolean anyData = status != BH_UNKNOWN || bms != BH_UNKNOWN || fail != BH_UNKNOWN || tempValid;
         if (bms == 8) {                              // BMS_STATE_FAULT
             color = BH_COLOR_FAULT;   label = "Неисправность";
-        } else if (status == 1 || bms == 9) {        // активный нагрев / preheat
+        } else if (status == 1 || bms == 9 || phase == BH_PHASE_ACTIVE) {
             color = BH_COLOR_HEATING; label = "Прогрев";
         } else if (fail >= 1 && fail <= 4) {         // прогрев невозможен
             color = BH_COLOR_WARN;    label = "Внимание";
+        } else if (phase == BH_PHASE_SENDING
+                || phase == BH_PHASE_AWAITING_CONFIRMATION) {
+            color = BH_COLOR_COLD;    label = "Ожидание";
+        } else if (phase == BH_PHASE_ENABLED) {
+            color = BH_COLOR_HEATING; label = "Контроль включён";
         } else if (tempValid && temp < threshold) {  // на улице холодно
             color = BH_COLOR_COLD;    label = "Холодно";
         } else {
@@ -331,6 +369,18 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private static String bhControlState(int platform, int h97xState, int h97cSwitch) {
+        if (platform == BH_PLATFORM_H97X) {
+            if (h97xState == 1) return "вкл";
+            if (h97xState == 0) return "выкл";
+            return "—";
+        }
+        if (platform == BH_PLATFORM_H97C) return bhOnOff(h97cSwitch);
+        if (h97xState == 1) return "вкл";
+        if (h97xState == 0) return "выкл";
+        return bhOnOff(h97cSwitch);
+    }
+
     /** Причина отказа прогрева (FAIL_STATE): null — отказа нет / нет данных. */
     private static String bhFail(int v) {
         switch (v) {
@@ -347,7 +397,7 @@ public class MainActivity extends AppCompatActivity {
         Intent i = new Intent(ACTION_BATTERY_HEAT_ACTIVATE);
         i.setPackage("ru.big.town.anative");
         sendBroadcast(i);
-        showSnack("Запуск прогрева батареи…");
+        showSnack("Запрос отправлен, ожидаем подтверждение автомобиля…");
         Log.i(TAG, "BATTERY_HEAT_ACTIVATE отправлен");
     }
 
@@ -614,6 +664,7 @@ public class MainActivity extends AppCompatActivity {
         batteryHeatTemp   = findViewById(R.id.batteryHeatTemp);
         batteryHeatStatus = findViewById(R.id.batteryHeatStatus);
         batteryHeatFail   = findViewById(R.id.batteryHeatFail);
+        buttonBatteryHeat = findViewById(R.id.buttonBatteryHeat);
         splitTilesGrid = findViewById(R.id.splitTilesGrid);
 
         editor = sharedPreferences.edit();

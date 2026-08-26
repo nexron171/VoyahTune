@@ -428,8 +428,14 @@ public final class ApplyEngine {
 
     /** Explicit command unrelated to restored drive modes (for example battery preheating). */
     public static void postIndependentUserCommand(String reason, Runnable action) {
+        postIndependentUserCommand(reason, action, null);
+    }
+
+    /** Independent explicit command with exactly-once completion, including queue rejection. */
+    public static void postIndependentUserCommand(String reason, Runnable action,
+                                                  Runnable onTerminal) {
         Log.i(TAG, "postIndependentUserCommand: " + reason);
-        enqueueUserCommand(commandBg(), reason, action, null);
+        enqueueUserCommand(commandBg(), reason, action, onTerminal);
     }
 
     private static void enqueueUserCommand(Handler commandHandler, String reason, Runnable action,

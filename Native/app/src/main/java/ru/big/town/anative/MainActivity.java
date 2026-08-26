@@ -457,16 +457,15 @@ public class MainActivity extends AppCompatActivity {
     // ------------------------------------------------------------------------
     // Прогрев высоковольтной батареи.
     //
-    // CAN-команда активации прогрева ВВБ (предоставлена пользователем). Формат — как у остальных
-    // raw-команд: 10-байтные строки hex через пробел.
+    // Диагностический raw fallback для H97X. Production-путь BatteryHeatService использует
+    // штатный OEM VehicleState API, чтобы CanBusService сам выбрал ABI конкретной платформы.
     private static final String[] BATTERY_HEAT_FRAMES = {
             "65 08 00 00 c1 c0 00 00 00 00",
     };
 
     /**
-     * Активация прогрева батареи. Вызывается из {@link BatteryHeatService} (авто-прогрев по
-     * температуре и ручной клик в виджете). Шлёт {@link #BATTERY_HEAT_FRAMES} в шину;
-     * пустой массив (если когда-нибудь очистят) — безопасный no-op с логом.
+     * Ручной диагностический fallback. Автоматический и UI-пути его не вызывают. Шлёт
+     * {@link #BATTERY_HEAT_FRAMES} напрямую; пустой массив — безопасный no-op с логом.
      */
     public static boolean sendBatteryHeatCommand() {
         if (BATTERY_HEAT_FRAMES.length == 0) {

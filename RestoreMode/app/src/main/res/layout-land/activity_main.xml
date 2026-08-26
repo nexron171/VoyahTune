@@ -489,7 +489,7 @@
             android:minWidth="220dp"
             android:backgroundTint="#2f7fd0"
             android:onClick="onButtonBatteryHeat"
-            android:text="Прогреть батарею"
+            android:text="Запустить прогрев"
             android:textColor="#FFFFFF"
             android:textSize="24dp"
             app:cornerRadius="20dp" />
