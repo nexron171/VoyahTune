@@ -40,7 +40,9 @@ require_fixture_text \
     'boolean onKeyEvent(KeyEvent event)'
 
 require_text "$AGENT_ROOT/launcherdock.js" 'com.qinggan.launcher.navigation.NavigationBarMain'
-for method in updateTheme initScreenUpViews updateSelectedApp onClick; do
+require_text "$AGENT_ROOT/launcherdock.js" 'com.qinggan.launcher.navigation.NavigationBarSecond'
+require_text "$AGENT_ROOT/launcherdock.js" 'dockPassenger'
+for method in updateTheme initScreenUpViews updateSelectedApp onClick doScreenLift; do
     require_text "$AGENT_ROOT/launcherdock.js" "NavigationBarMain.$method"
 done
 for fixture_method in \
@@ -48,14 +50,90 @@ for fixture_method in \
     'void initScreenUpViews()' \
     'void updateSelectedApp(String packageName, String activityName)' \
     'void onClick(View view)' \
-    'void dismiss()'; do
+    'void dismiss()' \
+    'void doScreenLift(int type)'; do
     require_fixture_text \
         'launcher/java/com/qinggan/launcher/navigation/NavigationBarMain.java' \
         "$fixture_method"
 done
+require_fixture_text \
+    'launcher/java/com/qinggan/launcher/navigation/NavigationBarSecond.java' \
+    'class NavigationBarSecond'
+
+# Full All Apps is a primary part of launcherdock.js now: both physical lists, both bind overloads,
+# owner-screen click routing, package-driven reload, and the optional OD passenger home rail.
+for allapps_class in \
+    'com.qinggan.launcher.base.bean.AppBean' \
+    'com.qinggan.launcher.base.allapp.AllAppDataManager' \
+    'com.qinggan.launcher.base.adapter.AllAppAdapter' \
+    'com.qinggan.launcher.base.allapp.AllAppBarView' \
+    'com.qinggan.launcher.base.utils.AppLauncher'; do
+    require_text "$AGENT_ROOT/launcherdock.js" "$allapps_class"
+done
+require_text "$AGENT_ROOT/launcherdock.js" "Data.getAllApps.overload('int')"
+require_text "$AGENT_ROOT/launcherdock.js" 'Data.reload.overload()'
+require_text "$AGENT_ROOT/launcherdock.js" "AllAppBarView.onClick.overload('android.view.View')"
+require_text "$AGENT_ROOT/launcherdock.js" 'AppLauncher.startApp(ctx(), intent, screenId)'
+require_text "$AGENT_ROOT/launcherdock.js" "'com.qinggan.launcher.base.adapter.AllAppAdapter\$AppViewHolder', 'int'"
+require_text "$AGENT_ROOT/launcherdock.js" "'int', 'java.util.List'"
+for package_action in PACKAGE_ADDED PACKAGE_REMOVED PACKAGE_CHANGED; do
+    require_text "$AGENT_ROOT/launcherdock.js" "android.intent.action.$package_action"
+done
+require_text "$AGENT_ROOT/launcherdock.js" 'packageFilter.addDataScheme("package")'
+
+for appbean_method in \
+    'AppBean(int icon, int nameRes, String packageName)' \
+    'int getIcon()' \
+    'int getNameRes()' \
+    'String getPackageName()' \
+    'int getType()' \
+    'String getSubType()' \
+    'void setSubType(String subType)'; do
+    require_fixture_text \
+        'launcher/java/com/qinggan/launcher/base/bean/AppBean.java' \
+        "$appbean_method"
+done
+for data_method in \
+    'List<AppBean> getAllApps(int screenId)' \
+    'void reload()'; do
+    require_fixture_text \
+        'launcher/java/com/qinggan/launcher/base/allapp/AllAppDataManager.java' \
+        "$data_method"
+done
+require_fixture_text \
+    'launcher/java/com/qinggan/launcher/base/allapp/AllAppBarView.java' \
+    'void onClick(View view)'
+require_fixture_text \
+    'launcher/java/com/qinggan/launcher/base/allapp/AllAppBarView.java' \
+    'int mScreenId'
+for bind_signature in \
+    'void onBindViewHolder(AppViewHolder holder, int position)' \
+    'void onBindViewHolder(AppViewHolder holder, int position, List<Object> payloads)'; do
+    require_fixture_text \
+        'launcher/java/com/qinggan/launcher/base/adapter/AllAppAdapter.java' \
+        "$bind_signature"
+done
+require_fixture_text \
+    'launcher/java/com/qinggan/launcher/base/utils/AppLauncher.java' \
+    'void startApp(Context context, Intent intent, int screenId)'
+
+require_text "$AGENT_ROOT/launcherdock.js" \
+    'com.qinggan.secondlauncher.adapter.SecondAllAppAdapter'
+require_text "$AGENT_ROOT/launcherdock.js" \
+    'com.qinggan.secondlauncher.fragment.SecondMainFragment'
+require_fixture_text \
+    'launcher/java/com/qinggan/secondlauncher/adapter/SecondAllAppAdapter.java' \
+    'void onBindViewHolder(ViewHolder holder, int position)'
+require_fixture_text \
+    'launcher/java/com/qinggan/secondlauncher/adapter/SecondAllAppAdapter.java' \
+    'List<AppBean> allAppList'
+require_fixture_text \
+    'launcher/java/com/qinggan/secondlauncher/fragment/SecondMainFragment.java' \
+    'void onItemClick(AppBean appBean)'
 
 require_text "$AGENT_ROOT/multidisplay.js" 'com.qinggan.systemservice.multidisplay.MultiDisplayImpl'
-require_text "$AGENT_ROOT/multidisplay.js" 'MDI.isWhiteListApp.overloads'
+require_text "$AGENT_ROOT/multidisplay.js" 'var method = MDI.isWhiteListApp;'
+require_text "$AGENT_ROOT/multidisplay.js" 'method.overloads.length === 0'
 require_fixture_text \
     'systemservice/java/com/qinggan/systemservice/multidisplay/MultiDisplayImpl.java' \
     'boolean isWhiteListApp(String packageName)'

@@ -28,7 +28,7 @@ class/method surface and assign their hook implementations:
 | Agent | Target | Synthetic ABI available |
 |---|---|---|
 | `steeringwheelkeys.js` | `com.qinggan.keymanager.service` | `KeyManagerReader.onKeyEvent(android.view.KeyEvent): boolean` |
-| `launcherdock.js` | `com.qinggan.app.launcher` | OD `NavigationBarMain.updateTheme()`, `initScreenUpViews()`, `updateSelectedApp(String,String)`, `onClick(View)`, `dismiss()`, plus the three view fields and `mScreenId` |
+| `launcherdock.js` | `com.qinggan.app.launcher` | OD `NavigationBarMain` + `NavigationBarSecond`; dual-display `AllAppDataManager.getAllApps(int)`/`reload()`; `AppBean`; full-screen `AllAppBarView` + both `AllAppAdapter.onBindViewHolder(...)` overloads; `AppLauncher.startApp(Context,Intent,int)`; optional OD `SecondAllAppAdapter` + `SecondMainFragment.onItemClick(AppBean)` |
 | `multidisplay.js` | `com.qinggan.systemservice` | `MultiDisplayImpl.isWhiteListApp(String): boolean` |
 | `apollo_tech.js` | `com.qinggan.app.vehiclesetting` | static no-argument `BaiduProviderUtil.doQuerySubscribeInfo(): String` and `doQueryNOALearnInfo(): String` |
 | `keyboard_lock_en.js` | `com.qinggan.app.qgime` | `InputModeSwitcher` English constants, `getInstance()`, `saveInputMode(int)`; `QGInputConfig.DISABLE_VOICE`; `SkbPool.getInstance()/resetCachedSkb()`; optional loader/reflection surface |
@@ -65,13 +65,19 @@ surfaces are not provided:
 - `com.qinggan.launcher.base.utils.AppUtils.getTopAppInfo(Context,int,int)`;
 - `com.qinggan.account.AccountConstantUtil.SEPARATOR`;
 - `com.qinggan.launcher.base.drag.ThirdAppUtil.isThirdShowFloatApp(String)`;
-- `AllAppDataManager.getAllApps(int)`,
-  `AllAppAdapter.onBindViewHolder(AllAppAdapter.AppViewHolder,int)`,
-  `AppBean`, and `AppLauncher.startApp(Context,Intent,int)`.
 
 No `NavigationBarMain` instance is created. Therefore `Java.choose`, drawable
-replacement, display selection, click routing, dock restoration, floating-home
-suppression, and all-app list behavior are not tested.
+replacement, display selection, click routing, dock restoration, and floating-home
+suppression are not tested.
+
+The All Apps fixtures do compile the exact hook-resolution surface for both physical
+lists, both full-screen bind overloads, owner-screen launch routing, the optional
+passenger home rail, and `AllAppDataManager.reload()`. They include positive inert
+resource IDs so the template-selection branch is representable. They do **not**
+emulate PackageManager broadcasts, RecyclerView lifecycle/recycling, OEM listener
+notification order, resource/theme rendering, list persistence, or actual activity
+launches. In particular, a passing fixture build cannot prove that the dynamic
+`PACKAGE_ADDED`/`PACKAGE_REMOVED`/`PACKAGE_CHANGED` refresh is visible on a head unit.
 
 ### `steeringwheelkeys.js`
 

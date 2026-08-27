@@ -4,18 +4,17 @@
 on post-fs-data
     # Default init context is not allowed to change enforcing state on Android 11 policy.
     exec u:r:su:s0 root root -- /system/bin/setenforce 0
+    # MD-priority-before-app-cache-v1: /data is mounted by definition at this trigger. Enable now;
+    # class late_start launches the watchdog before apps cache Qinggan's original whitelist result.
+    enable voyahtune_load
 
 # load.bin — watchdog-цикл сам по себе, поэтому НЕ oneshot: init перезапустит сервис, если он упадёт.
-# disabled + property-триггер даёт property-gated ordering: сервис не стартует раньше, чем
-# post-fs-data action выше успеет выставить permissive, и не раньше boot_completed (когда
-# install.sh уже гарантированно наполнил /data/local/bin). enable снимает постоянный disabled-флаг,
-# чтобы сервис участвовал и в последующих class_reset/class_start после suspend/resume.
+# disabled + enable в post-fs-data гарантируют, что сервис не стартует до смонтированного /data и
+# synchronous setenforce выше. class late_start остаётся вторым ordering-барьером; enable лишь
+# снимает disabled и сохраняет участие в последующих class_reset/class_start после suspend/resume.
 service voyahtune_load /system/bin/sh /system/etc/init.voyahtune.load.sh
     class late_start
     user root
     group root
     seclabel u:r:su:s0
     disabled
-
-on property:sys.boot_completed=1
-    enable voyahtune_load

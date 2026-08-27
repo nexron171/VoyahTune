@@ -659,6 +659,7 @@ public class SetModesService extends Service {
 
     //private boolean isWorking = false;
     private SetModesReceiverDynamic setModesReceiverDynamic;
+    private ScreenLiftTaskRestorer screenLiftTaskRestorer;
     private boolean receiverRegistered = false;
     private final String CHANNEL_ID = "screen_monitor_channel";
     private volatile Car mCar;
@@ -837,6 +838,10 @@ public class SetModesService extends Service {
         setModesReceiverDynamic = new SetModesReceiverDynamic(
                 this::handleScreenOffFallback,
                 this::handleScreenOnFallback);
+        if (BuildConfig.IS_FULL) {
+            screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
+            screenLiftTaskRestorer.register();
+        }
         // Приёмник запроса снимка логов + восстановление захвата регистрируем в onCreate
         // (срабатывает и при простом bind, не только при startService).
         try {
@@ -1251,6 +1256,9 @@ public class SetModesService extends Service {
         endWakeSession();
         cancelAncillaryWakeTasks();
         mainHandler.removeCallbacksAndMessages(null);
+        ScreenLiftTaskRestorer liftRestorer = screenLiftTaskRestorer;
+        screenLiftTaskRestorer = null;
+        if (liftRestorer != null) liftRestorer.close();
         if (receiverRegistered) {
             try {
                 getApplicationContext().unregisterReceiver(setModesReceiverDynamic);

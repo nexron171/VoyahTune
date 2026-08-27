@@ -114,8 +114,9 @@ Java.perform(function () {
     //     ru.big.town.anative.WIN_RELOAD.
     //   • ВЕСЬ код хука в try/catch → при ЛЮБОЙ ошибке (в т.ч. неверные имена приватных полей WM на
     //     другой прошивке) молча отдаём штатное поведение + латчим FF.on=false. WM НЕ падает.
-    //  Ключи: voyahtune_freeform(0/1, деф 1), voyahtune_win_left/top/right/bottom(int,145/45/1920/720 — для обоих
-    //         физических экранов, они идентичны), voyahtune_dpi_<pkg>(int, 0=не трогать).
+    //  Ключи: voyahtune_freeform(0/1, деф 1), voyahtune_win_left/top/right/bottom
+    //  (int,145/45/1920/720), voyahtune_win_compact_bottom (int, деф 560),
+    //  voyahtune_dpi_<pkg> (int, 0=не трогать).
     //  РАЗВЕДКА перед включением флага: подтвердить поля WindowFrames
     //  (mStableFrame/mParentFrame/mDisplayFrame/mContentFrame/mVisibleFrame/mDecorFrame),
     //  DisplayFrames.mStable, поле ActivityRecord.task/packageName, сигнатуры layoutWindowLw/ensureActivityConfiguration.
@@ -124,12 +125,16 @@ Java.perform(function () {
     // reattach вообще не пересекает Java<->Frida bridge, а не просто делает JS fast-path.
     var FF = { on: true, screenOn: true, hookEpoch: 0,
                lastScreenTransitionAt: 0, rapidScreenTransitions: 0,
-               left: 145, top: 45, right: 1920, bottom: 720, dpi: {} };
+               left: 145, top: 45, right: 1920, bottom: 720, compactBottom: 560,
+               liftType: 2, dpi: {} };
     var SettingsGlobal = Java.use('android.provider.Settings$Global');
     var ATh = Java.use('android.app.ActivityThread');
     var ffLayoutMethod = null, ffLayoutImplementation = null, ffLayoutAttached = false;
     var ffConfigMethod = null, ffConfigImplementation = null, ffConfigAttached = false;
     var ffTraversalService = null, ffTraversalMethod = null, ffTraversalWarned = false;
+    var ffTaskClass = null, ffConfigurationClass = null, ffTaskField = null;
+    var ffDisplayChangedMethod = null, ffDisplayChangedApplying = false;
+    var ffDisplayChangedWarned = false;
 
     function ffCr() {
         try { return ATh.currentActivityThread().getSystemContext().getContentResolver(); } catch (e) { return null; }
@@ -137,6 +142,17 @@ Java.perform(function () {
     function ffInt(cr, key, def) {
         try { var v = SettingsGlobal.getString(cr, key); var n = parseInt(v, 10); return isNaN(n) ? def : n; }
         catch (e) { return def; }
+    }
+    function readScreenLiftType() {
+        try {
+            var SystemProperties = Java.use("android.os.SystemProperties");
+            var type = SystemProperties.getInt("persist.qg.canbus.bcm_screenAutoLiftFdb", 2);
+            if (type === 1 || type === 2) return type;
+        } catch (e) {}
+        return ffInt(ffCr(), "voyahtune_screen_lift_type", 2);
+    }
+    function ffBottom() {
+        return FF.liftType === 1 ? FF.compactBottom : FF.bottom;
     }
     function refreshFreeformCfg() {
         try {
@@ -146,8 +162,11 @@ Java.perform(function () {
             FF.top    = ffInt(cr, "voyahtune_win_top", 45);
             FF.right  = ffInt(cr, "voyahtune_win_right", 1920);
             FF.bottom = ffInt(cr, "voyahtune_win_bottom", 720);
+            FF.compactBottom = ffInt(cr, "voyahtune_win_compact_bottom", 560);
+            FF.liftType = readScreenLiftType();
             FF.dpi = {};   // сбросить кэш per-app DPI
-            Log.i(TAG, "freeform cfg on=" + FF.on + " rect=" + FF.left + "," + FF.top + "," + FF.right + "," + FF.bottom);
+            Log.i(TAG, "freeform cfg on=" + FF.on + " liftType=" + FF.liftType + " rect="
+                    + FF.left + "," + FF.top + "," + FF.right + "," + ffBottom());
         } catch (e) { Log.e(TAG, "refreshFreeformCfg: " + e); }
     }
     // Блэклист системных пакетов + наши ru.big.town.*. settings/documentsui — исключения.
@@ -164,6 +183,23 @@ Java.perform(function () {
         var d = FF.dpi[pkg];
         if (typeof d !== "number") { d = ffInt(ffCr(), "voyahtune_dpi_" + pkg, 0); FF.dpi[pkg] = d; }
         return d;
+    }
+
+    // Keep the task requested override minimal. In particular, never copy the resolved bounds,
+    // appBounds or dp sizes here: those belong to the destination display and copying them would
+    // freeze an intermediate size after a reparent/VD resize. Physical viewport bounds are applied
+    // by layoutWindowLw below; the only persistent per-task request is the explicitly configured DPI.
+    function ffApplyTaskDpi(taskObject, pkg) {
+        if (ffTaskClass === null || ffConfigurationClass === null || taskObject === null) return false;
+        var dpi = ffDpiFor(pkg);
+        if (!(dpi > 0)) return false;
+        var task = Java.cast(taskObject, ffTaskClass);
+        var current = task.getRequestedOverrideConfiguration();
+        if (current.densityDpi.value === dpi) return false;
+        var requested = ffConfigurationClass.$new(current);
+        requested.densityDpi.value = dpi;
+        task.onRequestedOverrideConfigurationChanged(requested);
+        return true;
     }
 
     // One-shot replay after delayed reattach. WindowManagerInternal's implementation takes
@@ -268,6 +304,42 @@ Java.perform(function () {
         installed.push("WIN_RELOAD receiver");
     } catch (e) { Log.e(TAG, "WIN_RELOAD receiver fail: " + e); }
 
+    // The logical displays stay 1920x720 while the dashboard is physically lowered. Apply the
+    // 560px viewport immediately on the OEM completion broadcast and replay WM traversal so every
+    // already visible third-party task receives new frames without being relaunched.
+    try {
+        var LiftReceiver = Java.registerClass({
+            name: "ru.big.town.vd.ScreenLiftReceiver",
+            superClass: Java.use("android.content.BroadcastReceiver"),
+            methods: {
+                onReceive: {
+                    returnType: "void",
+                    argumentTypes: ["android.content.Context", "android.content.Intent"],
+                    implementation: function (c, i) {
+                        try {
+                            var type = i.getIntExtra("type", 2);
+                            var actualType = readScreenLiftType();
+                            if (type !== actualType) {
+                                Log.w(TAG, "screen lift broadcast ignored: type=" + type
+                                        + " property=" + actualType);
+                                return;
+                            }
+                            FF.liftType = type === 1 ? 1 : 2;
+                            Log.i(TAG, "screen lift changed type=" + FF.liftType
+                                    + " effectiveBottom=" + ffBottom());
+                            requestFreeformTraversalOnce("screen lift type=" + FF.liftType);
+                        } catch (e) { Log.e(TAG, "screen lift receiver: " + e); }
+                    }
+                }
+            }
+        });
+        var liftFilter = Java.use("android.content.IntentFilter").$new("action.qg.layout.changed");
+        var liftCtx = ATh.currentActivityThread().getSystemContext();
+        liftCtx.registerReceiver.overload('android.content.BroadcastReceiver', 'android.content.IntentFilter')
+            .call(liftCtx, LiftReceiver.$new(), liftFilter);
+        installed.push("screen-lift bounds receiver");
+    } catch (e) { Log.e(TAG, "screen-lift receiver fail: " + e); }
+
     // 6) Ресайз не-системного окна на ФИЗИЧЕСКИХ экранах (display 0 = водитель, display 1 = пассажир) в Rect
     //    (фейк-freeform). Наш VD/прочие дисплеи не трогаем. Горячий путь → fast-path по флагу.
     try {
@@ -290,25 +362,26 @@ Java.perform(function () {
                 var df = win.getDisplayFrames(displayFrames);
                 var wf = win.getWindowFrames();
                 if (!df || !wf) return;                           // нечего мутировать — чистый пропуск (без порчи рамки)
-                // Пассажирский экран (display 1) на этой голове ПОЛНОСТЬЮ идентичен главному (1920×720, док
-                // 145dp) → те же bounds, что и display 0. Guard выше уже пропускает оба физических экрана.
+                // Оба физических экрана логически 1920×720 с доком 145 px; при опущенной панели
+                // effective bottom становится 560. Guard выше уже пропускает оба display.
                 // DisplayFrames принадлежит всему display/layout-проходу, а не только этому окну.
                 // Раньше мы заменяли mStable и оставляли уменьшенный Rect там навсегда: следующие окна
                 // (включая Launcher/док) могли получить геометрию стороннего приложения. Сохраняем
                 // значение и обязательно возвращаем его после computeFrame; WindowFrames самого окна
                 // остаются уменьшенными.
                 var stable = df.mStable.value;
+                var bottom = ffBottom();
                 // Не создаём Rect на каждом layout: этот метод вызывается сотни раз на screen-on.
                 var savedLeft = stable.left.value, savedTop = stable.top.value;
                 var savedRight = stable.right.value, savedBottom = stable.bottom.value;
                 try {
-                    stable.set(FF.left, FF.top, FF.right, FF.bottom);
-                    wf.mStableFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
-                    wf.mParentFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
-                    wf.mDisplayFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
-                    wf.mContentFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
-                    wf.mVisibleFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
-                    wf.mDecorFrame.value.set(FF.left, FF.top, FF.right, FF.bottom);
+                    stable.set(FF.left, FF.top, FF.right, bottom);
+                    wf.mStableFrame.value.set(FF.left, FF.top, FF.right, bottom);
+                    wf.mParentFrame.value.set(FF.left, FF.top, FF.right, bottom);
+                    wf.mDisplayFrame.value.set(FF.left, FF.top, FF.right, bottom);
+                    wf.mContentFrame.value.set(FF.left, FF.top, FF.right, bottom);
+                    wf.mVisibleFrame.value.set(FF.left, FF.top, FF.right, bottom);
+                    wf.mDecorFrame.value.set(FF.left, FF.top, FF.right, bottom);
                     win.computeFrame(df);
                 } finally {
                     stable.set(savedLeft, savedTop, savedRight, savedBottom);
@@ -334,11 +407,11 @@ Java.perform(function () {
     // одно действительно запрошенное поле — densityDpi; resolved Configuration копировать нельзя.
     try {
         var ARc = Java.use("com.android.server.wm.ActivityRecord");
-        var Task = Java.use("com.android.server.wm.Task");
-        var Configuration = Java.use("android.content.res.Configuration");
+        ffTaskClass = Java.use("com.android.server.wm.Task");
+        ffConfigurationClass = Java.use("android.content.res.Configuration");
         // Поле одно и то же для всех ActivityRecord: reflection lookup на каждом config-pass не нужен.
-        var taskF = ARc.class.getDeclaredField("task");
-        taskF.setAccessible(true);
+        ffTaskField = ARc.class.getDeclaredField("task");
+        ffTaskField.setAccessible(true);
         ffConfigMethod = ARc.ensureActivityConfiguration.overload('int', 'boolean', 'boolean');
         ffConfigImplementation = function (g, p, iv) {
             var result = ffConfigMethod.call(this, g, p, iv);
@@ -348,19 +421,60 @@ Java.perform(function () {
                 if (displayId !== 0 && displayId !== 1) return result;
                 var pkg = this.packageName.value;
                 if (ffBlacklisted(pkg)) return result;
-                var dpi = ffDpiFor(pkg);
-                if (!(dpi > 0)) return result;   // DPI не задан/невалиден (в т.ч. undefined из гонки кэша) → не трогаем
-                var task = Java.cast(taskF.get(this), Task);
-                var current = task.getRequestedOverrideConfiguration();
-                if (current.densityDpi.value === dpi) return result;
-                var tc = Configuration.$new(current);
-                tc.densityDpi.value = dpi;
-                task.onRequestedOverrideConfigurationChanged(tc);
+                ffApplyTaskDpi(ffTaskField.get(this), pkg);
             } catch (e) { /* не роняем WM */ }
             return result;
         };
         installed.push("ActivityRecord.ensureActivityConfiguration(detachable-dpi)");
     } catch (e) { Log.e(TAG, "ensureActivityConfiguration hook fail: " + e); }
+
+    // 8) A successful OEM swap reparents ActivityRecord to the other physical DisplayContent.
+    // Run the stock move first, then request one ordinary WM traversal: layoutWindowLw will rebuild
+    // this task's frames from the current raised/compact viewport. Re-apply only the requested DPI
+    // here; writing mSizeCompatBounds or a resolved Configuration (as some older scripts do) can pin
+    // stale source-display bounds and make the task impossible to resize.
+    //
+    // The guard is intentionally strict: only a real third-party task whose destination is physical
+    // display 0/1. Any reflection/OEM mismatch is swallowed after the original method, and the depth
+    // latch prevents our configuration update from recursively re-applying itself. Keep this rare
+    // hook isolated from the detachable config hook so a firmware ABI mismatch cannot disable DPI.
+    try {
+        if (SYSTEM_SERVER_FREEFORM_HOT_HOOKS && ffTaskField !== null) {
+            var ARd = Java.use("com.android.server.wm.ActivityRecord");
+            ffDisplayChangedMethod = ARd.onDisplayChanged.overload(
+                    'com.android.server.wm.DisplayContent');
+            ffDisplayChangedMethod.implementation = function (displayContent) {
+                ffDisplayChangedMethod.call(this, displayContent);
+                if (!FF.on || !FF.screenOn || ffDisplayChangedApplying) return;
+                try {
+                    if (displayContent === null) return;
+                    var displayId = displayContent.getDisplayId();
+                    if (displayId !== 0 && displayId !== 1) return;
+                    if (this.getDisplayId() !== displayId) return;
+                    var pkg = this.packageName.value;
+                    if (ffBlacklisted(pkg)) return;
+                    var taskObject = ffTaskField.get(this);
+                    if (taskObject === null) return;
+
+                    ffDisplayChangedApplying = true;
+                    try {
+                        ffApplyTaskDpi(taskObject, pkg);
+                        requestFreeformTraversalOnce("physical reparent pkg=" + pkg
+                                + " display=" + displayId);
+                    } finally {
+                        ffDisplayChangedApplying = false;
+                    }
+                } catch (e) {
+                    ffDisplayChangedApplying = false;
+                    if (!ffDisplayChangedWarned) {
+                        ffDisplayChangedWarned = true;
+                        Log.w(TAG, "physical reparent replay skipped (once): " + e);
+                    }
+                }
+            };
+            installed.push("ActivityRecord.onDisplayChanged(physical-reparent-replay)");
+        }
+    } catch (e) { Log.e(TAG, "ActivityRecord.onDisplayChanged hook fail: " + e); }
 
     function detachFreeformHotHooks(reason) {
         var changed = false;

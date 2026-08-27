@@ -1,18 +1,19 @@
 #!/system/bin/sh
 # Самодостаточный Frida-оркестратор Open Voyah (не зависит от сторонних обвязок).
 # Держит хуки через watchdog-цикл:
-#   1) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
-#   2) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (звёздочка 3090, DVR 173, медиа);
-#   3) launcherdock.js       в процессе лаунчера — переопределение дока главного экрана (NavigationBarMain);
-#   4) multidisplay.js       в com.qinggan.systemservice — перенос любого приложения между экранами;
+#   1) multidisplay.js       в com.qinggan.systemservice — до app-side whitelist cache;
+#   2) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
+#   3) launcherdock.js       в процессе лаунчера — док водительского/пассажирского экранов;
+#   4) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (3090, 173, медиа);
 #   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — по сохранённой настройке VoyahTune.
 #   6) keyboard_*.js         в com.qinggan.app.qgime — только при явном opt-in из «Другого».
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
-#   • Каждая точная process identity (boot-id + pid + start-time) получает НЕ БОЛЕЕ ОДНОЙ попытки.
-#     Attempt-маркер резервируется ДО frida-inject и сохраняется при timeout/ошибке. Поэтому зависший
-#     eternalize не может каждые 10–60 секунд добавлять в живой OEM-процесс новые GumJS threads.
-#     Повтор разрешён только после реального перезапуска цели, когда изменится identity.
+#   • По умолчанию каждая точная process identity (boot-id + pid + start-time) получает НЕ БОЛЕЕ
+#     ОДНОЙ попытки. Attempt-маркер резервируется ДО frida-inject и остаётся при timeout/ошибке.
+#   • Единственное узкое исключение — multidisplay: агент имеет idempotence-sentinel, rollback
+#     частичного core и точный ready-marker. Для него разрешены максимум три persistent попытки с
+#     backoff. Это лечит раннюю загрузку classloader/потерянный stdout, не создавая вечный цикл.
 #   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление). Запускаем одну
 #     фоновую попытку на PID под timeout; успех подтверждаем exit-code либо точным лог-маркером агента.
 
@@ -129,6 +130,14 @@ VD_ATTEMPT=/data/local/tmp/voyahtune_vd.attempt
 SWK_KM_ATTEMPT=/data/local/tmp/voyahtune_swk_km.attempt
 LNCH_ATTEMPT=/data/local/tmp/voyahtune_lnch.attempt
 MD_ATTEMPT=/data/local/tmp/voyahtune_md.attempt
+MD_READY_MARKER='[multidisplay] hook ready v2'
+MD_FAILURE_MARKER='[multidisplay] hook failed v2'
+MD_MAX_ATTEMPTS=3
+MD_RETRY_CORE_SECONDS=2
+MD_RETRY_SHORT_SECONDS=20
+MD_RETRY_LONG_SECONDS=60
+MD_BOOTSTRAP_WAIT_SECONDS=30
+MD_PRIORITY_DEFER_CYCLES=1
 APOLLO_MARK=/data/local/tmp/voyahtune_apollo.pid
 APOLLO_ATTEMPT=/data/local/tmp/voyahtune_apollo.attempt
 APOLLO_LOG=/data/local/tmp/voyahtune_apollo.txt
@@ -277,6 +286,11 @@ publish_hook_status() {
             return
         fi
     fi
+
+    # The loader now starts in late_start, before Android's app/provider phase. Keep local status
+    # current immediately, but do not spend the bounded provider retry budget before boot complete.
+    STATUS_BOOT_COMPLETED=$(getprop sys.boot_completed 2>/dev/null) || STATUS_BOOT_COMPLETED=
+    [ "$STATUS_BOOT_COMPLETED" = 1 ] || return
 
     if [ "$HOOK_STATUS_PROVIDER_PAYLOAD" != "$HOOK_STATUS_PAYLOAD" ] \
             && [ "$HOOK_STATUS_PROVIDER_ATTEMPTS" -lt "$HOOK_STATUS_PROVIDER_MAX_ATTEMPTS" ]; then
@@ -478,6 +492,271 @@ uptime_seconds() {
     esac
 }
 
+# multidisplay is the only retryable injector. Its attempt record is bound to the same exact
+# process identity as every success marker and persists count/deadline atomically:
+#     identity|attempt-count|next-allowed-uptime
+# A legacy one-shot record containing only identity is treated as attempt 1 due now.
+read_md_attempt_record() {
+    MD_RECORD_FILE=$1
+    MD_RECORD_RAW=
+    MD_RECORD_ID=
+    MD_RECORD_COUNT=0
+    MD_RECORD_NEXT=0
+    [ ! -r "$MD_RECORD_FILE" ] || IFS= read -r MD_RECORD_RAW < "$MD_RECORD_FILE"
+    [ -n "$MD_RECORD_RAW" ] || return 1
+    case "$MD_RECORD_RAW" in
+        *'|'*'|'*)
+            MD_RECORD_ID=${MD_RECORD_RAW%%|*}
+            MD_RECORD_REST=${MD_RECORD_RAW#*|}
+            MD_RECORD_COUNT=${MD_RECORD_REST%%|*}
+            MD_RECORD_NEXT=${MD_RECORD_REST#*|}
+            case "$MD_RECORD_NEXT" in *'|'*) return 1 ;; esac
+            ;;
+        v2:*)
+            MD_RECORD_ID=$MD_RECORD_RAW
+            MD_RECORD_COUNT=1
+            MD_RECORD_NEXT=0
+            ;;
+        *) return 1 ;;
+    esac
+    case "$MD_RECORD_ID" in v2:*) ;; *) return 1 ;; esac
+    case "$MD_RECORD_COUNT" in ''|*[!0-9]*) return 1 ;; esac
+    case "$MD_RECORD_NEXT" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$MD_RECORD_COUNT" -ge 1 ] && [ "$MD_RECORD_COUNT" -le "$MD_MAX_ATTEMPTS" ] \
+        || return 1
+    return 0
+}
+
+write_md_attempt_record() {
+    MD_WRITE_FILE=$1
+    MD_WRITE_ID=$2
+    MD_WRITE_COUNT=$3
+    MD_WRITE_NEXT=$4
+    MD_WRITE_TMP="$MD_WRITE_FILE.$$.new"
+    if ! printf '%s|%s|%s\n' "$MD_WRITE_ID" "$MD_WRITE_COUNT" "$MD_WRITE_NEXT" \
+            > "$MD_WRITE_TMP" || ! mv -f "$MD_WRITE_TMP" "$MD_WRITE_FILE"; then
+        rm -f "$MD_WRITE_TMP"
+        loge "multidisplay attempt marker write FAIL: $MD_WRITE_FILE"
+        return 1
+    fi
+    return 0
+}
+
+md_retry_delay() {
+    case "$1" in
+        1) echo "$MD_RETRY_SHORT_SECONDS" ;;
+        2) echo "$MD_RETRY_LONG_SECONDS" ;;
+        *) echo 0 ;;
+    esac
+}
+
+# Reserve persistently before frida-inject. Exposes MD_RESERVED_ATTEMPT to the caller.
+reserve_md_injection_attempt() {
+    MD_RESERVE_ID=$1
+    MD_RESERVE_FILE=$2
+    MD_RESERVED_ATTEMPT=1
+    MD_PREVIOUS_COUNT=0
+    MD_PREVIOUS_NEXT=0
+    if read_md_attempt_record "$MD_RESERVE_FILE" && [ "$MD_RECORD_ID" = "$MD_RESERVE_ID" ]; then
+        MD_PREVIOUS_COUNT=$MD_RECORD_COUNT
+        MD_PREVIOUS_NEXT=$MD_RECORD_NEXT
+        [ "$MD_PREVIOUS_COUNT" -lt "$MD_MAX_ATTEMPTS" ] || return 1
+        MD_RESERVE_NOW=$(uptime_seconds)
+        case "$MD_RESERVE_NOW" in ''|*[!0-9]*) return 1 ;; esac
+        [ "$MD_PREVIOUS_NEXT" -le "$MD_RESERVE_NOW" ] || return 1
+        MD_RESERVED_ATTEMPT=$((MD_PREVIOUS_COUNT + 1))
+    fi
+    MD_RESERVE_NOW=$(uptime_seconds)
+    case "$MD_RESERVE_NOW" in ''|*[!0-9]*) return 1 ;; esac
+    MD_RESERVE_DELAY=$(md_retry_delay "$MD_RESERVED_ATTEMPT")
+    MD_RESERVE_NEXT=$((MD_RESERVE_NOW + MD_RESERVE_DELAY))
+    write_md_attempt_record "$MD_RESERVE_FILE" "$MD_RESERVE_ID" \
+        "$MD_RESERVED_ATTEMPT" "$MD_RESERVE_NEXT"
+}
+
+record_md_injection_failure() {
+    MD_FAILURE_ID=$1
+    MD_FAILURE_FILE=$2
+    MD_FAILURE_ATTEMPT=$3
+    MD_FAILURE_REASON=${4:-generic}
+    # Never let a stale result overwrite the reservation of a newer process/attempt.
+    if ! read_md_attempt_record "$MD_FAILURE_FILE" \
+            || [ "$MD_RECORD_ID" != "$MD_FAILURE_ID" ] \
+            || [ "$MD_RECORD_COUNT" -ne "$MD_FAILURE_ATTEMPT" ]; then
+        return 1
+    fi
+    MD_FAILURE_NOW=$(uptime_seconds)
+    case "$MD_FAILURE_NOW" in ''|*[!0-9]*) return 1 ;; esac
+    if { [ "$MD_FAILURE_REASON" = agent_core_failure ] \
+            || [ "$MD_FAILURE_REASON" = ready_marker_missing ]; } \
+            && [ "$MD_FAILURE_ATTEMPT" -lt "$MD_MAX_ATTEMPTS" ]; then
+        MD_FAILURE_DELAY=$MD_RETRY_CORE_SECONDS
+    else
+        MD_FAILURE_DELAY=$(md_retry_delay "$MD_FAILURE_ATTEMPT")
+    fi
+    MD_FAILURE_NEXT=$((MD_FAILURE_NOW + MD_FAILURE_DELAY))
+    write_md_attempt_record "$MD_FAILURE_FILE" "$MD_FAILURE_ID" \
+        "$MD_FAILURE_ATTEMPT" "$MD_FAILURE_NEXT"
+}
+
+record_md_injection_success() {
+    # A terminal attempt record prevents duplicate GumJS agents if the success marker is later
+    # removed manually. The exact success marker still takes precedence in runtime state.
+    write_md_attempt_record "$2" "$1" "$MD_MAX_ATTEMPTS" 0
+}
+
+load_md_runtime_hook_state() {
+    MD_RUNTIME_INTEGRITY=$1
+    MD_RUNTIME_ID=$2
+    MD_RUNTIME_MARK=$3
+    MD_RUNTIME_ATTEMPT=$4
+    MD_RUNTIME_MARK_VALUE=
+    [ ! -r "$MD_RUNTIME_MARK" ] \
+        || IFS= read -r MD_RUNTIME_MARK_VALUE < "$MD_RUNTIME_MARK"
+    if [ "$MD_RUNTIME_INTEGRITY" != ok ]; then
+        RUNTIME_STATE=invalid
+    elif [ -z "$MD_RUNTIME_ID" ]; then
+        RUNTIME_STATE=waiting
+    elif [ "$MD_RUNTIME_MARK_VALUE" = "$MD_RUNTIME_ID" ]; then
+        RUNTIME_STATE=active
+    elif read_md_attempt_record "$MD_RUNTIME_ATTEMPT" \
+            && [ "$MD_RECORD_ID" = "$MD_RUNTIME_ID" ]; then
+        if [ "$MD_RECORD_COUNT" -ge "$MD_MAX_ATTEMPTS" ]; then
+            RUNTIME_STATE=failed
+        else
+            MD_RUNTIME_NOW=$(uptime_seconds)
+            case "$MD_RUNTIME_NOW" in
+                ''|*[!0-9]*) RUNTIME_STATE=injecting ;;
+                *)
+                    if [ "$MD_RECORD_NEXT" -gt "$MD_RUNTIME_NOW" ]; then
+                        RUNTIME_STATE=injecting
+                    else
+                        RUNTIME_STATE=waiting
+                    fi
+                    ;;
+            esac
+        fi
+    else
+        RUNTIME_STATE=waiting
+    fi
+}
+
+# Exact-ready multidisplay injector. A timeout/exit 0 without the agent marker is a failed attempt;
+# a marker is accepted even when eternalize made the wrapper time out. Internal agent failures have
+# their own marker and therefore cannot become a false active state.
+inject_multidisplay() {
+    MD_INJECT_PID=$1
+    MD_INJECT_ID=$2
+    MD_LAST_FAILURE=
+    reserve_md_injection_attempt "$MD_INJECT_ID" "$MD_ATTEMPT" || return 1
+    MD_INJECT_ATTEMPT=$MD_RESERVED_ATTEMPT
+    MD_CURRENT_ID=$(process_identity "$MD_INJECT_PID" com.qinggan.systemservice 2>/dev/null) \
+        || MD_CURRENT_ID=
+    if [ "$MD_CURRENT_ID" != "$MD_INJECT_ID" ]; then
+        loge "multidisplay inject skipped: target identity changed before launch"
+        record_md_injection_failure "$MD_INJECT_ID" "$MD_ATTEMPT" \
+            "$MD_INJECT_ATTEMPT" || true
+        return 1
+    fi
+
+    MD_LOG=/data/local/tmp/voyahtune_md.txt
+    MD_TRY="$MD_LOG.try"
+    : > "$MD_TRY"
+    timeout -k 5 30 "$FI" -p "$MD_INJECT_PID" -s "$MD" -e > "$MD_TRY" 2>&1
+    MD_RC=$?
+    cat "$MD_TRY" >> "$MD_LOG"
+
+    MD_INJECT_FAILURE=
+    # Agent marker wins over generic words in its error detail (e.g. "class not found"). Explicit
+    # rollback and missing-ready (sentinel-protected) are the only 2s bootstrap retry reasons.
+    if grep -qF "$MD_FAILURE_MARKER " "$MD_TRY"; then
+        MD_INJECT_FAILURE=agent_core_failure
+    elif grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' \
+            "$MD_TRY"; then
+        MD_INJECT_FAILURE=injector_error
+    elif ! grep -qF "$MD_READY_MARKER " "$MD_TRY"; then
+        MD_INJECT_FAILURE=ready_marker_missing
+    fi
+    if [ -n "$MD_INJECT_FAILURE" ]; then
+        MD_LAST_FAILURE=$MD_INJECT_FAILURE
+        record_md_injection_failure "$MD_INJECT_ID" "$MD_ATTEMPT" \
+            "$MD_INJECT_ATTEMPT" "$MD_INJECT_FAILURE" || true
+        loge "multidisplay inject FAIL pid=$MD_INJECT_PID attempt=$MD_INJECT_ATTEMPT/$MD_MAX_ATTEMPTS rc=$MD_RC reason=$MD_INJECT_FAILURE"
+        return 1
+    fi
+
+    MD_AFTER_ID=$(process_identity "$MD_INJECT_PID" com.qinggan.systemservice 2>/dev/null) \
+        || MD_AFTER_ID=
+    if [ "$MD_AFTER_ID" != "$MD_INJECT_ID" ]; then
+        record_md_injection_failure "$MD_INJECT_ID" "$MD_ATTEMPT" \
+            "$MD_INJECT_ATTEMPT" || true
+        loge "multidisplay inject result stale pid=$MD_INJECT_PID attempt=$MD_INJECT_ATTEMPT"
+        return 1
+    fi
+
+    # Latch success before publishing the marker: if local storage fails midway, the next cycle can
+    # never mistake a mere frida exit-code for success, and retries remain capped at three.
+    record_md_injection_success "$MD_INJECT_ID" "$MD_ATTEMPT" || true
+    MD_MARK_TMP="$MD_MARK.$$.new"
+    if ! printf '%s\n' "$MD_INJECT_ID" > "$MD_MARK_TMP" \
+            || ! mv -f "$MD_MARK_TMP" "$MD_MARK"; then
+        rm -f "$MD_MARK_TMP"
+        loge "multidisplay marker write FAIL pid=$MD_INJECT_PID (terminal retry latch kept)"
+        return 1
+    fi
+    rm -f "$MD_TRY"
+    logi "multidisplay inject OK pid=$MD_INJECT_PID attempt=$MD_INJECT_ATTEMPT/$MD_MAX_ATTEMPTS"
+    return 0
+}
+
+# During late_start, give Qinggan systemservice a short bounded discovery window and perform the
+# first verified server-hook attempt before any potentially 30s VD/launcher attach. An explicit core
+# rollback or missing stdout marker is safe to retry after 2s: the former removed partial hooks, the
+# latter is protected by the process sentinel. Exactly one such retry runs here; all later retries
+# remain in the regular bounded state.
+bootstrap_multidisplay() {
+    [ "$MD_INTEGRITY" = ok ] || return
+    MD_BOOTSTRAP_ELAPSED=0
+    MDP=
+    MDP_ID=
+    while [ "$MD_BOOTSTRAP_ELAPSED" -lt "$MD_BOOTSTRAP_WAIT_SECONDS" ]; do
+        MDP=$(pidof com.qinggan.systemservice 2>/dev/null)
+        MDP=${MDP%% *}
+        MDP_ID=$(process_identity "$MDP" com.qinggan.systemservice 2>/dev/null) || MDP_ID=
+        [ -z "$MDP_ID" ] || break
+        sleep 1
+        MD_BOOTSTRAP_ELAPSED=$((MD_BOOTSTRAP_ELAPSED + 1))
+    done
+    [ -n "$MDP_ID" ] || {
+        logi "multidisplay bootstrap target absent after ${MD_BOOTSTRAP_ELAPSED}s; defer to watchdog"
+        return
+    }
+
+    load_md_runtime_hook_state "$MD_INTEGRITY" "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
+    MD_STATE=$RUNTIME_STATE
+    [ "$MD_STATE" = waiting ] || return
+    inject_multidisplay "$MDP" "$MDP_ID" && {
+        MD_STATE=active
+        return
+    }
+
+    if [ "$MD_LAST_FAILURE" != agent_core_failure ] \
+            && [ "$MD_LAST_FAILURE" != ready_marker_missing ]; then
+        return
+    fi
+    sleep "$MD_RETRY_CORE_SECONDS"
+    MD_BOOTSTRAP_RETRY_PID=$(pidof com.qinggan.systemservice 2>/dev/null)
+    MD_BOOTSTRAP_RETRY_PID=${MD_BOOTSTRAP_RETRY_PID%% *}
+    MD_BOOTSTRAP_RETRY_ID=$(process_identity "$MD_BOOTSTRAP_RETRY_PID" \
+        com.qinggan.systemservice 2>/dev/null) || MD_BOOTSTRAP_RETRY_ID=
+    [ "$MD_BOOTSTRAP_RETRY_ID" = "$MDP_ID" ] || return
+    load_md_runtime_hook_state "$MD_INTEGRITY" "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
+    [ "$RUNTIME_STATE" = waiting ] || return
+    if inject_multidisplay "$MDP" "$MDP_ID"; then
+        MD_STATE=active
+    fi
+}
+
 # `timeout` uses a clock that may pause in suspend on some Toybox builds, while /proc/uptime can
 # advance across suspend. Before expiring a TTL record, verify that its actual injector child is
 # gone; otherwise a long sleep could create a second injection while the first still has time left.
@@ -594,7 +873,33 @@ inject_keymanager_bg() {
 }
 
 watchdog_cycle() {
-    # 1) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
+    # 1) Сначала server whitelist: никакой потенциально 30-секундный attach не должен позволить
+    #    клиентам MultiDisplayManager закэшировать прежний false до установки этого hook.
+    MDP=$(pidof com.qinggan.systemservice)
+    MDP=${MDP%% *}
+    MDP_ID=$(process_identity "$MDP" com.qinggan.systemservice 2>/dev/null) || MDP_ID=
+    load_md_runtime_hook_state "$MD_INTEGRITY" "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
+    MD_STATE=$RUNTIME_STATE
+    if [ -n "$MDP_ID" ] && [ "$MD_STATE" = waiting ]; then
+        if inject_multidisplay "$MDP" "$MDP_ID"; then
+            MD_STATE=active
+        else
+            load_md_runtime_hook_state "$MD_INTEGRITY" "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
+            MD_STATE=$RUNTIME_STATE
+        fi
+    fi
+    # If late_start won the race before Qinggan spawned systemservice (or a clean core retry is due),
+    # yield one complete 10s cycle instead of immediately blocking for up to 30s in VD/launcher.
+    # The counter makes this startup priority bounded even on firmware without this target.
+    if [ "$MD_INTEGRITY" = ok ] && [ "$MD_STATE" != active ] && [ "$MD_STATE" != failed ] \
+            && [ "$MD_PRIORITY_DEFER_CYCLES" -gt 0 ]; then
+        MD_PRIORITY_DEFER_CYCLES=$((MD_PRIORITY_DEFER_CYCLES - 1))
+        publish_hook_status running
+        return
+    fi
+    MD_PRIORITY_DEFER_CYCLES=0
+
+    # 2) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
     SS=$(pidof system_server)
     SS=${SS%% *}
     SS_ID=$(process_identity "$SS" system_server 2>/dev/null) || SS_ID=
@@ -609,7 +914,7 @@ watchdog_cycle() {
         fi
     fi
 
-    # 2) Переопределение дока — инъекция в процесс лаунчера (возвращает управление → verify-before-mark).
+    # 3) Переопределение дока — инъекция в процесс лаунчера (возвращает управление → verify-before-mark).
     #    По -p pid; промах лачится для exact identity и не повторяется циклом.
     LP=$(pidof com.qinggan.app.launcher)
     LP=${LP%% *}
@@ -625,7 +930,7 @@ watchdog_cycle() {
         fi
     fi
 
-    # 3) Кнопки руля в keymanager: фоновая one-shot/verified попытка (см. inject_keymanager_bg).
+    # 4) Кнопки руля в keymanager: фоновая one-shot/verified попытка (см. inject_keymanager_bg).
     KMP=$(pidof com.qinggan.keymanager.service 2>/dev/null)
     KMP=${KMP%% *}
     KMP_ID=$(process_identity "$KMP" com.qinggan.keymanager.service 2>/dev/null) || KMP_ID=
@@ -638,22 +943,6 @@ watchdog_cycle() {
             SWK_STATE=injecting
         elif [ -r "$SWK_KM_ATTEMPT" ]; then
             SWK_STATE=failed
-        fi
-    fi
-
-    # 4) Перенос приложений между экранами — инъекция в systemservice (возвращает управление →
-    #    verify-before-mark, как system_server и лаунчер).
-    MDP=$(pidof com.qinggan.systemservice)
-    MDP=${MDP%% *}
-    MDP_ID=$(process_identity "$MDP" com.qinggan.systemservice 2>/dev/null) || MDP_ID=
-    load_runtime_hook_state "$MD_INTEGRITY" "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
-    MD_STATE=$RUNTIME_STATE
-    if [ -n "$MDP_ID" ] && [ "$MD_STATE" = waiting ]; then
-        if inject_ret "$MDP" "$MD" /data/local/tmp/voyahtune_md.txt \
-                "$MD_MARK" "$MD_ATTEMPT" "$MDP_ID" com.qinggan.systemservice; then
-            MD_STATE=active
-        else
-            MD_STATE=failed
         fi
     fi
 
@@ -837,6 +1126,8 @@ cleanup_loader() {
 trap 'cleanup_loader' 0
 
 logi "voyah load.bin start"
+bootstrap_multidisplay
+publish_hook_status running
 
 while [ 1 ]; do
     watchdog_cycle

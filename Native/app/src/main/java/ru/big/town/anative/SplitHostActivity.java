@@ -2,7 +2,10 @@ package ru.big.town.anative;
 
 import android.app.Activity;
 import android.app.ActivityOptions;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.Outline;
@@ -11,6 +14,7 @@ import android.hardware.display.VirtualDisplay;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.InputEvent;
@@ -30,6 +34,8 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.lang.ref.WeakReference;
+
+import androidx.core.content.ContextCompat;
 
 /**
  * Хост одного приложения или сплита на VirtualDisplay: каждая видимая панель запускается на СВОЁМ
@@ -62,6 +68,14 @@ public class SplitHostActivity extends Activity {
      */
     private static final boolean DIVIDER_RESIZE_GESTURE_ENABLED = false;
 
+    private static final String ACTION_SCREEN_LIFT_CHANGED = "action.qg.layout.changed";
+    private static final String SCREEN_LIFT_SETTING = "voyahtune_screen_lift_type";
+    private static final String SCREEN_LIFT_PROPERTY = "persist.qg.canbus.bcm_screenAutoLiftFdb";
+    private static final int SCREEN_LIFT_DOWN = 1;
+    private static final int SCREEN_LIFT_UP = 2;
+    private static final int SCREEN_DOWN_HEIGHT_PX = 560;
+    private static final int SCREEN_UP_HEIGHT_PX = 720;
+
     public static final String EXTRA_LEFT     = "leftPkg";
     public static final String EXTRA_RIGHT    = "rightPkg";
     public static final String EXTRA_RATIO    = "ratio";
@@ -85,6 +99,23 @@ public class SplitHostActivity extends Activity {
     private DisplayManager displayManager;
     private int defaultDpi = 213;
     private boolean touchWarned = false;
+    private boolean screenLiftReceiverRegistered;
+    private int screenLiftType = SCREEN_LIFT_UP;
+
+    private final BroadcastReceiver screenLiftReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null || !ACTION_SCREEN_LIFT_CHANGED.equals(intent.getAction())) return;
+            int type = intent.getIntExtra("type", SCREEN_LIFT_UP);
+            int actualType = readScreenLiftProperty(type);
+            if (actualType != type) {
+                Log.w(TAG, "screen lift broadcast ignored: type=" + type
+                        + " property=" + actualType);
+                return;
+            }
+            applyScreenLiftSize(type);
+        }
+    };
 
     /** Одна «панель» сплита: контейнер + SurfaceView + свой VirtualDisplay + запускаемое приложение. */
     private static final class Pane {
@@ -147,6 +178,8 @@ public class SplitHostActivity extends Activity {
         getWindow().setDecorFitsSystemWindows(false);
         setContentView(R.layout.activity_split_host);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        applyScreenLiftSize(readScreenLiftType());
+        registerScreenLiftReceiver();
         applyWindowInsets();
 
         displayManager = (DisplayManager) getSystemService(DISPLAY_SERVICE);
@@ -193,7 +226,65 @@ public class SplitHostActivity extends Activity {
         Log.i(TAG, "onCreate single=" + single + " left=" + left.pkg + " right=" + right.pkg
                 + " ratio=" + ratio + " lDpi=" + left.dpi + " rDpi=" + right.dpi
                 + " defaultDpi=" + defaultDpi + " resizable=" + resizable
-                + " split=" + startSplit + " presetId=" + presetId);
+                + " split=" + startSplit + " presetId=" + presetId
+                + " liftType=" + screenLiftType + " hostHeight=" + currentHostHeight());
+    }
+
+    /**
+     * The OEM display always reports 1920x720. In the lowered state only the upper 560 pixels are
+     * physically visible, so size the host content explicitly. SurfaceView then emits
+     * surfaceChanged and the existing VD resize path updates an already running split as well.
+     */
+    private void applyScreenLiftSize(int type) {
+        screenLiftType = type == SCREEN_LIFT_DOWN ? SCREEN_LIFT_DOWN : SCREEN_LIFT_UP;
+        final int height = currentHostHeight();
+        View root = findViewById(R.id.splitHostRoot);
+        if (root == null) return;
+        ViewGroup.LayoutParams lp = root.getLayoutParams();
+        if (lp.height != height) {
+            lp.height = height;
+            root.setLayoutParams(lp);
+        }
+        root.requestLayout();
+        Log.i(TAG, "screen lift type=" + screenLiftType + " hostHeight=" + height
+                + " (active VDs resize from SurfaceView.surfaceChanged)");
+    }
+
+    private int currentHostHeight() {
+        return screenLiftType == SCREEN_LIFT_DOWN ? SCREEN_DOWN_HEIGHT_PX : SCREEN_UP_HEIGHT_PX;
+    }
+
+    private int readScreenLiftType() {
+        int property = readScreenLiftProperty(0);
+        if (property == SCREEN_LIFT_DOWN || property == SCREEN_LIFT_UP) return property;
+        try {
+            return Settings.Global.getInt(getContentResolver(), SCREEN_LIFT_SETTING, SCREEN_LIFT_UP);
+        } catch (RuntimeException e) {
+            return SCREEN_LIFT_UP;
+        }
+    }
+
+    private int readScreenLiftProperty(int fallback) {
+        try {
+            Class<?> properties = Class.forName("android.os.SystemProperties");
+            Method getInt = properties.getDeclaredMethod("getInt", String.class, int.class);
+            int value = (Integer) getInt.invoke(null, SCREEN_LIFT_PROPERTY, fallback);
+            if (value == SCREEN_LIFT_DOWN || value == SCREEN_LIFT_UP) return value;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "screen lift property unavailable: " + e.getMessage());
+        }
+        return fallback;
+    }
+
+    private void registerScreenLiftReceiver() {
+        IntentFilter filter = new IntentFilter(ACTION_SCREEN_LIFT_CHANGED);
+        try {
+            ContextCompat.registerReceiver(this, screenLiftReceiver, filter,
+                    ContextCompat.RECEIVER_EXPORTED);
+            screenLiftReceiverRegistered = true;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "screen lift receiver unavailable: " + e.getMessage());
+        }
     }
 
     /**
@@ -1037,6 +1128,13 @@ public class SplitHostActivity extends Activity {
         cancelResizeGesture();
         releasePane(left);
         releasePane(right);
+        if (screenLiftReceiverRegistered) {
+            try {
+                unregisterReceiver(screenLiftReceiver);
+            } catch (IllegalArgumentException ignored) {
+            }
+            screenLiftReceiverRegistered = false;
+        }
         super.onDestroy();
     }
 

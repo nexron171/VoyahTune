@@ -189,6 +189,24 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
     }
 
+    /** Пассажирский док имеет отдельные слоты и только короткое нажатие, поэтому split extras не зеркалим. */
+    static void mirrorPassengerDock(Context ctx, Intent intent, int slot) {
+        String extra = "dockPassenger" + slot;
+        String pkg = intent.getStringExtra(extra);
+        if (pkg == null || pkg.isEmpty()) pkg = "none";
+        int dpi = intent.getIntExtra(extra + "Dpi", 0);
+        try {
+            android.content.ContentResolver cr = ctx.getContentResolver();
+            android.provider.Settings.Global.putString(cr, "voyahtune_" + extra, pkg);
+            android.provider.Settings.Global.putString(cr, "voyahtune_" + extra + "Dpi", String.valueOf(dpi));
+            if (!"none".equals(pkg)) {
+                android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "mirrorPassengerDock " + slot + ": " + e.getMessage());
+        }
+    }
+
     /** Полный event-driven снимок per-app DPI. Никакого polling: вызывается при изменении и startup/wake. */
     static void mirrorAppDpi(Context ctx, Intent intent) {
         String json = intent.getStringExtra("appDpiJson");
@@ -278,7 +296,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         if (pkg == null || pkg.isEmpty()) return false;
         android.content.ContentResolver cr = ctx.getContentResolver();
         return pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock1"))
-                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock2"));
+                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock2"))
+                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dockPassenger1"))
+                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dockPassenger2"));
     }
 
     /** STEER_ACTION должен совпадать с одним из значений, зеркалированных из подписанного RestoreMode. */

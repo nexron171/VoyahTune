@@ -57,9 +57,74 @@ grep -Fq 'com.qinggan.launcher.base.allapp.AllAppDataManager' "$DOCK" \
 grep -Fq 'if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list);' "$DOCK" \
     || fail "All Apps injection must cover both physical displays"
 [ "$(grep -Fc 'pm.getInstalledApplications(0)' "$DOCK")" -eq 1 ] \
-    || fail "installed app discovery must be a single cached snapshot, not polling"
+    || fail "installed app discovery must have one event-invalidated snapshot builder, not polling"
+grep -Fq 'var reloadData = Data.reload.overload();' "$DOCK" \
+    || fail "package changes cannot rebuild both OEM All Apps lists"
+grep -Fq 'name: "ru.big.town.dock.AllAppsPackageReceiver"' "$DOCK" \
+    || fail "All Apps package lifecycle receiver is not registered in the launcher process"
+for package_action in PACKAGE_ADDED PACKAGE_REMOVED PACKAGE_CHANGED; do
+    grep -Fq "android.intent.action.$package_action" "$DOCK" \
+        || fail "All Apps cache does not react to $package_action"
+done
+grep -Fq 'packageFilter.addDataScheme("package");' "$DOCK" \
+    || fail "package lifecycle receiver is missing the mandatory package data scheme"
+grep -Fq 'if (packageRefreshTimer !== null) clearTimeout(packageRefreshTimer);' "$DOCK" \
+    || fail "APK update REMOVE+ADD bursts must be coalesced without polling"
+grep -Fq 'installedSnapshot = null;' "$DOCK" \
+    || fail "package lifecycle events do not invalidate the installed-app snapshot"
+grep -Fq 'invalidateIconCache(packageName);' "$DOCK" \
+    || fail "updated/removed package icons remain pinned in the launcher cache"
+grep -Fq 'reloadData.call(Data);' "$DOCK" \
+    || fail "package lifecycle events never invoke the OEM list reload"
+grep -Fq 'Java.scheduleOnMainThread(function () {' "$DOCK" \
+    || fail "AllAppDataManager reload must be dispatched on the launcher UI thread"
 grep -Fq 'AppLauncher.startApp(ctx(), intent, screenId);' "$DOCK" \
     || fail "All Apps click does not preserve the selected physical display"
+grep -Fq 'if (screenId !== 0 && screenId !== 1)' "$DOCK" \
+    || fail "All Apps must reject accidental non-physical launch destinations"
+grep -Fq 'var display = view.getDisplay();' "$DOCK" \
+    || fail "All Apps click needs a physical-view fallback when its owner screen id is unavailable"
+grep -Fq 'var rawScreenId = fieldValue(owner, "mScreenId");' "$DOCK" \
+    || fail "All Apps click must derive its primary destination from the owner view screen id"
+if grep -Fq 'var screenId = Number(fieldValue(this, "mScreenId"));' "$DOCK"; then
+    fail "AllAppAdapter has no mScreenId; missing fields must not silently route passenger clicks to display 0"
+fi
+grep -Fq 'var bean = AppBean.$new(template.icon, template.name, pkg);' "$DOCK" \
+    || fail "synthetic All Apps entries need valid OEM placeholder resources before stock bind"
+grep -Fq 'template = findAppTemplate(getAll.call(Data, 0));' "$DOCK" \
+    || fail "an empty passenger OEM list needs a safe main-list resource template fallback"
+if grep -Fq 'var bean = AppBean.$new(0, 0, pkg);' "$DOCK"; then
+    fail "zero All Apps resources crash the OEM adapter before custom icon/label replacement"
+fi
+grep -Fq "'int', 'java.util.List'" "$DOCK" \
+    || fail "All Apps payload binds must re-apply third-party icons after theme/state updates"
+grep -Fq 'com.qinggan.launcher.base.allapp.AllAppBarView' "$DOCK" \
+    || fail "All Apps synthetic clicks must be intercepted by the OEM listener owner"
+grep -Fq 'com.qinggan.secondlauncher.adapter.SecondAllAppAdapter' "$DOCK" \
+    || fail "passenger home rail must decorate the shared synthetic app list"
+grep -Fq 'com.qinggan.secondlauncher.fragment.SecondMainFragment' "$DOCK" \
+    || fail "passenger home rail must launch arbitrary synthetic packages on display 1"
+grep -Fq '[allapps] optional passenger rail hooks unavailable:' "$DOCK" \
+    || fail "optional passenger rail ABI drift must not disable full-screen All Apps"
+
+for required_compact_view in home item1 item2 allApps; do
+    grep -Fq "setDockViewVisibility($required_compact_view, 0" "$DOCK" \
+        || fail "compact dock does not force $required_compact_view visible"
+done
+grep -Fq 'setDockViewHeight(up, compact ? 560 : 720' "$DOCK" \
+    || fail "compact/normal dock viewport heights are not applied"
+grep -Fq 'setDockViewVisibility(item3, compact ? 8 : 0' "$DOCK" \
+    || fail "compact dock does not hide stock slot 3"
+grep -Fq 'setDockViewVisibility(item4, compact ? 8 : 0' "$DOCK" \
+    || fail "compact dock does not hide stock slot 4"
+grep -Fq 'if (av && sid === 0)' "$DOCK" \
+    || fail "All Apps long tap must be driver-only"
+grep -Fq 'av.setOnLongClickListener(null);' "$DOCK" \
+    || fail "passenger All Apps retains a long-click listener"
+grep -Fq 'sv1.setOnLongClickListener(null); sv1.setLongClickable(false);' "$DOCK" \
+    || fail "passenger slot 1 retains long-click behavior"
+grep -Fq 'sv2.setOnLongClickListener(null); sv2.setLongClickable(false);' "$DOCK" \
+    || fail "passenger slot 2 retains long-click behavior"
 if grep -Fq 'android.activity.windowingMode' "$RECEIVER"; then
     fail "single-app launch must remain a normal task for WindowManager frame clamping"
 fi

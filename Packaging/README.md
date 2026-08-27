@@ -45,11 +45,29 @@ per-app DPI независимо от источника запуска. На `S
 split двух приложений.
 
 `launcherdock.js` также добавляет в штатные списки «Все приложения» обоих физических экранов launchable
-сторонние APK, которые OEM launcher скрывает. PackageManager сканируется один раз за процесс launcher,
-без polling. Клик передаёт OEM AppLauncher идентификатор выбранного экрана, после чего приложение
-попадает в тот же physical-window путь. Плавающая кнопка Home
+сторонние APK, которые OEM launcher скрывает. Снимок PackageManager кэшируется между системными
+`PACKAGE_ADDED`/`PACKAGE_REMOVED`/`PACKAGE_CHANGED`; динамический receiver инвалидирует его и через
+штатный `AllAppDataManager.reload()` обновляет открытые списки обоих экранов. Периодического polling нет.
+Для synthetic-записей используются валидные placeholder-ресурсы OEM, а после штатного bind подставляются
+настоящие иконка и название приложения. Клик передаёт OEM AppLauncher `mScreenId` самого `AllAppBarView`
+(с проверочным fallback по дисплею view), поэтому пассажирский All Apps запускает приложение на пассажирском
+экране. Отдельно обработана пассажирская home-лента `SecondAllAppAdapter`, которая читает тот же источник.
+После этого приложение попадает в тот же physical-window путь. Плавающая кнопка Home
 подавляется штатными launcher-предикатами, а событие `TOP_ACTIVITY_CHANGED` повторно показывает док
 при возврате из fullscreen OEM-экрана (например угловой камеры) к оконному приложению.
+
+Слоты 1/2 настраиваются независимо для водительского и пассажирского доков. На пассажирском экране
+перехватываются только короткие нажатия; long tap для меню и split-пресетов там принудительно отключён.
+При опущенной панели OEM one-button dock заменяется компактной раскладкой из Home, двух настраиваемых
+слотов и All Apps. Пока интеграционная проверка автомобиля не показала иное, высота компактного viewport
+зафиксирована как 560 px (обычный режим — 720 px).
+
+`action.qg.layout.start_change` сохраняет foreground-задачу каждого физического экрана, а
+`action.qg.layout.changed` возвращает те же task id после OEM-анимации. Одновременно system_server
+пересчитывает рамки уже открытых обычных приложений. `SplitHostActivity` читает текущее состояние до
+создания VirtualDisplay и при каждой последующей смене высоты меняет корневой viewport; штатный
+`SurfaceView.surfaceChanged` вызывает `VirtualDisplay.resize`, поэтому новый и уже активный split
+получают актуальный размер.
 
 Per-app DPI хранится в `DrivePreferences` и event-driven зеркалируется в
 `Settings.Global/voyahtune_dpi_<package>` при изменении, старте Native и пробуждении. `WIN_RELOAD`
@@ -139,10 +157,19 @@ VoyahTune. Переключатели сохраняют только целев
 
 Постоянный 10-секундный watchdog full-варианта обслуживает VD, launcher, keymanager, multidisplay,
 VehicleSetting и opt-in Qinggan IME. Режим клавиатуры читается только при появлении новой qgime
-identity; в выключенном по умолчанию состоянии это одно чтение на жизнь процесса. Каждая точная identity получает не более одной
-тяжёлой Frida-попытки; ошибка не создаёт повторяющийся injection loop, а новый процесс получает новую
-попытку. Owner/busy lock loops имеют sleep и конечный budget, поэтому повреждённый lock path не
-создаёт 100% CPU spin.
+identity; в выключенном по умолчанию состоянии это одно чтение на жизнь процесса. Обычно каждая точная
+identity получает не более одной тяжёлой Frida-попытки. Узкое исключение — idempotent multidisplay-agent:
+он стартует первым, подтверждает точный ready-marker и имеет persistent лимит из трёх попыток
+(быстрый 2-секундный повтор для чистой ранней ошибки/потерянного marker, затем bounded 20/60 секунд).
+Owner/busy lock loops имеют sleep и конечный budget, поэтому повреждённый lock path не создаёт 100% CPU
+spin.
+
+Loader включается в `post-fs-data` после синхронного `setenforce`, но остаётся `class late_start`.
+Перед общим watchdog он до 30 секунд ждёт `com.qinggan.systemservice` и устанавливает server whitelist
+раньше, чем приложения успеют закэшировать OEM-ответ. Это устраняет основной источник «иногда работает
+после перезапуска приложения». Activity-level `mEnable`, Home/SplitHost и top-task race намеренно не
+переопределяются вслепую; подробный разбор находится в
+`Docs/multidisplay-transfer-audit.md`.
 
 Это не меняет политику внутренних автомобильных watchdog: редкие собственные проверки, нужные для
 возврата целевого состояния, сохраняются. Оптимизация направлена прежде всего на работу,
@@ -163,6 +190,15 @@ RestoreMode ContentProvider и атомарно сохраняется в отд
 уже существующем цикле RAM/CPU раз в 5 секунд. Вне видимого раздела ни timer, ни чтение status не
 работают. Ошибка доставки provider получает максимум три попытки для данной revision, а не вечный
 retry-loop.
+
+После воспроизведения отказа жеста или системной кнопки read-only bundle снимается командой:
+
+```bash
+./Packaging/tools/capture_multidisplay_diagnostics.sh 3cad9c17 ./md-failure
+```
+
+Скрипт не меняет настройки и процессы ГУ; он сохраняет hook markers/logs, полный logcat и нужные
+`dumpsys` для различения whitelist, activity-level `mEnable` и неверного top task.
 
 Для безопасной host-проверки exact process identity добавлен
 `Utils/android11-oem-stubs`. Harness рассчитан только на Android 11/API 30 emulator, требует явный

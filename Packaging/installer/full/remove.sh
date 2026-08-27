@@ -429,6 +429,9 @@ echo "=== Очистка Settings.Global ==="
 if ! adb shell '
     for setting_name in \
         voyahtune_dock1 voyahtune_dock2 voyahtune_dock1Dpi voyahtune_dock2Dpi \
+        voyahtune_dockPassenger1 voyahtune_dockPassenger2 \
+        voyahtune_dockPassenger1Dpi voyahtune_dockPassenger2Dpi \
+        voyahtune_screen_lift_type voyahtune_win_compact_bottom \
         voyahtune_steerStarShort voyahtune_steerStarLong \
         voyahtune_steerDvrShort voyahtune_steerDvrLong \
         voyahtune_steerVoiceShort voyahtune_steerVoiceLong \

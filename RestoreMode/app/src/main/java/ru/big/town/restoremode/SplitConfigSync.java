@@ -37,11 +37,17 @@ final class SplitConfigSync {
     static void pushDock(Context context, SharedPreferences prefs) {
         String p1 = prefs.getString("dockOverride1", "");
         String p2 = prefs.getString("dockOverride2", "");
+        String pp1 = prefs.getString("dockPassengerOverride1", "");
+        String pp2 = prefs.getString("dockPassengerOverride2", "");
         Intent i = configIntent("ru.big.town.anative.DOCK_CONFIG");
         i.putExtra("dock1", p1.isEmpty() ? "none" : p1);
         i.putExtra("dock2", p2.isEmpty() ? "none" : p2);
         i.putExtra("dock1Dpi", p1.isEmpty() ? 0 : AppDpiStore.get(prefs, p1));
         i.putExtra("dock2Dpi", p2.isEmpty() ? 0 : AppDpiStore.get(prefs, p2));
+        i.putExtra("dockPassenger1", pp1.isEmpty() ? "none" : pp1);
+        i.putExtra("dockPassenger2", pp2.isEmpty() ? "none" : pp2);
+        i.putExtra("dockPassenger1Dpi", pp1.isEmpty() ? 0 : AppDpiStore.get(prefs, pp1));
+        i.putExtra("dockPassenger2Dpi", pp2.isEmpty() ? 0 : AppDpiStore.get(prefs, pp2));
         addDockSplitExtras(i, 1, p1, prefs);
         addDockSplitExtras(i, 2, p2, prefs);
         context.sendBroadcast(i);
