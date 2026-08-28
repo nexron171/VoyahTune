@@ -1,9 +1,9 @@
 #!/system/bin/sh
 # Самодостаточный Frida-оркестратор Open Voyah (не зависит от сторонних обвязок).
-# Держит хуки через watchdog-цикл:
-#   1) multidisplay.js       в com.qinggan.systemservice — до app-side whitelist cache;
-#   2) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
-#   3) launcherdock.js       в процессе лаунчера — док водительского/пассажирского экранов;
+# Держит хуки через ранний launcher pass + watchdog-цикл:
+#   1) launcherdock.js       в процессе лаунчера — немедленная отрисовка дока на cold boot;
+#   2) multidisplay.js       в com.qinggan.systemservice — server whitelist до общего watchdog;
+#   3) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
 #   4) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (3090, 173, медиа);
 #   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — по сохранённой настройке VoyahTune.
 #   6) keyboard_*.js         в com.qinggan.app.qgime — только при явном opt-in из «Другого».
@@ -391,6 +391,33 @@ inject_ret() {
     return 0
 }
 
+# Cold-boot fast path: launcher обычно уже создан к запуску class late_start, тогда как Qinggan
+# systemservice ещё может отсутствовать все bounded 15 секунд. Один exact-identity attach здесь
+# позволяет сразу нарисовать compact dock. Никакого ожидания launcher PID нет: если он ещё не создан,
+# обычный MD-first watchdog подхватит его позже. Запуск приложений этот pass не инициирует.
+bootstrap_launcher_dock() {
+    [ "$LNCH_INTEGRITY" = ok ] || return 1
+    LP=$(pidof com.qinggan.app.launcher 2>/dev/null)
+    LP=${LP%% *}
+    LP_ID=$(process_identity "$LP" com.qinggan.app.launcher 2>/dev/null) || LP_ID=
+    [ -n "$LP_ID" ] || return 1
+    load_runtime_hook_state "$LNCH_INTEGRITY" "$LP_ID" "$LNCH_MARK" "$LNCH_ATTEMPT"
+    LNCH_STATE=$RUNTIME_STATE
+    [ "$LNCH_STATE" = waiting ] || {
+        [ "$LNCH_STATE" = active ]
+        return
+    }
+    if inject_ret "$LP" "$LNCH" /data/local/tmp/voyahtune_lnch.txt \
+            "$LNCH_MARK" "$LNCH_ATTEMPT" "$LP_ID" com.qinggan.app.launcher; then
+        LNCH_STATE=active
+        logi "launcher early bootstrap active pid=$LP"
+        return 0
+    else
+        LNCH_STATE=failed
+        return 1
+    fi
+}
+
 # VehicleSetting может удержать eternalized Frida session после того, как обвязка timeout завершила
 # injector. Поэтому точный ready-marker агента также считается успехом. Попытка всё равно только одна
 # на process identity: неисправная прошивка не получает 10-секундный injection loop.
@@ -711,7 +738,8 @@ inject_multidisplay() {
 }
 
 # During late_start, give Qinggan systemservice a short bounded discovery window and perform the
-# first verified server-hook attempt before any potentially 30s VD/launcher attach. An explicit core
+# first verified server-hook attempt before the general watchdog/VD attach. The cold-boot launcher
+# one-shot is the deliberate latency exception and never launches an application. An explicit core
 # rollback or missing stdout marker is safe to retry after 2s: the former removed partial hooks, the
 # latter is protected by the process sentinel. Exactly one such retry runs here; all later retries
 # remain in the regular bounded state.
@@ -721,6 +749,9 @@ bootstrap_multidisplay() {
     MDP=
     MDP_ID=
     while [ "$MD_BOOTSTRAP_ELAPSED" -lt "$MD_BOOTSTRAP_WAIT_SECONDS" ]; do
+        # Launcher appears around 10s on the live H97C, while Qinggan systemservice may take 30s+.
+        # Reuse this already-bounded loop so dock injection happens on the first visible identity.
+        bootstrap_launcher_dock || true
         MDP=$(pidof com.qinggan.systemservice 2>/dev/null)
         MDP=${MDP%% *}
         MDP_ID=$(process_identity "$MDP" com.qinggan.systemservice 2>/dev/null) || MDP_ID=

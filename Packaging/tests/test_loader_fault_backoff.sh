@@ -211,6 +211,17 @@ bootstrap_call_line=$(grep -n '^bootstrap_multidisplay$' "$LOAD_BIN" | cut -d: -
 watchdog_loop_line=$(grep -n '^while \[ 1 \]; do$' "$LOAD_BIN" | tail -n1 | cut -d: -f1)
 [ "$bootstrap_call_line" -lt "$watchdog_loop_line" ] \
     || fail "bounded multidisplay discovery is not run before the general watchdog"
+md_bootstrap_function=$(awk '
+    /^bootstrap_multidisplay\(\) \{/ { capture = 1 }
+    /^# `timeout` uses/ { capture = 0 }
+    capture { print }
+' "$LOAD_BIN")
+launcher_probe_line=$(printf '%s\n' "$md_bootstrap_function" \
+    | grep -nF 'bootstrap_launcher_dock || true' | head -n1 | cut -d: -f1)
+bootstrap_sleep_line=$(printf '%s\n' "$md_bootstrap_function" \
+    | grep -nF 'sleep 1' | head -n1 | cut -d: -f1)
+[ -n "$launcher_probe_line" ] && [ "$launcher_probe_line" -lt "$bootstrap_sleep_line" ] \
+    || fail "cold-boot launcher is not probed on every bounded multidisplay wait cycle"
 grep -Fq 'WATCHDOG_CYCLE_SECONDS=5' "$LOAD_BIN" \
     || fail "launcher restart discovery is slower than the 5-second wake target"
 grep -Fq 'sleep "$WATCHDOG_CYCLE_SECONDS"' "$LOAD_BIN" \

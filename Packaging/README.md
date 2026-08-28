@@ -162,14 +162,17 @@ VoyahTune. Переключатели сохраняют только целев
 VehicleSetting и opt-in Qinggan IME. Режим клавиатуры читается только при появлении новой qgime
 identity; в выключенном по умолчанию состоянии это одно чтение на жизнь процесса. Обычно каждая точная
 identity получает не более одной тяжёлой Frida-попытки. Узкое исключение — idempotent multidisplay-agent:
-он стартует первым, подтверждает точный ready-marker и имеет persistent лимит из трёх попыток
+он первым обслуживается в каждом watchdog-цикле, подтверждает точный ready-marker и имеет persistent
+лимит из трёх попыток
 (быстрый 2-секундный повтор для чистой ранней ошибки/потерянного marker, затем bounded 20/60 секунд).
 Owner/busy lock loops имеют sleep и конечный budget, поэтому повреждённый lock path не создаёт 100% CPU
 spin.
 
-Внутри цикла порядок приоритетов — multidisplay whitelist, launcher dock, затем VD/system_server.
-Поэтому появление иконок после wake/restart launcher не ждёт потенциально долгого VD attach, а новая
-identity launcher обнаруживается максимум за 5 секунд.
+На cold boot тот же 15-секундный bootstrap каждую секунду ищет не только Qinggan systemservice, но и
+launcher. Как только launcher появляется, выполняется exact-identity one-shot launcher-dock: он только
+оформляет док и не запускает приложения, поэтому иконки не ждут более поздний systemservice или VD
+attach. Внутри последующего watchdog порядок приоритетов остаётся multidisplay whitelist, launcher
+dock, затем VD/system_server; новая identity launcher обнаруживается максимум за 5 секунд.
 
 Loader включается в `post-fs-data` после синхронного `setenforce`, но остаётся `class late_start`.
 Перед общим watchdog он до 15 секунд ждёт `com.qinggan.systemservice` и устанавливает server whitelist
