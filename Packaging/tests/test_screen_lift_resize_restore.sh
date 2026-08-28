@@ -27,8 +27,8 @@ require_fixed "$HOST" 'private static final int SCREEN_DOWN_HEIGHT_PX = 560;'
 require_fixed "$HOST" 'private static final int SCREEN_UP_HEIGHT_PX = 720;'
 require_fixed "$VD" 'compactBottom: 560'
 require_fixed "$VD" 'voyahtune_win_compact_bottom", 560'
-require_fixed "$DOCK" 'setDockViewHeight(up, compact ? 560 : 720, "screenUp");'
-require_fixed "$DOCK" 'setDockViewHeight(group, compact ? 560 : -1, "radioGroup");'
+require_fixed "$DOCK" 'setDockViewHeight(views.up, compact ? 560 : 720, "screenUp");'
+require_fixed "$DOCK" 'setDockViewHeight(views.group, compact ? 560 : -1, "radioGroup");'
 
 # A new host reads the real lift state before any SurfaceView/VirtualDisplay is created. An existing
 # host receives the completion event and lets the ordinary Surface lifecycle perform the actual VD resize.
@@ -67,19 +67,24 @@ require_fixed "$SERVICE" 'if (BuildConfig.IS_FULL) {'
 require_fixed "$SERVICE" 'if (liftRestorer != null) liftRestorer.close();'
 require_fixed "$MANIFEST" '<uses-permission android:name="android.permission.REORDER_TASKS" />'
 
-# Compact dock keeps the regular bar and only hides the two surplus OEM entries: Home, overrides 1/2
-# and All Apps remain addressable. Passenger long-click listeners are explicitly cleared.
-require_fixed "$DOCK" 'setDockViewVisibility(down, 8, "screenDown");'
-require_fixed "$DOCK" 'setDockViewVisibility(home, 0, "home");'
-require_fixed "$DOCK" 'setDockViewVisibility(item1, 0, "slot1");'
-require_fixed "$DOCK" 'setDockViewVisibility(item2, 0, "slot2");'
-require_fixed "$DOCK" 'setDockViewVisibility(allApps, 0, "allApps");'
-require_fixed "$DOCK" 'setDockViewVisibility(item3, compact ? 8 : 0, "slot3");'
-require_fixed "$DOCK" 'setDockViewVisibility(item4, compact ? 8 : 0, "slot4");'
-require_fixed "$DOCK" 'if (viewId === this.mScreenUpHomeView.value.getId()) {'
-require_fixed "$DOCK" 'if (viewId === this.mScreenUpAllAppView.value.getId()) {'
-require_fixed "$DOCK" 'av.setOnLongClickListener(null);'
-require_fixed "$DOCK" 'sv1.setOnLongClickListener(null);'
-require_fixed "$DOCK" 'sv2.setOnLongClickListener(null);'
+# Compact mode is overridden only for the driver: Home, user slots 1/2 and All Apps remain addressable.
+# Passenger compact layout stays OEM-controlled (one-button Home dock).
+require_fixed "$DOCK" 'setDockViewVisibility(views.down, 8, "screenDown");'
+require_fixed "$DOCK" 'setDockViewVisibility(views.home, 0, "home");'
+require_fixed "$DOCK" 'setDockViewVisibility(views.slot1, 0, "slot1");'
+require_fixed "$DOCK" 'setDockViewVisibility(views.slot2, 0, "slot2");'
+require_fixed "$DOCK" 'setDockViewVisibility(views.allApps, 0, "allApps");'
+require_fixed "$DOCK" 'setDockViewVisibility(views.extra1, compact ? 8 : 0, "slot3");'
+require_fixed "$DOCK" 'setDockViewVisibility(views.extra2, compact ? 8 : 0, "slot4");'
+require_fixed "$DOCK" 'if (sid !== 0) return; // passenger compact remains completely OEM-controlled'
+require_fixed "$DOCK" 'var driverTemperature = dockField(instance, "mScreenUpTemperatureContentView");'
+require_fixed "$DOCK" 'setDockViewVisibility(driverTemperature, compact ? 8 : 0, "driverTemperature");'
+require_fixed "$DOCK" 'var controllerLift = LiftController.doScreenLift.overload('
+require_fixed "$DOCK" 'var navigationBar = runtimeObject(dockField(this, "mNavigationBar"));'
+require_fixed "$DOCK" 'return mainOnClick.call(this, view);'
+require_fixed "$DOCK" 'if (screenId !== 0) return "none";'
+if grep -Eq 'mScreenUp(AirView|SeatView)' "$DOCK"; then
+    fail "driver compact override writes passenger Air/Seat views"
+fi
 
 echo "screen-lift resize/restore contract test: OK"

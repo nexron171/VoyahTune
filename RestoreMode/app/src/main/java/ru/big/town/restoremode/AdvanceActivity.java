@@ -809,11 +809,10 @@ public class AdvanceActivity extends AppCompatActivity {
     // -------------------------------------------------------------------------
     // Системный док — переопределение приложений в доке лаунчера (слоты 1 и 2).
     // Выбранные пакеты хранятся в DrivePreferences (dockOverride1/2 + *Label); их читает
-    // Frida-хук в процессе лаунчера, чтобы подменить ярлыки и запускать обычную задачу на экране дока.
+    // Frida-хук в процессе лаунчера, чтобы подменить ярлыки и запускать обычную задачу на экране водителя.
     // -------------------------------------------------------------------------
     private Button dockApp1Btn, dockApp2Btn;
     private Button dockSplit1Btn, dockSplit2Btn;
-    private Button passengerDockApp1Btn, passengerDockApp2Btn;
 
     private void initDockOverride() {
         // «Системный док» завязан на Frida-хук лаунчера → только full. В light прячем весь блок.
@@ -826,13 +825,9 @@ public class AdvanceActivity extends AppCompatActivity {
         dockApp2Btn = findViewById(R.id.buttonDockApp2);
         dockSplit1Btn = findViewById(R.id.buttonDockSplit1);
         dockSplit2Btn = findViewById(R.id.buttonDockSplit2);
-        passengerDockApp1Btn = findViewById(R.id.buttonPassengerDockApp1);
-        passengerDockApp2Btn = findViewById(R.id.buttonPassengerDockApp2);
         refreshDockButtons();
         if (dockApp1Btn != null) dockApp1Btn.setOnLongClickListener(v -> { clearDockApp(1); return true; });
         if (dockApp2Btn != null) dockApp2Btn.setOnLongClickListener(v -> { clearDockApp(2); return true; });
-        if (passengerDockApp1Btn != null) passengerDockApp1Btn.setOnLongClickListener(v -> { clearPassengerDockApp(1); return true; });
-        if (passengerDockApp2Btn != null) passengerDockApp2Btn.setOnLongClickListener(v -> { clearPassengerDockApp(2); return true; });
         pushDockConfig();   // синхронизируем выбор дока в Native при открытии раздела
     }
 
@@ -840,8 +835,6 @@ public class AdvanceActivity extends AppCompatActivity {
     public void onPickDockApp2(View v) { pickDockApp(2); }
     public void onPickDockSplit1(View v) { pickDockSplit(1); }
     public void onPickDockSplit2(View v) { pickDockSplit(2); }
-    public void onPickPassengerDockApp1(View v) { pickPassengerDockApp(1); }
-    public void onPickPassengerDockApp2(View v) { pickPassengerDockApp(2); }
 
     private void pickDockApp(int slot) {
         showAppPicker("Приложение " + slot + " в доке", (pkg, label) -> {
@@ -894,43 +887,16 @@ public class AdvanceActivity extends AppCompatActivity {
                 "Слот " + slot + " сброшен", com.google.android.material.snackbar.Snackbar.LENGTH_SHORT).show();
     }
 
-    private void pickPassengerDockApp(int slot) {
-        showAppPicker("Приложение " + slot + " пассажирского дока", (pkg, label) -> {
-            prefs.edit().putString("dockPassengerOverride" + slot, pkg)
-                    .putString("dockPassengerOverride" + slot + "Label", label).apply();
-            refreshDockButtons();
-            pushDockConfig();
-        });
-    }
-
-    private void clearPassengerDockApp(int slot) {
-        prefs.edit().remove("dockPassengerOverride" + slot)
-                .remove("dockPassengerOverride" + slot + "Label").apply();
-        refreshDockButtons();
-        pushDockConfig();
-        com.google.android.material.snackbar.Snackbar.make(findViewById(R.id.main),
-                "Пассажирский слот " + slot + " сброшен",
-                com.google.android.material.snackbar.Snackbar.LENGTH_SHORT).show();
-    }
-
     private void refreshDockButtons() {
         setDockButtonText(dockApp1Btn, 1);
         setDockButtonText(dockApp2Btn, 2);
         setDockSplitButton(dockSplit1Btn, 1);
         setDockSplitButton(dockSplit2Btn, 2);
-        setPassengerDockButtonText(passengerDockApp1Btn, 1);
-        setPassengerDockButtonText(passengerDockApp2Btn, 2);
     }
 
     private void setDockButtonText(Button b, int slot) {
         if (b == null) return;
         String label = prefs.getString("dockOverride" + slot + "Label", "");
-        b.setText("Приложение " + slot + ": " + (label.isEmpty() ? "не выбрано" : label));
-    }
-
-    private void setPassengerDockButtonText(Button b, int slot) {
-        if (b == null) return;
-        String label = prefs.getString("dockPassengerOverride" + slot + "Label", "");
         b.setText("Приложение " + slot + ": " + (label.isEmpty() ? "не выбрано" : label));
     }
 

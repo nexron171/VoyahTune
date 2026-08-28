@@ -17,6 +17,14 @@ require_text() {
     grep -Fq "$text" "$file" || fail "'$text' is missing from $file"
 }
 
+reject_text() {
+    local file="$1"
+    local text="$2"
+    if grep -Fq "$text" "$file"; then
+        fail "obsolete '$text' is present in $file"
+    fi
+}
+
 require_fixture_text() {
     local relative_file="$1"
     local text="$2"
@@ -41,24 +49,65 @@ require_fixture_text \
 
 require_text "$AGENT_ROOT/launcherdock.js" 'com.qinggan.launcher.navigation.NavigationBarMain'
 require_text "$AGENT_ROOT/launcherdock.js" 'com.qinggan.launcher.navigation.NavigationBarSecond'
-require_text "$AGENT_ROOT/launcherdock.js" 'dockPassenger'
-for method in updateTheme initScreenUpViews updateSelectedApp onClick doScreenLift; do
+require_text "$AGENT_ROOT/launcherdock.js" 'com.qinggan.launcher.navigation.NavigationBarController'
+reject_text "$AGENT_ROOT/launcherdock.js" 'dockPassenger'
+for method in updateTheme initScreenUpViews updateSelectedApp onClick; do
     require_text "$AGENT_ROOT/launcherdock.js" "NavigationBarMain.$method"
 done
+for passenger_field in mScreenUpAirView mScreenUpSeatView; do
+    reject_text "$AGENT_ROOT/launcherdock.js" "$passenger_field"
+done
+require_text "$AGENT_ROOT/launcherdock.js" 'var driverTemperature = dockField(instance, "mScreenUpTemperatureContentView");'
+require_text "$AGENT_ROOT/launcherdock.js" 'setDockViewVisibility(driverTemperature, compact ? 8 : 0, "driverTemperature");'
+reject_text "$AGENT_ROOT/launcherdock.js" 'NavigationBarMain.doScreenLift'
+reject_text "$AGENT_ROOT/launcherdock.js" 'NavigationBarSecond.doScreenLift'
+reject_text "$AGENT_ROOT/launcherdock.js" 'this.startLauncherMain('
+reject_text "$AGENT_ROOT/launcherdock.js" 'this.openAllApp('
 for fixture_method in \
     'void updateTheme()' \
     'void initScreenUpViews()' \
+    'View mScreenUpTemperatureContentView' \
     'void updateSelectedApp(String packageName, String activityName)' \
-    'void onClick(View view)' \
-    'void dismiss()' \
-    'void doScreenLift(int type)'; do
+    'void onClick(View view)'; do
     require_fixture_text \
         'launcher/java/com/qinggan/launcher/navigation/NavigationBarMain.java' \
         "$fixture_method"
 done
-require_fixture_text \
-    'launcher/java/com/qinggan/launcher/navigation/NavigationBarSecond.java' \
-    'class NavigationBarSecond'
+for passenger_fixture in \
+    'class NavigationBarSecond implements INavigationBar, View.OnClickListener' \
+    'View mScreenUpAirView' \
+    'View mScreenUpSeatView' \
+    'View mScreenUpTemperatureContentView' \
+    'void updateSelectedApp(String packageName, String activityName)' \
+    'void onClick(View view)'; do
+    require_fixture_text \
+        'launcher/java/com/qinggan/launcher/navigation/NavigationBarSecond.java' \
+        "$passenger_fixture"
+done
+reject_text \
+    "$HARNESS_ROOT/app/src/launcher/java/com/qinggan/launcher/navigation/NavigationBarSecond.java" \
+    'extends NavigationBarMain'
+for controller_fixture in \
+    'int mScreenId' \
+    'INavigationBar mNavigationBar' \
+    'void doScreenLift(int type)' \
+    'void show()' \
+    'void dismiss()' \
+    'boolean isShowing()'; do
+    require_fixture_text \
+        'launcher/java/com/qinggan/launcher/navigation/NavigationBarController.java' \
+        "$controller_fixture"
+done
+for launcher_lifecycle in \
+    'void onReceive(Context context, Intent intent)' \
+    'void handleUpdateMainNavigationBar(' \
+    'void handleUpdateSecondNavigationBar(' \
+    'void onMoveStart(' \
+    'void onMoveStop('; do
+    require_fixture_text \
+        'launcher/java/com/qinggan/app/launcher/LauncherModel.java' \
+        "$launcher_lifecycle"
+done
 
 # Full All Apps is a primary part of launcherdock.js now: both physical lists, both bind overloads,
 # owner-screen click routing, package-driven reload, and the optional OD passenger home rail.

@@ -1560,7 +1560,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Переопределить приложения в доке системного лаунчера отдельно для водительского и пассажирского экранов. На водительском экране долгое нажатие по слоту может открыть назначенный сплит. На пассажирском экране поддерживается только короткое нажатие. Долгое нажатие на кнопку настройки сбрасывает слот."
+                    android:text="Переопределить приложения в слотах 1 и 2 водительского дока системного лаунчера. Долгое нажатие по слоту может открыть назначенный сплит, а долгое нажатие на кнопку настройки сбрасывает слот. Пассажирский док остаётся штатным."
                     android:textColor="#888888"
                     android:textSize="20px" />
 
@@ -1627,40 +1627,6 @@
                     android:singleLine="true"
                     android:visibility="gone"
                     app:cornerRadius="16dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:text="Пассажирский экран"
-                    android:textColor="#dddddd"
-                    android:textSize="22px" />
-
-                <Button
-                    android:id="@+id/buttonPassengerDockApp1"
-                    android:layout_width="match_parent"
-                    android:layout_height="70dp"
-                    android:layout_marginTop="8dp"
-                    android:backgroundTint="#373f4a"
-                    android:onClick="onPickPassengerDockApp1"
-                    android:singleLine="true"
-                    android:text="Приложение 1: не выбрано"
-                    android:textColor="#FFFFFF"
-                    android:textSize="22dp"
-                    app:cornerRadius="20dp" />
-
-                <Button
-                    android:id="@+id/buttonPassengerDockApp2"
-                    android:layout_width="match_parent"
-                    android:layout_height="70dp"
-                    android:layout_marginTop="8dp"
-                    android:backgroundTint="#373f4a"
-                    android:onClick="onPickPassengerDockApp2"
-                    android:singleLine="true"
-                    android:text="Приложение 2: не выбрано"
-                    android:textColor="#FFFFFF"
-                    android:textSize="22dp"
-                    app:cornerRadius="20dp" />
 
                 <View
                     android:layout_width="match_parent"

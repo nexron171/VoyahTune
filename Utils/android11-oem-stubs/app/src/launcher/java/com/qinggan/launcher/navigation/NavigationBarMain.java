@@ -6,7 +6,7 @@ import android.view.View;
  * Synthetic OD-firmware surface used only to resolve launcherdock.js primary hooks.
  * It is not an implementation of the production launcher navigation bar.
  */
-public class NavigationBarMain implements View.OnClickListener {
+public class NavigationBarMain implements INavigationBar, View.OnClickListener {
     public int mScreenId = 0;
     public View mScreenUpItemView1;
     public View mScreenUpItemView2;
@@ -14,6 +14,7 @@ public class NavigationBarMain implements View.OnClickListener {
     public View mScreenUpItemView4;
     public View mScreenUpHomeView;
     public View mScreenUpAllAppView;
+    public View mScreenUpTemperatureContentView;
     public View mScreenUpRadioGroup;
     public View mScreenUpView;
     public View mScreenDownView;
@@ -35,19 +36,4 @@ public class NavigationBarMain implements View.OnClickListener {
         // Stub.
     }
 
-    public void dismiss() {
-        // Stub.
-    }
-
-    public void doScreenLift(int type) {
-        // Stub.
-    }
-
-    public void startLauncherMain(boolean home) {
-        // Stub.
-    }
-
-    public void openAllApp() {
-        // Stub.
-    }
 }

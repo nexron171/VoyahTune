@@ -28,7 +28,7 @@ class/method surface and assign their hook implementations:
 | Agent | Target | Synthetic ABI available |
 |---|---|---|
 | `steeringwheelkeys.js` | `com.qinggan.keymanager.service` | `KeyManagerReader.onKeyEvent(android.view.KeyEvent): boolean` |
-| `launcherdock.js` | `com.qinggan.app.launcher` | OD `NavigationBarMain` + `NavigationBarSecond`; dual-display `AllAppDataManager.getAllApps(int)`/`reload()`; `AppBean`; full-screen `AllAppBarView` + both `AllAppAdapter.onBindViewHolder(...)` overloads; `AppLauncher.startApp(Context,Intent,int)`; optional OD `SecondAllAppAdapter` + `SecondMainFragment.onItemClick(AppBean)` |
+| `launcherdock.js` | `com.qinggan.app.launcher` | OD `NavigationBarMain`; independent passenger `NavigationBarSecond` with stock Air/Seat layout controls (not remappable slots); shared `NavigationBarController.doScreenLift(int)`/`show()`/`dismiss()` distinguished by `mScreenId`; `LauncherModel` top-activity and transfer lifecycle; dual-display `AllAppDataManager.getAllApps(int)`/`reload()`; `AppBean`; full-screen `AllAppBarView` + both `AllAppAdapter.onBindViewHolder(...)` overloads; `AppLauncher.startApp(Context,Intent,int)`; optional OD `SecondAllAppAdapter` + `SecondMainFragment.onItemClick(AppBean)` |
 | `multidisplay.js` | `com.qinggan.systemservice` | `MultiDisplayImpl.isWhiteListApp(String): boolean` |
 | `apollo_tech.js` | `com.qinggan.app.vehiclesetting` | static no-argument `BaiduProviderUtil.doQuerySubscribeInfo(): String` and `doQueryNOALearnInfo(): String` |
 | `keyboard_lock_en.js` | `com.qinggan.app.qgime` | `InputModeSwitcher` English constants, `getInstance()`, `saveInputMode(int)`; `QGInputConfig.DISABLE_VOICE`; `SkbPool.getInstance()/resetCachedSkb()`; optional loader/reflection surface |
@@ -54,21 +54,28 @@ contracts belong to the injector under test rather than the target APKs.
 
 ### `launcherdock.js`
 
-The primary OD navigation-bar hook resolves. These optional or firmware-specific
-surfaces are not provided:
+The primary OD navigation-bar hook resolves. The fixture deliberately models
+the two bars as different ABIs: only `NavigationBarMain` owns
+`mScreenUpItemView1..4`; its separate temperature-content overlay is hidden only
+while the driver dock is compact so it cannot cover All Apps. `NavigationBarSecond`
+owns `mScreenUpAirView` and `mScreenUpSeatView` and remains entirely OEM-controlled.
+Screen-lift and window visibility belong to the one shared
+`NavigationBarController`, whose instances are distinguished by `mScreenId`.
+This mirrors the launcher APK inspected from an H97C head unit on 2026-08-28 and
+prevents a shared-inheritance fixture from hiding passenger-only hook errors.
+
+These optional or firmware-specific surfaces are not provided:
 
 - PI firmware `com.qinggan.mainlauncher.navigation.NavigationBar`;
-- `com.qinggan.launcher.navigation.NavigationBarController.dismiss()`;
-- `com.qinggan.app.launcher.LauncherModel.onReceive(Context,Intent)`,
-  `handleUpdateMainNavigationBar(String,String,boolean)`,
-  `isThirdShowFloatApp(String)`, and `onMoveStart(...)`;
 - `com.qinggan.launcher.base.utils.AppUtils.getTopAppInfo(Context,int,int)`;
 - `com.qinggan.account.AccountConstantUtil.SEPARATOR`;
 - `com.qinggan.launcher.base.drag.ThirdAppUtil.isThirdShowFloatApp(String)`;
 
-No `NavigationBarMain` instance is created. Therefore `Java.choose`, drawable
-replacement, display selection, click routing, dock restoration, and floating-home
-suppression are not tested.
+No navigation bar, controller, or `LauncherModel` instance is created. Therefore
+`Java.choose`, drawable replacement, display selection, click routing, screen-lift
+layout, transfer ordering, dock restoration, and floating-home suppression are not
+tested. The lifecycle fixtures validate hook resolution only; they do not emulate
+WindowManager attachment, `TOP_ACTIVITY_CHANGED`, or multidisplay callbacks.
 
 The All Apps fixtures do compile the exact hook-resolution surface for both physical
 lists, both full-screen bind overloads, owner-screen launch routing, the optional

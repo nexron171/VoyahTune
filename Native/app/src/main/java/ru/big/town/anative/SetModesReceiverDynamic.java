@@ -58,10 +58,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // Одиночное приложение из дока открываем обычной задачей целевого пакета на физическом дисплее.
         // Глобальный WindowManager hook ужмёт её рамку; VD остаётся только для split-пресетов. Только full.
         if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            // display: на каком экране открыть. Отсутствует → 0 (водительский), т.е. прежнее поведение.
+            // Переопределяемые слоты существуют только на водительском экране. Receiver экспортирован
+            // ради launcher-agent, поэтому не доверяем display extra от explicit broadcast: старый агент
+            // или сторонний отправитель не должен вернуть удалённый passenger launch path.
             String pkg = intent.getStringExtra("pkg");
-            if (isConfiguredDockPackage(context, pkg)) {
-                openFreeformApp(context, pkg, intent.getIntExtra("display", 0));
+            int displayId = intent.getIntExtra("display", 0);
+            if (displayId != 0) {
+                Log.w(TAG, "OPEN_FREEFORM отклонён: поддерживается только водительский display 0");
+            } else if (isConfiguredDockPackage(context, pkg)) {
+                openFreeformApp(context, pkg, 0);
             } else {
                 Log.w(TAG, "OPEN_FREEFORM отклонён: пакет не назначен доку: " + pkg);
             }
@@ -189,21 +194,20 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
     }
 
-    /** Пассажирский док имеет отдельные слоты и только короткое нажатие, поэтому split extras не зеркалим. */
-    static void mirrorPassengerDock(Context ctx, Intent intent, int slot) {
-        String extra = "dockPassenger" + slot;
-        String pkg = intent.getStringExtra(extra);
-        if (pkg == null || pkg.isEmpty()) pkg = "none";
-        int dpi = intent.getIntExtra(extra + "Dpi", 0);
+    /**
+     * Миграция со сборок, где пассажирские Air/Seat ошибочно предлагались как настраиваемые слоты.
+     * Выполняется при каждом DOCK_CONFIG, чтобы уже записанное на ГУ значение не продолжало влиять
+     * на eternalized launcher hook после обновления без очистки данных приложений.
+     */
+    static void clearLegacyPassengerDock(Context ctx) {
         try {
             android.content.ContentResolver cr = ctx.getContentResolver();
-            android.provider.Settings.Global.putString(cr, "voyahtune_" + extra, pkg);
-            android.provider.Settings.Global.putString(cr, "voyahtune_" + extra + "Dpi", String.valueOf(dpi));
-            if (!"none".equals(pkg)) {
-                android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
-            }
+            android.provider.Settings.Global.putString(cr, "voyahtune_dockPassenger1", "none");
+            android.provider.Settings.Global.putString(cr, "voyahtune_dockPassenger2", "none");
+            android.provider.Settings.Global.putString(cr, "voyahtune_dockPassenger1Dpi", "0");
+            android.provider.Settings.Global.putString(cr, "voyahtune_dockPassenger2Dpi", "0");
         } catch (Exception e) {
-            Log.w(TAG, "mirrorPassengerDock " + slot + ": " + e.getMessage());
+            Log.w(TAG, "clearLegacyPassengerDock: " + e.getMessage());
         }
     }
 
@@ -296,9 +300,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         if (pkg == null || pkg.isEmpty()) return false;
         android.content.ContentResolver cr = ctx.getContentResolver();
         return pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock1"))
-                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock2"))
-                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dockPassenger1"))
-                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dockPassenger2"));
+                || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock2"));
     }
 
     /** STEER_ACTION должен совпадать с одним из значений, зеркалированных из подписанного RestoreMode. */

@@ -36,8 +36,7 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
         } else if ("ru.big.town.anative.DOCK_CONFIG".equals(action)) {
             SetModesReceiverDynamic.mirrorDock(context, intent, 1);
             SetModesReceiverDynamic.mirrorDock(context, intent, 2);
-            SetModesReceiverDynamic.mirrorPassengerDock(context, intent, 1);
-            SetModesReceiverDynamic.mirrorPassengerDock(context, intent, 2);
+            SetModesReceiverDynamic.clearLegacyPassengerDock(context);
             Intent reload = new Intent("ru.big.town.anative.DOCK_RELOAD");
             reload.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             context.sendBroadcast(reload);

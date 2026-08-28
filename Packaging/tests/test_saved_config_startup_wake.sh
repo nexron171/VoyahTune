@@ -29,21 +29,41 @@ awk '
 ' "$SERVICE" || fail "wake sync is not inside beginWakeSession"
 
 grep -q 'DrivePreferences' "$RECEIVER" || fail "receiver does not read persisted preferences"
+for legacy_preference in \
+    'remove("dockPassengerOverride1")' \
+    'remove("dockPassengerOverride1Label")' \
+    'remove("dockPassengerOverride2")' \
+    'remove("dockPassengerOverride2Label")'; do
+    grep -q "$legacy_preference" "$RECEIVER" \
+        || fail "obsolete passenger preference is not deleted: $legacy_preference"
+done
 grep -q 'SplitConfigSync.pushAll(context, prefs)' "$RECEIVER" || fail "receiver does not publish Dock and steering"
-grep -q 'dockPassengerOverride1' "$SYNC" || fail "startup/wake sync omits passenger dock slot 1"
-grep -q 'dockPassengerOverride2' "$SYNC" || fail "startup/wake sync omits passenger dock slot 2"
-grep -q 'i.putExtra("dockPassenger1"' "$SYNC" || fail "passenger dock slot 1 is not transported"
-grep -q 'i.putExtra("dockPassenger2"' "$SYNC" || fail "passenger dock slot 2 is not transported"
+if grep -q 'dockPassengerOverride\|i.putExtra("dockPassenger' "$SYNC" "$ADVANCE"; then
+    fail "removed passenger dock picker/config is still persisted or transported"
+fi
 grep -q 'pushAppDpi(context, prefs, null, 0)' "$SYNC" || fail "startup/wake sync omits complete app DPI snapshot"
 grep -q 'ru.big.town.anative.APP_DPI_CONFIG' "$SYNC" || fail "app DPI config action missing"
 grep -q 'appDpiJson' "$SYNC" || fail "authoritative app DPI JSON is not published"
 grep -q 'SplitConfigSync.pushAppDpi(AdvanceActivity.this, prefs, fpkg, dpi)' "$ADVANCE" \
     || fail "DPI changes are not published immediately"
 grep -q 'mirrorAppDpi(context, intent)' "$NATIVE_CONFIG" || fail "Native does not receive app DPI config"
-grep -q 'mirrorPassengerDock(context, intent, 1)' "$NATIVE_CONFIG" \
-    || fail "Native does not mirror passenger dock slot 1"
-grep -q 'mirrorPassengerDock(context, intent, 2)' "$NATIVE_CONFIG" \
-    || fail "Native does not mirror passenger dock slot 2"
+if grep -q 'mirrorPassengerDock' "$NATIVE_CONFIG" "$NATIVE_BRIDGE"; then
+    fail "removed passenger dock config is still mirrored"
+fi
+grep -q 'clearLegacyPassengerDock(context)' "$NATIVE_CONFIG" \
+    || fail "DOCK_CONFIG does not clear passenger slot values left by previous builds"
+grep -q 'if (displayId != 0)' "$NATIVE_BRIDGE" \
+    || fail "OPEN_FREEFORM can still revive driver dock launches on the passenger display"
+grep -q 'openFreeformApp(context, pkg, 0)' "$NATIVE_BRIDGE" \
+    || fail "driver dock launch is not pinned to physical display 0"
+for legacy_assignment in \
+    '"voyahtune_dockPassenger1", "none"' \
+    '"voyahtune_dockPassenger2", "none"' \
+    '"voyahtune_dockPassenger1Dpi", "0"' \
+    '"voyahtune_dockPassenger2Dpi", "0"'; do
+    grep -q "$legacy_assignment" "$NATIVE_BRIDGE" \
+        || fail "legacy passenger dock migration is missing: $legacy_assignment"
+done
 grep -q 'voyahtune_dpi_packages' "$NATIVE_BRIDGE" || fail "removed/Auto DPI values cannot be cleared"
 grep -q 'sendWinReload(ctx)' "$NATIVE_BRIDGE" || fail "launch-time DPI fallback does not reload WM cache"
 grep -q 'intent.getComponent() == null' "$RECEIVER" || fail "receiver does not require an explicit intent"
@@ -60,4 +80,4 @@ if grep -Eq 'setInterval|scheduleAtFixedRate|postDelayed\([^,]+,[[:space:]]*[0-9
     fail "saved configuration sync must not poll"
 fi
 
-echo "PASS: saved Dock/steering/app-DPI configuration is applied at startup and coalesced wake"
+echo "PASS: saved driver Dock/steering/app-DPI configuration is applied and legacy passenger slots are cleared"

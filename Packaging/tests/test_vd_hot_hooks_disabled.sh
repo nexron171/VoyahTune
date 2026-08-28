@@ -50,8 +50,25 @@ grep -Fq 'var floatHomeOff = function () { return cfg("floathome") !== "0"; };' 
     || fail "floating Home suppression is not restored globally"
 grep -Fq 'android.intent.action.TOP_ACTIVITY_CHANGED' "$DOCK" \
     || fail "launcher does not re-evaluate the dock after fullscreen activity transitions"
-grep -Fq 'this.handleUpdateMainNavigationBar(pkg, act, true);' "$DOCK" \
+grep -Fq 'model.handleUpdateMainNavigationBar(pkg, act, true);' "$DOCK" \
     || fail "return from a fullscreen OEM activity cannot restore the main dock"
+grep -Fq 'model.handleUpdateSecondNavigationBar(pkg, act, true);' "$DOCK" \
+    || fail "return/transfer to passenger cannot restore the second dock"
+grep -Fq 'var AccountConstantUtil = null;' "$DOCK" \
+    || fail "optional account separator ABI can disable all transfer recovery"
+grep -Fq 'if (AccountConstantUtil !== null)' "$DOCK" \
+    || fail "transfer recovery dereferences an optional account helper"
+grep -Fq 'var moveDockGuards = {' "$DOCK" \
+    || fail "OEM transfer can dismiss both docks before destination foreground catches up"
+grep -Fq 'move guard START source=' "$DOCK" \
+    || fail "third-party transfer does not arm the cross-display dismiss guard"
+grep -Fq 'LM2.onMoveStop.overloads.forEach' "$DOCK" \
+    || fail "transfer guard/recovery has no matching stop lifecycle"
+grep -Fq 'schedulePhysicalDockRecovery(this, "onMoveStop")' "$DOCK" \
+    || fail "a missed TOP broadcast leaves the transferred-app dock hidden"
+if grep -Fq 'dockPassenger' "$DOCK"; then
+    fail "passenger Air/Seat must remain OEM controls, not remappable dock slots"
+fi
 grep -Fq 'com.qinggan.launcher.base.allapp.AllAppDataManager' "$DOCK" \
     || fail "third-party launchable apps are not added to the stock launcher"
 grep -Fq 'if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list);' "$DOCK" \
@@ -108,23 +125,29 @@ grep -Fq '[allapps] optional passenger rail hooks unavailable:' "$DOCK" \
     || fail "optional passenger rail ABI drift must not disable full-screen All Apps"
 
 for required_compact_view in home item1 item2 allApps; do
-    grep -Fq "setDockViewVisibility($required_compact_view, 0" "$DOCK" \
+    case "$required_compact_view" in
+        item1) resolved_view=slot1 ;;
+        item2) resolved_view=slot2 ;;
+        *) resolved_view=$required_compact_view ;;
+    esac
+    grep -Fq "setDockViewVisibility(views.$resolved_view, 0" "$DOCK" \
         || fail "compact dock does not force $required_compact_view visible"
 done
-grep -Fq 'setDockViewHeight(up, compact ? 560 : 720' "$DOCK" \
+grep -Fq 'setDockViewHeight(views.up, compact ? 560 : 720' "$DOCK" \
     || fail "compact/normal dock viewport heights are not applied"
-grep -Fq 'setDockViewVisibility(item3, compact ? 8 : 0' "$DOCK" \
+grep -Fq 'setDockViewVisibility(views.extra1, compact ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide stock slot 3"
-grep -Fq 'setDockViewVisibility(item4, compact ? 8 : 0' "$DOCK" \
+grep -Fq 'setDockViewVisibility(views.extra2, compact ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide stock slot 4"
-grep -Fq 'if (av && sid === 0)' "$DOCK" \
-    || fail "All Apps long tap must be driver-only"
-grep -Fq 'av.setOnLongClickListener(null);' "$DOCK" \
-    || fail "passenger All Apps retains a long-click listener"
-grep -Fq 'sv1.setOnLongClickListener(null); sv1.setLongClickable(false);' "$DOCK" \
-    || fail "passenger slot 1 retains long-click behavior"
-grep -Fq 'sv2.setOnLongClickListener(null); sv2.setLongClickable(false);' "$DOCK" \
-    || fail "passenger slot 2 retains long-click behavior"
+grep -Fq 'if (sid !== 0) return; // no icon/listener/layout writes to the passenger OEM bar' "$DOCK" \
+    || fail "driver dock update can mutate passenger controls"
+if grep -Eq 'mScreenUp(AirView|SeatView)' "$DOCK"; then
+    fail "passenger Air/Seat must remain entirely OEM-controlled"
+fi
+grep -Fq 'var driverTemperature = dockField(instance, "mScreenUpTemperatureContentView");' "$DOCK" \
+    || fail "driver compact dock does not resolve its temperature overlay"
+grep -Fq 'setDockViewVisibility(driverTemperature, compact ? 8 : 0' "$DOCK" \
+    || fail "driver temperature overlay can cover All Apps in compact mode"
 if grep -Fq 'android.activity.windowingMode' "$RECEIVER"; then
     fail "single-app launch must remain a normal task for WindowManager frame clamping"
 fi

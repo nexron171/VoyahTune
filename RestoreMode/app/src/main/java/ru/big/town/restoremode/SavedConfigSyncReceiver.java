@@ -23,6 +23,18 @@ public final class SavedConfigSyncReceiver extends BroadcastReceiver {
         }
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            // One-way migration: passenger Air/Seat are OEM controls again. Remove the obsolete
+            // picker state as well as clearing its Settings.Global projection in Native, so an
+            // older APK cannot resurrect the removed overrides from preserved app data.
+            boolean legacyPassengerStateRemoved = prefs.edit()
+                    .remove("dockPassengerOverride1")
+                    .remove("dockPassengerOverride1Label")
+                    .remove("dockPassengerOverride2")
+                    .remove("dockPassengerOverride2Label")
+                    .commit();
+            if (!legacyPassengerStateRemoved) {
+                Log.w(TAG, "obsolete passenger dock preferences could not be removed");
+            }
             SplitConfigSync.pushAll(context, prefs);
             Log.i(TAG, "saved Dock/steering/app-DPI/keyboard configuration published");
         } catch (RuntimeException e) {
