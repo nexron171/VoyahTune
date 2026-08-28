@@ -3,7 +3,7 @@
   "hooks": [
     {"id":"vd-bypass","process":"system_server","script":"vd_bypass.js","sha256":"96855fbd50a4948e541983c176a7670439f00f60192273ea7e79c63652d13d11"},
     {"id":"steering-wheel","process":"com.qinggan.keymanager.service","script":"steeringwheelkeys.js","sha256":"b66700bb177ae4a78966dd63d6f3839e8e308d026b317624cc11363c03bad1c5"},
-    {"id":"launcher-dock","process":"com.qinggan.app.launcher","script":"launcherdock.js","sha256":"74aab00898294d36ebe5dd855bdf6dc0f275b54f868f3df1bdbe897d6df54bbd"},
+    {"id":"launcher-dock","process":"com.qinggan.app.launcher","script":"launcherdock.js","sha256":"c1108415dfc7b7c74e6e0eb9899334830fac90435b306b48d36e4a5421892faa"},
     {"id":"multi-display","process":"com.qinggan.systemservice","script":"multidisplay.js","sha256":"fed228b0f848efdab2fa56e3c7b5b022fadaa27f805a68186ebf35d922a56203"},
     {"id":"apollo-tech","process":"com.qinggan.app.vehiclesetting","script":"apollo_tech.js","sha256":"023ffe63abbe6e2653e9ea93a57b07bc0afedad3541792c0cfd82f0bc260a6ee"},
     {"id":"keyboard-en","process":"com.qinggan.app.qgime","script":"keyboard_lock_en.js","sha256":"9347786a1d979f422fe5f9dca34b4a8446c9927ea135608383c737212b17a44b"},

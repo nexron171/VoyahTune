@@ -132,10 +132,15 @@ grep -Fq 'setDockViewVisibility(views.slot1, compact && !compactSlot1 ? 8 : 0' "
     || fail "compact dock does not hide an unassigned slot 1"
 grep -Fq 'setDockViewVisibility(views.slot2, compact && !compactSlot2 ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide an unassigned slot 2"
+if grep -Eq 'compactSlot[12].*isInstalled' "$DOCK"; then
+    fail "compact slot visibility depends on transient cold-boot PackageManager readiness"
+fi
 grep -Fq 'setDockViewHeight(views.up, compact ? 560 : 720' "$DOCK" \
     || fail "compact/normal dock viewport heights are not applied"
 grep -Fq 'setDockViewHeight(views.group, compact ? -2 : -1' "$DOCK" \
     || fail "compact buttons are not vertically centered as a wrap-content group"
+grep -Fq 'var controllerShow = LiftController.show.overload();' "$DOCK" \
+    || fail "cold-boot dock show is not reconciled after pre-hook screen-lift state"
 grep -Fq 'setDockViewVisibility(views.extra1, compact ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide stock slot 3"
 grep -Fq 'setDockViewVisibility(views.extra2, compact ? 8 : 0' "$DOCK" \

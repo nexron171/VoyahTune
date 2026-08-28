@@ -449,10 +449,11 @@ Java.perform(function () {
         // На водительском OD temperature-content лежит поверх штатного slot3 (Air). В compact
         // скрываем оба слоя вместе со всеми штатными кнопками, оставляя Home и пользовательские 1/2.
         var driverTemperature = dockField(instance, "mScreenUpTemperatureContentView");
-        var compactSlot1 = dockPackage(0, 1, false) !== "none"
-                && isInstalled(dockPackage(0, 1, false));
-        var compactSlot2 = dockPackage(0, 2, false) !== "none"
-                && isInstalled(dockPackage(0, 2, false));
+        // Visibility follows the persisted assignment, not early PackageManager readiness. During
+        // cold boot getLaunchIntentForPackage() may still be null even though the app is installed;
+        // hiding the slot on that transient answer made compact startup look as if the hook was absent.
+        var compactSlot1 = dockPackage(0, 1, false) !== "none";
+        var compactSlot2 = dockPackage(0, 2, false) !== "none";
 
         // OEM controller doScreenLift(1) перед нашим post-hook показывает отдельный one-button screenDown.
         // Возвращаем driver screenUp. WRAP_CONTENT + штатный layout_gravity=center центрирует по высоте
@@ -500,9 +501,11 @@ Java.perform(function () {
                 var bgKey = "0:" + name;
                 if (!originalBg[bgKey]) originalBg[bgKey] = view.getBackground(); // backup once
                 var pkg = slots[slotIndex].pkg;
-                if (pkg === "none" || !isInstalled(pkg)) {
+                if (pkg === "none") {
                     view.setBackground(originalBg[bgKey]);                       // restore OEM icon
                 } else {
+                    // getAppDrawable uses getApplicationInfo directly. It commonly becomes available
+                    // earlier during cold boot than getLaunchIntentForPackage used by the click gate.
                     var d = getAppDrawable(pkg);
                     if (d) view.setBackground(d);
                 }
@@ -1074,6 +1077,27 @@ Java.perform(function () {
                 return result;
             };
             Log.i(TAG, "[dock] NavigationBarController doScreenLift hooked");
+
+            // On a cold boot that starts already lowered, doScreenLift(1) may have run before the
+            // agent was attached. show() is the next authoritative point at which the root dock is
+            // attached/updated, so reconcile the current property there as well.
+            var controllerShow = LiftController.show.overload();
+            controllerShow.implementation = function () {
+                var result = controllerShow.call(this);
+                try {
+                    var sid = managedScreenId(this, -1);
+                    if (sid === 0) {
+                        var navigationBar = runtimeObject(dockField(this, "mNavigationBar"));
+                        if (navigationBar !== null) {
+                            updateIcons(navigationBar, sid, true);
+                            applyScreenLiftDock(navigationBar, currentScreenLiftType(), sid);
+                            Log.i(TAG, "[dock] controller show reconciled driver layout");
+                        }
+                    }
+                } catch (e) { Log.e(TAG, "[dock] controller show reconcile err: " + e); }
+                return result;
+            };
+            Log.i(TAG, "[dock] NavigationBarController show reconciliation hooked");
         } catch (e) { Log.e(TAG, "[dock] controller doScreenLift hook skip: " + e); }
 
         // 4) ДОК НЕ ДОЛЖЕН САМ УЕЗЖАТЬ ИЗ-ПОД НАШЕГО FREEFORM-ОКНА/VD-СПЛИТА.
@@ -1346,6 +1370,11 @@ Java.perform(function () {
         setTimeout(updateAllNavbars, 800);
         setTimeout(updateAllNavbars, 2500);
         setTimeout(updateAllNavbars, 5000);
+        // PackageManager and OEM navbar construction finish at different moments on a true cold boot.
+        // These are bounded one-shot reconciliations, not polling; normal boots still update immediately.
+        setTimeout(updateAllNavbars, 8000);
+        setTimeout(updateAllNavbars, 12000);
+        setTimeout(updateAllNavbars, 15000);
 
         Log.i(TAG, "[dock] NavigationBarMain hooks installed (updateTheme/updateSelectedApp/onClick)");
     } catch (e) {
