@@ -32,7 +32,7 @@ final class ScreenLiftTaskRestorer implements AutoCloseable {
     private static final String TAG = "ScreenLiftRestore";
     private static final String ACTION_START = "action.qg.layout.start_change";
     private static final String ACTION_CHANGED = "action.qg.layout.changed";
-    private static final long RESTORE_DELAY_MS = 350L;
+    private static final long RESTORE_DELAY_MS = 2_000L;
     private static final String LAUNCHER_PKG = "com.qinggan.app.launcher";
     private static final String SCREEN_LIFT_SETTING = "voyahtune_screen_lift_type";
     private static final String SCREEN_LIFT_PROPERTY = "persist.qg.canbus.bcm_screenAutoLiftFdb";
@@ -189,10 +189,35 @@ final class ScreenLiftTaskRestorer implements AutoCloseable {
     }
 
     private ComponentName topComponent(int displayId) {
+        ComponentName oemTop = oemTopComponent(displayId);
+        if (oemTop != null) return oemTop;
         for (ActivityManager.RunningTaskInfo task : runningTasks()) {
             if (displayId(task) == displayId) return task.topActivity;
         }
         return null;
+    }
+
+    /**
+     * RunningTaskInfo is ordered inconsistently across physical displays on this firmware: a
+     * paused third-party task may precede the actually resumed Launcher task. The OEM service is
+     * the same source ScreenLiftManager uses for its per-display foreground decision, so prefer it
+     * here and retain the public ActivityManager path as a fail-open fallback for other firmware.
+     */
+    private ComponentName oemTopComponent(int displayId) {
+        try {
+            Class<?> serviceManager = Class.forName("com.qinggan.os.ServiceManager");
+            Method getTop = serviceManager.getMethod(
+                    "getDpyTopAppInfo", Context.class, int.class, int.class);
+            Object value = getTop.invoke(null, context, displayId, 4);
+            if (!(value instanceof String)) return null;
+            String flattened = ((String) value).trim();
+            if (flattened.isEmpty()) return null;
+            return ComponentName.unflattenFromString(flattened);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "OEM top component unavailable display=" + displayId + ": "
+                    + e.getMessage());
+            return null;
+        }
     }
 
     private List<ActivityManager.RunningTaskInfo> runningTasks() {
