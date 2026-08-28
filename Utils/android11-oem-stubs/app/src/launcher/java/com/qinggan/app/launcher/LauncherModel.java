@@ -21,6 +21,10 @@ public class LauncherModel extends BroadcastReceiver {
         // Stub.
     }
 
+    public void doScreenLift(int type) {
+        // Stub.
+    }
+
     public void onMoveStart(
             String packageName,
             String objectName,

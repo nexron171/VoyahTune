@@ -136,8 +136,9 @@ MD_MAX_ATTEMPTS=3
 MD_RETRY_CORE_SECONDS=2
 MD_RETRY_SHORT_SECONDS=20
 MD_RETRY_LONG_SECONDS=60
-MD_BOOTSTRAP_WAIT_SECONDS=30
+MD_BOOTSTRAP_WAIT_SECONDS=15
 MD_PRIORITY_DEFER_CYCLES=1
+WATCHDOG_CYCLE_SECONDS=5
 APOLLO_MARK=/data/local/tmp/voyahtune_apollo.pid
 APOLLO_ATTEMPT=/data/local/tmp/voyahtune_apollo.attempt
 APOLLO_LOG=/data/local/tmp/voyahtune_apollo.txt
@@ -889,7 +890,7 @@ watchdog_cycle() {
         fi
     fi
     # If late_start won the race before Qinggan spawned systemservice (or a clean core retry is due),
-    # yield one complete 10s cycle instead of immediately blocking for up to 30s in VD/launcher.
+    # yield one complete short cycle instead of immediately blocking in launcher/VD attach.
     # The counter makes this startup priority bounded even on firmware without this target.
     if [ "$MD_INTEGRITY" = ok ] && [ "$MD_STATE" != active ] && [ "$MD_STATE" != failed ] \
             && [ "$MD_PRIORITY_DEFER_CYCLES" -gt 0 ]; then
@@ -899,22 +900,7 @@ watchdog_cycle() {
     fi
     MD_PRIORITY_DEFER_CYCLES=0
 
-    # 2) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
-    SS=$(pidof system_server)
-    SS=${SS%% *}
-    SS_ID=$(process_identity "$SS" system_server 2>/dev/null) || SS_ID=
-    load_runtime_hook_state "$VD_INTEGRITY" "$SS_ID" "$VDMARK" "$VD_ATTEMPT"
-    VD_STATE=$RUNTIME_STATE
-    if [ -n "$SS_ID" ] && [ "$VD_STATE" = waiting ]; then
-        if inject_ret "$SS" "$VD" /data/local/tmp/voyahtune_vd_bypass.txt \
-                "$VDMARK" "$VD_ATTEMPT" "$SS_ID" system_server; then
-            VD_STATE=active
-        else
-            VD_STATE=failed
-        fi
-    fi
-
-    # 3) Переопределение дока — инъекция в процесс лаунчера (возвращает управление → verify-before-mark).
+    # 2) Переопределение дока — сразу после whitelist, до потенциально долгого system_server attach.
     #    По -p pid; промах лачится для exact identity и не повторяется циклом.
     LP=$(pidof com.qinggan.app.launcher)
     LP=${LP%% *}
@@ -927,6 +913,21 @@ watchdog_cycle() {
             LNCH_STATE=active
         else
             LNCH_STATE=failed
+        fi
+    fi
+
+    # 3) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
+    SS=$(pidof system_server)
+    SS=${SS%% *}
+    SS_ID=$(process_identity "$SS" system_server 2>/dev/null) || SS_ID=
+    load_runtime_hook_state "$VD_INTEGRITY" "$SS_ID" "$VDMARK" "$VD_ATTEMPT"
+    VD_STATE=$RUNTIME_STATE
+    if [ -n "$SS_ID" ] && [ "$VD_STATE" = waiting ]; then
+        if inject_ret "$SS" "$VD" /data/local/tmp/voyahtune_vd_bypass.txt \
+                "$VDMARK" "$VD_ATTEMPT" "$SS_ID" system_server; then
+            VD_STATE=active
+        else
+            VD_STATE=failed
         fi
     fi
 
@@ -967,7 +968,7 @@ watchdog_cycle() {
     fi
 
     # 6) Штатная Qinggan-клавиатура. Режим читается ровно один раз на новую process identity,
-    #    а не на каждом 10-секундном цикле. Native при изменении opt-in перезапускает только qgime,
+    #    а не на каждом watchdog-цикле. Native при изменении opt-in перезапускает только qgime,
     #    поэтому новый режим получает новый PID/start-time; off/null/error безопасно лачится без hook.
     KEYBOARD_PID=$(pidof "$KEYBOARD_TARGET" 2>/dev/null)
     KEYBOARD_PID=${KEYBOARD_PID%% *}
@@ -1131,5 +1132,5 @@ publish_hook_status running
 
 while [ 1 ]; do
     watchdog_cycle
-    sleep 10
+    sleep "$WATCHDOG_CYCLE_SECONDS"
 done

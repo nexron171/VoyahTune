@@ -79,8 +79,26 @@ Java.perform(function () {
     function dockField(instance, name) {
         try {
             var field = instance[name];
-            return field === null || field === undefined ? null : field.value;
-        } catch (e) { return null; }
+            if (field !== null && field !== undefined && field.value !== undefined) {
+                return field.value;
+            }
+        } catch (direct) {}
+        // Some live OD private fields (notably NavigationBarController.mNavigationBar) are absent
+        // from Frida's direct wrapper even though sibling fields resolve. Reflection keeps the lift
+        // replay fail-open without assuming public/package visibility.
+        try {
+            var c = instance.getClass();
+            while (c !== null) {
+                try {
+                    var reflected = c.getDeclaredField(name);
+                    reflected.setAccessible(true);
+                    return reflected.get(instance);
+                } catch (missing) {
+                    try { c = c.getSuperclass(); } catch (end) { c = null; }
+                }
+            }
+        } catch (ignored) {}
+        return null;
     }
 
     function runtimeObject(value) {
@@ -93,8 +111,8 @@ Java.perform(function () {
         }
     }
 
-    // Пользовательская compact-раскладка применяется только к водительскому Main. Пассажирский OD
-    // имеет совсем другой Air/temperature overlay ABI и целиком остаётся под управлением OEM.
+    // Driver app slots and passenger Air/Seat have different ABIs. Keep the generic driver resolver
+    // free of passenger fields so icon/click/long-tap overrides can never leak to display 1.
     function dockViews(instance) {
         return {
             up: dockField(instance, "mScreenUpView"),
@@ -425,31 +443,34 @@ Java.perform(function () {
 
     function applyScreenLiftDock(instance, type, fallbackScreen) {
         var sid = managedScreenId(instance, fallbackScreen);
-        if (sid !== 0) return; // passenger compact remains completely OEM-controlled
+        if (sid !== 0) return; // passenger compact remains completely OEM-controlled (Home only)
         var compact = type === 1;
         var views = dockViews(instance);
-        // На водительском OD отдельный temperature-content лежит поверх нижней части radio group.
-        // После скрытия slot3/4 он ровно перекрывает перенесённую вверх кнопку All Apps, поэтому в
-        // compact прячем только этот DRIVER overlay. Поле читается строго после sid===0: одноимённый
-        // passenger Air overlay не трогаем даже чтением.
+        // На водительском OD temperature-content лежит поверх штатного slot3 (Air). В compact
+        // скрываем оба слоя вместе со всеми штатными кнопками, оставляя Home и пользовательские 1/2.
         var driverTemperature = dockField(instance, "mScreenUpTemperatureContentView");
+        var compactSlot1 = dockPackage(0, 1, false) !== "none"
+                && isInstalled(dockPackage(0, 1, false));
+        var compactSlot2 = dockPackage(0, 2, false) !== "none"
+                && isInstalled(dockPackage(0, 2, false));
 
         // OEM controller doScreenLift(1) перед нашим post-hook показывает отдельный one-button screenDown.
-        // Только на водительском экране возвращаем screenUp и четыре обязательных элемента: Home,
-        // пользовательские слоты 1/2 и All Apps. Пассажирский layout не меняем.
+        // Возвращаем driver screenUp. WRAP_CONTENT + штатный layout_gravity=center центрирует по высоте
+        // Home и только реально назначенные/установленные пользовательские app-слоты.
         setDockViewVisibility(views.up, 0, "screenUp");
         setDockViewVisibility(views.down, 8, "screenDown");
         setDockViewHeight(views.up, compact ? 560 : 720, "screenUp");
-        setDockViewHeight(views.group, compact ? 560 : -1, "radioGroup");
+        setDockViewHeight(views.group, compact ? -2 : -1, "radioGroup");
         setDockViewVisibility(views.home, 0, "home");
-        setDockViewVisibility(views.slot1, 0, "slot1");
-        setDockViewVisibility(views.slot2, 0, "slot2");
-        setDockViewVisibility(views.allApps, 0, "allApps");
+        setDockViewVisibility(views.slot1, compact && !compactSlot1 ? 8 : 0, "slot1");
+        setDockViewVisibility(views.slot2, compact && !compactSlot2 ? 8 : 0, "slot2");
+        setDockViewVisibility(views.allApps, compact ? 8 : 0, "allApps");
         setDockViewVisibility(views.extra1, compact ? 8 : 0, "slot3");
         setDockViewVisibility(views.extra2, compact ? 8 : 0, "slot4");
         setDockViewVisibility(driverTemperature, compact ? 8 : 0, "driverTemperature");
         Log.i(TAG, "[dock] driver lift=" + type
-                + " mode=" + (compact ? "compact(home+1+2+allapps)" : "normal"));
+                + " mode=" + (compact ? "compact(home"
+                    + (compactSlot1 ? "+1" : "") + (compactSlot2 ? "+2" : "") + ")" : "normal"));
     }
 
     function currentScreenLiftType() {
@@ -510,14 +531,15 @@ Java.perform(function () {
         } catch (e) { Log.e(TAG, "[dock] updateIcons err: " + e); }
     }
 
-    // Первичный проход + reload: перерисовать водительский dock (shared PI passenger отсекается по sid).
+    // Первичный проход + reload: перерисовать водительский dock (passenger остаётся OEM-controlled).
     function updateAllNavbars() {
         NAV_CLASSES.forEach(function (entry) {
             try {
                 Java.choose(entry.name, {
                     onMatch: function (inst) {
                         Java.scheduleOnMainThread(function () {
-                            try { updateIcons(inst, entry.screen); } catch (e) { Log.e(TAG, "[dock] updateAll err: " + e); }
+                            try { updateIcons(inst, entry.screen); }
+                            catch (e) { Log.e(TAG, "[dock] updateAll err: " + e); }
                         });
                     },
                     onComplete: function () {}
@@ -548,10 +570,45 @@ Java.perform(function () {
     // Никакого периодического PackageManager polling: снимок живёт до ближайшего package-broadcast.
     function installAllAppsHooks() {
         try {
-            var AppBean = Java.use("com.qinggan.launcher.base.bean.AppBean");
-            var Data = Java.use("com.qinggan.launcher.base.allapp.AllAppDataManager");
-            var Adapter = Java.use("com.qinggan.launcher.base.adapter.AllAppAdapter");
-            var AllAppBarView = Java.use("com.qinggan.launcher.base.allapp.AllAppBarView");
+            // H97C OD keeps the whole model/adapter family in com.qinggan.launcher.allapp. Other
+            // launcher builds use the older launcher.base split. Resolve one complete family so
+            // overload signatures never mix classes from different ABIs.
+            var allAppsFamilies = [
+                {
+                    bean: "com.qinggan.launcher.allapp.AppBean",
+                    data: "com.qinggan.launcher.allapp.AllAppDataManager",
+                    adapter: "com.qinggan.launcher.allapp.AllAppAdapter",
+                    bar: "com.qinggan.launcher.allapp.AllAppBarView"
+                },
+                {
+                    bean: "com.qinggan.launcher.base.bean.AppBean",
+                    data: "com.qinggan.launcher.base.allapp.AllAppDataManager",
+                    adapter: "com.qinggan.launcher.base.adapter.AllAppAdapter",
+                    bar: "com.qinggan.launcher.base.allapp.AllAppBarView"
+                }
+            ];
+            var allAppsAbi = null;
+            var AppBean = null;
+            var Data = null;
+            var Adapter = null;
+            var AllAppBarView = null;
+            for (var familyIndex = 0; familyIndex < allAppsFamilies.length; familyIndex++) {
+                try {
+                    var family = allAppsFamilies[familyIndex];
+                    var familyBean = Java.use(family.bean);
+                    var familyData = Java.use(family.data);
+                    var familyAdapter = Java.use(family.adapter);
+                    var familyBar = Java.use(family.bar);
+                    allAppsAbi = family;
+                    AppBean = familyBean;
+                    Data = familyData;
+                    Adapter = familyAdapter;
+                    AllAppBarView = familyBar;
+                    break;
+                } catch (familyMissing) {}
+            }
+            if (allAppsAbi === null) throw new Error("no compatible All Apps class family");
+            Log.i(TAG, "[allapps] ABI=" + allAppsAbi.bean);
             var AppLauncher = Java.use("com.qinggan.launcher.base.utils.AppLauncher");
             var JavaString = Java.use("java.lang.String");
             var pm = ctx().getPackageManager();
@@ -735,7 +792,11 @@ Java.perform(function () {
                 var label = loadLabel(pkg);
                 var iconView = fieldValue(holder, "iconView");
                 var nameView = fieldValue(holder, "nameView");
-                if (iconView !== null && icon) iconView.setBackground(icon);
+                if (iconView !== null && icon) {
+                    var concreteIconView = runtimeObject(iconView) || iconView;
+                    try { concreteIconView.setImageDrawable(icon); }
+                    catch (notImageView) { concreteIconView.setBackground(icon); }
+                }
                 if (nameView !== null) nameView.setText(JavaString.$new(label));
             }
 
@@ -764,7 +825,7 @@ Java.perform(function () {
             };
 
             var bind = Adapter.onBindViewHolder.overload(
-                    'com.qinggan.launcher.base.adapter.AllAppAdapter$AppViewHolder', 'int');
+                    allAppsAbi.adapter + '$AppViewHolder', 'int');
             bind.implementation = function (holder, position) {
                 bind.call(this, holder, position);
                 try {
@@ -776,7 +837,7 @@ Java.perform(function () {
             // placeholder. Re-apply the custom presentation after every such OEM update as well.
             try {
                 var bindPayload = Adapter.onBindViewHolder.overload(
-                        'com.qinggan.launcher.base.adapter.AllAppAdapter$AppViewHolder',
+                        allAppsAbi.adapter + '$AppViewHolder',
                         'int', 'java.util.List');
                 bindPayload.implementation = function (holder, position, payloads) {
                     bindPayload.call(this, holder, position, payloads);
@@ -817,7 +878,7 @@ Java.perform(function () {
                     };
 
                     var secondClick = SecondFragment.onItemClick.overload(
-                            'com.qinggan.launcher.base.bean.AppBean');
+                            allAppsAbi.bean);
                     secondClick.implementation = function (bean) {
                         try {
                             var pkg = syntheticPackage(bean);
@@ -995,7 +1056,7 @@ Java.perform(function () {
 
         // На живом OD doScreenLift принадлежит единственному NavigationBarController, а не классам
         // Main/Second. После OEM-переключения меняем layout только у driver controller; passenger
-        // controller уже обработан оригиналом и остаётся one-button dock в compact.
+        // остаётся на штатном one-button Home dock.
         try {
             var LiftController = Java.use("com.qinggan.launcher.navigation.NavigationBarController");
             var controllerLift = LiftController.doScreenLift.overload('int');
@@ -1162,6 +1223,20 @@ Java.perform(function () {
         try {
             var LM2 = Java.use("com.qinggan.app.launcher.LauncherModel");
             var Log2 = Java.use("android.util.Log");
+            // Live H97C invokes NavigationBarController through its INavigationBarController field;
+            // that invoke-interface path is not reliably intercepted by the concrete-class hook.
+            // Replay the driver layout shortly after the authoritative LauncherModel event instead.
+            try {
+                var launcherScreenLift = LM2.doScreenLift.overload('int');
+                launcherScreenLift.implementation = function (type) {
+                    var result = launcherScreenLift.call(this, type);
+                    setTimeout(updateAllNavbars, 50);
+                    setTimeout(updateAllNavbars, 250);
+                    Log.i(TAG, "[dock] LauncherModel lift replay scheduled type=" + type);
+                    return result;
+                };
+                Log.i(TAG, "[dock] LauncherModel doScreenLift replay hooked");
+            } catch (e) { Log.e(TAG, "[dock] LauncherModel doScreenLift replay skip: " + e); }
             LM2.onMoveStart.overloads.forEach(function (ov) {
                 ov.implementation = function () {
                     try {

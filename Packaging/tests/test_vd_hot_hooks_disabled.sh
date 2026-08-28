@@ -69,7 +69,7 @@ grep -Fq 'schedulePhysicalDockRecovery(this, "onMoveStop")' "$DOCK" \
 if grep -Fq 'dockPassenger' "$DOCK"; then
     fail "passenger Air/Seat must remain OEM controls, not remappable dock slots"
 fi
-grep -Fq 'com.qinggan.launcher.base.allapp.AllAppDataManager' "$DOCK" \
+grep -Fq 'com.qinggan.launcher.allapp.AllAppDataManager' "$DOCK" \
     || fail "third-party launchable apps are not added to the stock launcher"
 grep -Fq 'if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list);' "$DOCK" \
     || fail "All Apps injection must cover both physical displays"
@@ -115,8 +115,10 @@ if grep -Fq 'var bean = AppBean.$new(0, 0, pkg);' "$DOCK"; then
 fi
 grep -Fq "'int', 'java.util.List'" "$DOCK" \
     || fail "All Apps payload binds must re-apply third-party icons after theme/state updates"
-grep -Fq 'com.qinggan.launcher.base.allapp.AllAppBarView' "$DOCK" \
+grep -Fq 'com.qinggan.launcher.allapp.AllAppBarView' "$DOCK" \
     || fail "All Apps synthetic clicks must be intercepted by the OEM listener owner"
+grep -Fq 'allAppsAbi.adapter + '\''$AppViewHolder'\''' "$DOCK" \
+    || fail "All Apps bind overload is pinned to one firmware package"
 grep -Fq 'com.qinggan.secondlauncher.adapter.SecondAllAppAdapter' "$DOCK" \
     || fail "passenger home rail must decorate the shared synthetic app list"
 grep -Fq 'com.qinggan.secondlauncher.fragment.SecondMainFragment' "$DOCK" \
@@ -124,21 +126,22 @@ grep -Fq 'com.qinggan.secondlauncher.fragment.SecondMainFragment' "$DOCK" \
 grep -Fq '[allapps] optional passenger rail hooks unavailable:' "$DOCK" \
     || fail "optional passenger rail ABI drift must not disable full-screen All Apps"
 
-for required_compact_view in home item1 item2 allApps; do
-    case "$required_compact_view" in
-        item1) resolved_view=slot1 ;;
-        item2) resolved_view=slot2 ;;
-        *) resolved_view=$required_compact_view ;;
-    esac
-    grep -Fq "setDockViewVisibility(views.$resolved_view, 0" "$DOCK" \
-        || fail "compact dock does not force $required_compact_view visible"
-done
+grep -Fq 'setDockViewVisibility(views.home, 0' "$DOCK" \
+    || fail "compact dock does not force Home visible"
+grep -Fq 'setDockViewVisibility(views.slot1, compact && !compactSlot1 ? 8 : 0' "$DOCK" \
+    || fail "compact dock does not hide an unassigned slot 1"
+grep -Fq 'setDockViewVisibility(views.slot2, compact && !compactSlot2 ? 8 : 0' "$DOCK" \
+    || fail "compact dock does not hide an unassigned slot 2"
 grep -Fq 'setDockViewHeight(views.up, compact ? 560 : 720' "$DOCK" \
     || fail "compact/normal dock viewport heights are not applied"
+grep -Fq 'setDockViewHeight(views.group, compact ? -2 : -1' "$DOCK" \
+    || fail "compact buttons are not vertically centered as a wrap-content group"
 grep -Fq 'setDockViewVisibility(views.extra1, compact ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide stock slot 3"
 grep -Fq 'setDockViewVisibility(views.extra2, compact ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide stock slot 4"
+grep -Fq 'setDockViewVisibility(views.allApps, compact ? 8 : 0' "$DOCK" \
+    || fail "compact dock does not hide stock All Apps"
 grep -Fq 'if (sid !== 0) return; // no icon/listener/layout writes to the passenger OEM bar' "$DOCK" \
     || fail "driver dock update can mutate passenger controls"
 if grep -Eq 'mScreenUp(AirView|SeatView)' "$DOCK"; then
@@ -147,7 +150,7 @@ fi
 grep -Fq 'var driverTemperature = dockField(instance, "mScreenUpTemperatureContentView");' "$DOCK" \
     || fail "driver compact dock does not resolve its temperature overlay"
 grep -Fq 'setDockViewVisibility(driverTemperature, compact ? 8 : 0' "$DOCK" \
-    || fail "driver temperature overlay can cover All Apps in compact mode"
+    || fail "compact dock does not hide the stock driver climate overlay"
 if grep -Fq 'android.activity.windowingMode' "$RECEIVER"; then
     fail "single-app launch must remain a normal task for WindowManager frame clamping"
 fi

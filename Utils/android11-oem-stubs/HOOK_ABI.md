@@ -28,7 +28,7 @@ class/method surface and assign their hook implementations:
 | Agent | Target | Synthetic ABI available |
 |---|---|---|
 | `steeringwheelkeys.js` | `com.qinggan.keymanager.service` | `KeyManagerReader.onKeyEvent(android.view.KeyEvent): boolean` |
-| `launcherdock.js` | `com.qinggan.app.launcher` | OD `NavigationBarMain`; independent passenger `NavigationBarSecond` with stock Air/Seat layout controls (not remappable slots); shared `NavigationBarController.doScreenLift(int)`/`show()`/`dismiss()` distinguished by `mScreenId`; `LauncherModel` top-activity and transfer lifecycle; dual-display `AllAppDataManager.getAllApps(int)`/`reload()`; `AppBean`; full-screen `AllAppBarView` + both `AllAppAdapter.onBindViewHolder(...)` overloads; `AppLauncher.startApp(Context,Intent,int)`; optional OD `SecondAllAppAdapter` + `SecondMainFragment.onItemClick(AppBean)` |
+| `launcherdock.js` | `com.qinggan.app.launcher` | OD `NavigationBarMain`; independent passenger `NavigationBarSecond` with stock Air/Seat layout controls (not remappable slots); shared `NavigationBarController.doScreenLift(int)`/`show()`/`dismiss()` distinguished by `mScreenId`; `LauncherModel` lift, top-activity and transfer lifecycle; live H97C `com.qinggan.launcher.allapp` family plus legacy `launcher.base` fallback for dual-display `AllAppDataManager.getAllApps(int)`/`reload()`, `AppBean`, `AllAppBarView` and both `AllAppAdapter.onBindViewHolder(...)` overloads; `AppLauncher.startApp(Context,Intent,int)`; optional OD `SecondAllAppAdapter` + `SecondMainFragment.onItemClick(AppBean)` |
 | `multidisplay.js` | `com.qinggan.systemservice` | `MultiDisplayImpl.isWhiteListApp(String): boolean` |
 | `apollo_tech.js` | `com.qinggan.app.vehiclesetting` | static no-argument `BaiduProviderUtil.doQuerySubscribeInfo(): String` and `doQueryNOALearnInfo(): String` |
 | `keyboard_lock_en.js` | `com.qinggan.app.qgime` | `InputModeSwitcher` English constants, `getInstance()`, `saveInputMode(int)`; `QGInputConfig.DISABLE_VOICE`; `SkbPool.getInstance()/resetCachedSkb()`; optional loader/reflection surface |
@@ -57,7 +57,7 @@ contracts belong to the injector under test rather than the target APKs.
 The primary OD navigation-bar hook resolves. The fixture deliberately models
 the two bars as different ABIs: only `NavigationBarMain` owns
 `mScreenUpItemView1..4`; its separate temperature-content overlay is hidden only
-while the driver dock is compact so it cannot cover All Apps. `NavigationBarSecond`
+while the driver dock is compact together with the other stock controls. `NavigationBarSecond`
 owns `mScreenUpAirView` and `mScreenUpSeatView` and remains entirely OEM-controlled.
 Screen-lift and window visibility belong to the one shared
 `NavigationBarController`, whose instances are distinguished by `mScreenId`.

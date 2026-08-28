@@ -51,7 +51,7 @@ for REQUIRED in \
         'MD_RETRY_CORE_SECONDS=2' \
         'MD_RETRY_SHORT_SECONDS=20' \
         'MD_RETRY_LONG_SECONDS=60' \
-        'MD_BOOTSTRAP_WAIT_SECONDS=30' \
+        'MD_BOOTSTRAP_WAIT_SECONDS=15' \
         'MD_PRIORITY_DEFER_CYCLES=1' \
         'reserve_md_injection_attempt "$MD_INJECT_ID" "$MD_ATTEMPT"' \
         'grep -qF "$MD_FAILURE_MARKER " "$MD_TRY"' \
@@ -203,12 +203,18 @@ watchdog_defer_line=$(printf '%s\n' "$watchdog_function" \
 [ "$watchdog_md_line" -lt "$watchdog_vd_line" ] \
     && [ "$watchdog_md_line" -lt "$watchdog_launcher_line" ] \
     || fail "slow VD/launcher injection can still precede multidisplay"
+[ "$watchdog_launcher_line" -lt "$watchdog_vd_line" ] \
+    || fail "launcher dock can still wait behind the potentially slow VD attach"
 [ "$watchdog_defer_line" -lt "$watchdog_vd_line" ] \
     || fail "absent early systemservice immediately falls into a blocking VD attach"
 bootstrap_call_line=$(grep -n '^bootstrap_multidisplay$' "$LOAD_BIN" | cut -d: -f1)
 watchdog_loop_line=$(grep -n '^while \[ 1 \]; do$' "$LOAD_BIN" | tail -n1 | cut -d: -f1)
 [ "$bootstrap_call_line" -lt "$watchdog_loop_line" ] \
     || fail "bounded multidisplay discovery is not run before the general watchdog"
+grep -Fq 'WATCHDOG_CYCLE_SECONDS=5' "$LOAD_BIN" \
+    || fail "launcher restart discovery is slower than the 5-second wake target"
+grep -Fq 'sleep "$WATCHDOG_CYCLE_SECONDS"' "$LOAD_BIN" \
+    || fail "watchdog does not use its bounded cycle setting"
 
 # Execute the real reservation helper: same identity is permanently rejected; a new exact identity
 # replaces the latch and is allowed once.

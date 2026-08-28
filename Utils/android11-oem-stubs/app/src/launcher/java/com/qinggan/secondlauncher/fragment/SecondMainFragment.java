@@ -1,6 +1,6 @@
 package com.qinggan.secondlauncher.fragment;
 
-import com.qinggan.launcher.base.bean.AppBean;
+import com.qinggan.launcher.allapp.AppBean;
 
 /** Synthetic optional passenger home-rail click owner. */
 public class SecondMainFragment {

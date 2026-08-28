@@ -4,7 +4,7 @@ import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-import com.qinggan.launcher.base.bean.AppBean;
+import com.qinggan.launcher.allapp.AppBean;
 
 import java.util.ArrayList;
 import java.util.List;
