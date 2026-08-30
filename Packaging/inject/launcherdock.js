@@ -1149,8 +1149,18 @@ Java.perform(function () {
                 Log.i(TAG, "[dock] dismiss pinned on " + label);
             } catch (e) { Log.e(TAG, "[dock] dismiss hook skip " + label + ": " + e); }
         }
-        pinDock(NAV_MAIN, "main/shared bar", mainFallbackScreen);
-        pinDock(NAV_MAIN.replace(/\.[^.]+$/, ".NavigationBarController"), "main/shared controller", mainFallbackScreen);
+
+        try {
+            pinDock(NAV_MAIN, "main/shared bar", mainFallbackScreen);
+        } catch (e) {
+            Log.e(TAG, "pinDock main/shared bar error: " + e);
+        }
+
+        try {
+            pinDock(NAV_MAIN.replace(/\.[^.]+$/, ".NavigationBarController"), "main/shared controller", mainFallbackScreen);
+        } catch (e) {
+            Log.e(TAG, "pinDock main/shared controller error: " + e);
+        }
 
         // 4b) Fullscreen OEM UI и transfer штатно скрывают navigation bar. LauncherModel уже получает
         // TOP_ACTIVITY_CHANGED; после оригинальной обработки повторно просим показать bar ТОГО display,
@@ -1223,21 +1233,23 @@ Java.perform(function () {
         //    постоянно, даже когда док на месте и она не нужна.
         //
         //    Аварийно вернуть штатное поведение: settings put global voyahtune_floathome 0
-        try {
-            var floatHomeOff = function () { return cfg("floathome") !== "0"; };
-            var LM = Java.use("com.qinggan.app.launcher.LauncherModel");
-            LM.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
-                return floatHomeOff() ? false : this.isThirdShowFloatApp(cn);
-            };
-            Log.i(TAG, "[dock] floating home suppressed (LauncherModel)");
-        } catch (e) { Log.e(TAG, "[dock] LauncherModel.isThirdShowFloatApp skip: " + e); }
-        try {
-            var TAU = Java.use("com.qinggan.launcher.base.drag.ThirdAppUtil");
-            TAU.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
-                return cfg("floathome") !== "0" ? false : this.isThirdShowFloatApp(cn);
-            };
-            Log.i(TAG, "[dock] floating home suppressed (ThirdAppUtil)");
-        } catch (e) { Log.e(TAG, "[dock] ThirdAppUtil.isThirdShowFloatApp skip: " + e); }
+        if (SHARED_NAV == false) { // на ПИ не надо даваить плавающую кнопку
+            try {
+                var floatHomeOff = function () { return cfg("floathome") !== "0"; };
+                var LM = Java.use("com.qinggan.app.launcher.LauncherModel");
+                LM.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
+                    return floatHomeOff() ? false : this.isThirdShowFloatApp(cn);
+                };
+                Log.i(TAG, "[dock] floating home suppressed (LauncherModel)");
+            } catch (e) { Log.e(TAG, "[dock] LauncherModel.isThirdShowFloatApp skip: " + e); }
+            try {
+                var TAU = Java.use("com.qinggan.launcher.base.drag.ThirdAppUtil");
+                TAU.isThirdShowFloatApp.overload('java.lang.String').implementation = function (cn) {
+                    return cfg("floathome") !== "0" ? false : this.isThirdShowFloatApp(cn);
+                };
+                Log.i(TAG, "[dock] floating home suppressed (ThirdAppUtil)");
+            } catch (e) { Log.e(TAG, "[dock] ThirdAppUtil.isThirdShowFloatApp skip: " + e); }
+        }
 
         // 6) OEM onMoveStart асинхронно гасит ОБА NavigationBarController. На destination foreground-кэш
         //    в этот момент ещё может содержать Launcher, поэтому обычный dockKept(fg) пропускает dismiss
