@@ -19,8 +19,11 @@ for asset in keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.jso
         voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json; do
     [ -s "$ROOT/Packaging/inject/$asset" ] || fail "missing keyboard asset: $asset"
 done
-node --check "$ROOT/Packaging/inject/keyboard_lock_en.js"
-node --check "$ROOT/Packaging/inject/keyboard_ru.js"
+
+if command -v node > /dev/null 2>&1; then
+  node --check "$ROOT/Packaging/inject/keyboard_lock_en.js"
+  node --check "$ROOT/Packaging/inject/keyboard_ru.js"
+fi
 
 require "$LAYOUT" 'android:id="@+id/switchKeyboardEnglish"'
 require "$LAYOUT" 'android:id="@+id/switchKeyboardRussian"'
