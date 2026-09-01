@@ -10,7 +10,8 @@
 // Долгое нажатие — ПО ТАЙМЕРУ (порог LONG_MS): сработал → сразу «долгое», не дожидаясь UP; отпустил
 // раньше порога → «короткое». Действия читаем ЖИВЬЁМ из Settings.Global (voyahtune_<slot>, зеркалит
 // Native из UI «Кнопки на руле»), исполняет их Native через explicit-broadcast STEER_ACTION →
-// SetModesReceiverDynamic.handleSteerAction. Оба слsота кнопки "none" → НЕ перехватываем (штатно).
+// SetModesReceiverDynamic.handleSteerActions. Пустой short/long-список кодируется как "none" →
+// кнопку не перехватываем (штатное поведение).
 Java.perform(function () {
     var LONG_MS = 600;
     // Медиа-кнопки руля: QG-код → команда Native + стандартный media keycode.
@@ -90,7 +91,8 @@ Java.perform(function () {
         }
     }
 
-    // Отдаём исполнение Native — explicit broadcast STEER_ACTION с id (напр. "energy:EV,REV").
+    // Отдаём исполнение Native — explicit broadcast STEER_ACTION с одиночным legacy-id либо
+    // length-prefixed списком действий, зеркалированным RestoreMode.
     function doAction(id) {
         if (id === "none") return;
         try {

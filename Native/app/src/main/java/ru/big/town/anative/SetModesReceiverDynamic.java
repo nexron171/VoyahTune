@@ -6,7 +6,11 @@ import static ru.big.town.anative.SetModesService.STATE_SHUTDOWN_PREPARE;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
+
+import java.util.List;
 
 public class SetModesReceiverDynamic extends BroadcastReceiver {
     public static volatile int repeat = 7;
@@ -117,7 +121,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // Исполнение назначенного действия кнопки руля. Только full.
         if ("ru.big.town.anative.STEER_ACTION".equals(receivedIntent) && BuildConfig.IS_FULL) {
             String action = intent.getStringExtra("action");
-            if (isConfiguredSteerAction(context, action)) handleSteerAction(context, action);
+            if (isConfiguredSteerAction(context, action)) handleSteerActions(context, action);
             else Log.w(TAG, "STEER_ACTION отклонён: действие не настроено: " + action);
         }
 //        if (receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES")) {
@@ -388,71 +392,123 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         } catch (Exception e) { Log.w(TAG, "sendWinReload: " + e.getMessage()); }
     }
 
-    /**
-     * Действие кнопки руля. Циклируем режимы ПО КРУГУ относительно ТЕКУЩЕГО СОХРАНЁННОГО режима (источник
-     * истины — pref RestoreMode, его же восстанавливает ApplyEngine и показывает UI); если текущего нет в
-     * наборе — первый. Одиночный набор → всегда этот режим. Новый режим СОХРАНЯЕМ как «последний
-     * активированный» → переживёт пробуждение и попадёт в настройки VoyahTune.
-     *   energy:&lt;режимы&gt;  — режим энергии;
-     *   drive:&lt;режимы&gt;   — режим вождения;
-     *   recycle:&lt;режимы&gt; — уровень рекуперации.
-     */
-    private static void handleSteerAction(Context ctx, String action) {
-        if (action == null || action.isEmpty()) return;
-        if (action.startsWith("energy:")) {
-            cycleMode(ctx, action.substring("energy:".length()), "energy");
-        } else if (action.startsWith("drive:")) {
-            cycleMode(ctx, action.substring("drive:".length()), "driveMode");
-        } else if (action.startsWith("recycle:")) {
-            cycleMode(ctx, action.substring("recycle:".length()), "recycle");
-        } else if ("toggle_forced_ev".equals(action)) {
-            toggleSetting(ctx, "forcedEv");
-        } else if ("toggle_pedestrian_sound".equals(action)) {
-            toggleSetting(ctx, "disablePedestrianSound");
-        } else if ("toggle_headlights".equals(action)) {
-            toggleHeadlights(ctx);
-        } else if ("toggle_headlights_auto".equals(action)) {
-            toggleHeadlightsAuto(ctx);
-        } else if ("system_back".equals(action)) {
-            BackButtonService.performBack(ctx);
-        } else if (action.startsWith("app:")) {
-            // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.
-            openFreeformApp(ctx, action.substring("app:".length()));
-            Log.i(TAG, "STEER_ACTION → приложение " + action.substring("app:".length()));
-        } else if (action.startsWith("split:")) {
-            // Backward-compatible строка: split:<L>,<R>,<ratio>,<lDpi>,<rDpi>[,<resizable>,<fraction>,<presetId>].
-            String[] p = action.substring("split:".length()).split(",");
-            if (p.length >= 3) {
-                try {
-                    int ratio = Integer.parseInt(p[2].trim());
-                    int lDpi  = p.length > 3 ? Integer.parseInt(p[3].trim()) : 0;
-                    int rDpi  = p.length > 4 ? Integer.parseInt(p[4].trim()) : 0;
-                    boolean resizable = p.length > 5 && "1".equals(p[5].trim());
-                    float fraction = p.length > 6 ? parseFloatSafe(p[6], 0f) : 0f;
-                    String presetId = p.length > 7 ? p[7].trim() : "";
-                    SplitHostActivity.launchSplit(ctx.getApplicationContext(), p[0].trim(), p[1].trim(),
-                            ratio, lDpi, rDpi, resizable, fraction, -1, presetId);
-                    Log.i(TAG, "STEER_ACTION → сплит " + p[0] + "/" + p[1] + " ratio=" + ratio);
-                } catch (Exception e) {
-                    Log.w(TAG, "STEER_ACTION split parse: " + e.getMessage());
-                }
-            }
-        } else if ("open_voyahtune".equals(action)) {
-            try {
-                Intent i = new Intent();
-                i.setClassName("ru.big.town.restoremode", "ru.big.town.restoremode.MainActivity");
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                DockLaunchGuard.arm(ctx, 0, "ru.big.town.restoremode");
-                android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
-                o.setLaunchDisplayId(0);
-                ctx.startActivity(i, o.toBundle());
-                Log.i(TAG, "STEER_ACTION → открыть VoyahTune");
-            } catch (Exception e) {
-                Log.w(TAG, "open VoyahTune failed: " + e.getMessage());
-            }
-        } else {
-            Log.i(TAG, "STEER_ACTION неизвестно: " + action);
+    private static final Handler STEER_SEQUENCE_HANDLER = new Handler(Looper.getMainLooper());
+
+    /** Декодирует назначение и запускает каждый пункт только после terminal callback предыдущего. */
+    private static void handleSteerActions(Context ctx, String configured) {
+        List<String> actions = SteeringActionSequence.decode(configured);
+        if (actions.isEmpty()) return;
+        Log.i(TAG, "STEER_ACTION sequence start, count=" + actions.size());
+        runSteerAction(ctx.getApplicationContext(), actions, 0);
+    }
+
+    private static void runSteerAction(Context ctx, List<String> actions, int index) {
+        if (index >= actions.size()) {
+            Log.i(TAG, "STEER_ACTION sequence complete, count=" + actions.size());
+            return;
         }
+        String action = actions.get(index);
+        Log.i(TAG, "STEER_ACTION sequence " + (index + 1) + "/" + actions.size() + ": " + action);
+        handleSteerAction(ctx, action, () -> STEER_SEQUENCE_HANDLER.post(
+                () -> runSteerAction(ctx, actions, index + 1)));
+    }
+
+    /**
+     * Один пункт последовательности. Асинхронные CAN-действия вызывают completion через exactly-once
+     * terminal callback ApplyEngine; синхронные действия завершаются сразу после вызова API.
+     */
+    private static void handleSteerAction(Context ctx, String action, Runnable completion) {
+        if (action == null || action.isEmpty()) {
+            completeSteerAction(completion);
+            return;
+        }
+        if (action.startsWith("energy:")) {
+            cycleMode(ctx, action.substring("energy:".length()), "energy", completion);
+        } else if (action.startsWith("drive:")) {
+            cycleMode(ctx, action.substring("drive:".length()), "driveMode", completion);
+        } else if (action.startsWith("recycle:")) {
+            cycleMode(ctx, action.substring("recycle:".length()), "recycle", completion);
+        } else if ("toggle_forced_ev".equals(action)) {
+            toggleSetting(ctx, "forcedEv", completion);
+        } else if ("toggle_pedestrian_sound".equals(action)) {
+            toggleSetting(ctx, "disablePedestrianSound", completion);
+        } else if ("toggle_headlights".equals(action)) {
+            toggleHeadlights(ctx, completion);
+        } else if ("toggle_headlights_auto".equals(action)) {
+            toggleHeadlightsAuto(ctx, completion);
+        } else if (action.startsWith("can:")) {
+            sendCustomCan(action, completion);
+        } else {
+            try {
+                if ("system_back".equals(action)) {
+                    BackButtonService.performBack(ctx);
+                } else if (action.startsWith("app:")) {
+                    // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.
+                    openFreeformApp(ctx, action.substring("app:".length()));
+                    Log.i(TAG, "STEER_ACTION → приложение " + action.substring("app:".length()));
+                } else if (action.startsWith("split:")) {
+                    launchSteerSplit(ctx, action);
+                } else if ("open_voyahtune".equals(action)) {
+                    openVoyahTune(ctx);
+                } else {
+                    Log.i(TAG, "STEER_ACTION неизвестно: " + action);
+                }
+            } finally {
+                completeSteerAction(completion);
+            }
+        }
+    }
+
+    private static void launchSteerSplit(Context ctx, String action) {
+        // Backward-compatible строка: split:<L>,<R>,<ratio>,<lDpi>,<rDpi>[,<resizable>,<fraction>,<presetId>].
+        String[] p = action.substring("split:".length()).split(",");
+        if (p.length >= 3) {
+            try {
+                int ratio = Integer.parseInt(p[2].trim());
+                int lDpi = p.length > 3 ? Integer.parseInt(p[3].trim()) : 0;
+                int rDpi = p.length > 4 ? Integer.parseInt(p[4].trim()) : 0;
+                boolean resizable = p.length > 5 && "1".equals(p[5].trim());
+                float fraction = p.length > 6 ? parseFloatSafe(p[6], 0f) : 0f;
+                String presetId = p.length > 7 ? p[7].trim() : "";
+                SplitHostActivity.launchSplit(ctx.getApplicationContext(), p[0].trim(), p[1].trim(),
+                        ratio, lDpi, rDpi, resizable, fraction, -1, presetId);
+                Log.i(TAG, "STEER_ACTION → сплит " + p[0] + "/" + p[1] + " ratio=" + ratio);
+            } catch (Exception e) {
+                Log.w(TAG, "STEER_ACTION split parse: " + e.getMessage());
+            }
+        }
+    }
+
+    private static void openVoyahTune(Context ctx) {
+        try {
+            Intent i = new Intent();
+            i.setClassName("ru.big.town.restoremode", "ru.big.town.restoremode.MainActivity");
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            DockLaunchGuard.arm(ctx, 0, "ru.big.town.restoremode");
+            android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
+            o.setLaunchDisplayId(0);
+            ctx.startActivity(i, o.toBundle());
+            Log.i(TAG, "STEER_ACTION → открыть VoyahTune");
+        } catch (Exception e) {
+            Log.w(TAG, "open VoyahTune failed: " + e.getMessage());
+        }
+    }
+
+    private static void sendCustomCan(String action, Runnable completion) {
+        byte[] frame = SteeringActionSequence.parseCustomCan(action);
+        if (frame == null) {
+            Log.w(TAG, "STEER_ACTION custom CAN отклонён: " + action);
+            completeSteerAction(completion);
+            return;
+        }
+        ApplyEngine.postUserCommand("steer custom CAN", () -> {
+            boolean sent = MainActivity.setCanValues(1, new byte[][] {frame}, "steering custom CAN");
+            Log.i(TAG, "STEER_ACTION custom CAN: " + (sent ? "sent" : "failed"));
+        }, completion);
+    }
+
+    private static void completeSteerAction(Runnable completion) {
+        if (completion != null) completion.run();
     }
 
     /** Открыть приложение обычной задачей на физическом экране; vd_bypass.js ужмёт рамку окна. */
@@ -506,7 +562,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      * первый клик уводит в sport, а не «в пустоту» обратно в comfort. Новый режим сохраняем как «последний
      * активированный» (MainActivity.persistSavedMode → pref RestoreMode) → переживёт пробуждение + в UI.
      */
-    private static void cycleMode(Context ctx, String csv, String modeKey) {
+    private static void cycleMode(Context ctx, String csv, String modeKey, Runnable completion) {
         final Context app = ctx.getApplicationContext();
         // Пользовательский выбор должен идти ПОСЛЕ уже запущенного wake-restore, а не параллельно с ним:
         // иначе restore успевал отправить старый snapshot поверх только что выбранного режима.
@@ -526,11 +582,11 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             MainActivity.persistSavedMode(app, modeKey, next);
             Log.i(TAG, "STEER_ACTION " + modeKey + ": набор=" + csv
                     + " тек=" + cur + " → " + next);
-        });
+        }, completion);
     }
 
     /** Переключить бинарную настройку относительно сохранённого значения, применить CAN и сохранить новый state. */
-    private static void toggleSetting(Context ctx, String key) {
+    private static void toggleSetting(Context ctx, String key, Runnable completion) {
         final Context app = ctx.getApplicationContext();
         ApplyEngine.postUserCommand("steer " + key, () -> {
             boolean current = MainActivity.currentSavedToggle(app, key);
@@ -550,11 +606,11 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
             MainActivity.persistSavedToggle(app, key, next);
             Log.i(TAG, "STEER_ACTION " + key + ": " + current + " → " + next);
-        });
+        }, completion);
     }
 
     /** Переключить фары теми же CAN-командами, которые использует автоматический свет. */
-    private static void toggleHeadlights(Context ctx) {
+    private static void toggleHeadlights(Context ctx, Runnable completion) {
         final Context app = ctx.getApplicationContext();
         final ManualAutoGate.Ticket manualTicket =
                 LightSensorService.reserveManualHeadlightCommand();
@@ -571,11 +627,14 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
             prefs.edit().putBoolean("steerHeadlightsOn", next).apply();
             Log.i(TAG, "STEER_ACTION headlights: " + current + " → " + next);
-        }, manualTicket::close);
+        }, () -> {
+            manualTicket.close();
+            completeSteerAction(completion);
+        });
     }
 
     /** Независимая пара для руля: штатный Auto ↔ ручной ближний свет. */
-    private static void toggleHeadlightsAuto(Context ctx) {
+    private static void toggleHeadlightsAuto(Context ctx, Runnable completion) {
         final Context app = ctx.getApplicationContext();
         final ManualAutoGate.Ticket manualTicket =
                 LightSensorService.reserveManualHeadlightCommand();
@@ -595,7 +654,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             Log.i(TAG, "STEER_ACTION headlights auto/low: "
                     + (currentLowBeam ? "LOW_BEAM" : "AUTO") + " → "
                     + (nextLowBeam ? "LOW_BEAM" : "AUTO"));
-        }, manualTicket::close);
+        }, () -> {
+            manualTicket.close();
+            completeSteerAction(completion);
+        });
     }
 
 }

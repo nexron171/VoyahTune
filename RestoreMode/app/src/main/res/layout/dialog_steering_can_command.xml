@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingHorizontal="24dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="4dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Введите один CAN-кадр: ровно 10 байт. Пробелы расставятся автоматически."
+        android:textColor="#AAAAAA"
+        android:textSize="18sp" />
+
+    <EditText
+        android:id="@+id/steerCanCommandInput"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:layout_marginTop="14dp"
+        android:background="#FFFFFF"
+        android:fontFamily="monospace"
+        android:hint="64 08 80 00 00 00 00 00 00 03"
+        android:inputType="textNoSuggestions|textVisiblePassword"
+        android:maxLines="1"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:textColor="#111111"
+        android:textColorHint="#777777"
+        android:textSize="21sp" />
+
+    <TextView
+        android:id="@+id/steerCanCommandError"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Введите 10 байт"
+        android:textColor="#FF8A80"
+        android:textSize="16sp" />
+
+</LinearLayout>

@@ -28,8 +28,10 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 String longKey = "steer" + button + "Long";
                 SetModesReceiverDynamic.mirrorSteer(context, intent, shortKey);
                 SetModesReceiverDynamic.mirrorSteer(context, intent, longKey);
-                needsBackService |= "system_back".equals(intent.getStringExtra(shortKey));
-                needsBackService |= "system_back".equals(intent.getStringExtra(longKey));
+                needsBackService |= SteeringActionSequence.contains(
+                        intent.getStringExtra(shortKey), "system_back");
+                needsBackService |= SteeringActionSequence.contains(
+                        intent.getStringExtra(longKey), "system_back");
             }
             BackButtonService.setSteeringBackEnabled(context, needsBackService);
             Log.i(TAG, "STEER_CONFIG зеркалирован");

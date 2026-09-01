@@ -2,6 +2,7 @@ package ru.big.town.restoremode;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
@@ -32,6 +33,7 @@ import android.widget.TextView;
 
 import androidx.activity.EdgeToEdge;
 import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
@@ -91,8 +93,9 @@ public class AdvanceActivity extends AppCompatActivity {
         return thread;
     });
 
-    // Кнопки на руле — 4 кнопки-пикера действий (звёздочка/DVR × короткое/долгое). Поля/логика ниже.
-    private Button steerStarShortBtn, steerStarLongBtn, steerDvrShortBtn, steerDvrLongBtn, steerVoiceShortBtn, steerVoiceLongBtn, steerPhoneShortBtn, steerPhoneLongBtn;
+    // Упорядоченные списки действий для 4 кнопок × короткое/долгое нажатие.
+    private LinearLayout steerStarShortList, steerStarLongList, steerDvrShortList, steerDvrLongList,
+            steerVoiceShortList, steerVoiceLongList, steerPhoneShortList, steerPhoneLongList;
 
     // DrivePreferences — единый источник настроек
     private SharedPreferences prefs;
@@ -1563,9 +1566,8 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     // -------------------------------------------------------------------------
-    // Кнопки на руле — назначение действий на короткое/долгое нажатие.
-    // Дефолт "none" = «Не менять» → штатное системное поведение (Frida-хук пропускает кнопку).
-    // Идентификатор выбранного действия хранится в prefs и исполняется Native через STEER_ACTION.
+    // Кнопки на руле — упорядоченные списки действий на короткое/долгое нажатие.
+    // Пустой список кодируется как "none" → Frida-хук сохраняет штатное системное поведение.
     // -------------------------------------------------------------------------
 
     // {id, ярлык}. Для energy:<режимы> последовательное нажатие циклирует режимы по кругу
@@ -1615,47 +1617,46 @@ public class AdvanceActivity extends AppCompatActivity {
     };
 
     private void initSteeringButtons() {
-        steerStarShortBtn = findViewById(R.id.steerStarShortBtn);
-        steerStarLongBtn  = findViewById(R.id.steerStarLongBtn);
-        steerDvrShortBtn  = findViewById(R.id.steerDvrShortBtn);
-        steerDvrLongBtn   = findViewById(R.id.steerDvrLongBtn);
-        steerVoiceShortBtn  = findViewById(R.id.steerVoiceShortBtn);
-        steerVoiceLongBtn   = findViewById(R.id.steerVoiceLongBtn);
-        steerPhoneShortBtn  = findViewById(R.id.steerPhoneShortBtn);
-        steerPhoneLongBtn   = findViewById(R.id.steerPhoneLongBtn);
-        refreshSteerButtons();
-        pushSteerConfig();   // синхронизируем выбор в Native при открытии раздела
+        steerStarShortList = findViewById(R.id.steerStarShortList);
+        steerStarLongList = findViewById(R.id.steerStarLongList);
+        steerDvrShortList = findViewById(R.id.steerDvrShortList);
+        steerDvrLongList = findViewById(R.id.steerDvrLongList);
+        steerVoiceShortList = findViewById(R.id.steerVoiceShortList);
+        steerVoiceLongList = findViewById(R.id.steerVoiceLongList);
+        steerPhoneShortList = findViewById(R.id.steerPhoneShortList);
+        steerPhoneLongList = findViewById(R.id.steerPhoneLongList);
+        refreshSteerActions();
+        pushSteerConfig();
     }
 
-    public void onPickSteerStarShort(View v) { pickSteerAction("steerStarShort", steerStarShortBtn); }
-    public void onPickSteerStarLong(View v)  { pickSteerAction("steerStarLong",  steerStarLongBtn); }
-    public void onPickSteerVoiceShort(View v) { pickSteerAction("steerVoiceShort", steerVoiceShortBtn); }
-    public void onPickSteerVoiceLong(View v)  { pickSteerAction("steerVoiceLong",  steerVoiceLongBtn); }
-    public void onPickSteerDvrShort(View v)  { pickSteerAction("steerDvrShort",  steerDvrShortBtn); }
-    public void onPickSteerDvrLong(View v)   { pickSteerAction("steerDvrLong",   steerDvrLongBtn); }
-    public void onPickSteerPhoneShort(View v) { pickSteerAction("steerPhoneShort", steerPhoneShortBtn); }
-    public void onPickSteerPhoneLong(View v)  { pickSteerAction("steerPhoneLong",  steerPhoneLongBtn); }
+    public void onPickSteerStarShort(View v) { pickSteerAction("steerStarShort"); }
+    public void onPickSteerStarLong(View v) { pickSteerAction("steerStarLong"); }
+    public void onPickSteerVoiceShort(View v) { pickSteerAction("steerVoiceShort"); }
+    public void onPickSteerVoiceLong(View v) { pickSteerAction("steerVoiceLong"); }
+    public void onPickSteerDvrShort(View v) { pickSteerAction("steerDvrShort"); }
+    public void onPickSteerDvrLong(View v) { pickSteerAction("steerDvrLong"); }
+    public void onPickSteerPhoneShort(View v) { pickSteerAction("steerPhoneShort"); }
+    public void onPickSteerPhoneLong(View v) { pickSteerAction("steerPhoneLong"); }
 
-    /** Диалог выбора действия для слота; сохраняет id в prefs, обновляет подпись кнопки. Помимо статических
-     *  действий (STEER_ACTIONS) есть два динамических: «Открыть сплит…» и «Открыть приложение…» — они
-     *  открывают под-пикер и сохраняют id вида «split:&lt;index&gt;» / «app:&lt;pkg&gt;». */
-    private void pickSteerAction(String key, Button btn) {
-        final int nStatic = STEER_ACTIONS.length;
-        final CharSequence[] labels = new CharSequence[nStatic + 2];
-        for (int i = 0; i < nStatic; i++) labels[i] = STEER_ACTIONS[i][1];
-        labels[nStatic]     = "Открыть сплит…";
-        labels[nStatic + 1] = "Открыть приложение…";
+    /** Добавляет ещё одно действие в конец списка слота. */
+    private void pickSteerAction(String key) {
+        final int staticCount = STEER_ACTIONS.length - 1; // "none" задаётся пустым списком
+        final CharSequence[] labels = new CharSequence[staticCount + 3];
+        for (int i = 0; i < staticCount; i++) labels[i] = STEER_ACTIONS[i + 1][1];
+        labels[staticCount] = "Открыть сплит…";
+        labels[staticCount + 1] = "Открыть приложение…";
+        labels[staticCount + 2] = "Своя CAN-команда…";
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
-                .setTitle("Действие")
+                .setTitle("Добавить действие")
                 .setItems(labels, (d, which) -> {
-                    if (which < nStatic) {
-                        prefs.edit().putString(key, STEER_ACTIONS[which][0]).apply();
-                        setSteerButtonText(btn, key);
-                        pushSteerConfig();
-                    } else if (which == nStatic) {
-                        pickSteerSplit(key, btn);
+                    if (which < staticCount) {
+                        appendSteerAction(key, STEER_ACTIONS[which + 1][0]);
+                    } else if (which == staticCount) {
+                        pickSteerSplit(key);
+                    } else if (which == staticCount + 1) {
+                        pickSteerApp(key);
                     } else {
-                        pickSteerApp(key, btn);
+                        showCustomSteerCommandDialog(key);
                     }
                 })
                 .setNegativeButton("Отмена", null)
@@ -1663,7 +1664,7 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     /** Под-пикер «Открыть сплит»: список готовых пресетов → id «split:&lt;index&gt;». */
-    private void pickSteerSplit(String key, Button btn) {
+    private void pickSteerSplit(String key) {
         final java.util.List<SplitStore.Preset> all = SplitStore.load(prefs);
         final java.util.List<Integer> readyIdx = new java.util.ArrayList<>();
         final java.util.List<CharSequence> labels = new java.util.ArrayList<>();
@@ -1682,42 +1683,131 @@ public class AdvanceActivity extends AppCompatActivity {
         }
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
                 .setTitle("Открыть сплит")
-                .setItems(labels.toArray(new CharSequence[0]), (d, which) -> {
-                    prefs.edit().putString(key, "split:" + readyIdx.get(which)).apply();
-                    setSteerButtonText(btn, key);
-                    pushSteerConfig();
-                })
+                .setItems(labels.toArray(new CharSequence[0]),
+                        (d, which) -> appendSteerAction(key, "split:" + readyIdx.get(which)))
                 .setNegativeButton("Отмена", null)
                 .show();
     }
 
     /** Под-пикер «Открыть приложение»: список приложений → id «app:&lt;pkg&gt;». */
-    private void pickSteerApp(String key, Button btn) {
-        showAppPicker("Открыть приложение", (pkg, label) -> {
-            prefs.edit().putString(key, "app:" + pkg).apply();
-            setSteerButtonText(btn, key);
-            pushSteerConfig();
+    private void pickSteerApp(String key) {
+        showAppPicker("Открыть приложение",
+                (pkg, label) -> appendSteerAction(key, "app:" + pkg));
+    }
+
+    /** Редактор одной CAN-команды с тем же live-форматированием, что и текстовый профиль команд. */
+    private void showCustomSteerCommandDialog(String key) {
+        View content = LayoutInflater.from(this)
+                .inflate(R.layout.dialog_steering_can_command, null, false);
+        EditText editor = content.findViewById(R.id.steerCanCommandInput);
+        TextView error = content.findViewById(R.id.steerCanCommandError);
+        AlertDialog dialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                this, R.style.DarkDialog)
+                .setTitle("Своя CAN-команда")
+                .setView(content)
+                .setPositiveButton("Добавить", null)
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            Button add = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
+            TextWatcher watcher = new TextWatcher() {
+                private boolean formatting;
+
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    if (formatting) return;
+                    String formatted = SteeringCanCommandPolicy.format(s.toString());
+                    if (!formatted.contentEquals(s)) {
+                        formatting = true;
+                        editor.setText(formatted);
+                        editor.setSelection(formatted.length());
+                        formatting = false;
+                    }
+                    updateCustomCanValidation(editor, error, add);
+                }
+
+                @Override public void afterTextChanged(Editable s) {}
+            };
+            editor.addTextChangedListener(watcher);
+            updateCustomCanValidation(editor, error, add);
+            add.setOnClickListener(v -> {
+                if (!SteeringCanCommandPolicy.isValid(editor.getText().toString())) return;
+                appendSteerAction(key,
+                        SteeringCanCommandPolicy.actionId(editor.getText().toString()));
+                dialog.dismiss();
+            });
+            editor.requestFocus();
         });
+        dialog.show();
     }
 
-    private void refreshSteerButtons() {
-        setSteerButtonText(steerStarShortBtn, "steerStarShort");
-        setSteerButtonText(steerStarLongBtn,  "steerStarLong");
-        setSteerButtonText(steerDvrShortBtn,  "steerDvrShort");
-        setSteerButtonText(steerDvrLongBtn,   "steerDvrLong");
-        setSteerButtonText(steerVoiceShortBtn,  "steerVoiceShort");
-        setSteerButtonText(steerVoiceLongBtn,   "steerVoiceLong");
-        setSteerButtonText(steerPhoneShortBtn,  "steerPhoneShort");
-        setSteerButtonText(steerPhoneLongBtn,   "steerPhoneLong");
+    private void updateCustomCanValidation(EditText editor, TextView error, Button add) {
+        String compact = SteeringCanCommandPolicy.compact(editor.getText().toString());
+        boolean valid = compact.length() == SteeringCanCommandPolicy.HEX_LENGTH;
+        editor.setBackgroundColor(valid ? Color.WHITE : 0xffffafaf);
+        error.setText(valid ? "Команда готова"
+                : "Нужно 20 hex-символов (10 байт). Сейчас: " + compact.length());
+        error.setTextColor(valid ? 0xff8bc9a3 : 0xffff8a80);
+        add.setEnabled(valid);
+        add.setAlpha(valid ? 1f : 0.4f);
     }
 
-    private void setSteerButtonText(Button b, String key) {
-        if (b == null) return;
-        b.setText(steerActionLabel(prefs.getString(key, "none")));
+    private void appendSteerAction(String key, String action) {
+        List<String> actions = SteeringActionStore.load(prefs, key);
+        actions.add(action);
+        SteeringActionStore.save(prefs, key, actions);
+        refreshSteerActions();
+        pushSteerConfig();
+    }
+
+    private void refreshSteerActions() {
+        renderSteerActionList("steerStarShort", steerStarShortList);
+        renderSteerActionList("steerStarLong", steerStarLongList);
+        renderSteerActionList("steerDvrShort", steerDvrShortList);
+        renderSteerActionList("steerDvrLong", steerDvrLongList);
+        renderSteerActionList("steerVoiceShort", steerVoiceShortList);
+        renderSteerActionList("steerVoiceLong", steerVoiceLongList);
+        renderSteerActionList("steerPhoneShort", steerPhoneShortList);
+        renderSteerActionList("steerPhoneLong", steerPhoneLongList);
+    }
+
+    private void renderSteerActionList(String key, LinearLayout container) {
+        if (container == null) return;
+        container.removeAllViews();
+        List<String> actions = SteeringActionStore.load(prefs, key);
+        if (actions.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("Действия не назначены");
+            empty.setTextColor(0xff888888);
+            empty.setTextSize(18f);
+            int top = Math.round(getResources().getDisplayMetrics().density * 8f);
+            empty.setPadding(4, top, 4, 0);
+            container.addView(empty);
+            return;
+        }
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (int i = 0; i < actions.size(); i++) {
+            final int index = i;
+            View row = inflater.inflate(R.layout.item_steering_action, container, false);
+            TextView label = row.findViewById(R.id.steerActionLabel);
+            ImageButton delete = row.findViewById(R.id.steerActionDelete);
+            label.setText((i + 1) + ". " + steerActionLabel(actions.get(i)));
+            delete.setOnClickListener(v -> {
+                List<String> current = SteeringActionStore.load(prefs, key);
+                if (index < 0 || index >= current.size()) return;
+                current.remove(index);
+                SteeringActionStore.save(prefs, key, current);
+                refreshSteerActions();
+                pushSteerConfig();
+            });
+            container.addView(row);
+        }
     }
 
     /** Человекочитаемая подпись действия: статические — из STEER_ACTIONS; «split:N» — из пресета сплита;
-     *  «app:pkg» — имя приложения. */
+     *  «app:pkg» — имя приложения; «can:hex» — отформатированная своя команда. */
     private String steerActionLabel(String id) {
         if (id == null || id.isEmpty()) return "Не менять";
         for (String[] a : STEER_ACTIONS) if (a[0].equals(id)) return a[1];
@@ -1739,7 +1829,13 @@ public class AdvanceActivity extends AppCompatActivity {
                 return "Приложение: " + pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
             } catch (Exception e) { return "Приложение: " + pkg; }
         }
-        return "Не менять";
+        if (id.startsWith("can:")) {
+            String command = id.substring("can:".length());
+            return command.length() == SteeringCanCommandPolicy.HEX_LENGTH
+                    ? "Своя команда: " + SteeringCanCommandPolicy.format(command)
+                    : "Своя команда (неверный формат)";
+        }
+        return "Неизвестное действие: " + id;
     }
 
     /** Зеркалим выбор действий кнопок в Native (он пишет их в Settings.Global — оттуда читает keymng2.js). */

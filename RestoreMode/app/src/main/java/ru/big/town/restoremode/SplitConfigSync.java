@@ -56,14 +56,14 @@ final class SplitConfigSync {
 
     static void pushSteering(Context context, SharedPreferences prefs) {
         Intent i = configIntent("ru.big.town.anative.STEER_CONFIG");
-        i.putExtra("steerStarShort", resolveSteerAction(prefs.getString("steerStarShort", "none"), prefs));
-        i.putExtra("steerStarLong",  resolveSteerAction(prefs.getString("steerStarLong",  "none"), prefs));
-        i.putExtra("steerDvrShort",  resolveSteerAction(prefs.getString("steerDvrShort",  "none"), prefs));
-        i.putExtra("steerDvrLong",   resolveSteerAction(prefs.getString("steerDvrLong",   "none"), prefs));
-        i.putExtra("steerVoiceShort",  resolveSteerAction(prefs.getString("steerVoiceShort",  "none"), prefs));
-        i.putExtra("steerVoiceLong",   resolveSteerAction(prefs.getString("steerVoiceLong",   "none"), prefs));
-        i.putExtra("steerPhoneShort",  resolveSteerAction(prefs.getString("steerPhoneShort",  "none"), prefs));
-        i.putExtra("steerPhoneLong",   resolveSteerAction(prefs.getString("steerPhoneLong",   "none"), prefs));
+        i.putExtra("steerStarShort", resolveSteerActions(prefs.getString("steerStarShort", "none"), prefs));
+        i.putExtra("steerStarLong", resolveSteerActions(prefs.getString("steerStarLong", "none"), prefs));
+        i.putExtra("steerDvrShort", resolveSteerActions(prefs.getString("steerDvrShort", "none"), prefs));
+        i.putExtra("steerDvrLong", resolveSteerActions(prefs.getString("steerDvrLong", "none"), prefs));
+        i.putExtra("steerVoiceShort", resolveSteerActions(prefs.getString("steerVoiceShort", "none"), prefs));
+        i.putExtra("steerVoiceLong", resolveSteerActions(prefs.getString("steerVoiceLong", "none"), prefs));
+        i.putExtra("steerPhoneShort", resolveSteerActions(prefs.getString("steerPhoneShort", "none"), prefs));
+        i.putExtra("steerPhoneLong", resolveSteerActions(prefs.getString("steerPhoneLong", "none"), prefs));
         context.sendBroadcast(i);
     }
 
@@ -107,6 +107,15 @@ final class SplitConfigSync {
         i.putExtra("dock" + slot + "SplitFraction", SplitStore.leftFraction(ps));
         i.putExtra("dock" + slot + "SplitPresetIdx", idx);       // fallback для старого Native
         i.putExtra("dock" + slot + "SplitPresetId", ps.id);
+    }
+
+    static String resolveSteerActions(String stored, SharedPreferences prefs) {
+        List<String> resolved = new java.util.ArrayList<>();
+        for (String action : SteeringActionStore.decode(stored)) {
+            String value = resolveSteerAction(action, prefs);
+            if (value != null && !value.isEmpty() && !"none".equals(value)) resolved.add(value);
+        }
+        return SteeringActionStore.encode(resolved);
     }
 
     /** Backward-compatible CSV: старый Native прочитает первые пять полей, новый — все восемь. */
