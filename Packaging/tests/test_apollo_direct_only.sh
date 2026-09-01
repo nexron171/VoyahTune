@@ -3,7 +3,6 @@ set -eu
 
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 HOOK="$REPO_ROOT/Packaging/inject/apollo_tech.js"
-HOOK_MANIFEST="$REPO_ROOT/Packaging/system/voyahtune-hook-manifest.json"
 LOAD_BIN="$REPO_ROOT/Packaging/system/load.bin"
 README="$REPO_ROOT/Packaging/README.md"
 ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
@@ -137,14 +136,5 @@ require_fixed "$APPLY_ENGINE" 'public static void applyNow('
 require_fixed "$README" 'Скрытые на 97X строки отдельных функций не раскрываются'
 require_fixed "$README" 'Автоматическое'
 require_fixed "$README" 'через 10 секунд после wake-события'
-
-# The manifest must commit the exact current hook bytes.
-if command -v shasum >/dev/null 2>&1; then
-    ACTUAL_SHA=$(shasum -a 256 "$HOOK" | awk '{print $1}')
-else
-    ACTUAL_SHA=$(sha256sum "$HOOK" | awk '{print $1}')
-fi
-require_fixed "$HOOK_MANIFEST" \
-    "{\"id\":\"apollo-tech\",\"process\":\"com.qinggan.app.vehiclesetting\",\"script\":\"apollo_tech.js\",\"sha256\":\"$ACTUAL_SHA\"}"
 
 echo "PASS: Apollo UI and functions use persisted event-driven restore targets"

@@ -46,13 +46,6 @@ final class HookStatusContract {
         out.append("Loader: ")
                 .append("running".equals(snapshot.loaderState) ? "работает" : "остановлен");
         if (snapshot.loaderPid > 0) out.append(" (PID ").append(snapshot.loaderPid).append(')');
-        out.append('\n').append("Manifest: ");
-        if (snapshot.manifestSha.length() == 64) {
-            out.append(snapshot.manifestSha, 0, 12).append("…");
-        } else {
-            out.append("недоступен");
-        }
-
         for (int i = 0; i < HOOK_IDS.length; i++) {
             Entry entry = snapshot.hooks.get(HOOK_IDS[i]);
             out.append('\n').append(HOOK_LABELS[i]).append(": ");
@@ -73,7 +66,6 @@ final class HookStatusContract {
             case "injecting": return "устанавливается";
             case "failed": return "ошибка (до перезапуска процесса)";
             case "disabled": return "выключен";
-            case "invalid": return "ошибка целостности";
             default: return "неизвестно";
         }
     }
@@ -84,7 +76,7 @@ final class HookStatusContract {
             return null;
         }
         String[] parts = payload.split(";", -1);
-        if (parts.length != 4 + HOOK_IDS.length) return null;
+        if (parts.length != 3 + HOOK_IDS.length) return null;
         if (!"v=1".equals(parts[0])) return null;
 
         String loaderState = exactValue(parts[1], "loader");
@@ -93,29 +85,22 @@ final class HookStatusContract {
         if (loaderPid < 0) return null;
         if (("running".equals(loaderState) && loaderPid == 0)
                 || ("stopped".equals(loaderState) && loaderPid != 0)) return null;
-        String manifestSha = exactValue(parts[3], "manifest");
-        if (manifestSha == null
-                || !(manifestSha.matches("[0-9a-f]{64}") || "unavailable".equals(manifestSha))) {
-            return null;
-        }
-
         LinkedHashMap<String, Entry> hooks = new LinkedHashMap<>();
         for (int i = 0; i < HOOK_IDS.length; i++) {
-            String value = exactValue(parts[4 + i], HOOK_IDS[i]);
+            String value = exactValue(parts[3 + i], HOOK_IDS[i]);
             int separator = value == null ? -1 : value.indexOf(':');
             if (separator <= 0 || separator == value.length() - 1) return null;
             String state = value.substring(0, separator);
             if (!("active".equals(state) || "waiting".equals(state)
                     || "injecting".equals(state) || "failed".equals(state)
-                    || "disabled".equals(state) || "invalid".equals(state)
-                    || "unknown".equals(state))) {
+                    || "disabled".equals(state) || "unknown".equals(state))) {
                 return null;
             }
             int pid = parsePid(value.substring(separator + 1));
             if (pid < 0) return null;
             hooks.put(HOOK_IDS[i], new Entry(state, pid));
         }
-        return new Snapshot(loaderState, loaderPid, manifestSha, hooks);
+        return new Snapshot(loaderState, loaderPid, hooks);
     }
 
     private static String exactValue(String field, String expectedKey) {
@@ -146,14 +131,11 @@ final class HookStatusContract {
     private static final class Snapshot {
         final String loaderState;
         final int loaderPid;
-        final String manifestSha;
         final Map<String, Entry> hooks;
 
-        Snapshot(String loaderState, int loaderPid, String manifestSha,
-                 Map<String, Entry> hooks) {
+        Snapshot(String loaderState, int loaderPid, Map<String, Entry> hooks) {
             this.loaderState = loaderState;
             this.loaderPid = loaderPid;
-            this.manifestSha = manifestSha;
             this.hooks = hooks;
         }
     }

@@ -420,7 +420,7 @@ if ! adb shell '
     exit 1
 fi
 if ! adb shell 'test ! -e /data/local/bin/voyahtune-hook-manifest.json && test ! -e /data/local/tmp/voyahtune-hook-status.v1'; then
-    echo "!!! Hook manifest/status не удалены — перезагрузка отменена."
+    echo "!!! Legacy hook manifest/status не удалены — перезагрузка отменена."
     exit 1
 fi
 # Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка

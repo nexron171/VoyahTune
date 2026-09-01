@@ -82,7 +82,7 @@ remove_full_hook_runtime_for_light() {
         # удаляется только по двум ASCII marker, generic injector остаётся неактивным без boot path.
         if [ -f /data/local/bin/load.bin ] \
                 && grep -qF 'LOG_TAG="vt_load_bin"' /data/local/bin/load.bin 2>/dev/null \
-                && grep -qF 'HOOK_MANIFEST=/data/local/bin/voyahtune-hook-manifest.json' \
+                && grep -qF 'LOAD_LOCK=/data/local/tmp/voyahtune_load.v2.lock' \
                     /data/local/bin/load.bin 2>/dev/null; then
             rm -f /data/local/bin/load.bin || exit 1
         fi

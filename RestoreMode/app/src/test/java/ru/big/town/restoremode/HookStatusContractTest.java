@@ -6,16 +6,14 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 public class HookStatusContractTest {
-    private static final String SHA =
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    private static final String VALID = "v=1;loader=running;pid=321;manifest=" + SHA
+    private static final String VALID = "v=1;loader=running;pid=321"
             + ";vd-bypass=active:100"
             + ";steering-wheel=injecting:101"
             + ";launcher-dock=waiting:0"
             + ";multi-display=failed:102"
             + ";apollo-tech=active:103"
             + ";keyboard-en=disabled:104"
-            + ";keyboard-ru=invalid:104";
+            + ";keyboard-ru=waiting:104";
 
     @Test
     public void validPayloadIsRendered() {
@@ -24,7 +22,7 @@ public class HookStatusContractTest {
         assertTrue(rendered.contains("Loader: работает (PID 321)"));
         assertTrue(rendered.contains("Окна / VirtualDisplay: активен (PID 100)"));
         assertTrue(rendered.contains("Кнопки руля: устанавливается (PID 101)"));
-        assertTrue(rendered.contains("Клавиатура RU: ошибка целостности (PID 104)"));
+        assertTrue(rendered.contains("Клавиатура RU: ожидает процесс (PID 104)"));
     }
 
     @Test
@@ -34,8 +32,8 @@ public class HookStatusContractTest {
         assertFalse(HookStatusContract.isValidPayload(VALID.replace("v=1", "v=2")));
         assertFalse(HookStatusContract.isValidPayload(VALID.replace("active:100", "bogus:100")));
         assertFalse(HookStatusContract.isValidPayload(VALID.replace("active:100", "ACTIVE:100")));
-        assertFalse(HookStatusContract.isValidPayload(VALID.replace("manifest=" + SHA,
-                "manifest=")));
+        assertFalse(HookStatusContract.isValidPayload(VALID.replace(
+                "vd-bypass=active:100", "manifest=unused")));
         assertFalse(HookStatusContract.isValidPayload(VALID.replace("pid=321", "pid=-1")));
         assertFalse(HookStatusContract.isValidPayload(VALID.replace("pid=321", "pid=2147483648")));
         assertFalse(HookStatusContract.isValidPayload(VALID.replace("pid=321", "pid=0")));
@@ -50,13 +48,11 @@ public class HookStatusContractTest {
     }
 
     @Test
-    public void unavailableManifestAndStoppedLoaderAreExplicitValidStates() {
+    public void stoppedLoaderIsExplicitValidState() {
         String stopped = VALID.replace("loader=running", "loader=stopped")
-                .replace("pid=321", "pid=0")
-                .replace("manifest=" + SHA, "manifest=unavailable");
+                .replace("pid=321", "pid=0");
         assertTrue(HookStatusContract.isValidPayload(stopped));
         assertTrue(HookStatusContract.renderForUi(stopped, true).contains("Loader: остановлен"));
-        assertTrue(HookStatusContract.renderForUi(stopped, true).contains("Manifest: недоступен"));
     }
 
     @Test

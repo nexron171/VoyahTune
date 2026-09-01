@@ -57,7 +57,7 @@ for REQUIRED in \
         'grep -qF "$MD_FAILURE_MARKER " "$MD_TRY"' \
         'grep -qF "$MD_READY_MARKER " "$MD_TRY"' \
         'record_md_injection_success "$MD_INJECT_ID" "$MD_ATTEMPT"' \
-        'load_md_runtime_hook_state "$MD_INTEGRITY" "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"' \
+        'load_md_runtime_hook_state "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"' \
         'inject_multidisplay "$MDP" "$MDP_ID"' \
         'bootstrap_multidisplay' \
         '[ "$MD_LAST_FAILURE" != ready_marker_missing ]' \
@@ -312,11 +312,11 @@ record_md_injection_success "$MD_NEW_ID" "$MD_ATTEMPT_FILE" \
 [ "$(cat "$MD_ATTEMPT_FILE")" = "$MD_NEW_ID|3|0" ] \
     || fail "multidisplay success does not prevent marker-loss reinjection"
 MD_SUCCESS_MARK="$TMP_DIR/md.pid"
-load_md_runtime_hook_state ok "$MD_NEW_ID" "$MD_SUCCESS_MARK" "$MD_ATTEMPT_FILE"
+load_md_runtime_hook_state "$MD_NEW_ID" "$MD_SUCCESS_MARK" "$MD_ATTEMPT_FILE"
 [ "$RUNTIME_STATE" = failed ] \
     || fail "terminal retry latch without exact ready marker was reported active"
 printf '%s\n' "$MD_NEW_ID" > "$MD_SUCCESS_MARK"
-load_md_runtime_hook_state ok "$MD_NEW_ID" "$MD_SUCCESS_MARK" "$MD_ATTEMPT_FILE"
+load_md_runtime_hook_state "$MD_NEW_ID" "$MD_SUCCESS_MARK" "$MD_ATTEMPT_FILE"
 [ "$RUNTIME_STATE" = active ] \
     || fail "exact multidisplay success marker does not dominate terminal attempt latch"
 

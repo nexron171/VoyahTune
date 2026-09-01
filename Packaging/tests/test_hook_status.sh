@@ -2,7 +2,6 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-MANIFEST="$ROOT/Packaging/system/voyahtune-hook-manifest.json"
 LOADER="$ROOT/Packaging/system/load.bin"
 PROVIDER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
 CONTRACT="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/HookStatusContract.java"
@@ -14,7 +13,7 @@ FULL_INSTALL_BAT="$ROOT/Packaging/installer/full/install.bat"
 LIGHT_INSTALL="$ROOT/Packaging/installer/light/install.sh"
 LIGHT_INSTALL_BAT="$ROOT/Packaging/installer/light/install.bat"
 
-fail() { echo "hook manifest/status test failed: $*" >&2; exit 1; }
+fail() { echo "hook status/install test failed: $*" >&2; exit 1; }
 require() { grep -Fq -- "$2" "$1" || fail "$1: missing $2"; }
 forbid() {
     if grep -Fq -- "$2" "$1"; then
@@ -31,37 +30,18 @@ line_first() {
     grep -nF "$2" "$1" | head -n1 | cut -d: -f1
 }
 
-sha256_file() {
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" | awk '{print $1}'
-    else
-        shasum -a 256 "$1" | awk '{print $1}'
-    fi
-}
-
-[ "$(grep -F -x -c '  "schemaVersion": 1,' "$MANIFEST")" -eq 1 ] || fail "schemaVersion != 1"
-[ "$(grep -F -c '{"id":' "$MANIFEST")" -eq 7 ] || fail "manifest must contain seven exact scripts"
-
-check_entry() {
-    id=$1 process=$2 script=$3
-    line=$(grep -F '"id":"'"$id"'"' "$MANIFEST") || fail "missing id=$id"
-    [ "$(printf '%s\n' "$line" | grep -F -c '"process":"'"$process"'","script":"'"$script"'"')" -eq 1 ] \
-        || fail "$id mapping mismatch"
-    expected=$(printf '%s\n' "$line" | sed -n 's/.*"sha256":"\([0-9a-f]*\)".*/\1/p')
-    actual=$(sha256_file "$ROOT/Packaging/inject/$script")
-    [ "${#expected}" -eq 64 ] && [ "$expected" = "$actual" ] || fail "$script SHA mismatch"
-}
-
-check_entry vd-bypass system_server vd_bypass.js
-check_entry steering-wheel com.qinggan.keymanager.service steeringwheelkeys.js
-check_entry launcher-dock com.qinggan.app.launcher launcherdock.js
-check_entry multi-display com.qinggan.systemservice multidisplay.js
-check_entry apollo-tech com.qinggan.app.vehiclesetting apollo_tech.js
-check_entry keyboard-en com.qinggan.app.qgime keyboard_lock_en.js
-check_entry keyboard-ru com.qinggan.app.qgime keyboard_ru.js
-
-require "$LOADER" 'HOOK_SET_VALID=ok'
-require "$LOADER" 'if [ "$HOOK_SET_VALID" != ok ]; then'
+forbid "$LOADER" 'HOOK_MANIFEST'
+forbid "$LOADER" 'sha256_path'
+forbid "$LOADER" 'INTEGRITY'
+forbid "$LOADER" 'manifest='
+require "$FULL_INSTALL" 'rm -f /data/local/bin/voyahtune-hook-manifest.json'
+forbid "$FULL_INSTALL" 'install_required_data_file voyahtune-hook-manifest.json'
+forbid "$FULL_INSTALL" 'host_sha256'
+forbid "$FULL_INSTALL" 'verify_hook_manifest'
+require "$FULL_INSTALL_BAT" 'rm -f /data/local/bin/voyahtune-hook-manifest.json'
+forbid "$FULL_INSTALL_BAT" 'call :install_required_data_file voyahtune-hook-manifest.json'
+forbid "$FULL_INSTALL_BAT" 'compute_sha256'
+forbid "$FULL_INSTALL_BAT" 'certutil.exe -hashfile'
 require "$LOADER" 'mv -f "$STATUS_STAGE" "$HOOK_STATUS_FILE"'
 require "$LOADER" 'if [ "$HOOK_STATUS_LOCAL_PAYLOAD" != "$HOOK_STATUS_PAYLOAD" ]; then'
 require "$LOADER" '/system/bin/content call --user 0'
@@ -73,7 +53,7 @@ require "$PROVIDER" 'Binder.getCallingUid() != 0'
 require "$PROVIDER" '.putString(HookStatusContract.PAYLOAD_KEY, arg)'
 require "$PROVIDER" '.commit();'
 require "$CONTRACT" 'MAX_PAYLOAD_LENGTH = 2_048'
-require "$CONTRACT" 'parts.length != 4 + HOOK_IDS.length'
+require "$CONTRACT" 'parts.length != 3 + HOOK_IDS.length'
 require "$CONTRACT" 'AUTHORITY = "ru.big.town.restoremode.restoremodecontentprovider"'
 require "$CONTRACT" 'METHOD_PUBLISH = "publishHookStatusV1"'
 require "$APP_MANIFEST" 'android:authorities="ru.big.town.restoremode.restoremodecontentprovider"'
@@ -90,9 +70,6 @@ watchdog_loop_line=$(grep -n '^while \[ 1 \]; do$' "$LOADER" | tail -n1 | cut -d
 [ -n "$startup_publish_line" ] && [ "$startup_publish_line" -lt "$watchdog_loop_line" ] \
     || fail "initial status must be published before the injection watchdog loop"
 
-script_line=$(grep -n 'install_required_data_file keyboard_ru.js' "$FULL_INSTALL" | cut -d: -f1)
-manifest_line=$(grep -n 'install_required_data_file voyahtune-hook-manifest.json' "$FULL_INSTALL" | tail -n1 | cut -d: -f1)
-[ "$manifest_line" -gt "$script_line" ] || fail "manifest is not published after all scripts"
 require "$FULL_INSTALL" 'setprop ctl.stop voyahtune_load'
 require "$FULL_INSTALL" 'getprop init.svc.voyahtune_load'
 forbid "$FULL_INSTALL" 'pgrep -f'
@@ -100,7 +77,7 @@ forbid "$FULL_INSTALL" 'pkill -'
 forbid "$FULL_INSTALL" 'signal_hook_runtime'
 
 # Full update safety: the process freeze is after the only possible verity reboot, before the first
-# hook-state mutation, and an abort can restart the old/new init service. The manifest stays last.
+# hook-state mutation, and an abort can restart the old/new init service.
 [ "$(grep -Ec '^[[:space:]]*(if ! )?adb reboot' "$FULL_INSTALL")" -eq 2 ] \
     || fail "full install.sh must have only verity and final reboots"
 full_sh_verity=$(grep -nE '^[[:space:]]*adb reboot$' "$FULL_INSTALL" | head -n1 | cut -d: -f1)
@@ -110,6 +87,18 @@ full_sh_mutation=$(line_first "$FULL_INSTALL" 'if ! adb shell settings put globa
     || fail "full install.sh freeze is not after verity reboot and before hook mutation"
 require "$FULL_INSTALL" "adb shell 'setprop ctl.start voyahtune_load"
 require "$FULL_INSTALL" 'HOOK_UPDATE_BARRIER_ARMED=0'
+require "$FULL_INSTALL" 'Ожидание загрузки устройства для проверки целостности установки...'
+require "$FULL_INSTALL" 'Установка завершена и проверена.'
+full_sh_final_reboot=$(grep -nE '^[[:space:]]*(if ! )?adb reboot' "$FULL_INSTALL" | tail -n1 | cut -d: -f1)
+full_sh_integrity_wait=$(line_first "$FULL_INSTALL" 'Ожидание загрузки устройства для проверки целостности установки...')
+full_sh_boot_wait=$(line_first "$FULL_INSTALL" 'if ! wait_for_android_boot; then')
+full_sh_native_check=$(line_first "$FULL_INSTALL" 'if ! ensure_native_user_ready; then')
+full_sh_complete=$(line_first "$FULL_INSTALL" 'Установка завершена и проверена.')
+[ "$full_sh_final_reboot" -lt "$full_sh_integrity_wait" ] \
+    && [ "$full_sh_integrity_wait" -lt "$full_sh_boot_wait" ] \
+    && [ "$full_sh_boot_wait" -lt "$full_sh_native_check" ] \
+    && [ "$full_sh_native_check" -lt "$full_sh_complete" ] \
+    || fail "full install.sh must wait for boot and verify Native before reporting completion"
 
 [ "$(grep -Ec '^adb[.]exe reboot' "$FULL_INSTALL_BAT")" -eq 2 ] \
     || fail "full install.bat must have only verity and final reboots"
@@ -124,41 +113,24 @@ forbid "$FULL_INSTALL_BAT" 'pgrep -f'
 forbid "$FULL_INSTALL_BAT" 'pkill -'
 forbid "$FULL_INSTALL_BAT" 'signal_hook_runtime'
 require "$FULL_INSTALL_BAT" 'setprop ctl.start voyahtune_load'
+require "$FULL_INSTALL_BAT" 'Waiting for the device to boot to verify installation integrity...'
+require "$FULL_INSTALL_BAT" 'Installation complete and verified.'
+full_bat_final_reboot=$(grep -nF 'adb.exe reboot' "$FULL_INSTALL_BAT" | tail -n1 | cut -d: -f1)
+full_bat_integrity_wait=$(line_first "$FULL_INSTALL_BAT" 'Waiting for the device to boot to verify installation integrity...')
+full_bat_boot_wait=$(line_first "$FULL_INSTALL_BAT" 'call :wait_android_boot')
+full_bat_native_check=$(line_first "$FULL_INSTALL_BAT" 'call :ensure_native_user_ready')
+full_bat_complete=$(line_first "$FULL_INSTALL_BAT" 'Installation complete and verified.')
+[ "$full_bat_final_reboot" -lt "$full_bat_integrity_wait" ] \
+    && [ "$full_bat_integrity_wait" -lt "$full_bat_boot_wait" ] \
+    && [ "$full_bat_boot_wait" -lt "$full_bat_native_check" ] \
+    && [ "$full_bat_native_check" -lt "$full_bat_complete" ] \
+    || fail "full install.bat must wait for boot and verify Native before reporting completion"
 forbid_ci "$FULL_INSTALL_BAT" 'powershell'
 forbid_ci "$FULL_INSTALL_BAT" 'pwsh'
 forbid_ci "$FULL_INSTALL_BAT" 'cscript'
-require "$FULL_INSTALL_BAT" 'call :verify_hook_manifest'
-require "$FULL_INSTALL_BAT" 'certutil.exe -hashfile "%~1" SHA256'
-require "$FULL_INSTALL_BAT" 'for /f "usebackq skip=1 delims=" %%H'
-require "$FULL_INSTALL_BAT" 'if "!HOOK_HASH_LINE:~63,1!"==""'
-require "$FULL_INSTALL_BAT" 'if not "!HOOK_HASH_LINE:~64,1!"==""'
-require "$FULL_INSTALL_BAT" 'for %%C in (0 1 2 3 4 5 6 7 8 9 a b c d e f A B C D E F)'
-require "$FULL_INSTALL_BAT" 'findstr.exe /N "^" "voyahtune-hook-manifest.json"'
-require "$FULL_INSTALL_BAT" 'findstr.exe /R /N "^$" "voyahtune-hook-manifest.json"'
-require "$FULL_INSTALL_BAT" 'if not "%HOOK_MANIFEST_SOURCE_LINES%"=="12"'
-require "$FULL_INSTALL_BAT" 'findstr.exe /R /X "[0-9][0-9]*:"'
-require "$FULL_INSTALL_BAT" 'fc.exe /B "%HOOK_ACTUAL_NORMALIZED%" "%HOOK_EXPECTED_NORMALIZED%"'
-[ "$(grep -F -c 'call :compute_sha256 ' "$FULL_INSTALL_BAT")" -eq 7 ] \
-    || fail "full install.bat must hash exactly seven hook scripts"
-[ "$(grep -F -c 'del "%HOOK_EXPECTED_MANIFEST%" "%HOOK_ACTUAL_NORMALIZED%" "%HOOK_EXPECTED_NORMALIZED%"' "$FULL_INSTALL_BAT")" -ge 3 ] \
-    || fail "full install.bat must clean every manifest temp on entry/success/failure"
-for expected_mapping in \
-        '"id":"vd-bypass","process":"system_server","script":"vd_bypass.js"' \
-        '"id":"steering-wheel","process":"com.qinggan.keymanager.service","script":"steeringwheelkeys.js"' \
-        '"id":"launcher-dock","process":"com.qinggan.app.launcher","script":"launcherdock.js"' \
-        '"id":"multi-display","process":"com.qinggan.systemservice","script":"multidisplay.js"' \
-        '"id":"apollo-tech","process":"com.qinggan.app.vehiclesetting","script":"apollo_tech.js"' \
-        '"id":"keyboard-en","process":"com.qinggan.app.qgime","script":"keyboard_lock_en.js"' \
-        '"id":"keyboard-ru","process":"com.qinggan.app.qgime","script":"keyboard_ru.js"'; do
-    require "$FULL_INSTALL_BAT" "$expected_mapping"
-done
-full_bat_manifest_preflight=$(line_first "$FULL_INSTALL_BAT" 'call :verify_hook_manifest')
-full_bat_first_adb=$(line_first "$FULL_INSTALL_BAT" 'adb.exe root')
-[ "$full_bat_manifest_preflight" -lt "$full_bat_first_adb" ] \
-    || fail "full install.bat manifest preflight must run before the first ADB call"
 
 # Full -> Light safety: stop after remount/reboot, refuse the owned legacy init.logcat path, disable
-# the dedicated RC before deleting all project scripts/manifest/status, and never remove an unknown
+# the dedicated RC before deleting all project scripts/status, and never remove an unknown
 # generic injector binary. Phase 2 intentionally has no restart path.
 [ "$(grep -Ec '^[[:space:]]*(if ! )?adb reboot' "$LIGHT_INSTALL")" -eq 2 ] \
     || fail "light install.sh must have only verity and final reboots"
@@ -174,7 +146,7 @@ require "$LIGHT_INSTALL" '# init.logcat.sh Open Voyah:'
 require "$LIGHT_INSTALL" 'voyahtune.load.rc.voyahtune-light-disabled'
 require "$LIGHT_INSTALL" 'mv -f "$ACTIVE_RC" "$DISABLED_RC"'
 require "$LIGHT_INSTALL" 'LOG_TAG="vt_load_bin"'
-require "$LIGHT_INSTALL" 'HOOK_MANIFEST=/data/local/bin/voyahtune-hook-manifest.json'
+require "$LIGHT_INSTALL" 'LOAD_LOCK=/data/local/tmp/voyahtune_load.v2.lock'
 require "$LIGHT_INSTALL" '/data/local/bin/voyahtune-hook-manifest.json'
 require "$LIGHT_INSTALL" '/data/local/tmp/voyahtune-hook-status.v1'
 require "$LIGHT_INSTALL" 'setprop ctl.stop voyahtune_load'
@@ -220,7 +192,7 @@ require "$LIGHT_INSTALL_BAT" '# init.logcat.sh Open Voyah:'
 require "$LIGHT_INSTALL_BAT" 'voyahtune.load.rc.voyahtune-light-disabled'
 require "$LIGHT_INSTALL_BAT" 'mv -f $ACTIVE_RC $DISABLED_RC'
 require "$LIGHT_INSTALL_BAT" "LOG_TAG=\\\"vt_load_bin\\\""
-require "$LIGHT_INSTALL_BAT" 'HOOK_MANIFEST=/data/local/bin/voyahtune-hook-manifest.json'
+require "$LIGHT_INSTALL_BAT" 'LOAD_LOCK=/data/local/tmp/voyahtune_load.v2.lock'
 require "$LIGHT_INSTALL_BAT" '/data/local/bin/voyahtune-hook-manifest.json'
 require "$LIGHT_INSTALL_BAT" '/data/local/tmp/voyahtune-hook-status.v1'
 require "$LIGHT_INSTALL_BAT" 'setprop ctl.stop voyahtune_load'
@@ -252,4 +224,4 @@ if grep -Eq 'rm -f([^;]*[[:space:]])?/data/local/bin/frida-inject([[:space:];]|$
     fail "light install.bat blindly removes the generic frida-inject"
 fi
 
-echo "PASS: atomic hook manifest and demand-scoped status contract"
+echo "PASS: direct hook install and demand-scoped status contract"
