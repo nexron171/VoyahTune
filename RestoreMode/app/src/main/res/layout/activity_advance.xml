@@ -1636,6 +1636,46 @@
 
             </LinearLayout>
 
+            <!-- Приложения, которым разрешён настоящий полноэкранный режим -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Полноэкранные приложения"
+                android:textColor="#FFFFFF"
+                android:textSize="28px" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Выбранные приложения открываются на всём физическом экране без отступов от дока и статус-бара. Системный док скрывается, а плавающие кнопки «Назад» и Home показываются автоматически."
+                android:textColor="#888888"
+                android:textSize="20px" />
+
+            <LinearLayout
+                android:id="@+id/fullscreenAppsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/buttonAddFullscreenApp"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:layout_marginTop="14dp"
+                android:backgroundTint="#2f7fd0"
+                android:onClick="onAddFullscreenApp"
+                android:text="＋ Добавить приложение"
+                android:textColor="#FFFFFF"
+                android:textSize="24dp"
+                app:cornerRadius="20dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginVertical="24dp"
+                android:background="#373f4a" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -2378,7 +2418,7 @@
 
         </LinearLayout>
 
-        <!-- Плавающая кнопка «Назад»: тумблер + положение (единый блок) -->
+        <!-- Плавающие кнопки «Назад»/Home: тумблер + положение (единый блок) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -2404,14 +2444,14 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Плавающая кнопка «Назад»"
+                        android:text="Плавающие кнопки «Назад» и Home"
                         android:textColor="#FFFFFF"
                         android:textSize="26px" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Кнопка поверх интерфейса; вызывает системное «Назад»"
+                        android:text="Кнопки поверх интерфейса; вызывают системные «Назад» и Home"
                         android:textColor="#888888"
                         android:textSize="20px" />
 
@@ -2426,12 +2466,12 @@
 
             </LinearLayout>
 
-            <!-- Положение кнопки -->
+            <!-- Положение блока кнопок -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="Положение кнопки"
+                android:text="Положение блока кнопок"
                 android:textColor="#FFFFFF"
                 android:textSize="24px" />
 
@@ -2483,7 +2523,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Потяните кнопку вдоль выбранной стороны, чтобы изменить положение — оно запомнится"
+                android:text="Потяните любую кнопку вдоль выбранной стороны, чтобы изменить положение блока — оно запомнится"
                 android:textColor="#888888"
                 android:textSize="20px" />
 

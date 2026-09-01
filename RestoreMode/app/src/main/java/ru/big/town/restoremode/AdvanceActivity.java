@@ -488,6 +488,7 @@ public class AdvanceActivity extends AppCompatActivity {
         initAppShortcuts();
         initDockOverride();
         if (BuildConfig.IS_FULL) {
+            initFullscreenApps();
             initSplitScreen();
             initAppDpiList();
         }
@@ -587,7 +588,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 // Флаг читает Native из ContentProvider (единый источник) — broadcast не нужен.
                 prefs.edit().putBoolean("autoLaunchOnWake", checked).apply());
 
-        // Раздел «Другое»: тоггл «Плавающая кнопка Назад» (по умолчанию выключено)
+        // Раздел «Другое»: тоггл плавающих кнопок Назад/Home (по умолчанию выключено)
         Switch switchFloatingBack = findViewById(R.id.switchFloatingBack);
         switchFloatingBack.setChecked(prefs.getBoolean("floatingBackButton", false));
         switchFloatingBack.setOnCheckedChangeListener((b, checked) -> {
@@ -696,7 +697,7 @@ public class AdvanceActivity extends AppCompatActivity {
         sw.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(key, checked).apply());
     }
 
-    /** Вкл/выкл плавающую кнопку «Назад» — шлём в SetModesService (тот правит secure settings). */
+    /** Вкл/выкл плавающие кнопки Назад/Home — шлём в SetModesService (тот правит secure settings). */
     private void sendFloatingBack(boolean enable) {
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
             Log.w("$$$ Advance floatBack $$$", "SetModesService не забинден");
@@ -1018,6 +1019,68 @@ public class AdvanceActivity extends AppCompatActivity {
                 renderAppShortcuts();
             });
             appShortcutsContainer.addView(row);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Полноэкранные приложения — исключения из physical window clamp
+    // -------------------------------------------------------------------------
+    private android.widget.LinearLayout fullscreenAppsContainer;
+
+    private void initFullscreenApps() {
+        fullscreenAppsContainer = findViewById(R.id.fullscreenAppsContainer);
+        renderFullscreenApps();
+    }
+
+    public void onAddFullscreenApp(View v) {
+        showAppPicker("Добавить полноэкранное приложение", (pkg, label) -> {
+            if (pkg.startsWith("ru.big.town")) {
+                com.google.android.material.snackbar.Snackbar.make(
+                        findViewById(R.id.main),
+                        "Экраны VoyahTune используют собственную системную раскладку",
+                        com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
+                return;
+            }
+            java.util.List<String> packages = FullscreenAppStore.load(prefs);
+            if (!packages.contains(pkg)) {
+                packages.add(pkg);
+                saveFullscreenApps(packages);
+            }
+        });
+    }
+
+    private void saveFullscreenApps(java.util.List<String> packages) {
+        FullscreenAppStore.save(prefs, packages);
+        SplitConfigSync.pushFullscreenApps(this, prefs);
+        renderFullscreenApps();
+    }
+
+    private void renderFullscreenApps() {
+        if (fullscreenAppsContainer == null) return;
+        fullscreenAppsContainer.removeAllViews();
+        java.util.List<String> packages = FullscreenAppStore.load(prefs);
+        android.content.pm.PackageManager pm = getPackageManager();
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (String pkg : packages) {
+            View row = inflater.inflate(R.layout.item_app_shortcut, fullscreenAppsContainer, false);
+            android.widget.ImageView icon = row.findViewById(R.id.shortcutIco);
+            TextView label = row.findViewById(R.id.shortcutLabel);
+            ImageButton delete = row.findViewById(R.id.shortcutDelete);
+            String name = pkg;
+            try {
+                android.content.pm.ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
+                name = pm.getApplicationLabel(info).toString();
+                icon.setImageDrawable(pm.getApplicationIcon(info));
+            } catch (Exception ignored) {
+            }
+            label.setText(name);
+            delete.setContentDescription("Убрать из полноэкранных приложений");
+            delete.setOnClickListener(v -> {
+                java.util.List<String> next = FullscreenAppStore.load(prefs);
+                next.remove(pkg);
+                saveFullscreenApps(next);
+            });
+            fullscreenAppsContainer.addView(row);
         }
     }
 

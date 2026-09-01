@@ -46,6 +46,13 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             SetModesReceiverDynamic.mirrorFreeform(context, intent);
             SetModesReceiverDynamic.sendWinReload(context);
             Log.i(TAG, "FREEFORM_CONFIG зеркалирован + reload");
+        } else if ("ru.big.town.anative.FULLSCREEN_APPS_CONFIG".equals(action)) {
+            SetModesReceiverDynamic.mirrorFullscreenApps(context, intent);
+            Intent reload = new Intent("ru.big.town.anative.DOCK_RELOAD");
+            reload.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+            context.sendBroadcast(reload);
+            SetModesReceiverDynamic.sendWinReload(context);
+            Log.i(TAG, "FULLSCREEN_APPS_CONFIG зеркалирован + dock/window reload");
         } else if ("ru.big.town.anative.APP_DPI_CONFIG".equals(action)) {
             SetModesReceiverDynamic.mirrorAppDpi(context, intent);
             SetModesReceiverDynamic.sendWinReload(context);

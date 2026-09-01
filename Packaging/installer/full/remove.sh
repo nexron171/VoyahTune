@@ -432,6 +432,7 @@ if ! adb shell '
         voyahtune_dockPassenger1 voyahtune_dockPassenger2 \
         voyahtune_dockPassenger1Dpi voyahtune_dockPassenger2Dpi \
         voyahtune_screen_lift_type voyahtune_win_compact_bottom \
+        voyahtune_fullscreen_apps \
         voyahtune_steerStarShort voyahtune_steerStarLong \
         voyahtune_steerDvrShort voyahtune_steerDvrLong \
         voyahtune_steerVoiceShort voyahtune_steerVoiceLong \

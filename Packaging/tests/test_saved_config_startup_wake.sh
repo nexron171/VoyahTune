@@ -42,6 +42,10 @@ if grep -q 'dockPassengerOverride\|i.putExtra("dockPassenger' "$SYNC" "$ADVANCE"
     fail "removed passenger dock picker/config is still persisted or transported"
 fi
 grep -q 'pushAppDpi(context, prefs, null, 0)' "$SYNC" || fail "startup/wake sync omits complete app DPI snapshot"
+grep -q 'pushFullscreenApps(context, prefs)' "$SYNC" || fail "startup/wake sync omits fullscreen package snapshot"
+grep -q 'ru.big.town.anative.FULLSCREEN_APPS_CONFIG' "$SYNC" || fail "fullscreen config action missing"
+grep -q 'mirrorFullscreenApps(context, intent)' "$NATIVE_CONFIG" || fail "Native does not receive fullscreen config"
+grep -q 'voyahtune_fullscreen_apps' "$NATIVE_BRIDGE" || fail "fullscreen packages are not mirrored for hooks"
 grep -q 'ru.big.town.anative.APP_DPI_CONFIG' "$SYNC" || fail "app DPI config action missing"
 grep -q 'appDpiJson' "$SYNC" || fail "authoritative app DPI JSON is not published"
 grep -q 'SplitConfigSync.pushAppDpi(AdvanceActivity.this, prefs, fpkg, dpi)' "$ADVANCE" \
@@ -80,4 +84,4 @@ if grep -Eq 'setInterval|scheduleAtFixedRate|postDelayed\([^,]+,[[:space:]]*[0-9
     fail "saved configuration sync must not poll"
 fi
 
-echo "PASS: saved driver Dock/steering/app-DPI configuration is applied and legacy passenger slots are cleared"
+echo "PASS: saved fullscreen/Dock/steering/app-DPI configuration is applied and legacy passenger slots are cleared"

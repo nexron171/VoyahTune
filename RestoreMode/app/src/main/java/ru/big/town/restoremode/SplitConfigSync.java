@@ -7,7 +7,7 @@ import android.content.SharedPreferences;
 import java.util.List;
 
 /**
- * Единая event-driven публикация сохранённой конфигурации в Native. Dock/steering/DPI/keyboard
+ * Единая event-driven публикация сохранённой конфигурации в Native. Fullscreen/Dock/steering/DPI/keyboard
  * зеркалируются при изменении, старте и физическом пробуждении без периодического чтения.
  */
 final class SplitConfigSync {
@@ -17,10 +17,17 @@ final class SplitConfigSync {
     private SplitConfigSync() {}
 
     static void pushAll(Context context, SharedPreferences prefs) {
+        pushFullscreenApps(context, prefs);
         pushAppDpi(context, prefs, null, 0);
         pushDock(context, prefs);
         pushSteering(context, prefs);
         pushKeyboard(context, prefs);
+    }
+
+    static void pushFullscreenApps(Context context, SharedPreferences prefs) {
+        Intent i = configIntent("ru.big.town.anative.FULLSCREEN_APPS_CONFIG");
+        i.putExtra("packagesCsv", FullscreenAppStore.snapshotCsv(prefs));
+        context.sendBroadcast(i);
     }
 
     /** Публикует полный DPI snapshot; changedPkg нужен, чтобы надёжно передать переход в «Авто» (0). */

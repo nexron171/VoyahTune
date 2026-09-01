@@ -72,6 +72,21 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
+        // Launcher hook routes an allowlisted All Apps tile here so ActivityOptions can normalize a
+        // reused freeform task before the activity is resumed. The exported bridge accepts only the
+        // exact package persisted by the protected fullscreen config receiver.
+        if ("ru.big.town.anative.OPEN_FULLSCREEN".equals(receivedIntent) && BuildConfig.IS_FULL) {
+            String pkg = intent.getStringExtra("pkg");
+            int displayId = intent.getIntExtra("display", 0);
+            if (displayId != 0 && displayId != 1) {
+                Log.w(TAG, "OPEN_FULLSCREEN отклонён: неверный physical display " + displayId);
+            } else if (isConfiguredFullscreenPackage(context, pkg)) {
+                openFreeformApp(context, pkg, displayId);
+            } else {
+                Log.w(TAG, "OPEN_FULLSCREEN отклонён: пакет не в fullscreen-списке: " + pkg);
+            }
+        }
+
         // Открытие СПЛИТА, назначенного слоту дока, по долгому нажатию (launcherdock.js шлёт номер слота).
         // Детали сплита читаем из Settings.Global — их зеркалит mirrorDock из DOCK_CONFIG (VoyahTune).
         // SplitHostActivity.launchSplit уходит на VD (обычный движок сплита); коллизии панелей он гасит сам.
@@ -317,6 +332,19 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         return false;
     }
 
+    /** Публичный launcher bridge принимает только пакет из защищённого fullscreen snapshot. */
+    private static boolean isConfiguredFullscreenPackage(Context ctx, String pkg) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        try {
+            String csv = android.provider.Settings.Global.getString(
+                    ctx.getContentResolver(), "voyahtune_fullscreen_apps");
+            return FullscreenPackagePolicy.contains(csv, pkg);
+        } catch (Exception e) {
+            Log.w(TAG, "fullscreen allowlist unavailable: " + e.getMessage());
+            return false;
+        }
+    }
+
     /** Флаг + bounds физического «оконного режима» → Settings.Global.
      *  Два system_server hook читают их в кэш только при attach/WIN_RELOAD, не на каждом layout.
      *  extras: on(boolean, опц.), left/top/right/bottom(int, опц., пишем только >=0). */
@@ -333,6 +361,21 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 if (v[i] >= 0) android.provider.Settings.Global.putString(ctx.getContentResolver(), k[i], String.valueOf(v[i]));
             }
         } catch (Exception e) { Log.w(TAG, "mirrorFreeform: " + e.getMessage()); }
+    }
+
+    /**
+     * Авторитетный список пакетов, которые обходят physical window clamp. Один и тот же CSV читают
+     * system_server/launcher hooks, а NativePrefs держит accessibility-сервис для forced Назад/Home.
+     */
+    static void mirrorFullscreenApps(Context ctx, Intent intent) {
+        String packages = FullscreenPackagePolicy.normalizeCsv(intent.getStringExtra("packagesCsv"));
+        try {
+            android.provider.Settings.Global.putString(
+                    ctx.getContentResolver(), "voyahtune_fullscreen_apps", packages);
+            BackButtonService.setFullscreenPackages(ctx, packages);
+        } catch (Exception e) {
+            Log.w(TAG, "mirrorFullscreenApps: " + e.getMessage());
+        }
     }
 
     /** Разбудить vd_bypass config receiver: перечитать кэш и переустановить WindowManager hooks.
@@ -437,6 +480,13 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
         options.setLaunchDisplayId(displayId);
         final android.os.Bundle optionBundle = options.toBundle();
+        final boolean fullscreen = isConfiguredFullscreenPackage(app, pkg);
+        if (fullscreen) {
+            // ActivityOptions.KEY_LAUNCH_WINDOWING_MODE is hidden in this Android 11 SDK, but the
+            // framework contract key is stable. Applying FULLSCREEN=1 at launch also normalizes an
+            // already existing task whose previous incarnation retained freeform bounds/mode 5.
+            optionBundle.putInt("android.activity.windowingMode", 1);
+        }
         Runnable launch = () -> {
             try { app.startActivity(launchIntent, optionBundle); }
             catch (Exception e) { Log.w(TAG, "openFreeformApp: " + e.getMessage()); }
@@ -447,7 +497,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             launch.run();
         }
         Log.i(TAG, "openFreeformApp window-managed pkg=" + pkg + " display=" + displayId
-                + " closedVdHost=" + closedVdHost);
+                + " fullscreen=" + fullscreen + " closedVdHost=" + closedVdHost);
     }
 
     /**

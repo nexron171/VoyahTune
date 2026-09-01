@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Фон плавающей кнопки «Назад»: полупрозрачный тёмный скруглённый -->
+<!-- Фон плавающей кнопки системной навигации: полупрозрачный тёмный скруглённый. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#B3222530" />

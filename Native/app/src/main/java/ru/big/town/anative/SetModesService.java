@@ -49,8 +49,8 @@ public class SetModesService extends Service {
     static final int MSG_APPLY_FORCED_EV           = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int MSG_REBOOT                     = 22; // перезагрузка системы (голова)
     static final int MSG_WASH_MODE                  = 23; // активация режима мойки
-    static final int MSG_FLOATING_BACK              = 24; // плавающая кнопка «Назад» (arg1: 1=вкл)
-    static final int MSG_FLOATING_BACK_SIDE         = 25; // сторона кнопки (arg1: 0 лево, 1 верх, 2 право)
+    static final int MSG_FLOATING_BACK              = 24; // плавающие Назад/Home (arg1: 1=вкл)
+    static final int MSG_FLOATING_BACK_SIDE         = 25; // сторона блока (arg1: 0 лево, 1 верх, 2 право)
     static final int MSG_GRANT_INSTALL              = 26; // выдать app-op установки из неизв. источников (data: "pkg")
     static final int MSG_CLOSE_ALL                  = 27; // закрыть все сторонние приложения (forceStopPackage)
     static final int MSG_SET_THEME                  = 28; // тема системы/приложений (arg1: 0 авто, 1 светлая, 2 тёмная)
@@ -246,7 +246,7 @@ public class SetModesService extends Service {
     }
 
     /**
-     * Вкл/выкл плавающую кнопку «Назад». Сам accessibility-сервис остаётся подключённым без оверлея,
+     * Вкл/выкл плавающие кнопки Назад/Home. Сам accessibility-сервис остаётся подключённым без оверлея,
      * если он нужен системному действию, назначенному на кнопку руля.
      */
     private void setFloatingBackEnabled(boolean enable) {
@@ -264,7 +264,7 @@ public class SetModesService extends Service {
     }
 
     /**
-     * На пробуждении/загрузке гарантируем плавающую кнопку «Назад», если она включена.
+     * На пробуждении/загрузке гарантируем плавающие кнопки Назад/Home, если они включены.
      * Просто перезапись secure-настройки тем же значением НЕ перебиндивает сервис и не
      * пересоздаёт оверлей (окно снимается при засыпании) — поэтому:
      *  1) если сервис доступности жив → просим его пере-показать оверлей ({@code reshow});

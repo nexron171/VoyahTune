@@ -117,7 +117,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo === Cleaning Settings.Global ===
-adb.exe shell "for setting_name in voyahtune_dock1 voyahtune_dock2 voyahtune_dock1Dpi voyahtune_dock2Dpi voyahtune_steerStarShort voyahtune_steerStarLong voyahtune_steerDvrShort voyahtune_steerDvrLong voyahtune_steerVoiceShort voyahtune_steerVoiceLong voyahtune_steerPhoneShort voyahtune_steerPhoneLong open_voyah_apollo_master open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat voyahtune_keyboard_mode enable_freeform_support force_resizable_activities; do settings delete global $setting_name >/dev/null 2>&1 || exit 1; done"
+adb.exe shell "for setting_name in voyahtune_dock1 voyahtune_dock2 voyahtune_dock1Dpi voyahtune_dock2Dpi voyahtune_fullscreen_apps voyahtune_steerStarShort voyahtune_steerStarLong voyahtune_steerDvrShort voyahtune_steerDvrLong voyahtune_steerVoiceShort voyahtune_steerVoiceLong voyahtune_steerPhoneShort voyahtune_steerPhoneLong open_voyah_apollo_master open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat voyahtune_keyboard_mode enable_freeform_support force_resizable_activities; do settings delete global $setting_name >/dev/null 2>&1 || exit 1; done"
 if errorlevel 1 (
     echo !!! Could not completely clean Settings.Global. Reboot was cancelled.
     exit /b 1

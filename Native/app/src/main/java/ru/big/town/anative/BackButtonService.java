@@ -1,6 +1,7 @@
 package ru.big.town.anative;
 
 import android.accessibilityservice.AccessibilityService;
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -12,19 +13,21 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.Display;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 
 /**
- * Системное действие «Назад» и его опциональная плавающая кнопка. Реализованы одним сервисом
+ * Системные действия «Назад»/Home и их опциональный плавающий блок. Реализованы одним сервисом
  * доступности, чтобы:
  *  - рисовать оверлей через TYPE_ACCESSIBILITY_OVERLAY (не нужен SYSTEM_ALERT_WINDOW);
- *  - выполнять системное «назад» через performGlobalAction(GLOBAL_ACTION_BACK).
+ *  - выполнять системные действия через performGlobalAction.
  * Положение (сторона слева/сверху/справа) + смещение вдоль стороны хранятся в NativePrefs
- * ("floatingBackSide"/"floatingBackOffset"), кнопка перетаскивается вдоль выбранной стороны.
+ * ("floatingBackSide"/"floatingBackOffset"), блок перетаскивается вдоль выбранной стороны.
  */
 public class BackButtonService extends AccessibilityService {
     static final String TAG = "$$$ BackButtonService $$$";
@@ -33,13 +36,18 @@ public class BackButtonService extends AccessibilityService {
             "ru.big.town.anative/ru.big.town.anative.BackButtonService";
     private static final String PREF_FLOATING = "floatingBack";
     private static final String PREF_STEERING = "steeringBack";
+    private static final String PREF_FULLSCREEN = "fullscreenApps";
 
     private static BackButtonService instance;
 
     private WindowManager wm;
-    private ImageView buttonView;
+    private LinearLayout buttonView;
     private WindowManager.LayoutParams lp;
     private int btnSize;
+    private final Handler overlayHandler = new Handler(Looper.getMainLooper());
+    private String pendingEventPackage = "";
+    private String lastForcedPackage = "";
+    private final Runnable overlayReevaluate = () -> reevaluateOverlayNow(pendingEventPackage);
 
     private SharedPreferences prefs() {
         return getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
@@ -50,11 +58,12 @@ public class BackButtonService extends AccessibilityService {
         super.onServiceConnected();
         instance = this;
         if (prefs().getBoolean(PREF_FLOATING, false)) {
-            Log.i(TAG, "onServiceConnected — показываем кнопку");
+            Log.i(TAG, "onServiceConnected — показываем пользовательский оверлей");
             showButton();
         } else {
-            Log.i(TAG, "onServiceConnected — без оверлея (сервис нужен кнопке руля)");
+            Log.i(TAG, "onServiceConnected — ждём полноэкранное приложение");
         }
+        scheduleOverlayEvaluation(null);
     }
 
     /** Включает оверлей, не отключая accessibility-сервис, если он нужен действию кнопки руля. */
@@ -62,15 +71,22 @@ public class BackButtonService extends AccessibilityService {
         prefs(context).edit().putBoolean(PREF_FLOATING, enabled).apply();
         syncAccessibility(context);
         BackButtonService live = instance;
-        if (live != null) {
-            if (enabled) live.showButton(); else live.hideButton();
-        }
+        if (live != null) live.scheduleOverlayEvaluation(null);
     }
 
     /** Держит accessibility-сервис подключённым, когда хотя бы один слот руля вызывает «Назад». */
     static void setSteeringBackEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(PREF_STEERING, enabled).apply();
         syncAccessibility(context);
+    }
+
+    /** Полноэкранные приложения держат сервис подключённым даже при выключенном постоянном оверлее. */
+    static void setFullscreenPackages(Context context, String packagesCsv) {
+        String normalized = FullscreenPackagePolicy.normalizeCsv(packagesCsv);
+        prefs(context).edit().putString(PREF_FULLSCREEN, normalized).apply();
+        syncAccessibility(context);
+        BackButtonService live = instance;
+        if (live != null) live.scheduleOverlayEvaluation(null);
     }
 
     /** Выполнить тот же GLOBAL_ACTION_BACK, что и тап по плавающей кнопке. */
@@ -94,8 +110,12 @@ public class BackButtonService extends AccessibilityService {
     }
 
     private void performBackNow(String source) {
-        boolean ok = performGlobalAction(GLOBAL_ACTION_BACK);
-        Log.i(TAG, "GLOBAL_ACTION_BACK (" + source + ") -> " + ok);
+        performGlobalActionNow(GLOBAL_ACTION_BACK, "GLOBAL_ACTION_BACK", source);
+    }
+
+    private void performGlobalActionNow(int action, String actionName, String source) {
+        boolean ok = performGlobalAction(action);
+        Log.i(TAG, actionName + " (" + source + ") -> " + ok);
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -103,11 +123,13 @@ public class BackButtonService extends AccessibilityService {
                 .getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
-    /** Сервис нужен либо оверлею, либо назначенному на руль системному действию. */
+    /** Сервис нужен постоянному оверлею, рулю или автоматическим кнопкам полноэкранного приложения. */
     private static void syncAccessibility(Context context) {
         SharedPreferences prefs = prefs(context);
-        boolean present = prefs.getBoolean(PREF_FLOATING, false)
-                || prefs.getBoolean(PREF_STEERING, false);
+        boolean present = FullscreenPackagePolicy.requiresAccessibilityService(
+                prefs.getBoolean(PREF_FLOATING, false),
+                prefs.getBoolean(PREF_STEERING, false),
+                prefs.getString(PREF_FULLSCREEN, ""));
         writeAccessibility(context, present);
     }
 
@@ -143,7 +165,8 @@ public class BackButtonService extends AccessibilityService {
                     set.isEmpty() ? 0 : 1);
             Log.i(TAG, "back a11y " + (present ? "ON" : "OFF")
                     + "; floating=" + prefs.getBoolean(PREF_FLOATING, false)
-                    + "; steering=" + prefs.getBoolean(PREF_STEERING, false));
+                    + "; steering=" + prefs.getBoolean(PREF_STEERING, false)
+                    + "; fullscreen=" + prefs.getString(PREF_FULLSCREEN, ""));
         } catch (Exception e) {
             Log.e(TAG, "syncAccessibility failed: " + e.getMessage());
         }
@@ -183,22 +206,95 @@ public class BackButtonService extends AccessibilityService {
         return Math.max(lo, Math.min(hi, v));
     }
 
+    private void scheduleOverlayEvaluation(String eventPackage) {
+        if (eventPackage != null) pendingEventPackage = eventPackage;
+        overlayHandler.removeCallbacks(overlayReevaluate);
+        overlayHandler.postDelayed(overlayReevaluate, 120L);
+    }
+
+    private void reevaluateOverlayNow(String fallbackPackage) {
+        String fullscreenCsv = prefs().getString(PREF_FULLSCREEN, "");
+        // Событие выбранного пакета — самый быстрый и точный сигнал входа. Для остальных событий
+        // (IME/SystemUI/диалог поверх приложения) перепроверяем реальную верхнюю physical task.
+        String topPackage = FullscreenPackagePolicy.contains(fullscreenCsv, fallbackPackage)
+                ? fallbackPackage : defaultDisplayTopPackage();
+        if (topPackage.isEmpty() && fallbackPackage != null) topPackage = fallbackPackage;
+        boolean persistent = prefs().getBoolean(PREF_FLOATING, false);
+        boolean forced = FullscreenPackagePolicy.contains(fullscreenCsv, topPackage);
+        if (FullscreenPackagePolicy.shouldShowOverlay(persistent, fullscreenCsv, topPackage)) {
+            if (buttonView == null) showButton();
+        } else {
+            hideButton();
+        }
+        String forcedPackage = forced ? topPackage : "";
+        if (!forcedPackage.equals(lastForcedPackage)) {
+            Log.i(TAG, forced ? "forced overlay ON for " + topPackage : "forced overlay OFF");
+            lastForcedPackage = forcedPackage;
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private String defaultDisplayTopPackage() {
+        try {
+            ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            if (manager == null) return "";
+            String firstVisiblePackage = "";
+            for (ActivityManager.RunningTaskInfo task : manager.getRunningTasks(20)) {
+                if (task.topActivity == null) continue;
+                if (firstVisiblePackage.isEmpty()) {
+                    firstVisiblePackage = task.topActivity.getPackageName();
+                }
+                if (runningTaskDisplayId(task) == Display.DEFAULT_DISPLAY) {
+                    return task.topActivity.getPackageName();
+                }
+            }
+            return firstVisiblePackage;
+        } catch (Exception e) {
+            Log.w(TAG, "top task unavailable: " + e.getMessage());
+        }
+        return "";
+    }
+
+    /** displayId скрыт в SDK этой Android 11 ROM, но присутствует в runtime TaskInfo. */
+    private static int runningTaskDisplayId(ActivityManager.RunningTaskInfo task) {
+        Class<?> type = task.getClass();
+        while (type != null) {
+            try {
+                java.lang.reflect.Field field = type.getDeclaredField("displayId");
+                field.setAccessible(true);
+                return field.getInt(task);
+            } catch (NoSuchFieldException e) {
+                type = type.getSuperclass();
+            } catch (Exception e) {
+                return -1;
+            }
+        }
+        return -1;
+    }
+
     private void showButton() {
         if (buttonView != null) { applyLayout(); return; }
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         if (wm == null) { Log.e(TAG, "WindowManager == null"); return; }
 
         btnSize = dp(56);
-        ImageView btn = new ImageView(this);
-        btn.setImageResource(R.drawable.ic_back_arrow);
-        btn.setBackgroundResource(R.drawable.floating_back_bg);
-        btn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        int pad = dp(12);
-        btn.setPadding(pad, pad, pad, pad);
-        btn.setOnTouchListener(new DragTouchListener());
+        int initialSide = prefs().getInt("floatingBackSide", SIDE_LEFT);
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(initialSide == SIDE_TOP
+                ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        buttons.setShowDividers(LinearLayout.SHOW_DIVIDER_NONE);
+        buttons.addView(createButton(
+                R.drawable.ic_back_arrow,
+                R.string.floating_back_button_desc,
+                new DragTouchListener(GLOBAL_ACTION_BACK, "GLOBAL_ACTION_BACK")));
+        buttons.addView(createButton(
+                R.drawable.ic_home,
+                R.string.floating_home_button_desc,
+                new DragTouchListener(GLOBAL_ACTION_HOME, "GLOBAL_ACTION_HOME")));
 
         lp = new WindowManager.LayoutParams(
-                btnSize, btnSize,
+                initialSide == SIDE_TOP ? btnSize * 2 : btnSize,
+                initialSide == SIDE_TOP ? btnSize : btnSize * 2,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -206,16 +302,29 @@ public class BackButtonService extends AccessibilityService {
         lp.gravity = Gravity.START | Gravity.TOP;
 
         try {
-            wm.addView(btn, lp);
-            buttonView = btn;
+            wm.addView(buttons, lp);
+            buttonView = buttons;
             applyLayout();
-            Log.i(TAG, "кнопка добавлена");
+            Log.i(TAG, "кнопки Назад/Home добавлены");
         } catch (Exception e) {
             Log.e(TAG, "addView failed: " + e.getMessage());
         }
     }
 
-    /** Раскладывает кнопку по выбранной стороне и сохранённому смещению (offset<0 = по центру стороны). */
+    private ImageView createButton(int iconRes, int descriptionRes, View.OnTouchListener listener) {
+        ImageView button = new ImageView(this);
+        button.setImageResource(iconRes);
+        button.setBackgroundResource(R.drawable.floating_back_bg);
+        button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        button.setContentDescription(getString(descriptionRes));
+        int pad = dp(12);
+        button.setPadding(pad, pad, pad, pad);
+        button.setLayoutParams(new LinearLayout.LayoutParams(btnSize, btnSize));
+        button.setOnTouchListener(listener);
+        return button;
+    }
+
+    /** Раскладывает блок по выбранной стороне и сохранённому смещению (offset<0 = по центру стороны). */
     private void applyLayout() {
         if (buttonView == null || wm == null || lp == null) return;
         int side = prefs().getInt("floatingBackSide", SIDE_LEFT);
@@ -227,13 +336,19 @@ public class BackButtonService extends AccessibilityService {
 
         lp.gravity = Gravity.START | Gravity.TOP;
         if (side == SIDE_TOP) {
-            int maxX = Math.max(0, sw - btnSize);
+            buttonView.setOrientation(LinearLayout.HORIZONTAL);
+            lp.width = btnSize * 2;
+            lp.height = btnSize;
+            int maxX = Math.max(0, sw - lp.width);
             lp.x = (offset < 0) ? maxX / 2 : clamp(offset, 0, maxX);
             lp.y = 0;
         } else { // LEFT / RIGHT — двигается по вертикали
-            int maxY = Math.max(0, sh - btnSize);
+            buttonView.setOrientation(LinearLayout.VERTICAL);
+            lp.width = btnSize;
+            lp.height = btnSize * 2;
+            int maxY = Math.max(0, sh - lp.height);
             lp.y = (offset < 0) ? maxY / 2 : clamp(offset, 0, maxY);
-            lp.x = (side == SIDE_RIGHT) ? Math.max(0, sw - btnSize) : 0;
+            lp.x = (side == SIDE_RIGHT) ? Math.max(0, sw - lp.width) : 0;
         }
         try {
             wm.updateViewLayout(buttonView, lp);
@@ -242,12 +357,19 @@ public class BackButtonService extends AccessibilityService {
         }
     }
 
-    /** Тап = «назад», перетаскивание вдоль стороны = смена позиции (с сохранением). */
+    /** Тап = действие выбранной кнопки, перетаскивание = смена позиции всего блока. */
     private class DragTouchListener implements View.OnTouchListener {
+        private final int globalAction;
+        private final String actionName;
         private int startX, startY;
         private float rawX0, rawY0;
         private boolean dragging;
         private final int slop = ViewConfiguration.get(BackButtonService.this).getScaledTouchSlop();
+
+        DragTouchListener(int globalAction, String actionName) {
+            this.globalAction = globalAction;
+            this.actionName = actionName;
+        }
 
         @Override
         public boolean onTouch(View v, MotionEvent e) {
@@ -266,16 +388,15 @@ public class BackButtonService extends AccessibilityService {
                         wm.getDefaultDisplay().getSize(size);
                         int side = prefs().getInt("floatingBackSide", SIDE_LEFT);
                         if (side == SIDE_TOP) {
-                            lp.x = clamp(startX + dx, 0, Math.max(0, size.x - btnSize));
+                            lp.x = clamp(startX + dx, 0, Math.max(0, size.x - lp.width));
                         } else {
-                            lp.y = clamp(startY + dy, 0, Math.max(0, size.y - btnSize));
+                            lp.y = clamp(startY + dy, 0, Math.max(0, size.y - lp.height));
                         }
                         try { wm.updateViewLayout(buttonView, lp); } catch (Exception ignored) {}
                     }
                     return true;
                 }
                 case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
                     if (dragging) {
                         int side = prefs().getInt("floatingBackSide", SIDE_LEFT);
                         int offset = (side == SIDE_TOP) ? lp.x : lp.y;
@@ -284,8 +405,11 @@ public class BackButtonService extends AccessibilityService {
                         prefs().edit().putInt("floatingBackOffset", offset).commit();
                         Log.i(TAG, "позиция сохранена offset=" + offset);
                     } else {
-                        performBackNow("floating button");
+                        performGlobalActionNow(globalAction, actionName, "floating button");
                     }
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    applyLayout();
                     return true;
             }
             return false;
@@ -296,12 +420,14 @@ public class BackButtonService extends AccessibilityService {
         if (buttonView != null && wm != null) {
             try { wm.removeView(buttonView); } catch (Exception ignored) {}
             buttonView = null;
-            Log.i(TAG, "кнопка убрана");
+            Log.i(TAG, "блок кнопок убран");
         }
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        CharSequence pkg = event == null ? null : event.getPackageName();
+        scheduleOverlayEvaluation(pkg == null ? null : pkg.toString());
     }
 
     @Override
@@ -310,6 +436,7 @@ public class BackButtonService extends AccessibilityService {
 
     @Override
     public boolean onUnbind(Intent intent) {
+        overlayHandler.removeCallbacks(overlayReevaluate);
         hideButton();
         if (instance == this) instance = null;
         return super.onUnbind(intent);
@@ -317,6 +444,7 @@ public class BackButtonService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        overlayHandler.removeCallbacks(overlayReevaluate);
         hideButton();
         if (instance == this) instance = null;
         super.onDestroy();

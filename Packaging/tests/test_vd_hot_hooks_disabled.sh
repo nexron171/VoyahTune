@@ -34,6 +34,25 @@ config_attach_line=$(grep -nF 'ffConfigMethod.implementation = ffConfigImplement
 [ "$(grep -Fc 'ffConfigMethod.implementation = ffConfigImplementation;' "$VD")" -eq 1 ] \
     || fail "unexpected config attach path"
 
+grep -Fq 'scheduleFreeformConfigReplay("config reload");' "$VD" \
+    || fail "config reloads bypass boot/wake hot-hook stabilization"
+grep -Fq 'if (ffLayoutAttached && ffConfigAttached) {' "$VD" \
+    || fail "cache-only config changes reinstall active WindowManager hooks"
+grep -Fq 'if (!ffHotAttachPending) {' "$VD" \
+    || fail "config traffic can shorten an already pending boot/wake stabilization delay"
+if grep -Fq 'scheduleFreeformHotAttach(0, "config reload");' "$VD"; then
+    fail "startup config immediately reattaches WindowManager hot hooks"
+fi
+config_replay_function=$(awk '
+    /^    function scheduleFreeformConfigReplay\(reason\) \{/ { capture = 1 }
+    /^    function scheduleFreeformHotAttach\(delayMs, reason\) \{/ { capture = 0 }
+    capture { print }
+' "$VD")
+[ -n "$config_replay_function" ] || fail "cannot inspect config replay implementation"
+if printf '%s\n' "$config_replay_function" | grep -Fq 'detachFreeformHotHooks'; then
+    fail "WIN_RELOAD detaches a live WindowManager replacement"
+fi
+
 for core_hook in \
     'IMS.checkInjectEventsPermission' \
     'BinderService.checkCallingPermission' \
@@ -46,18 +65,77 @@ done
 
 grep -Fq 'return !isStockPkg(pkg);' "$DOCK" \
     || fail "Dock pinning is not global for all non-stock apps"
+grep -Fq 'if (isUserFullscreen(pkg)) return false;' "$DOCK" \
+    || fail "user fullscreen package cannot release the pinned dock"
+grep -Fq 'if (isUserFullscreen(pkg)) return null;' "$DOCK" \
+    || fail "pending launch guard keeps the dock over a fullscreen package"
+grep -Fq 'var targetLeft = fullscreen ? 0 : FF.left;' "$VD" \
+    || fail "fullscreen package does not remove the dock inset"
+grep -Fq 'var targetTop = fullscreen ? 0 : FF.top;' "$VD" \
+    || fail "fullscreen package does not remove the status-bar inset"
+grep -Fq 'if (wmode == 5) { ffNote("skip-freeform", pkg, displayId, wmode); return; }' "$VD" \
+    || fail "DisplayPolicy hot path attempts to mutate a real freeform task"
+if grep -Fq 'wmode == 5 && !fullscreen' "$VD"; then
+    fail "fullscreen allowlist bypasses the safe real-freeform guard"
+fi
+grep -Fq 'attrs.width.value = -1;' "$VD" \
+    || fail "fullscreen package cannot override an app-requested dock-width reservation"
+grep -Fq 'attrs.width.value = savedAttrWidth;' "$VD" \
+    || fail "fullscreen LayoutParams override leaks into later WindowManager layouts"
+grep -Fq 'ffRequestedWidthField.setInt(win, FF.right - targetLeft);' "$VD" \
+    || fail "fullscreen Window frame does not propagate to its Surface requested width"
+grep -Fq 'if (fullscreen && wt === 1' "$VD" \
+    || fail "requested Surface size override is not restricted to the main Activity window"
+grep -Fq 'optionBundle.putInt("android.activity.windowingMode", 1);' "$RECEIVER" \
+    || fail "reused freeform tasks are not normalized to Android fullscreen at launch"
+grep -Fq '"ru.big.town.anative.OPEN_FULLSCREEN".equals(receivedIntent)' "$RECEIVER" \
+    || fail "launcher All Apps has no validated Native fullscreen launch bridge"
+grep -Fq 'isConfiguredFullscreenPackage(context, pkg)' "$RECEIVER" \
+    || fail "exported fullscreen launch bridge accepts packages outside the saved allowlist"
+grep -Fq 'voyahtune_fullscreen_apps' "$VD" \
+    || fail "WindowManager hook does not cache fullscreen packages"
 grep -Fq 'var floatHomeOff = function () { return cfg("floathome") !== "0"; };' "$DOCK" \
     || fail "floating Home suppression is not restored globally"
 grep -Fq 'android.intent.action.TOP_ACTIVITY_CHANGED' "$DOCK" \
     || fail "launcher does not re-evaluate the dock after fullscreen activity transitions"
 grep -Fq 'model.handleUpdateMainNavigationBar(pkg, act, true);' "$DOCK" \
     || fail "return from a fullscreen OEM activity cannot restore the main dock"
+grep -Fq 'model.handleUpdateMainNavigationBar(pkg, act, false);' "$DOCK" \
+    || fail "user fullscreen package does not explicitly hide the main dock"
+grep -Fq 'model.handleUpdateSecondNavigationBar(pkg, act, false);' "$DOCK" \
+    || fail "user fullscreen package does not explicitly hide the destination dock"
+grep -Fq 'animator.removeAllListeners();' "$DOCK" \
+    || fail "fullscreen hide can cancel OEM dismiss with its destructive end listener attached"
+grep -Fq 'animator.removeAllUpdateListeners();' "$DOCK" \
+    || fail "fullscreen hide can race an in-flight OEM window-position update"
+grep -Fq 'windowManager.updateViewLayout(root, lp);' "$DOCK" \
+    || fail "fullscreen hide does not synchronously place the dock Window off-screen"
+if grep -Fq 'windowManager.removeViewImmediate(root);' "$DOCK"; then
+    fail "fullscreen hide can double-remove the dock after an animator end callback"
+fi
+grep -Fq 'forceHideDockController(this, "blocked show display=" + sid);' "$DOCK" \
+    || fail "OEM show can resurrect a dock over a fullscreen package"
+grep -Fq 'function topActivityForScreen(screenId, context) {' "$DOCK" \
+    || fail "dock visibility relies only on a stale updateSelectedApp cache"
+grep -Fq 'installFullscreenVisibilityGate("handleUpdateMainNavigationBar", 0);' "$DOCK" \
+    || fail "queued main-display visibility requests can resurrect a fullscreen dock"
+grep -Fq 'installFullscreenVisibilityGate("handleUpdateSecondNavigationBar", 1);' "$DOCK" \
+    || fail "queued passenger visibility requests can resurrect a fullscreen dock"
+grep -Fq 'if (forceHideDockController(controller, label)) {' "$DOCK" \
+    || fail "model gate enters OEM dismiss even after a successful idempotent hide"
 grep -Fq 'model.handleUpdateSecondNavigationBar(pkg, act, true);' "$DOCK" \
     || fail "return/transfer to passenger cannot restore the second dock"
 grep -Fq 'var AccountConstantUtil = null;' "$DOCK" \
     || fail "optional account separator ABI can disable all transfer recovery"
 grep -Fq 'if (AccountConstantUtil !== null)' "$DOCK" \
     || fail "transfer recovery dereferences an optional account helper"
+grep -Fq 'launcherFloatApp.call(this, cn)' "$DOCK" \
+    || fail "LauncherModel floating-home fallback recursively calls its own hook"
+grep -Fq 'thirdFloatApp.call(this, cn)' "$DOCK" \
+    || fail "ThirdAppUtil floating-home fallback recursively calls its own hook"
+if grep -Fq 'this.isThirdShowFloatApp(cn)' "$DOCK"; then
+    fail "floating-home emergency fallback still recurses into its replacement"
+fi
 grep -Fq 'var moveDockGuards = {' "$DOCK" \
     || fail "OEM transfer can dismiss both docks before destination foreground catches up"
 grep -Fq 'move guard START source=' "$DOCK" \
@@ -95,8 +173,18 @@ grep -Fq 'reloadData.call(Data);' "$DOCK" \
     || fail "package lifecycle events never invoke the OEM list reload"
 grep -Fq 'Java.scheduleOnMainThread(function () {' "$DOCK" \
     || fail "AllAppDataManager reload must be dispatched on the launcher UI thread"
+grep -Fq 'var retainedNavbar = Java.retain(inst);' "$DOCK" \
+    || fail "bounded cold-boot dock passes post an unretained Java.choose wrapper"
+grep -Fq 'retainedNavbar.$dispose();' "$DOCK" \
+    || fail "bounded cold-boot dock passes leak retained controller wrappers"
 grep -Fq 'AppLauncher.startApp(ctx(), intent, screenId);' "$DOCK" \
     || fail "All Apps click does not preserve the selected physical display"
+grep -Fq 'var startAppIntent = AppLauncher.startApp.overload(' "$DOCK" \
+    || fail "stock OEM All Apps entries bypass fullscreen ActivityOptions routing"
+grep -Fq 'if (isUserFullscreen(pkg)) return launchFullscreen(pkg, screenId);' "$DOCK" \
+    || fail "synthetic All Apps entries bypass fullscreen ActivityOptions routing"
+grep -Fq 'Intent.$new("ru.big.town.anative.OPEN_FULLSCREEN")' "$DOCK" \
+    || fail "launcher does not call the validated Native fullscreen bridge"
 grep -Fq 'if (screenId !== 0 && screenId !== 1)' "$DOCK" \
     || fail "All Apps must reject accidental non-physical launch destinations"
 grep -Fq 'var display = view.getDisplay();' "$DOCK" \
@@ -156,9 +244,10 @@ grep -Fq 'var driverTemperature = dockField(instance, "mScreenUpTemperatureConte
     || fail "driver compact dock does not resolve its temperature overlay"
 grep -Fq 'setDockViewVisibility(driverTemperature, compact ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide the stock driver climate overlay"
-if grep -Fq 'android.activity.windowingMode' "$RECEIVER"; then
-    fail "single-app launch must remain a normal task for WindowManager frame clamping"
-fi
+grep -Fq 'final boolean fullscreen = isConfiguredFullscreenPackage(app, pkg);' "$RECEIVER" \
+    || fail "launch-time windowing mode is not scoped to the saved fullscreen allowlist"
+grep -Fq 'if (fullscreen) {' "$RECEIVER" \
+    || fail "ordinary single-app launches no longer remain normal WindowManager-clamped tasks"
 if grep -Fq 'setLaunchBounds' "$RECEIVER"; then
     fail "Native must not bypass the global WindowManager bounds contract"
 fi
