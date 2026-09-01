@@ -752,6 +752,8 @@ Java.perform(function () {
                     bar: "com.qinggan.launcher.base.allapp.AllAppBarView"
                 }
             ];
+
+
             var allAppsAbi = null;
             var AppBean = null;
             var Data = null;
@@ -761,12 +763,15 @@ Java.perform(function () {
                 try {
                     var family = allAppsFamilies[familyIndex];
                     var familyBean = Java.use(family.bean);
+
+
                     var familyData = Java.use(family.data);
                     var familyAdapter = Java.use(family.adapter);
                     var familyBar = Java.use(family.bar);
                     allAppsAbi = family;
                     AppBean = familyBean;
                     Data = familyData;
+
                     Adapter = familyAdapter;
                     AllAppBarView = familyBar;
                     break;
@@ -776,6 +781,10 @@ Java.perform(function () {
             Log.i(TAG, "[allapps] ABI=" + allAppsAbi.bean);
             var AppLauncher = Java.use("com.qinggan.launcher.base.utils.AppLauncher");
             var JavaString = Java.use("java.lang.String");
+            var JavaList = Java.use("java.util.List");
+            // pm.getInstalledApplications() отдаёт List<ApplicationInfo>, но List.get() возвращает
+            // обёртку java.lang.Object: без Java.cast поля packageName/flags не читаются вообще.
+            var ApplicationInfo = Java.use("android.content.pm.ApplicationInfo");
             var pm = ctx().getPackageManager();
             var installedSnapshot = null;
             var iconCache = {};
@@ -806,6 +815,7 @@ Java.perform(function () {
             // Covers both synthetic third-party entries and stock OEM entries that happen to expose an
             // allowlisted package. Without this gate, All Apps bypasses Native ActivityOptions and can
             // simply raise a reused dock-width freeform task.
+
             try {
                 var startAppIntent = AppLauncher.startApp.overload(
                         'android.content.Context', 'android.content.Intent', 'int');
@@ -861,13 +871,14 @@ Java.perform(function () {
                 return null;
             }
 
+
             function snapshotInstalled() {
                 if (installedSnapshot !== null) return installedSnapshot;
                 var result = [];
                 var installed = pm.getInstalledApplications(0);
                 for (var i = 0; i < installed.size(); i++) {
                     try {
-                        var ai = installed.get(i);
+                        var ai = Java.cast(installed.get(i), ApplicationInfo);
                         var pkg = "" + ai.packageName.value;
                         var flags = Number(ai.flags.value);
                         if ((flags & FLAG_SYSTEM) !== 0 || pkg === "com.qinggan.app.launcher") continue;
@@ -879,6 +890,7 @@ Java.perform(function () {
                 Log.i(TAG, "[allapps] cached launchable user apps=" + result.length);
                 return installedSnapshot;
             }
+
 
             // OEM bind безусловно вызывает Resources.getText(nameRes) и SkinResourceManager.getDrawable(icon).
             // AppBean(0, 0, pkg), который использовал voboost, поэтому падает ещё до нашего post-bind.
@@ -902,7 +914,18 @@ Java.perform(function () {
                 return resourceTemplate;
             }
 
+            // Флаг от повторного входа: fallback-шаблон зовёт оригинальный getAllApps, а тот
+            // проходит через наш же хук ниже.
+            var addingApps = false;
+
             function addMissingApps(list) {
+                if (list === null || list === undefined || addingApps) return;
+                addingApps = true;
+                try { addMissingAppsImpl(list); }
+                finally { addingApps = false; }
+            }
+
+            function addMissingAppsImpl(list) {
                 var existing = {};
                 for (var i = 0; i < list.size(); i++) {
                     try {
@@ -910,6 +933,7 @@ Java.perform(function () {
                         existing["pkg:" + current.getPackageName()] = true;
                     } catch (ignored) {}
                 }
+
                 var apps = snapshotInstalled();
                 var template = null;
                 for (var j = 0; j < apps.length; j++) {
@@ -1002,9 +1026,12 @@ Java.perform(function () {
                 var iconView = fieldValue(holder, "iconView");
                 var nameView = fieldValue(holder, "nameView");
                 if (iconView !== null && icon) {
+                    // Плитка рисует иконку в BACKGROUND у SimpleDraweeView (проверено на живой
+                    // CN-голове: после штатного bind getBackground() = BitmapDrawable, а
+                    // getDrawable() — пустой drawee RootDrawable). setImageDrawable ушёл бы под
+                    // иерархию drawee, и осталась бы placeholder-иконка шаблона.
                     var concreteIconView = runtimeObject(iconView) || iconView;
-                    try { concreteIconView.setImageDrawable(icon); }
-                    catch (notImageView) { concreteIconView.setBackground(icon); }
+                    concreteIconView.setBackground(icon);
                 }
                 if (nameView !== null) nameView.setText(JavaString.$new(label));
             }
@@ -1065,6 +1092,7 @@ Java.perform(function () {
             } catch (absent) {
                 Log.i(TAG, "[allapps] optional SecondAllAppAdapter is absent");
             }
+
             if (SecondAdapter !== null) {
                 try {
                     var SecondFragment = Java.use("com.qinggan.secondlauncher.fragment.SecondMainFragment");
@@ -1110,10 +1138,130 @@ Java.perform(function () {
             // прошивкой, synthetic entries не успеют попасть в разделяемый OEM list.
             var getAll = Data.getAllApps.overload('int');
             getAll.implementation = function (screenId) {
-                var list = getAll.call(Data, screenId);
+                var list = getAll.call(this, screenId);
                 if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list);
                 return list;
             };
+
+            // Хук getAllApps закрывает только момент инициализации: AllAppBarView.initApps()
+            // забирает список один раз и дальше держит ссылку, поэтому после буты getAllApps(int)
+            // больше не зовётся. Дописываем synthetic entries прямо в mMainAllApps/mSecondAllApps —
+            // это те же List-объекты, на которые смотрят AllAppBarView.mAppBeans и
+            // AllAppAdapter.mAppBeans (проверено на живой CN-голове: identityHashCode совпадает и
+            // не меняется даже после reload, списки чистятся и заполняются на месте).
+            var dataSingleton = null;
+
+            function dataManager() {
+                if (dataSingleton !== null) return dataSingleton;
+                try {
+                    var getInstance = Data.class.getDeclaredMethod("getInstance", null);
+                    getInstance.setAccessible(true);
+                    dataSingleton = getInstance.invoke(null, null);
+                } catch (e) {
+                    Log.e(TAG, "[allapps] AllAppDataManager singleton unavailable: " + e);
+                    dataSingleton = null;
+                }
+                return dataSingleton;
+            }
+
+            function screenList(manager, fieldName) {
+                try {
+                    var f = Data.class.getDeclaredField(fieldName);
+                    f.setAccessible(true);
+                    var value = f.get(manager);
+                    return value === null ? null : Java.cast(value, JavaList);
+                } catch (e) { return null; }
+            }
+
+            // 0 = водительский экран (mMainAllApps), 1 = пассажирский (mSecondAllApps).
+            function injectAllScreens() {
+                try {
+                    var manager = dataManager();
+                    if (manager === null) return;
+                    var fields = ["mMainAllApps", "mSecondAllApps"];
+                    var total = 0;
+                    for (var i = 0; i < fields.length; i++) {
+                        var list = screenList(manager, fields[i]);
+                        if (list === null) continue;
+                        var before = list.size();
+                        addMissingApps(list);
+                        var added = list.size() - before;
+                        if (added > 0) {
+                            Log.i(TAG, "[allapps] " + fields[i] + " += " + added);
+                            total += added;
+                        }
+                    }
+                    if (total > 0) refreshAllAppBars();
+                } catch (e) { Log.e(TAG, "[allapps] inject failed: " + e); }
+            }
+
+            // Сетка раскладывается кастомным PagerGridLayoutManager, который кэширует рамки
+            // элементов в mItemFrames и считает число страниц по item count. На уже заполненной
+            // сетке одного notifyDataSetChanged() не хватает: старые рамки выживают, и лишние
+            // приложения (вместе с лишней страницей) не раскладываются. Чистим mItemFrames, затем
+            // notify + requestLayout — это заставляет пересчитать позиции, число страниц и
+            // индикатор. Только на main-треде: трогаем вьюхи.
+            var REFRESH_MAX_ATTEMPTS = 12;
+            var REFRESH_RETRY_MS = 200;
+            var REFRESH_INITIAL_DELAY_MS = 300;
+
+            function refreshAllAppBars() {
+                setTimeout(function () { refreshAttempt(0); }, REFRESH_INITIAL_DELAY_MS);
+            }
+
+            function refreshAttempt(attempt) {
+                Java.scheduleOnMainThread(function () {
+                    var busy = false;
+                    try {
+                        var bars = [];
+                        Java.choose(allAppsAbi.bar, {
+                            onMatch: function (bar) { bars.push(bar); },
+                            onComplete: function () {}
+                        });
+                        if (bars.length === 0) return;
+
+                        var refreshed = 0;
+                        for (var i = 0; i < bars.length; i++) {
+                            var adapter = fieldValue(bars[i], "mAllAppAdapter");
+                            var layoutManager = fieldValue(bars[i], "mLayoutManager");
+                            if (adapter === null || layoutManager === null) continue;
+                            var lm = runtimeObject(layoutManager) || layoutManager;
+                            var frames = fieldValue(lm, "mItemFrames");
+                            if (frames !== null) (runtimeObject(frames) || frames).clear();
+                            // Бросает IllegalStateException, если RecyclerView в этот момент
+                            // раскладывается; catch ниже превращает это в повтор.
+                            (runtimeObject(adapter) || adapter).notifyDataSetChanged();
+                            var rv = fieldValue(lm, "mRecyclerView");
+                            if (rv !== null) (runtimeObject(rv) || rv).requestLayout();
+                            refreshed++;
+                        }
+                        Log.i(TAG, "[allapps] grid refreshed views=" + refreshed);
+                    } catch (e) {
+                        if (/computing a layout|scrolling/.test("" + e)) busy = true;
+                        else {
+                            Log.e(TAG, "[allapps] grid refresh failed: " + e);
+                            return;
+                        }
+                    }
+                    if (busy && attempt + 1 < REFRESH_MAX_ATTEMPTS) {
+                        setTimeout(function () { refreshAttempt(attempt + 1); }, REFRESH_RETRY_MS);
+                    } else if (busy) {
+                        Log.e(TAG, "[allapps] grid stayed busy, refresh skipped");
+                    }
+                });
+            }
+
+            // reloadImpl() пересобирает оба списка через loadData(): штатные записи заполняются
+            // заново в тех же List-объектах, а наши при этом теряются. Дописываем сразу после
+            // штатной пересборки, до notify/setAllAppList открытых адаптеров.
+            try {
+                var loadData = Data.loadData.overload();
+                loadData.implementation = function () {
+                    loadData.call(this);
+                    injectAllScreens();
+                };
+                Log.i(TAG, "[allapps] loadData re-injection hook installed");
+            } catch (e) { Log.e(TAG, "[allapps] loadData hook unavailable: " + e); }
 
             try {
                 // AllAppDataManager.reload() сам очищает/пересобирает mMainAllApps и mSecondAllApps,
@@ -1184,6 +1332,10 @@ Java.perform(function () {
                 // synthetic apps: getAllApps/bind/click хуки уже установлены и остаются рабочими.
                 Log.e(TAG, "[allapps] event refresh unavailable: " + e);
             }
+            // Основной путь: сетка уже собрана к моменту инъекции, поэтому дописываем приложения
+            // в живые списки и перестраиваем сетку сейчас, а не ждём следующего getAllApps().
+            injectAllScreens();
+
             Log.i(TAG, "[allapps] both physical display list hooks installed");
         } catch (e) {
             // Firmware variant without these launcher-base classes: dock remains fully functional.
