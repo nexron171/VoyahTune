@@ -517,10 +517,12 @@ Java.perform(function () {
 
     // OEM dismiss() only starts a 100-ms x=-width animation and removes the Window from its end
     // callback. Another launcher lifecycle event can end/reuse that animator before removal. Cancelling
-    // it with the OEM listener still attached also invokes onAnimationEnd(), so a following explicit
-    // removeViewImmediate() can remove the same root twice and destabilize Launcher. Make fullscreen
-    // idempotent instead: silence/cancel the current animator and keep its Window attached off-screen.
-    // OEM show() can later restore the same root with one ordinary updateViewLayout(x=0).
+    // it with the OEM listener still attached invokes onAnimationEnd(), so a following explicit remove
+    // can remove the same root twice and destabilize Launcher. Silence/cancel the animator first, move
+    // the Window off-screen synchronously, then use ordinary removeView(). Keeping the Window attached
+    // would leave its navigation-bar inset active and constrain fullscreen apps to the old dock width.
+    // WindowManagerGlobal clears the View parent as removal starts, so repeated hides are idempotent;
+    // OEM show() can safely add the root again when Home becomes foreground.
     function forceHideDockController(controller, label) {
         if (controller === null) return false;
         try {
@@ -541,8 +543,9 @@ Java.perform(function () {
             if (attached) {
                 if (windowManager === null) return false;
                 windowManager.updateViewLayout(root, lp);
+                windowManager.removeView(root);
             }
-            Log.i("voyahdock", "force hidden offscreen " + label + " attached=" + attached);
+            Log.i("voyahdock", "force hidden/detached " + label + " attached=" + attached);
             return true;
         } catch (e) {
             Log.e(TAG, "[dock] force hide " + label + " failed: " + e);
@@ -554,7 +557,7 @@ Java.perform(function () {
         var sid = managedScreenId(instance, fallbackScreen);
         if (sid !== 0) return; // passenger compact remains completely OEM-controlled (Home only)
         if (isUserFullscreen(topActivityForScreen(0, null).pkg)) {
-            // Bounded boot/reload icon passes must never expose children of the off-screen fullscreen dock.
+            // Bounded boot/reload icon passes must never expose children of the detached fullscreen dock.
             var hiddenViews = dockViews(instance);
             setDockViewVisibility(hiddenViews.up, 8, "fullscreen screenUp");
             setDockViewVisibility(hiddenViews.down, 8, "fullscreen screenDown");
@@ -1342,7 +1345,7 @@ Java.perform(function () {
                             + (pending ? " pending=" + pending.pkg + "/" + Math.ceil(pending.remaining) + "ms" : "")); } catch (ee) {}
                     try {
                         // Fullscreen policy wins over stale transfer/launch guards. Do not enter the
-                        // asynchronous OEM dismiss path: place the attached root off-screen now.
+                        // asynchronous OEM dismiss path: hide and detach the attached root now.
                         if (isUserFullscreen(fg.pkg)) {
                             if (forceHideDockController(this, "dismiss fullscreen " + label
                                     + " display=" + sid)) return;
@@ -1415,7 +1418,7 @@ Java.perform(function () {
                     if (!foreground.live) fgByScreen[displayId].act = cleanJavaString(actArg);
                     // Calling OEM dismiss() again after x already reached -width makes the live
                     // controller removeView(root), reintroducing an async detach/show race. Keep the
-                    // Window attached off-screen; use OEM false only as a cross-firmware fallback
+                    // Window detached; use OEM false only as a cross-firmware fallback
                     // when the controller fields are unavailable. A later original(true) always
                     // invokes show() and restores x=0 on the confirmed H97C LauncherModel ABI.
                     var controller = modelDockController(this, displayId);

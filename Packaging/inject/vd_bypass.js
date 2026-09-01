@@ -116,7 +116,8 @@ Java.perform(function () {
     //     другой прошивке) молча отдаём штатное поведение + латчим FF.on=false. WM НЕ падает.
     //  Ключи: voyahtune_freeform(0/1, деф 1), voyahtune_win_left/top/right/bottom
     //  (int,145/45/1920/720), voyahtune_win_compact_bottom (int, деф 560),
-    //  voyahtune_fullscreen_apps (CSV пакетов, которым нужны рамки 0,0… и скрытый док),
+    //  voyahtune_fullscreen_apps (CSV пакетов, которым нужна вся ширина без дока,
+    //  но с сохраненным верхним отступом статус-бара),
     //  voyahtune_dpi_<pkg> (int, 0=не трогать).
     //  РАЗВЕДКА перед включением флага: подтвердить поля WindowFrames
     //  (mStableFrame/mParentFrame/mDisplayFrame/mContentFrame/mVisibleFrame/mDecorFrame),
@@ -406,7 +407,10 @@ Java.perform(function () {
                 var stable = df.mStable.value;
                 var bottom = ffBottom();
                 var targetLeft = fullscreen ? 0 : FF.left;
-                var targetTop = fullscreen ? 0 : FF.top;
+                // Fullscreen removes only the left dock reservation. The OEM status bar remains
+                // visible and consumes touches, so placing the app at y=0 would hide an unclickable
+                // strip of its UI underneath that bar. Reuse the configured status-bar top inset.
+                var targetTop = FF.top;
                 if (fullscreen) ffNote("user-fullscreen", pkg, displayId, wmode);
                 // Не создаём Rect на каждом layout: этот метод вызывается сотни раз на screen-on.
                 var savedLeft = stable.left.value, savedTop = stable.top.value;

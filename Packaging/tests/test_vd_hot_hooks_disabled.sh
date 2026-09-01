@@ -71,8 +71,11 @@ grep -Fq 'if (isUserFullscreen(pkg)) return null;' "$DOCK" \
     || fail "pending launch guard keeps the dock over a fullscreen package"
 grep -Fq 'var targetLeft = fullscreen ? 0 : FF.left;' "$VD" \
     || fail "fullscreen package does not remove the dock inset"
-grep -Fq 'var targetTop = fullscreen ? 0 : FF.top;' "$VD" \
-    || fail "fullscreen package does not remove the status-bar inset"
+grep -Fq 'var targetTop = FF.top;' "$VD" \
+    || fail "fullscreen package can overlap the status bar"
+if grep -Fq 'var targetTop = fullscreen ? 0 : FF.top;' "$VD"; then
+    fail "fullscreen package removes the required status-bar inset"
+fi
 grep -Fq 'if (wmode == 5) { ffNote("skip-freeform", pkg, displayId, wmode); return; }' "$VD" \
     || fail "DisplayPolicy hot path attempts to mutate a real freeform task"
 if grep -Fq 'wmode == 5 && !fullscreen' "$VD"; then
@@ -84,6 +87,14 @@ grep -Fq 'attrs.width.value = savedAttrWidth;' "$VD" \
     || fail "fullscreen LayoutParams override leaks into later WindowManager layouts"
 grep -Fq 'ffRequestedWidthField.setInt(win, FF.right - targetLeft);' "$VD" \
     || fail "fullscreen Window frame does not propagate to its Surface requested width"
+grep -Fq 'ffRequestedHeightField.setInt(win, bottom - targetTop);' "$VD" \
+    || fail "fullscreen Surface height does not preserve the status-bar inset"
+for window_frame in \
+    mStableFrame mParentFrame mDisplayFrame mContentFrame mVisibleFrame mDecorFrame
+do
+    grep -Fq "wf.$window_frame.value.set(targetLeft, targetTop, FF.right, bottom);" "$VD" \
+        || fail "$window_frame does not preserve the fullscreen status-bar inset"
+done
 grep -Fq 'if (fullscreen && wt === 1' "$VD" \
     || fail "requested Surface size override is not restricted to the main Activity window"
 grep -Fq 'optionBundle.putInt("android.activity.windowingMode", 1);' "$RECEIVER" \
@@ -110,6 +121,15 @@ grep -Fq 'animator.removeAllUpdateListeners();' "$DOCK" \
     || fail "fullscreen hide can race an in-flight OEM window-position update"
 grep -Fq 'windowManager.updateViewLayout(root, lp);' "$DOCK" \
     || fail "fullscreen hide does not synchronously place the dock Window off-screen"
+grep -Fq 'windowManager.removeView(root);' "$DOCK" \
+    || fail "fullscreen hide leaves the navigation-bar inset attached to WindowManager"
+animator_listener_line=$(grep -nF 'animator.removeAllListeners();' "$DOCK" | cut -d: -f1)
+attached_guard_line=$(grep -nF '            if (attached) {' "$DOCK" | cut -d: -f1)
+dock_remove_line=$(grep -nF 'windowManager.removeView(root);' "$DOCK" | cut -d: -f1)
+[ "$animator_listener_line" -lt "$dock_remove_line" ] \
+    || fail "dock Window can be removed before the OEM animator end-listener is disarmed"
+[ "$attached_guard_line" -lt "$dock_remove_line" ] \
+    || fail "repeated fullscreen reconciliation can remove an already detached dock Window"
 if grep -Fq 'windowManager.removeViewImmediate(root);' "$DOCK"; then
     fail "fullscreen hide can double-remove the dock after an animator end callback"
 fi
