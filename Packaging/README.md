@@ -20,8 +20,8 @@ Releases/dist/VoyahTune-3.2.2-light.zip
 
 ## Состав
 
-`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, статуса Apollo и
-опциональной штатной клавиатуры. `light` не
+`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, полноэкранных
+клиентских окон, статуса Apollo и опциональной штатной клавиатуры. `light` не
 содержит Frida и `load.bin`. Управление сохранёнными Apollo-функциями входит в оба варианта.
 
 | Папка | Что | Куда идёт |
@@ -43,6 +43,15 @@ Light всё равно требует `adb root` и запись в `/system` �
 per-app DPI независимо от источника запуска. На `SCREEN_OFF` hooks снимаются, после пробуждения ставятся
 обратно. Native перед одиночным запуском закрывает активный VD-host; VirtualDisplay остаётся только для
 split двух приложений.
+
+Для пакетов из списка «Полноэкранные приложения» dock-hook удаляет окно системного дока, а
+`system_server` выдаёт приложению рамку на всю ширину ниже статус-бара. Некоторые APK (в частности
+AutoKit) сохраняют в своём `ViewRootImpl` старую фиксированную ширину рабочей области 1780 px даже при
+серверной рамке и Surface 1920 px. Поэтому `fullscreen_client.js` точечно инъектируется только в
+allowlisted основной процесс и передаёт базовому окну копию `LayoutParams` с
+`width=MATCH_PARENT`. Диалоги, starting windows и VirtualDisplay не меняются. Уже открытое окно
+переизмеряется после позднего attach; `WIN_RELOAD` возвращает исходную ширину без перезапуска процесса,
+если пакет удалён из списка. Loader применяет этот перехват только к 64-битному основному процессу.
 
 `launcherdock.js` также добавляет в штатные списки «Все приложения» обоих физических экранов launchable
 сторонние APK, которые OEM launcher скрывает. Снимок PackageManager кэшируется между системными
@@ -159,7 +168,7 @@ VoyahTune. Переключатели сохраняют только целев
 ## Full loader и нагрузка
 
 Постоянный 5-секундный watchdog full-варианта обслуживает VD, launcher, keymanager, multidisplay,
-VehicleSetting и opt-in Qinggan IME. Режим клавиатуры читается только при появлении новой qgime
+VehicleSetting, opt-in Qinggan IME и запущенные пакеты из fullscreen allowlist. Режим клавиатуры читается только при появлении новой qgime
 identity; в выключенном по умолчанию состоянии это одно чтение на жизнь процесса. Обычно каждая точная
 identity получает не более одной тяжёлой Frida-попытки. Узкое исключение — idempotent multidisplay-agent:
 он первым обслуживается в каждом watchdog-цикле, подтверждает точный ready-marker и имеет persistent
@@ -167,6 +176,11 @@ identity получает не более одной тяжёлой Frida-поп
 (быстрый 2-секундный повтор для чистой ранней ошибки/потерянного marker, затем bounded 20/60 секунд).
 Owner/busy lock loops имеют sleep и конечный budget, поэтому повреждённый lock path не создаёт 100% CPU
 spin.
+
+Fullscreen client запускается только для точного main-process (`cmdline == package`) пользователя 0,
+не более одного фонового attach одновременно и с one-shot marker на exact identity. Две быстрые смерти
+новых process identity после attach блокируют дальнейшую инъекцию этого пакета до следующей загрузки,
+чтобы несовместимый APK не мог попасть в crash-loop.
 
 На cold boot тот же 15-секундный bootstrap каждую секунду ищет не только Qinggan systemservice, но и
 launcher. Как только launcher появляется, выполняется exact-identity one-shot launcher-dock: он только

@@ -7,6 +7,7 @@
 #   4) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (3090, 173, медиа);
 #   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — по сохранённой настройке VoyahTune.
 #   6) keyboard_*.js         в com.qinggan.app.qgime — только при явном opt-in из «Другого».
+#   7) fullscreen_client.js  в выбранных приложениях — client DecorView заполняет место скрытого дока.
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
 #   • По умолчанию каждая точная process identity (boot-id + pid + start-time) получает НЕ БОЛЕЕ
@@ -152,6 +153,13 @@ KEYBOARD_ATTEMPT=/data/local/tmp/voyahtune_keyboard.attempt
 KEYBOARD_LOG=/data/local/tmp/voyahtune_keyboard.txt
 KEYBOARD_SEEN_ID=
 KEYBOARD_MODE_CURRENT=unknown
+FULLSCREEN_CLIENT=/data/local/bin/fullscreen_client.js
+FULLSCREEN_CLIENT_SETTING=voyahtune_fullscreen_apps
+FULLSCREEN_CLIENT_READY='[fullscreen-client] hook ready v1'
+FULLSCREEN_CLIENT_BUSY=/data/local/tmp/voyahtune_fullscreen_client.busy
+FULLSCREEN_CLIENT_BUSY_TTL=45
+FULLSCREEN_CLIENT_CRASH_WINDOW=45
+FULLSCREEN_CLIENT_MAX_RAPID_RESTARTS=2
 SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
 LNCH_MARK=/data/local/tmp/voyahtune_lnch.pid     # exact process identity лаунчера с launcherdock
 MD_MARK=/data/local/tmp/voyahtune_md.pid         # exact process identity systemservice с multidisplay
@@ -836,6 +844,237 @@ inject_keymanager_bg() {
     ) &
 }
 
+# The per-app agent is intentionally lower priority than every core hook. Injection runs in one
+# global background worker, so a slow third-party process can never hold up dock/VD/steering status.
+# Both the attempt and success markers are bound to exact boot+pid+start-time identity.
+fullscreen_client_inject_is_live() {
+    # Inspect the bounded cmdline set instead of relying on the kernel's truncated process name.
+    # This scan runs only when a busy marker has already exceeded its 45-second TTL.
+    for FC_INJECT_CMDLINE in /proc/[0-9]*/cmdline; do
+        [ -r "$FC_INJECT_CMDLINE" ] || continue
+        FC_INJECT_CMD=$(tr '\000' ' ' < "$FC_INJECT_CMDLINE" 2>/dev/null)
+        case "$FC_INJECT_CMD" in
+            *"-p $1 "*"fullscreen_client.js"*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# Two process deaths inside the short post-injection window block this package until reboot. This
+# prevents a broken OEM/agent combination from turning an optional fullscreen repair into an app
+# crash-loop, while an ordinary restart after a stable session remains injectable.
+#   $1=package  $2=exact identity  $3=history-file  $4=blocked-file
+prepare_fullscreen_client_attempt() {
+    FC_PREP_PACKAGE=$1
+    FC_PREP_ID=$2
+    FC_PREP_HISTORY=$3
+    FC_PREP_BLOCKED=$4
+    FC_PREP_BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || return 1
+    FC_PREP_NOW=$(uptime_seconds)
+    case "$FC_PREP_NOW" in ''|*[!0-9]*) return 1 ;; esac
+
+    [ "$(cat "$FC_PREP_BLOCKED" 2>/dev/null)" != "$FC_PREP_BOOT" ] || return 1
+    FC_PREP_RAPID=0
+    FC_PREP_VALUE=$(cat "$FC_PREP_HISTORY" 2>/dev/null)
+    FC_PREP_OLD_BOOT=${FC_PREP_VALUE%%|*}
+    FC_PREP_REST=${FC_PREP_VALUE#*|}
+    FC_PREP_OLD_TIME=${FC_PREP_REST%%|*}
+    FC_PREP_REST=${FC_PREP_REST#*|}
+    FC_PREP_OLD_RAPID=${FC_PREP_REST%%|*}
+    FC_PREP_OLD_ID=${FC_PREP_REST#*|}
+    if [ -n "$FC_PREP_VALUE" ] && [ "$FC_PREP_OLD_BOOT" = "$FC_PREP_BOOT" ] \
+            && [ "$FC_PREP_OLD_ID" != "$FC_PREP_ID" ]; then
+        case "$FC_PREP_OLD_TIME:$FC_PREP_OLD_RAPID" in
+            *[!0-9:]*|:*|*:) ;;
+            *)
+                FC_PREP_AGE=$((FC_PREP_NOW - FC_PREP_OLD_TIME))
+                if [ "$FC_PREP_AGE" -ge 0 ] \
+                        && [ "$FC_PREP_AGE" -lt "$FULLSCREEN_CLIENT_CRASH_WINDOW" ]; then
+                    FC_PREP_RAPID=$((FC_PREP_OLD_RAPID + 1))
+                fi
+                ;;
+        esac
+    fi
+    if [ "$FC_PREP_RAPID" -ge "$FULLSCREEN_CLIENT_MAX_RAPID_RESTARTS" ]; then
+        printf '%s\n' "$FC_PREP_BOOT" > "$FC_PREP_BLOCKED"
+        loge "fullscreen client blocked after rapid restarts package=$FC_PREP_PACKAGE"
+        return 1
+    fi
+    FC_PREP_TMP="$FC_PREP_HISTORY.$$.new"
+    if ! printf '%s|%s|%s|%s\n' "$FC_PREP_BOOT" "$FC_PREP_NOW" "$FC_PREP_RAPID" \
+            "$FC_PREP_ID" > "$FC_PREP_TMP" || ! mv -f "$FC_PREP_TMP" "$FC_PREP_HISTORY"; then
+        rm -f "$FC_PREP_TMP"
+        return 1
+    fi
+    return 0
+}
+
+#   $1=package $2=pid $3=identity $4=injector $5=marker $6=attempt $7=log $8=history $9=blocked
+inject_fullscreen_client_bg() {
+    FC_TARGET_PACKAGE=$1
+    FC_TARGET_PID=$2
+    FC_TARGET_ID=$3
+    FC_TARGET_INJECTOR=$4
+    FC_TARGET_MARK=$5
+    FC_TARGET_ATTEMPT=$6
+    FC_TARGET_LOG=$7
+    FC_TARGET_HISTORY=$8
+    FC_TARGET_BLOCKED=$9
+
+    [ "$(cat "$FC_TARGET_MARK" 2>/dev/null)" = "$FC_TARGET_ID" ] && return 0
+    [ "$(cat "$FC_TARGET_ATTEMPT" 2>/dev/null)" = "$FC_TARGET_ID" ] && return 0
+
+    FC_BUSY_NOW=$(uptime_seconds)
+    FC_BUSY_RECORD=$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)
+    if [ -L "$FULLSCREEN_CLIENT_BUSY" ]; then
+        FC_BUSY_PID=${FC_BUSY_RECORD%%|*}
+        FC_BUSY_REST=${FC_BUSY_RECORD#*|}
+        FC_BUSY_STARTED=${FC_BUSY_REST%%|*}
+        case "$FC_BUSY_NOW:$FC_BUSY_STARTED" in
+            *[!0-9:]*|:*|*:) FC_BUSY_AGE=$FULLSCREEN_CLIENT_BUSY_TTL ;;
+            *) FC_BUSY_AGE=$((FC_BUSY_NOW - FC_BUSY_STARTED)) ;;
+        esac
+        if [ "$FC_BUSY_AGE" -ge 0 ] && [ "$FC_BUSY_AGE" -lt "$FULLSCREEN_CLIENT_BUSY_TTL" ]; then
+            return 0
+        fi
+        if fullscreen_client_inject_is_live "$FC_BUSY_PID"; then
+            return 0
+        fi
+        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_RECORD" ] \
+            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+    elif [ -e "$FULLSCREEN_CLIENT_BUSY" ]; then
+        rm -f "$FULLSCREEN_CLIENT_BUSY"
+    fi
+
+    FC_BUSY_TOKEN="$$.$FC_BUSY_NOW.$FC_TARGET_PID"
+    FC_BUSY_OWN_RECORD="$FC_TARGET_PID|$FC_BUSY_NOW|$FC_BUSY_TOKEN"
+    ln -s "$FC_BUSY_OWN_RECORD" "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null || return 0
+    FC_CURRENT_ID=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE" 2>/dev/null) \
+        || FC_CURRENT_ID=
+    if [ "$FC_CURRENT_ID" != "$FC_TARGET_ID" ]; then
+        loge "fullscreen client skipped: target identity changed package=$FC_TARGET_PACKAGE"
+        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
+            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+        return 0
+    fi
+    if ! prepare_fullscreen_client_attempt "$FC_TARGET_PACKAGE" "$FC_TARGET_ID" \
+            "$FC_TARGET_HISTORY" "$FC_TARGET_BLOCKED"; then
+        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
+            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+        return 0
+    fi
+    if ! reserve_injection_attempt "$FC_TARGET_ID" "$FC_TARGET_ATTEMPT"; then
+        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
+            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+        return 0
+    fi
+
+    logi "inject fullscreen client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
+    (
+        trap - 0 HUP INT TERM
+        FC_TRY="$FC_TARGET_LOG.try"
+        : > "$FC_TRY"
+        FC_ID_BEFORE=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE" 2>/dev/null) \
+            || FC_ID_BEFORE=
+        if [ "$FC_ID_BEFORE" = "$FC_TARGET_ID" ]; then
+            timeout -k 5 30 "$FC_TARGET_INJECTOR" -p "$FC_TARGET_PID" \
+                -s "$FULLSCREEN_CLIENT" -e > "$FC_TRY" 2>&1
+            FC_RC=$?
+        else
+            printf '%s\n' "target identity changed before frida-inject" > "$FC_TRY"
+            FC_RC=1
+        fi
+        cat "$FC_TRY" >> "$FC_TARGET_LOG"
+        if [ "$FC_RC" -eq 0 ] && grep -qF "$FULLSCREEN_CLIENT_READY" "$FC_TRY"; then
+            FC_ID_AFTER=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE" 2>/dev/null) \
+                || FC_ID_AFTER=
+            if [ "$FC_ID_AFTER" = "$FC_TARGET_ID" ]; then
+                FC_MARK_TMP="$FC_TARGET_MARK.$$.new"
+                if printf '%s\n' "$FC_TARGET_ID" > "$FC_MARK_TMP" \
+                        && mv -f "$FC_MARK_TMP" "$FC_TARGET_MARK"; then
+                    logi "inject OK fullscreen client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
+                else
+                    rm -f "$FC_MARK_TMP"
+                    loge "fullscreen client marker write FAIL package=$FC_TARGET_PACKAGE"
+                fi
+            else
+                loge "fullscreen client result stale package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
+            fi
+        else
+            loge "inject FAIL fullscreen client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID rc=$FC_RC"
+        fi
+        rm -f "$FC_TRY"
+        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
+            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+    ) &
+}
+
+discover_fullscreen_client() {
+    # SettingsProvider is outside this process; keep its Binder failure bounded on the main cycle.
+    FC_LIST=$(timeout -k 1 1 settings get global "$FULLSCREEN_CLIENT_SETTING" 2>/dev/null) \
+        || FC_LIST=
+    case "$FC_LIST" in ''|null) return ;; esac
+    FC_SAVED_IFS=$IFS
+    IFS=,
+    for FC_PACKAGE in $FC_LIST; do
+        IFS=$FC_SAVED_IFS
+        FC_PACKAGE=$(printf '%s' "$FC_PACKAGE" | tr -d '[:space:]')
+        case "$FC_PACKAGE" in ''|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue ;; esac
+        FC_PID=
+        FC_ID=
+        for FC_CANDIDATE in $(pidof "$FC_PACKAGE" 2>/dev/null); do
+            FC_CANDIDATE_ID=$(process_identity "$FC_CANDIDATE" "$FC_PACKAGE" 2>/dev/null) \
+                || FC_CANDIDATE_ID=
+            [ -n "$FC_CANDIDATE_ID" ] || continue
+            FC_UID=$(awk '/^Uid:/{print $2; exit}' "/proc/$FC_CANDIDATE/status" 2>/dev/null)
+            case "$FC_UID" in ''|*[!0-9]*) continue ;; esac
+            [ "$FC_UID" -lt 100000 ] || continue
+            FC_PID=$FC_CANDIDATE
+            FC_ID=$FC_CANDIDATE_ID
+            break
+        done
+        if [ -z "$FC_ID" ]; then IFS=,; continue; fi
+
+        FC_BASE="/data/local/tmp/voyahtune_fullscreen_client.$FC_PACKAGE"
+        FC_MARK="$FC_BASE.pid"
+        FC_ATTEMPT="$FC_BASE.attempt"
+        FC_LOG="$FC_BASE.txt"
+        FC_HISTORY="$FC_BASE.history"
+        FC_BLOCKED="$FC_BASE.blocked"
+        FC_BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+        if [ -n "$FC_BOOT" ] && [ "$(cat "$FC_BLOCKED" 2>/dev/null)" = "$FC_BOOT" ]; then
+            IFS=,
+            continue
+        fi
+        if [ "$(cat "$FC_MARK" 2>/dev/null)" = "$FC_ID" ] \
+                || [ "$(cat "$FC_ATTEMPT" 2>/dev/null)" = "$FC_ID" ]; then
+            IFS=,
+            continue
+        fi
+        FC_EXE=$(readlink "/proc/$FC_PID/exe" 2>/dev/null)
+        case "$FC_EXE" in
+            *app_process64) FC_INJECTOR=$FI ;;
+            *)
+                reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
+                loge "fullscreen client unsupported process ABI package=$FC_PACKAGE exe=$FC_EXE"
+                IFS=,
+                continue
+                ;;
+        esac
+        if [ ! -x "$FC_INJECTOR" ] || [ ! -r "$FULLSCREEN_CLIENT" ]; then
+            reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
+            loge "fullscreen client assets unavailable package=$FC_PACKAGE injector=$FC_INJECTOR"
+            IFS=,
+            continue
+        fi
+        inject_fullscreen_client_bg "$FC_PACKAGE" "$FC_PID" "$FC_ID" "$FC_INJECTOR" \
+            "$FC_MARK" "$FC_ATTEMPT" "$FC_LOG" "$FC_HISTORY" "$FC_BLOCKED"
+        IFS=$FC_SAVED_IFS
+        return
+    done
+    IFS=$FC_SAVED_IFS
+}
+
 watchdog_cycle() {
     # 1) Сначала server whitelist: никакой потенциально 30-секундный attach не должен позволить
     #    клиентам MultiDisplayManager закэшировать прежний false до установки этого hook.
@@ -982,6 +1221,10 @@ watchdog_cycle() {
             fi
         fi
     fi
+
+    # 7) Optional client geometry repair. Discovery runs after every core hook and its only Binder
+    #    read has a one-second timeout; at most one exact-package injection worker runs in background.
+    discover_fullscreen_client
 
     publish_hook_status running
 }

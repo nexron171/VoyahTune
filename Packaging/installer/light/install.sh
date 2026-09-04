@@ -91,6 +91,8 @@ remove_full_hook_runtime_for_light() {
             /data/local/bin/apollo_tech.js.voyahtune.new \
             /data/local/bin/load.bin.voyahtune.new \
             /data/local/bin/frida-inject.voyahtune.new \
+            /data/local/bin/fullscreen_client.js \
+            /data/local/bin/fullscreen_client.js.voyahtune.new \
             /data/local/bin/vd_bypass.js \
             /data/local/bin/vd_bypass.js.voyahtune.new \
             /data/local/bin/steeringwheelkeys.js \
@@ -165,6 +167,7 @@ remove_full_hook_runtime_for_light() {
             /data/local/tmp/voyah_apollo.txt \
             /data/local/tmp/voyah_apollo.txt.1 \
             /data/local/tmp/voyah_apollo.txt.try || exit 1
+        rm -f /data/local/tmp/voyahtune_fullscreen_client.* || exit 1
         rm -rf /data/local/tmp/voyah_load.lock || exit 1
         for removed_path in \
                 /system/etc/init/voyahtune.load.rc \
@@ -174,6 +177,7 @@ remove_full_hook_runtime_for_light() {
                 /data/local/bin/steeringwheelkeys.js \
                 /data/local/bin/launcherdock.js \
                 /data/local/bin/multidisplay.js \
+                /data/local/bin/fullscreen_client.js \
                 /data/local/bin/apollo_tech.js \
                 /data/local/bin/keyboard_lock_en.js \
                 /data/local/bin/keyboard_ru.js \
@@ -181,6 +185,7 @@ remove_full_hook_runtime_for_light() {
                 /data/local/tmp/voyahtune-hook-status.v1; do
             [ ! -e "$removed_path" ] && [ ! -L "$removed_path" ] || exit 1
         done
+        ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
         sync
     '
 }

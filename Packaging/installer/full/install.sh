@@ -27,6 +27,7 @@ fi
 
 # Полный локальный preflight до первого ADB-вызова.
 for FULL_REQUIRED_ASSET in load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js \
+        fullscreen_client.js \
         apollo_tech.js keyboard_lock_en.js keyboard_ru.js \
         voyahtune_keyboard_en_config.json \
         voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json \
@@ -632,6 +633,7 @@ install_required_data_file steeringwheelkeys.js /data/local/bin/steeringwheelkey
 install_required_data_file launcherdock.js /data/local/bin/launcherdock.js 644 || exit 1
 install_required_data_file multidisplay.js /data/local/bin/multidisplay.js 644 || exit 1
 install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644 || exit 1
+install_required_data_file fullscreen_client.js /data/local/bin/fullscreen_client.js 644 || exit 1
 install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644 || exit 1
 install_required_data_file keyboard_lock_en.js /data/local/bin/keyboard_lock_en.js 644 || exit 1
 install_required_data_file keyboard_ru.js /data/local/bin/keyboard_ru.js 644 || exit 1
@@ -639,6 +641,7 @@ install_required_data_file voyahtune_keyboard_en_config.json /data/local/bin/voy
 install_required_data_file voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_keyboard_ru_config.json 644 || exit 1
 install_required_data_file voyahtune_skb_qwerty_ru.json /data/local/bin/voyahtune_skb_qwerty_ru.json 644 || exit 1
 install_required_data_file frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject 755 || exit 1
+adb shell "rm -f /data/local/tmp/voyahtune_fullscreen_client.*" || exit 1
 # Удаляем неиспользуемый manifest, оставшийся от предыдущих full-релизов.
 adb shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json.voyahtune.new" || exit 1
 

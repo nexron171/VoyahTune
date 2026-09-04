@@ -11,7 +11,7 @@ exit /b %FULL_INSTALL_RESULT%
 
 :install_main
 cd /d "%~dp0" || exit /b 1
-for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
+for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js fullscreen_client.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
     exit /b 1
 )
@@ -136,6 +136,8 @@ call :install_required_data_file multidisplay.js /data/local/bin/multidisplay.js
 if errorlevel 1 exit /b 1
 call :install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644
 if errorlevel 1 exit /b 1
+call :install_required_data_file fullscreen_client.js /data/local/bin/fullscreen_client.js 644
+if errorlevel 1 exit /b 1
 call :install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file keyboard_lock_en.js /data/local/bin/keyboard_lock_en.js 644
@@ -149,6 +151,8 @@ if errorlevel 1 exit /b 1
 call :install_required_data_file voyahtune_skb_qwerty_ru.json /data/local/bin/voyahtune_skb_qwerty_ru.json 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file frida-inject-16.2.1-android-arm64 /data/local/bin/frida-inject 755
+if errorlevel 1 exit /b 1
+adb.exe shell "rm -f /data/local/tmp/voyahtune_fullscreen_client.*"
 if errorlevel 1 exit /b 1
 rem Remove the unused manifest left by previous full releases.
 adb.exe shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json.voyahtune.new"
