@@ -37,6 +37,9 @@ public class BackButtonService extends AccessibilityService {
     private static final String PREF_FLOATING = "floatingBack";
     private static final String PREF_STEERING = "steeringBack";
     private static final String PREF_FULLSCREEN = "fullscreenApps";
+    private static final int BUTTON_VISUAL_SIZE_DP = 45;
+    private static final int BUTTON_GAP_DP = 10;
+    private static final int BUTTON_TOUCH_OUTSET_DP = 10;
 
     private static BackButtonService instance;
 
@@ -44,6 +47,8 @@ public class BackButtonService extends AccessibilityService {
     private LinearLayout buttonView;
     private WindowManager.LayoutParams lp;
     private int btnSize;
+    private int btnGap;
+    private int touchOutset;
     private final Handler overlayHandler = new Handler(Looper.getMainLooper());
     private String pendingEventPackage = "";
     private String lastForcedPackage = "";
@@ -277,24 +282,27 @@ public class BackButtonService extends AccessibilityService {
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         if (wm == null) { Log.e(TAG, "WindowManager == null"); return; }
 
-        btnSize = dp(56);
+        btnSize = dp(BUTTON_VISUAL_SIZE_DP);
+        btnGap = dp(BUTTON_GAP_DP);
+        touchOutset = dp(BUTTON_TOUCH_OUTSET_DP);
         int initialSide = prefs().getInt("floatingBackSide", SIDE_LEFT);
         LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(initialSide == SIDE_TOP
-                ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         buttons.setShowDividers(LinearLayout.SHOW_DIVIDER_NONE);
+        buttons.setBackground(null);
         buttons.addView(createButton(
                 R.drawable.ic_back_arrow,
-                R.string.floating_back_button_desc,
-                new DragTouchListener(GLOBAL_ACTION_BACK, "GLOBAL_ACTION_BACK")));
+                R.string.floating_back_button_desc));
         buttons.addView(createButton(
                 R.drawable.ic_home,
-                R.string.floating_home_button_desc,
-                new DragTouchListener(GLOBAL_ACTION_HOME, "GLOBAL_ACTION_HOME")));
+                R.string.floating_home_button_desc));
+        buttons.setOnTouchListener(new DragTouchListener());
+
+        int overlayLength = btnSize * 2 + btnGap + touchOutset * 2;
+        int overlayThickness = btnSize + touchOutset * 2;
 
         lp = new WindowManager.LayoutParams(
-                initialSide == SIDE_TOP ? btnSize * 2 : btnSize,
-                initialSide == SIDE_TOP ? btnSize : btnSize * 2,
+                initialSide == SIDE_TOP ? overlayLength : overlayThickness,
+                initialSide == SIDE_TOP ? overlayThickness : overlayLength,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -311,17 +319,36 @@ public class BackButtonService extends AccessibilityService {
         }
     }
 
-    private ImageView createButton(int iconRes, int descriptionRes, View.OnTouchListener listener) {
+    private ImageView createButton(int iconRes, int descriptionRes) {
         ImageView button = new ImageView(this);
         button.setImageResource(iconRes);
-        button.setBackgroundResource(R.drawable.floating_back_bg);
+        button.setBackground(null);
         button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         button.setContentDescription(getString(descriptionRes));
-        int pad = dp(12);
+        int pad = dp(10);
         button.setPadding(pad, pad, pad, pad);
         button.setLayoutParams(new LinearLayout.LayoutParams(btnSize, btnSize));
-        button.setOnTouchListener(listener);
         return button;
+    }
+
+    /**
+     * Видимые кнопки имеют размер 45 dp и зазор 10 dp. Прозрачный отступ вокруг блока входит
+     * в окно и делится между ближайшими кнопками, поэтому touch-зона каждой получается заметно
+     * больше изображения, включая половину межкнопочного зазора.
+     */
+    private void applyButtonGeometry(int side) {
+        boolean horizontal = side == SIDE_TOP;
+        buttonView.setOrientation(horizontal ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        buttonView.setPadding(touchOutset, touchOutset, touchOutset, touchOutset);
+        for (int i = 0; i < buttonView.getChildCount(); i++) {
+            LinearLayout.LayoutParams childLp =
+                    new LinearLayout.LayoutParams(btnSize, btnSize);
+            if (i == 0) {
+                if (horizontal) childLp.rightMargin = btnGap;
+                else childLp.bottomMargin = btnGap;
+            }
+            buttonView.getChildAt(i).setLayoutParams(childLp);
+        }
     }
 
     /** Раскладывает блок по выбранной стороне и сохранённому смещению (offset<0 = по центру стороны). */
@@ -333,19 +360,20 @@ public class BackButtonService extends AccessibilityService {
         Point size = new Point();
         wm.getDefaultDisplay().getSize(size);
         int sw = size.x, sh = size.y;
+        int overlayLength = btnSize * 2 + btnGap + touchOutset * 2;
+        int overlayThickness = btnSize + touchOutset * 2;
 
         lp.gravity = Gravity.START | Gravity.TOP;
+        applyButtonGeometry(side);
         if (side == SIDE_TOP) {
-            buttonView.setOrientation(LinearLayout.HORIZONTAL);
-            lp.width = btnSize * 2;
-            lp.height = btnSize;
+            lp.width = overlayLength;
+            lp.height = overlayThickness;
             int maxX = Math.max(0, sw - lp.width);
             lp.x = (offset < 0) ? maxX / 2 : clamp(offset, 0, maxX);
             lp.y = 0;
         } else { // LEFT / RIGHT — двигается по вертикали
-            buttonView.setOrientation(LinearLayout.VERTICAL);
-            lp.width = btnSize;
-            lp.height = btnSize * 2;
+            lp.width = overlayThickness;
+            lp.height = overlayLength;
             int maxY = Math.max(0, sh - lp.height);
             lp.y = (offset < 0) ? maxY / 2 : clamp(offset, 0, maxY);
             lp.x = (side == SIDE_RIGHT) ? Math.max(0, sw - lp.width) : 0;
@@ -359,26 +387,28 @@ public class BackButtonService extends AccessibilityService {
 
     /** Тап = действие выбранной кнопки, перетаскивание = смена позиции всего блока. */
     private class DragTouchListener implements View.OnTouchListener {
-        private final int globalAction;
-        private final String actionName;
+        private int globalAction;
+        private String actionName;
         private int startX, startY;
         private float rawX0, rawY0;
         private boolean dragging;
         private final int slop = ViewConfiguration.get(BackButtonService.this).getScaledTouchSlop();
 
-        DragTouchListener(int globalAction, String actionName) {
-            this.globalAction = globalAction;
-            this.actionName = actionName;
-        }
-
         @Override
         public boolean onTouch(View v, MotionEvent e) {
             switch (e.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_DOWN: {
+                    int side = prefs().getInt("floatingBackSide", SIDE_LEFT);
+                    boolean home = side == SIDE_TOP
+                            ? e.getX() >= v.getWidth() / 2f
+                            : e.getY() >= v.getHeight() / 2f;
+                    globalAction = home ? GLOBAL_ACTION_HOME : GLOBAL_ACTION_BACK;
+                    actionName = home ? "GLOBAL_ACTION_HOME" : "GLOBAL_ACTION_BACK";
                     startX = lp.x; startY = lp.y;
                     rawX0 = e.getRawX(); rawY0 = e.getRawY();
                     dragging = false;
                     return true;
+                }
                 case MotionEvent.ACTION_MOVE: {
                     int dx = (int) (e.getRawX() - rawX0);
                     int dy = (int) (e.getRawY() - rawY0);

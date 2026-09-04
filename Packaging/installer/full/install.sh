@@ -718,6 +718,9 @@ fi
 adb shell settings put global enable_freeform_support 1
 adb shell settings put global force_resizable_activities 1
 
+# Достпу к не‑SDK‑интерфейсам
+adb shell settings put global hidden_api_policy 1
+
 if ! adb install -r -g restore_mode.apk; then
     echo "!!! RestoreMode не установлен — исправьте ошибку и повторите installer до перезагрузки."
     exit 1
