@@ -45,9 +45,9 @@ import androidx.core.app.NotificationCompat;
  * <p><b>Сигнал</b> берём из {@code CanBusService} (тот же сервис, что и автосвет,
  * проверен декомпиляцией — см. память reference-canbus-door-temp):
  * <ul>
- *   <li>единая process-wide подписка {@link CanBusEventHub} фильтрует коды двери и передачи
- *       до ограниченной очереди;</li>
- *   <li>seed двери TX=2 выполняется изолированно в фоновом query-потоке hub — колбэки
+ *   <li>{@link DriverDoorStateController} и {@link GearStateController} отдают типизированные
+ *       состояния без зависимости сервиса от CAN callback-кодов;</li>
+ *   <li>seed двери TX=2 централизован в {@link VehicleStateControllers} — OEM-колбэки
  *       delta-only, начальное значение не отдают.</li>
  * </ul>
  * Логика <i>level-triggered</i> с guard'ом по флагу активности: это заодно ловит
@@ -111,7 +111,8 @@ public class WiperColdService extends Service {
     private volatile Handler timerHandler;
     private volatile Handler mediaHandler;
     private HandlerThread mediaThread;
-    private CanBusEventHub.Subscription canBusSubscription;
+    private GearStateController.Subscription gearStateSubscription;
+    private DriverDoorStateController.Subscription driverDoorSubscription;
 
     private final DoorPauseRunState mediaPauseState = new DoorPauseRunState();
     private final DoorPauseWorkGate mediaPauseWorkGate = new DoorPauseWorkGate();
@@ -124,25 +125,10 @@ public class WiperColdService extends Service {
     private int  lastFLDoor = -1;
     private long lastPowerOnResetElapsed = 0L; // когда последний раз возвращали дворники по power on
 
-    private void onCanBusEvent(CanBusEvent event) {
+    private void onDriverDoorState(DriverDoorStateController.State state) {
         if (destroyed) return;
-        switch (event.kind) {
-            case CONNECTION:
-                CanBusEventHub.get(this).requestDriverDoorSeed();
-                break;
-            case DOOR:
-                if (event.origin == CanBusEvent.Origin.LIVE) {
-                    onDoorState(event.first);
-                } else {
-                    applyDoorSeed(event.first);
-                }
-                break;
-            case GEAR:
-                onGearState(event.first);
-                break;
-            default:
-                break;
-        }
+        if (state.isLive()) onDoorState(state.frontLeft);
+        else applyDoorSeed(state.frontLeft);
     }
 
     private void applyDoorSeed(int frontLeft) {
@@ -563,11 +549,10 @@ public class WiperColdService extends Service {
         mediaThread.start();
         mediaHandler = new Handler(mediaThread.getLooper());
 
-        canBusSubscription = CanBusEventHub.get(this).subscribe(
-                CanBusEventRouter.INTEREST_CONNECTION
-                        | CanBusEventRouter.INTEREST_DOOR
-                        | CanBusEventRouter.INTEREST_GEAR,
-                null, timerHandler, this::onCanBusEvent);
+        VehicleStateControllers vehicleState = VehicleStateControllers.get(this);
+        gearStateSubscription = vehicleState.gear().subscribe(timerHandler, this::onGearState);
+        driverDoorSubscription = vehicleState.driverDoor().subscribe(
+                timerHandler, this::onDriverDoorState);
     }
 
     @Override
@@ -590,9 +575,12 @@ public class WiperColdService extends Service {
         Log.i(TAG, "onDestroy()");
         destroyed = true;
         mediaPauseWorkGate.close();
-        CanBusEventHub.Subscription subscription = canBusSubscription;
-        canBusSubscription = null;
-        if (subscription != null) subscription.close();
+        GearStateController.Subscription gearSubscription = gearStateSubscription;
+        DriverDoorStateController.Subscription doorSubscription = driverDoorSubscription;
+        gearStateSubscription = null;
+        driverDoorSubscription = null;
+        if (gearSubscription != null) gearSubscription.close();
+        if (doorSubscription != null) doorSubscription.close();
         if (timerHandler != null) timerHandler.removeCallbacksAndMessages(null);
         Handler media = mediaHandler;
         HandlerThread thread = mediaThread;

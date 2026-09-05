@@ -670,6 +670,7 @@ public class SetModesService extends Service {
     private WashModeController washModeController;
     private PowerHoldController powerHoldController;
     private PowerHoldStatusTracker powerHoldStatusTracker;
+    private VehicleStateControllers vehicleStateControllers;
     private boolean powerHoldStatusReceiverRegistered;
     private CarPropertyManager mCarPropertyManager;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -825,6 +826,11 @@ public class SetModesService extends Service {
         powerHoldController = PowerHoldController.create(this);
         powerHoldStatusTracker = PowerHoldStatusTracker.create(
                 this, this::publishPowerHoldStatus);
+        try {
+            vehicleStateControllers = VehicleStateControllers.get(getApplicationContext());
+        } catch (RuntimeException e) {
+            Log.w(TAG, "start vehicle state controllers: " + e.getMessage());
+        }
         try {
             ContextCompat.registerReceiver(this, powerHoldStatusRequestReceiver,
                     new IntentFilter(ACTION_REQUEST_POWER_HOLD_STATUS), BIND_PERMISSION,
@@ -1250,6 +1256,7 @@ public class SetModesService extends Service {
         PowerHoldStatusTracker powerHoldTracker = powerHoldStatusTracker;
         powerHoldStatusTracker = null;
         if (powerHoldTracker != null) powerHoldTracker.close();
+        vehicleStateControllers = null;
         powerHoldController = null;
         releaseCarPowerManagerAsync();
         pendingPhysicalWake = false;

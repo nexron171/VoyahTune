@@ -216,4 +216,63 @@ public class ModeSyncPolicyTest {
 
         assertFalse(p.canPersist(persistToken, stableAt));
     }
+
+    @Test
+    public void optedOutDriveFeedbackStillCorrectsWakeButNeverPersistsAfterSettle() {
+        ModeSyncPolicy p = new ModeSyncPolicy();
+        p.updateExpected(
+                "COMFORT", "SREV", "HIGH",
+                true, true, true,
+                false, true, true);
+        long generation = p.beginRestore();
+
+        assertEquals(ModeSyncPolicy.Decision.CORRECT,
+                p.evaluate("driveMode", "ECO", 1_000L));
+
+        long correctionGeneration = p.beginRestore();
+        assertTrue(correctionGeneration > generation);
+        assertTrue(p.completeRestore(correctionGeneration, 5_000L));
+        long stableAt = 5_000L + ModeSyncPolicy.POST_RESTORE_SETTLE_MS;
+        assertEquals(ModeSyncPolicy.Decision.IGNORE,
+                p.evaluate("driveMode", "SPORT", stableAt));
+        assertFalse(p.canPersist(p.currentGeneration(), "driveMode", stableAt));
+    }
+
+    @Test
+    public void rememberLastCanBeOptedOutAndBackInWhileAwake() {
+        ModeSyncPolicy p = new ModeSyncPolicy();
+        p.updateExpected(
+                "COMFORT", "SREV", "MEDIUM",
+                true, true, true,
+                true, true, true);
+        long generation = p.beginRestore();
+        assertTrue(p.completeRestore(generation, 1_000L));
+        long stableAt = 1_000L + ModeSyncPolicy.POST_RESTORE_SETTLE_MS;
+
+        p.updateRememberLast("recycle", false);
+        assertEquals(ModeSyncPolicy.Decision.IGNORE,
+                p.evaluate("recycle", "HIGH", stableAt));
+
+        p.updateRememberLast("recycle", true);
+        assertEquals(ModeSyncPolicy.Decision.ACCEPT,
+                p.evaluate("recycle", "HIGH", stableAt));
+        assertTrue(p.canPersist(p.currentGeneration(), "recycle", stableAt));
+    }
+
+    @Test
+    public void snowRecuperationFeedbackIsNeverTreatedAsUserSelection() {
+        ModeSyncPolicy p = new ModeSyncPolicy();
+        p.updateExpected(
+                "SNOW", "SREV", "HIGH",
+                true, true, true,
+                true, true, true);
+        long generation = p.beginRestore();
+
+        assertEquals(ModeSyncPolicy.Decision.IGNORE,
+                p.evaluate("recycle", "LOW", 1_000L));
+        assertTrue(p.completeRestore(generation, 2_000L));
+        assertEquals(ModeSyncPolicy.Decision.IGNORE,
+                p.evaluate("recycle", "LOW",
+                        2_000L + ModeSyncPolicy.POST_RESTORE_SETTLE_MS));
+    }
 }

@@ -30,6 +30,10 @@ public class MainActivity extends AppCompatActivity {
     private static boolean driveEnabled   = false;
     private static boolean recycleEnabled = false;
     private static boolean energyEnabled  = false;
+    // Opt-out flags: missing provider/cache values preserve the historical remember-last behaviour.
+    private static boolean driveRememberLast   = true;
+    private static boolean energyRememberLast  = true;
+    private static boolean recycleRememberLast = true;
     private static boolean disablePedestrianSound = false;
     /** Форсированный электрорежим (колонка 19 провайдера RestoreMode). */
     private static boolean forcedEv = false;
@@ -323,6 +327,11 @@ public class MainActivity extends AppCompatActivity {
                         && cursor.getInt(27) == 1;
                 apolloStockUiEnabled = cursor.getColumnCount() > 28
                         && cursor.getInt(28) == 1;
+                // cols 29..31 — opt-out remember-last flags. Older providers and SQL-style NULL
+                // both mean true, so an update never silently changes historical behaviour.
+                driveRememberLast = cursorBooleanDefaultTrue(cursor, 29);
+                energyRememberLast = cursorBooleanDefaultTrue(cursor, 30);
+                recycleRememberLast = cursorBooleanDefaultTrue(cursor, 31);
                 // col 12 — «Режим отладки»: эмуляция CAN в логи вместо реальной отправки
                 boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
                 // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
@@ -334,9 +343,14 @@ public class MainActivity extends AppCompatActivity {
                 boolean pauseMediaOnDoor = cursor.getColumnCount() > 18 && cursor.getInt(18) == 1;
                 applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
                 saveModesCache(context, debugMode, wiperColdMode, pauseMediaOnDoor);
-                ApplyEngine.noteLoadedModes(driveMode, energy, driveEnabled, energyEnabled);
+                ApplyEngine.noteLoadedModes(
+                        driveMode, energy, recycle,
+                        driveEnabled, energyEnabled, recycleEnabled,
+                        driveRememberLast, energyRememberLast, recycleRememberLast);
                 Log.i(MODES_LOG, "FRESH: driveEnabled=" + driveEnabled
                         + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
+                        + " rememberLast=" + driveRememberLast + "/" + energyRememberLast
+                        + "/" + recycleRememberLast
                         + " disablePedestrianSound=" + disablePedestrianSound
                         + " fragranceEnabled=" + fragranceEnabled
                         + " fragrance=" + fragranceTaste + "/" + fragranceDuration
@@ -370,6 +384,11 @@ public class MainActivity extends AppCompatActivity {
         return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
+    /** Missing or NULL opt-out fields are enabled; only an explicit numeric zero disables them. */
+    private static boolean cursorBooleanDefaultTrue(Cursor cursor, int column) {
+        return cursor.getColumnCount() <= column || cursor.isNull(column) || cursor.getInt(column) != 0;
+    }
+
     /** Сохраняет успешно прочитанный снимок настроек в NativePrefs (кэш на случай «глухого» пробуждения). */
     private static void saveModesCache(Context context, boolean debugMode, boolean wiperColdMode, boolean pauseMediaOnDoor) {
         nativePrefs(context).edit()
@@ -381,6 +400,9 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheDriveEnabled", driveEnabled)
                 .putBoolean("cacheRecycleEnabled", recycleEnabled)
                 .putBoolean("cacheEnergyEnabled", energyEnabled)
+                .putBoolean("cacheDriveRememberLast", driveRememberLast)
+                .putBoolean("cacheEnergyRememberLast", energyRememberLast)
+                .putBoolean("cacheRecycleRememberLast", recycleRememberLast)
                 .putBoolean("cacheDisablePedestrianSound", disablePedestrianSound)
                 .putBoolean("cacheForcedEv", forcedEv)
                 .putBoolean("cacheFragranceEnabled", fragranceEnabled)
@@ -414,6 +436,9 @@ public class MainActivity extends AppCompatActivity {
         driveEnabled       = p.getBoolean("cacheDriveEnabled", false);
         recycleEnabled     = p.getBoolean("cacheRecycleEnabled", false);
         energyEnabled      = p.getBoolean("cacheEnergyEnabled", false);
+        driveRememberLast  = p.getBoolean("cacheDriveRememberLast", true);
+        energyRememberLast = p.getBoolean("cacheEnergyRememberLast", true);
+        recycleRememberLast = p.getBoolean("cacheRecycleRememberLast", true);
         disablePedestrianSound = p.getBoolean("cacheDisablePedestrianSound", false);
         forcedEv = p.getBoolean("cacheForcedEv", false);
         fragranceEnabled = p.getBoolean("cacheFragranceEnabled", false);
@@ -433,9 +458,14 @@ public class MainActivity extends AppCompatActivity {
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
         applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
-        ApplyEngine.noteLoadedModes(driveMode, energy, driveEnabled, energyEnabled);
+        ApplyEngine.noteLoadedModes(
+                driveMode, energy, recycle,
+                driveEnabled, energyEnabled, recycleEnabled,
+                driveRememberLast, energyRememberLast, recycleRememberLast);
         Log.i(MODES_LOG, "CACHE: driveEnabled=" + driveEnabled
                 + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
+                + " rememberLast=" + driveRememberLast + "/" + energyRememberLast
+                + "/" + recycleRememberLast
                 + " disablePedestrianSound=" + disablePedestrianSound
                 + " fragranceEnabled=" + fragranceEnabled
                 + " fragrance=" + fragranceTaste + "/" + fragranceDuration
@@ -653,15 +683,44 @@ public class MainActivity extends AppCompatActivity {
 
     /** Быстрая проверка уже загруженного snapshot без повторного запроса к provider на каждый VState. */
     static boolean isLoadedMode(boolean isEnergy, String mode) {
+        return isLoadedMode(isEnergy ? "energy" : "driveMode", mode);
+    }
+
+    /** Fast comparison against the full in-memory drive/energy/recuperation snapshot. */
+    static boolean isLoadedMode(String modeKey, String mode) {
         if (mode == null) return false;
-        return mode.equals(isEnergy ? energy : driveMode);
+        if ("energy".equals(modeKey)) return mode.equals(energy);
+        if ("recycle".equals(modeKey)) return mode.equals(recycle);
+        return "driveMode".equals(modeKey) && mode.equals(driveMode);
+    }
+
+    /** Applies an already-persisted UI opt-out immediately to the running feedback policy/cache. */
+    static void updateRememberLastMode(Context context, String modeKey, boolean rememberLast) {
+        final String cacheKey;
+        if ("driveMode".equals(modeKey)) {
+            driveRememberLast = rememberLast;
+            cacheKey = "cacheDriveRememberLast";
+        } else if ("energy".equals(modeKey)) {
+            energyRememberLast = rememberLast;
+            cacheKey = "cacheEnergyRememberLast";
+        } else if ("recycle".equals(modeKey)) {
+            recycleRememberLast = rememberLast;
+            cacheKey = "cacheRecycleRememberLast";
+        } else {
+            return;
+        }
+        ApplyEngine.noteRememberLastMode(modeKey, rememberLast);
+        if (context != null) {
+            nativePrefs(context).edit().putBoolean(cacheKey, rememberLast).apply();
+        }
+        Log.i(MODES_LOG, "rememberLast " + modeKey + "=" + rememberLast);
     }
 
     /**
      * Сохранить «последний активированный» режим как ИСТОЧНИК ИСТИНЫ: пишем в pref RestoreMode через
      * провайдер (переживёт пробуждение + попадёт в UI VoyahTune), плюс освежаем статик Native и его кэш
      * (fallback «глухого» пробуждения). Вызывает кнопка руля (SetModesReceiverDynamic.cycleMode); после
-     * снятия value-ID на голове — синк внешней смены режима (см. TripStatsService).
+     * снятия value-ID на голове — синк внешней смены режима (см. ModeFeedbackController).
      * @param isEnergy true → энергорежим (pref "energy"), иначе режим вождения (pref "driveMode").
      */
     public static void persistSavedMode(Context context, boolean isEnergy, String mode) {
@@ -686,7 +745,7 @@ public class MainActivity extends AppCompatActivity {
         if ("energy".equals(modeKey)) energy = mode;
         else if ("recycle".equals(modeKey)) recycle = mode;
         else driveMode = mode;
-        if (!"recycle".equals(modeKey)) ApplyEngine.noteSavedMode("energy".equals(modeKey), mode);
+        ApplyEngine.noteSavedMode(modeKey, mode);
         // Уведомить UI VoyahTune, чтобы селектор режима следил за текущим в реальном времени — даже когда
         // режим сменили штатным меню машины или кнопкой руля при ОТКРЫТОМ экране «Настройки автомобиля».
         try {

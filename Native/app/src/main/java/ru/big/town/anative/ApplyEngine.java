@@ -122,14 +122,29 @@ public final class ApplyEngine {
     }
 
     /** Полный снимок источника истины, прочитанный MainActivity из provider/cache. */
-    static void noteLoadedModes(String drive, String energy,
-                                boolean driveEnabled, boolean energyEnabled) {
-        MODE_SYNC_POLICY.updateExpected(drive, energy, driveEnabled, energyEnabled);
+    static void noteLoadedModes(String drive, String energy, String recycle,
+                                boolean driveEnabled, boolean energyEnabled,
+                                boolean recycleEnabled,
+                                boolean driveRememberLast, boolean energyRememberLast,
+                                boolean recycleRememberLast) {
+        MODE_SYNC_POLICY.updateExpected(
+                drive, energy, recycle,
+                driveEnabled, energyEnabled, recycleEnabled,
+                driveRememberLast, energyRememberLast, recycleRememberLast);
     }
 
     /** Явно сохранённый режим (руль или уже разрешённая внешняя смена) сразу становится ожидаемым. */
     static void noteSavedMode(boolean energy, String mode) {
-        MODE_SYNC_POLICY.updateExpectedMode(energy, mode);
+        noteSavedMode(energy ? "energy" : "driveMode", mode);
+    }
+
+    static void noteSavedMode(String modeKey, String mode) {
+        MODE_SYNC_POLICY.updateExpectedMode(modeKey, mode);
+    }
+
+    /** Немедленно закрывает/открывает feedback persistence для одного режима. */
+    static void noteRememberLastMode(String modeKey, boolean rememberLast) {
+        MODE_SYNC_POLICY.updateRememberLast(modeKey, rememberLast);
     }
 
     /**
@@ -137,18 +152,21 @@ public final class ApplyEngine {
      * не перезаписывает provider. Несовпадение запускает коалесцированный корректирующий цикл.
      */
     static boolean shouldPersistModeFeedback(boolean energy, String observedMode) {
+        return shouldPersistModeFeedback(energy ? "energy" : "driveMode", observedMode);
+    }
+
+    static boolean shouldPersistModeFeedback(String modeKey, String observedMode) {
         final ModeSyncPolicy.Decision decision;
         synchronized (RESTORE_LOCK) {
-            decision = MODE_SYNC_POLICY.evaluate(energy, observedMode, SystemClock.uptimeMillis());
+            decision = MODE_SYNC_POLICY.evaluate(modeKey, observedMode, SystemClock.uptimeMillis());
             if (decision == ModeSyncPolicy.Decision.CORRECT) {
-                String kind = energy ? "energy" : "drive";
-                Log.w(TAG, "wake feedback conflicts with saved " + kind + " mode: " + observedMode
+                Log.w(TAG, "wake feedback conflicts with saved " + modeKey + " mode: " + observedMode
                         + " — restoring source of truth again");
                 // Keep evaluation and enqueue ordered against resetRestoreGate(). Otherwise sleep
                 // could freeze/cancel between them and this pre-sleep feedback would enqueue a fresh
                 // restore after reset. Java synchronized is reentrant, so scheduleApply uses the same
                 // lock and reset either happens wholly before or wholly after this correction enqueue.
-                scheduleApply("wake " + kind + " drift " + observedMode);
+                scheduleApply("wake " + modeKey + " drift " + observedMode);
                 return false;
             }
         }
@@ -158,23 +176,29 @@ public final class ApplyEngine {
 
     /** Revalidates stable feedback without holding the restore-cancellation lock across Binder I/O. */
     static void persistModeFeedbackIfAllowed(Context context, boolean energy, String observedMode) {
+        persistModeFeedbackIfAllowed(
+                context, energy ? "energy" : "driveMode", observedMode);
+    }
+
+    static void persistModeFeedbackIfAllowed(
+            Context context, String modeKey, String observedMode) {
         final long gateGeneration;
         synchronized (RESTORE_LOCK) {
-            if (!shouldPersistModeFeedback(energy, observedMode)) return;
+            if (!shouldPersistModeFeedback(modeKey, observedMode)) return;
             gateGeneration = MODE_SYNC_POLICY.currentGeneration();
         }
 
-        if (MainActivity.isLoadedMode(energy, observedMode)) return;
+        if (MainActivity.isLoadedMode(modeKey, observedMode)) return;
 
         // Provider.update/broadcast may block on another process. Revalidate immediately before it,
         // then release RESTORE_LOCK so sleep can cancel CAN even if that external process is stuck.
         synchronized (RESTORE_LOCK) {
             if (!MODE_SYNC_POLICY.canPersist(
-                    gateGeneration, SystemClock.uptimeMillis())) {
+                    gateGeneration, modeKey, SystemClock.uptimeMillis())) {
                 return;
             }
         }
-        MainActivity.persistSavedMode(context, energy, observedMode);
+        MainActivity.persistSavedMode(context, modeKey, observedMode);
     }
 
     private ApplyEngine() {}

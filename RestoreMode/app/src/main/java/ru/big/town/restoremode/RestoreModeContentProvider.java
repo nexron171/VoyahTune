@@ -22,6 +22,9 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  boolean driveEnabled=false;
     private  boolean recycleEnabled=false;
     private  boolean energyEnabled=false;
+    private boolean driveRememberLast=true;
+    private boolean energyRememberLast=true;
+    private boolean recycleRememberLast=true;
     private  int lightSensorThreshold=3;
     private  int lightSensorThresholdOff=5;
     private  boolean disablePedestrianSound=false;
@@ -109,6 +112,10 @@ public class RestoreModeContentProvider extends ContentProvider {
         driveEnabled          = sharedPreferences.getBoolean("driveEnabled",          false);
         recycleEnabled        = sharedPreferences.getBoolean("recycleEnabled",        false);
         energyEnabled         = sharedPreferences.getBoolean("energyEnabled",         false);
+        // Opt-out setting: upgrades without the key keep the historical remember-last behaviour.
+        driveRememberLast     = sharedPreferences.getBoolean("driveRememberLast",     true);
+        energyRememberLast    = sharedPreferences.getBoolean("energyRememberLast",    true);
+        recycleRememberLast   = sharedPreferences.getBoolean("recycleRememberLast",   true);
         lightSensorThreshold    = sharedPreferences.getInt("lightSensorThreshold",    3);
         lightSensorThresholdOff = sharedPreferences.getInt("lightSensorThresholdOff", 5);
         disablePedestrianSound  = sharedPreferences.getBoolean("disablePedestrianSound", false);
@@ -169,6 +176,9 @@ public class RestoreModeContentProvider extends ContentProvider {
                 ApolloSettings.GREEN_SOUND, // 26 — звук зелёного сигнала
                 ApolloSettings.TRAFFIC_SIGNS,// 27 — распознавание дорожных знаков
                 ApolloSettings.STOCK_UI,      // 28 — эмуляция подписки/экзамена для штатного UI
+                "driveRememberLast",        // 29 — null/нет колонки трактуется Native как true
+                "energyRememberLast",       // 30 — null/нет колонки трактуется Native как true
+                "recycleRememberLast",      // 31 — null/нет колонки трактуется Native как true
         });
 
         cursor.addRow(new Object[]{
@@ -197,6 +207,9 @@ public class RestoreModeContentProvider extends ContentProvider {
                 apolloGreenSoundEnabled ? 1 : 0,
                 apolloTrafficSignsEnabled ? 1 : 0,
                 apolloStockUiEnabled ? 1 : 0,
+                driveRememberLast ? 1 : 0,
+                energyRememberLast ? 1 : 0,
+                recycleRememberLast ? 1 : 0,
         });
        return cursor;
 

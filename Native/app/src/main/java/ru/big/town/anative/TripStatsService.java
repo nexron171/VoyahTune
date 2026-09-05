@@ -10,7 +10,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -79,10 +78,8 @@ public class TripStatsService extends Service {
     private static final String PREFS = "TripStats";
 
     private Handler timerHandler;
-    private HandlerThread modeFeedbackThread;
-    private Handler modeFeedbackHandler;
-    private CanBusEventHub.Subscription tripCanBusSubscription;
-    private CanBusEventHub.Subscription modeCanBusSubscription;
+    private GearStateController.Subscription gearStateSubscription;
+    private DriverDoorStateController.Subscription driverDoorSubscription;
     private volatile boolean destroyed = false;
 
     // Состояние текущей поездки
@@ -98,37 +95,6 @@ public class TripStatsService extends Service {
         canStatePublishPending = false;
         persistAndBroadcast();
     };
-
-    private void onTripCanBusEvent(CanBusEvent event) {
-        if (destroyed) return;
-        switch (event.kind) {
-            case GEAR:
-                onGear(event.first);
-                break;
-            case DOOR:
-                // Door snapshots are levels for Wiper only, never a real trip-finalization edge.
-                if (event.origin == CanBusEvent.Origin.LIVE) onDoor(event.first);
-                break;
-            default:
-                break;
-        }
-    }
-
-    private void onModeCanBusEvent(CanBusEvent event) {
-        if (destroyed) return;
-        if (event.kind == CanBusEvent.Kind.CONNECTION) {
-            // CONNECTION and mode feedback share this serial Handler. The hub queues the barrier
-            // first, so the restore gate closes before any buffered OEM mode value is accepted.
-            ApplyEngine.scheduleApply("CanBus connected");
-            return;
-        }
-        if (event.kind != CanBusEvent.Kind.VEHICLE_STATE) return;
-        maybeSyncMode(event.first, event.second);
-        if (NativeLog.get().isRunning()) {
-            Log.i(TAG, "VSTATE mode id=" + event.first + " state=" + event.second);
-        }
-    }
-
     // -------------------------------------------------------------------------
     // Стейт-машина
     // -------------------------------------------------------------------------
@@ -341,77 +307,6 @@ public class TripStatsService extends Service {
         long s = ms / 1000; return (s / 60) + "м " + (s % 60) + "с";
     }
 
-    // ------------------------------------------------------------------------
-    // FEEDBACK РЕЖИМОВ ОТ МАШИНЫ — С ОКНОМ ЗАЩИТЫ WAKE-RESTORE.
-    //
-    // На пробуждении машина сначала публикует дефолтные ECO/EV, и их нельзя сохранять поверх последнего
-    // режима. Первые 30 секунд после успешного restore feedback может запросить одну bounded-коррекцию,
-    // но не пишется в prefs. После защитного окна машина снова является допустимым источником истины:
-    // устойчивое внешнее изменение сохраняется так же, как команда руля или VoyahTune.
-    //
-    // Value-ID сняты на голове H97C (2026-07). ВАЖНО про режим вождения: берём сигнал ВЫБРАННОГО ПУНКТА
-    // меню DRIVING_MODE_SET (id 545), а НЕ DRIVING_MODE_SET_FB (id 787) — последний это параметр «режим
-    // управления» (эко/стандарт/спорт), которым «Собственный» тоже прикидывается (у Собственного управление
-    // может стоять на Спорт → FB=3=Спорт, неразличимо). DRIVING_MODE_SET различает: Собственный=5, Снег=6.
-    // (id785=ASC_MODE_SET_FB подвеска — тоже следует за режимом, но может меняться отдельно, не берём.)
-    // Энергорежим — IVI_SOC_MODESET (id 957). Оба приходят в наш code=36 колбэк как (id, state).
-    private static final int DRIVE_MODE_VSTATE_ID  = 545;  // DRIVING_MODE_SET (выбранный пункт режима вождения)
-    private static final int ENERGY_MODE_VSTATE_ID = 957;  // IVI_SOC_MODESET (энергорежим / power mode)
-
-    private void maybeSyncMode(int id, int state) {
-        if (id < 0) return;                                // -1 = «нет id» в parcel; не коллизимся с сентинелом
-        try {
-            final boolean energy;
-            final String mode;
-            if (id == DRIVE_MODE_VSTATE_ID) {
-                energy = false;
-                mode = driveModeFromState(state);
-            } else if (id == ENERGY_MODE_VSTATE_ID) {
-                energy = true;
-                mode = energyModeFromState(state);
-            } else return;
-
-            // Неизвестный/переходный state нельзя угадывать и тем более сохранять как пользовательский.
-            if (mode == null) {
-                if (NativeLog.get().isRunning()) {
-                    Log.i(TAG, "maybeSyncMode: unknown state ignored id=" + id + " state=" + state);
-                }
-                return;
-            }
-            // Во время restore+30s policy либо игнорирует ожидаемое эхо, либо запускает одну
-            // корректирующую попытку. После окна стабильный feedback разрешено сохранить.
-            ApplyEngine.persistModeFeedbackIfAllowed(getApplicationContext(), energy, mode);
-        } catch (Exception e) {
-            Log.w(TAG, "maybeSyncMode: " + e.getMessage());
-        }
-    }
-
-    /** DRIVING_MODE_SET (id545) → тег выбранного режима вождения (снято на голове H97C, подтверждено таймингом).
-     *  Собственный=5 и Снег=6 — отличимы (в отличие от FB-параметра управления). Неизвестное → не синкать. */
-    private static String driveModeFromState(int state) {
-        switch (state) {
-            case 1: return "ECO";
-            case 2: return "COMFORT";
-            case 3: return "SPORT";
-            case 4: return "OUTING";       // Загород
-            case 5: return "INDIVIDUAL";   // Собственный
-            case 6: return "SNOW";         // Снег
-            default: return null;
-        }
-    }
-
-    /** IVI_SOC_MODESET (id957) → тег энергорежима (снято на голове H97C).
-     *  Неизвестное/переходное значение не синкаем: угадывание раньше безусловно превращало его в REV.
-     *  SMART намеренно не угадываем без подтверждённого state на конкретной комплектации. */
-    private static String energyModeFromState(int state) {
-        switch (state) {
-            case 2: return "EV";     // Электро
-            case 3: return "REV";    // Гибрид (fuel)
-            case 4: return "SREV";   // Топливо (save)
-            default: return null;
-        }
-    }
-
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
@@ -421,9 +316,6 @@ public class TripStatsService extends Service {
         super.onCreate();
         Log.i(TAG, "onCreate()");
         timerHandler = new Handler(Looper.getMainLooper());
-        modeFeedbackThread = new HandlerThread("TripModeFeedback");
-        modeFeedbackThread.start();
-        modeFeedbackHandler = new Handler(modeFeedbackThread.getLooper());
         restoreState();
 
         createNotificationChannel();
@@ -441,16 +333,12 @@ public class TripStatsService extends Service {
         ContextCompat.registerReceiver(this, requestReceiver, reqFilter,
                 ContextCompat.RECEIVER_EXPORTED);
 
-        CanBusEventHub hub = CanBusEventHub.get(this);
-        modeCanBusSubscription = hub.subscribe(
-                CanBusEventRouter.INTEREST_CONNECTION
-                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                new int[]{DRIVE_MODE_VSTATE_ID, ENERGY_MODE_VSTATE_ID},
-                modeFeedbackHandler, this::onModeCanBusEvent);
-        tripCanBusSubscription = hub.subscribe(
-                CanBusEventRouter.INTEREST_DOOR
-                        | CanBusEventRouter.INTEREST_GEAR,
-                null, timerHandler, this::onTripCanBusEvent);
+        VehicleStateControllers vehicleState = VehicleStateControllers.get(this);
+        gearStateSubscription = vehicleState.gear().subscribe(timerHandler, this::onGear);
+        driverDoorSubscription = vehicleState.driverDoor().subscribe(timerHandler, state -> {
+            // Seed/replay is a level for consumers such as Wiper, never a trip-finalization edge.
+            if (state.isLive()) onDoor(state.frontLeft);
+        });
     }
 
     @Override
@@ -477,16 +365,14 @@ public class TripStatsService extends Service {
             persistState();
         }
         destroyed = true;
-        CanBusEventHub.Subscription tripSubscription = tripCanBusSubscription;
-        CanBusEventHub.Subscription modeSubscription = modeCanBusSubscription;
-        tripCanBusSubscription = null;
-        modeCanBusSubscription = null;
-        if (tripSubscription != null) tripSubscription.close();
-        if (modeSubscription != null) modeSubscription.close();
+        GearStateController.Subscription gearSubscription = gearStateSubscription;
+        DriverDoorStateController.Subscription doorSubscription = driverDoorSubscription;
+        gearStateSubscription = null;
+        driverDoorSubscription = null;
+        if (gearSubscription != null) gearSubscription.close();
+        if (doorSubscription != null) doorSubscription.close();
         try { unregisterReceiver(requestReceiver); } catch (Exception ignored) {}
         timerHandler.removeCallbacksAndMessages(null);
-        if (modeFeedbackHandler != null) modeFeedbackHandler.removeCallbacksAndMessages(null);
-        if (modeFeedbackThread != null) modeFeedbackThread.quitSafely();
         super.onDestroy();
     }
 

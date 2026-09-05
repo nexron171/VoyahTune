@@ -32,8 +32,13 @@ final class ModeSyncPolicy {
 
     private String expectedDrive;
     private String expectedEnergy;
+    private String expectedRecycle;
     private boolean driveEnabled;
     private boolean energyEnabled;
+    private boolean recycleEnabled;
+    private boolean driveRememberLast = true;
+    private boolean energyRememberLast = true;
+    private boolean recycleRememberLast = true;
 
     /**
      * Starts a new guarded restore generation while retaining the last known saved snapshot.
@@ -98,25 +103,59 @@ final class ModeSyncPolicy {
 
     /** Pure revalidation immediately before potentially blocking provider persistence. */
     synchronized boolean canPersist(long candidateGeneration, long nowUptime) {
+        return canPersist(candidateGeneration, "driveMode", nowUptime);
+    }
+
+    /** Revalidates both the wake token and the per-mode remember-last opt-out. */
+    synchronized boolean canPersist(long candidateGeneration, String modeKey, long nowUptime) {
         return candidateGeneration == generation
                 && restoreCompleted
-                && nowUptime >= acceptAfterUptime;
+                && nowUptime >= acceptAfterUptime
+                && acceptsExternalFeedback(modeKey);
     }
 
     /** Refreshes the source-of-truth snapshot loaded from RestoreMode/provider or Native cache. */
     synchronized void updateExpected(String drive, String energy,
                                      boolean driveEnabled, boolean energyEnabled) {
+        updateExpected(drive, energy, expectedRecycle,
+                driveEnabled, energyEnabled, recycleEnabled,
+                driveRememberLast, energyRememberLast, recycleRememberLast);
+    }
+
+    /** Refreshes the complete source-of-truth snapshot and per-mode feedback preferences. */
+    synchronized void updateExpected(String drive, String energy, String recycle,
+                                     boolean driveEnabled, boolean energyEnabled,
+                                     boolean recycleEnabled,
+                                     boolean driveRememberLast, boolean energyRememberLast,
+                                     boolean recycleRememberLast) {
         if (valid(drive)) expectedDrive = drive;
         if (valid(energy)) expectedEnergy = energy;
+        if (valid(recycle)) expectedRecycle = recycle;
         this.driveEnabled = driveEnabled;
         this.energyEnabled = energyEnabled;
+        this.recycleEnabled = recycleEnabled;
+        this.driveRememberLast = driveRememberLast;
+        this.energyRememberLast = energyRememberLast;
+        this.recycleRememberLast = recycleRememberLast;
     }
 
     /** Updates one explicitly saved mode immediately (steering button or accepted external change). */
     synchronized void updateExpectedMode(boolean energy, String mode) {
+        updateExpectedMode(energy ? "energy" : "driveMode", mode);
+    }
+
+    synchronized void updateExpectedMode(String modeKey, String mode) {
         if (!valid(mode)) return;
-        if (energy) expectedEnergy = mode;
-        else expectedDrive = mode;
+        if ("energy".equals(modeKey)) expectedEnergy = mode;
+        else if ("recycle".equals(modeKey)) expectedRecycle = mode;
+        else if ("driveMode".equals(modeKey)) expectedDrive = mode;
+    }
+
+    /** Applies an explicit UI opt-out without waiting for the next full provider reload. */
+    synchronized void updateRememberLast(String modeKey, boolean rememberLast) {
+        if ("driveMode".equals(modeKey)) driveRememberLast = rememberLast;
+        else if ("energy".equals(modeKey)) energyRememberLast = rememberLast;
+        else if ("recycle".equals(modeKey)) recycleRememberLast = rememberLast;
     }
 
     /** Opens feedback only after the matching generation has restored and then settled. */
@@ -137,12 +176,24 @@ final class ModeSyncPolicy {
     }
 
     synchronized Decision evaluate(boolean energy, String observedMode, long nowUptime) {
-        if (!valid(observedMode)) return Decision.IGNORE;
-        // The car is a valid source of truth only after the wake-default window has elapsed.
-        if (restoreCompleted && nowUptime >= acceptAfterUptime) return Decision.ACCEPT;
+        return evaluate(energy ? "energy" : "driveMode", observedMode, nowUptime);
+    }
 
-        String expected = energy ? expectedEnergy : expectedDrive;
-        boolean enabled = energy ? energyEnabled : driveEnabled;
+    synchronized Decision evaluate(String modeKey, String observedMode, long nowUptime) {
+        if (!valid(observedMode)) return Decision.IGNORE;
+        if (!knownModeKey(modeKey)) return Decision.IGNORE;
+        // Snow owns minimum recuperation; that safety-derived value is not a user selection and
+        // must neither replace the stored recuperation target nor trigger an impossible correction.
+        if ("recycle".equals(modeKey) && "SNOW".equals(expectedDrive)) {
+            return Decision.IGNORE;
+        }
+        // The car is a valid source of truth only after the wake-default window has elapsed.
+        if (restoreCompleted && nowUptime >= acceptAfterUptime) {
+            return acceptsExternalFeedback(modeKey) ? Decision.ACCEPT : Decision.IGNORE;
+        }
+
+        String expected = expected(modeKey);
+        boolean enabled = enabled(modeKey);
         if (!correctionAllowed || !enabled || !valid(expected) || expected.equals(observedMode)) {
             return Decision.IGNORE;
         }
@@ -156,6 +207,35 @@ final class ModeSyncPolicy {
             return Decision.CORRECT;
         }
         return Decision.IGNORE;
+    }
+
+    private String expected(String modeKey) {
+        if ("energy".equals(modeKey)) return expectedEnergy;
+        if ("recycle".equals(modeKey)) return expectedRecycle;
+        return expectedDrive;
+    }
+
+    private boolean enabled(String modeKey) {
+        if ("energy".equals(modeKey)) return energyEnabled;
+        if ("recycle".equals(modeKey)) return recycleEnabled;
+        return driveEnabled;
+    }
+
+    private boolean remembers(String modeKey) {
+        if ("energy".equals(modeKey)) return energyRememberLast;
+        if ("recycle".equals(modeKey)) return recycleRememberLast;
+        return "driveMode".equals(modeKey) && driveRememberLast;
+    }
+
+    private boolean acceptsExternalFeedback(String modeKey) {
+        return remembers(modeKey)
+                && !("recycle".equals(modeKey) && "SNOW".equals(expectedDrive));
+    }
+
+    private static boolean knownModeKey(String modeKey) {
+        return "driveMode".equals(modeKey)
+                || "energy".equals(modeKey)
+                || "recycle".equals(modeKey);
     }
 
     private static boolean valid(String mode) {

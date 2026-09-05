@@ -707,6 +707,32 @@
 
                 </LinearLayout>
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginBottom="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Запоминать последнее выбранное значение"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                    <Switch
+                        android:id="@+id/switchDriveRememberLast"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
                 <RadioGroup
                     android:id="@+id/drive_modes_group"
                     style="@style/radio_group_height_70_style"
@@ -1032,6 +1058,32 @@
 
                 </LinearLayout>
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginBottom="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Запоминать последнее выбранное значение"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                    <Switch
+                        android:id="@+id/switchEnergyRememberLast"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
                 <RadioGroup
                     android:id="@+id/energy_modes_group"
                     style="@style/radio_group_height_70_style"
@@ -1113,6 +1165,32 @@
 
                     <Switch
                         android:id="@+id/switchRecycle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:thumb="@drawable/switch_thumb"
+                        android:track="@drawable/switch_track" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginBottom="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Запоминать последнее выбранное значение"
+                        android:textColor="#ffffff"
+                        android:textSize="26px" />
+
+                    <Switch
+                        android:id="@+id/switchRecycleRememberLast"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:checked="true"

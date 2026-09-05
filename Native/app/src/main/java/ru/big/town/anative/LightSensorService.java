@@ -48,8 +48,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *    single-flight очереди, не блокируя main и bind/reconnect.
  *  - Safety-poll каждые SAFETY_POLL_MS: фоновая страховка от пропущенного события.
  *    CAN шлёт только при реальной смене цели — холостого трафика не создаёт.
- *  - Общая process-wide подписка CanBusEventHub фильтрует LightStatus, Gear и только
- *    VehicleState 1072 до очереди этого сервиса. Когда BCM сам уходит в «авто» (перевод КПП
+ *  - Общая process-wide подписка CanBusEventHub фильтрует LightStatus и только VehicleState 1072,
+ *    а КПП приходит через GearStateController. Когда BCM сам уходит в «авто» (перевод КПП
  *    в Drive сбрасывает фары в auto) при нашем таргете «ближний» — возвращаем ближний.
  *    Ручное «выкл» (autoLamp=0, headLight=0) под правило не попадает — уважается.
  *    Guard HEADLIGHT_GUARD_MS отсекает «эхо» собственных команд. Так заменяется
@@ -205,6 +205,7 @@ public class LightSensorService extends Service {
     private volatile int lastReason = -1;
 
     private CanBusEventHub.Subscription canBusSubscription;
+    private GearStateController.Subscription gearStateSubscription;
     private volatile boolean destroyed = false;
     // Последние значимые поля LightStatus — фильтр шума от поворотников/стопа
     private int lastAutoLamp   = -1;
@@ -260,9 +261,6 @@ public class LightSensorService extends Service {
         switch (event.kind) {
             case LIGHT_STATUS:
                 onLightStatusChanged(event.first, event.second, event.third);
-                break;
-            case GEAR:
-                onGear(event.first);
                 break;
             case VEHICLE_STATE:
                 if (event.first == RSM_LIGHT_SW_REASON) onLightSwReason(event.second);
@@ -1094,9 +1092,10 @@ public class LightSensorService extends Service {
         requestCarSignalMaintenance();
         canBusSubscription = CanBusEventHub.get(this).subscribe(
                 CanBusEventRouter.INTEREST_LIGHT_STATUS
-                        | CanBusEventRouter.INTEREST_GEAR
                         | CanBusEventRouter.INTEREST_VEHICLE_STATE,
                 new int[]{RSM_LIGHT_SW_REASON}, timerHandler, this::onCanBusEvent);
+        gearStateSubscription = VehicleStateControllers.get(this).gear().subscribe(
+                timerHandler, this::onGear);
         timerHandler.postDelayed(safetyRunnable, 2_000L);
     }
 
@@ -1122,6 +1121,9 @@ public class LightSensorService extends Service {
         CanBusEventHub.Subscription subscription = canBusSubscription;
         canBusSubscription = null;
         if (subscription != null) subscription.close();
+        GearStateController.Subscription gearSubscription = gearStateSubscription;
+        gearStateSubscription = null;
+        if (gearSubscription != null) gearSubscription.close();
         try { unregisterReceiver(requestReceiver); } catch (Exception ignored) {}
         timerHandler.removeCallbacks(safetyRunnable);
         timerHandler.removeCallbacks(forceInitRunnable);

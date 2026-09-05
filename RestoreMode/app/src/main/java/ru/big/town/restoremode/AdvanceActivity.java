@@ -122,6 +122,10 @@ public class AdvanceActivity extends AppCompatActivity {
     private static final String ACTION_BATTERY_HEAT_AUTO_CHANGED =
             "ru.big.town.anative.BATTERY_HEAT_AUTO_CHANGED";
     private static final String EXTRA_BATTERY_HEAT_AUTO_ENABLED = "autoEnabled";
+    private static final String ACTION_MODE_REMEMBER_CHANGED =
+            "ru.big.town.anative.MODE_REMEMBER_CHANGED";
+    private static final String EXTRA_MODE_KEY = "modeKey";
+    private static final String EXTRA_REMEMBER_LAST = "rememberLast";
 
     // Apollo Tech owns persisted targets, including the stock subscription/exam UI.
     private Switch switchApolloSettingsActivation, switchApolloTlc, switchApolloTrafficLights,
@@ -499,6 +503,7 @@ public class AdvanceActivity extends AppCompatActivity {
         // Раздел «Настройки автомобиля» (режимы + безопасность + комфорт слиты в один раздел)
         initModeRadios();
         initModeEnableToggles();
+        initModeRememberLastToggles();
         initFragranceSettings();
         initCheckBox34();
         initPedestrianSoundGroup();
@@ -1934,6 +1939,34 @@ public class AdvanceActivity extends AppCompatActivity {
         setupEnableSwitch(R.id.switchDriveMode,  R.id.drive_modes_group,   "driveEnabled");
         setupEnableSwitch(R.id.switchEnergy,     R.id.energy_modes_group,  "energyEnabled");
         setupEnableSwitch(R.id.switchRecycle,    R.id.recycle_modes_group, "recycleEnabled");
+    }
+
+    private void initModeRememberLastToggles() {
+        bindRememberLastSwitch(
+                R.id.switchDriveRememberLast, "driveRememberLast", "driveMode");
+        bindRememberLastSwitch(
+                R.id.switchEnergyRememberLast, "energyRememberLast", "energy");
+        bindRememberLastSwitch(
+                R.id.switchRecycleRememberLast, "recycleRememberLast", "recycle");
+    }
+
+    /**
+     * Remember-last is opt-out: an absent preference (including an upgraded installation) is on.
+     * Native also receives the change immediately so already-running vehicle feedback cannot move
+     * the selector after the user explicitly switches this off.
+     */
+    private void bindRememberLastSwitch(int switchId, String prefKey, String modeKey) {
+        Switch sw = findViewById(switchId);
+        if (sw == null) return;
+        sw.setChecked(prefs.getBoolean(prefKey, true));
+        sw.setOnCheckedChangeListener((button, checked) -> {
+            prefs.edit().putBoolean(prefKey, checked).apply();
+            Intent changed = new Intent(ACTION_MODE_REMEMBER_CHANGED)
+                    .setPackage(NATIVE_PACKAGE)
+                    .putExtra(EXTRA_MODE_KEY, modeKey)
+                    .putExtra(EXTRA_REMEMBER_LAST, checked);
+            sendBroadcast(changed);
+        });
     }
 
     /**
