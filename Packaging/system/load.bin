@@ -7,7 +7,8 @@
 #   4) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (3090, 173, медиа);
 #   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — по сохранённой настройке VoyahTune.
 #   6) keyboard_*.js         в com.qinggan.app.qgime — только при явном opt-in из «Другого».
-#   7) fullscreen_client.js  в выбранных приложениях — client DecorView заполняет место скрытого дока.
+#   7) app_client.js         в выбранных приложениях — client DecorView заполняет место скрытого дока,
+#                            а Yandex/Yango MapKit получает renderer scale выбранного per-app DPI.
 #
 # НАДЁЖНОСТЬ ИНЪЕКЦИИ (важно!):
 #   • По умолчанию каждая точная process identity (boot-id + pid + start-time) получает НЕ БОЛЕЕ
@@ -153,13 +154,15 @@ KEYBOARD_ATTEMPT=/data/local/tmp/voyahtune_keyboard.attempt
 KEYBOARD_LOG=/data/local/tmp/voyahtune_keyboard.txt
 KEYBOARD_SEEN_ID=
 KEYBOARD_MODE_CURRENT=unknown
-FULLSCREEN_CLIENT=/data/local/bin/fullscreen_client.js
-FULLSCREEN_CLIENT_SETTING=voyahtune_fullscreen_apps
-FULLSCREEN_CLIENT_READY='[fullscreen-client] hook ready v1'
-FULLSCREEN_CLIENT_BUSY=/data/local/tmp/voyahtune_fullscreen_client.busy
-FULLSCREEN_CLIENT_BUSY_TTL=45
-FULLSCREEN_CLIENT_CRASH_WINDOW=45
-FULLSCREEN_CLIENT_MAX_RAPID_RESTARTS=2
+APP_CLIENT=/data/local/bin/app_client.js
+APP_CLIENT_FULLSCREEN_SETTING=voyahtune_fullscreen_apps
+APP_CLIENT_DPI_SETTING=voyahtune_dpi_packages
+APP_CLIENT_READY='[app-client] hook ready v1'
+MAPKIT_DPI_CLIENT_READY='[mapkit-dpi] hook ready v1'
+APP_CLIENT_BUSY=/data/local/tmp/voyahtune_app_client.busy
+APP_CLIENT_BUSY_TTL=45
+APP_CLIENT_CRASH_WINDOW=45
+APP_CLIENT_MAX_RAPID_RESTARTS=2
 SWK_KM_BUSY_TTL=45                            # timeout 30s + 5s KILL + запас на cleanup
 LNCH_MARK=/data/local/tmp/voyahtune_lnch.pid     # exact process identity лаунчера с launcherdock
 MD_MARK=/data/local/tmp/voyahtune_md.pid         # exact process identity systemservice с multidisplay
@@ -847,14 +850,14 @@ inject_keymanager_bg() {
 # The per-app agent is intentionally lower priority than every core hook. Injection runs in one
 # global background worker, so a slow third-party process can never hold up dock/VD/steering status.
 # Both the attempt and success markers are bound to exact boot+pid+start-time identity.
-fullscreen_client_inject_is_live() {
+app_client_inject_is_live() {
     # Inspect the bounded cmdline set instead of relying on the kernel's truncated process name.
     # This scan runs only when a busy marker has already exceeded its 45-second TTL.
     for FC_INJECT_CMDLINE in /proc/[0-9]*/cmdline; do
         [ -r "$FC_INJECT_CMDLINE" ] || continue
         FC_INJECT_CMD=$(tr '\000' ' ' < "$FC_INJECT_CMDLINE" 2>/dev/null)
         case "$FC_INJECT_CMD" in
-            *"-p $1 "*"fullscreen_client.js"*) return 0 ;;
+            *"-p $1 "*"app_client.js"*) return 0 ;;
         esac
     done
     return 1
@@ -864,7 +867,7 @@ fullscreen_client_inject_is_live() {
 # prevents a broken OEM/agent combination from turning an optional fullscreen repair into an app
 # crash-loop, while an ordinary restart after a stable session remains injectable.
 #   $1=package  $2=exact identity  $3=history-file  $4=blocked-file
-prepare_fullscreen_client_attempt() {
+prepare_app_client_attempt() {
     FC_PREP_PACKAGE=$1
     FC_PREP_ID=$2
     FC_PREP_HISTORY=$3
@@ -889,15 +892,15 @@ prepare_fullscreen_client_attempt() {
             *)
                 FC_PREP_AGE=$((FC_PREP_NOW - FC_PREP_OLD_TIME))
                 if [ "$FC_PREP_AGE" -ge 0 ] \
-                        && [ "$FC_PREP_AGE" -lt "$FULLSCREEN_CLIENT_CRASH_WINDOW" ]; then
+                        && [ "$FC_PREP_AGE" -lt "$APP_CLIENT_CRASH_WINDOW" ]; then
                     FC_PREP_RAPID=$((FC_PREP_OLD_RAPID + 1))
                 fi
                 ;;
         esac
     fi
-    if [ "$FC_PREP_RAPID" -ge "$FULLSCREEN_CLIENT_MAX_RAPID_RESTARTS" ]; then
+    if [ "$FC_PREP_RAPID" -ge "$APP_CLIENT_MAX_RAPID_RESTARTS" ]; then
         printf '%s\n' "$FC_PREP_BOOT" > "$FC_PREP_BLOCKED"
-        loge "fullscreen client blocked after rapid restarts package=$FC_PREP_PACKAGE"
+        loge "app client blocked after rapid restarts package=$FC_PREP_PACKAGE"
         return 1
     fi
     FC_PREP_TMP="$FC_PREP_HISTORY.$$.new"
@@ -910,7 +913,8 @@ prepare_fullscreen_client_attempt() {
 }
 
 #   $1=package $2=pid $3=identity $4=injector $5=marker $6=attempt $7=log $8=history $9=blocked
-inject_fullscreen_client_bg() {
+#   $10=1 when MapKit readiness is mandatory for this exact injection
+inject_app_client_bg() {
     FC_TARGET_PACKAGE=$1
     FC_TARGET_PID=$2
     FC_TARGET_ID=$3
@@ -920,56 +924,57 @@ inject_fullscreen_client_bg() {
     FC_TARGET_LOG=$7
     FC_TARGET_HISTORY=$8
     FC_TARGET_BLOCKED=$9
+    FC_TARGET_REQUIRE_MAPKIT=${10}
 
     [ "$(cat "$FC_TARGET_MARK" 2>/dev/null)" = "$FC_TARGET_ID" ] && return 0
     [ "$(cat "$FC_TARGET_ATTEMPT" 2>/dev/null)" = "$FC_TARGET_ID" ] && return 0
 
     FC_BUSY_NOW=$(uptime_seconds)
-    FC_BUSY_RECORD=$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)
-    if [ -L "$FULLSCREEN_CLIENT_BUSY" ]; then
+    FC_BUSY_RECORD=$(readlink "$APP_CLIENT_BUSY" 2>/dev/null)
+    if [ -L "$APP_CLIENT_BUSY" ]; then
         FC_BUSY_PID=${FC_BUSY_RECORD%%|*}
         FC_BUSY_REST=${FC_BUSY_RECORD#*|}
         FC_BUSY_STARTED=${FC_BUSY_REST%%|*}
         case "$FC_BUSY_NOW:$FC_BUSY_STARTED" in
-            *[!0-9:]*|:*|*:) FC_BUSY_AGE=$FULLSCREEN_CLIENT_BUSY_TTL ;;
+            *[!0-9:]*|:*|*:) FC_BUSY_AGE=$APP_CLIENT_BUSY_TTL ;;
             *) FC_BUSY_AGE=$((FC_BUSY_NOW - FC_BUSY_STARTED)) ;;
         esac
-        if [ "$FC_BUSY_AGE" -ge 0 ] && [ "$FC_BUSY_AGE" -lt "$FULLSCREEN_CLIENT_BUSY_TTL" ]; then
+        if [ "$FC_BUSY_AGE" -ge 0 ] && [ "$FC_BUSY_AGE" -lt "$APP_CLIENT_BUSY_TTL" ]; then
             return 0
         fi
-        if fullscreen_client_inject_is_live "$FC_BUSY_PID"; then
+        if app_client_inject_is_live "$FC_BUSY_PID"; then
             return 0
         fi
-        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_RECORD" ] \
-            && rm -f "$FULLSCREEN_CLIENT_BUSY"
-    elif [ -e "$FULLSCREEN_CLIENT_BUSY" ]; then
-        rm -f "$FULLSCREEN_CLIENT_BUSY"
+        [ "$(readlink "$APP_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_RECORD" ] \
+            && rm -f "$APP_CLIENT_BUSY"
+    elif [ -e "$APP_CLIENT_BUSY" ]; then
+        rm -f "$APP_CLIENT_BUSY"
     fi
 
     FC_BUSY_TOKEN="$$.$FC_BUSY_NOW.$FC_TARGET_PID"
     FC_BUSY_OWN_RECORD="$FC_TARGET_PID|$FC_BUSY_NOW|$FC_BUSY_TOKEN"
-    ln -s "$FC_BUSY_OWN_RECORD" "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null || return 0
+    ln -s "$FC_BUSY_OWN_RECORD" "$APP_CLIENT_BUSY" 2>/dev/null || return 0
     FC_CURRENT_ID=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE" 2>/dev/null) \
         || FC_CURRENT_ID=
     if [ "$FC_CURRENT_ID" != "$FC_TARGET_ID" ]; then
-        loge "fullscreen client skipped: target identity changed package=$FC_TARGET_PACKAGE"
-        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
-            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+        loge "app client skipped: target identity changed package=$FC_TARGET_PACKAGE"
+        [ "$(readlink "$APP_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
+            && rm -f "$APP_CLIENT_BUSY"
         return 0
     fi
-    if ! prepare_fullscreen_client_attempt "$FC_TARGET_PACKAGE" "$FC_TARGET_ID" \
+    if ! prepare_app_client_attempt "$FC_TARGET_PACKAGE" "$FC_TARGET_ID" \
             "$FC_TARGET_HISTORY" "$FC_TARGET_BLOCKED"; then
-        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
-            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+        [ "$(readlink "$APP_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
+            && rm -f "$APP_CLIENT_BUSY"
         return 0
     fi
     if ! reserve_injection_attempt "$FC_TARGET_ID" "$FC_TARGET_ATTEMPT"; then
-        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
-            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+        [ "$(readlink "$APP_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
+            && rm -f "$APP_CLIENT_BUSY"
         return 0
     fi
 
-    logi "inject fullscreen client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
+    logi "inject app client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
     (
         trap - 0 HUP INT TERM
         FC_TRY="$FC_TARGET_LOG.try"
@@ -978,48 +983,82 @@ inject_fullscreen_client_bg() {
             || FC_ID_BEFORE=
         if [ "$FC_ID_BEFORE" = "$FC_TARGET_ID" ]; then
             timeout -k 5 30 "$FC_TARGET_INJECTOR" -p "$FC_TARGET_PID" \
-                -s "$FULLSCREEN_CLIENT" -e > "$FC_TRY" 2>&1
+                -s "$APP_CLIENT" -e > "$FC_TRY" 2>&1
             FC_RC=$?
         else
             printf '%s\n' "target identity changed before frida-inject" > "$FC_TRY"
             FC_RC=1
         fi
         cat "$FC_TRY" >> "$FC_TARGET_LOG"
-        if [ "$FC_RC" -eq 0 ] && grep -qF "$FULLSCREEN_CLIENT_READY" "$FC_TRY"; then
+        FC_READY_OK=0
+        if [ "$FC_RC" -eq 0 ] && grep -qF "$APP_CLIENT_READY" "$FC_TRY"; then
+            if [ "$FC_TARGET_REQUIRE_MAPKIT" != 1 ] \
+                    || grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"; then
+                FC_READY_OK=1
+            fi
+        fi
+        if [ "$FC_READY_OK" -eq 1 ]; then
             FC_ID_AFTER=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE" 2>/dev/null) \
                 || FC_ID_AFTER=
             if [ "$FC_ID_AFTER" = "$FC_TARGET_ID" ]; then
                 FC_MARK_TMP="$FC_TARGET_MARK.$$.new"
                 if printf '%s\n' "$FC_TARGET_ID" > "$FC_MARK_TMP" \
                         && mv -f "$FC_MARK_TMP" "$FC_TARGET_MARK"; then
-                    logi "inject OK fullscreen client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
+                    logi "inject OK app client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
                 else
                     rm -f "$FC_MARK_TMP"
-                    loge "fullscreen client marker write FAIL package=$FC_TARGET_PACKAGE"
+                    loge "app client marker write FAIL package=$FC_TARGET_PACKAGE"
                 fi
             else
-                loge "fullscreen client result stale package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
+                loge "app client result stale package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID"
             fi
         else
-            loge "inject FAIL fullscreen client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID rc=$FC_RC"
+            loge "inject FAIL app client package=$FC_TARGET_PACKAGE pid=$FC_TARGET_PID rc=$FC_RC mapkit_required=$FC_TARGET_REQUIRE_MAPKIT"
         fi
         rm -f "$FC_TRY"
-        [ "$(readlink "$FULLSCREEN_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
-            && rm -f "$FULLSCREEN_CLIENT_BUSY"
+        [ "$(readlink "$APP_CLIENT_BUSY" 2>/dev/null)" = "$FC_BUSY_OWN_RECORD" ] \
+            && rm -f "$APP_CLIENT_BUSY"
     ) &
 }
 
-discover_fullscreen_client() {
-    # SettingsProvider is outside this process; keep its Binder failure bounded on the main cycle.
-    FC_LIST=$(timeout -k 1 1 settings get global "$FULLSCREEN_CLIENT_SETTING" 2>/dev/null) \
-        || FC_LIST=
-    case "$FC_LIST" in ''|null) return ;; esac
+discover_app_client() {
+    # SettingsProvider is outside this process; keep both Binder reads bounded on the main cycle.
+    # DPI alone may request this agent only for the three exact MapKit packages below. Other apps
+    # keep the server-side density override without acquiring an unnecessary client hook.
+    FC_FULLSCREEN_LIST=$(timeout -k 1 1 settings get global "$APP_CLIENT_FULLSCREEN_SETTING" \
+        2>/dev/null) || FC_FULLSCREEN_LIST=
+    FC_DPI_LIST=$(timeout -k 1 1 settings get global "$APP_CLIENT_DPI_SETTING" \
+        2>/dev/null) || FC_DPI_LIST=
+    case "$FC_FULLSCREEN_LIST" in null) FC_FULLSCREEN_LIST= ;; esac
+    case "$FC_DPI_LIST" in null) FC_DPI_LIST= ;; esac
+    FC_DPI_LIST=$(printf '%s' "$FC_DPI_LIST" | tr -d '[:space:]')
+    FC_LIST=$FC_FULLSCREEN_LIST
     FC_SAVED_IFS=$IFS
+    IFS=,
+    for FC_DPI_PACKAGE in $FC_DPI_LIST; do
+        IFS=$FC_SAVED_IFS
+        case "$FC_DPI_PACKAGE" in
+            ru.yandex.yandexnavi|ru.yandex.yandexmaps|com.yango.maps.android)
+                FC_LIST="${FC_LIST}${FC_LIST:+,}$FC_DPI_PACKAGE"
+                ;;
+        esac
+        IFS=,
+    done
+    IFS=$FC_SAVED_IFS
+    case "$FC_LIST" in '') return ;; esac
     IFS=,
     for FC_PACKAGE in $FC_LIST; do
         IFS=$FC_SAVED_IFS
         FC_PACKAGE=$(printf '%s' "$FC_PACKAGE" | tr -d '[:space:]')
         case "$FC_PACKAGE" in ''|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue ;; esac
+        FC_REQUIRE_MAPKIT=0
+        case "$FC_PACKAGE" in
+            ru.yandex.yandexnavi|ru.yandex.yandexmaps|com.yango.maps.android)
+                case ",$FC_DPI_LIST," in
+                    *",$FC_PACKAGE,"*) FC_REQUIRE_MAPKIT=1 ;;
+                esac
+                ;;
+        esac
         FC_PID=
         FC_ID=
         for FC_CANDIDATE in $(pidof "$FC_PACKAGE" 2>/dev/null); do
@@ -1035,7 +1074,7 @@ discover_fullscreen_client() {
         done
         if [ -z "$FC_ID" ]; then IFS=,; continue; fi
 
-        FC_BASE="/data/local/tmp/voyahtune_fullscreen_client.$FC_PACKAGE"
+        FC_BASE="/data/local/tmp/voyahtune_app_client.$FC_PACKAGE"
         FC_MARK="$FC_BASE.pid"
         FC_ATTEMPT="$FC_BASE.attempt"
         FC_LOG="$FC_BASE.txt"
@@ -1056,19 +1095,20 @@ discover_fullscreen_client() {
             *app_process64) FC_INJECTOR=$FI ;;
             *)
                 reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
-                loge "fullscreen client unsupported process ABI package=$FC_PACKAGE exe=$FC_EXE"
+                loge "app client unsupported process ABI package=$FC_PACKAGE exe=$FC_EXE"
                 IFS=,
                 continue
                 ;;
         esac
-        if [ ! -x "$FC_INJECTOR" ] || [ ! -r "$FULLSCREEN_CLIENT" ]; then
+        if [ ! -x "$FC_INJECTOR" ] || [ ! -r "$APP_CLIENT" ]; then
             reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
-            loge "fullscreen client assets unavailable package=$FC_PACKAGE injector=$FC_INJECTOR"
+            loge "app client assets unavailable package=$FC_PACKAGE injector=$FC_INJECTOR"
             IFS=,
             continue
         fi
-        inject_fullscreen_client_bg "$FC_PACKAGE" "$FC_PID" "$FC_ID" "$FC_INJECTOR" \
-            "$FC_MARK" "$FC_ATTEMPT" "$FC_LOG" "$FC_HISTORY" "$FC_BLOCKED"
+        inject_app_client_bg "$FC_PACKAGE" "$FC_PID" "$FC_ID" "$FC_INJECTOR" \
+            "$FC_MARK" "$FC_ATTEMPT" "$FC_LOG" "$FC_HISTORY" "$FC_BLOCKED" \
+            "$FC_REQUIRE_MAPKIT"
         IFS=$FC_SAVED_IFS
         return
     done
@@ -1222,9 +1262,9 @@ watchdog_cycle() {
         fi
     fi
 
-    # 7) Optional client geometry repair. Discovery runs after every core hook and its only Binder
-    #    read has a one-second timeout; at most one exact-package injection worker runs in background.
-    discover_fullscreen_client
+    # 7) Optional client geometry/MapKit-DPI repair. Discovery runs after every core hook; both
+    #    Binder reads have one-second timeouts and at most one exact-package worker runs in background.
+    discover_app_client
 
     publish_hook_status running
 }

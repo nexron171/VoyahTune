@@ -1,5 +1,4 @@
-// Client-side fullscreen geometry repair for packages selected in VoyahTune's
-// "Fullscreen applications" list.
+// Client-side per-application repairs for packages selected in VoyahTune.
 //
 // The OEM launcher may start an application with WindowManager.LayoutParams.width fixed to the
 // old 1780 px work area. system_server can already give that window a 1920 px frame and Surface,
@@ -11,21 +10,34 @@
 // ViewRootImpl a COPY of base-activity LayoutParams whose width is MATCH_PARENT. A late attach must
 // also update an already measured DecorView, so its original width is remembered and restored when
 // the package leaves the list. Dialogs, starting windows and VirtualDisplay windows are left alone.
+//
+// Yandex MapKit owns a second, renderer-side density value. A physical Task density override scales
+// Android resources but does not necessarily update MapWindow, so the native Vulkan/GL map can stay
+// at the 160-dpi scale. For the three known Yandex/Yango map applications this agent mirrors the
+// selected per-app DPI to MapWindow.scaleFactor (physical pixels per independent point). The Surface
+// keeps its native physical resolution; no VirtualDisplay or compositor upscaling is involved.
 
 Java.perform(function () {
-    var TAG = "vt_fullscreen_client";
-    var READY_MARKER = "[fullscreen-client] hook ready v1";
+    var TAG = "vt_app_client";
+    var READY_MARKER = "[app-client] hook ready v1";
+    var MAPKIT_READY_MARKER = "[mapkit-dpi] hook ready v1";
     var SETTING = "voyahtune_fullscreen_apps";
+    var DPI_SETTING_PREFIX = "voyahtune_dpi_";
     var RELOAD_ACTION = "ru.big.town.anative.WIN_RELOAD";
     var RELOAD_PERMISSION = "android.permission.WRITE_SECURE_SETTINGS";
     var TYPE_BASE_APPLICATION = 1;
     var MATCH_PARENT = -1;
+    var DEFAULT_DENSITY_DPI = 160;
+    var MAP_WINDOW_INTERFACE = "com.yandex.mapkit.map.MapWindow";
+    var MAP_VIEW = "com.yandex.mapkit.mapview.MapView";
+    var MAPKIT_BINDING = "com.yandex.mapkit.internal.MapKitBinding";
 
     var Log = Java.use("android.util.Log");
     var ActivityThread = Java.use("android.app.ActivityThread");
     var SettingsGlobal = Java.use("android.provider.Settings$Global");
     var LayoutParams = Java.use("android.view.WindowManager$LayoutParams");
     var View = Java.use("android.view.View");
+    var ViewGroup = Java.use("android.view.ViewGroup");
     var ViewRootImpl = Java.use("android.view.ViewRootImpl");
     var WindowManagerGlobal = Java.use("android.view.WindowManagerGlobal");
     var BroadcastReceiver = Java.use("android.content.BroadcastReceiver");
@@ -44,17 +56,31 @@ Java.perform(function () {
         application = ActivityThread.currentApplication();
     }
     if (application === null) {
-        console.log("[fullscreen-client] hook failed v1: currentApplication is null");
+        console.log("[app-client] hook failed v1: currentApplication is null");
         return;
     }
 
     var packageName = "" + application.getPackageName();
     var enabled = false;
+    var mapkitPackage = packageName === "ru.yandex.yandexnavi"
+        || packageName === "ru.yandex.yandexmaps"
+        || packageName === "com.yango.maps.android";
+    var mapkitDpi = 0;
     var reloadReceiver = null;
     var mainHandler = Handler.$new(Looper.getMainLooper());
     var originalWidths = {};
     var replayApplying = false;
     var replayScheduled = false;
+    var MapWindow = null;
+    var MapViewClass = null;
+    var mapViewGetter = null;
+    var mapkitBindingHookInstalled = false;
+    var mapkitHooksInstalled = false;
+    var mapkitReadyAnnounced = false;
+    var mapkitReplayScheduled = false;
+    var mapkitApplying = 0;
+    var mapWindowBaselines = Object.create(null);
+    var hookedMapWindowClasses = Object.create(null);
 
     function packageIsAllowlisted(csv) {
         if (csv === null) return false;
@@ -73,6 +99,207 @@ Java.perform(function () {
             Log.e(TAG, "fullscreen setting read failed for " + packageName + ": " + e);
             return false;
         }
+    }
+
+    function readMapkitDpi() {
+        if (!mapkitPackage) return 0;
+        try {
+            var raw = SettingsGlobal.getString(application.getContentResolver(),
+                DPI_SETTING_PREFIX + packageName);
+            if (raw === null) return 0;
+            var dpi = parseInt(("" + raw).trim(), 10);
+            return dpi >= 100 && dpi <= 640 ? dpi : 0;
+        } catch (e) {
+            Log.e(TAG, "MapKit DPI setting read failed for " + packageName + ": " + e);
+            return 0;
+        }
+    }
+
+    function mapkitScaleForDpi(dpi) {
+        return dpi / DEFAULT_DENSITY_DPI;
+    }
+
+    function mapWindowKey(windowObject) {
+        var className = "unknown";
+        try { className = "" + windowObject.$className; } catch (ignoredClass) {}
+        return className + ":" + Number(System.identityHashCode(windowObject));
+    }
+
+    function rememberMapWindowBaseline(windowObject, typedWindow) {
+        var key = mapWindowKey(windowObject);
+        if (typeof mapWindowBaselines[key] !== "number") {
+            var current = Number(typedWindow.getScaleFactor());
+            if (isFinite(current) && current > 0) mapWindowBaselines[key] = current;
+        }
+        return typeof mapWindowBaselines[key] === "number"
+            ? mapWindowBaselines[key] : 1.0;
+    }
+
+    function hookMapWindowClass(windowObject) {
+        var className = "" + windowObject.$className;
+        if (hookedMapWindowClasses[className]) return true;
+        try {
+            var WindowClass = Java.use(className);
+            var originalSetScale = WindowClass.setScaleFactor.overload("float");
+            originalSetScale.implementation = function (requestedScale) {
+                var requested = Number(requestedScale);
+                var key = mapWindowKey(this);
+                if (mapkitApplying > 0) {
+                    return originalSetScale.call(this, requestedScale);
+                }
+                if (!(mapkitDpi > 0)) {
+                    if (isFinite(requested) && requested > 0) {
+                        mapWindowBaselines[key] = requested;
+                    }
+                    return originalSetScale.call(this, requestedScale);
+                }
+                if (typeof mapWindowBaselines[key] !== "number") {
+                    try {
+                        var current = Number(Java.cast(this, MapWindow).getScaleFactor());
+                        if (isFinite(current) && current > 0) mapWindowBaselines[key] = current;
+                    } catch (ignoredBaseline) {}
+                }
+                return originalSetScale.call(this, mapkitScaleForDpi(mapkitDpi));
+            };
+            hookedMapWindowClasses[className] = true;
+            Log.i(TAG, "MapKit setScaleFactor guard installed class=" + className);
+            return true;
+        } catch (e) {
+            Log.w(TAG, "MapKit setScaleFactor guard unavailable class=" + className + ": " + e);
+            return false;
+        }
+    }
+
+    function applyMapWindow(windowObject, reason) {
+        if (!mapkitPackage || windowObject === null || MapWindow === null) return false;
+        try {
+            var typedWindow = Java.cast(windowObject, MapWindow);
+            if (!typedWindow.isValid()) return false;
+            hookMapWindowClass(windowObject);
+            var baseline = rememberMapWindowBaseline(windowObject, typedWindow);
+            var target = mapkitDpi > 0 ? mapkitScaleForDpi(mapkitDpi) : baseline;
+            var current = Number(typedWindow.getScaleFactor());
+            if (Math.abs(current - target) < 0.0001) return false;
+            mapkitApplying++;
+            try {
+                typedWindow.setScaleFactor(target);
+            } finally {
+                mapkitApplying--;
+            }
+            var mapSize = "unknown";
+            try {
+                mapSize = Number(typedWindow.width()) + "x" + Number(typedWindow.height());
+            } catch (ignoredSize) {}
+            Log.i(TAG, "MapKit scale " + reason + " package=" + packageName
+                + " dpi=" + mapkitDpi + " old=" + current + " target=" + target
+                + " size=" + mapSize);
+            return true;
+        } catch (e) {
+            Log.e(TAG, "MapKit scale apply failed " + reason + ": " + e);
+            return false;
+        }
+    }
+
+    function hookMapView() {
+        if (mapViewGetter !== null) return true;
+        try {
+            MapViewClass = Java.use(MAP_VIEW);
+            mapViewGetter = MapViewClass.getMapWindow.overload();
+            mapViewGetter.implementation = function () {
+                var windowObject = mapViewGetter.call(this);
+                applyMapWindow(windowObject, "MapView.getMapWindow");
+                return windowObject;
+            };
+            Log.i(TAG, "MapKit MapView factory hook installed");
+            return true;
+        } catch (e) {
+            MapViewClass = null;
+            mapViewGetter = null;
+            Log.w(TAG, "MapKit MapView hook unavailable: " + e);
+            return false;
+        }
+    }
+
+    function hookMapKitBinding() {
+        if (mapkitBindingHookInstalled) return true;
+        try {
+            var MapKitBinding = Java.use(MAPKIT_BINDING);
+            if (typeof MapKitBinding.createMapWindow === "undefined") return false;
+            var overloads = MapKitBinding.createMapWindow.overloads;
+            for (var i = 0; i < overloads.length; i++) {
+                (function (originalCreate) {
+                    originalCreate.implementation = function () {
+                        var windowObject = originalCreate.apply(this, arguments);
+                        applyMapWindow(windowObject, "MapKitBinding.createMapWindow");
+                        return windowObject;
+                    };
+                })(overloads[i]);
+            }
+            mapkitBindingHookInstalled = overloads.length > 0;
+            Log.i(TAG, "MapKit binding factory hooks=" + overloads.length);
+            return mapkitBindingHookInstalled;
+        } catch (e) {
+            Log.w(TAG, "MapKit binding factory hook unavailable: " + e);
+            return false;
+        }
+    }
+
+    function ensureMapkitHooks(reason) {
+        if (!mapkitPackage) return true;
+        if (mapkitHooksInstalled) return true;
+        try {
+            Java.classFactory.loader = application.getClassLoader();
+            MapWindow = Java.use(MAP_WINDOW_INTERFACE);
+            // Install both when available. The factory catches new windows; MapView also gives us
+            // a stable path to already-created windows after a late Frida attach.
+            var mapViewReady = hookMapView();
+            var bindingReady = hookMapKitBinding();
+            mapkitHooksInstalled = mapViewReady || bindingReady;
+        } catch (e) {
+            Log.e(TAG, "MapKit hook installation failed " + reason + ": " + e);
+            mapkitHooksInstalled = false;
+        }
+        if (mapkitHooksInstalled && !mapkitReadyAnnounced) {
+            mapkitReadyAnnounced = true;
+            Log.i(TAG, MAPKIT_READY_MARKER + " package=" + packageName);
+            console.log(MAPKIT_READY_MARKER + " package=" + packageName);
+        }
+        return mapkitHooksInstalled;
+    }
+
+    function replayMapWindows(reason) {
+        if (!mapkitPackage || !mapkitHooksInstalled || mapkitReplayScheduled) return;
+        mapkitReplayScheduled = true;
+        Java.scheduleOnMainThread(function () {
+            mapkitReplayScheduled = false;
+            var matched = 0;
+            function visit(view) {
+                if (view === null) return;
+                try {
+                    if (MapViewClass !== null && MapViewClass.class.isInstance(view)) {
+                        var mapView = Java.cast(view, MapViewClass);
+                        if (applyMapWindow(mapViewGetter.call(mapView), reason)) matched++;
+                    }
+                    if (!ViewGroup.class.isInstance(view)) return;
+                    var group = Java.cast(view, ViewGroup);
+                    for (var childIndex = 0; childIndex < group.getChildCount(); childIndex++) {
+                        visit(group.getChildAt(childIndex));
+                    }
+                } catch (viewError) {
+                    Log.w(TAG, "MapKit view-tree replay skipped: " + viewError);
+                }
+            }
+            try {
+                var views = WindowManagerGlobal.getInstance().getWindowViews();
+                for (var i = 0; i < views.size(); i++) {
+                    visit(Java.cast(views.get(i), View));
+                }
+            } catch (rootError) {
+                Log.e(TAG, "MapKit root replay failed: " + rootError);
+            }
+            Log.i(TAG, "MapKit replay " + reason + " package=" + packageName
+                + " dpi=" + mapkitDpi + " changed=" + matched);
+        });
     }
 
     function displayIdOf(root) {
@@ -189,17 +416,22 @@ Java.perform(function () {
         });
     }
 
-    function refreshEnabled(reason) {
+    function refreshPolicy(reason) {
         var previous = enabled;
+        var previousMapkitDpi = mapkitDpi;
         enabled = readEnabled();
+        mapkitDpi = readMapkitDpi();
         Log.i(TAG, "policy " + reason + " package=" + packageName
-            + " enabled=" + enabled + " changed=" + (previous !== enabled));
+            + " enabled=" + enabled + " changed=" + (previous !== enabled)
+            + " mapkitDpi=" + mapkitDpi
+            + " mapkitChanged=" + (previousMapkitDpi !== mapkitDpi));
+        if (ensureMapkitHooks(reason)) replayMapWindows(reason);
         replayAttachedRoots(reason);
     }
 
     try {
         var Receiver = Java.registerClass({
-            name: "ru.big.town.voyahtune.FullscreenClientReloadReceiver",
+            name: "ru.big.town.voyahtune.AppClientReloadReceiver",
             superClass: BroadcastReceiver,
             methods: {
                 // BroadcastReceiver.onReceive is abstract. This OEM ART needs an explicit method
@@ -211,7 +443,7 @@ Java.perform(function () {
                     implementation: function (context, intent) {
                         try {
                             if (intent !== null && ("" + intent.getAction()) === RELOAD_ACTION) {
-                                refreshEnabled("WIN_RELOAD");
+                                refreshPolicy("WIN_RELOAD");
                             }
                         } catch (e) {
                             Log.e(TAG, "WIN_RELOAD failed: " + e);
@@ -230,7 +462,7 @@ Java.perform(function () {
             RELOAD_PERMISSION, mainHandler);
     } catch (e) {
         Log.e(TAG, "WIN_RELOAD receiver registration failed: " + e);
-        console.log("[fullscreen-client] hook failed v1: receiver registration: " + e);
+        console.log("[app-client] hook failed v1: receiver registration: " + e);
         return;
     }
 
@@ -259,12 +491,13 @@ Java.perform(function () {
         try { setLayoutParams.implementation = null; } catch (ignoredSetLayout) {}
         try { application.unregisterReceiver(reloadReceiver); } catch (ignoredReceiver) {}
         Log.e(TAG, "ViewRootImpl hook installation failed: " + e);
-        console.log("[fullscreen-client] hook failed v1: ViewRootImpl: " + e);
+        console.log("[app-client] hook failed v1: ViewRootImpl: " + e);
         return;
     }
 
-    enabled = readEnabled();
-    replayAttachedRoots("attach");
-    Log.i(TAG, READY_MARKER + " package=" + packageName + " enabled=" + enabled);
-    console.log(READY_MARKER + " package=" + packageName + " enabled=" + enabled);
+    refreshPolicy("attach");
+    Log.i(TAG, READY_MARKER + " package=" + packageName + " enabled=" + enabled
+        + " mapkitDpi=" + mapkitDpi + " mapkitHooks=" + mapkitHooksInstalled);
+    console.log(READY_MARKER + " package=" + packageName + " enabled=" + enabled
+        + " mapkitDpi=" + mapkitDpi + " mapkitHooks=" + mapkitHooksInstalled);
 });

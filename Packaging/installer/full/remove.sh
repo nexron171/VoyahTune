@@ -256,11 +256,14 @@ fi
 adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null
 adb shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock" 2>/dev/null
 adb shell "rm -rf /data/local/tmp/voyah_load.lock" 2>/dev/null
-adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|keyboard_lock_en|keyboard_ru|fullscreen_client' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
+adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
 # Eternalized agent живёт в target без frida-inject; force-stop выгружает его до финального reboot.
 adb shell "am force-stop com.qinggan.app.vehiclesetting" 2>/dev/null
 adb shell "am force-stop com.qinggan.app.qgime" 2>/dev/null
 adb shell 'fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for fullscreen_pkg in $fullscreen_csv; do IFS=$old_ifs; case "$fullscreen_pkg" in ""|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop "$fullscreen_pkg" >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs' 2>/dev/null
+for APP_CLIENT_PACKAGE in ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android; do
+    adb shell "am force-stop '$APP_CLIENT_PACKAGE'" 2>/dev/null
+done
 
 # --- Убрать наши Frida-файлы (или вернуть бэкап, если что-то было до нас) ---
 if [ -f backup/load.bin ]; then adb push backup/load.bin /data/local/bin/load.bin; else adb shell "rm -f /data/local/bin/load.bin"; fi
@@ -269,7 +272,7 @@ adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdo
 # Apollo entitlement hook принадлежит Open Voyah и при remove удаляется без восстановления backup.
 adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
 adb shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"
-adb shell "rm -f /data/local/bin/fullscreen_client.js /data/local/tmp/voyahtune_fullscreen_client.*"
+adb shell "rm -f /data/local/bin/app_client.js /data/local/bin/app_client.js.voyahtune.new /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_app_client.* /data/local/tmp/voyahtune_fullscreen_client.*"
 adb shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1 /data/local/tmp/voyahtune-hook-status.v1.*.new"
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
 # Project-owned Frida scripts, PID/lock markers and diagnostic logs. Generic CUNBA/Frida files
@@ -425,8 +428,8 @@ if ! adb shell 'test ! -e /data/local/bin/voyahtune-hook-manifest.json && test !
     echo "!!! Legacy hook manifest/status не удалены — перезагрузка отменена."
     exit 1
 fi
-if ! adb shell 'test ! -e /data/local/bin/fullscreen_client.js && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1'; then
-    echo "!!! Fullscreen client не удалён полностью — перезагрузка отменена."
+if ! adb shell 'test ! -e /data/local/bin/app_client.js && test ! -e /data/local/bin/app_client.js.voyahtune.new && test ! -e /data/local/bin/fullscreen_client.js && test ! -e /data/local/bin/fullscreen_client.js.voyahtune.new && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1'; then
+    echo "!!! App client или его legacy-файлы удалены не полностью — перезагрузка отменена."
     exit 1
 fi
 # Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка

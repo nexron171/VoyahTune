@@ -77,6 +77,24 @@ remove_full_hook_runtime_for_light() {
             /system/etc/.voyahtune.setenforce.rc.rollback \
             "$DISABLED_RC" || exit 1
 
+        # Eternalized app-client agents survive removal of their script file. Stop every configured
+        # fullscreen host plus the three MapKit hosts before tearing down the full runtime.
+        fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null)
+        old_ifs=$IFS
+        IFS=,
+        for app_client_pkg in $fullscreen_csv; do
+            IFS=$old_ifs
+            case "$app_client_pkg" in
+                ""|null|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue ;;
+            esac
+            am force-stop "$app_client_pkg" >/dev/null 2>&1
+            IFS=,
+        done
+        IFS=$old_ifs
+        for app_client_pkg in ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android; do
+            am force-stop "$app_client_pkg" >/dev/null 2>&1
+        done
+
         # load.bin/frida-inject могли существовать до VoyahTune, а их backup хранится в каталоге
         # исходного Full-релиза. Light не угадывает ownership generic binaries: project loader
         # удаляется только по двум ASCII marker, generic injector остаётся неактивным без boot path.
@@ -91,6 +109,8 @@ remove_full_hook_runtime_for_light() {
             /data/local/bin/apollo_tech.js.voyahtune.new \
             /data/local/bin/load.bin.voyahtune.new \
             /data/local/bin/frida-inject.voyahtune.new \
+            /data/local/bin/app_client.js \
+            /data/local/bin/app_client.js.voyahtune.new \
             /data/local/bin/fullscreen_client.js \
             /data/local/bin/fullscreen_client.js.voyahtune.new \
             /data/local/bin/vd_bypass.js \
@@ -167,7 +187,8 @@ remove_full_hook_runtime_for_light() {
             /data/local/tmp/voyah_apollo.txt \
             /data/local/tmp/voyah_apollo.txt.1 \
             /data/local/tmp/voyah_apollo.txt.try || exit 1
-        rm -f /data/local/tmp/voyahtune_fullscreen_client.* || exit 1
+        rm -f /data/local/tmp/voyahtune_app_client.* \
+            /data/local/tmp/voyahtune_fullscreen_client.* || exit 1
         rm -rf /data/local/tmp/voyah_load.lock || exit 1
         for removed_path in \
                 /system/etc/init/voyahtune.load.rc \
@@ -177,7 +198,10 @@ remove_full_hook_runtime_for_light() {
                 /data/local/bin/steeringwheelkeys.js \
                 /data/local/bin/launcherdock.js \
                 /data/local/bin/multidisplay.js \
+                /data/local/bin/app_client.js \
+                /data/local/bin/app_client.js.voyahtune.new \
                 /data/local/bin/fullscreen_client.js \
+                /data/local/bin/fullscreen_client.js.voyahtune.new \
                 /data/local/bin/apollo_tech.js \
                 /data/local/bin/keyboard_lock_en.js \
                 /data/local/bin/keyboard_ru.js \
@@ -185,6 +209,7 @@ remove_full_hook_runtime_for_light() {
                 /data/local/tmp/voyahtune-hook-status.v1; do
             [ ! -e "$removed_path" ] && [ ! -L "$removed_path" ] || exit 1
         done
+        ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
         ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
         sync
     '
