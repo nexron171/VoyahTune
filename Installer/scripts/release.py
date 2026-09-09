@@ -109,7 +109,7 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix='.release-',dir=build) as temporary:
             work = Path(temporary)
-            for script in ['test_android11_package_lifecycle.sh','test_saved_config_startup_wake.sh','test_keyboard_modes.sh','test_hook_status.sh','test_fullscreen_client_layout.sh']:
+            for script in ['test_android11_package_lifecycle.sh','test_saved_config_startup_wake.sh','test_keyboard_modes.sh','test_hook_status.sh','test_app_client.sh','test_mapkit_dpi_client.sh']:
                 run(['sh',ROOT/'Packaging/tests'/script])
             run(['bash',ROOT/'Utils/android11-oem-stubs/tests/static-checks.sh'])
             run(['cargo','build','--locked','--release','--manifest-path',ROOT/'Installer/Cargo.toml','-p','installer-build'],env=env,cwd=ROOT)

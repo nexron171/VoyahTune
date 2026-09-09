@@ -258,6 +258,29 @@ fn copy(
 mod tests {
     use super::*;
     #[test]
+    fn checkout_payload_contains_every_required_full_file() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let (recipe, sources) = discover(&root).unwrap();
+        recipe.validate().unwrap();
+        for name in payload::FULL_NAMES {
+            let entry = sources["artifacts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["name"] == *name)
+                .unwrap_or_else(|| panic!("Missing {name}"));
+            assert!(
+                root.join(entry["source"].as_str().unwrap()).is_file(),
+                "Missing source for {name}"
+            );
+        }
+        assert!(recipe.files.iter().any(|f| f.artifact == "app_client.js"));
+        assert!(!recipe
+            .files
+            .iter()
+            .any(|f| f.artifact == "fullscreen_client.js"));
+    }
+    #[test]
     fn discovers_new_hook_and_keeps_cleanup_after_its_removal() {
         let root = std::env::temp_dir().join(format!("voyahtune-discovery-{}", std::process::id()));
         let inject = root.join("Packaging/inject");

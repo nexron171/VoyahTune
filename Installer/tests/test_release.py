@@ -2,6 +2,7 @@
 """Release selection and replacement with tiny local build fixtures (no SDK/ADB)."""
 import importlib.util
 import json
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -92,5 +93,20 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(r.returncode,0,r.stderr)
         self.assertIn('--windows',r.stdout)
         self.assertIn('release.py',r.stdout)
+
+    def test_prebuild_checks_exist_and_match_classic_release(self):
+        with patch.object(self, 'fake_run', wraps=self.fake_run) as fake:
+            # Record the real orchestrator's calls while keeping SDK/build operations fake.
+            self.run_release('--mac')
+            commands = [list(map(str, call.args[0])) for call in fake.call_args_list]
+        actual = [Path(c[1]).relative_to(self.root).as_posix()
+                  for c in commands if c[0] in ('sh', 'bash')]
+        classic = (REPO/'make_release.sh').read_text()
+        expected = ['Packaging/tests/' + name for name in re.findall(
+            r'sh "\$COMMON/tests/([^"]+)"', classic)]
+        expected += ['Utils/android11-oem-stubs/tests/static-checks.sh']
+        self.assertEqual(actual, expected)
+        for script in actual:
+            self.assertTrue((REPO/script).is_file(), script)
 
 if __name__=='__main__':unittest.main(verbosity=2)

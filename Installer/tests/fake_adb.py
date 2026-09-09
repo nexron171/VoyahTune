@@ -73,6 +73,14 @@ def main():
    result=subprocess.run(['/bin/sh','-s'],input=script,text=True,env=env,capture_output=True)
    sys.stdout.write(result.stdout.replace(str(root),''));sys.stderr.write(result.stderr.replace(str(root),''));return result.returncode
   else:raise RuntimeError(f'Unknown ADB command: {args}')
+ elif name=='grep':
+  # Shell path remapping must not change a grep pattern that inspects bytes of a
+  # pushed script/RC. Keep file arguments mapped into the fake car, but restore
+  # the first non-option argument (the pattern) to its original Android paths.
+  for i,arg in enumerate(args):
+   if not arg.startswith('-'):
+    args[i]=arg.replace(str(root),'');break
+  return subprocess.run(['/usr/bin/grep',*args]).returncode
  elif name=='getprop':
   print({'ro.build.fingerprint':'qinggan/voyah/free:11/test','ro.product.model':'Voyah Free','ro.build.version.sdk':s.get('sdk','30'),'ro.product.cpu.abilist':s.get('abi','arm64-v8a,armeabi-v7a'),'sys.boot_completed':'1','init.svc.voyahtune_load':s.get('loader','')}.get(args[0],''))
  elif name=='setprop':

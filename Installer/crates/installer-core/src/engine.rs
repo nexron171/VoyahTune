@@ -559,7 +559,7 @@ impl Engine {
                 false,
             )?;
         }
-        self.shell("rm -f /data/local/tmp/voyahtune_fullscreen_client.*\n")?;
+        self.shell(c::APP_CLIENT_MIGRATION)?;
         self.shell("rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json.voyahtune.new\n")?;
         Ok(())
     }
@@ -845,6 +845,13 @@ impl Engine {
         self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
         self.ignore("am force-stop com.qinggan.app.qgime\n");
         self.ignore(c::STOP_FULLSCREEN);
+        for package in [
+            "ru.yandex.yandexnavi",
+            "ru.yandex.yandexmaps",
+            "com.yango.maps.android",
+        ] {
+            self.ignore(&format!("am force-stop {}\n", quote(package)));
+        }
         // The classic remover restores host backups when present and otherwise
         // removes these generic files. No ownership/hash database is consulted.
         self.restore_host_file("load.bin");
@@ -861,7 +868,7 @@ impl Engine {
         self.restore_host_file("frida-inject");
         self.shell(c::REMOVE_FILES)?;
         self.shell("test ! -e /data/local/bin/voyahtune-hook-manifest.json && test ! -e /data/local/tmp/voyahtune-hook-status.v1\n")?;
-        self.shell("test ! -e /data/local/bin/fullscreen_client.js && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1\n")?;
+        self.shell(c::REMOVE_CLIENT_CHECK)?;
         Ok(())
     }
     fn restore_host_file(&self, name: &str) {

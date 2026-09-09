@@ -57,6 +57,33 @@ pub const BOOT_READY: &str = r###"if [ -x /system/etc/init.voyahtune.load.sh ] &
 pub const BOOT_REMOVE_OLD: &str = r###"rm -f /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.setenforce.rc && sync"###;
 // Packaging/installer/full/install.sh:616
 pub const APOLLO_FILES: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"###;
+// Packaging/installer/full/install.sh:648
+pub const APP_CLIENT_MIGRATION: &str = r###"
+    fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null)
+    old_ifs=$IFS
+    IFS=,
+    for app_client_pkg in $fullscreen_csv; do
+        IFS=$old_ifs
+        case "$app_client_pkg" in
+            ""|null|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue ;;
+        esac
+        am force-stop "$app_client_pkg" >/dev/null 2>&1
+        IFS=,
+    done
+    IFS=$old_ifs
+    for app_client_pkg in ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android; do
+        am force-stop "$app_client_pkg" >/dev/null 2>&1
+    done
+    rm -f /data/local/bin/fullscreen_client.js \
+        /data/local/bin/fullscreen_client.js.voyahtune.new \
+        /data/local/tmp/voyahtune_fullscreen_client.* \
+        /data/local/tmp/voyahtune_app_client.* || exit 1
+    [ -s /data/local/bin/app_client.js ] || exit 1
+    [ ! -e /data/local/bin/fullscreen_client.js ] || exit 1
+    [ ! -e /data/local/bin/fullscreen_client.js.voyahtune.new ] || exit 1
+    ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
+    ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
+"###;
 // Packaging/installer/light/install.sh:40
 pub const STOP_LIGHT: &str = r###"
         setprop ctl.stop voyahtune_load 2>/dev/null || exit 1
@@ -94,6 +121,24 @@ pub const LIGHT_TEARDOWN: &str = r###"
             /system/etc/.voyahtune.setenforce.rc.rollback \
             "$DISABLED_RC" || exit 1
 
+        # Eternalized app-client agents survive removal of their script file. Stop every configured
+        # fullscreen host plus the three MapKit hosts before tearing down the full runtime.
+        fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null)
+        old_ifs=$IFS
+        IFS=,
+        for app_client_pkg in $fullscreen_csv; do
+            IFS=$old_ifs
+            case "$app_client_pkg" in
+                ""|null|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue ;;
+            esac
+            am force-stop "$app_client_pkg" >/dev/null 2>&1
+            IFS=,
+        done
+        IFS=$old_ifs
+        for app_client_pkg in ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android; do
+            am force-stop "$app_client_pkg" >/dev/null 2>&1
+        done
+
         # load.bin/frida-inject могли существовать до VoyahTune, а их backup хранится в каталоге
         # исходного Full-релиза. Light не угадывает ownership generic binaries: project loader
         # удаляется только по двум ASCII marker, generic injector остаётся неактивным без boot path.
@@ -108,6 +153,8 @@ pub const LIGHT_TEARDOWN: &str = r###"
             /data/local/bin/apollo_tech.js.voyahtune.new \
             /data/local/bin/load.bin.voyahtune.new \
             /data/local/bin/frida-inject.voyahtune.new \
+            /data/local/bin/app_client.js \
+            /data/local/bin/app_client.js.voyahtune.new \
             /data/local/bin/fullscreen_client.js \
             /data/local/bin/fullscreen_client.js.voyahtune.new \
             /data/local/bin/vd_bypass.js \
@@ -184,7 +231,8 @@ pub const LIGHT_TEARDOWN: &str = r###"
             /data/local/tmp/voyah_apollo.txt \
             /data/local/tmp/voyah_apollo.txt.1 \
             /data/local/tmp/voyah_apollo.txt.try || exit 1
-        rm -f /data/local/tmp/voyahtune_fullscreen_client.* || exit 1
+        rm -f /data/local/tmp/voyahtune_app_client.* \
+            /data/local/tmp/voyahtune_fullscreen_client.* || exit 1
         rm -rf /data/local/tmp/voyah_load.lock || exit 1
         for removed_path in \
                 /system/etc/init/voyahtune.load.rc \
@@ -194,7 +242,10 @@ pub const LIGHT_TEARDOWN: &str = r###"
                 /data/local/bin/steeringwheelkeys.js \
                 /data/local/bin/launcherdock.js \
                 /data/local/bin/multidisplay.js \
+                /data/local/bin/app_client.js \
+                /data/local/bin/app_client.js.voyahtune.new \
                 /data/local/bin/fullscreen_client.js \
+                /data/local/bin/fullscreen_client.js.voyahtune.new \
                 /data/local/bin/apollo_tech.js \
                 /data/local/bin/keyboard_lock_en.js \
                 /data/local/bin/keyboard_ru.js \
@@ -202,10 +253,11 @@ pub const LIGHT_TEARDOWN: &str = r###"
                 /data/local/tmp/voyahtune-hook-status.v1; do
             [ ! -e "$removed_path" ] && [ ! -L "$removed_path" ] || exit 1
         done
+        ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
         ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
         sync
     "###;
-// Packaging/installer/light/install.sh:381
+// Packaging/installer/light/install.sh:406
 pub const LIGHT_LEGACY_STATE: &str = r###"
     if [ ! -e /system/etc/init.logcat.sh ]; then
         echo CLEAN
@@ -230,23 +282,23 @@ pub const REMOVE_BOOT: &str = r###"rm -f /system/etc/init/voyahtune.load.rc /sys
 // Packaging/installer/full/remove.sh:251
 pub const REMOVE_TRANSACTIONS: &str = r###"rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback /system/etc/init.logcat.sh.voyahtune.new /system/etc/init.logcat.sh.voyahtune.rollback"###;
 // Packaging/installer/full/remove.sh:259
-pub const REMOVE_PROCESSES: &str = r###"ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|keyboard_lock_en|keyboard_ru|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs kill -9"###;
+pub const REMOVE_PROCESSES: &str = r###"ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs kill -9"###;
 // Packaging/installer/full/remove.sh:263
 pub const STOP_FULLSCREEN: &str = r###"fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for fullscreen_pkg in $fullscreen_csv; do IFS=$old_ifs; case "$fullscreen_pkg" in ""|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop "$fullscreen_pkg" >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs"###;
-// Packaging/installer/full/remove.sh:267
-pub const REMOVE_EARLY_VD: &str = r###"rm -f /data/local/bin/vd_bypass.js"###;
-// Packaging/installer/full/remove.sh:268
-pub const REMOVE_EARLY_HOOKS: &str = r###"rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"###;
 // Packaging/installer/full/remove.sh:270
+pub const REMOVE_EARLY_VD: &str = r###"rm -f /data/local/bin/vd_bypass.js"###;
+// Packaging/installer/full/remove.sh:271
+pub const REMOVE_EARLY_HOOKS: &str = r###"rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"###;
+// Packaging/installer/full/remove.sh:273
 pub const REMOVE_EARLY_APOLLO: &str =
     r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"###;
-// Packaging/installer/full/remove.sh:271
+// Packaging/installer/full/remove.sh:274
 pub const REMOVE_EARLY_KEYBOARD: &str = r###"rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"###;
-// Packaging/installer/full/remove.sh:272
-pub const REMOVE_EARLY_FULLSCREEN: &str = r###"rm -f /data/local/bin/fullscreen_client.js /data/local/tmp/voyahtune_fullscreen_client.*"###;
-// Packaging/installer/full/remove.sh:273
+// Packaging/installer/full/remove.sh:275
+pub const REMOVE_EARLY_FULLSCREEN: &str = r###"rm -f /data/local/bin/app_client.js /data/local/bin/app_client.js.voyahtune.new /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_app_client.* /data/local/tmp/voyahtune_fullscreen_client.*"###;
+// Packaging/installer/full/remove.sh:276
 pub const REMOVE_EARLY_MANIFEST: &str = r###"rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1 /data/local/tmp/voyahtune-hook-status.v1.*.new"###;
-// Packaging/installer/full/remove.sh:278
+// Packaging/installer/full/remove.sh:281
 pub const REMOVE_FILES: &str = r###"
     rm -f \
         /data/local/bin/vd_bypass.js \
@@ -390,7 +442,7 @@ pub const REMOVE_FILES: &str = r###"
         if [ -e "$path" ] || [ -L "$path" ]; then exit 1; fi
     done
 "###;
-// Packaging/installer/full/remove.sh:435
+// Packaging/installer/full/remove.sh:438
 pub const REMOVE_SETTINGS: &str = r###"
     for setting_name in \
         voyahtune_dock1 voyahtune_dock2 voyahtune_dock1Dpi voyahtune_dock2Dpi \
@@ -410,7 +462,7 @@ pub const REMOVE_SETTINGS: &str = r###"
         settings delete global "$setting_name" >/dev/null 2>&1 || exit 1
     done
 "###;
-// Packaging/installer/full/remove.sh:469
+// Packaging/installer/full/remove.sh:472
 pub const REMOVE_PACKAGES: &str = r###"
     pm uninstall ru.big.town.anative >/dev/null 2>&1 || true
     pm uninstall --user 0 ru.big.town.anative >/dev/null 2>&1 || true
@@ -418,5 +470,7 @@ pub const REMOVE_PACKAGES: &str = r###"
     if pm path ru.big.town.anative 2>/dev/null | grep -q "^package:/data/app/"; then exit 1; fi
     if pm path ru.big.town.restoremode 2>/dev/null | grep -q "^package:"; then exit 1; fi
 "###;
-// Packaging/installer/full/remove.sh:480
+// Packaging/installer/full/remove.sh:483
 pub const REMOVE_SYSTEM: &str = r###"rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new /system/priv-app/.Native.apk.voyahtune.new && rm -rf /system/priv-app/Native && test ! -e /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml && test ! -e /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new && test ! -e /system/priv-app/.Native.apk.voyahtune.new && test ! -e /system/priv-app/Native"###;
+// Packaging/installer/full/remove.sh:431
+pub const REMOVE_CLIENT_CHECK: &str = r###"test ! -e /data/local/bin/app_client.js && test ! -e /data/local/bin/app_client.js.voyahtune.new && test ! -e /data/local/bin/fullscreen_client.js && test ! -e /data/local/bin/fullscreen_client.js.voyahtune.new && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1"###;

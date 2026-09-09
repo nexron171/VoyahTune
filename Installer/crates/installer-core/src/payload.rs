@@ -18,7 +18,7 @@ pub const FULL_NAMES: &[&str] = &[
     "launcherdock.js",
     "multidisplay.js",
     "vd_bypass.js",
-    "fullscreen_client.js",
+    "app_client.js",
     "apollo_tech.js",
     "keyboard_lock_en.js",
     "keyboard_ru.js",

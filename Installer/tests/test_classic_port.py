@@ -33,7 +33,37 @@ class ClassicPortTests(unittest.TestCase):
   self.assertEqual(new.returncode==0,old.returncode==0,old.stdout[-1600:]+old.stderr[-1000:]+'\nPORT:\n'+new.stdout[-3500:])
   self.assertEqual(self.state(port),self.state(reference))
   return reference,port,old,new
- def test_full_fresh_matches_classic(self):self.compare('full')
+ def test_full_fresh_matches_classic(self):
+  _,_,old,new=self.compare('full')
+  self.assertEqual(old.returncode,0,old.stdout+old.stderr)
+  self.assertEqual(new.returncode,0,new.stdout)
+ def seed_client_migration(self,f):
+  for path in ['data/local/bin/fullscreen_client.js','data/local/bin/fullscreen_client.js.voyahtune.new','data/local/tmp/voyahtune_fullscreen_client.old','data/local/tmp/voyahtune_app_client.old']:
+   (f.device/path).write_text('legacy client')
+  f.state['settings']['voyahtune_fullscreen_apps']='ru.yandex.yandexnavi,com.example.player'
+  f.write_state()
+ def test_app_client_migration_matches_classic(self):
+  _,port,old,new=self.compare('full',seed=self.seed_client_migration)
+  self.assertEqual(old.returncode,0,old.stdout+old.stderr)
+  self.assertEqual(new.returncode,0,new.stdout)
+  self.assertTrue((port.device/'data/local/bin/app_client.js').is_file())
+  self.assertFalse((port.device/'data/local/bin/fullscreen_client.js').exists())
+ def test_app_client_migration_failure_matches_classic(self):
+  _,_,old,new=self.compare('full',{'failShell':'for app_client_pkg in $fullscreen_csv'},self.seed_client_migration)
+  self.assertNotEqual(old.returncode,0)
+  self.assertNotEqual(new.returncode,0)
+ def test_light_and_remove_clean_both_client_generations(self):
+  def seed(f):
+   self.seed_client_migration(f)
+   for path in ['data/local/bin/app_client.js','data/local/bin/app_client.js.voyahtune.new']:
+    (f.device/path).write_text('new client')
+  for action in ['light','remove']:
+   with self.subTest(action=action):
+    _,port,old,new=self.compare(action,seed=seed)
+    self.assertEqual(old.returncode,0,old.stdout+old.stderr)
+    self.assertEqual(new.returncode,0,new.stdout)
+    self.assertFalse((port.device/'data/local/bin/app_client.js').exists())
+    self.assertFalse((port.device/'data/local/bin/fullscreen_client.js').exists())
  def test_light_fresh_matches_classic(self):self.compare('light')
  def test_remove_matches_classic_and_does_not_wait_after_reboot(self):
   _,port,_,_=self.compare('remove',seed=lambda f:f.seed_apps(old_key=True,broken=True))

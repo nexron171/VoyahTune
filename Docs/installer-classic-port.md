@@ -80,6 +80,7 @@ SHA/подписи всего payload проверяются сборкой и �
 ```sh
 python3 Installer/scripts/sync-classic-commands.py --check
 cargo test --manifest-path Installer/Cargo.toml -p installer-core -p installer-build
+python3 Installer/tests/test_release.py
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
   python3 Installer/tests/test_classic_port.py
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
