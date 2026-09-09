@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>VoyahTune — прототип установщика</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="model.js"></script>
+  <script defer src="demo-adapter.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="preview-label"><span class="preview-dot"></span> Интерактивный прототип <span>·</span> Все операции демонстрационные</div>
+  <div class="installer-window">
+    <header class="titlebar"><span class="window-controls" aria-hidden="true"><i></i><i></i><i></i></span><span>VoyahTune</span><span class="titlebar-platform">Установщик</span></header>
+    <div class="window-body">
+      <aside class="sidebar">
+        <div class="brand">VoyahTune<span>Установка на автомобиль</span></div>
+        <nav aria-label="Этапы установки"><ol id="navigation"></ol></nav>
+        <div class="sidebar-bottom"><span class="offline-dot"></span> Всё необходимое в комплекте<small>macOS · Windows · Linux</small></div>
+      </aside>
+      <main id="main"></main>
+    </div>
+  </div>
+  <details class="demo-tools" open>
+    <summary>Панель демонстрации <span>Управление сценариями прототипа</span></summary>
+    <div class="demo-fields">
+      <label>Подключение<select id="demo-connection"><option value="none">Автомобиль не найден</option><option value="ready">Один автомобиль · готов</option><option value="multiple">Два устройства</option><option value="unauthorized">Нужно разрешить отладку</option><option value="offline">Устройство не отвечает</option><option value="incompatible">Несовместимое устройство</option><option value="toolError">Ошибка запуска ADB</option></select></label>
+      <label>Сейчас в автомобиле<select id="demo-installed"><option value="none">VoyahTune не установлен</option><option value="full">Full</option><option value="light">Light</option><option value="mixed">Light + остатки Full</option><option value="remnants">Только остатки установки</option></select></label>
+      <label>Сбой один раз<select id="demo-fault"><option value="none">Без ошибок</option><option value="root">Нет прав для изменения системы</option><option value="backup">Обрыв при резервном копировании</option><option value="boot">Не завершилась загрузка Android</option><option value="cleanup">Не удалился остаточный файл</option></select></label>
+      <button type="button" id="demo-reset" class="button secondary compact">В начало</button>
+    </div>
+    <p>Измените подключение, затем нажмите «Обновить» в мастере. Удаление проверяет компоненты обоих наборов. Реальные устройства не используются.</p>
+  </details>
+  <div id="announcement" class="sr-only" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="log-dialog" aria-labelledby="log-title"><header><div><span class="eyebrow">ДИАГНОСТИКА</span><h2 id="log-title">Журнал операции</h2></div><button type="button" id="close-log" class="button secondary compact">Закрыть</button></header><p>Демонстрационные события. В реальном установщике здесь будут команды и ответы ADB.</p><pre id="log-content"></pre><footer><button type="button" id="download-log" class="button primary">Сохранить отчёт</button></footer></dialog>
+</body>
+</html>
