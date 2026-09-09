@@ -1,0 +1,18 @@
+{
+  "version": "36.0.2",
+  "source": "https://developer.android.com/tools/releases/platform-tools",
+  "archives": {
+    "darwin": {
+      "url": "https://dl.google.com/android/repository/platform-tools_r36.0.2-darwin.zip",
+      "sha256": "106a5d31fad8c1c0c5a180d06f5779767d129d7d5edbe629005c11a85eec5b4b"
+    },
+    "windows": {
+      "url": "https://dl.google.com/android/repository/platform-tools_r36.0.2-win.zip",
+      "sha256": "b024d4f319d6ad3004de1ba7b96a5c7c5f3512e8b14126308d598b4ab93dcead"
+    },
+    "linux": {
+      "url": "https://dl.google.com/android/repository/platform-tools_r36.0.2-linux.zip",
+      "sha256": "3afdea91441815ab41254193df0343d92c1b1c0d0237165c3a345c8af8891c31"
+    }
+  }
+}

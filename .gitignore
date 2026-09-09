@@ -86,3 +86,18 @@ CONTEXT.md
 # Источник комплекта (инжект-скрипты, установщики, boot-обвязка, tools) — в Packaging/.
 # Собрать: ./make_release.sh <версия>
 /Releases/
+
+# Compiled installers and validators must never be committed.
+/Packaging/installer-tools/*
+!/Packaging/installer-tools/README.md
+
+# Native installer build/dependency output.
+/Installer/target/
+/Installer/desktop/node_modules/
+/Installer/desktop/dist/
+/Installer/desktop/src-tauri/binaries/
+/Installer/desktop/src-tauri/resources/
+/Installer/desktop/src-tauri/gen/
+
+/Installer/desktop/src-tauri/tauri.release.conf.json
+/Installer/tests/__pycache__/

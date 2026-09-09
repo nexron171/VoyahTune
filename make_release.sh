@@ -1,7 +1,9 @@
 #!/bin/sh
-# Сборка релиза Open Voyah: собирает APK обоих флейворов и раскладывает готовые папки релиза.
+# ./make_release.sh VERSION → Full/Light ZIP со скриптами установки и удаления.
+# ./make_release.sh VERSION --installers → три автономных GUI/CLI-установщика.
+# ./make_release.sh VERSION --mac [--windows] [--linux] → только выбранные установщики.
 #
-#   ./make_release.sh 3.2.2              → Releases/build/v3.2.2{,-light} + Releases/dist/*.zip
+#   ./make_release.sh 3.2.2              → Releases/build/VoyahTune-3.2.2{,-light} + Releases/dist/*.zip
 #   ./make_release.sh 3.2.2 --full-only  → только full
 #   ./make_release.sh 3.2.2 --light-only → только light
 #   ./make_release.sh 3.2.2 --no-build   → не пересобирать APK, только переразложить файлы
@@ -14,6 +16,15 @@
 # Папка релиза остаётся ПЛОСКОЙ: install.sh ищет файлы рядом с собой, его править не нужно.
 # Заменяет собой прежние build_full.sh / build_light.sh (там версия была зашита в код).
 set -e
+# Preserve the classic shell-only default. The Python branch consumes --installers.
+for release_arg in "$@"; do
+    case "$release_arg" in
+        --installers|--mac|--windows|--linux)
+            exec python3 "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/Installer/scripts/release.py" "$@" ;;
+    esac
+done
+if [ "${1:-}" = --legacy ]; then shift; fi
+
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 COMMON="$ROOT/Packaging"
