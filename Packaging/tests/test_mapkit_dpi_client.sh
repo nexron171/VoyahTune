@@ -11,7 +11,9 @@ forbid() {
     if grep -Fq -- "$2" "$1"; then fail "$1: forbidden $2"; fi
 }
 
-node --check "$AGENT"
+if command -v node > /dev/null 2>&1; then
+    node --check "$AGENT"
+fi
 sh -n "$LOADER"
 
 # Only these public application IDs may turn a per-app DPI selection into a MapKit client attach.

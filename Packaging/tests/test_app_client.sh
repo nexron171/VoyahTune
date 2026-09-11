@@ -27,7 +27,9 @@ require_before() {
     [ "$BEFORE_LINE" -lt "$AFTER_LINE" ] \
         || fail "$1: $2 must precede $3"
 }
-node --check "$AGENT"
+if command -v node > /dev/null 2>&1; then
+    node --check "$AGENT"
+fi
 sh -n "$LOADER"
 sh -n "$FULL_INSTALL"
 sh -n "$FULL_REMOVE"
