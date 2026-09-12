@@ -1,4 +1,5 @@
 pub mod adb;
+pub mod canbus;
 mod classic_commands;
 pub mod engine;
 pub mod engineering_menu;

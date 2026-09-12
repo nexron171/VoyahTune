@@ -45,6 +45,11 @@ def main():
     s['packages'].pop(package,None);s.pop('nativeOldHash',None)
    else:s['packages'][package]=path
 
+   if not remote('/system/priv-app/VoyahHlCTRL').exists() and not any(remote('/data/system/package_cache').glob('*')):
+    if s.get('canbusOwner')=='com.voyah.hl.service' and not s.get('retainCanbusOwner'):
+     s.pop('canbusOwner',None)
+    if not s.get('retainCanbusPackage'):
+     s['packages'].pop('com.voyah.hl.service',None)
    save(s)
   elif args[0]=='push':
    dest=remote(args[2]);dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(args[1],dest)
@@ -52,7 +57,9 @@ def main():
    print('1 file pushed')
   elif args[0]=='pull':
    if s.get('failPull'):print('device offline',file=sys.stderr);return 1
-   shutil.copyfile(remote(args[1]),args[2]);print('1 file pulled')
+   if remote(args[1]).is_dir():shutil.copytree(remote(args[1]),args[2])
+   else:shutil.copyfile(remote(args[1]),args[2])
+   print('1 file pulled')
   elif args[0]=='install':
    if s.get('installError'):
     print('Failure ['+s['installError']+']',file=sys.stderr);return 1
@@ -68,7 +75,7 @@ def main():
     if 'restore' in script:shutil.rmtree(remote('/data/local/open_voyah/qgdns'),ignore_errors=True)
     print('off');return 0
    if s.get('readOnly') and 'touch /system/' in script:print('RO');return 0
-   script=re.sub(r'/(system|data|vendor|sdcard|proc)(?=/|[\s\'\";]|$)',lambda m:str(root)+'/'+m[1],script)
+   script=re.sub(r'(?<![\w/])/(system|data|vendor|sdcard|proc)(?=/|[\s\'\";]|$)',lambda m:str(root)+'/'+m[1],script)
    env={**os.environ,'PATH':str(base/'bin')+':/usr/bin:/bin'}
    result=subprocess.run(['/bin/sh','-s'],input=script,text=True,env=env,capture_output=True)
    sys.stdout.write(result.stdout.replace(str(root),''));sys.stderr.write(result.stderr.replace(str(root),''));return result.returncode
@@ -105,7 +112,12 @@ def main():
  elif name=='cmd':
   if args[:2]!=['package','install-existing']:raise RuntimeError(args)
   package=args[-1];s['packages'][package]='/system/priv-app/Native/Native.apk';save(s);package_data(package);print('Package installed for user: 0')
- elif name=='dumpsys':print('Permissions:\n Permission [android.permission.INTERNET]\n sourcePackage=android')
+ elif name=='dumpsys':
+  print('Permissions:')
+  if 'canbusOwner' in s:
+   print(' Permission [com.qinggan.permission.WRITE_CANBUS]')
+   if s['canbusOwner'] is not None:print(' sourcePackage='+s['canbusOwner'])
+  print(' Permission [android.permission.INTERNET]\n sourcePackage=android')
  elif name=='settings':
   key=args[2] if len(args)>2 else None;settings=s.setdefault('settings',{})
   if args[0]=='list':

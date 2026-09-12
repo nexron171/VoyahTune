@@ -1,8 +1,10 @@
 //! Rust port of Packaging/installer/{full,light}/install.sh and full/remove.sh.
 //! Each checked result below corresponds to a checked branch in those scripts.
 //! GUI steps, diagnostics and journals do not add vehicle preconditions.
+//! The approved VoyahHlCTRL remediation is an opt-in extension to the permission step.
 use crate::{
     adb::{quote, Adb},
+    canbus::{self, RemovalConsent},
     classic_commands as c,
     events::{EventCallback, Events},
     inventory,
@@ -29,6 +31,7 @@ pub struct Engine {
     pub payload: Payload,
     pub operation: Operation,
     pub cancel: Arc<AtomicBool>,
+    pub canbus_consent: Option<Arc<RemovalConsent>>,
     restart_loader: bool,
     legacy_migrated: bool,
 }
@@ -53,6 +56,7 @@ impl Engine {
             payload,
             operation,
             cancel,
+            canbus_consent: None,
             restart_loader: false,
             legacy_migrated: false,
         })
@@ -79,6 +83,10 @@ impl Engine {
         self.adb.events.emit(
             if result.is_ok() {
                 "operation-completed"
+            } else if result.as_ref().is_err_and(|e| e.code == "CANCELLED") {
+                "operation-cancelled"
+            } else if result.as_ref().is_err_and(|e| e.code == "ACTION_REQUIRED") {
+                "operation-paused"
             } else {
                 "operation-failed"
             },
@@ -111,9 +119,16 @@ impl Engine {
                 .events
                 .emit("step-completed", Some(id), title, json!({})),
             Err(e) => {
-                self.adb
-                    .events
-                    .emit("step-failed", Some(id), &e.message, json!({"error":e}))?;
+                self.adb.events.emit(
+                    match e.code.as_str() {
+                        "CANCELLED" => "step-cancelled",
+                        "ACTION_REQUIRED" => "step-paused",
+                        _ => "step-failed",
+                    },
+                    Some(id),
+                    &e.message,
+                    json!({"error":e}),
+                )?;
                 Err(e)
             }
         }
@@ -311,13 +326,22 @@ impl Engine {
     }
     fn permission_owner(&self) -> Result<()> {
         let dump = self.shell("dumpsys package permissions\n")?;
-        if let Some(block) = dump
-            .split_once("Permission [com.qinggan.permission.WRITE_CANBUS]")
-            .map(|(_, s)| s.split("Permission [").next().unwrap_or(s))
-        {
-            let owner = block
-                .lines()
-                .find_map(|s| s.split_once("sourcePackage=").map(|(_, v)| v.trim()));
+        if self.has_canbus_conflict(&dump)? {
+            return self.resolve_canbus_conflict();
+        }
+        self.validate_permission_owner(&dump)
+    }
+    fn hl_service_installed(&self) -> Result<bool> {
+        let packages = self.shell("pm list packages --user 0\n")?;
+        Ok(packages
+            .lines()
+            .any(|line| line.trim().strip_prefix("package:") == Some(canbus::PACKAGE)))
+    }
+    fn has_canbus_conflict(&self, dump: &str) -> Result<bool> {
+        Ok(canbus::owner(dump) == Some(Some(canbus::PACKAGE)) || self.hl_service_installed()?)
+    }
+    fn validate_permission_owner(&self, dump: &str) -> Result<()> {
+        if let Some(owner) = canbus::owner(dump) {
             if owner != Some(NATIVE) && !(cfg!(windows) && owner.is_none()) {
                 return Err(self.fail(
                     "WRITE_CANBUS принадлежит другому пакету",
@@ -325,6 +349,100 @@ impl Engine {
                 ));
             }
         }
+        Ok(())
+    }
+    fn resolve_canbus_conflict(&self) -> Result<()> {
+        if let Some(consent) = &self.canbus_consent {
+            consent.begin();
+        }
+        if self.canbus_consent.as_ref().and_then(|c| c.decision()) != Some(true) {
+            self.adb.events.emit("canbus-conflict", self.adb.step.as_deref(), canbus::NOTICE,
+                json!({"package":canbus::PACKAGE,"awaitingConfirmation":self.canbus_consent.is_some(),"cliFlag":"--remove-voyah-hl-service"}))?;
+        }
+        let Some(consent) = &self.canbus_consent else {
+            return Err(Error::new("ACTION_REQUIRED", canbus::NOTICE)
+                .retry("Для удаления com.voyah.hl.service повторите команду с --remove-voyah-hl-service или используйте --interactive."));
+        };
+        loop {
+            if self.cancel.load(Ordering::Relaxed) || consent.decision() == Some(false) {
+                return Err(Error::new(
+                    "CANCELLED",
+                    "Удаление com.voyah.hl.service отменено. Установка не продолжена.",
+                )
+                .retry(
+                    "Повторите установку, когда будете готовы удалить конфликтующее приложение.",
+                ));
+            }
+            if consent.decision() == Some(true) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        self.adb.events.emit("canbus-removal-started", self.adb.step.as_deref(),
+            "Удаление com.voyah.hl.service подтверждено. Сохраняем системную папку перед удалением.", json!({}))?;
+        // Back up before remount or uninstall; a failed pull must not remove the app.
+        if self.shell("if [ -d /system/priv-app/VoyahHlCTRL ]; then echo PRESENT; fi\n")?
+            == "PRESENT"
+        {
+            let backup = self.operation.dir.join("VoyahHlCTRL");
+            self.raw(&["pull", canbus::DIRECTORY, &backup.to_string_lossy()])?
+                .checked("Не удалось сохранить VoyahHlCTRL перед удалением")?;
+            self.adb.events.emit(
+                "canbus-backup",
+                self.adb.step.as_deref(),
+                "Копия VoyahHlCTRL сохранена на компьютере",
+                json!({"path":backup}),
+            )?;
+        }
+        self.writable(false)?;
+        // Preparation may reboot the car. Recheck both reasons for removal.
+        let dump = self.shell("dumpsys package permissions\n")?;
+        if !self.has_canbus_conflict(&dump)? {
+            self.validate_permission_owner(&dump)?;
+            self.adb.events.emit("canbus-conflict-resolved", self.adb.step.as_deref(),
+                "После подготовки раздела com.voyah.hl.service отсутствует и не владеет WRITE_CANBUS. Удаление не требуется.", json!({}))?;
+            return Ok(());
+        }
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(Error::new(
+                "CANCELLED",
+                "Удаление com.voyah.hl.service отменено",
+            ));
+        }
+        self.ignore("am force-stop com.voyah.hl.service\n");
+        // A system package may reject uninstall, or already be uninstalled for user 0.
+        // Its system APK and stale permission registration still need removal.
+        self.ignore("pm uninstall --user 0 com.voyah.hl.service\n");
+        self.shell("rm -rf /system/priv-app/VoyahHlCTRL && rm -rf /data/system/package_cache/*\n")?;
+        self.adb.events.emit(
+            "canbus-removal-reboot",
+            self.adb.step.as_deref(),
+            "Перезагрузка для освобождения WRITE_CANBUS. Не отключайте кабель и питание.",
+            json!({}),
+        )?;
+        self.raw(&["reboot"])?
+            .checked("ADB не принял перезагрузку после удаления VoyahHlCTRL")?;
+        self.wait_boot(true)?;
+        let dump = self.shell("dumpsys package permissions\n")?;
+        if canbus::owner(&dump) == Some(Some(canbus::PACKAGE)) {
+            return Err(self.fail(
+                "WRITE_CANBUS не освободилось после удаления VoyahHlCTRL",
+                canbus::PACKAGE,
+            ));
+        }
+        if self.hl_service_installed()? {
+            return Err(self.fail(
+                "com.voyah.hl.service осталось установленным после удаления VoyahHlCTRL",
+                "Пакет присутствует у пользователя 0 после перезагрузки",
+            ));
+        }
+        self.validate_permission_owner(&dump)?;
+        self.adb.events.emit(
+            "canbus-conflict-resolved",
+            self.adb.step.as_deref(),
+            "Конфликт WRITE_CANBUS устранён. Продолжаем установку VoyahTune.",
+            json!({}),
+        )?;
         Ok(())
     }
     fn is_writable(&self) -> bool {

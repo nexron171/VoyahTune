@@ -5,9 +5,10 @@
   let devices = $state<Device[]>([]), busy = $state(false), confirmed = $state(false), removeConfirmed = $state(false);
   let plan = $state<Plan|null>(null), error = $state<Failure|null>(null), events = $state<Event[]>([]);
   let date = $state(''), code = $state(''), manualDate = $state(false), logOpen = $state(false), stopRequested = $state(false);
-  let outcome = $state<'running'|'success'|'failed'>('running'), reportPath = $state('');
+  let outcome = $state<'running'|'success'|'failed'|'cancelled'|'paused'>('running'), reportPath = $state('');
   let closeNotice = $state(false), eventsReady = $state(false), eventError = $state<Failure|null>(null);
   let completed = $state<string[]>([]), current = $state<string|undefined>();
+  let canbusNotice = $state(''), canbusAnswerPending = $state(false), stopMessage = $state('');
   let releasePath = $state(''), releaseVersion = $state('');
   function showLog(node: HTMLDialogElement) { node.showModal(); return {destroy(){node.close();}}; }
   const stages = ['Выбор действия','Подключение','Проверка','Выполнение','Результат'];
@@ -22,10 +23,13 @@
   function acceptEvent(event:Event){
     if(events.some(e=>e.operationId===event.operationId&&e.sequence===event.sequence))return;
     events=[...events,event].slice(-1500);
+    if(event.type==='canbus-conflict'&&event.data.awaitingConfirmation){canbusNotice=event.message;canbusAnswerPending=false;}
+    if(event.type==='canbus-removal-started'){canbusNotice='';canbusAnswerPending=false;}
+    if(['operation-cancelled','operation-paused'].includes(event.type)){canbusNotice='';error=null;stopMessage=event.data.report?.error?.message||event.message;outcome=event.type==='operation-paused'?'paused':'cancelled';screen=4;busy=false;reportPath=event.data.reportPath||'';}
     if(event.type==='step-started')current=event.stepId;
     if(event.type==='step-completed'&&event.stepId&&!completed.includes(event.stepId))completed=[...completed,event.stepId];
-    if(event.type==='operation-failed') {error=event.data.report?.error || failure(event.message);outcome='failed';screen=4;busy=false;reportPath=event.data.reportPath||'';}
-    if(event.type==='operation-completed') {outcome='success';screen=4;busy=false;reportPath=event.data.reportPath||'';}
+    if(event.type==='operation-failed') {canbusNotice='';error=event.data.report?.error || failure(event.message);outcome='failed';screen=4;busy=false;reportPath=event.data.reportPath||'';}
+    if(event.type==='operation-completed') {canbusNotice='';outcome='success';screen=4;busy=false;reportPath=event.data.reportPath||'';}
   }
   async function recoverEvents(){
     try{for(const event of await command<Event[]>('operation_events'))acceptEvent(event);}
@@ -44,8 +48,9 @@
   async function choose(value:Action){action=value;screen=1;plan=null;confirmed=false;error=null;await refresh();}
   async function refresh(){busy=true;confirmed=false;plan=null;error=null;devices=[];try{devices=(await command<{devices:Device[]}>('devices')).devices;}catch(e){error=failure(e);}finally{busy=false;}}
   async function review(){if(!connected||!confirmed)return;busy=true;error=null;try{plan=await command<Plan>('plan',{serial:devices[0].serial,action,dns});screen=2;removeConfirmed=false;}catch(e){error=failure(e);}finally{busy=false;}}
-  async function start(){if(!eventsReady||!plan || (action==='remove'&&!removeConfirmed))return;busy=true;error=null;events=[];completed=[];current=undefined;reportPath='';stopRequested=false;outcome='running';screen=3;
+  async function start(){if(!eventsReady||!plan || (action==='remove'&&!removeConfirmed))return;busy=true;error=null;canbusNotice='';canbusAnswerPending=false;stopMessage='';events=[];completed=[];current=undefined;reportPath='';stopRequested=false;outcome='running';screen=3;
     try{await command('apply',{request:{...plan.request,dns,confirmed:true}});}catch(e){error=failure(e);outcome='failed';screen=4;busy=false;}finally{await recoverEvents();}}
+  async function resolveCanbus(approved:boolean){canbusAnswerPending=true;try{await command('resolve_canbus_conflict',{approved});}catch(e){error=failure(e);canbusAnswerPending=false;}}
   async function stop(){try{await command('cancel');stopRequested=true;}catch(e){error=failure(e);}}
   async function retry(){screen=1;error=null;await refresh();}
   async function saveReport(){try{const path=await command<string>('save_report',{events});reportPath=path;}catch(e){error=failure(e);}}
@@ -56,7 +61,7 @@
       <nav aria-label="Этапы установки"><ol>{#each stages as stage,i}<li class:current={i===screen} class:done={i<screen} class="nav-item" aria-current={i===screen?'step':undefined}><span class="nav-number">{i<screen?'✓':i+1}</span><span class="nav-label">{stage}</span></li>{/each}</ol></nav>
       <div class="sidebar-bottom"><span class="offline-dot"></span> Всё необходимое в комплекте<small>macOS · Windows · Linux</small></div>
     </aside>
-    <main id="main" aria-busy={busy}>
+    <main id="main" aria-busy={busy&&!canbusNotice}>
       <div class="screen">
       {#if screen===0}
         <div class="screen-heading"><span class="eyebrow">НАЧАЛО РАБОТЫ</span><h1>Что вы хотите сделать?</h1><p class="subtitle">Выберите набор функций для автомобиля или удалите VoyahTune.</p></div>
@@ -81,12 +86,13 @@
         {#if action==='remove'}<label class="confirmation"><input type="checkbox" bind:checked={removeConfirmed}> Подтверждаю удаление обоих наборов VoyahTune, их настроек и данных</label>{/if}
       {:else if screen===3 && plan}
         <div class="screen-heading"><span class="eyebrow">{action==='remove'?'УДАЛЕНИЕ':'УСТАНОВКА'} VOYAHTUNE</span><h1>{plan.steps.find(s=>s.id===current)?.title||'Повторная проверка'}</h1><p class="subtitle">Не отключайте кабель и питание автомобиля. Здесь будет показан результат каждого шага.</p></div>
+        {#if canbusNotice}<section class="status-panel warning" role="alert" aria-label="Конфликт разрешения WRITE_CANBUS"><h2>Нужно удалить конфликтующее приложение</h2><p>{canbusNotice}</p><div class="canbus-actions"><button class="button danger" disabled={canbusAnswerPending||stopRequested} onclick={()=>resolveCanbus(true)}>Удалить приложение и продолжить</button><button class="button secondary" disabled={canbusAnswerPending||stopRequested} onclick={()=>resolveCanbus(false)}>Отменить установку</button></div></section>{/if}
         <div class="progress-track indeterminate"><div class="progress-bar"></div></div><p class="progress-text">Завершено {completed.length} из {plan.steps.length} шагов</p>
         <ol class="step-list">{#each plan.steps as step,i}<li class="step-row" class:done={completed.includes(step.id)} class:active={current===step.id&&!completed.includes(step.id)}><span class="step-indicator">{completed.includes(step.id)?'✓':i+1}</span><span>{step.title}</span></li>{/each}</ol>
-        {#if events.filter(e=>e.stepId===current&&['package-reset','signing-reset-reboot'].includes(e.type)).at(-1)}<p class="info-note" role="status">{events.filter(e=>e.stepId===current&&['package-reset','signing-reset-reboot'].includes(e.type)).at(-1)?.message}</p>{/if}
+        {#if events.filter(e=>e.stepId===current&&['package-reset','signing-reset-reboot','canbus-removal-started','canbus-backup','canbus-removal-reboot','canbus-conflict-resolved'].includes(e.type)).at(-1)}<p class="info-note" role="status">{events.filter(e=>e.stepId===current&&['package-reset','signing-reset-reboot','canbus-removal-started','canbus-backup','canbus-removal-reboot','canbus-conflict-resolved'].includes(e.type)).at(-1)?.message}</p>{/if}
         {#if stopRequested}<p class="info-note">Остановка запрошена. Текущий шаг завершится, затем операция остановится.</p>{/if}
       {:else if screen===4}
-        <div class="screen-heading"><span class="eyebrow">{outcome==='success'?'ГОТОВО':'ОПЕРАЦИЯ ОСТАНОВЛЕНА'}</span><h1>{outcome==='success'?(action==='remove'?'VoyahTune удалён':'VoyahTune готов к работе'):'Не удалось завершить операцию'}</h1><p class="subtitle">{outcome==='success'?(action==='remove'?'Команды удаления выполнены. Автомобиль перезагружается.':'Запуск Native проверен после перезагрузки автомобиля.'):'Завершённые шаги могли изменить автомобиль. После устранения причины выполните новую проверку.'}</p></div>
+        <div class="screen-heading"><span class="eyebrow">{outcome==='success'?'ГОТОВО':'ОПЕРАЦИЯ ОСТАНОВЛЕНА'}</span><h1>{outcome==='success'?(action==='remove'?'VoyahTune удалён':'VoyahTune готов к работе'):outcome==='cancelled'?'Операция отменена':outcome==='paused'?'Требуется ваше решение':'Не удалось завершить операцию'}</h1><p class="subtitle">{outcome==='success'?(action==='remove'?'Команды удаления выполнены. Автомобиль перезагружается.':'Запуск Native проверен после перезагрузки автомобиля.'):['cancelled','paused'].includes(outcome)?stopMessage:'Завершённые шаги могли изменить автомобиль. После устранения причины выполните новую проверку.'}</p></div>
         {#if outcome==='success'}<section class="status-panel success"><h2>{action==='remove'?'Приложения и компоненты удалены':`Установлен ${action==='full'?'Full':'Light'}`}</h2><p>{action==='remove'?'Резервные копии и журнал сохранены на компьютере.':'Откройте VoyahTune на автомобиле, чтобы настроить доступные функции.'}</p></section>{/if}
       {/if}
       {#if closeNotice && busy}<p class="info-note" role="status">Сейчас выполняется проверка или установка. Дождитесь завершения; установку можно остановить кнопкой «Остановить после текущего шага».</p>{/if}

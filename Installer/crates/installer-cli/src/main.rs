@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use installer_core::{
     adb::Adb,
+    canbus::RemovalConsent,
     engine::{default_adb, Engine},
     engineering_menu,
     events::Events,
@@ -107,6 +108,11 @@ enum Commands {
         logs: Option<PathBuf>,
         #[arg(long)]
         interactive: bool,
+        #[arg(
+            long,
+            help = "Разрешить удаление com.voyah.hl.service, его данных и системной папки с перезагрузкой"
+        )]
+        remove_voyah_hl_service: bool,
     },
     /// Применить ранее подтверждённый план. Требуются серийный номер, токен и --yes.
     Apply {
@@ -122,14 +128,31 @@ enum Commands {
         yes: bool,
         #[arg(long)]
         logs: Option<PathBuf>,
-        #[arg(long, help = "Принимать JSON {\"cancel\":true} через stdin")]
+        #[arg(
+            long,
+            help = "Принимать отмену и решение confirmRemoveVoyahHlService через JSON stdin"
+        )]
         interactive: bool,
+        #[arg(
+            long,
+            help = "Разрешить удаление com.voyah.hl.service, его данных и системной папки с перезагрузкой"
+        )]
+        remove_voyah_hl_service: bool,
     },
 }
 fn main() {
     if let Err(error) = run(Cli::parse()) {
-        println!("{}", json!({"type":"error","error":error}));
-        std::process::exit(if error.code == "CANCELLED" { 130 } else { 1 });
+        let kind = match error.code.as_str() {
+            "CANCELLED" => "cancelled",
+            "ACTION_REQUIRED" => "notification",
+            _ => "error",
+        };
+        println!("{}", json!({"type":kind,"error":error}));
+        std::process::exit(match error.code.as_str() {
+            "CANCELLED" => 130,
+            "ACTION_REQUIRED" => 3,
+            _ => 1,
+        });
     }
 }
 fn run(cli: Cli) -> Result<()> {
@@ -140,6 +163,7 @@ fn run(cli: Cli) -> Result<()> {
         yes,
         logs,
         interactive,
+        remove_voyah_hl_service,
     } = cli.command
     {
         let plan: plans::Plan = serde_json::from_reader(std::fs::File::open(file)?)?;
@@ -162,6 +186,7 @@ fn run(cli: Cli) -> Result<()> {
                 yes,
                 logs,
                 interactive,
+                remove_voyah_hl_service,
             },
         });
     }
@@ -254,26 +279,30 @@ fn run(cli: Cli) -> Result<()> {
             yes,
             logs,
             interactive,
+            remove_voyah_hl_service,
         } => {
             if !yes {
                 return Err(Error::new("CONFIRMATION_REQUIRED","Операция изменяет автомобиль. Проверьте результат plan и передайте --yes для подтверждения."));
             }
             let cancel = Arc::new(AtomicBool::new(false));
+            let consent = (interactive || remove_voyah_hl_service)
+                .then(|| Arc::new(RemovalConsent::new(remove_voyah_hl_service)));
             if interactive {
                 let c = cancel.clone();
+                let input_consent = consent.clone().unwrap();
                 std::thread::spawn(move || {
                     for line in io::stdin().lock().lines() {
-                        match line {
-                            Ok(s)
-                                if serde_json::from_str::<serde_json::Value>(&s)
-                                    .ok()
-                                    .is_some_and(|v| v["cancel"] == true) =>
-                            {
+                        let Ok(line) = line else {
+                            break;
+                        };
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                            if value["cancel"] == true {
                                 c.store(true, Ordering::Relaxed);
                                 break;
                             }
-                            Err(_) => break,
-                            _ => {}
+                            if let Some(approved) = value["confirmRemoveVoyahHlService"].as_bool() {
+                                input_consent.answer(approved);
+                            }
                         }
                     }
                     // EOF means the controlling GUI/script has disappeared.
@@ -298,6 +327,7 @@ fn run(cli: Cli) -> Result<()> {
                 callback,
                 cancel,
             )?;
+            engine.canbus_consent = consent;
             engine.run(Request {
                 action: action.into(),
                 dns: dns.into(),

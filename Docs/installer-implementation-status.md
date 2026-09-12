@@ -3,6 +3,29 @@
 Актуально: 2026-09-08. Engine 0.3.0. Все текущие изменения сохранены в рабочем
 дереве; коммит и push не выполнялись.
 
+## Дополнение 2026-09-12: конфликт WRITE_CANBUS
+
+- В GUI/CLI добавлено уведомление, если `com.voyah.hl.service` владеет WRITE_CANBUS
+  **или** установлен для пользователя 0 (`pm list packages --user 0`), с отдельным
+  подтверждением удаления. Бэкап VoyahHlCTRL → подготовка `/system` → force-stop /
+  uninstall user 0 → удаление системной папки / package_cache → reboot → проверка
+  освобождения разрешения и отсутствия пакета → продолжение Full/Light. Отказ отображается как отмена.
+- CLI: `--remove-voyah-hl-service`, интерактивное решение через stdin;
+  без решения код 3 и `operation-paused`. Формат описан в `Installer/README.md`.
+- Проверено на fake ADB; есть отдельный набор `Installer/tests/test_canbus.py`,
+  не требующий готового payload. Применение к реальному автомобилю не проверялось.
+- Релиз 3.10.0 пересобран с проверкой через ИЛИ для macOS Universal и Windows x64:
+  `Releases/dist/VoyahTune-3.10.0-installers/`. Linux исключён по просьбе пользователя.
+  Готовые macOS/Windows сохранены из общей сборки, упаковка Linux остановлена;
+  итоговые ZIP и метаданные сформированы штатными функциями release.py.
+  Проверки встроенного payload/ADB, NSIS, CRC ZIP и SHA-256 прошли. GUI/CLI macOS
+  имеют обе архитектуры. Все 16 сценариев test_canbus.py прошли на готовом macOS CLI.
+  Логи: `Releases/cache/installer-all-Fh0G3h/` и
+  `Releases/cache/setup/canbus-release-3.10.0-or.log`.
+  Пакеты без Developer ID/notarization и Authenticode; на реальном автомобиле
+  и чистых целевых ОС этот выпуск не проверялся.
+- Ниже сохранены результаты предыдущей проверки от 2026-09-08.
+
 ## Главное решение
 
 GUI/CLI исполняет **Rust-порт старого install/remove**, сохраняя порядок действий

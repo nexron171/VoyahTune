@@ -50,6 +50,15 @@ Windows-вариант старого permission-check допускает неи
 
 ## Явно согласованные отличия и интерфейс
 
+- GUI/CLI при владельце WRITE_CANBUS `com.voyah.hl.service` **или** наличии этого
+  пакета у пользователя 0 показывает уведомление
+  и предлагает удалить VoyahHlCTRL. Только после отдельного согласия сохраняется
+  системная папка на компьютере, подготавливается `/system`, выполняются force-stop,
+  uninstall для user 0, удаление `/system/priv-app/VoyahHlCTRL` и очистка package_cache.
+  Затем обязательны reboot, ожидание Android/root и повторная проверка владельца разрешения и наличия пакета.
+  Ошибка бэкапа или сохранение конфликта после reboot останавливают процесс.
+  Эта ветка GUI/CLI находится в `engine.rs::resolve_canbus_conflict`, согласие —
+  в `canbus.rs`. Классические `.sh/.bat` сохраняют прежний отказ при этом владельце.
 - Пользователь вручную подтверждает единственный подключённый автомобиль.
 - При несовпадении подписи Native/RestoreMode соответствующее приложение удаляется
   с данными и устанавливается заново. Native требует промежуточного reboot, чтобы
@@ -80,6 +89,7 @@ SHA/подписи всего payload проверяются сборкой и �
 ```sh
 python3 Installer/scripts/sync-classic-commands.py --check
 cargo test --manifest-path Installer/Cargo.toml -p installer-core -p installer-build
+python3 Installer/tests/test_canbus.py
 python3 Installer/tests/test_release.py
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
   python3 Installer/tests/test_classic_port.py

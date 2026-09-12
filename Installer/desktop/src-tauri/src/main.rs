@@ -276,7 +276,10 @@ fn run_operation(app: &tauri::AppHandle, request: Request) -> Result<()> {
                     if event["type"] == "error" {
                         last_error = serde_json::from_value::<Error>(event["error"].clone()).ok();
                     }
-                    if event["type"] == "operation-failed" {
+                    if matches!(
+                        event["type"].as_str(),
+                        Some("operation-failed" | "operation-cancelled" | "operation-paused")
+                    ) {
                         last_error = serde_json::from_value::<Error>(
                             event["data"]["report"]["error"].clone(),
                         )
@@ -301,12 +304,33 @@ fn run_operation(app: &tauri::AppHandle, request: Request) -> Result<()> {
     }
     let status = child.wait()?;
     let detail = stderr.join().unwrap_or_default();
+    if status.code() == Some(130) && last_error.as_ref().is_some_and(|e| e.code == "CANCELLED") {
+        return Ok(());
+    }
     if !status.success() {
         return Err(last_error.unwrap_or_else(|| {
             Error::new("CLI_EXIT", "Исполняемый модуль неожиданно завершился")
                 .detail(format!("{status}\n{detail}"))
         }));
     }
+    Ok(())
+}
+#[tauri::command]
+fn resolve_canbus_conflict(runtime: State<Runtime>, approved: bool) -> Result<()> {
+    let mut state = runtime
+        .0
+        .lock()
+        .map_err(|_| Error::new("DESKTOP_LOCK", "Состояние недоступно"))?;
+    let stdin = state
+        .stdin
+        .as_mut()
+        .ok_or_else(|| Error::new("NOT_RUNNING", "Операция уже завершена"))?;
+    writeln!(
+        stdin,
+        "{}",
+        serde_json::json!({"confirmRemoveVoyahHlService":approved})
+    )?;
+    stdin.flush()?;
     Ok(())
 }
 #[tauri::command]
@@ -404,6 +428,7 @@ fn main() {
             plan,
             apply,
             cancel,
+            resolve_canbus_conflict,
             operation_events,
             save_report
         ])

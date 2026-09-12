@@ -1652,3 +1652,5 @@ pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:380px
 .log-modal header {display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
 
 .release-picker{padding:18px 22px;margin-bottom:24px}.release-picker h2{margin:0}.release-picker p{margin:8px 0 14px}.release-picker label{display:block}.release-picker input{display:block;width:100%;box-sizing:border-box;padding:10px;margin:6px 0 12px;border:1px solid #ccd5d5;border-radius:8px}
+
+.canbus-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px}
