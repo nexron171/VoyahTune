@@ -39,13 +39,12 @@ if grep -Eq 'ModeFeedback|MODE_REMEMBER|persistModeFeedback|INTEREST_VEHICLE_STA
     fail "TripStatsService contains vehicle-mode responsibilities"
 fi
 
-# OEM defaults during wake must not replace the stored target. After settle, only opted-in mode
-# feedback may become the source of truth.
-require_fixed "$MODE_POLICY" 'POST_RESTORE_SETTLE_MS = 30_000L'
-require_fixed "$MODE_POLICY" \
-    'return acceptsExternalFeedback(modeKey) ? Decision.ACCEPT : Decision.IGNORE;'
-require_fixed "$MODE_POLICY" 'acceptsExternalFeedback(modeKey)'
+# Feedback is gated only during the pass and never causes correction retries.
+require_fixed "$MODE_POLICY" 'feedbackOpen && acceptsExternalFeedback(modeKey)'
 require_fixed "$APPLY_ENGINE" 'MODE_SYNC_POLICY.canPersist('
+require_fixed "$NATIVE_MAIN" '!remembersMode(context, modeKey)'
+require_fixed "$PROVIDER" 'sharedPreferences.getBoolean(rememberKey, true)'
+require_fixed "$ADVANCE" 'if (!prefs.getBoolean(rememberKey, true)) return;'
 
 # Remember-last is opt-out per mode. Missing provider columns, NULL values and old caches all retain
 # the historical enabled behaviour; the running controller receives UI changes immediately.

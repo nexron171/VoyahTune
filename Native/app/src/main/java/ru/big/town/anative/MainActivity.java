@@ -166,7 +166,7 @@ public class MainActivity extends AppCompatActivity {
     public static boolean sendRecuperationModeCommand(Context context, String mode) {
         if (context == null) return false;
         if (!VehicleRestorePolicy.allowsRecuperationRestore(
-                currentSavedMode(context, "driveMode"))) {
+                currentVehicleMode(context, "driveMode"))) {
             Log.i("$$$ MainActivity recuperation $$$",
                     "Snow owns minimum recuperation; storing selection without CAN send");
             return true;
@@ -239,10 +239,6 @@ public class MainActivity extends AppCompatActivity {
         } else {
             startService(serviceIntent);
         }
-
-        // Открытие Native остаётся ручным recovery-path при пропущенном power/screen callback. Движок
-        // дедебаунсит этот триггер с service-start и не создаёт параллельную прямую CAN-отправку.
-        ApplyEngine.scheduleApply("Native activity opened");
 
         // Если у плитки виджета отключён автозапуск, пользователь запускает приложение вручную.
         // При повторном открытии MainActivity — автоматически запускаем это приложение заново.
@@ -559,7 +555,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Builds one validated pass before the first OEM request is submitted. */
-    static CanRestorePlan createCanRestorePlan(boolean repeatOemOnNextPass) {
+    static CanRestorePlan createCanRestorePlan() {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound
@@ -621,19 +617,27 @@ public class MainActivity extends AppCompatActivity {
 
         if (!primaryValues.isEmpty() || !trailingValues.isEmpty()) {
             final OemVehicleStateTransport.StateValue firstState = fragranceDurationState;
-            plan.addOperation("OEM vehicle restore snapshot", () ->
-                    OemVehicleStateTransport.sendRestoreSequence(
-                            context, firstState, primaryValues, trailingValues, stableIds,
-                            "drive/energy/fragrance/Apollo entitlements then switches/recuperation")
-                            .accepted()
-                            ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
-                            : CanRestorePlan.OperationResult.TRANSIENT_FAILURE,
-                    repeatOemOnNextPass);
+            final String appliedDrive = driveEnabled ? driveMode : null;
+            final String appliedEnergy = forcedEv ? "FORCE_EV" : energyEnabled ? energy : null;
+            final String appliedRecycle = recycleEnabled
+                    && VehicleRestorePolicy.allowsRecuperationRestore(driveMode) ? recycle : null;
+            plan.addOnce("OEM vehicle restore snapshot", () -> {
+                boolean accepted = OemVehicleStateTransport.sendRestoreSequence(
+                        context, firstState, primaryValues, trailingValues, stableIds,
+                        "drive/energy/fragrance/Apollo entitlements then switches/recuperation")
+                        .accepted();
+                if (!accepted) return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+                // These are current vehicle targets, never writes to the pinned menu selection.
+                ApplyEngine.noteVehicleMode("driveMode", appliedDrive);
+                ApplyEngine.noteVehicleMode("energy", appliedEnergy);
+                ApplyEngine.noteVehicleMode("recycle", appliedRecycle);
+                return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+            });
         }
 
         // Independent TX58: the OEM setter preserves the neighbouring VSP frame fields.
         final boolean pedestrianDisabled = disablePedestrianSound;
-        plan.addOperation(
+        plan.addOnce(
                 "pedestrian sound mode " + (pedestrianDisabled ? "off" : "on"),
                 () -> OemVehicleStateTransport.sendVehicleState(
                         context,
@@ -642,16 +646,12 @@ public class MainActivity extends AppCompatActivity {
                         VehicleRestorePolicy.pedestrianSoundState(pedestrianDisabled),
                         "pedestrian sound restore").accepted()
                         ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
-                        : CanRestorePlan.OperationResult.TRANSIENT_FAILURE,
-                repeatOemOnNextPass);
+                        : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
         return plan.build();
     }
 
-    static CanRestorePlan createCanRestorePlan() {
-        return createCanRestorePlan(false);
-    }
 
-    /** Compatibility one-shot; ApplyEngine keeps the plan across transient retries. */
+    /** Compatibility one-shot application of the current snapshot. */
     public static boolean runCmds() {
         try {
             return createCanRestorePlan().sendPending(
@@ -672,7 +672,7 @@ public class MainActivity extends AppCompatActivity {
     /**
      * Текущий СОХРАНЁННЫЙ режим (тот, что восстанавливается на пробуждении и показан в UI VoyahTune).
      * Читаем из провайдера RestoreMode; фолбэк — статик Native.
-     * Нужно кнопке руля, чтобы циклировать ОТНОСИТЕЛЬНО реального режима (правильный первый клик).
+     * Используется как fallback, если текущее состояние машины ещё неизвестно.
      * @param isEnergy true → энергорежим, иначе режим вождения.
      */
     public static String currentSavedMode(Context context, boolean isEnergy) {
@@ -697,6 +697,26 @@ public class MainActivity extends AppCompatActivity {
             if (c != null) c.close();
         }
         return "energy".equals(modeKey) ? energy : "recycle".equals(modeKey) ? recycle : driveMode;
+    }
+
+    /** Steering cycles follow vehicle feedback / the last successful command, even when not saved. */
+    static String currentVehicleMode(Context context, String modeKey) {
+        return ApplyEngine.currentVehicleMode(modeKey, currentSavedMode(context, modeKey));
+    }
+
+    private static boolean remembersMode(Context context, String modeKey) {
+        int column = "driveMode".equals(modeKey) ? 29 : "energy".equals(modeKey) ? 30 : 31;
+        try (Cursor cursor = context.getContentResolver().query(
+                MODES_PROVIDER_URI, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                return cursorBooleanDefaultTrue(cursor, column);
+            }
+        } catch (Exception e) {
+            Log.w(MODES_LOG, "remember-last lookup: " + e.getMessage());
+        }
+        String key = "driveMode".equals(modeKey) ? "cacheDriveRememberLast"
+                : "energy".equals(modeKey) ? "cacheEnergyRememberLast" : "cacheRecycleRememberLast";
+        return nativePrefs(context).getBoolean(key, true);
     }
 
     /** Быстрая проверка уже загруженного snapshot без повторного запроса к provider на каждый VState. */
@@ -745,10 +765,10 @@ public class MainActivity extends AppCompatActivity {
         persistSavedMode(context, isEnergy ? "energy" : "driveMode", mode);
     }
 
-    /** Сохраняет driveMode/energy/recycle после явного действия пользователя. */
+    /** Saves an external/steering selection only while remember-last is enabled. */
     public static void persistSavedMode(Context context, String modeKey, String mode) {
         if (context == null || mode == null || mode.isEmpty()) return;
-        if (modeColumn(modeKey) < 0) return;
+        if (modeColumn(modeKey) < 0 || !remembersMode(context, modeKey)) return;
         boolean written = false;
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
@@ -756,6 +776,7 @@ public class MainActivity extends AppCompatActivity {
             // update() провайдера возвращает число записанных ключей (>0 = успех). Провайдер может быть на
             // миг недоступен (перезапуск/переустановка) → ловим исключение и НЕ считаем запись успешной.
             written = context.getContentResolver().update(MODES_PROVIDER_URI, cv, null, null) > 0;
+            if (!written) return;
         } catch (Exception e) {
             Log.w(MODES_LOG, "persistSavedMode provider: " + e.getMessage());
         }
@@ -868,7 +889,7 @@ public class MainActivity extends AppCompatActivity {
 //
 //        LocalBroadcastManager.getInstance(this).registerReceiver(setModesReceiver, filter);
         //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
-        ApplyEngine.scheduleApply("MainActivity button");
+        ApplyEngine.applyNow(null);
         //initValueModes(getApplicationContext());
         //runCmds();
     }

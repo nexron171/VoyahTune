@@ -129,12 +129,11 @@ require_fixed "$MAIN" 'Apollo entitlements then switches/recuperation'
 forbid_fixed "$RESTORE_POLICY" 'getVehicleState'
 forbid_fixed "$RESTORE_POLICY" 'Parking'
 
-# Automatic startup/wake restore waits ten seconds; explicit Apply remains on applyNow().
-require_fixed "$APPLY_ENGINE" 'private static final long DEBOUNCE_MS = 10_000L;'
-require_fixed "$APPLY_ENGINE" 'scheduledAt + DEBOUNCE_MS'
+# Restoration has no debounce; explicit Apply remains immediate.
+forbid_fixed "$APPLY_ENGINE" 'DEBOUNCE_MS'
 require_fixed "$APPLY_ENGINE" 'public static void applyNow('
 require_fixed "$README" 'Скрытые на 97X строки отдельных функций не раскрываются'
 require_fixed "$README" 'Автоматическое'
-require_fixed "$README" 'через 10 секунд после wake-события'
+require_fixed "$README" 'восстановление выполняется по открытию водительской двери и переходу в Drive.'
 
 echo "PASS: Apollo UI and functions use persisted event-driven restore targets"

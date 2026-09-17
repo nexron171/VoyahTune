@@ -101,7 +101,7 @@ public class SetModesService extends Service {
                     // MSG_RESULT отправим по ЗАВЕРШЕНИИ цикла применения, чтобы клиент держал
                     // кнопку «Применить» заблокированной всё время отправки.
                     final Messenger replyTo = msg.replyTo;
-                    ApplyEngine.applyNow(8, 250, () -> notifyApplyDone(replyTo));
+                    ApplyEngine.applyNow(() -> notifyApplyDone(replyTo));
                     Log.i(TAG, "handleMessage() MSG_APPLY_DRIVE_MODES");
                     break;
                 case MSG_APPLY_DRIVE_MODES_STAR_BUTTON:
@@ -967,7 +967,7 @@ public class SetModesService extends Service {
         Log.i(TAG, "Power state changed: " + state + " (" + powerStateName(state) + ")");
         if (isWakeState(state)) {
             requestWashModeCleanup("power state " + powerStateName(state));
-            ApplyEngine.scheduleApply("power state " + powerStateName(state));
+            ApplyEngine.activateWake("power state " + powerStateName(state));
             if (isScreenInteractive()
                     || state == CarPowerManager.CarPowerStateListener.ON
                     || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_CANCELLED) {
@@ -1288,7 +1288,7 @@ public class SetModesService extends Service {
         // Fallback-подписку на пробуждение через броадкасты держим ВСЕГДА (belt-and-suspenders),
         // а не только когда mCarPowerManager==null: слушатель питания может «протухнуть» при
         // рестарте CarService, и тогда единственным триггером остаётся SCREEN_ON/GARAGE_MODE_OFF.
-        // Дубли с power-listener гасит дебаунс в ApplyEngine.
+        // Режимы восстанавливаются отдельно по двери и Drive.
         if (!receiverRegistered) {
             IntentFilter filter = new IntentFilter();
             filter.addAction("android.intent.action.KEYCODE_SWC_USER_DEFINE");
@@ -1305,7 +1305,7 @@ public class SetModesService extends Service {
         if (!startupInitialized) {
             startupInitialized = true;
             requestSavedConfigSync("service start");
-            ApplyEngine.scheduleApply("service start");
+            ApplyEngine.activateWake("service start");
             restoreAutoLightState();
             restoreWiperColdState();
             startTripStatsService();

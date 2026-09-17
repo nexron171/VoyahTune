@@ -13,8 +13,7 @@ import androidx.core.content.ContextCompat;
  * Owns vehicle-mode decoding, persistence policy and the remember-last control channel.
  *
  * <p>The CanBus connection barrier and all following mode events share one serial handler. This
- * guarantees that the wake restore gate closes before buffered OEM defaults can be considered for
- * persistence. {@link VehicleStateControllers} owns the CAN subscription and invokes this
+ * orders door/gear restore events before subsequent mode feedback. {@link VehicleStateControllers} owns the CAN subscription and invokes this
  * controller with typed connection/state inputs. Remember-last opt-outs are applied immediately.</p>
  */
 final class ModeFeedbackController implements AutoCloseable {
@@ -66,7 +65,7 @@ final class ModeFeedbackController implements AutoCloseable {
 
     void onConnected() {
         if (closed) return;
-        ApplyEngine.scheduleApply("CanBus connected");
+        ApplyEngine.activateWake("CanBus connected");
     }
 
     void onVehicleState(int id, int state) {

@@ -172,6 +172,9 @@ public class AdvanceActivity extends AppCompatActivity {
             if (modeKey == null) {
                 modeKey = intent.getBooleanExtra("isEnergy", false) ? "energy" : "driveMode";
             }
+            String rememberKey = "energy".equals(modeKey) ? "energyRememberLast"
+                    : "recycle".equals(modeKey) ? "recycleRememberLast" : "driveRememberLast";
+            if (!prefs.getBoolean(rememberKey, true)) return;
             int groupId = "energy".equals(modeKey) ? R.id.energy_modes_group
                     : "recycle".equals(modeKey) ? R.id.recycle_modes_group
                     : R.id.drive_modes_group;
