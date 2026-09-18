@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<HorizontalScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#303640"
+    android:scrollbars="none">
+    <LinearLayout
+        android:id="@+id/launch_apps_list"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:padding="4dp" />
+</HorizontalScrollView>

@@ -7,4 +7,4 @@
     android:gravity="center_vertical"
     android:textColor="#FFFFFF"
     android:textSize="22sp"
-    android:background="?android:attr/selectableItemBackground" />
+    android:background="#2C2C2C" />

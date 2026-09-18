@@ -145,6 +145,13 @@
             android:enabled="true"
             android:exported="true"></receiver>
 
+        <receiver android:name=".WidgetActionReceiver" android:exported="false" />
+        <!-- Удалены: RunningAppsWidget, MediaVolumeWidget — не работают, будут переделаны позже -->
+        <receiver android:name=".LaunchAppsWidget" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_launch_apps_info" />
+        </receiver>
+
         <receiver
             android:name=".SetModesConfigReceiver"
             android:enabled="true"
@@ -238,6 +245,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Удалён RunningAppsActivity — связан с удалённым RunningAppsWidget -->
 
         <!-- Однопанельный/двухпанельный VirtualDisplay-хост (per-app DPI + живой ресайз) -->
         <activity

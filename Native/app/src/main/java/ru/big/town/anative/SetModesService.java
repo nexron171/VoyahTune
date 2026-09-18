@@ -13,6 +13,9 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.app.ActivityOptions;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
@@ -26,6 +29,12 @@ import android.car.hardware.power.CarPowerManager;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
+import android.view.InputEvent;
+import android.view.MotionEvent;
+import android.view.Surface;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
@@ -37,6 +46,9 @@ import java.util.concurrent.atomic.AtomicReference;
 public class SetModesService extends Service {
 
     private Messenger clientMessenger;
+    private final Map<String, VirtualDisplay> embeddedDisplays = new HashMap<>();
+    private final Map<String, String> embeddedPackages = new HashMap<>();
+    private final Map<String, Boolean> embeddedLaunched = new HashMap<>();
     static final int MSG_APPLY_DRIVE_MODES          = 1;
     static final int MSG_APPLY_DRIVE_MODES_STAR_BUTTON = 2;
     static final int MSG_RESULT                     = 4;
@@ -195,6 +207,7 @@ public class SetModesService extends Service {
                     String right = (d != null) ? d.getString("right") : null;
                     int lDpi = (d != null) ? d.getInt("leftDpi", 0) : 0;
                     int rDpi = (d != null) ? d.getInt("rightDpi", 0) : 0;
+                    boolean singleVd = (d != null) && d.getBoolean("singleVd", false);
                     // Изменяемая пропорция: разрешение тянуть делитель, стартовая доля левого окна и
                     // индекс пресета (по нему хост вернёт новое значение в RestoreMode).
                     boolean resizable = (d != null) && d.getBoolean("resizable", false);
@@ -203,9 +216,21 @@ public class SetModesService extends Service {
                     String presetId = (d != null) ? d.getString("presetId", "") : "";
                     Log.i(TAG, "handleMessage() MSG_SPLIT_LAUNCH_VD left=" + left + " right=" + right
                             + " ratio=" + msg.arg1 + " lDpi=" + lDpi + " rDpi=" + rDpi
+                            + " singleVd=" + singleVd
                             + " resizable=" + resizable + " split=" + split + " preset=" + presetIdx
                             + " presetId=" + presetId);
-                    if (right == null || right.isEmpty()) {
+                    if (d != null && d.getBoolean("embeddedRelease", false)) {
+                        releaseEmbeddedDisplay(d.getString("widgetId", ""));
+                    } else if (d != null && d.getBoolean("embeddedSurface", false)) {
+                        Surface surface = d.getParcelable("surface");
+                        startEmbeddedDisplay(d.getString("widgetId", ""), left, surface,
+                                d.getInt("width", 0), d.getInt("height", 0), lDpi);
+                    } else if (d != null && d.getBoolean("embeddedTouch", false)) {
+                        injectEmbeddedTouch(d.getString("widgetId", ""),
+                                d.getParcelable("event"));
+                    } else if (singleVd) {
+                        SplitHostActivity.launchSingle(SetModesService.this, left, lDpi, 0);
+                    } else if (right == null || right.isEmpty()) {
                         boolean dpiReloaded = SetModesReceiverDynamic.ensureAppDpi(
                                 SetModesService.this, left, lDpi);
                         Runnable launch = () -> SetModesReceiverDynamic.openFreeformApp(
@@ -467,6 +492,80 @@ public class SetModesService extends Service {
             Log.i(TAG, "launchVirtualSplit host started");
         } catch (Exception e) {
             Log.e(TAG, "launchVirtualSplit failed: " + e.getMessage());
+        }
+    }
+
+    private void startEmbeddedDisplay(String widgetId, String packageName, Surface surface,
+                                      int width, int height, int dpi) {
+        if (widgetId == null || widgetId.isEmpty() || packageName == null || packageName.isEmpty()
+                || surface == null || !surface.isValid() || width <= 0 || height <= 0) return;
+        try {
+            VirtualDisplay display = embeddedDisplays.get(widgetId);
+            if (display != null) {
+                display.setSurface(surface);
+                display.resize(width, height, dpi > 0 ? dpi : 213);
+            } else {
+                DisplayManager manager = (DisplayManager) getSystemService(DISPLAY_SERVICE);
+                int flags = 1 | 8 | 256 | 1024;
+                try {
+                    display = manager.createVirtualDisplay("voyah-app-widget-" + widgetId,
+                            width, height, dpi > 0 ? dpi : 213, surface, flags);
+                } catch (Exception trustedFailure) {
+                    display = manager.createVirtualDisplay("voyah-app-widget-" + widgetId,
+                            width, height, dpi > 0 ? dpi : 213, surface, 1 | 8 | 256);
+                }
+                if (display == null) return;
+                // Re-attach explicitly after creation. On Android 11 a Surface received through
+                // Binder can be accepted by createVirtualDisplay but not become the active sink.
+                display.setSurface(surface);
+                embeddedDisplays.put(widgetId, display);
+                embeddedPackages.put(widgetId, packageName);
+                embeddedLaunched.put(widgetId, false);
+                Log.i(TAG, "embedded VD created widget=" + widgetId + " display="
+                        + display.getDisplay().getDisplayId() + " " + width + "x" + height);
+            }
+            if (!Boolean.TRUE.equals(embeddedLaunched.get(widgetId))) {
+                Intent launch = getPackageManager().getLaunchIntentForPackage(packageName);
+                if (launch == null) return;
+                // A widget owns a dedicated display. Reusing an existing task can leave its
+                // activity attached to the previous display: audio/input still work, while the
+                // embedded surface stays black. Match SplitHostActivity and force a new task.
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+                ActivityOptions options = ActivityOptions.makeBasic();
+                options.setLaunchDisplayId(display.getDisplay().getDisplayId());
+                startActivity(launch, options.toBundle());
+                embeddedLaunched.put(widgetId, true);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "embedded VD failed widget=" + widgetId + ": " + e.getMessage());
+        }
+    }
+
+    private void releaseEmbeddedDisplay(String widgetId) {
+        VirtualDisplay display = embeddedDisplays.remove(widgetId);
+        embeddedPackages.remove(widgetId);
+        embeddedLaunched.remove(widgetId);
+        if (display != null) {
+            try { display.release(); } catch (Exception ignored) {}
+            Log.i(TAG, "embedded VD released widget=" + widgetId);
+        }
+    }
+
+    private void injectEmbeddedTouch(String widgetId, MotionEvent event) {
+        VirtualDisplay display = embeddedDisplays.get(widgetId);
+        if (display == null || event == null) return;
+        MotionEvent copy = null;
+        try {
+            copy = MotionEvent.obtain(event);
+            Method setDisplayId = MotionEvent.class.getMethod("setDisplayId", int.class);
+            setDisplayId.invoke(copy, display.getDisplay().getDisplayId());
+            Object inputManager = getSystemService("input");
+            Method inject = inputManager.getClass().getMethod("injectInputEvent", InputEvent.class, int.class);
+            inject.invoke(inputManager, copy, 0);
+        } catch (Exception e) {
+            Log.w(TAG, "embedded touch failed: " + e.getMessage());
+        } finally {
+            if (copy != null) copy.recycle();
         }
     }
 
@@ -1246,6 +1345,12 @@ public class SetModesService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
         serviceDestroyed = true;
+        for (VirtualDisplay display : embeddedDisplays.values()) {
+            try { display.release(); } catch (Exception ignored) {}
+        }
+        embeddedDisplays.clear();
+        embeddedPackages.clear();
+        embeddedLaunched.clear();
         if (powerHoldStatusReceiverRegistered) {
             try {
                 unregisterReceiver(powerHoldStatusRequestReceiver);

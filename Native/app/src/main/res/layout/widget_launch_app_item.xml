@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Плитка приложения в виджете: иконка + название + кнопки действий -->
+<!-- 1) Freeform-открытие (окно на VD)  2) Fullscreen (на весь экран)  3) Закрытие (крестик) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/launch_app_item"
+    android:layout_width="72dp"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="4dp">
+    <!-- Иконка приложения -->
+    <ImageView
+        android:id="@+id/launch_app_icon"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="@string/widget_app_icon" />
+    <!-- Название приложения -->
+    <TextView
+        android:id="@+id/launch_app_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="#FFFFFF"
+        android:textSize="9sp" />
+    <!-- Разделитель -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:background="#555555" />
+    <!-- Ряд кнопок действий -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal">
+        <!-- Кнопка 1: Freeform-открытие (окно на виртуальном дисплее) -->
+        <LinearLayout
+            android:id="@+id/widget_btn_open"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="2dp">
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@android:drawable/ic_menu_recent_history"
+                android:contentDescription="@string/widget_btn_open" />
+        </LinearLayout>
+        <!-- Кнопка 2: Развернуть на весь экран (fullscreen) -->
+        <LinearLayout
+            android:id="@+id/widget_btn_fullscreen"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="2dp">
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@android:drawable/ic_menu_zoom"
+                android:contentDescription="@string/widget_btn_fullscreen" />
+        </LinearLayout>
+        <!-- Кнопка 3: Закрытие приложения (крестик, rotate 45°) -->
+        <LinearLayout
+            android:id="@+id/widget_btn_close"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="2dp">
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@drawable/ic_close"
+                android:contentDescription="@string/widget_btn_close" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

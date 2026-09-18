@@ -243,6 +243,24 @@ public class MainActivity extends AppCompatActivity {
         // Открытие Native остаётся ручным recovery-path при пропущенном power/screen callback. Движок
         // дедебаунсит этот триггер с service-start и не создаёт параллельную прямую CAN-отправку.
         ApplyEngine.scheduleApply("Native activity opened");
+
+        // Если у плитки виджета отключён автозапуск, пользователь запускает приложение вручную.
+        // При повторном открытии MainActivity — автоматически запускаем это приложение заново.
+        // Это решает проблему: пользователь открыл MainActivity, потом запустил приложение через
+        // виджет (без автозапуска), и при возврате в MainActivity приложение должно запуститься снова.
+        String lastManualApp = WidgetSupport.getLastManualApp(this);
+        if (lastManualApp != null && !lastManualApp.isEmpty()) {
+            try {
+                // Проверяем, что пакет всё ещё установлен
+                getPackageManager().getApplicationInfo(lastManualApp, 0);
+                // Запускаем приложение
+                SetModesReceiverDynamic.openFreeformApp(this, lastManualApp, 0);
+                Log.i("$$$ MainActivity onCreate $$$", "Автозапуск последнего приложения: " + lastManualApp);
+            } catch (Exception e) {
+                Log.w("$$$ MainActivity onCreate $$$", "Не удалось автозапустить " + lastManualApp, e);
+            }
+        }
+
         //binding = ActivityMainBinding.inflate(getLayoutInflater());
         //setContentView(binding.getRoot());
         setContentView(R.layout.activity_main);
