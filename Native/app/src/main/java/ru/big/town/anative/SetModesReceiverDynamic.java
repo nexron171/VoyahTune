@@ -4,6 +4,7 @@ import static ru.big.town.anative.SetModesService.MSG_APPLY_DRIVE_MODES_STAR_BUT
 import static ru.big.town.anative.SetModesService.STATE_SHUTDOWN_PREPARE;
 
 import android.content.BroadcastReceiver;
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Handler;
@@ -448,6 +449,12 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     Log.i(TAG, "STEER_ACTION → приложение " + action.substring("app:".length()));
                 } else if (action.startsWith("split:")) {
                     launchSteerSplit(ctx, action);
+                } else if (action.startsWith("call:")) {
+                    String number = action.substring("call:".length());
+                    Intent call = new Intent("com.qinggan.broadcast.action.callfromcard");
+                    call.putExtra("dial_number", number);
+                    ctx.sendBroadcast(call);
+                    Log.i(TAG, "STEER_ACTION → вызов номера " + number);
                 } else if ("open_voyahtune".equals(action)) {
                     openVoyahTune(ctx);
                 } else {
@@ -522,12 +529,47 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      * Целевой экран задаём ВСЕГДА, в том числе 0. Без явного setLaunchDisplayId startActivity с
      * FLAG_ACTIVITY_NEW_TASK находит УЖЕ СУЩЕСТВУЮЩУЮ задачу приложения и поднимает её НА ТОМ ЭКРАНЕ,
      * ГДЕ ОНА ЖИВЁТ, а не на дисплее по умолчанию. Из-за этого, если приложение открыто на пассажирском
-     * экране, клик по его иконке в доке главного визуально «ничего не делал»: задача поднималась на
+     * экране, клик по его иконке в доке визуально «ничего не делал»: задача поднималась на
      * пассажирском. Сворачивание там же не помогало — задача никуда с display 1 не девалась.
+     *
+     * ВАЖНО: перед запуском проверяем, не запущено ли уже приложение. Если да — просто поднимаем
+     * его задачу на передний план (без setLaunchDisplayId), чтобы не создавать дубликат.
      */
     static void openFreeformApp(Context context, String pkg, int displayId) {
         if (pkg == null || pkg.isEmpty()) return;
         final Context app = context.getApplicationContext();
+
+        // Проверяем, запущено ли уже приложение. Если да — просто поднимаем его задачу на передний
+        // план. Без setLaunchDisplayId Android поднимет задачу НА ТОМ ЭКРАНЕ, где она живёт.
+        // Это решает проблему «приложения перезапускаются при возврате на экран с плитками»:
+        // существующая задача поднимается, а не создаётся дубликат.
+        ActivityManager am = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
+        if (am != null) {
+            List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(100);
+            if (tasks != null) {
+                for (ActivityManager.RunningTaskInfo task : tasks) {
+                    if (task != null && task.baseActivity != null
+                            && task.baseActivity.getPackageName().equals(pkg)) {
+                        // Приложение уже запущено — поднимаем его задачу на передний план.
+                        // Без setLaunchDisplayId задача поднимется на том дисплее, где живёт.
+                        Intent bringToFront = new Intent(new Intent(Intent.ACTION_MAIN));
+                        bringToFront.addCategory(Intent.CATEGORY_LAUNCHER);
+                        bringToFront.setComponent(task.baseActivity);
+                        bringToFront.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                | Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT);
+                        try {
+                            app.startActivity(bringToFront);
+                            Log.i(TAG, "openFreeformApp: задача " + pkg
+                                    + " уже запущена, поднята на передний план");
+                        } catch (Exception e) {
+                            Log.w(TAG, "openFreeformApp: не удалось поднять задачу " + pkg, e);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
         Intent launchIntent = app.getPackageManager().getLaunchIntentForPackage(pkg);
         if (launchIntent == null) { Log.w(TAG, "openFreeformApp: нет launch intent для " + pkg); return; }
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

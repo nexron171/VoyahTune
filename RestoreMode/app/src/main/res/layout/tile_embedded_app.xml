@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/appWidgetRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/card_dark_ripple"
+    android:clickable="true"
+    android:focusable="true">
+
+    <HorizontalScrollView
+        android:id="@+id/appWidgetLauncherScroll"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/appWidgetList"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp" />
+
+    </HorizontalScrollView>
+
+    <ImageButton
+        android:id="@+id/appWidgetDragHandleLauncher"
+        android:layout_width="96dp"
+        android:layout_height="96dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:background="@drawable/nav_back_circle_bg"
+        android:src="@drawable/ic_drag_handle"
+        android:padding="24dp"
+        android:scaleType="fitCenter"
+        android:alpha="0.9"
+        android:visibility="visible"
+        android:contentDescription="Перетащить" />
+
+    <LinearLayout
+        android:id="@+id/appWidgetControls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <ImageButton
+            android:id="@+id/appWidgetDragHandle"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/nav_back_circle_bg"
+            android:src="@drawable/ic_drag_handle"
+            android:padding="24dp"
+            android:scaleType="fitCenter"
+            android:alpha="0.9"
+            android:contentDescription="Перетащить" />
+
+        <ImageButton
+            android:id="@+id/appWidgetExpand"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/nav_back_circle_bg"
+            android:src="@drawable/ic_expand"
+            android:padding="24dp"
+            android:scaleType="fitCenter"
+            android:alpha="0.9"
+            android:contentDescription="Развернуть" />
+
+        <ImageButton
+            android:id="@+id/appWidgetClose"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:background="@drawable/nav_back_circle_bg"
+            android:src="@drawable/ic_close"
+            android:padding="24dp"
+            android:scaleType="fitCenter"
+            android:alpha="0.9"
+            android:contentDescription="Закрыть" />
+
+    </LinearLayout>
+
+</FrameLayout>

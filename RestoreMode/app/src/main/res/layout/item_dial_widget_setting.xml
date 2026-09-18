@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="10dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/layout_category_bg"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="8dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <EditText
+            android:id="@+id/dialSettingName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Имя контакта"
+            android:inputType="textCapSentences"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#999999"
+            android:textSize="24px" />
+
+        <EditText
+            android:id="@+id/dialSettingNumber"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Номер: 4–10 цифр"
+            android:inputType="number"
+            android:maxLength="10"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#999999"
+            android:textSize="24px" />
+
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/dialSettingSave"
+        android:layout_width="wrap_content"
+        android:layout_height="56dp"
+        android:layout_marginStart="10dp"
+        android:backgroundTint="#373f4a"
+        android:text="Сохранить"
+        android:textColor="#FFFFFF"
+        android:textSize="20dp"
+        android:singleLine="true" />
+
+    <ImageButton
+        android:id="@+id/dialSettingDelete"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/card_dark_ripple"
+        android:src="@android:drawable/ic_menu_delete"
+        android:contentDescription="Удалить карточку набора" />
+
+</LinearLayout>

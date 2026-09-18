@@ -13,4 +13,5 @@
         <item name="android:statusBarColor">#3C4352</item>
         <!-- Customize your theme here. -->
     </style>
+    <!-- Удалён Theme.Native.WidgetPopup — был нужен только для RunningAppsActivity -->
 </resources>

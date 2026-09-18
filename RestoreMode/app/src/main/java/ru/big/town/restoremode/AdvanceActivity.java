@@ -472,13 +472,15 @@ public class AdvanceActivity extends AppCompatActivity {
         }
 
         // Раздел «Главный экран»: тумблеры видимости карточек (по умолчанию все включены)
-        bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer");
-        bindShowSwitch(R.id.switchShowPowerHold, "showPowerHold");
-        bindShowSwitch(R.id.switchShowWashMode,  "showWashMode");
-        bindShowSwitch(R.id.switchShowAutoLight, "showAutoLight");
-        bindShowSwitch(R.id.switchShowPedestrian, "showPedestrian");
-        bindShowSwitch(R.id.switchShowBatteryHeat, "showBatteryHeat");
-        bindShowSwitch(R.id.switchShowForcedEv,   "showForcedEv");
+        bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer", true);
+        bindShowSwitch(R.id.switchShowPowerHold, "showPowerHold", true);
+        bindShowSwitch(R.id.switchShowWashMode,  "showWashMode", true);
+        bindShowSwitch(R.id.switchShowAutoLight, "showAutoLight", true);
+        bindShowSwitch(R.id.switchShowPedestrian, "showPedestrian", true);
+        bindShowSwitch(R.id.switchShowBatteryHeat, "showBatteryHeat", true);
+        bindShowSwitch(R.id.switchShowForcedEv,   "showForcedEv", false);
+        bindShowSwitch(R.id.switchShowLaunchAppsWidget, "showLaunchAppsWidget", false);
+        initDialWidgets();
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
         Switch switchSaveHistory = findViewById(R.id.switchSaveTripHistory);
@@ -493,6 +495,7 @@ public class AdvanceActivity extends AppCompatActivity {
         // Ярлыки приложений на главном — в обоих флейворах (в light открывают приложение обычным
         // способом, в full — на VD). Пресеты сплита и per-app DPI — только в full.
         initAppShortcuts();
+        initAppWidgets();
         initDockOverride();
         if (BuildConfig.IS_FULL) {
             initFullscreenApps();
@@ -546,6 +549,25 @@ public class AdvanceActivity extends AppCompatActivity {
         switchDebugMode.setChecked(prefs.getBoolean("debugMode", false));
         switchDebugMode.setOnCheckedChangeListener((b, checked) ->
                 prefs.edit().putBoolean("debugMode", checked).apply());
+
+        // Раздел «Другое»: тоггл «Полноэкранная сетка» главного экрана и число растянутых колонок
+        Switch switchFullscreenGrid = findViewById(R.id.switchFullscreenGrid);
+        NumberPicker pickerFullscreenGridColumns = findViewById(R.id.pickerFullscreenGridColumns);
+        pickerFullscreenGridColumns.setMinValue(0);
+        pickerFullscreenGridColumns.setMaxValue(12);
+        pickerFullscreenGridColumns.setTextColor(0xffffffff);
+        pickerFullscreenGridColumns.setTextSize(40f);
+        pickerFullscreenGridColumns.setValue(prefs.getInt("fullscreenGridColumns", 8));
+        pickerFullscreenGridColumns.setOnValueChangedListener((picker, oldValue, newValue) ->
+                prefs.edit().putInt("fullscreenGridColumns", newValue).apply());
+
+        switchFullscreenGrid.setChecked(prefs.getBoolean("fullscreenGrid", false));
+        // Настройка обслуживает только эту фичу: без неё растягивать нечего.
+        pickerFullscreenGridColumns.setEnabled(switchFullscreenGrid.isChecked());
+        switchFullscreenGrid.setOnCheckedChangeListener((b, checked) -> {
+            prefs.edit().putBoolean("fullscreenGrid", checked).apply();
+            pickerFullscreenGridColumns.setEnabled(checked);
+        });
 
         // Keyboard modifications are optional full-only Frida agents. The agents overlap in the
         // Qinggan IME, so the two switches expose one mutually-exclusive off/en/ru preference.
@@ -642,6 +664,68 @@ public class AdvanceActivity extends AppCompatActivity {
         }
     }
 
+    private void initDialWidgets() {
+        android.widget.LinearLayout container = findViewById(R.id.dialWidgetsContainer);
+        Button addButton = findViewById(R.id.buttonAddDialWidget);
+        addButton.setOnClickListener(v -> {
+            List<DialWidgetStore.Entry> entries = DialWidgetStore.load(prefs);
+            if (entries.size() >= DialWidgetStore.MAX_COUNT) {
+                android.widget.Toast.makeText(this, "Достигнут лимит 100 карточек",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            entries.add(new DialWidgetStore.Entry());
+            DialWidgetStore.save(prefs, entries);
+            TileOrderStore.sync(prefs, getPackageManager());
+            renderDialWidgets(container);
+        });
+        renderDialWidgets(container);
+    }
+
+    private void renderDialWidgets(android.widget.LinearLayout container) {
+        container.removeAllViews();
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (DialWidgetStore.Entry entry : DialWidgetStore.load(prefs)) {
+            View row = inflater.inflate(R.layout.item_dial_widget_setting, container, false);
+            EditText name = row.findViewById(R.id.dialSettingName);
+            EditText number = row.findViewById(R.id.dialSettingNumber);
+            name.setText(entry.name);
+            number.setText(entry.number);
+            row.findViewById(R.id.dialSettingSave).setOnClickListener(v -> {
+                String valueName = name.getText().toString().trim();
+                String valueNumber = number.getText().toString().replaceAll("[^0-9]", "");
+                if (valueName.isEmpty()) {
+                    name.setError("Введите имя");
+                    return;
+                }
+                if (valueNumber.length() < 4 || valueNumber.length() > 10) {
+                    number.setError("Введите от 4 до 10 цифр");
+                    return;
+                }
+                List<DialWidgetStore.Entry> entries = DialWidgetStore.load(prefs);
+                for (DialWidgetStore.Entry current : entries) {
+                    if (current.id.equals(entry.id)) {
+                        current.name = valueName;
+                        current.number = valueNumber;
+                        break;
+                    }
+                }
+                DialWidgetStore.save(prefs, entries);
+                TileOrderStore.sync(prefs, getPackageManager());
+                android.widget.Toast.makeText(this, "Карточка сохранена",
+                        android.widget.Toast.LENGTH_SHORT).show();
+            });
+            row.findViewById(R.id.dialSettingDelete).setOnClickListener(v -> {
+                List<DialWidgetStore.Entry> entries = DialWidgetStore.load(prefs);
+                entries.removeIf(current -> current.id.equals(entry.id));
+                DialWidgetStore.save(prefs, entries);
+                TileOrderStore.sync(prefs, getPackageManager());
+                renderDialWidgets(container);
+            });
+            container.addView(row);
+        }
+    }
+
     /**
      * Отступы экрана настроек: системные панели из insets + левый родной док головы (~145dp, висит
      * поверх и в insets НЕ приходит — как в главном экране и хосте сплита). Иначе левая навигационная
@@ -698,10 +782,10 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     /** Тумблер видимости карточки на главном экране: пишет флаг в DrivePreferences (MainActivity читает в onResume). */
-    private void bindShowSwitch(int switchId, String key) {
+    private void bindShowSwitch(int switchId, String key, boolean def) {
         Switch sw = findViewById(switchId);
         if (sw == null) return;
-        sw.setChecked(prefs.getBoolean(key, true));
+        sw.setChecked(prefs.getBoolean(key, def));
         sw.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(key, checked).apply());
     }
 
@@ -995,6 +1079,8 @@ public class AdvanceActivity extends AppCompatActivity {
             if (!list.contains(pkg)) {
                 list.add(pkg);
                 AppShortcutStore.save(prefs, list);
+                // Синхронизировать порядок плиток
+                TileOrderStore.sync(prefs, getPackageManager());
                 renderAppShortcuts();
             }
         });
@@ -1024,9 +1110,199 @@ public class AdvanceActivity extends AppCompatActivity {
                 java.util.List<String> l2 = AppShortcutStore.load(prefs);
                 l2.remove(pkg);
                 AppShortcutStore.save(prefs, l2);
+                // Синхронизировать порядок плиток
+                TileOrderStore.sync(prefs, getPackageManager());
                 renderAppShortcuts();
             });
             appShortcutsContainer.addView(row);
+        }
+    }
+
+    private android.widget.LinearLayout appWidgetsContainer;
+
+    private void initAppWidgets() {
+        appWidgetsContainer = findViewById(R.id.appWidgetsContainer);
+        renderAppWidgets();
+    }
+
+    /** Создать виджет приложения через тот же picker, что и обычные ярлыки. */
+    public void onAddAppWidget(View v) {
+        if (AppWidgetStore.load(prefs).size() >= AppWidgetStore.MAX_WIDGETS) {
+            com.google.android.material.snackbar.Snackbar.make(findViewById(R.id.main),
+                    "Можно создать не более 20 виджетов", com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
+            return;
+        }
+        showAppPicker("Приложение для виджета", (pkg, label) -> {
+            AppWidgetStore.add(prefs, pkg);
+            TileOrderStore.sync(prefs, getPackageManager());
+            renderAppWidgets();
+        });
+    }
+
+    private void renderAppWidgets() {
+        if (appWidgetsContainer == null) return;
+        appWidgetsContainer.removeAllViews();
+        android.content.pm.PackageManager pm = getPackageManager();
+        LayoutInflater inf = LayoutInflater.from(this);
+        for (AppWidgetStore.Entry entry : AppWidgetStore.load(prefs)) {
+            View row = inf.inflate(R.layout.item_app_widget_setting, appWidgetsContainer, false);
+            android.widget.ImageView icon = row.findViewById(R.id.appWidgetSettingIcon);
+            TextView label = row.findViewById(R.id.appWidgetSettingLabel);
+            ImageButton delete = row.findViewById(R.id.appWidgetSettingDelete);
+            android.widget.Spinner widthSpinner = row.findViewById(R.id.appWidgetSettingWidth);
+            android.widget.Spinner heightSpinner = row.findViewById(R.id.appWidgetSettingHeight);
+            android.widget.Switch autoStart = row.findViewById(R.id.appWidgetSettingAutoStart);
+            android.widget.LinearLayout profilesContainer = row.findViewById(R.id.appWidgetProfiles);
+            Button addProfile = row.findViewById(R.id.appWidgetAddProfile);
+            String name = entry.packageName;
+            try {
+                android.content.pm.ApplicationInfo info = pm.getApplicationInfo(entry.packageName, 0);
+                name = pm.getApplicationLabel(info).toString();
+                icon.setImageDrawable(pm.getApplicationIcon(info));
+            } catch (Exception ignored) {
+            }
+            label.setText("Виджет: " + name);
+            android.widget.ArrayAdapter<String> widthAdapter = new android.widget.ArrayAdapter<>(this,
+                    R.layout.spinner_item, new String[]{"1 ячейка", "2 ячейки",
+                    "3 ячейки", "4 ячейки", "5 ячеек",
+                    "6 ячеек", "7 ячеек", "8 ячеек",
+                    "9 ячеек", "10 ячеек", "11 ячеек",
+                    "12 ячеек"});
+            widthAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            widthSpinner.setAdapter(widthAdapter);
+            widthSpinner.setSelection(AppWidgetStore.clampWidth(entry.width) - 1);
+            widthSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                                      int position, long id) {
+                    int value = position + 1;
+                    if (entry.width != value) {
+                        entry.width = value;
+                        AppWidgetStore.update(prefs, entry);
+                        TileOrderStore.sync(prefs, getPackageManager());
+                    }
+                }
+
+                @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+            });
+            android.widget.ArrayAdapter<String> heightAdapter = new android.widget.ArrayAdapter<>(this,
+                    R.layout.spinner_item, new String[]{"1 ячейка", "2 ячейки",
+                    "3 ячейки", "4 ячейки", "5 ячеек"});
+            heightAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            heightSpinner.setAdapter(heightAdapter);
+            heightSpinner.setSelection(AppWidgetStore.clampHeight(entry.height) - 1);
+            heightSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                                      int position, long id) {
+                    int value = position + 1;
+                    if (entry.height != value) {
+                        entry.height = value;
+                        AppWidgetStore.update(prefs, entry);
+                        TileOrderStore.sync(prefs, getPackageManager());
+                    }
+                }
+
+                @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+            });
+            autoStart.setChecked(entry.autoStart);
+            
+            View delayContainer = row.findViewById(R.id.appWidgetDelayContainer);
+            android.widget.SeekBar delaySeek = row.findViewById(R.id.appWidgetSettingDelay);
+            TextView delayText = row.findViewById(R.id.appWidgetSettingDelayText);
+            
+            delayContainer.setVisibility(entry.autoStart ? View.VISIBLE : View.GONE);
+            delaySeek.setProgress(entry.autoStartDelay - 1);
+            delayText.setText(entry.autoStartDelay + " сек");
+            
+            delaySeek.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(android.widget.SeekBar seekBar, int progress, boolean fromUser) {
+                    int val = progress + 1;
+                    delayText.setText(val + " сек");
+                    if (fromUser) {
+                        entry.autoStartDelay = val;
+                        AppWidgetStore.update(prefs, entry);
+                    }
+                }
+                @Override public void onStartTrackingTouch(android.widget.SeekBar seekBar) {}
+                @Override public void onStopTrackingTouch(android.widget.SeekBar seekBar) {}
+            });
+
+            autoStart.setOnCheckedChangeListener((button, checked) -> {
+                entry.autoStart = checked;
+                delayContainer.setVisibility(checked ? View.VISIBLE : View.GONE);
+                AppWidgetStore.update(prefs, entry);
+                TileOrderStore.sync(prefs, getPackageManager());
+            });
+            entry.ensureProfiles();
+            renderAppWidgetProfiles(profilesContainer, entry);
+            addProfile.setOnClickListener(v -> showAppPicker("Добавить приложение в виджет", (pkg, pickedLabel) -> {
+                AppWidgetStore.addProfile(entry, pkg, AppWidgetStore.DEFAULT_DPI);
+                AppWidgetStore.update(prefs, entry);
+                TileOrderStore.sync(prefs, getPackageManager());
+                renderAppWidgets();
+            }));
+            delete.setContentDescription("Убрать виджет приложения");
+            delete.setOnClickListener(v -> {
+                AppWidgetStore.remove(prefs, entry.id);
+                TileOrderStore.sync(prefs, getPackageManager());
+                renderAppWidgets();
+            });
+            appWidgetsContainer.addView(row);
+        }
+    }
+
+    private void renderAppWidgetProfiles(android.widget.LinearLayout container, AppWidgetStore.Entry entry) {
+        container.removeAllViews();
+        android.content.pm.PackageManager pm = getPackageManager();
+        for (int index = 0; index < entry.profiles.size(); index++) {
+            final int profileIndex = index;
+            AppWidgetStore.Profile profile = entry.profiles.get(index);
+            View profileView = LayoutInflater.from(this).inflate(
+                    R.layout.item_app_widget_profile, container, false);
+            android.widget.ImageView icon = profileView.findViewById(R.id.appWidgetProfileIcon);
+            TextView label = profileView.findViewById(R.id.appWidgetProfileLabel);
+            android.widget.Spinner dpi = profileView.findViewById(R.id.appWidgetProfileDpi);
+            ImageButton remove = profileView.findViewById(R.id.appWidgetProfileDelete);
+            try {
+                android.content.pm.ApplicationInfo info = pm.getApplicationInfo(profile.packageName, 0);
+                icon.setImageDrawable(pm.getApplicationIcon(info));
+                label.setText(pm.getApplicationLabel(info));
+            } catch (Exception ignored) {
+                label.setText(profile.packageName);
+            }
+            String[] labels = new String[AppWidgetStore.DPI_VALUES.length];
+            int selected = 0;
+            for (int dpiIndex = 0; dpiIndex < AppWidgetStore.DPI_VALUES.length; dpiIndex++) {
+                int value = AppWidgetStore.DPI_VALUES[dpiIndex];
+                labels[dpiIndex] = value == 0 ? "Авто" : String.valueOf(value);
+                if (value == AppWidgetStore.normalizeDpi(profile.dpi)) selected = dpiIndex;
+            }
+            android.widget.ArrayAdapter<String> dpiAdapter = new android.widget.ArrayAdapter<>(this,
+                    R.layout.spinner_item, labels);
+            dpiAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            dpi.setAdapter(dpiAdapter);
+            dpi.setSelection(selected);
+            dpi.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                                      int position, long id) {
+                    int value = AppWidgetStore.DPI_VALUES[position];
+                    if (profile.dpi != value) {
+                        profile.dpi = value;
+                        AppWidgetStore.update(prefs, entry);
+                        TileOrderStore.sync(prefs, getPackageManager());
+                    }
+                }
+
+                @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+            });
+            remove.setVisibility(entry.profiles.size() > 1 ? View.VISIBLE : View.GONE);
+            remove.setOnClickListener(v -> {
+                AppWidgetStore.removeProfile(entry, profileIndex);
+                AppWidgetStore.update(prefs, entry);
+                TileOrderStore.sync(prefs, getPackageManager());
+                renderAppWidgets();
+            });
+            container.addView(profileView);
         }
     }
 
@@ -1113,6 +1389,8 @@ public class AdvanceActivity extends AppCompatActivity {
     /** Пресеты зеркалятся в dock/steering Settings.Global, поэтому одной записи JSON недостаточно. */
     private void saveSplitPresets(java.util.List<SplitStore.Preset> list) {
         SplitStore.save(prefs, list);
+        // Синхронизировать порядок плиток
+        TileOrderStore.sync(prefs, getPackageManager());
         SplitConfigSync.pushAll(this, prefs);
     }
 
@@ -1646,11 +1924,12 @@ public class AdvanceActivity extends AppCompatActivity {
     /** Добавляет ещё одно действие в конец списка слота. */
     private void pickSteerAction(String key) {
         final int staticCount = STEER_ACTIONS.length - 1; // "none" задаётся пустым списком
-        final CharSequence[] labels = new CharSequence[staticCount + 3];
+        final CharSequence[] labels = new CharSequence[staticCount + 4];
         for (int i = 0; i < staticCount; i++) labels[i] = STEER_ACTIONS[i + 1][1];
         labels[staticCount] = "Открыть сплит…";
         labels[staticCount + 1] = "Открыть приложение…";
-        labels[staticCount + 2] = "Своя CAN-команда…";
+        labels[staticCount + 2] = "Набрать номер…";
+        labels[staticCount + 3] = "Своя CAN-команда…";
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
                 .setTitle("Добавить действие")
                 .setItems(labels, (d, which) -> {
@@ -1660,8 +1939,37 @@ public class AdvanceActivity extends AppCompatActivity {
                         pickSteerSplit(key);
                     } else if (which == staticCount + 1) {
                         pickSteerApp(key);
+                    } else if (which == staticCount + 2) {
+                        pickSteerDial(key);
                     } else {
                         showCustomSteerCommandDialog(key);
+                    }
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /** Выбрать сохранённую dial-карточку и назначить её номер на кнопку руля. */
+    private void pickSteerDial(String key) {
+        List<DialWidgetStore.Entry> entries = DialWidgetStore.load(prefs);
+        if (entries.isEmpty()) {
+            android.widget.Toast.makeText(this, "Сначала создайте карточку набора номера",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        CharSequence[] labels = new CharSequence[entries.size()];
+        for (int i = 0; i < entries.size(); i++) {
+            DialWidgetStore.Entry entry = entries.get(i);
+            labels[i] = (entry.name.isEmpty() ? "Без имени" : entry.name)
+                    + " — " + entry.number;
+        }
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+                .setTitle("Выбрать номер для кнопки руля")
+                .setItems(labels, (dialog, which) -> {
+                    String number = entries.get(which).number.replaceAll("[^0-9]", "");
+                    if (number.length() >= 4 && number.length() <= 10) {
+                        if (number.length() == 10) number = "8" + number;
+                        appendSteerAction(key, "call:" + number);
                     }
                 })
                 .setNegativeButton("Отмена", null)
@@ -1833,6 +2141,9 @@ public class AdvanceActivity extends AppCompatActivity {
                 android.content.pm.PackageManager pm = getPackageManager();
                 return "Приложение: " + pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
             } catch (Exception e) { return "Приложение: " + pkg; }
+        }
+        if (id.startsWith("call:")) {
+            return "Набрать номер: " + id.substring("call:".length());
         }
         if (id.startsWith("can:")) {
             String command = id.substring("can:".length());

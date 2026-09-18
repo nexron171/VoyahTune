@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/cardAndroidSettings"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/card_dark_ripple"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center"
+    android:onClick="onCardAndroidSettings"
+    android:orientation="vertical"
+    android:padding="8dp">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:text="Настройки Android" android:textColor="#FFFFFF" android:textSize="28px" android:textStyle="bold" />
+</LinearLayout>

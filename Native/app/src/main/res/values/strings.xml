@@ -3,4 +3,10 @@
     <string name="floating_back_desc">Плавающие кнопки «Назад» и Home поверх интерфейса системы</string>
     <string name="floating_back_button_desc">Назад</string>
     <string name="floating_home_button_desc">На главный экран</string>
+    <string name="widget_app_icon">Иконка приложения</string>
+    <!-- Подписи кнопок действий в виджете -->
+    <string name="widget_btn_open">Открыть в окне</string>
+    <string name="widget_btn_fullscreen">На весь экран</string>
+    <string name="widget_btn_close">Закрыть</string>
+    <!-- Удалены: widget_task_manager, close_all_apps, no_running_apps — были нужны для RunningAppsWidget/Activity -->
 </resources>

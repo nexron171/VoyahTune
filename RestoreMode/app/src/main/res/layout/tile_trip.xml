@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/tripCard"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/layout_category_bg"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:clickable="true"
+    android:focusable="true">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Время в пути"
+        android:textColor="#aaaaaa"
+        android:textSize="24px" />
+
+    <TextView
+        android:id="@+id/tripTimer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:text="0:00:00"
+        android:textColor="#FFFFFF"
+        android:textSize="52px"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tripStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="14dp"
+        android:text="нет активной поездки"
+        android:textColor="#888888"
+        android:textSize="20px" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/buttonTripHistory"
+            android:layout_width="0dp"
+            android:layout_height="52dp"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="1"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonTripHistory"
+            android:singleLine="true"
+            android:text="История поездок"
+            android:textColor="#FFFFFF"
+            android:textSize="22dp"
+            app:cornerRadius="16dp" />
+
+        <Button
+            android:id="@+id/buttonTripReset"
+            android:layout_width="wrap_content"
+            android:layout_height="52dp"
+            android:backgroundTint="#373f4a"
+            android:onClick="onButtonTripReset"
+            android:singleLine="true"
+            android:text="Сброс"
+            android:textColor="#FFFFFF"
+            android:textSize="22dp"
+            app:cornerRadius="16dp" />
+    </LinearLayout>
+</LinearLayout>

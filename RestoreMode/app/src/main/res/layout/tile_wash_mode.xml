@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/cardWashMode"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/card_dark_ripple"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center"
+    android:onClick="onCardWashMode"
+    android:orientation="vertical"
+    android:padding="8dp">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:text="Режим мойки" android:textColor="#FFFFFF" android:textSize="26px" android:textStyle="bold" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:gravity="center" android:text="Машина засыпает и не реагирует на открытие дверей" android:textColor="#aaaaaa" android:textSize="15px" />
+</LinearLayout>
