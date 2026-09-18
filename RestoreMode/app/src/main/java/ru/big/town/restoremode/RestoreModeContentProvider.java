@@ -229,7 +229,9 @@ public class RestoreModeContentProvider extends ContentProvider {
         SharedPreferences.Editor e = sharedPreferences.edit();
         int n = 0;
         for (String key : new String[]{"driveMode", "energy", "recycle"}) {
-            if (values.containsKey(key)) {
+            String rememberKey = "driveMode".equals(key) ? "driveRememberLast"
+                    : "energy".equals(key) ? "energyRememberLast" : "recycleRememberLast";
+            if (values.containsKey(key) && sharedPreferences.getBoolean(rememberKey, true)) {
                 String v = values.getAsString(key);
                 if (v != null && !v.isEmpty()) { e.putString(key, v); n++; Log.i("$$$", "provider UPDATE " + key + "=" + v); }
             }

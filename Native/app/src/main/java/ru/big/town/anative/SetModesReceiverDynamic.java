@@ -142,11 +142,11 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         // Fallback-триггер пробуждения через броадкасты. Держим его активным всегда (даже если
         // power-listener работает): при рестарте CarService слушатель может «протухнуть», а этот
-        // путь остаётся. Возможные дубли с power-listener гасит дебаунс в ApplyEngine.
+        // путь остаётся. Режимы восстанавливаются отдельно по двери и Drive.
         if (!explicitComponent && (Intent.ACTION_SCREEN_ON.equals(receivedIntent) ||
                 "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent))) {
             Log.i(TAG, "onReceive ACTION_SCREEN_ON or GARAGE_MODE_OFF");
-            ApplyEngine.scheduleApply(receivedIntent);
+            ApplyEngine.activateWake(receivedIntent);
             if (Intent.ACTION_SCREEN_ON.equals(receivedIntent) && wakeCallback != null) {
                 wakeCallback.run();
             }
@@ -598,18 +598,13 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 + " fullscreen=" + fullscreen + " closedVdHost=" + closedVdHost);
     }
 
-    /**
-     * Циклировать режим по CSV-набору ОТНОСИТЕЛЬНО ТЕКУЩЕГО СОХРАНЁННОГО режима (не отдельного дрейфующего
-     * указателя) и послать CAN. Правильный UX первого клика: если сейчас уже comfort, а набор comfort,sport —
-     * первый клик уводит в sport, а не «в пустоту» обратно в comfort. Новый режим сохраняем как «последний
-     * активированный» (MainActivity.persistSavedMode → pref RestoreMode) → переживёт пробуждение + в UI.
-     */
+    /** Cycle the vehicle state; only remember-last opt-in updates the saved UI selection. */
     private static void cycleMode(Context ctx, String csv, String modeKey, Runnable completion) {
         final Context app = ctx.getApplicationContext();
         // Пользовательский выбор должен идти ПОСЛЕ уже запущенного wake-restore, а не параллельно с ним:
         // иначе restore успевал отправить старый snapshot поверх только что выбранного режима.
         ApplyEngine.postUserCommand("steer " + modeKey, () -> {
-            String cur = MainActivity.currentSavedMode(app, modeKey);
+            String cur = MainActivity.currentVehicleMode(app, modeKey);
             String next = SteeringActionPolicy.nextMode(csv, cur);
             if (next == null) return;
             boolean sent = "driveMode".equals(modeKey)
@@ -621,6 +616,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 Log.w(TAG, "STEER_ACTION " + modeKey + ": CAN failed, selection not persisted");
                 return;
             }
+            ApplyEngine.noteVehicleMode(modeKey, next);
             MainActivity.persistSavedMode(app, modeKey, next);
             Log.i(TAG, "STEER_ACTION " + modeKey + ": набор=" + csv
                     + " тек=" + cur + " → " + next);

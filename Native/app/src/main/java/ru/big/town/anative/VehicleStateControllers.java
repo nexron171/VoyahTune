@@ -29,6 +29,7 @@ final class VehicleStateControllers {
         }
     }
 
+    private final ModeRestoreTriggers restoreTriggers = new ModeRestoreTriggers();
     private final Context appContext;
     private final CanBusEventHub canBusEventHub;
     private final HandlerThread stateThread;
@@ -87,16 +88,21 @@ final class VehicleStateControllers {
         switch (event.kind) {
             case CONNECTION:
                 // Snapshot requests and mode gating are ordered before later events on stateHandler.
+                restoreTriggers.reset();
                 gearStateController.reset();
                 driverDoorStateController.reset();
                 canBusEventHub.requestDriverDoorSeed();
                 if (modeFeedbackController != null) modeFeedbackController.onConnected();
                 break;
             case CONNECTION_LOST:
+                restoreTriggers.reset();
                 gearStateController.reset();
                 driverDoorStateController.reset();
                 break;
             case DOOR:
+                if (restoreTriggers.onDoor(event.first)) {
+                    ApplyEngine.scheduleApply("driver door opened");
+                }
                 driverDoorStateController.accept(
                         event.first,
                         event.origin == CanBusEvent.Origin.LIVE
@@ -104,6 +110,9 @@ final class VehicleStateControllers {
                                 : DriverDoorStateController.Source.SNAPSHOT);
                 break;
             case GEAR:
+                if (restoreTriggers.onGear(event.first)) {
+                    ApplyEngine.scheduleApply("gear Drive");
+                }
                 gearStateController.accept(event.first);
                 break;
             case VEHICLE_STATE:
