@@ -458,6 +458,50 @@
 
             </LinearLayout>
 
+            <!-- Размер плитки «Быстрый запуск» (Ш×В в ячейках), виден при включённом тумблере -->
+            <LinearLayout
+                android:id="@+id/launchAppsSizeRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Ширина"
+                    android:textColor="#E0E0E0"
+                    android:textSize="24px" />
+
+                <Spinner
+                    android:id="@+id/launchAppsSettingWidth"
+                    android:layout_width="120dp"
+                    android:layout_height="60dp"
+                    android:layout_marginStart="8dp"
+                    android:textColor="#FFFFFF" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="24dp"
+                    android:text="Высота"
+                    android:textColor="#E0E0E0"
+                    android:textSize="24px" />
+
+                <Spinner
+                    android:id="@+id/launchAppsSettingHeight"
+                    android:layout_width="120dp"
+                    android:layout_height="60dp"
+                    android:layout_marginStart="8dp"
+                    android:textColor="#FFFFFF" />
+
+            </LinearLayout>
+
             <!-- Карточки «Набрать номер» (0..100) -->
             <LinearLayout
                 android:id="@+id/dialWidgetsContainer"

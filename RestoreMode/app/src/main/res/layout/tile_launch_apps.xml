@@ -7,20 +7,25 @@
     android:clickable="true"
     android:focusable="true">
 
-    <HorizontalScrollView
+    <!-- Вертикальный скролл: сетка приложений не влезает в плитку целиком.
+         Внешний скролл главного экрана горизонтальный, поэтому оси не конфликтуют. -->
+    <ScrollView
+        android:id="@+id/launchAppsScroll"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:fillViewport="true"
+        android:clipToPadding="false"
+        android:overScrollMode="never"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="4dp"
         android:scrollbars="none">
 
-        <LinearLayout
-            android:id="@+id/launchAppsList"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:orientation="horizontal"
-            android:paddingHorizontal="8dp" />
+        <GridLayout
+            android:id="@+id/launchAppsGrid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:alignmentMode="alignMargins"
+            android:useDefaultMargins="false" />
 
-    </HorizontalScrollView>
+    </ScrollView>
 
 </FrameLayout>
