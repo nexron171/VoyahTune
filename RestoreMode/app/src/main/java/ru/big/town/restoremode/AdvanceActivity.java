@@ -482,7 +482,11 @@ public class AdvanceActivity extends AppCompatActivity {
         bindShowSwitch(R.id.switchShowPedestrian, "showPedestrian", true);
         bindShowSwitch(R.id.switchShowBatteryHeat, "showBatteryHeat", true);
         bindShowSwitch(R.id.switchShowForcedEv,   "showForcedEv", false);
-        bindShowSwitch(R.id.switchShowLaunchAppsWidget, "showLaunchAppsWidget", false);
+        bindShowSwitch(R.id.switchShowLaunchAppsWidget, "showLaunchAppsWidget", false,
+                R.id.launchAppsSizeRow);
+        bindTileSizeSpinners(R.id.launchAppsSettingWidth, R.id.launchAppsSettingHeight,
+                TileSizeStore.LAUNCH_APPS_WIDGET_ID,
+                TileSizeStore.LAUNCH_APPS_DEFAULT_WIDTH, TileSizeStore.LAUNCH_APPS_DEFAULT_HEIGHT);
         initDialWidgets();
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
@@ -786,10 +790,68 @@ public class AdvanceActivity extends AppCompatActivity {
 
     /** Тумблер видимости карточки на главном экране: пишет флаг в DrivePreferences (MainActivity читает в onResume). */
     private void bindShowSwitch(int switchId, String key, boolean def) {
+        bindShowSwitch(switchId, key, def, 0);
+    }
+
+    /** Вариант с зависимым блоком: он виден только когда тумблер включён. */
+    private void bindShowSwitch(int switchId, String key, boolean def, int dependentId) {
         Switch sw = findViewById(switchId);
         if (sw == null) return;
-        sw.setChecked(prefs.getBoolean(key, def));
-        sw.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(key, checked).apply());
+        View dependent = dependentId == 0 ? null : findViewById(dependentId);
+        boolean checked = prefs.getBoolean(key, def);
+        sw.setChecked(checked);
+        if (dependent != null) dependent.setVisibility(checked ? View.VISIBLE : View.GONE);
+        sw.setOnCheckedChangeListener((b, on) -> {
+            prefs.edit().putBoolean(key, on).apply();
+            if (dependent != null) dependent.setVisibility(on ? View.VISIBLE : View.GONE);
+        });
+    }
+
+    /**
+     * Спиннеры Ш×В для плитки главного экрана: значения хранит TileSizeStore.
+     * MainActivity перечитывает размер в onResume и применяет его при следующем рендере сетки.
+     */
+    private void bindTileSizeSpinners(int widthSpinnerId, int heightSpinnerId, String widgetId,
+                                      int defaultWidth, int defaultHeight) {
+        android.widget.Spinner widthSpinner = findViewById(widthSpinnerId);
+        android.widget.Spinner heightSpinner = findViewById(heightSpinnerId);
+        if (widthSpinner == null || heightSpinner == null) return;
+
+        String[] widths = {"1 ячейка", "2 ячейки", "3 ячейки", "4 ячейки", "5 ячеек", "6 ячеек",
+                           "7 ячеек", "8 ячеек", "9 ячеек", "10 ячеек", "11 ячеек", "12 ячеек"};
+        android.widget.ArrayAdapter<String> widthAdapter =
+                new android.widget.ArrayAdapter<>(this, R.layout.spinner_item, widths);
+        widthAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+        widthSpinner.setAdapter(widthAdapter);
+        widthSpinner.setSelection(TileSizeStore.width(prefs, widgetId, defaultWidth) - 1);
+        widthSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                                  int position, long id) {
+                // setSelection() при открытии экрана тоже зовёт этот колбэк — пишем только реальную смену.
+                if (TileSizeStore.width(prefs, widgetId, defaultWidth) != position + 1) {
+                    TileSizeStore.setWidth(prefs, widgetId, position + 1);
+                }
+            }
+
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
+
+        String[] heights = {"1 ячейка", "2 ячейки", "3 ячейки", "4 ячейки", "5 ячеек"};
+        android.widget.ArrayAdapter<String> heightAdapter =
+                new android.widget.ArrayAdapter<>(this, R.layout.spinner_item, heights);
+        heightAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+        heightSpinner.setAdapter(heightAdapter);
+        heightSpinner.setSelection(TileSizeStore.height(prefs, widgetId, defaultHeight) - 1);
+        heightSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                                  int position, long id) {
+                if (TileSizeStore.height(prefs, widgetId, defaultHeight) != position + 1) {
+                    TileSizeStore.setHeight(prefs, widgetId, position + 1);
+                }
+            }
+
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
     }
 
     /** Вкл/выкл плавающие кнопки Назад/Home — шлём в SetModesService (тот правит secure settings). */

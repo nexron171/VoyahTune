@@ -782,45 +782,78 @@ public class MainActivity extends AppCompatActivity {
 
     /** Открыть экран запущенных приложений (RunningAppsActivity из Native). */
 
+    /**
+     * Плитка «Быстрый запуск»: сетка приложений с вертикальным скролом, порядок — по подписи.
+     * Колонок не больше, чем ширина плитки в ячейках smart-grid.
+     */
     private void populateLaunchAppsWidget() {
         if (launchAppsWidget == null) return;
-        ViewGroup list = launchAppsWidget.findViewById(R.id.launchAppsList);
-        if (list == null) return;
-        
-        list.removeAllViews();
+        ViewGroup grid = launchAppsWidget.findViewById(R.id.launchAppsGrid);
+        if (grid == null) return;
+        grid.removeAllViews();
+
         PackageManager pm = getPackageManager();
         Intent query = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        LayoutInflater inf = LayoutInflater.from(this);
-        
-        // Кэш для избежания дубликатов
-        Set<String> seen = new HashSet<>();
-        
+
+        // Пакет без дублей и сразу его подпись: по ней же сортируем.
+        Map<String, String> labels = new HashMap<>();
         for (ResolveInfo info : pm.queryIntentActivities(query, 0)) {
             String pkg = info.activityInfo.packageName;
-            if (seen.contains(pkg)) continue;
-            
-            // Фильтр: сторонние + Контакты
-            boolean isAllowed = false;
-            if (!pkg.equals(getPackageName()) && !pkg.equals("ru.big.town.anative")
-                       && !pkg.startsWith("com.qinggan") && !pkg.startsWith("com.android.car")) {
-                try {
-                    ApplicationInfo appInfo = pm.getApplicationInfo(pkg, 0);
-                    isAllowed = (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0;
-                } catch (Exception ignored) {}
+            if (labels.containsKey(pkg)) continue;
+            if (!isLaunchAppsTileCandidate(pm, pkg)) continue;
+            labels.put(pkg, info.loadLabel(pm).toString());
+        }
+
+        List<String> packages = new ArrayList<>(labels.keySet());
+        packages.sort((a, b) -> labels.get(a).compareToIgnoreCase(labels.get(b)));
+
+        int columns = Math.max(1, Math.min(LAUNCH_APPS_MAX_COLUMNS,
+                TileSizeStore.width(sharedPreferences, TileSizeStore.LAUNCH_APPS_WIDGET_ID,
+                        TileSizeStore.LAUNCH_APPS_DEFAULT_WIDTH)));
+        if (grid instanceof GridLayout) ((GridLayout) grid).setColumnCount(columns);
+
+        LayoutInflater inf = LayoutInflater.from(this);
+        for (String pkg : packages) {
+            View item = inf.inflate(R.layout.item_launch_app_grid, grid, false);
+            ((TextView) item.findViewById(R.id.launchAppGridLabel)).setText(labels.get(pkg));
+            try {
+                ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                ((ImageView) item.findViewById(R.id.launchAppGridIcon))
+                        .setImageDrawable(pm.getApplicationIcon(ai));
+            } catch (Exception ignored) {
             }
-            
-            if (!isAllowed) continue;
-            seen.add(pkg);
-            
-            View item = inf.inflate(R.layout.item_app_widget_launcher_item, list, false);
-            ImageView ico = item.findViewById(R.id.launcherItemIcon);
-            TextView label = item.findViewById(R.id.launcherItemLabel);
-            
-            ico.setImageDrawable(info.loadIcon(pm));
-            label.setText(info.loadLabel(pm));
-            
+
             item.setOnClickListener(v -> launchAppNormally(pkg));
-            list.addView(item);
+            // Долгий тап по элементу начинает перенос плитки — как и тапом по её фону.
+            item.setOnLongClickListener(v -> {
+                startTileDrag(v, TileOrderStore.Tile.TYPE_WIDGET, TileSizeStore.LAUNCH_APPS_WIDGET_ID);
+                return true;
+            });
+
+            if (grid instanceof GridLayout) {
+                int index = ((GridLayout) grid).getChildCount();
+                GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
+                lp.width = 0;                                  // ширину колонки задаёт вес
+                lp.height = GridLayout.LayoutParams.WRAP_CONTENT;
+                lp.columnSpec = GridLayout.spec(index % columns, 1, 1f);
+                lp.rowSpec = GridLayout.spec(index / columns, 1);
+                item.setLayoutParams(lp);
+            }
+            grid.addView(item);
+        }
+    }
+
+    /** Кандидат для плитки «Быстрый запуск»: стороннее приложение, без своих и служебных пакетов. */
+    private boolean isLaunchAppsTileCandidate(PackageManager pm, String pkg) {
+        if (pkg.equals(getPackageName()) || pkg.equals("ru.big.town.anative")
+                || pkg.startsWith("com.qinggan") || pkg.startsWith("com.android.car")) {
+            return false;
+        }
+        try {
+            ApplicationInfo appInfo = pm.getApplicationInfo(pkg, 0);
+            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0;
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -938,11 +971,19 @@ public class MainActivity extends AppCompatActivity {
         card.setVisibility(sharedPreferences.getBoolean(key, true) ? View.VISIBLE : View.GONE);
     }
 
+    /** Максимум колонок в сетке плитки «Быстрый запуск»: дальше элементы становятся слишком узкими. */
+    private static final int LAUNCH_APPS_MAX_COLUMNS = 4;
+
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
         if ("tripCard".equals(widgetId)) return new int[]{3, 2};
         if ("cardBatteryHeat".equals(widgetId)) return new int[]{3, 2};
-        if ("launchAppsWidget".equals(widgetId)) return new int[]{3, 1};  // по умолчанию 3x1 (настраиваемый)
+        // Плитка «Быстрый запуск»: по умолчанию 2x3, размер задаётся в «Дополнительно».
+        if (TileSizeStore.LAUNCH_APPS_WIDGET_ID.equals(widgetId)) {
+            return TileSizeStore.dimensions(sharedPreferences, widgetId,
+                    TileSizeStore.LAUNCH_APPS_DEFAULT_WIDTH,
+                    TileSizeStore.LAUNCH_APPS_DEFAULT_HEIGHT);
+        }
         return new int[]{2, 1};
     }
 
