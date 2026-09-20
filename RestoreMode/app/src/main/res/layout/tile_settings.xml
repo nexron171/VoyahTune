@@ -10,5 +10,5 @@
     android:onClick="onButtonClickAdvance"
     android:orientation="vertical"
     android:padding="8dp">
-    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:text="Настройки" android:textColor="#FFFFFF" android:textSize="28px" android:textStyle="bold" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:maxLines="2" android:text="Настройки" android:textColor="#FFFFFF" android:textSize="20px" android:textStyle="bold" />
 </LinearLayout>

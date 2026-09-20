@@ -576,6 +576,16 @@ public class AdvanceActivity extends AppCompatActivity {
             pickerFullscreenGridColumns.setEnabled(checked);
         });
 
+        // Расстояние между плитками главного экрана: dp вокруг каждой плитки (0 — вплотную).
+        NumberPicker pickerTileSpacing = findViewById(R.id.pickerTileSpacing);
+        pickerTileSpacing.setMinValue(0);
+        pickerTileSpacing.setMaxValue(24);
+        pickerTileSpacing.setTextColor(0xffffffff);
+        pickerTileSpacing.setTextSize(40f);
+        pickerTileSpacing.setValue(Math.max(0, Math.min(24, prefs.getInt("tileSpacingDp", 4))));
+        pickerTileSpacing.setOnValueChangedListener((picker, oldValue, newValue) ->
+                prefs.edit().putInt("tileSpacingDp", newValue).apply());
+
         // Keyboard modifications are optional full-only Frida agents. The agents overlap in the
         // Qinggan IME, so the two switches expose one mutually-exclusive off/en/ru preference.
         Switch switchKeyboardEnglish = findViewById(R.id.switchKeyboardEnglish);

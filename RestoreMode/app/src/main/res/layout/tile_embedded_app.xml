@@ -26,15 +26,15 @@
 
     <ImageButton
         android:id="@+id/appWidgetDragHandleLauncher"
-        android:layout_width="96dp"
-        android:layout_height="96dp"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
         android:layout_gravity="top|end"
         android:layout_margin="8dp"
         android:background="@drawable/nav_back_circle_bg"
         android:src="@drawable/ic_drag_handle"
-        android:padding="24dp"
+        android:padding="12dp"
         android:scaleType="fitCenter"
-        android:alpha="0.9"
+        android:alpha="0.2"
         android:visibility="visible"
         android:contentDescription="Перетащить" />
 
@@ -49,37 +49,37 @@
 
         <ImageButton
             android:id="@+id/appWidgetDragHandle"
-            android:layout_width="96dp"
-            android:layout_height="96dp"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
             android:layout_marginEnd="8dp"
             android:background="@drawable/nav_back_circle_bg"
             android:src="@drawable/ic_drag_handle"
-            android:padding="24dp"
+            android:padding="12dp"
             android:scaleType="fitCenter"
-            android:alpha="0.9"
+            android:alpha="0.95"
             android:contentDescription="Перетащить" />
 
         <ImageButton
             android:id="@+id/appWidgetExpand"
-            android:layout_width="96dp"
-            android:layout_height="96dp"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
             android:layout_marginEnd="8dp"
             android:background="@drawable/nav_back_circle_bg"
             android:src="@drawable/ic_expand"
-            android:padding="24dp"
+            android:padding="12dp"
             android:scaleType="fitCenter"
-            android:alpha="0.9"
+            android:alpha="0.95"
             android:contentDescription="Развернуть" />
 
         <ImageButton
             android:id="@+id/appWidgetClose"
-            android:layout_width="96dp"
-            android:layout_height="96dp"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
             android:background="@drawable/nav_back_circle_bg"
             android:src="@drawable/ic_close"
-            android:padding="24dp"
+            android:padding="12dp"
             android:scaleType="fitCenter"
-            android:alpha="0.9"
+            android:alpha="0.95"
             android:contentDescription="Закрыть" />
 
     </LinearLayout>
