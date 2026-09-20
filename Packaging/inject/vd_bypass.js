@@ -1,6 +1,6 @@
 // Frida-хук в system_server: разрешает нашему приложению (ru.big.town.anative) создавать trusted
 // VirtualDisplay и инжектить касания — путь двухпанельного VD-hosting на release-keys голове
-// (ADD_TRUSTED_DISPLAY/INJECT_EVENTS — чистый signature, whitelist их не выдаёт).
+// (ADD_TRUSTED_DISPLAY/INJECT_EVENTS/REMOVE_TASKS не выдаются через privapp-whitelist на этой ROM).
 //
 // ВАЖНО: хукаем ТОЧЕЧНЫЕ РЕДКИЕ методы, НЕ общий checkComponentPermission (тот на горячем пути —
 // тысячи вызовов/сек — и роняет watchdog system_server). Плюс инжектить нужно через -e (eternalize):
@@ -31,6 +31,31 @@ Java.perform(function () {
         Log.e(TAG, "package uid resolve failed; privileged UID hooks disabled: " + e);
     }
     var installed = [];
+
+    // BEGIN_NATIVE_TASK_REMOVAL
+    // REMOVE_TASKS is signature|documenter on the OEM ROM, not signature|privileged.
+    // Whitelisting Native cannot grant it. Only this rare operation, only Native's resolved UID:
+    // execute the stock removeTask body as system and restore Binder identity even on failure.
+    // Never hook a general permission checker (hot path / affects unrelated callers).
+    try {
+        var ATMS = Java.use("com.android.server.wm.ActivityTaskManagerService");
+        var nativeRemoveTask = ATMS.removeTask.overload('int');
+        nativeRemoveTask.implementation = function (taskId) {
+            if (ourUid < 0 || Binder.getCallingUid() !== ourUid) {
+                return nativeRemoveTask.call(this, taskId);
+            }
+            var identity = Binder.clearCallingIdentity();
+            try {
+                return nativeRemoveTask.call(this, taskId);
+            } finally {
+                Binder.restoreCallingIdentity(identity);
+            }
+        };
+        installed.push("ATMS.removeTask(native-uid)");
+    } catch (e) {
+        Log.e(TAG, "ATMS.removeTask hook fail: " + e);
+    }
+    // END_NATIVE_TASK_REMOVAL
 
     // 1) INJECT_EVENTS — редко (только при инъекции ввода из SplitHostActivity)
     try {

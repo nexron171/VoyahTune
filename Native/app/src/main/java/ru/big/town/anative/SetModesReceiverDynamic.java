@@ -4,7 +4,6 @@ import static ru.big.town.anative.SetModesService.MSG_APPLY_DRIVE_MODES_STAR_BUT
 import static ru.big.town.anative.SetModesService.STATE_SHUTDOWN_PREPARE;
 
 import android.content.BroadcastReceiver;
-import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Handler;
@@ -61,17 +60,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
 
         // Одиночное приложение из дока открываем обычной задачей целевого пакета на физическом дисплее.
-        // Глобальный WindowManager hook ужмёт её рамку; VD остаётся только для split-пресетов. Только full.
+        // Возврат из медиакарточки восстанавливает OEM-карточку и учитывает экран нажатия. Только full.
         if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && BuildConfig.IS_FULL) {
-            // Переопределяемые слоты существуют только на водительском экране. Receiver экспортирован
-            // ради launcher-agent, поэтому не доверяем display extra от explicit broadcast: старый агент
-            // или сторонний отправитель не должен вернуть удалённый passenger launch path.
+            // Accept only configured dock packages and the two physical application screens.
             String pkg = intent.getStringExtra("pkg");
             int displayId = intent.getIntExtra("display", 0);
-            if (displayId != 0) {
-                Log.w(TAG, "OPEN_FREEFORM отклонён: поддерживается только водительский display 0");
+            if (displayId != 0 && displayId != 1) {
+                Log.w(TAG, "OPEN_FREEFORM отклонён: неверный physical display " + displayId);
             } else if (isConfiguredDockPackage(context, pkg)) {
-                openFreeformApp(context, pkg, 0);
+                openFreeformApp(context, pkg, displayId);
             } else {
                 Log.w(TAG, "OPEN_FREEFORM отклонён: пакет не назначен доку: " + pkg);
             }
@@ -92,15 +89,19 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
-        // Открытие СПЛИТА, назначенного слоту дока, по долгому нажатию (launcherdock.js шлёт номер слота).
-        // Детали сплита читаем из Settings.Global — их зеркалит mirrorDock из DOCK_CONFIG (VoyahTune).
-        // SplitHostActivity.launchSplit уходит на VD (обычный движок сплита); коллизии панелей он гасит сам.
-        if ("ru.big.town.anative.OPEN_DOCK_SPLIT".equals(receivedIntent) && BuildConfig.IS_FULL) {
+        // Long press resolves only protected slot config: split or the slot app in the cluster.
+        // Keep the legacy action for an older launcher hook during upgrades.
+        if (("ru.big.town.anative.OPEN_DOCK_SPLIT".equals(receivedIntent)
+                || "ru.big.town.anative.OPEN_DOCK_LONG_PRESS".equals(receivedIntent)) && BuildConfig.IS_FULL) {
             int slot = intent.getIntExtra("slot", 0);
             if (slot == 1 || slot == 2) {
                 android.content.ContentResolver cr = context.getContentResolver();
+                String action = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "LongAction");
                 String has = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "HasSplit");
-                if ("1".equals(has)) {
+                if ("cluster".equals(action)) {
+                    String pkg = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot);
+                    ClusterMediaHostActivity.launch(context, pkg);
+                } else if ((action == null || "split".equals(action)) && "1".equals(has)) {
                     String l = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitL");
                     String r = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitR");
                     int ratio = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitRatio"), 1);
@@ -110,6 +111,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     float frac = parseFloatSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitFraction"), 0f);
                     int pIdx = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitPresetIdx"), -1);
                     String pId = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitPresetId");
+                    ClusterMediaHostActivity.closeForPackage(l);
+                    ClusterMediaHostActivity.closeForPackage(r);
                     SplitHostActivity.launchSplit(context.getApplicationContext(), l, r, ratio, lDpi, rDpi,
                             rsz, frac, pIdx, pId);
                     Log.i(TAG, "OPEN_DOCK_SPLIT slot=" + slot + " " + l + "/" + r + " ratio=" + ratio);
@@ -183,6 +186,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         int dpi = intent.getIntExtra("dock" + slot + "Dpi", 0);
         try {
             android.content.ContentResolver cr = ctx.getContentResolver();
+            String previousPkg = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot);
+            if (previousPkg != null && !previousPkg.equals(pkg)) {
+                ClusterMediaHostActivity.closeForPackage(previousPkg);
+            }
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot, pkg);
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "Dpi", String.valueOf(dpi));
             // Per-package DPI остаётся для VD split-панелей: 0 тоже обязательно зеркалируем. Иначе
@@ -193,6 +200,11 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             // Сплит, открываемый долгим нажатием на слот дока. Флаг HasSplit читает launcherdock.js
             // (гейт долгого тапа), детали (L/R/Ratio/Dpi) — обработчик OPEN_DOCK_SPLIT ниже.
             boolean hasSplit = intent.getBooleanExtra("dock" + slot + "HasSplit", false);
+            String action = intent.getStringExtra("dock" + slot + "LongAction");
+            if (action == null) action = hasSplit ? "split" : "none";
+            if ("none".equals(pkg) || !("split".equals(action) || "cluster".equals(action))) action = "none";
+            hasSplit = hasSplit && "split".equals(action);
+            android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "LongAction", action);
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "HasSplit", hasSplit ? "1" : "0");
             if (hasSplit) {
                 android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitL", nz(intent.getStringExtra("dock" + slot + "SplitL")));
@@ -523,79 +535,16 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         openFreeformApp(context, pkg, 0);
     }
 
-    /**
-     * displayId: 0 — водительский экран, 1 — пассажирский.
-     *
-     * Целевой экран задаём ВСЕГДА, в том числе 0. Без явного setLaunchDisplayId startActivity с
-     * FLAG_ACTIVITY_NEW_TASK находит УЖЕ СУЩЕСТВУЮЩУЮ задачу приложения и поднимает её НА ТОМ ЭКРАНЕ,
-     * ГДЕ ОНА ЖИВЁТ, а не на дисплее по умолчанию. Из-за этого, если приложение открыто на пассажирском
-     * экране, клик по его иконке в доке визуально «ничего не делал»: задача поднималась на
-     * пассажирском. Сворачивание там же не помогало — задача никуда с display 1 не девалась.
-     *
-     * ВАЖНО: перед запуском проверяем, не запущено ли уже приложение. Если да — просто поднимаем
-     * его задачу на передний план (без setLaunchDisplayId), чтобы не создавать дубликат.
-     */
+    /** Always honor the clicked physical display, including when returning from the cluster. */
     static void openFreeformApp(Context context, String pkg, int displayId) {
-        if (pkg == null || pkg.isEmpty()) return;
-        final Context app = context.getApplicationContext();
-
-        // Проверяем, запущено ли уже приложение. Если да — просто поднимаем его задачу на передний
-        // план. Без setLaunchDisplayId Android поднимет задачу НА ТОМ ЭКРАНЕ, где она живёт.
-        // Это решает проблему «приложения перезапускаются при возврате на экран с плитками»:
-        // существующая задача поднимается, а не создаётся дубликат.
-        ActivityManager am = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
-        if (am != null) {
-            List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(100);
-            if (tasks != null) {
-                for (ActivityManager.RunningTaskInfo task : tasks) {
-                    if (task != null && task.baseActivity != null
-                            && task.baseActivity.getPackageName().equals(pkg)) {
-                        // Приложение уже запущено — поднимаем его задачу на передний план.
-                        // Без setLaunchDisplayId задача поднимется на том дисплее, где живёт.
-                        Intent bringToFront = new Intent(new Intent(Intent.ACTION_MAIN));
-                        bringToFront.addCategory(Intent.CATEGORY_LAUNCHER);
-                        bringToFront.setComponent(task.baseActivity);
-                        bringToFront.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                | Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT);
-                        try {
-                            app.startActivity(bringToFront);
-                            Log.i(TAG, "openFreeformApp: задача " + pkg
-                                    + " уже запущена, поднята на передний план");
-                        } catch (Exception e) {
-                            Log.w(TAG, "openFreeformApp: не удалось поднять задачу " + pkg, e);
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-
-        Intent launchIntent = app.getPackageManager().getLaunchIntentForPackage(pkg);
-        if (launchIntent == null) { Log.w(TAG, "openFreeformApp: нет launch intent для " + pkg); return; }
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        DockLaunchGuard.arm(app, displayId, pkg);
-        boolean closedVdHost = SplitHostActivity.closeActiveHost();
-        android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
-        options.setLaunchDisplayId(displayId);
-        final android.os.Bundle optionBundle = options.toBundle();
-        final boolean fullscreen = isConfiguredFullscreenPackage(app, pkg);
-        if (fullscreen) {
-            // ActivityOptions.KEY_LAUNCH_WINDOWING_MODE is hidden in this Android 11 SDK, but the
-            // framework contract key is stable. Applying FULLSCREEN=1 at launch also normalizes an
-            // already existing task whose previous incarnation retained freeform bounds/mode 5.
-            optionBundle.putInt("android.activity.windowingMode", 1);
-        }
-        Runnable launch = () -> {
-            try { app.startActivity(launchIntent, optionBundle); }
-            catch (Exception e) { Log.w(TAG, "openFreeformApp: " + e.getMessage()); }
-        };
-        if (closedVdHost) {
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(launch, 500L);
-        } else {
-            launch.run();
-        }
-        Log.i(TAG, "openFreeformApp window-managed pkg=" + pkg + " display=" + displayId
-                + " fullscreen=" + fullscreen + " closedVdHost=" + closedVdHost);
+        if (pkg == null || pkg.isEmpty() || (displayId != 0 && displayId != 1)) return;
+        Context app = context.getApplicationContext();
+        ClusterMediaHostActivity.closeForPackage(pkg);
+        SplitHostActivity.closeActiveHost();
+        AppDisplayLauncher.launch(app, pkg, displayId,
+                isConfiguredFullscreenPackage(app, pkg), () -> true,
+                () -> android.widget.Toast.makeText(app, "Не удалось открыть приложение",
+                        android.widget.Toast.LENGTH_LONG).show());
     }
 
     /** Cycle the vehicle state; only remember-last opt-in updates the saved UI selection. */

@@ -8,7 +8,8 @@
     <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
     <!-- Перенос приложения между сплитом/фриформом БЕЗ убийства процесса: завершаем задачу приложения
          (removeTask), а не force-stop процесса — плейбек в foreground-сервисе выживает (музыка не глохнет).
-         REAL_GET_TASKS — перечислить задачи всех приложений; REMOVE_TASKS — завершить чужую задачу. -->
+         REAL_GET_TASKS — перечислить задачи всех приложений; REMOVE_TASKS — завершить чужую задачу.
+         OEM REMOVE_TASKS = signature|documenter: Full использует UID-scoped ATMS.removeTask hook. -->
     <uses-permission android:name="android.permission.REAL_GET_TASKS" />
     <uses-permission android:name="android.permission.REMOVE_TASKS" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
@@ -255,6 +256,15 @@
             android:launchMode="singleTop"
             android:resizeableActivity="true"
             android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density" />
+
+        <activity
+            android:name=".ClusterMediaHostActivity"
+            android:exported="false"
+            android:taskAffinity="ru.big.town.anative.cluster"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density" />
 
         <!-- «Сейчас играет» — снимок трека + обложка для наших поверхностей (читает RestoreMode/VoyahTune) -->

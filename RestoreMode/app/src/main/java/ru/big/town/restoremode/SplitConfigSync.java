@@ -90,9 +90,16 @@ final class SplitConfigSync {
     }
 
     private static void addDockSplitExtras(Intent i, int slot, String slotPkg, SharedPreferences prefs) {
+        String action = DockLongPressAction.resolve(prefs, slot);
+        i.putExtra("dock" + slot + "LongAction", action);
+        if (!"split".equals(action)) {
+            i.putExtra("dock" + slot + "HasSplit", false);
+            return;
+        }
         int idx = slotPkg.isEmpty() ? -1 : prefs.getInt("dockOverride" + slot + "Split", -1);
         List<SplitStore.Preset> all = SplitStore.load(prefs);
         if (idx < 0 || idx >= all.size() || !all.get(idx).ready()) {
+            i.putExtra("dock" + slot + "LongAction", "none");
             i.putExtra("dock" + slot + "HasSplit", false);
             return;
         }

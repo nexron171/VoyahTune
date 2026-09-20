@@ -56,10 +56,10 @@ if grep -q 'mirrorPassengerDock' "$NATIVE_CONFIG" "$NATIVE_BRIDGE"; then
 fi
 grep -q 'clearLegacyPassengerDock(context)' "$NATIVE_CONFIG" \
     || fail "DOCK_CONFIG does not clear passenger slot values left by previous builds"
-grep -q 'if (displayId != 0)' "$NATIVE_BRIDGE" \
-    || fail "OPEN_FREEFORM can still revive driver dock launches on the passenger display"
-grep -q 'openFreeformApp(context, pkg, 0)' "$NATIVE_BRIDGE" \
-    || fail "driver dock launch is not pinned to physical display 0"
+grep -q 'if (displayId != 0 && displayId != 1)' "$NATIVE_BRIDGE" \
+    || fail "OPEN_FREEFORM must reject non-physical target displays"
+grep -q 'openFreeformApp(context, pkg, displayId)' "$NATIVE_BRIDGE" \
+    || fail "dock return does not honor the clicked physical display"
 for legacy_assignment in \
     '"voyahtune_dockPassenger1", "none"' \
     '"voyahtune_dockPassenger2", "none"' \

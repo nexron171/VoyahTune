@@ -991,8 +991,26 @@ public class AdvanceActivity extends AppCompatActivity {
 
     public void onPickDockApp1(View v) { pickDockApp(1); }
     public void onPickDockApp2(View v) { pickDockApp(2); }
-    public void onPickDockSplit1(View v) { pickDockSplit(1); }
-    public void onPickDockSplit2(View v) { pickDockSplit(2); }
+    public void onPickDockSplit1(View v) { pickDockLongPress(1); }
+    public void onPickDockSplit2(View v) { pickDockLongPress(2); }
+
+    private void pickDockLongPress(int slot) {
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+                .setTitle("Долгое нажатие · приложение " + slot)
+                .setItems(new String[]{"Открыть сплит", "Открыть в медиакарточке приборной панели", "Не назначено"},
+                        (dialog, which) -> {
+                            if (which == 0) {
+                                pickDockSplit(slot);
+                            } else {
+                                prefs.edit().putString("dockOverride" + slot + "LongAction",
+                                        which == 1 ? "cluster" : "none").apply();
+                                refreshDockButtons();
+                                pushDockConfig();
+                            }
+                        })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
 
     private void pickDockApp(int slot) {
         showAppPicker("Приложение " + slot + " в доке", (pkg, label) -> {
@@ -1021,11 +1039,13 @@ public class AdvanceActivity extends AppCompatActivity {
                 .setTitle("Сплит по долгому нажатию (слот " + slot + ")")
                 .setItems(labels.toArray(new CharSequence[0]), (d, which) -> {
                     if (which == 0) {
-                        prefs.edit().remove("dockOverride" + slot + "Split")
+                        prefs.edit().putString("dockOverride" + slot + "LongAction", "none")
+                                    .remove("dockOverride" + slot + "Split")
                                     .remove("dockOverride" + slot + "SplitLabel").apply();
                     } else {
                         int idx = readyIdx.get(which - 1);
-                        prefs.edit().putInt("dockOverride" + slot + "Split", idx)
+                        prefs.edit().putString("dockOverride" + slot + "LongAction", "split")
+                                    .putInt("dockOverride" + slot + "Split", idx)
                                     .putString("dockOverride" + slot + "SplitLabel", labels.get(which).toString()).apply();
                     }
                     refreshDockButtons();
@@ -1038,6 +1058,7 @@ public class AdvanceActivity extends AppCompatActivity {
     private void clearDockApp(int slot) {
         // Слот сброшен → назначение сплита на этот слот теряет смысл, чистим и его.
         prefs.edit().remove("dockOverride" + slot).remove("dockOverride" + slot + "Label")
+                    .remove("dockOverride" + slot + "LongAction")
                     .remove("dockOverride" + slot + "Split").remove("dockOverride" + slot + "SplitLabel").apply();
         refreshDockButtons();
         pushDockConfig();
@@ -1063,8 +1084,13 @@ public class AdvanceActivity extends AppCompatActivity {
         if (b == null) return;
         boolean hasApp = !prefs.getString("dockOverride" + slot, "").isEmpty();
         b.setVisibility(hasApp ? View.VISIBLE : View.GONE);
-        String label = prefs.getString("dockOverride" + slot + "SplitLabel", "");
-        b.setText("Сплит по долгому нажатию: " + (label.isEmpty() ? "не выбран" : label));
+        String action = DockLongPressAction.resolve(prefs, slot);
+        String label = "не назначено";
+        if ("cluster".equals(action)) label = "медиакарточка приборной панели";
+        else if ("split".equals(action)) {
+            label = "сплит · " + prefs.getString("dockOverride" + slot + "SplitLabel", "не выбран");
+        }
+        b.setText("Долгое нажатие: " + label);
     }
 
     /** Колбэк выбора приложения из диалога-списка. */

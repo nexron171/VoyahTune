@@ -12,11 +12,10 @@
 //   • КЛИК — на водительском onClick сравнивает view.getId() с mScreenUpItemView1/2. При совпадении и
 //     если pkg установлен — делегируем Native. Пассажирские Air/Seat остаются полностью штатными.
 //     Native запускает обычную задачу целевого пакета на display 0, а vd_bypass ужимает её
-//     WindowManager-рамку. VD — только для split-пресетов.
-//   • ДОЛГИЙ ТАП по слоту — если слоту назначен сплит (voyahtune_dockN HasSplit=="1"), шлём Native
-//     broadcast OPEN_DOCK_SPLIT (slot) → Native читает детали сплита из Settings.Global и стартует его на
-//     VD. Если сплит не назначен — слушатель возвращает false (штатное долгое поведение лаунчера). Назначение
-//     сплита слоту делается в VoyahTune («Приложения и разделение экрана» → Системный док).
+//     WindowManager-рамку. Возврат из VD-медиакарточки закрывает её хост и восстанавливает OEM-карточку.
+//   • ДОЛГИЙ ТАП по слоту — OPEN_DOCK_LONG_PRESS (slot). Native читает защищённый LongAction:
+//     split → назначенный сплит, cluster → приложение слота в медиакарточке приборной панели.
+//     Без назначения сохраняется штатное поведение. Выбор — VoyahTune → Системный док.
 //   • ПОДСВЕТКА — updateSelectedApp: reverse-mapping (наш pkg слота → штатный pkg, закреплённый за слотом),
 //     чтобы родной лаунчер чекнул правильную кнопку. Косметика, не блокер.
 //   • RELOAD — приёмник ru.big.town.anative.DOCK_RELOAD перечитывает конфиг и перерисовывает иконки
@@ -446,10 +445,7 @@ Java.perform(function () {
         return menuLC;
     }
 
-    // Долгий тап по слоту дока → открыть назначенный слоту СПЛИТ (делегируем Native: он читает детали
-    // сплита из Settings.Global и стартует SplitHostActivity на VD). Слушатель один на оба слота; слот
-    // определяем по view.getId() через slotByViewId. Если сплит слоту не назначен (voyahtune_dockN
-    // HasSplit != "1") — возвращаем false, чтобы штатное долгое поведение лаунчера не ломать.
+    // Native resolves the configured long-press action. HasSplit supports older saved settings.
     var slotLC = null;
     function getSlotLongClick() {
         if (slotLC !== null) return slotLC;
@@ -465,10 +461,11 @@ Java.perform(function () {
                             try {
                                 var slot = slotByViewId["" + view.getId()] || 0;
                                 var has = slot ? cfg("dock" + slot + "HasSplit") : "?";
+                                var action = slot ? cfg("dock" + slot + "LongAction") : "none";
                                 try { Java.use("android.util.Log").i("voyahdock", "slot long-press id=" + view.getId() + " slot=" + slot + " hasSplit=" + has); } catch (ee) {}
                                 if (slot === 0) return false;
-                                if (has !== "1") return false;  // сплит не назначен → штатно
-                                openDockSplit(slot);
+                                if (action !== "cluster" && has !== "1") return false;
+                                openDockLongPress(slot);
                                 return true;
                             } catch (e) {
                                 try { Log.e(TAG, "slot long-press err: " + e); } catch (ee) {}
@@ -483,19 +480,17 @@ Java.perform(function () {
         return slotLC;
     }
 
-    // Открыть назначенный слоту сплит — broadcast OPEN_DOCK_SPLIT в Native (тот резолвит детали и стартует).
-    function openDockSplit(slot) {
+    function openDockLongPress(slot) {
         try {
-            var i = Intent.$new("ru.big.town.anative.OPEN_DOCK_SPLIT");
+            var i = Intent.$new("ru.big.town.anative.OPEN_DOCK_LONG_PRESS");
             i.setClassName(OUR_PKG, "ru.big.town.anative.SetModesReceiverDynamic");
             i.putExtra.overload('java.lang.String', 'int').call(i, "slot", slot);
             i.addFlags(0x00000020);   // FLAG_INCLUDE_STOPPED_PACKAGES — добудиться, даже если Native стоплен
             ctx().sendBroadcast(i);
-            Log.i(TAG, "[dock] OPEN_DOCK_SPLIT slot=" + slot);
-            try { Java.use("android.util.Log").i("voyahdock", "OPEN_DOCK_SPLIT sent slot=" + slot); } catch (ee) {}
+            Log.i(TAG, "[dock] OPEN_DOCK_LONG_PRESS slot=" + slot);
+            try { Java.use("android.util.Log").i("voyahdock", "OPEN_DOCK_LONG_PRESS sent slot=" + slot); } catch (ee) {}
         } catch (e) {
-            Log.e(TAG, "[dock] openDockSplit err: " + e);
-            try { Log.e(TAG, "openDockSplit err: " + e); } catch (ee) {}
+            Log.e(TAG, "[dock] openDockLongPress err: " + e);
         }
     }
 
@@ -704,7 +699,15 @@ Java.perform(function () {
             i.addFlags(0x00000020);   // FLAG_INCLUDE_STOPPED_PACKAGES — добудиться, даже если Native стоплен
             ctx().sendBroadcast(i);
             Log.i(TAG, "[dock] OPEN_FREEFORM -> " + pkg + " display=" + displayId);
-        } catch (e) { Log.e(TAG, "[dock] launchFreeform err: " + e); }
+            return true;
+        } catch (e) { Log.e(TAG, "[dock] launchFreeform err: " + e); return false; }
+    }
+
+    // Includes OEM app shortcuts on either application screen, without remapping passenger Air/Seat.
+    function returnDockAppToScreen(pkg, displayId) {
+        if ((displayId !== 0 && displayId !== 1) || !pkg || pkg === "none") return false;
+        if (pkg !== cfg("dock1") && pkg !== cfg("dock2")) return false;
+        return launchFreeform(pkg, displayId);
     }
 
     // Fullscreen launch must normalize an already existing mode-5 task before resume. Native applies
@@ -822,6 +825,7 @@ Java.perform(function () {
                 startAppIntent.implementation = function (context, intent, screenIdArg) {
                     var screenId = Number(screenIdArg);
                     var pkg = packageFromIntent(intent);
+                    if (returnDockAppToScreen(pkg, screenId)) return;
                     if (isUserFullscreen(pkg) && launchFullscreen(pkg, screenId)) return;
                     return startAppIntent.call(this, context, intent, screenIdArg);
                 };
@@ -830,6 +834,7 @@ Java.perform(function () {
                 startAppComponent.implementation = function (context, pkgArg, classArg, screenIdArg) {
                     var pkg = cleanJavaString(pkgArg);
                     var screenId = Number(screenIdArg);
+                    if (returnDockAppToScreen(pkg, screenId)) return;
                     if (isUserFullscreen(pkg) && launchFullscreen(pkg, screenId)) return;
                     return startAppComponent.call(this,
                             context, pkgArg, classArg, screenIdArg);
