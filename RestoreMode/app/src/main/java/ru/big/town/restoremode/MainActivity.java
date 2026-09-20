@@ -129,6 +129,8 @@ public class MainActivity extends AppCompatActivity {
     static final String ACTION_BATTERY_HEAT_UPDATE   = "ru.big.town.anative.BATTERY_HEAT_UPDATE";
     static final String ACTION_REQUEST_BATTERY_HEAT  = "ru.big.town.anative.REQUEST_BATTERY_HEAT";
     static final String ACTION_BATTERY_HEAT_ACTIVATE = "ru.big.town.anative.BATTERY_HEAT_ACTIVATE";
+    // Запуск приложения из плитки «Быстрый запуск» на выбранном физическом дисплее (0/1).
+    static final String ACTION_OPEN_ON_DISPLAY = "ru.big.town.anative.OPEN_ON_DISPLAY";
     private static final int BH_UNKNOWN = Integer.MIN_VALUE;
     private static final int BH_TEMP_INVALID = -9999;
     private static final int BH_PLATFORM_H97X = 1;
@@ -164,6 +166,8 @@ public class MainActivity extends AppCompatActivity {
     private int gridPaddingBottom;
     private final Map<String, TextureView> embeddedWidgetSurfaces = new HashMap<>();
     private final Map<String, Surface> embeddedWidgetOutputs = new HashMap<>();
+    // View плиток app_widget по id записи: нужен, чтобы запустить приложение в первом виджете.
+    private final Map<String, View> appWidgetTileViews = new HashMap<>();
 
     // -------- Drag-and-drop для переупорядочивания плиток --------
     private int draggedTilePosition = -1;    // позиция в общем списке TileOrderStore
@@ -824,9 +828,10 @@ public class MainActivity extends AppCompatActivity {
             }
 
             item.setOnClickListener(v -> launchAppNormally(pkg));
-            // Долгий тап по элементу начинает перенос плитки — как и тапом по её фону.
+            // Долгий тап по иконке — контекстное меню запуска (основной дисплей / пассажирский /
+            // первый app_widget). Перенос самой плитки остаётся на долгом тапе по её фону.
             item.setOnLongClickListener(v -> {
-                startTileDrag(v, TileOrderStore.Tile.TYPE_WIDGET, TileSizeStore.LAUNCH_APPS_WIDGET_ID);
+                showLaunchAppMenu(v, pkg);
                 return true;
             });
 
@@ -855,6 +860,93 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** Контекстное меню иконки «Быстрого запуска»: куда открыть приложение. */
+    private void showLaunchAppMenu(View anchor, String pkg) {
+        final int idMainDisplay = 1;
+        final int idNoWidgets = 2;
+        final int idWidgetBase = 100;
+        java.util.List<AppWidgetStore.Entry> widgets = AppWidgetStore.load(sharedPreferences);
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+        menu.getMenu().add(0, idMainDisplay, 0, "Запустить на основном дисплее");
+        if (widgets.isEmpty()) {
+            menu.getMenu().add(0, idNoWidgets, 1, "Нет виджетов приложения").setEnabled(false);
+        } else {
+            // По пункту на каждый созданный пользователем виджет приложения.
+            for (int i = 0; i < widgets.size(); i++) {
+                menu.getMenu().add(0, idWidgetBase + i, i + 1,
+                        "Запустить в виджете: " + appWidgetTitle(widgets.get(i)));
+            }
+        }
+        menu.setOnMenuItemClickListener(item -> {
+            int id = item.getItemId();
+            if (id == idMainDisplay) {
+                launchAppOnDisplay(pkg, 0);
+                return true;
+            }
+            int index = id - idWidgetBase;
+            if (index >= 0 && index < widgets.size()) {
+                launchInsideAppWidget(pkg, widgets.get(index).id);
+                return true;
+            }
+            return false;
+        });
+        menu.show();
+    }
+
+    /** Подпись виджета в меню: приложение, выбранное в этом виджете. */
+    private String appWidgetTitle(AppWidgetStore.Entry entry) {
+        String configured = entry.selected().packageName;
+        try {
+            android.content.pm.PackageManager pm = getPackageManager();
+            return pm.getApplicationLabel(pm.getApplicationInfo(configured, 0)).toString();
+        } catch (Exception e) {
+            return configured;
+        }
+    }
+
+    /** Открыть приложение обычной задачей на выбранном дисплее: 0 — водитель, 1 — пассажир. */
+    private void launchAppOnDisplay(String pkg, int displayId) {
+        if (!BuildConfig.IS_FULL) {
+            launchAppNormally(pkg);
+            return;
+        }
+        try {
+            Intent intent = new Intent(ACTION_OPEN_ON_DISPLAY)
+                    .setPackage("ru.big.town.anative")
+                    .putExtra("pkg", pkg)
+                    .putExtra("display", displayId);
+            sendBroadcast(intent, BIND_SET_MODES_PERMISSION);
+            Log.i(TAG, "launchAppOnDisplay " + pkg + " display=" + displayId);
+        } catch (Exception e) {
+            showSnack("Не удалось открыть приложение");
+            Log.w(TAG, "launchAppOnDisplay " + pkg + ": " + e.getMessage());
+        }
+    }
+
+    /** Открыть приложение внутри выбранного app_widget, не меняя его настройки. */
+    private void launchInsideAppWidget(String pkg, String widgetId) {
+        if (!BuildConfig.IS_FULL) {
+            launchAppNormally(pkg);
+            return;
+        }
+        AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
+        if (entry == null) {
+            showSnack("Виджет приложения не найден");
+            return;
+        }
+        View widgetView = appWidgetTileViews.get(entry.id);
+        if (widgetView == null) {
+            showSnack("Виджет приложения не на экране");
+            return;
+        }
+        // Native переиспользует embedded-дисплей по widgetId и без освобождения не перезапустит
+        // приложение, поэтому сначала снимаем текущее.
+        if (embeddedWidgetSurfaces.containsKey(entry.id)) {
+            releaseEmbeddedWidget(entry.id, widgetView);
+        }
+        showEmbeddedAppWidget(widgetView, entry, pkg, AppDpiStore.get(sharedPreferences, pkg));
     }
 
     /** Открыть системный экран настроек Android. */
@@ -978,6 +1070,10 @@ public class MainActivity extends AppCompatActivity {
     private int[] getWidgetDimensions(String widgetId) {
         if ("tripCard".equals(widgetId)) return new int[]{3, 2};
         if ("cardBatteryHeat".equals(widgetId)) return new int[]{3, 2};
+        // Компактные карточки-иконки: одна ячейка.
+        if ("cardSettings".equals(widgetId) || "cardAndroidSettings".equals(widgetId)) {
+            return new int[]{1, 1};
+        }
         // Плитка «Быстрый запуск»: по умолчанию 2x3, размер задаётся в «Дополнительно».
         if (TileSizeStore.LAUNCH_APPS_WIDGET_ID.equals(widgetId)) {
             return TileSizeStore.dimensions(sharedPreferences, widgetId,
@@ -1036,6 +1132,7 @@ public class MainActivity extends AppCompatActivity {
                 fullscreenGrid ? 0 : gridPaddingTop,
                 splitTilesGrid.getPaddingRight(), gridPaddingBottom);
         splitTilesGrid.removeAllViews();
+        appWidgetTileViews.clear();
         splitTilesGrid.setOnDragListener((v, event) -> {
             if (event.getAction() == DragEvent.ACTION_DROP) {
                 int insertionPos = findGridInsertionPosition(event.getX(), event.getY());
@@ -1055,7 +1152,9 @@ public class MainActivity extends AppCompatActivity {
         // минус верхний инсет и собственные вертикальные отступы сетки.
         int availableH = 720 - contentInsetTop
                 - splitTilesGrid.getPaddingTop() - 0;
-        int m = Math.round(4 * metrics.density);
+        // Расстояние между плитками — настройка раздела «Главный экран» (dp вокруг каждой плитки).
+        int spacingDp = Math.max(0, Math.min(24, sharedPreferences.getInt("tileSpacingDp", 4)));
+        int m = Math.round(spacingDp * metrics.density);
         int tileW = (availableW / 12) - 2 * m;
         int tileH = (availableH / 5) - 2 * m;
         final int rows = 5;
@@ -1206,6 +1305,7 @@ public class MainActivity extends AppCompatActivity {
                 AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, tile.id);
                 if (entry == null) continue;
                 View appWidgetView = inf.inflate(R.layout.tile_embedded_app, splitTilesGrid, false);
+                appWidgetTileViews.put(entry.id, appWidgetView);
                 populateAppWidgetLauncher(appWidgetView, entry);
                 
                 // Перетаскивание всей плитки: кнопка в углу или долгий тап по карточке.
@@ -1517,19 +1617,23 @@ public class MainActivity extends AppCompatActivity {
         View dragHandleLauncher = widgetView.findViewById(R.id.appWidgetDragHandleLauncher);
     }
 
-    /** Переключить карточку в режим embedded VirtualDisplay. */
+    /** Переключить карточку в режим embedded VirtualDisplay (пакет из настроек виджета). */
     private void showEmbeddedAppWidget(View widgetView, AppWidgetStore.Entry entry) {
+        AppWidgetStore.Profile profile = entry.selected();
+        showEmbeddedAppWidget(widgetView, entry, profile.packageName, profile.dpi);
+    }
+
+    /** Переключить карточку в режим embedded VirtualDisplay для явно заданного пакета. */
+    private void showEmbeddedAppWidget(View widgetView, AppWidgetStore.Entry entry,
+                                       String packageName, int profileDpi) {
         if (!BuildConfig.IS_FULL) {
-            launchAppNormally(entry.packageName);
+            launchAppNormally(packageName);
             return;
         }
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
             showSnack("Сервис не готов");
             return;
         }
-        AppWidgetStore.Profile profile = entry.selected();
-        String packageName = profile.packageName;
-        int profileDpi = profile.dpi;
 
         View scroll = widgetView.findViewById(R.id.appWidgetLauncherScroll);
         if (scroll != null) scroll.setVisibility(View.GONE);

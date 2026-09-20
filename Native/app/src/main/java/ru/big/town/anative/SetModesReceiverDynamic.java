@@ -74,6 +74,20 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
+        // Плитка «Быстрый запуск»: открыть приложение на выбранном физическом дисплее.
+        // 0 — водительский экран, 1 — пассажирский. Как и OPEN_FREEFORM, только в full-сборке.
+        if ("ru.big.town.anative.OPEN_ON_DISPLAY".equals(receivedIntent) && BuildConfig.IS_FULL) {
+            String pkg = intent.getStringExtra("pkg");
+            int displayId = intent.getIntExtra("display", 0);
+            if (displayId != 0 && displayId != 1) {
+                Log.w(TAG, "OPEN_ON_DISPLAY отклонён: неверный physical display " + displayId);
+            } else if (pkg == null || pkg.isEmpty()) {
+                Log.w(TAG, "OPEN_ON_DISPLAY отклонён: пустой пакет");
+            } else {
+                openFreeformApp(context, pkg, displayId);
+            }
+        }
+
         // Launcher hook routes an allowlisted All Apps tile here so ActivityOptions can normalize a
         // reused freeform task before the activity is resumed. The exported bridge accepts only the
         // exact package persisted by the protected fullscreen config receiver.
