@@ -1710,6 +1710,7 @@ public class MainActivity extends AppCompatActivity {
             
             View expandBtn = widgetView.findViewById(R.id.appWidgetExpand);
             if (expandBtn != null) {
+                expandBtn.setVisibility(View.VISIBLE);
                 expandBtn.setOnClickListener(v -> {
                     // Развернуть текущее приложение на весь экран (simpleLaunch)
                     releaseEmbeddedWidget(entry.id, widgetView);
