@@ -1032,6 +1032,26 @@ public class MainActivity extends AppCompatActivity {
         renderSplitTiles();
     }
 
+    /**
+     * Показывать ли виджет главного экрана: ключ и дефолт его тумблера из «Дополнительно» → «Главный экран».
+     * Дефолты совпадают с тумблерами: Forced EV и «Быстрый запуск» выключены, остальные карточки включены.
+     */
+    private boolean isWidgetVisible(String widgetId) {
+        switch (widgetId) {
+            case "tripCard":         return sharedPreferences.getBoolean("showTripTimer", true);
+            case "cardPowerHold":
+            case "cardLeaveCar":     return sharedPreferences.getBoolean("showPowerHold", true);
+            case "cardWashMode":     return sharedPreferences.getBoolean("showWashMode", true);
+            case "cardAutoLight":    return sharedPreferences.getBoolean("showAutoLight", true);
+            case "cardPedestrian":   return sharedPreferences.getBoolean("showPedestrian", true);
+            case "cardForcedEv":     return sharedPreferences.getBoolean("showForcedEv", false);
+            case "cardBatteryHeat":  return sharedPreferences.getBoolean("showBatteryHeat", true);
+            case "launchAppsWidget": return sharedPreferences.getBoolean("showLaunchAppsWidget", false);
+            // Виджеты без тумблера («Настройки», настройки Android) видно всегда.
+            default:                 return true;
+        }
+    }
+
     /** Скрыть/показать карточки главного экрана по настройкам раздела «Главный экран». */
     private void applyMainScreenVisibility() {
         setCardVisible(tripCard,       "showTripTimer");
@@ -1225,6 +1245,8 @@ public class MainActivity extends AppCompatActivity {
                 
                 switch(tile.id) {
                     case "tripCard": widgetView = inf.inflate(R.layout.tile_trip, splitTilesGrid, false); break;
+                    // Исторический id карточки Power Hold: встречается в сохранённом порядке плиток.
+                    case "cardPowerHold":
                     case "cardLeaveCar": widgetView = inf.inflate(R.layout.tile_power_hold, splitTilesGrid, false); break;
                     case "cardWashMode": widgetView = inf.inflate(R.layout.tile_wash_mode, splitTilesGrid, false); break;
                     case "cardSettings": widgetView = inf.inflate(R.layout.tile_settings, splitTilesGrid, false); break;
@@ -1235,8 +1257,12 @@ public class MainActivity extends AppCompatActivity {
                     case "cardBatteryHeat": widgetView = inf.inflate(R.layout.tile_battery_heat, splitTilesGrid, false); break;
                     case "launchAppsWidget": widgetView = inf.inflate(R.layout.tile_launch_apps, splitTilesGrid, false); break;
                 }
-                // Отключённые карточки не должны занимать место в smart-grid.
-                if (widgetView == null || widgetView.getVisibility() != View.VISIBLE) continue;
+                if (widgetView == null) continue;
+                // Отключённые карточки не должны занимать место в smart-grid. Настройку читаем
+                // именно здесь: сетка пересобирается на каждом рендере, поэтому «скрыть» уже
+                // созданную вьюху бесполезно — на её место приходит новая, по умолчанию видимая.
+                widgetView.setVisibility(isWidgetVisible(tile.id) ? View.VISIBLE : View.GONE);
+                if (widgetView.getVisibility() != View.VISIBLE) continue;
 
                 if ("cardDialNumber".equals(tile.id)) {
                     continue;
@@ -1248,7 +1274,7 @@ public class MainActivity extends AppCompatActivity {
                     tripStatus = widgetView.findViewById(R.id.tripStatus);
                     tripCard   = widgetView;
                     updateTripTimer();
-                } else if (tile.id.equals("cardLeaveCar")) {
+                } else if (tile.id.equals("cardPowerHold") || tile.id.equals("cardLeaveCar")) {
                     cardPowerHold  = widgetView;
                     powerHoldBadge = widgetView.findViewById(R.id.powerHoldBadge);
                     refreshToggles();
