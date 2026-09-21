@@ -85,6 +85,9 @@ public class MainActivity extends AppCompatActivity {
             "ru.big.town.anative.REQUEST_POWER_HOLD_STATUS";
     static final String ACTION_POWER_HOLD_STATUS_UPDATE =
             "ru.big.town.anative.POWER_HOLD_STATUS_UPDATE";
+    // Native уводит задачу приложения с виртуального дисплея виджета при полноэкранном запуске.
+    static final String ACTION_EMBEDDED_TASK_LEFT = "ru.big.town.anative.EMBEDDED_TASK_LEFT";
+    static final String EXTRA_EMBEDDED_TASK_PKG = "pkg";
     private static final String BIND_SET_MODES_PERMISSION =
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
     private static final int POWER_HOLD_UNKNOWN = 0;
@@ -198,6 +201,28 @@ public class MainActivity extends AppCompatActivity {
             renderPowerHoldStatus(intent);
         }
     };
+
+    private final BroadcastReceiver embeddedLeftReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            releaseEmbeddedWidgetsOf(intent.getStringExtra(EXTRA_EMBEDDED_TASK_PKG));
+        }
+    };
+
+    /**
+     * Приложение открыли в полный экран, а его задача уехала с дисплея виджета: снимаем такие
+     * виджеты, иначе они показывали бы чёрный квадрат, который сам не восстановится.
+     */
+    private void releaseEmbeddedWidgetsOf(String pkg) {
+        if (pkg == null) return;
+        for (String widgetId : new ArrayList<>(embeddedWidgetSurfaces.keySet())) {
+            AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
+            View tile = appWidgetTileViews.get(widgetId);
+            if (tile != null && entry != null && pkg.equals(entry.selected().packageName)) {
+                releaseEmbeddedWidget(widgetId, tile);
+            }
+        }
+    }
 
     private void renderPowerHoldStatus(Intent intent) {
         if (powerHoldBadge == null || intent == null) return;
@@ -1014,6 +1039,9 @@ public class MainActivity extends AppCompatActivity {
                 BIND_SET_MODES_PERMISSION, null, RECEIVER_EXPORTED);
         registerReceiver(powerHoldStatusReceiver,
                 new IntentFilter(ACTION_POWER_HOLD_STATUS_UPDATE),
+                BIND_SET_MODES_PERMISSION, null, RECEIVER_EXPORTED);
+        registerReceiver(embeddedLeftReceiver,
+                new IntentFilter(ACTION_EMBEDDED_TASK_LEFT),
                 BIND_SET_MODES_PERMISSION, null, RECEIVER_EXPORTED);
         Intent powerHoldRequest = new Intent(ACTION_REQUEST_POWER_HOLD_STATUS);
         powerHoldRequest.setPackage("ru.big.town.anative");
@@ -1962,6 +1990,7 @@ public class MainActivity extends AppCompatActivity {
         try { unregisterReceiver(batteryHeatReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(settingSyncReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(powerHoldStatusReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(embeddedLeftReceiver); } catch (Exception ignored) {}
         uiHandler.removeCallbacks(tripTick);
     }
 
