@@ -100,6 +100,7 @@ final class VehicleStateControllers {
                 break;
             case DOOR:
                 if (restoreTriggers.onDoor(event.first)) {
+                    ApplyEngine.noteDriverDoorOpened();
                     ApplyEngine.scheduleApply("driver door opened");
                 }
                 driverDoorStateController.accept(
@@ -112,6 +113,8 @@ final class VehicleStateControllers {
                 if (restoreTriggers.onGear(event.first)) {
                     ApplyEngine.scheduleApply("gear Drive");
                 }
+                // Close the restore gate above before allowing this trip's mode persistence.
+                ApplyEngine.noteGear(event.first);
                 gearStateController.accept(event.first);
                 break;
             case VEHICLE_STATE:

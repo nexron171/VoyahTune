@@ -89,6 +89,24 @@ public final class ApplyEngine {
         MODE_SYNC_POLICY.updateRememberLast(modeKey, rememberLast);
     }
 
+    static void noteDriverDoorOpened() {
+        synchronized (RESTORE_LOCK) {
+            MODE_SYNC_POLICY.onDriverDoorOpened();
+        }
+    }
+
+    static void noteGear(int gear) {
+        synchronized (RESTORE_LOCK) {
+            MODE_SYNC_POLICY.onGear(gear);
+        }
+    }
+
+    static boolean canRememberModeSelection() {
+        synchronized (RESTORE_LOCK) {
+            return MODE_SYNC_POLICY.canRememberSelection();
+        }
+    }
+
     /** Feedback never initiates another restore. */
     static boolean shouldPersistModeFeedback(String modeKey, String observedMode) {
         synchronized (RESTORE_LOCK) {
