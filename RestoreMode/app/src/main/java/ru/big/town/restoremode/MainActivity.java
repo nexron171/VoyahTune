@@ -85,6 +85,9 @@ public class MainActivity extends AppCompatActivity {
             "ru.big.town.anative.REQUEST_POWER_HOLD_STATUS";
     static final String ACTION_POWER_HOLD_STATUS_UPDATE =
             "ru.big.town.anative.POWER_HOLD_STATUS_UPDATE";
+    // Native уводит задачу приложения с виртуального дисплея виджета при полноэкранном запуске.
+    static final String ACTION_EMBEDDED_TASK_LEFT = "ru.big.town.anative.EMBEDDED_TASK_LEFT";
+    static final String EXTRA_EMBEDDED_TASK_PKG = "pkg";
     private static final String BIND_SET_MODES_PERMISSION =
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
     private static final int POWER_HOLD_UNKNOWN = 0;
@@ -198,6 +201,28 @@ public class MainActivity extends AppCompatActivity {
             renderPowerHoldStatus(intent);
         }
     };
+
+    private final BroadcastReceiver embeddedLeftReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            releaseEmbeddedWidgetsOf(intent.getStringExtra(EXTRA_EMBEDDED_TASK_PKG));
+        }
+    };
+
+    /**
+     * Приложение открыли в полный экран, а его задача уехала с дисплея виджета: снимаем такие
+     * виджеты, иначе они показывали бы чёрный квадрат, который сам не восстановится.
+     */
+    private void releaseEmbeddedWidgetsOf(String pkg) {
+        if (pkg == null) return;
+        for (String widgetId : new ArrayList<>(embeddedWidgetSurfaces.keySet())) {
+            AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
+            View tile = appWidgetTileViews.get(widgetId);
+            if (tile != null && entry != null && pkg.equals(entry.selected().packageName)) {
+                releaseEmbeddedWidget(widgetId, tile);
+            }
+        }
+    }
 
     private void renderPowerHoldStatus(Intent intent) {
         if (powerHoldBadge == null || intent == null) return;
@@ -1015,6 +1040,9 @@ public class MainActivity extends AppCompatActivity {
         registerReceiver(powerHoldStatusReceiver,
                 new IntentFilter(ACTION_POWER_HOLD_STATUS_UPDATE),
                 BIND_SET_MODES_PERMISSION, null, RECEIVER_EXPORTED);
+        registerReceiver(embeddedLeftReceiver,
+                new IntentFilter(ACTION_EMBEDDED_TASK_LEFT),
+                BIND_SET_MODES_PERMISSION, null, RECEIVER_EXPORTED);
         Intent powerHoldRequest = new Intent(ACTION_REQUEST_POWER_HOLD_STATUS);
         powerHoldRequest.setPackage("ru.big.town.anative");
         sendBroadcast(powerHoldRequest, BIND_SET_MODES_PERMISSION);
@@ -1030,6 +1058,26 @@ public class MainActivity extends AppCompatActivity {
         // Синхронизировать список плиток перед рендером
         TileOrderStore.sync(sharedPreferences, getPackageManager());
         renderSplitTiles();
+    }
+
+    /**
+     * Показывать ли виджет главного экрана: ключ и дефолт его тумблера из «Дополнительно» → «Главный экран».
+     * Дефолты совпадают с тумблерами: Forced EV и «Быстрый запуск» выключены, остальные карточки включены.
+     */
+    private boolean isWidgetVisible(String widgetId) {
+        switch (widgetId) {
+            case "tripCard":         return sharedPreferences.getBoolean("showTripTimer", true);
+            case "cardPowerHold":
+            case "cardLeaveCar":     return sharedPreferences.getBoolean("showPowerHold", true);
+            case "cardWashMode":     return sharedPreferences.getBoolean("showWashMode", true);
+            case "cardAutoLight":    return sharedPreferences.getBoolean("showAutoLight", true);
+            case "cardPedestrian":   return sharedPreferences.getBoolean("showPedestrian", true);
+            case "cardForcedEv":     return sharedPreferences.getBoolean("showForcedEv", false);
+            case "cardBatteryHeat":  return sharedPreferences.getBoolean("showBatteryHeat", true);
+            case "launchAppsWidget": return sharedPreferences.getBoolean("showLaunchAppsWidget", false);
+            // Виджеты без тумблера («Настройки», настройки Android) видно всегда.
+            default:                 return true;
+        }
     }
 
     /** Скрыть/показать карточки главного экрана по настройкам раздела «Главный экран». */
@@ -1225,6 +1273,8 @@ public class MainActivity extends AppCompatActivity {
                 
                 switch(tile.id) {
                     case "tripCard": widgetView = inf.inflate(R.layout.tile_trip, splitTilesGrid, false); break;
+                    // Исторический id карточки Power Hold: встречается в сохранённом порядке плиток.
+                    case "cardPowerHold":
                     case "cardLeaveCar": widgetView = inf.inflate(R.layout.tile_power_hold, splitTilesGrid, false); break;
                     case "cardWashMode": widgetView = inf.inflate(R.layout.tile_wash_mode, splitTilesGrid, false); break;
                     case "cardSettings": widgetView = inf.inflate(R.layout.tile_settings, splitTilesGrid, false); break;
@@ -1235,8 +1285,12 @@ public class MainActivity extends AppCompatActivity {
                     case "cardBatteryHeat": widgetView = inf.inflate(R.layout.tile_battery_heat, splitTilesGrid, false); break;
                     case "launchAppsWidget": widgetView = inf.inflate(R.layout.tile_launch_apps, splitTilesGrid, false); break;
                 }
-                // Отключённые карточки не должны занимать место в smart-grid.
-                if (widgetView == null || widgetView.getVisibility() != View.VISIBLE) continue;
+                if (widgetView == null) continue;
+                // Отключённые карточки не должны занимать место в smart-grid. Настройку читаем
+                // именно здесь: сетка пересобирается на каждом рендере, поэтому «скрыть» уже
+                // созданную вьюху бесполезно — на её место приходит новая, по умолчанию видимая.
+                widgetView.setVisibility(isWidgetVisible(tile.id) ? View.VISIBLE : View.GONE);
+                if (widgetView.getVisibility() != View.VISIBLE) continue;
 
                 if ("cardDialNumber".equals(tile.id)) {
                     continue;
@@ -1248,7 +1302,7 @@ public class MainActivity extends AppCompatActivity {
                     tripStatus = widgetView.findViewById(R.id.tripStatus);
                     tripCard   = widgetView;
                     updateTripTimer();
-                } else if (tile.id.equals("cardLeaveCar")) {
+                } else if (tile.id.equals("cardPowerHold") || tile.id.equals("cardLeaveCar")) {
                     cardPowerHold  = widgetView;
                     powerHoldBadge = widgetView.findViewById(R.id.powerHoldBadge);
                     refreshToggles();
@@ -1656,6 +1710,7 @@ public class MainActivity extends AppCompatActivity {
             
             View expandBtn = widgetView.findViewById(R.id.appWidgetExpand);
             if (expandBtn != null) {
+                expandBtn.setVisibility(View.VISIBLE);
                 expandBtn.setOnClickListener(v -> {
                     // Развернуть текущее приложение на весь экран (simpleLaunch)
                     releaseEmbeddedWidget(entry.id, widgetView);
@@ -1936,6 +1991,7 @@ public class MainActivity extends AppCompatActivity {
         try { unregisterReceiver(batteryHeatReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(settingSyncReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(powerHoldStatusReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(embeddedLeftReceiver); } catch (Exception ignored) {}
         uiHandler.removeCallbacks(tripTick);
     }
 

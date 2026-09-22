@@ -13,7 +13,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.app.ActivityOptions;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.content.SharedPreferences;
@@ -49,6 +48,10 @@ public class SetModesService extends Service {
     private final Map<String, VirtualDisplay> embeddedDisplays = new HashMap<>();
     private final Map<String, String> embeddedPackages = new HashMap<>();
     private final Map<String, Boolean> embeddedLaunched = new HashMap<>();
+    // Время последнего запуска приложения в виджет: задача создаётся не мгновенно, и без этой паузы
+    // переподключение Surface сразу после запуска принимало бы живой дисплей за протухший.
+    private static final long EMBEDDED_LAUNCH_GRACE_MS = 3_000L;
+    private final Map<String, Long> embeddedLaunchAt = new HashMap<>();
     static final int MSG_APPLY_DRIVE_MODES          = 1;
     static final int MSG_APPLY_DRIVE_MODES_STAR_BUTTON = 2;
     static final int MSG_RESULT                     = 4;
@@ -77,6 +80,10 @@ public class SetModesService extends Service {
             "ru.big.town.anative.REQUEST_POWER_HOLD_STATUS";
     static final String ACTION_POWER_HOLD_STATUS_UPDATE =
             "ru.big.town.anative.POWER_HOLD_STATUS_UPDATE";
+    // Сообщение хосту (RestoreMode), что embedded-виджет теряет задачу приложения: она уезжает
+    // на физический экран, и виджет без окна показал бы чёрный квадрат.
+    static final String ACTION_EMBEDDED_TASK_LEFT = "ru.big.town.anative.EMBEDDED_TASK_LEFT";
+    static final String EXTRA_EMBEDDED_TASK_PKG = "pkg";
     static final String EXTRA_POWER_HOLD_STATUS = "status";
     static final String EXTRA_POWER_HOLD_EXIT_REASON = "exitReason";
     static final String EXTRA_POWER_HOLD_REQUEST_OUTCOME = "requestOutcome";
@@ -495,12 +502,55 @@ public class SetModesService extends Service {
         }
     }
 
+    /**
+     * Есть ли у пакета задача на указанном дисплее. Защёлка embeddedLaunched экономит перезапуск,
+     * но врёт, когда приложение покинуло дисплей виджета (развернули на весь экран, запустили
+     * обычным способом из дока, приложение закрылось): поверхность остаётся без окна, и плитка
+     * показывает чёрный квадрат. При ошибке считаем, что задача на месте: ложный перезапуск хуже,
+     * чем неперерисованный виджет.
+     */
+    private boolean hasTaskOnDisplay(String pkg, int displayId) {
+        try {
+            android.app.ActivityManager am =
+                    (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            if (am == null) return true;
+            List<android.app.ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(100);
+            if (tasks == null) return true;
+            for (android.app.ActivityManager.RunningTaskInfo task : tasks) {
+                android.content.ComponentName component = task.baseActivity != null
+                        ? task.baseActivity : task.topActivity;
+                if (component == null || !pkg.equals(component.getPackageName())) continue;
+                // RunningTaskInfo.displayId скрыт в этом SDK — читаем полем, как AppDisplayLauncher.
+                int taskDisplay = task.getClass().getField("displayId").getInt(task);
+                if (taskDisplay == displayId) return true;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "hasTaskOnDisplay: " + e.getMessage());
+            return true;
+        }
+        return false;
+    }
+
     private void startEmbeddedDisplay(String widgetId, String packageName, Surface surface,
                                       int width, int height, int dpi) {
         if (widgetId == null || widgetId.isEmpty() || packageName == null || packageName.isEmpty()
                 || surface == null || !surface.isValid() || width <= 0 || height <= 0) return;
         try {
             VirtualDisplay display = embeddedDisplays.get(widgetId);
+            // Виджет переподключает Surface при каждом рендере главного экрана. Если приложение уже
+            // ушло с дисплея виджета, старая защёлка embeddedLaunched запрещала повторный запуск и
+            // плитка оставалась чёрным квадратом. Пересоздаём дисплей и запускаем заново — ровно то,
+            // что вручную делают крестиком и повторным тапом по иконке приложения.
+            Long launchedAt = embeddedLaunchAt.get(widgetId);
+            boolean launchSettled = launchedAt == null
+                    || SystemClock.elapsedRealtime() - launchedAt > EMBEDDED_LAUNCH_GRACE_MS;
+            if (display != null && launchSettled
+                    && !hasTaskOnDisplay(packageName, display.getDisplay().getDisplayId())) {
+                Log.i(TAG, "embedded VD stale widget=" + widgetId + " pkg=" + packageName
+                        + " — пересоздаём дисплей");
+                releaseEmbeddedDisplay(widgetId);
+                display = null;
+            }
             if (display != null) {
                 display.setSurface(surface);
                 display.resize(width, height, dpi > 0 ? dpi : 213);
@@ -525,16 +575,19 @@ public class SetModesService extends Service {
                         + display.getDisplay().getDisplayId() + " " + width + "x" + height);
             }
             if (!Boolean.TRUE.equals(embeddedLaunched.get(widgetId))) {
-                Intent launch = getPackageManager().getLaunchIntentForPackage(packageName);
-                if (launch == null) return;
-                // A widget owns a dedicated display. Reusing an existing task can leave its
-                // activity attached to the previous display: audio/input still work, while the
-                // embedded surface stays black. Match SplitHostActivity and force a new task.
-                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
-                ActivityOptions options = ActivityOptions.makeBasic();
-                options.setLaunchDisplayId(display.getDisplay().getDisplayId());
-                startActivity(launch, options.toBundle());
+                // Запускаем в дисплей виджета тем же путём, что и любой запуск на конкретный
+                // дисплей: AppDisplayLauncher сперва снимает уже существующую задачу приложения
+                // (она могла остаться на физическом экране или в другом VirtualDisplay) и только
+                // потом стартует его заново на нужном дисплее. Без снятия задача оставалась на
+                // прежнем дисплее, а поверхность виджета показывала чёрный квадрат — лечилось
+                // только свернуть/открыть сетку.
+                final String widget = widgetId;
+                int vdDisplayId = display.getDisplay().getDisplayId();
+                AppDisplayLauncher.launch(getApplicationContext(), packageName, vdDisplayId, false,
+                        () -> embeddedDisplays.containsKey(widget),      // запуск ещё нужен?
+                        () -> embeddedLaunched.put(widget, false));      // неудача → разрешаем повтор
                 embeddedLaunched.put(widgetId, true);
+                embeddedLaunchAt.put(widgetId, SystemClock.elapsedRealtime());
             }
         } catch (Exception e) {
             Log.e(TAG, "embedded VD failed widget=" + widgetId + ": " + e.getMessage());
@@ -545,6 +598,7 @@ public class SetModesService extends Service {
         VirtualDisplay display = embeddedDisplays.remove(widgetId);
         embeddedPackages.remove(widgetId);
         embeddedLaunched.remove(widgetId);
+        embeddedLaunchAt.remove(widgetId);
         if (display != null) {
             try { display.release(); } catch (Exception ignored) {}
             Log.i(TAG, "embedded VD released widget=" + widgetId);
@@ -800,6 +854,22 @@ public class SetModesService extends Service {
             if (tracker != null) tracker.requestCurrentStatus();
         }
     };
+
+    /**
+     * Задача пакета снимается с виртуального дисплея (embedded-виджет главного экрана) перед
+     * полноэкранным запуском. Велим хосту снять такой виджет: сам он не восстановится, потому что
+     * защёлка embeddedLaunched не даёт перезапустить приложение без запроса хоста.
+     */
+    static void notifyEmbeddedTaskLeft(Context context, String pkg) {
+        Intent update = new Intent(ACTION_EMBEDDED_TASK_LEFT);
+        update.setPackage(RESTOREMODE_PKG);
+        update.putExtra(EXTRA_EMBEDDED_TASK_PKG, pkg);
+        try {
+            context.sendBroadcast(update, BIND_PERMISSION);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "notifyEmbeddedTaskLeft failed: " + e.getMessage());
+        }
+    }
 
     private void publishPowerHoldStatus(PowerHoldStatusPolicy.Snapshot snapshot,
                                         PowerHoldPolicy.Outcome requestOutcome,
@@ -1351,6 +1421,7 @@ public class SetModesService extends Service {
         embeddedDisplays.clear();
         embeddedPackages.clear();
         embeddedLaunched.clear();
+        embeddedLaunchAt.clear();
         if (powerHoldStatusReceiverRegistered) {
             try {
                 unregisterReceiver(powerHoldStatusRequestReceiver);

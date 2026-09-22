@@ -74,6 +74,14 @@ final class AppDisplayLauncher {
                 snapshot.add(new SplitHostTaskSnapshot.TaskRecord(task.taskId, pkg, oldDisplay));
             }
             Set<Integer> retiring = AppDisplayTaskPlan.retiring(snapshot, pkg, displayId);
+            // Задача уходит с виртуального дисплея (это дисплей embedded-виджета главного экрана):
+            // просим хост снять виджет, иначе тот останется с мёртвым Surface — чёрным квадратом.
+            for (SplitHostTaskSnapshot.TaskRecord task : snapshot) {
+                if (retiring.contains(task.taskId) && task.displayId != null && task.displayId > 1) {
+                    SetModesService.notifyEmbeddedTaskLeft(app, pkg);
+                    break;
+                }
+            }
             Object service = null;
             Method remove = null;
             for (int taskId : retiring) {
