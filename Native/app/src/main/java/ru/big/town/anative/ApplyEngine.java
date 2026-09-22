@@ -8,7 +8,7 @@ import android.util.Log;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-/** Applies one saved snapshot per door-open / Drive event, or explicit Apply request. */
+/** Applies one saved snapshot per eligible door/first-Drive trigger, or explicit Apply request. */
 public final class ApplyEngine {
     static final String TAG = "$$$ ApplyEngine $$$";
 

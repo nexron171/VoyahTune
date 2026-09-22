@@ -87,15 +87,14 @@ final class VehicleStateControllers {
     private void onCanBusEvent(CanBusEvent event) {
         switch (event.kind) {
             case CONNECTION:
-                // Snapshot requests and mode gating are ordered before later events on stateHandler.
-                restoreTriggers.reset();
+                // Preserve restore history across CAN reconnects: neither replayed states nor
+                // reconnecting during parking may grant another Drive restore.
                 gearStateController.reset();
                 driverDoorStateController.reset();
                 canBusEventHub.requestDriverDoorSeed();
                 if (modeFeedbackController != null) modeFeedbackController.onConnected();
                 break;
             case CONNECTION_LOST:
-                restoreTriggers.reset();
                 gearStateController.reset();
                 driverDoorStateController.reset();
                 break;
