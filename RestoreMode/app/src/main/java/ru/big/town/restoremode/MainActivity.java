@@ -55,6 +55,8 @@ import androidx.core.view.WindowInsetsCompat;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.snackbar.Snackbar;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -114,7 +116,9 @@ public class MainActivity extends AppCompatActivity {
     static final String ACTION_TRIP_UPDATE = "ru.big.town.anative.TRIP_UPDATE";
     static final String ACTION_REQUEST_TRIP_UPDATE = "ru.big.town.anative.REQUEST_TRIP_UPDATE";
     static final String ACTION_TRIP_RESET = "ru.big.town.anative.TRIP_RESET";
-    private TextView tripTimer, tripStatus;
+    private static final DateTimeFormatter TRIP_DATE_FORMAT =
+            DateTimeFormatter.ofPattern("dd.MM.yyyy, EEEE", Locale.forLanguageTag("ru"));
+    private TextView tripDate, tripTimer, tripStatus;
     // Карточки главного экрана, скрываемые настройками раздела «Главный экран»
     private View tripCard, cardPowerHold, cardWashMode, cardAutoLight, cardPedestrian, cardForcedEv;
     // Native-виджеты
@@ -307,6 +311,10 @@ public class MainActivity extends AppCompatActivity {
     };
 
     private void updateTripTimer() {
+        if (tripDate != null) {
+            String date = LocalDate.now().format(TRIP_DATE_FORMAT);
+            if (!date.contentEquals(tripDate.getText())) tripDate.setText(date);
+        }
         long ms = tripAccumMs;
         if (tripActive && tripInDrive) ms += SystemClock.elapsedRealtime() - tripDriveStartElapsed;
         if (tripTimer != null) tripTimer.setText(fmtDuration(ms));
@@ -1309,6 +1317,7 @@ public class MainActivity extends AppCompatActivity {
                 
                 // Re-bind dynamically inflated views based on ID
                 if (tile.id.equals("tripCard")) {
+                    tripDate   = widgetView.findViewById(R.id.tripDate);
                     tripTimer  = widgetView.findViewById(R.id.tripTimer);
                     tripStatus = widgetView.findViewById(R.id.tripStatus);
                     tripCard   = widgetView;

@@ -2434,6 +2434,34 @@
         android:paddingHorizontal="28dp"
         android:paddingVertical="20dp">
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/layout_category_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Версия приложения"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <TextView
+                android:id="@+id/textAppVersion"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:textColor="#AAAAAA"
+                android:textSize="26px" />
+
+        </LinearLayout>
+
         <!-- Диагностика ресурсов существует только пока открыт раздел «Другое». -->
         <LinearLayout
             android:layout_width="match_parent"

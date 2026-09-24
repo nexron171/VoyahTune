@@ -561,6 +561,9 @@ public class AdvanceActivity extends AppCompatActivity {
                     prefs.edit().putBoolean("pauseMediaOnDoor", checked).apply());
         }
 
+        TextView textAppVersion = findViewById(R.id.textAppVersion);
+        textAppVersion.setText(BuildConfig.VERSION_NAME);
+
         // Раздел «Другое»: тоггл «Режим отладки»
         Switch switchDebugMode = findViewById(R.id.switchDebugMode);
         switchDebugMode.setChecked(prefs.getBoolean("debugMode", false));
