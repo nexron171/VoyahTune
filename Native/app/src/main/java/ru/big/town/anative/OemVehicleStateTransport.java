@@ -40,6 +40,7 @@ final class OemVehicleStateTransport {
     private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
     private static final String WRITE_CANBUS_PERMISSION = "com.qinggan.permission.WRITE_CANBUS";
     private static final int TX_GEAR_STATUS = 6;
+    private static final int TX_FUEL_LEVEL = 9;
     private static final int TX_GET_VEHICLE_STATE = 57;
     private static final int TX_SET_VEHICLE_STATE = 58;
     private static final int TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE = 77;
@@ -108,8 +109,20 @@ final class OemVehicleStateTransport {
         }
     }
 
+    static final class FuelLevel {
+        final int capacityLiters;
+        final float remainingPercent;
+
+        FuelLevel(int capacityLiters, float remainingPercent) {
+            this.capacityLiters = capacityLiters;
+            this.remainingPercent = remainingPercent;
+        }
+    }
+
     interface Session {
         GearStatus readGearStatus();
+
+        default FuelLevel readFuelLevel() { return null; }
 
         Integer readVehicleState(StateKey key);
 
@@ -374,6 +387,12 @@ final class OemVehicleStateTransport {
                 return new GearStatus(0, 0);
             }
             return transactGearStatus(binder);
+        }
+
+        @Override
+        public FuelLevel readFuelLevel() {
+            // Debug emulation must not present invented fuel readings as vehicle data.
+            return emulated ? null : transactFuelLevel(binder);
         }
 
         @Override
@@ -714,6 +733,29 @@ final class OemVehicleStateTransport {
         } catch (RemoteException | RuntimeException e) {
             Log.e(TAG, "TX6 getGearStatus failed", e);
             dropBinding(null, binder);
+            return null;
+        } finally {
+            reply.recycle();
+            data.recycle();
+        }
+    }
+
+    private FuelLevel transactFuelLevel(IBinder binder) {
+        if (!isCurrentBinder(binder)) return null;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+            if (!binder.transact(TX_FUEL_LEVEL, data, reply, 0)) return null;
+            reply.readException();
+            if (reply.readInt() == 0 || reply.dataAvail() < 28) return null;
+            // OEM FuelLevel Parcelable: capacity, remain, percentage, shortage, three consumption floats.
+            int capacity = reply.readInt();
+            reply.readInt(); // mRemain is not populated by the examined H97C/H97X service.
+            float percentage = reply.readFloat();
+            return new FuelLevel(capacity, percentage);
+        } catch (RemoteException | RuntimeException e) {
+            Log.w(TAG, "TX9 getFuelLevel unavailable", e);
             return null;
         } finally {
             reply.recycle();

@@ -131,6 +131,9 @@ public class VoiceActivity extends AppCompatActivity {
             orb.recognized(); status.setText("Команда распознана"); transcript.setText("Режим движения: Спорт");
         } else if ("success".equals(state)) {
             showSuccess("Тестовая команда · закрытие через 3 секунды");
+        } else if ("fuel".equals(state)) {
+            showSuccess(VoiceResultPresentation.successText("port_cap:fuel", "", 26),
+                    VoiceResultPresentation.successDurationMs("port_cap:fuel"));
         } else if ("error".equals(state)) {
             fail("Тестовая ошибка · закрытие через 6 секунд");
         }
@@ -187,7 +190,9 @@ public class VoiceActivity extends AppCompatActivity {
                     getSharedPreferences("DrivePreferences", MODE_PRIVATE).edit()
                             .putBoolean("autoLight", command.action.endsWith(":on")).apply();
                 }
-                showSuccess(command.title);
+                int refillLiters = data == null ? -1 : data.getInt("fuelRefillLiters", -1);
+                showSuccess(VoiceResultPresentation.successText(command.action, command.title, refillLiters),
+                        VoiceResultPresentation.successDurationMs(command.action));
             }
         };
         submitted = send("execute", command.action, reply);
@@ -213,10 +218,13 @@ public class VoiceActivity extends AppCompatActivity {
         ui.postDelayed(() -> finish(), 6000);
     }
     private void showSuccess(String title) {
+        showSuccess(title, 3000);
+    }
+    private void showSuccess(String title, int durationMs) {
         ended = true; recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
         orb.recognized(); status.setText("Команда передана"); transcript.setText(title);
         sounds.success();
-        ui.postDelayed(() -> finish(), 3000);
+        ui.postDelayed(() -> finish(), durationMs);
     }
     private void releaseFocus() {
         if (focus != null && audio != null) { audio.abandonAudioFocusRequest(focus); focus = null; }

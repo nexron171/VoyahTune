@@ -20,8 +20,8 @@ public class VoiceAnimationPreviewActivity extends VoiceActivity implements Chor
         super.onCreate(state);
         LinearLayout controls = new LinearLayout(this);
         controls.setGravity(Gravity.CENTER);
-        String[] labels = {"Слушаю", "Распознано", "Успех · 3 с", "Ошибка · 6 с"};
-        String[] states = {"listening", "recognized", "success", "error"};
+        String[] labels = {"Слушаю", "Распознано", "Успех · 3 с", "Бензобак · 10 с", "Ошибка · 6 с"};
+        String[] states = {"listening", "recognized", "success", "fuel", "error"};
         int gap = (int) (8 * getResources().getDisplayMetrics().density);
         for (int i = 0; i < labels.length; i++) {
             String selection = states[i];

@@ -81,6 +81,7 @@ final class VoiceCommandController {
             return;
         }
         AtomicBoolean accepted = new AtomicBoolean();
+        Bundle details = new Bundle();
         String[] error = {"Автомобиль не принял команду"};
         boolean headlights = action.startsWith("headlights:") || action.startsWith("toggle_headlights");
         ManualAutoGate.Ticket ticket = headlights ? LightSensorService.reserveManualHeadlightCommand() : null;
@@ -90,12 +91,12 @@ final class VoiceCommandController {
                 // The charge target and SREV selection are two writes: recheck before each one.
                 CanSender.runGuardedAction(
                         () -> gate.active(token) && SystemClock.elapsedRealtime() <= deadline,
-                        () -> accepted.set(execute(action, error)));
+                        () -> accepted.set(execute(action, error, details)));
             }
             catch (RuntimeException e) { android.util.Log.e("VoyahVoice", "Command failed: " + action, e); }
         }, () -> {
             if (ticket != null) ticket.close();
-            if (gate.active(token)) respond(reply, accepted.get(), error[0]);
+            if (gate.active(token)) respond(reply, accepted.get(), error[0], details);
         });
     }
 
@@ -104,7 +105,22 @@ final class VoiceCommandController {
                 || action.startsWith("app:") || action.startsWith("split:") || action.startsWith("call:");
     }
 
-    private boolean execute(String action, String[] error) {
+    private boolean execute(String action, String[] error, Bundle details) {
+        if (action.startsWith("port_cap:")) {
+            PortCapController.OpenResult opened = PortCapController.open(service, action);
+            PortCapController.Outcome result = opened.outcome;
+            if (result == PortCapController.Outcome.ACCEPTED && opened.refillLiters != null) {
+                details.putInt("fuelRefillLiters", opened.refillLiters);
+            }
+            if (result == PortCapController.Outcome.NOT_IN_PARK) {
+                error[0] = "Для открытия лючка переведите селектор в P";
+            } else if (result == PortCapController.Outcome.STATE_UNAVAILABLE) {
+                error[0] = "Не удалось проверить положение селектора";
+            } else if (result == PortCapController.Outcome.TRANSPORT_FAILURE) {
+                error[0] = "Не удалось отправить команду открытия лючка";
+            }
+            return result == PortCapController.Outcome.ACCEPTED;
+        }
         if (action.startsWith("fuel_charge:")) {
             final int percent;
             try {
@@ -174,8 +190,12 @@ final class VoiceCommandController {
     }
 
     static void respond(ResultReceiver reply, boolean accepted, String error) {
+        respond(reply, accepted, error, new Bundle());
+    }
+
+    private static void respond(ResultReceiver reply, boolean accepted, String error, Bundle result) {
         if (reply == null) return;
-        Bundle result = new Bundle(); result.putString("error", error);
+        result.putString("error", error);
         reply.send(accepted ? 1 : 0, result);
     }
 }

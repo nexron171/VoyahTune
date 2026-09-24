@@ -116,6 +116,22 @@ public class VoiceCommandCatalogTest {
         assertAction("headlights:off", "выключи фары", "выключить фары");
         assertAction("headlights:auto", "фары авто", "включи фары авто");
     }
+    @Test public void portCapsAcceptOpenAndShortPhrasesWithoutUnlockingConnector() {
+        assertAction("port_cap:fuel", "открой бензобак", "открыть бензобак", "бензобак",
+                "открой люк бензобака", "открой лючок бензобака", "люк бензобака", "лючок бензобака",
+                "откройте топливный лючок", "топливный люк", "люк бака", "пожалуйста бензобака лючок открой");
+        assertAction("port_cap:charge", "открой зарядку", "открыть зарядку", "зарядка", "зарядку",
+                "открой люк зарядки", "открой лючок зарядки", "люк зарядки", "лючок зарядки",
+                "зарядный люк", "зарядный лючок", "откройте лючок для зарядки", "люк зарядного порта");
+        for (String phrase : new String[]{"люк", "лючок", "открой люк", "открой лючок",
+                "не открывай бензобак", "не открой бензобак", "не зарядка", "закрой бензобак",
+                "закрой зарядку", "открой бензобак и зарядку", "бензобак зарядка",
+                "разблокируй зарядку", "разблокируй зарядный разъем", "открой люк крыши"}) {
+            assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
+        }
+        assertAction("energy:SREV", "топливо");
+        assertAction("fuel_charge:80", "топливо 80");
+    }
     @Test public void modesAreSelectedDirectlyAndCyclePhrasesAreRejected() {
         for (String phrase : new String[]{"переключи эко и комфорт", "переключи эко и спорт",
                 "переключи режим эко и спорт", "переключи электро и топливо",

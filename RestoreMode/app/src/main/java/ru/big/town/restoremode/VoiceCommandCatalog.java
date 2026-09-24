@@ -96,6 +96,12 @@ final class VoiceCommandCatalog {
         add(all, "toggle_headlights_auto", "Переключить фары: ближний / авто",
                 "переключи фары авто", "переключить фары авто",
                 "переключи авто свет", "переключить авто свет");
+        portCap(all, "port_cap:fuel", "Открыть лючок бензобака (только в P)",
+                "бензобак", "бак", "люк бензобака", "лючок бензобака", "люк бака", "лючок бака",
+                "топливный люк", "топливный лючок");
+        portCap(all, "port_cap:charge", "Открыть лючок зарядки (только в P)",
+                "зарядку", "зарядка", "люк зарядки", "лючок зарядки", "зарядный люк", "зарядный лючок",
+                "люк для зарядки", "лючок для зарядки", "люк зарядного порта", "лючок зарядного порта");
         add(all, "power_hold", "Power Hold — оставить автомобиль включённым", "пауэр холд", "оставь машину включенной", "режим ожидания");
         add(all, "wash", "Режим мойки", "мойка", "включи мойку", "режим мойки");
         add(all, "battery_heat", "Запросить прогрев батареи", "прогрей батарею", "прогрев батареи", "включи подогрев батареи");
@@ -107,6 +113,14 @@ final class VoiceCommandCatalog {
         all.add(new Command("reboot", "Перезагрузить головное устройство", true,
                 "перезагрузи систему", "перезагрузи головное устройство", "перезагрузка системы"));
         return all;
+    }
+
+    private static void portCap(List<Command> all, String action, String title, String... names) {
+        List<String> phrases = new ArrayList<>();
+        for (String name : names) {
+            Collections.addAll(phrases, name, "открой " + name, "открыть " + name, "откройте " + name);
+        }
+        all.add(new Command(action, title, false, phrases.toArray(new String[0])));
     }
 
     private static void mode(List<Command> all, String action, String title, String... names) {
