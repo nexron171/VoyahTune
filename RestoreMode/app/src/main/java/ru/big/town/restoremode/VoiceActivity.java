@@ -70,7 +70,7 @@ public class VoiceActivity extends AppCompatActivity {
         orb = new VoiceOrbView(this);
         int size = (int) (360 * getResources().getDisplayMetrics().density);
         center.addView(orb, new LinearLayout.LayoutParams(size, size));
-        status = label(26); transcript = label(20); center.addView(status); center.addView(transcript);
+        status = label(26); transcript = label(40); center.addView(status); center.addView(transcript);
         closeControl.attach(this, center);
         root.addView(center, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
         setContentView(root);
