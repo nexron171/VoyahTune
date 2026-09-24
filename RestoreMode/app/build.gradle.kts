@@ -40,11 +40,13 @@ android {
 
         }
         debug {
+            // Android instrumentation needs library classes removed from the normal debug APK.
+            val minifyDebug = providers.gradleProperty("voyahMinifyDebug").orElse("true").get().toBoolean()
             // Enables code-related app optimization.
-            isMinifyEnabled = true
+            isMinifyEnabled = minifyDebug
 
             // Enables resource shrinking.
-            isShrinkResources = true
+            isShrinkResources = minifyDebug
 
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -106,7 +106,13 @@ public class SetModesService extends Service {
         public void handleMessage(Message msg) {
             switch (msg.what) {
                 case 36: // Signature-protected voice session protocol.
-                    voiceCommands.handle(msg.getData());
+                    try {
+                        voiceCommands.handle(msg.getData());
+                    } catch (android.os.BadParcelableException e) {
+                        // An older client can include its own ResultReceiver subclass.
+                        // Reject the unreadable request without crashing the vehicle service.
+                        Log.e(TAG, "Invalid voice command parcel; update VoyahTune UI", e);
+                    }
                     break;
                 case MSG_APPLY_DRIVE_MODES:
                     clientMessenger = msg.replyTo;

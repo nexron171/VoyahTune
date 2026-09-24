@@ -12,7 +12,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.Message;
 import android.os.Messenger;
 import android.os.ResultReceiver;
 import android.view.Gravity;
@@ -202,12 +201,7 @@ public class VoiceActivity extends AppCompatActivity {
     private boolean send(String op, String action, ResultReceiver reply) {
         if (nativeService == null || session == null) return false;
         try {
-            Bundle data = new Bundle(); data.putString("session", session); data.putString("op", op);
-            data.putString("action", action); data.putParcelable("reply", reply);
-            // Native acknowledges navigation, then waits for the success screen to close.
-            data.putInt("resultDisplayMs", 3000);
-            Message message = Message.obtain(null, VoiceCommands.MESSAGE); message.setData(data);
-            nativeService.send(message); return true;
+            nativeService.send(VoiceCommandMessage.create(session, op, action, reply)); return true;
         } catch (Exception e) { return false; }
     }
     private void fail(String message) {

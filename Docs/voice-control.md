@@ -133,6 +133,16 @@ Native проверяет диапазон и шаг повторно. Чере�
 
 ## Модель и сборка
 
+Ответ Native передаётся через framework `ResultReceiver`, восстановленный из Parcel перед
+помещением в Bundle. Нельзя отправлять анонимный подкласс из `VoiceActivity` напрямую:
+в отдельном APK Native его нет, что вызывает `BadParcelableException` ещё при чтении сессии.
+Native также отклоняет нечитаемые сообщения без падения сервиса.
+Регрессионный `VoiceCommandMessageTest` проверяет чтение системным загрузчиком классов,
+`begin` / `cancel` без ответа и реальный обмен с отдельным тестовым процессом без команд автомобилю.
+Запуск на эмуляторе: из `RestoreMode` выполнить
+`ANDROID_SERIAL=emulator-5554 ./gradlew -PvoyahMinifyDebug=false :app:connectedFullDebugAndroidTest`.
+Опция отключает сокращение классов только для debug, чтобы сохранить зависимости Android test runner.
+
 - Vosk Android `0.3.75`, JNA `5.18.1`.
 - `vosk-model-small-ru-0.22`, Apache-2.0, архив около 44 МиБ / 45 МБ,
   распакованная модель около 87 МиБ. [Источник модели](https://alphacephei.com/vosk/models).
