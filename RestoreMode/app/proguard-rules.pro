@@ -27,3 +27,8 @@
 #-dontobfuscate
 #-dontoptimize
 -dontwarn javax.lang.model.element.Modifier
+
+# Vosk and JNA bind native symbols reflectively.
+-keep class org.vosk.** { *; }
+-keep class com.sun.jna.** { *; }
+-dontwarn java.awt.**

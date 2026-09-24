@@ -409,6 +409,11 @@ Java.perform(function () {
                 var displayId = dc.getDisplayId();
                 if (displayId !== 0 && displayId !== 1) return;   // только два ФИЗИЧЕСКИХ экрана (не наш VD/прочие)
                 var attrs = win.getAttrs();
+                // Voice is a dedicated translucent full-display activity, independent of the
+                // main app's dock/freeform preference. Never clamp its 50% scrim to app bounds.
+                var title = attrs.getTitle();
+                if (pkg === "ru.big.town.restoremode" && title !== null
+                        && String(title).indexOf("ru.big.town.restoremode.VoiceActivity") >= 0) return;
                 var wt = attrs.type.value;
                 if (wt === 2011 || wt === 2012 || wt === 2038 || wt === 2032) return;  // статус/навбар/оверлеи
                 var fullscreen = ffFullscreen(pkg);

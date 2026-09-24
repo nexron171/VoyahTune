@@ -33,6 +33,7 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 needsBackService |= SteeringActionSequence.contains(
                         intent.getStringExtra(longKey), "system_back");
             }
+            needsBackService |= SteeringActionSequence.contains(intent.getStringExtra("steerVoiceLong"), "voice_assistant");
             BackButtonService.setSteeringBackEnabled(context, needsBackService);
             Log.i(TAG, "STEER_CONFIG зеркалирован");
         } else if ("ru.big.town.anative.DOCK_CONFIG".equals(action)) {

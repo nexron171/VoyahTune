@@ -1,3 +1,6 @@
+import java.io.File
+import java.net.URI
+import java.util.zip.ZipInputStream
 import java.security.MessageDigest
 
 //import com.android.build.gradle.internal.dependency.isProguardRule
@@ -82,6 +85,8 @@ android {
 
 dependencies {
 
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.activity)
@@ -163,5 +168,55 @@ androidComponents {
             outputDirectory.set(layout.buildDirectory.dir("generated/voyahIdentity/${variant.name}"))
         }
         variant.sources.assets?.addGeneratedSourceDirectory(identity, VoyahBuildIdentity::outputDirectory)
+    }
+}
+
+
+
+// The pinned Russian model ships in the APK; no network dependency on the car.
+abstract class PrepareVoiceModel : DefaultTask() {
+    @get:OutputDirectory abstract val generatedAssets: DirectoryProperty
+    @TaskAction fun prepare() {
+        val root = generatedAssets.get().asFile
+        val zip = root.parentFile.parentFile.resolve("voice-model/vosk-model-small-ru-0.22.zip")
+        zip.parentFile.mkdirs()
+        val expected = "961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4"
+        if (!zip.isFile) {
+            val partial = File(zip.parentFile, zip.name + ".part")
+            val connection = URI("https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip").toURL().openConnection()
+            connection.connectTimeout = 30000
+            connection.readTimeout = 60000
+            connection.getInputStream().use { input -> partial.outputStream().use { input.copyTo(it) } }
+            check(partial.renameTo(zip)) { "Cannot store Vosk model archive" }
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+        zip.inputStream().use { input ->
+            val buffer = ByteArray(65536)
+            while (true) { val count = input.read(buffer); if (count < 0) break; digest.update(buffer, 0, count) }
+        }
+        check(digest.digest().joinToString("") { "%02x".format(it) } == expected) {
+            "Vosk model checksum mismatch: delete ${zip.absolutePath} and retry"
+        }
+        root.deleteRecursively()
+        root.mkdirs()
+        ZipInputStream(zip.inputStream()).use { input ->
+            while (true) {
+                val entry = input.nextEntry ?: break
+                val file = File(root, entry.name)
+                check(file.canonicalPath.startsWith(root.canonicalPath + File.separator))
+                if (entry.isDirectory) file.mkdirs() else {
+                    file.parentFile.mkdirs()
+                    file.outputStream().use { input.copyTo(it) }
+                }
+            }
+        }
+    }
+}
+val prepareVoiceModel = tasks.register<PrepareVoiceModel>("prepareVoiceModel") {
+    generatedAssets.set(layout.buildDirectory.dir("generated/voiceAssets"))
+}
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(prepareVoiceModel, PrepareVoiceModel::generatedAssets)
     }
 }

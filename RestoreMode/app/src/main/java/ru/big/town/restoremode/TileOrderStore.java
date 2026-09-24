@@ -70,6 +70,7 @@ public class TileOrderStore {
             out.add(new Tile(Tile.TYPE_WIDGET, "cardPedestrian"));
             out.add(new Tile(Tile.TYPE_WIDGET, "cardForcedEv"));
             out.add(new Tile(Tile.TYPE_WIDGET, "cardBatteryHeat"));
+            out.add(new Tile(Tile.TYPE_WIDGET, "cardVoiceCommand"));
             // Native-виджеты (запуск приложений, громкость, запущенные приложения)
             out.add(new Tile(Tile.TYPE_WIDGET, "launchAppsWidget"));
             // Сохранить миграцию
@@ -144,6 +145,7 @@ public class TileOrderStore {
                widgetId.equals("cardPedestrian") ||
                widgetId.equals("cardForcedEv") ||
              widgetId.equals("cardBatteryHeat") ||
+             widgetId.equals("cardVoiceCommand") ||
              widgetId.equals("cardSettings") ||
              widgetId.equals("cardAndroidSettings") ||
              // Native-виджеты
@@ -211,7 +213,7 @@ public class TileOrderStore {
         // Добавить известные виджеты, которые ещё не в списке
         String[] knownWidgets = {"tripCard", "cardPowerHold", "cardWashMode", "cardAutoLight",
                  "cardPedestrian", "cardForcedEv", "cardBatteryHeat",
-                     "cardSettings", "cardAndroidSettings",
+                     "cardSettings", "cardAndroidSettings", "cardVoiceCommand",
                      "launchAppsWidget"};
         for (String widgetId : knownWidgets) {
             boolean found = false;

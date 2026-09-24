@@ -1064,6 +1064,12 @@ public class MainActivity extends AppCompatActivity {
      * Показывать ли виджет главного экрана: ключ и дефолт его тумблера из «Дополнительно» → «Главный экран».
      * Дефолты совпадают с тумблерами: Forced EV и «Быстрый запуск» выключены, остальные карточки включены.
      */
+    public void onVoiceCommand(View view) {
+        Class<?> target = sharedPreferences.getBoolean(VoiceCommands.ENABLED, false)
+                ? VoiceActivity.class : VoiceSettingsActivity.class;
+        startActivity(new Intent(this, target));
+    }
+
     private boolean isWidgetVisible(String widgetId) {
         switch (widgetId) {
             case "tripCard":         return sharedPreferences.getBoolean("showTripTimer", true);
@@ -1073,6 +1079,7 @@ public class MainActivity extends AppCompatActivity {
             case "cardAutoLight":    return sharedPreferences.getBoolean("showAutoLight", true);
             case "cardPedestrian":   return sharedPreferences.getBoolean("showPedestrian", true);
             case "cardForcedEv":     return sharedPreferences.getBoolean("showForcedEv", false);
+            case "cardVoiceCommand": return sharedPreferences.getBoolean("showVoiceCommand", false);
             case "cardBatteryHeat":  return sharedPreferences.getBoolean("showBatteryHeat", true);
             case "launchAppsWidget": return sharedPreferences.getBoolean("showLaunchAppsWidget", false);
             // Виджеты без тумблера («Настройки», настройки Android) видно всегда.
@@ -1119,7 +1126,7 @@ public class MainActivity extends AppCompatActivity {
         if ("tripCard".equals(widgetId)) return new int[]{3, 2};
         if ("cardBatteryHeat".equals(widgetId)) return new int[]{3, 2};
         // Компактные карточки-иконки: одна ячейка.
-        if ("cardSettings".equals(widgetId) || "cardAndroidSettings".equals(widgetId)) {
+        if ("cardSettings".equals(widgetId) || "cardAndroidSettings".equals(widgetId) || "cardVoiceCommand".equals(widgetId)) {
             return new int[]{1, 1};
         }
         // Плитка «Быстрый запуск»: по умолчанию 2x3, размер задаётся в «Дополнительно».
@@ -1277,6 +1284,7 @@ public class MainActivity extends AppCompatActivity {
                     case "cardPowerHold":
                     case "cardLeaveCar": widgetView = inf.inflate(R.layout.tile_power_hold, splitTilesGrid, false); break;
                     case "cardWashMode": widgetView = inf.inflate(R.layout.tile_wash_mode, splitTilesGrid, false); break;
+                    case "cardVoiceCommand": widgetView = inf.inflate(R.layout.tile_voice_command, splitTilesGrid, false); break;
                     case "cardSettings": widgetView = inf.inflate(R.layout.tile_settings, splitTilesGrid, false); break;
                     case "cardAndroidSettings": widgetView = inf.inflate(R.layout.tile_android_settings, splitTilesGrid, false); break;
                     case "cardAutoLight": widgetView = inf.inflate(R.layout.tile_auto_light, splitTilesGrid, false); break;

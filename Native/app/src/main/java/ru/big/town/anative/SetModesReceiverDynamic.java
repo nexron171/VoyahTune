@@ -444,7 +444,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      * Один пункт последовательности. Асинхронные CAN-действия вызывают completion через exactly-once
      * terminal callback ApplyEngine; синхронные действия завершаются сразу после вызова API.
      */
-    private static void handleSteerAction(Context ctx, String action, Runnable completion) {
+    static void handleSteerAction(Context ctx, String action, Runnable completion) {
         if (action == null || action.isEmpty()) {
             completeSteerAction(completion);
             return;
@@ -467,7 +467,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             sendCustomCan(action, completion);
         } else {
             try {
-                if ("system_back".equals(action)) {
+                if ("voice_assistant".equals(action)) {
+                    Intent voice = new Intent().setClassName("ru.big.town.restoremode", "ru.big.town.restoremode.VoiceActivity");
+                    voice.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+                    options.setLaunchDisplayId(0);
+                    android.os.Bundle voiceOptions = options.toBundle();
+                    voiceOptions.putInt("android.activity.windowingMode", 1);
+                    ctx.startActivity(voice, voiceOptions);
+                } else if ("system_back".equals(action)) {
                     BackButtonService.performBack(ctx);
                 } else if (action.startsWith("app:")) {
                     // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.

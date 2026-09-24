@@ -1,0 +1,18 @@
+Offline voice recognition in VoyahTune
+
+Vosk API / vosk-android 0.3.75
+Copyright Alpha Cephei Inc. and Vosk contributors.
+https://github.com/alphacep/vosk-api
+Licensed under the Apache License, Version 2.0.
+
+Russian model: vosk-model-small-ru-0.22
+https://alphacephei.com/vosk/models
+License listed by the publisher: Apache-2.0.
+The original model README is bundled alongside its data in assets.
+
+Java Native Access (JNA) 5.18.1
+https://github.com/java-native-access/jna
+JNA is dual-licensed under LGPL-2.1-or-later / Apache-2.0;
+this distribution uses the Apache-2.0 option.
+
+See Apache-2.0.txt in this directory for license terms.

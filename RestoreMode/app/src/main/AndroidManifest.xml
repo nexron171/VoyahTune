@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
     <!-- Список установленных приложений для «Выдать права на установку» -->
@@ -24,6 +25,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RestoreMode"
         tools:targetApi="31">
+        <activity android:name=".VoiceSettingsActivity" android:exported="false" />
+        <activity android:name=".VoiceActivity"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE"
+            android:launchMode="singleTask"
+            android:taskAffinity="ru.big.town.restoremode.voice"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.VoiceOverlay" />
         <activity
             android:name=".AdvanceActivityStarButton"
             android:exported="false" />
