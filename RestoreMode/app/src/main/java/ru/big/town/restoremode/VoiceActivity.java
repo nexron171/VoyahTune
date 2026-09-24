@@ -18,7 +18,6 @@ import android.os.ResultReceiver;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -34,12 +33,14 @@ public class VoiceActivity extends AppCompatActivity {
     private VoiceOrbView orb;
     private TextView status, transcript;
     private Messenger nativeService;
-    private boolean bound, ended, submitted;
+    private boolean bound, ended, submitted, interrupted;
     private String session;
     private List<VoiceCommandCatalog.Command> commands;
     private AudioManager audio;
     private AudioFocusRequest focus;
     private AlertDialog confirmation;
+    private VoiceSounds sounds;
+    private final VoiceCloseControl closeControl = new VoiceCloseControl();
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -57,29 +58,28 @@ public class VoiceActivity extends AppCompatActivity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        sounds = new VoiceSounds(this);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON | WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                 | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                 | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-        FrameLayout root = new FrameLayout(this); root.setBackgroundColor(0x80000000);
+        FrameLayout root = new FrameLayout(this); root.setBackgroundColor(0xCC000000);
         LinearLayout center = new LinearLayout(this); center.setOrientation(LinearLayout.VERTICAL); center.setGravity(Gravity.CENTER);
         orb = new VoiceOrbView(this);
-        int size = (int) (300 * getResources().getDisplayMetrics().density);
+        int size = (int) (360 * getResources().getDisplayMetrics().density);
         center.addView(orb, new LinearLayout.LayoutParams(size, size));
         status = label(26); transcript = label(20); center.addView(status); center.addView(transcript);
+        closeControl.attach(this, center);
         root.addView(center, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
-        Button close = new Button(this); close.setText("Закрыть"); close.setOnClickListener(v -> finish());
-        FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
-        closeParams.setMargins(16, 16, 24, 16); root.addView(close, closeParams);
         setContentView(root);
         audio = (AudioManager) getSystemService(AUDIO_SERVICE);
         newSession();
         ensureBinding();
     }
     private void ensureBinding() {
-        if (ended || bound) return;
+        if (isAnimationPreview() || ended || bound) return;
         try {
             bound = bindService(new Intent().setClassName("ru.big.town.anative", "ru.big.town.anative.SetModesService"), connection, BIND_AUTO_CREATE);
             if (!bound) fail("Сервис автомобиля недоступен");
@@ -95,9 +95,19 @@ public class VoiceActivity extends AppCompatActivity {
         else ensureBinding();
     }
     private void newSession() {
+        newSession(true);
+    }
+    private void newSession(boolean activationCue) {
         cancelSession();
-        session = UUID.randomUUID().toString(); ended = false; submitted = false;
+        session = UUID.randomUUID().toString(); ended = false; submitted = false; interrupted = false;
         status.setText("Подготовка распознавания…"); transcript.setText(""); orb.state(false, false);
+        if (isAnimationPreview()) {
+            status.setText("Слушаю…");
+            transcript.setText("Тест анимации · имитация голоса");
+            orb.state(true, false);
+            if (activationCue) sounds.activation();
+            return;
+        }
         if (!getSharedPreferences("DrivePreferences", MODE_PRIVATE).getBoolean(VoiceCommands.ENABLED, false)) {
             fail("Голосовое управление выключено"); return;
         }
@@ -106,6 +116,24 @@ public class VoiceActivity extends AppCompatActivity {
         }
         commands = VoiceCommands.load(this);
         ui.postDelayed(() -> fail("Не удалось подготовить распознавание"), 30000);
+    }
+    /** Only the debug-source-set preview activity overrides this; release has no demo entry. */
+    protected boolean isAnimationPreview() { return false; }
+    protected final void previewLevel(float level) { orb.level(level); }
+    /** Debug preview invokes the actual result UI and cancellation timers, without sending commands. */
+    protected final void previewState(String state) {
+        if (!isAnimationPreview()) return;
+        if ("listening".equals(state)) { newSession(); return; }
+        // Replace timers and sounds without resetting the current colour transition.
+        cancelSession();
+        session = UUID.randomUUID().toString(); ended = false; submitted = false; interrupted = false;
+        if ("recognized".equals(state)) {
+            orb.recognized(); status.setText("Команда распознана"); transcript.setText("Режим движения: Спорт");
+        } else if ("success".equals(state)) {
+            showSuccess("Тестовая команда · закрытие через 3 секунды");
+        } else if ("error".equals(state)) {
+            fail("Тестовая ошибка · закрытие через 6 секунд");
+        }
     }
     private void beginRecognition() {
         final String token = session;
@@ -123,6 +151,7 @@ public class VoiceActivity extends AppCompatActivity {
                 if (!active()) return;
                 ui.removeCallbacksAndMessages(null);
                 status.setText("Слушаю…"); orb.state(true, false);
+                sounds.activation();
                 ui.postDelayed(() -> fail("Не удалось распознать команду"), 12000);
             }
             @Override public void audio(float level, String partial) {
@@ -137,6 +166,7 @@ public class VoiceActivity extends AppCompatActivity {
         orb.state(false, false); transcript.setText(text);
         VoiceCommandCatalog.Command command = VoiceCommandCatalog.match(commands, text);
         if (command == null) { fail(text.isEmpty() ? "Не расслышал команду" : "Команда не распознана"); return; }
+        orb.recognized();
         if (command.confirm) {
             status.setText("Подтвердите действие");
             confirmation = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
@@ -157,22 +187,20 @@ public class VoiceActivity extends AppCompatActivity {
                     getSharedPreferences("DrivePreferences", MODE_PRIVATE).edit()
                             .putBoolean("autoLight", command.action.endsWith(":on")).apply();
                 }
-                ended = true; ui.removeCallbacksAndMessages(null);
-                status.setText("Команда передана"); transcript.setText(command.title);
-                ui.postDelayed(() -> finish(), 1200);
+                showSuccess(command.title);
             }
         };
         submitted = send("execute", command.action, reply);
         if (!submitted) { fail("Не удалось отправить команду"); return; }
-        if (command.action.equals("system_back") || command.action.startsWith("app:")
-                || command.action.startsWith("split:") || command.action.equals("open_voyahtune")) finish();
-        else ui.postDelayed(() -> fail("Сервис не ответил на команду"), 8000);
+        ui.postDelayed(() -> fail("Сервис не ответил на команду"), 8000);
     }
     private boolean send(String op, String action, ResultReceiver reply) {
         if (nativeService == null || session == null) return false;
         try {
             Bundle data = new Bundle(); data.putString("session", session); data.putString("op", op);
             data.putString("action", action); data.putParcelable("reply", reply);
+            // Native acknowledges navigation, then waits for the success screen to close.
+            data.putInt("resultDisplayMs", 3000);
             Message message = Message.obtain(null, VoiceCommands.MESSAGE); message.setData(data);
             nativeService.send(message); return true;
         } catch (Exception e) { return false; }
@@ -181,21 +209,36 @@ public class VoiceActivity extends AppCompatActivity {
         if (ended || isFinishing()) return;
         ended = true; recognizer.cancel(); releaseFocus(); send("cancel", null, null);
         ui.removeCallbacksAndMessages(null); orb.state(false, true); status.setText(message);
+        sounds.error();
+        ui.postDelayed(() -> finish(), 6000);
+    }
+    private void showSuccess(String title) {
+        ended = true; recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
+        orb.recognized(); status.setText("Команда передана"); transcript.setText(title);
+        sounds.success();
         ui.postDelayed(() -> finish(), 3000);
     }
     private void releaseFocus() {
         if (focus != null && audio != null) { audio.abandonAudioFocusRequest(focus); focus = null; }
     }
     private void cancelSession() {
+        sounds.stop();
         ended = true; recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
         if (confirmation != null) { confirmation.dismiss(); confirmation = null; }
         send("cancel", null, null);
     }
+    @Override protected void onResume() {
+        super.onResume();
+        // onNewIntent starts a replacement session between pause and resume.
+        // A resume without a new invocation must not revive a cancelled session.
+        if (interrupted) finish();
+    }
     @Override protected void onPause() {
+        sounds.stop();
+        interrupted = true;
         recognizer.cancel(); releaseFocus();
         if (!submitted) cancelSession();
         super.onPause();
-        finish();
     }
     @Override protected void onStop() {
         super.onStop(); recognizer.cancel(); releaseFocus();
@@ -203,6 +246,8 @@ public class VoiceActivity extends AppCompatActivity {
         finish();
     }
     @Override protected void onDestroy() {
+        sounds.release();
+        closeControl.dispose();
         recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
         if (!submitted) send("cancel", null, null);
         if (bound) unbindService(connection);

@@ -20,7 +20,7 @@ public class VoiceCommandCatalogTest {
     }
     @Test public void everyDriveModePublishesAndRecognizesBothModeWordPositions() {
         String[][] modes = {{"SPORT", "спорт"}, {"ECO", "эко"}, {"COMFORT", "комфорт"},
-                {"OUTING", "аутинг"}, {"SNOW", "снег"}, {"INDIVIDUAL", "индивидуальный"}};
+                {"OUTING", "внедорожный"}, {"SNOW", "снег"}, {"INDIVIDUAL", "индивидуальный"}};
         for (String[] mode : modes) {
             String action = "drive:" + mode[0], name = mode[1];
             assertAction(action, "режим " + name, name + " режим",
@@ -36,6 +36,16 @@ public class VoiceCommandCatalogTest {
         assertAction("headlights:off", "выключи фары", "отключи ближний свет");
         assertAction("headlights:auto", "фары авто", "включи авто свет");
     }
+    @Test public void outingAcceptsCountryOffRoadAndRaiseSuspensionPhrases() {
+        for (String name : new String[]{"загород", "загородный", "внедорожье", "внедорожный"}) {
+            assertAction("drive:OUTING", name, "режим " + name, name + " режим",
+                    "включи " + name, "включи режим " + name, "включи " + name + " режим",
+                    "включить режим " + name, "переключи на " + name, "поставь " + name);
+        }
+        assertAction("drive:OUTING", "поднять подвеску", "подними подвеску", "поднимите подвеску",
+                "пожалуйста подними подвеску");
+        assertNull(VoiceCommandCatalog.match(commands, "не поднимай подвеску"));
+    }
     @Test public void shortSwitchPhrasesRemainDistinctFromSettingHeadlights() {
         assertAction("toggle_headlights", "переключи фары", "переключить фары",
                 "фары переключи пожалуйста", "переключите фары");
@@ -45,18 +55,16 @@ public class VoiceCommandCatalogTest {
         assertAction("headlights:off", "выключи фары", "выключить фары");
         assertAction("headlights:auto", "фары авто", "включи фары авто");
     }
-    @Test public void cyclesUseShortSpokenPhrasesAndRequireSwitchIntent() {
-        VoiceCommandCatalog.addCycle(commands, "drive:ECO,SPORT", "Режим езды: Eco → Sport");
-        VoiceCommandCatalog.addCycle(commands, "energy:EV,REV", "Энергорежим: Electric → Fuel");
-        VoiceCommandCatalog.addCycle(commands, "recycle:LOW,HIGH", "Рекуперация: Низкая → Высокая");
-        assertAction("drive:ECO,SPORT", "переключи эко и спорт", "переключить эко и спорт",
-                "переключи режим эко и спорт", "переключи эко и спорт режим",
-                "переключить режим эко и спорт", "переключить эко и спорт режим");
-        assertAction("energy:EV,REV", "переключи электро и топливо", "переключить электро и топливо");
-        assertAction("recycle:LOW,HIGH", "переключи низкую и высокую рекуперацию",
-                "переключить низкую и высокую рекуперацию");
-        assertNull(VoiceCommandCatalog.match(commands, "включи эко и спорт"));
-        assertNull(VoiceCommandCatalog.match(commands, "эко и спорт"));
+    @Test public void modesAreSelectedDirectlyAndCyclePhrasesAreRejected() {
+        for (String phrase : new String[]{"переключи эко и комфорт", "переключи эко и спорт",
+                "переключи режим эко и спорт", "переключи электро и топливо",
+                "переключи низкую и высокую рекуперацию", "включи эко и спорт", "эко и спорт"}) {
+            assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
+        }
+        assertAction("drive:ECO", "включи режим эко");
+        assertAction("drive:COMFORT", "переключи на комфорт");
+        assertAction("energy:EV", "включи электро");
+        assertAction("recycle:HIGH", "высокая рекуперация");
     }
     @Test public void explicitOnAndOffAreNeverToggles() {
         assertAction("forced_ev:on", "включи принудительный электрорежим", "включи форс и ви");

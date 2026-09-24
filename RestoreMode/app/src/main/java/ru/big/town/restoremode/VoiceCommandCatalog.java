@@ -70,7 +70,10 @@ final class VoiceCommandCatalog {
         mode(all, "drive:SPORT", "Режим движения: Спорт", "спорт", "спортивный");
         mode(all, "drive:ECO", "Режим движения: Эко", "эко", "экономичный");
         mode(all, "drive:COMFORT", "Режим движения: Комфорт", "комфорт", "комфортный");
-        mode(all, "drive:OUTING", "Режим движения: Outing", "аутинг", "прогулочный");
+        mode(all, "drive:OUTING", "Режим движения: Outing",
+                "загород", "загородный", "внедорожье", "внедорожный");
+        add(all, "drive:OUTING", "Режим Outing — поднять подвеску",
+                "поднять подвеску", "подними подвеску", "поднимите подвеску");
         mode(all, "drive:SNOW", "Режим движения: Снег", "снег", "снежный");
         mode(all, "drive:INDIVIDUAL", "Режим движения: Индивидуальный", "индивидуальный");
         mode(all, "energy:EV", "Энергорежим: Электро", "электро", "электрический");
@@ -129,35 +132,4 @@ final class VoiceCommandCatalog {
         all.add(new Command(action, title, false, phrases));
     }
 
-    /** Spoken cycles use mode names, not UI headings such as «Энергорежим:». */
-    static void addCycle(List<Command> all, String action, String title) {
-        int separator = action.indexOf(':');
-        if (separator < 0 || !action.contains(",")) return;
-        List<String> names = new ArrayList<>();
-        for (String value : action.substring(separator + 1).split(",")) {
-            switch (value) {
-                case "ECO": names.add("эко"); break;
-                case "COMFORT": names.add("комфорт"); break;
-                case "SPORT": names.add("спорт"); break;
-                case "OUTING": names.add("аутинг"); break;
-                case "SNOW": names.add("снег"); break;
-                case "INDIVIDUAL": names.add("индивидуальный"); break;
-                case "EV": names.add("электро"); break;
-                case "REV": names.add("топливо"); break;
-                case "SREV": names.add("сохранение заряда"); break;
-                case "LOW": names.add("низкую"); break;
-                case "MEDIUM": names.add("стандартную"); break;
-                case "HIGH": names.add("высокую"); break;
-                default: return;
-            }
-        }
-        String modes = String.join(" и ", names) + (action.startsWith("recycle:") ? " рекуперацию" : "");
-        if (action.startsWith("drive:")) {
-            add(all, action, title, "переключи " + modes, "переключить " + modes,
-                    "переключи режим " + modes, "переключи " + modes + " режим",
-                    "переключить режим " + modes, "переключить " + modes + " режим");
-        } else {
-            add(all, action, title, "переключи " + modes, "переключить " + modes);
-        }
-    }
 }

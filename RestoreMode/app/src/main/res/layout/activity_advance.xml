@@ -223,6 +223,22 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
+    <ScrollView
+        android:id="@+id/pageVoiceControl"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        android:visibility="gone">
+        <LinearLayout
+            android:id="@+id/voiceSettingsContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="28dp"
+            android:paddingVertical="20dp" />
+    </ScrollView>
+
     <!-- Раздел: Главный экран -->
     <ScrollView
         android:id="@+id/pageMainScreen"

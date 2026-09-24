@@ -1065,9 +1065,12 @@ public class MainActivity extends AppCompatActivity {
      * Дефолты совпадают с тумблерами: Forced EV и «Быстрый запуск» выключены, остальные карточки включены.
      */
     public void onVoiceCommand(View view) {
-        Class<?> target = sharedPreferences.getBoolean(VoiceCommands.ENABLED, false)
-                ? VoiceActivity.class : VoiceSettingsActivity.class;
-        startActivity(new Intent(this, target));
+        if (sharedPreferences.getBoolean(VoiceCommands.ENABLED, false)) {
+            startActivity(new Intent(this, VoiceActivity.class));
+        } else {
+            startActivityForResult(new Intent(this, AdvanceActivity.class)
+                    .putExtra(AdvanceActivity.EXTRA_SECTION, AdvanceActivity.SECTION_VOICE), REQUEST_CODE);
+        }
     }
 
     private boolean isWidgetVisible(String widgetId) {

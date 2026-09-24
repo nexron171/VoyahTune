@@ -32,6 +32,15 @@ final class VoiceCommandController {
         long deadline = SystemClock.elapsedRealtime() + 7000;
         // Let the translucent activity finish before navigating or issuing GLOBAL_ACTION_BACK.
         if (isNavigation(action)) {
+            int resultDisplayMs = Math.max(0, Math.min(3000, data.getInt("resultDisplayMs", 0)));
+            if (action.startsWith("app:") && service.getPackageManager()
+                    .getLaunchIntentForPackage(action.substring(4)) == null) {
+                respond(reply, false, "Не удалось открыть приложение");
+                return;
+            }
+            // Success means the service accepted the request, as for other voice commands.
+            // Older clients omit this field and retain the original immediate navigation flow.
+            if (resultDisplayMs > 0) respond(reply, true, null);
             main.postDelayed(() -> {
                 if (!gate.active(token) || SystemClock.elapsedRealtime() > deadline) return;
                 try {
@@ -51,9 +60,9 @@ final class VoiceCommandController {
                             service.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                         }
                     } else SetModesReceiverDynamic.handleSteerAction(service, action, null);
-                    respond(reply, true, null);
+                    if (resultDisplayMs == 0) respond(reply, true, null);
                 } catch (RuntimeException e) { respond(reply, false, "Не удалось открыть приложение"); }
-            }, 350);
+            }, resultDisplayMs + 350L);
             return;
         }
         if (service.isVoiceServiceAction(action)) {

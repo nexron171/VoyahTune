@@ -53,6 +53,9 @@ import java.util.concurrent.RejectedExecutionException;
 
 
 public class AdvanceActivity extends AppCompatActivity {
+    static final String EXTRA_SECTION = "settingsSection";
+    static final int SECTION_VOICE = 7;
+    private VoiceSettingsPage voiceSettings;
     private EditText canCommandsEditor;
     private ImageButton buttonBack;
     private NumberPicker pickerCustomCommandCount;
@@ -63,16 +66,16 @@ public class AdvanceActivity extends AppCompatActivity {
     // Навигация: 0 главный экран, 1 настройки автомобиля (+комфорт), 2 приложения и разделение экрана,
     //            3 Apollo Tech, 4 команды (видимость настраивается), 5 кнопки на руле, 6 другое
     private TextView navMainScreen, navCustomCommands, navDriveModes, navSplitScreen, navApolloTech,
-            navSteeringButtons, navOther;
+            navSteeringButtons, navOther, navVoiceControl;
     private View pageMainScreen, pageCustomCommands, pageDriveModes, pageSplitScreen, pageApolloTech,
-            pageSteeringButtons, pageOther;
+            pageSteeringButtons, pageOther, pageVoiceControl;
     // Заголовок раздела в верхней панели (на одной строке с «Применить»)
     private TextView sectionTitle;
     // Освободившийся после переноса «Комфорта» индекс 3 занимает Apollo Tech. Индекс 4
     // (Собственные команды) показывается отдельной настройкой.
     private static final String[] SECTION_TITLES = {
             "Главный экран", "Настройки автомобиля", "Приложения и разделение экрана", "Apollo Tech",
-            "Собственные команды", "Кнопки на руле", "Другое"
+            "Собственные команды", "Кнопки на руле", "Другое", "Голосовое управление"
     };
     private static final String PREF_SHOW_CUSTOM_COMMANDS = "showCustomCommands";
     private int currentSection;
@@ -342,8 +345,9 @@ public class AdvanceActivity extends AppCompatActivity {
 
         Intent intent = getIntent();
         if (intent != null) {
-            String customCommand    = intent.getStringExtra("customCommand");
-            int customCommandCount  = intent.getIntExtra("customCommandCount", 1);
+            String customCommand = intent.hasExtra("customCommand") ? intent.getStringExtra("customCommand")
+                    : prefs.getString("customCommand", "");
+            int customCommandCount = intent.getIntExtra("customCommandCount", prefs.getInt("customCommandCount", 1));
 
             canCommandsEditor.setText(customCommand);
             pickerCustomCommandCount.setValue(customCommandCount);
@@ -444,6 +448,7 @@ public class AdvanceActivity extends AppCompatActivity {
         navApolloTech     = findViewById(R.id.navApolloTech);
         navSteeringButtons = findViewById(R.id.navSteeringButtons);
         navOther          = findViewById(R.id.navOther);
+        navVoiceControl   = findViewById(R.id.navVoiceControl);
         pageMainScreen     = findViewById(R.id.pageMainScreen);
         pageCustomCommands = findViewById(R.id.pageCustomCommands);
         pageDriveModes     = findViewById(R.id.pageDriveModes);
@@ -451,6 +456,9 @@ public class AdvanceActivity extends AppCompatActivity {
         pageApolloTech     = findViewById(R.id.pageApolloTech);
         pageSteeringButtons = findViewById(R.id.pageSteeringButtons);
         pageOther          = findViewById(R.id.pageOther);
+        pageVoiceControl   = findViewById(R.id.pageVoiceControl);
+        voiceSettings = new VoiceSettingsPage(this, findViewById(R.id.voiceSettingsContent),
+                prefs, this::refreshSteerActions);
         textRamStatus      = findViewById(R.id.textRamStatus);
         textCpuStatus      = findViewById(R.id.textCpuStatus);
         textHookStatus     = findViewById(R.id.textHookStatus);
@@ -461,10 +469,9 @@ public class AdvanceActivity extends AppCompatActivity {
         navApolloTech.setOnClickListener(v -> setSection(3));
         navSteeringButtons.setOnClickListener(v -> setSection(5));
         navOther.setOnClickListener(v -> setSection(6));
-        findViewById(R.id.navVoiceControl).setOnClickListener(v ->
-                startActivity(new Intent(this, VoiceSettingsActivity.class)));
+        navVoiceControl.setOnClickListener(v -> setSection(SECTION_VOICE));
         initApolloTech();
-        setSection(0);
+        setSection(intent != null && intent.getIntExtra(EXTRA_SECTION, 0) == SECTION_VOICE ? SECTION_VOICE : 0);
 
         // «Собственные команды» (4) по умолчанию скрыты. Пункт можно включить в разделе «Другое».
         navCustomCommands.setVisibility(
@@ -1667,6 +1674,7 @@ public class AdvanceActivity extends AppCompatActivity {
         if (pageCustomCommands != null)  pageCustomCommands.setVisibility(index == 4 ? View.VISIBLE : View.GONE);
         if (pageSteeringButtons != null) pageSteeringButtons.setVisibility(index == 5 ? View.VISIBLE : View.GONE);
         if (pageOther != null)           pageOther.setVisibility(index == 6 ? View.VISIBLE : View.GONE);
+        if (pageVoiceControl != null)    pageVoiceControl.setVisibility(index == SECTION_VOICE ? View.VISIBLE : View.GONE);
         if (navMainScreen != null)       navMainScreen.setSelected(index == 0);
         if (navDriveModes != null)       navDriveModes.setSelected(index == 1);
         if (navSplitScreen != null)      navSplitScreen.setSelected(index == 2);
@@ -1674,12 +1682,18 @@ public class AdvanceActivity extends AppCompatActivity {
         if (navCustomCommands != null)   navCustomCommands.setSelected(index == 4);
         if (navSteeringButtons != null)  navSteeringButtons.setSelected(index == 5);
         if (navOther != null)            navOther.setSelected(index == 6);
+        if (navVoiceControl != null)     navVoiceControl.setSelected(index == SECTION_VOICE);
+        if (index == SECTION_VOICE && voiceSettings != null) voiceSettings.refresh();
+        if (index == 0) {
+            Switch shortcut = findViewById(R.id.switchShowVoiceCommand);
+            if (shortcut != null) shortcut.setChecked(prefs.getBoolean("showVoiceCommand", false));
+        }
 
         if (buttonApplyAdvance != null) {
-            buttonApplyAdvance.setVisibility(View.VISIBLE);
+            buttonApplyAdvance.setVisibility(index == SECTION_VOICE ? View.GONE : View.VISIBLE);
         }
         if (applyProgressAdvance != null) {
-            applyProgressAdvance.setVisibility(applying ? View.VISIBLE : View.GONE);
+            applyProgressAdvance.setVisibility(applying && index != SECTION_VOICE ? View.VISIBLE : View.GONE);
         }
         updateSystemMetricsPolling();
     }
@@ -2507,10 +2521,17 @@ public class AdvanceActivity extends AppCompatActivity {
 
 
     @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
+        super.onRequestPermissionsResult(request, permissions, grants);
+        if (voiceSettings != null) voiceSettings.onPermissionResult(request, grants);
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         activityResumed = true;
         refreshSteerActions();
+        if (currentSection == SECTION_VOICE && voiceSettings != null) voiceSettings.refresh();
         if (autoLightGroup != null) {
             syncingSettingUi = true;
             autoLightGroup.check(prefs.getBoolean("autoLight", false) ? R.id.autoLightOn : R.id.autoLightOff);

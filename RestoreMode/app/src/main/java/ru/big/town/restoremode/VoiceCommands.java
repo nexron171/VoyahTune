@@ -18,10 +18,6 @@ final class VoiceCommands {
     static List<VoiceCommandCatalog.Command> load(Context context) {
         List<VoiceCommandCatalog.Command> out = VoiceCommandCatalog.builtIns();
         SharedPreferences prefs = context.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
-        // All existing cycle actions remain available as named commands, alongside direct modes.
-        for (String[] action : AdvanceActivity.STEER_ACTIONS) {
-            VoiceCommandCatalog.addCycle(out, action[0], action[1]);
-        }
         for (String[] example : AdvanceActivity.EXAMPLE_COMMANDS) {
             // Forced EV uses the typed controller (off restores the saved energy mode).
             if (example[1].startsWith("форсе")) continue;
