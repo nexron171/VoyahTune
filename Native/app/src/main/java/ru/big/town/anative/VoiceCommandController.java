@@ -86,7 +86,12 @@ final class VoiceCommandController {
         ManualAutoGate.Ticket ticket = headlights ? LightSensorService.reserveManualHeadlightCommand() : null;
         ApplyEngine.postUserCommand("voice " + action, () -> {
             if (!gate.active(token) || SystemClock.elapsedRealtime() > deadline) return;
-            try { accepted.set(execute(action, error)); }
+            try {
+                // The charge target and SREV selection are two writes: recheck before each one.
+                CanSender.runGuardedAction(
+                        () -> gate.active(token) && SystemClock.elapsedRealtime() <= deadline,
+                        () -> accepted.set(execute(action, error)));
+            }
             catch (RuntimeException e) { android.util.Log.e("VoyahVoice", "Command failed: " + action, e); }
         }, () -> {
             if (ticket != null) ticket.close();
@@ -100,6 +105,24 @@ final class VoiceCommandController {
     }
 
     private boolean execute(String action, String[] error) {
+        if (action.startsWith("fuel_charge:")) {
+            final int percent;
+            try {
+                percent = Integer.parseInt(action.substring("fuel_charge:".length()));
+                VehicleRestorePolicy.requireSaveChargeLevel(percent);
+            } catch (IllegalArgumentException e) {
+                error[0] = "Некорректный уровень поддержания заряда";
+                return false;
+            }
+            boolean sent = MainActivity.sendSaveChargeCommand(service, percent);
+            if (sent) {
+                // An explicit SREV selection supersedes forced EV, including the restore snapshot.
+                MainActivity.persistSavedToggle(service, "forcedEv", false);
+                ApplyEngine.noteVehicleMode("energy", "SREV");
+                MainActivity.persistSavedMode(service, "energy", "SREV");
+            }
+            return sent;
+        }
         if (action.startsWith("drive:") || action.startsWith("energy:") || action.startsWith("recycle:")) {
             int split = action.indexOf(':');
             String type = action.substring(0, split);

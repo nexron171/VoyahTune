@@ -152,6 +152,17 @@ public class MainActivity extends AppCompatActivity {
                 VehicleRestorePolicy.requireEnergy(mode), "energy mode: " + mode);
     }
 
+    /** Set the target before activating SREV, using the installed OEM enum on Full and Light. */
+    static boolean sendSaveChargeCommand(Context context, int percent) {
+        int level = VehicleRestorePolicy.requireSaveChargeLevel(percent);
+        Map<String, Integer> modes = new LinkedHashMap<>();
+        modes.put(VehicleRestorePolicy.SOC_MODE, VehicleRestorePolicy.SOC_SREV);
+        return OemVehicleStateTransport.sendVehicleStateThenBundle(context,
+                VehicleRestorePolicy.SAVE_CHARGE_LEVEL, VehicleRestorePolicy.SAVE_CHARGE_LEVEL_ID,
+                level, modes, VehicleRestorePolicy.stableIds(), "voice SREV target: " + percent + "%")
+                .accepted();
+    }
+
     //------------- OEM VehicleState-команды режимов вождения ---------------------------------------
     public static boolean sendDriveModeCommand(Context context, String mode) {
         return DriveModeCanTransport.send(context, mode);

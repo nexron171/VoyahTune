@@ -36,6 +36,67 @@ public class VoiceCommandCatalogTest {
         assertAction("headlights:off", "выключи фары", "отключи ближний свет");
         assertAction("headlights:auto", "фары авто", "включи авто свет");
     }
+    @Test public void fuelChargeAcceptsWordsDigitsAndOptionalPercent() {
+        assertAction("fuel_charge:80", "топливо восемьдесят", "Топливо 80", "топливо 80%",
+                "включи режим топливо на восемьдесят процентов пожалуйста");
+        assertAction("fuel_charge:25", "топливо двадцать пять", "топливо 25 процентов");
+        assertAction("fuel_charge:50", "поставь топливо пятьдесят", "топливо 50");
+        assertAction("fuel_charge:75", "переключи на топливо семьдесят пять");
+        assertEquals("Топливо: поддерживать 80% (SREV)",
+                VoiceCommandCatalog.match(commands, "топливо восемьдесят").title);
+        assertAction("energy:SREV", "топливо");
+    }
+    @Test public void energyModesUseHybridForRevAndFuelForSrevWithModeInEitherPosition() {
+        String[][] modes = {{"EV", "электро"}, {"REV", "гибрид"}, {"SREV", "топливо"},
+                {"SREV", "сохранение заряда"}};
+        for (String[] mode : modes) {
+            String action = "energy:" + mode[0], name = mode[1];
+            assertAction(action, name, "режим " + name, name + " режим", "включи режим " + name,
+                    "включить режим " + name, "переключи на режим " + name);
+            VoiceCommandCatalog.Command command = VoiceCommandCatalog.match(commands, name);
+            assertTrue(command.phrases.contains("режим " + name));
+            assertTrue(command.phrases.contains(name + " режим"));
+        }
+        assertAction("energy:REV", "гибридный режим", "включи гибрид");
+        assertAction("energy:SREV", "топливный режим", "включи топливо");
+        assertAction("fuel_charge:80", "режим топливо восемьдесят", "включи режим топливо 80");
+        for (String phrase : new String[]{"гибрид 80", "режим гибрид 80", "гибрид топливо", "электро гибрид"}) {
+            assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
+        }
+        for (VoiceCommandCatalog.Command command : commands) {
+            if (command.action.equals("energy:REV")) {
+                for (String phrase : command.phrases) assertFalse(phrase.contains("топлив"));
+            }
+        }
+    }
+    @Test public void fuelChargeRoundsAndClampsBeforeShowingTheResult() {
+        assertAction("fuel_charge:70", "топливо семьдесят два", "топливо 72");
+        assertAction("fuel_charge:75", "топливо семьдесят три", "топливо 73", "топливо 72,5", "топливо 72.5");
+        assertAction("fuel_charge:25", "топливо ноль", "топливо нуль", "топливо десять", "топливо 0", "топливо -80",
+                "топливо минус восемьдесят", "топливо минус 80", "топливо -999999999999999999999999");
+        assertAction("fuel_charge:80", "топливо восемьдесят три", "топливо девяносто девять",
+                "топливо сто", "топливо сто двадцать три", "топливо двести",
+                "топливо тысяча", "топливо две тысячи", "топливо миллион",
+                "топливо 999999999999999999999999");
+        assertEquals("Топливо: поддерживать 75% (SREV)",
+                VoiceCommandCatalog.match(commands, "топливо семьдесят три").title);
+    }
+    @Test public void fuelChargeRejectsNegationMultipleNumbersAndUnrelatedWords() {
+        for (String phrase : new String[]{"не включи топливо восемьдесят", "выключи топливо 80",
+                "топливо 80 и спорт", "топливо 50 или 80", "топливо 50 80", "топливо 80 80",
+                "топливо восемьдесят восемьдесят", "топливо пять семьдесят", "топливо 80-80",
+                "топливо 80 80%", "топливо 80 литров", "топливо неизвестно восемьдесят",
+                "топливо [unk] восемьдесят", "топливо восемь десятков", "топливо процентов",
+                "топливо минус", "топливо двадцать десять", "топливо сто ноль",
+                "топливо тысяча миллион", "топливо 50/80"}) {
+            assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
+        }
+    }
+    @Test public void numericFuelCommandDoesNotWinOverAnAmbiguousCustomPhrase() {
+        List<VoiceCommandCatalog.Command> all = new ArrayList<>(commands);
+        VoiceCommandCatalog.add(all, "can:other", "Другая команда", "топливо 80");
+        assertNull(VoiceCommandCatalog.match(all, "топливо 80"));
+    }
     @Test public void outingAcceptsCountryOffRoadAndRaiseSuspensionPhrases() {
         for (String name : new String[]{"загород", "загородный", "внедорожье", "внедорожный"}) {
             assertAction("drive:OUTING", name, "режим " + name, name + " режим",

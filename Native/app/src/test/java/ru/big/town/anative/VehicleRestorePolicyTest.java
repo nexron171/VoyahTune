@@ -11,6 +11,31 @@ import org.junit.Test;
 
 public class VehicleRestorePolicyTest {
     @Test
+    public void saveChargeMatchesOemSliderEncodingAndAlwaysUsesSrev() {
+        assertEquals("SREV_SOC_SET", VehicleRestorePolicy.SAVE_CHARGE_LEVEL);
+        assertEquals(1196, VehicleRestorePolicy.SAVE_CHARGE_LEVEL_ID);
+        assertEquals(0, VehicleRestorePolicy.requireSaveChargeLevel(25));
+        assertEquals(3, VehicleRestorePolicy.requireSaveChargeLevel(40));
+        assertEquals(5, VehicleRestorePolicy.requireSaveChargeLevel(50));
+        assertEquals(7, VehicleRestorePolicy.requireSaveChargeLevel(60));
+        assertEquals(9, VehicleRestorePolicy.requireSaveChargeLevel(70));
+        assertEquals(11, VehicleRestorePolicy.requireSaveChargeLevel(80));
+        assertEquals(4, VehicleRestorePolicy.SOC_SREV);
+    }
+
+    @Test
+    public void serviceRejectsUnnormalizedChargeTargets() {
+        for (int target : new int[]{Integer.MIN_VALUE, -80, 0, 24, 26, 73, 81, 100, Integer.MAX_VALUE}) {
+            try {
+                VehicleRestorePolicy.requireSaveChargeLevel(target);
+                fail("Invalid charge target accepted: " + target);
+            } catch (IllegalArgumentException expected) {
+                // Reject malformed IPC before writing either charge level or mode.
+            }
+        }
+    }
+
+    @Test
     public void mapsEnergyAndRecuperationToOemValues() {
         assertEquals(1, VehicleRestorePolicy.requireEnergy("SMART"));
         assertEquals(2, VehicleRestorePolicy.requireEnergy("EV"));

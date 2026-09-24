@@ -76,12 +76,17 @@ final class VoiceSettingsPage {
         Map<String, VoiceCommandCatalog.Command> actions = new LinkedHashMap<>();
         Map<String, LinkedHashSet<String>> phrases = new LinkedHashMap<>();
         for (VoiceCommandCatalog.Command command : VoiceCommands.load(activity)) {
-            actions.putIfAbsent(command.action, command);
-            phrases.computeIfAbsent(command.action, key -> new LinkedHashSet<>()).addAll(command.phrases);
+            String key = command.action.startsWith(VoiceFuelCommand.PREFIX) ? VoiceFuelCommand.PREFIX : command.action;
+            actions.putIfAbsent(key, command);
+            phrases.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).addAll(command.phrases);
         }
-        for (VoiceCommandCatalog.Command command : actions.values()) {
-            row(command.title + (command.confirm ? "\nС подтверждением" : ""),
-                    String.join("; ", phrases.get(command.action)), false);
+        for (Map.Entry<String, VoiceCommandCatalog.Command> entry : actions.entrySet()) {
+            VoiceCommandCatalog.Command command = entry.getValue();
+            boolean fuel = entry.getKey().equals(VoiceFuelCommand.PREFIX);
+            row(fuel ? "Топливо: поддержание заряда (SREV)"
+                            : command.title + (command.confirm ? "\nС подтверждением" : ""),
+                    (fuel ? "Топливо <число>: словами или цифрами. Любое число округляется до ближайших 5% в пределах 25–80%. Например: топливо семьдесят три → 75%.\n" : "")
+                            + String.join("; ", phrases.get(entry.getKey())), false);
         }
     }
 

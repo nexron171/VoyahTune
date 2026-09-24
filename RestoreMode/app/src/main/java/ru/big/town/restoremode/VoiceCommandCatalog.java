@@ -54,8 +54,10 @@ final class VoiceCommandCatalog {
     static Command match(List<Command> commands, String text) {
         Set<String> input = words(text);
         if (input == null || input.isEmpty()) return null;
-        Command found = null;
+        Command found = VoiceFuelCommand.match(text);
         for (Command command : commands) {
+            // Numeric commands must retain word order and repeated tokens for strict parsing.
+            if (command.action.startsWith(VoiceFuelCommand.PREFIX)) continue;
             for (String phrase : command.phrases) {
                 if (!input.equals(words(phrase))) continue;
                 if (found != null && !found.action.equals(command.action)) return null;
@@ -77,8 +79,10 @@ final class VoiceCommandCatalog {
         mode(all, "drive:SNOW", "Режим движения: Снег", "снег", "снежный");
         mode(all, "drive:INDIVIDUAL", "Режим движения: Индивидуальный", "индивидуальный");
         mode(all, "energy:EV", "Энергорежим: Электро", "электро", "электрический");
-        mode(all, "energy:REV", "Энергорежим: Топливо", "топливо", "топливный");
-        mode(all, "energy:SREV", "Энергорежим: Сохранение заряда", "сохранение заряда");
+        mode(all, "energy:REV", "Энергорежим: Гибрид", "гибрид", "гибридный");
+        mode(all, "energy:SREV", "Энергорежим: Топливо / сохранение заряда",
+                "топливо", "топливный", "сохранение заряда");
+        for (int percent = 25; percent <= 80; percent += 5) all.add(VoiceFuelCommand.command(percent));
         mode(all, "recycle:LOW", "Рекуперация: Низкая", "низкая рекуперация", "слабая рекуперация");
         mode(all, "recycle:MEDIUM", "Рекуперация: Стандартная", "стандартная рекуперация", "средняя рекуперация");
         mode(all, "recycle:HIGH", "Рекуперация: Высокая", "высокая рекуперация", "сильная рекуперация");
@@ -111,7 +115,7 @@ final class VoiceCommandCatalog {
             Collections.addAll(phrases, name, "включи " + name,
                     name + " режим", "включи " + name + " режим", "включи режим " + name,
                     "переключи на " + name, "поставь " + name);
-            if (action.startsWith("drive:")) Collections.addAll(phrases,
+            if (action.startsWith("drive:") || action.startsWith("energy:")) Collections.addAll(phrases,
                     "режим " + name, "включить режим " + name, "включить " + name + " режим",
                     "переключи на режим " + name, "переключи на " + name + " режим");
         }
