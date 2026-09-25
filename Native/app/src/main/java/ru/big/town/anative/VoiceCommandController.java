@@ -31,6 +31,17 @@ final class VoiceCommandController {
         String action = data.getString("action", "");
         ResultReceiver reply = data.getParcelable("reply");
         long deadline = SystemClock.elapsedRealtime() + 7000;
+        if (SeatCommand.handles(action)) {
+            // Submission commits this one-shot action. Closing/replacing the voice UI must not
+            // cancel a queued write, roll it back or cause a retry; only its reply is session-bound.
+            String[] error = {"Не удалось отправить команду автомобилю"};
+            ApplyEngine.postIndependentUserCommand("voice " + action,
+                    () -> error[0] = SeatCommandSender.send(action, deadline, SeatOemTransport.get(service)),
+                    () -> {
+                        if (gate.active(token)) respond(reply, error[0] == null, error[0]);
+                    });
+            return;
+        }
         // Let the translucent activity finish before navigating or issuing GLOBAL_ACTION_BACK.
         if (isNavigation(action)) {
             int resultDisplayMs = Math.max(0, Math.min(3000, data.getInt("resultDisplayMs", 0)));

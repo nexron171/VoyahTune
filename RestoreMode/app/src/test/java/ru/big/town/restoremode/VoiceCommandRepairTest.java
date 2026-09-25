@@ -6,14 +6,10 @@ import static org.junit.Assert.*;
 
 public class VoiceCommandRepairTest {
     private final List<VoiceCommandCatalog.Command> commands = VoiceCommandCatalog.builtIns();
-    private static final String WHEEL_ON = "can:64088000000000000003";
-    private static final String WHEEL_OFF = "can:64084000000000000003";
+    private static final String WHEEL_ON = "wheel_heat:on";
+    private static final String WHEEL_OFF = "wheel_heat:off";
 
     public VoiceCommandRepairTest() {
-        VoiceCommandCatalog.addVehicle(commands, WHEEL_ON, "Обогрев руля",
-                "включи обогрев руля", "включить обогрев руля");
-        VoiceCommandCatalog.addVehicle(commands, WHEEL_OFF, "Выключить обогрев руля",
-                "выключи обогрев руля", "отключи обогрев руля");
         VoiceCommandCatalog.addVehicle(commands, "can:rear-on", "Обогрев заднего стекла",
                 "включи обогрев заднего стекла");
     }

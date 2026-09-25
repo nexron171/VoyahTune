@@ -224,6 +224,7 @@ public class VoiceActivity extends AppCompatActivity {
     private void execute(VoiceCommandCatalog.Command command) {
         final String token = session;
         status.setText("Передаю команду…");
+        transcript.setText(command.title);
         ResultReceiver reply = new ResultReceiver(ui) {
             @Override protected void onReceiveResult(int code, Bundle data) {
                 if (!token.equals(session) || ended || isFinishing()) return;
@@ -235,6 +236,9 @@ public class VoiceActivity extends AppCompatActivity {
                 int refillLiters = data == null ? -1 : data.getInt("fuelRefillLiters", -1);
                 showSuccess(VoiceResultPresentation.successText(command.action, command.title, refillLiters),
                         VoiceResultPresentation.successDurationMs(command.action));
+                if (VoiceSeatCommands.isAction(command.action) || command.action.startsWith("wheel_heat:")) {
+                    status.setText("Команда отправлена");
+                }
                 if (command.action.startsWith("fuel_charge:") && data != null
                         && data.getBoolean("chargeTargetConfirmed", false)) {
                     status.setText("Уровень поддержания заряда подтверждён");

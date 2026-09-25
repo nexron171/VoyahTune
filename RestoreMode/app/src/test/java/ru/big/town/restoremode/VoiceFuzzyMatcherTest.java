@@ -6,10 +6,6 @@ import static org.junit.Assert.*;
 
 public class VoiceFuzzyMatcherTest {
     private final List<VoiceCommandCatalog.Command> commands = VoiceCommandCatalog.builtIns();
-    public VoiceFuzzyMatcherTest() {
-        VoiceCommandCatalog.addVehicle(commands, "wheel:on", "Обогрев руля", "включи обогрев руля");
-        VoiceCommandCatalog.addVehicle(commands, "wheel:off", "Выключить обогрев руля", "выключи обогрев руля");
-    }
     private void accepts(String action, String... texts) {
         for (String text : texts) {
             VoiceCommandCatalog.Command found = VoiceCommandCatalog.match(commands, text);
@@ -25,9 +21,9 @@ public class VoiceFuzzyMatcherTest {
         assertEquals(5, VoiceFuzzyMatcher.distance("абвгд", "12345"));
     }
     @Test public void reportedErrorsAndWordOrderFindWheel() {
-        accepts("wheel:on", "подогрев рубля", "подогрев гребля", "гребля подогрев",
+        accepts("wheel_heat:on", "подогрев рубля", "подогрев гребля", "гребля подогрев",
                 "включи подогрев рубля", "подо грев гребля");
-        accepts("wheel:off", "выключи подогрев гребля");
+        accepts("wheel_heat:off", "выключи подогрев гребля");
     }
     @Test public void acceptsSeveralEditsInLongPhraseButKeepsShortWordsStrict() {
         accepts("recycle:HIGH", "высакая рекупирация");

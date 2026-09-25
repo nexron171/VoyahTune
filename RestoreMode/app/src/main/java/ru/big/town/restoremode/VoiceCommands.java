@@ -21,6 +21,8 @@ final class VoiceCommands {
         for (String[] example : AdvanceActivity.EXAMPLE_COMMANDS) {
             // Forced EV uses the typed controller (off restores the saved energy mode).
             if (example[1].startsWith("форсе")) continue;
+            // Now dispatched through the typed OEM API; keep raw examples for other entry points.
+            if (example[1].startsWith("обогрев руля ")) continue;
             boolean on = example[1].endsWith(" вкл");
             String name = example[1].replace(" вкл", "").replace(" выкл", "");
             VoiceCommandCatalog.addVehicle(out, "can:" + example[0].replace(" ", ""),

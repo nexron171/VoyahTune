@@ -70,9 +70,11 @@ final class VoiceCommandCatalog {
         Set<String> input = words(text);
         if (input == null || input.isEmpty()) return null;
         Command found = VoiceFuelCommand.match(text);
+        Command seat = VoiceSeatCommands.match(commands, text);
+        if (seat != null) found = seat;
         for (Command command : commands) {
             // Numeric commands must retain word order and repeated tokens for strict parsing.
-            if (command.action.startsWith(VoiceFuelCommand.PREFIX)) continue;
+            if (command.action.startsWith(VoiceFuelCommand.PREFIX) || VoiceSeatCommands.isAction(command.action)) continue;
             for (String phrase : command.phrases) {
                 if (!input.equals(words(phrase))) continue;
                 if (found != null && !found.action.equals(command.action)) return null;
@@ -96,6 +98,8 @@ final class VoiceCommandCatalog {
 
     static List<Command> builtIns() {
         List<Command> all = new ArrayList<>();
+        VoiceSeatCommands.addTo(all);
+        binary(all, "wheel_heat", "Подогрев руля", "подогрев руля", "обогрев руля");
         mode(all, "drive:SPORT", "Режим движения: Спорт", "спорт", "спортивный");
         mode(all, "drive:ECO", "Режим движения: Эко", "эко", "экономичный");
         mode(all, "drive:COMFORT", "Режим движения: Комфорт", "комфорт", "комфортный");
