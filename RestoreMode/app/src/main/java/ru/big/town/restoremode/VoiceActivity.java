@@ -236,7 +236,8 @@ public class VoiceActivity extends AppCompatActivity {
                 int refillLiters = data == null ? -1 : data.getInt("fuelRefillLiters", -1);
                 showSuccess(VoiceResultPresentation.successText(command.action, command.title, refillLiters),
                         VoiceResultPresentation.successDurationMs(command.action));
-                if (VoiceSeatCommands.isAction(command.action) || command.action.startsWith("wheel_heat:")) {
+                if (VoiceSeatCommands.isAction(command.action) || command.action.startsWith("wheel_heat:")
+                        || VoiceWindowCommands.isAction(command.action)) {
                     status.setText("Команда отправлена");
                 }
                 if (command.action.startsWith("fuel_charge:") && data != null

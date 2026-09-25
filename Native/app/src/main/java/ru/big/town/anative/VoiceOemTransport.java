@@ -15,8 +15,8 @@ import java.util.List;
 import java.util.concurrent.TimeoutException;
 
 /** Uses the installed vendor Java implementation, never a guessed Binder transaction or raw CAN. */
-final class SeatOemTransport implements SeatCommandSender.Transport {
-    private static final SeatOemTransport INSTANCE = new SeatOemTransport();
+final class VoiceOemTransport implements OemCommandSender.Transport {
+    private static final VoiceOemTransport INSTANCE = new VoiceOemTransport();
     private final Object connection = new Object();
     private Context context;
     private Class<?> managerClass, stateClass, listenerClass;
@@ -26,7 +26,7 @@ final class SeatOemTransport implements SeatCommandSender.Transport {
     private boolean connected;
     private long deadline;
 
-    static SeatOemTransport get(Context context) {
+    static VoiceOemTransport get(Context context) {
         synchronized (INSTANCE) {
             if (INSTANCE.context == null) INSTANCE.context = context.getApplicationContext();
         }
@@ -64,7 +64,7 @@ final class SeatOemTransport implements SeatCommandSender.Transport {
                         }
                         if (method.getName().equals("hashCode")) return System.identityHashCode(proxy);
                         if (method.getName().equals("equals")) return args != null && args.length == 1 && proxy == args[0];
-                        if (method.getName().equals("toString")) return "VoyahTune seat CAN connection";
+                        if (method.getName().equals("toString")) return "VoyahTune voice CAN connection";
                         return null;
                     });
             manager = invoke(managerClass.getMethod("getInstance", Context.class, listenerClass),
@@ -88,7 +88,7 @@ final class SeatOemTransport implements SeatCommandSender.Transport {
             Object result = invoke(setter, manager, selectedState, value);
             return result instanceof Integer ? (Integer) result : -1;
         } catch (Exception | LinkageError e) {
-            Log.w("VoyahSeatVoice", "OEM send failed for " + field, e);
+            Log.w("VoyahOemVoice", "OEM send failed for " + field, e);
             throw e;
         } finally {
             selectedState = null;
@@ -124,7 +124,7 @@ final class SeatOemTransport implements SeatCommandSender.Transport {
                 managerClass = api; stateClass = state; listenerClass = listener; setter = method;
                 return;
             } catch (ReflectiveOperationException | LinkageError e) {
-                Log.d("VoyahSeatVoice", "OEM API unavailable in class loader", e);
+                Log.d("VoyahOemVoice", "OEM API unavailable in class loader", e);
             }
         }
         throw new UnsupportedOperationException("CanBusManager API unavailable");

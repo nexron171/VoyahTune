@@ -72,9 +72,15 @@ final class VoiceCommandCatalog {
         Command found = VoiceFuelCommand.match(text);
         Command seat = VoiceSeatCommands.match(commands, text);
         if (seat != null) found = seat;
+        Command window = VoiceWindowCommands.match(commands, text);
+        if (window != null) {
+            if (found != null && !found.action.equals(window.action)) return null;
+            found = window;
+        }
         for (Command command : commands) {
-            // Numeric commands must retain word order and repeated tokens for strict parsing.
-            if (command.action.startsWith(VoiceFuelCommand.PREFIX) || VoiceSeatCommands.isAction(command.action)) continue;
+            // Structured commands retain location, number and repeated tokens for strict parsing.
+            if (command.action.startsWith(VoiceFuelCommand.PREFIX) || VoiceSeatCommands.isAction(command.action)
+                    || VoiceWindowCommands.isAction(command.action)) continue;
             for (String phrase : command.phrases) {
                 if (!input.equals(words(phrase))) continue;
                 if (found != null && !found.action.equals(command.action)) return null;
@@ -82,6 +88,7 @@ final class VoiceCommandCatalog {
             }
         }
         if (found != null) return found;
+        if (VoiceWindowCommands.mentionsWindow(text)) return null;
         // Only trusted vehicle phrases opt in. Apps, calls and user CAN remain exact-only.
         String repaired = VoiceCommandRepair.normalize(text, true);
         if (repaired == null) return VoiceFuzzyMatcher.match(commands, text);
@@ -99,6 +106,7 @@ final class VoiceCommandCatalog {
     static List<Command> builtIns() {
         List<Command> all = new ArrayList<>();
         VoiceSeatCommands.addTo(all);
+        VoiceWindowCommands.addTo(all);
         binary(all, "wheel_heat", "Подогрев руля", "подогрев руля", "обогрев руля");
         mode(all, "drive:SPORT", "Режим движения: Спорт", "спорт", "спортивный");
         mode(all, "drive:ECO", "Режим движения: Эко", "эко", "экономичный");

@@ -1,18 +1,21 @@
 package ru.big.town.anative;
 
 /** One invocation, no readback, retries, session cancellation or compensating writes. */
-final class SeatCommandSender {
+final class OemCommandSender {
     interface Transport {
         void prepare(String field, long deadlineMs) throws Exception;
         int send(String field, int value) throws Exception;
     }
 
     static String send(String action, long deadlineMs, Transport transport) {
-        SeatCommand command = SeatCommand.parse(action);
-        if (command == null) return "Неизвестная команда сиденья или руля";
+        SeatCommand seat = SeatCommand.parse(action);
+        WindowCommand window = WindowCommand.parse(action);
+        if (seat == null && window == null) return "Неизвестная команда автомобиля";
+        String field = seat != null ? seat.field : window.field;
+        int value = seat != null ? seat.value : window.value;
         try {
-            transport.prepare(command.field, deadlineMs);
-            return transport.send(command.field, command.value) == 0 ? null : "Не удалось отправить команду автомобилю";
+            transport.prepare(field, deadlineMs);
+            return transport.send(field, value) == 0 ? null : "Не удалось отправить команду автомобилю";
         } catch (SecurityException e) {
             return "Нет разрешения на управление автомобилем";
         } catch (UnsupportedOperationException e) {
