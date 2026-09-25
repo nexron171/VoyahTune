@@ -3,6 +3,7 @@ package ru.big.town.restoremode;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.ResolveInfo;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -33,6 +34,10 @@ final class VoiceCommands {
         Set<String> packages = new HashSet<>();
         Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         List<ResolveInfo> apps = context.getPackageManager().queryIntentActivities(launcher, 0);
+        // An updated preinstalled app remains a system app, even when its APK is in /data.
+        apps.removeIf(app -> app.activityInfo == null || app.activityInfo.applicationInfo == null
+                || (app.activityInfo.applicationInfo.flags
+                & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0);
         apps.sort((a, b) -> a.loadLabel(context.getPackageManager()).toString()
                 .compareToIgnoreCase(b.loadLabel(context.getPackageManager()).toString()));
         for (ResolveInfo app : apps) {

@@ -47,8 +47,6 @@ final class VoiceSettingsPage {
         content.addView(text("Распознавание работает без интернета. Произносите одну команду за раз. Не обязательно произносить фразу целиком: достаточно ключевых слов, например «спорт» или «фары авто». Слова «выключи» и «переключи» определяют действие — их пропускать нельзя. Можно менять порядок слов и добавлять «пожалуйста». Помощник учитывает окончания и небольшие ошибки в названиях автомобильных команд. Неизвестная или неоднозначная фраза не выполняется.", 20, 0xffaaaaaa));
         content.addView(text("Массаж, подогрев и вентиляция: без указания места команда относится к водителю. Для переднего пассажира добавьте «пассажира», например «массаж пассажира волны» или «подогрев сиденья пассажира три». Уровни — от 1 до 3. Выбор уровня или типа массажа может одновременно включить функцию. Доступность зависит от комплектации и прошивки автомобиля.", 20, 0xffaaaaaa));
         content.addView(text("Окна: «открой» или «опусти» — открыть, «закрой» или «подними» — закрыть. Можно указать водителя, переднего пассажира, заднее левое/правое окно или группу: передние, задние, левые, правые. «Открой окна» относится ко всем четырём; для одного окна укажите место. «Проветривание» приоткрывает все четыре окна, «проветривание люка» — только люк. Величину открытия задаёт автомобиль. Шторка управляется отдельно: «открой шторку» / «закрой шторку». После отправки помощник не проверяет фактическое положение.", 20, 0xffaaaaaa));
-        content.addView(text("Zipformer2 распознаёт фразу после паузы. DeepFilterNet3 снижает шум микрофона; силу обработки можно изменить ниже. Распознавание и шумоподавление работают без интернета.", 20, 0xffaaaaaa));
-        content.addView(text("При включённом помощнике VoyahTune заранее готовит модели и сохраняет их в памяти для быстрого вызова. Микрофон включается только на время распознавания на экране помощника. Отключение помощника освобождает модели.", 20, 0xffaaaaaa));
         deepFilterStrength = new LinearLayout(activity);
         deepFilterStrength.setOrientation(LinearLayout.VERTICAL);
         deepFilterStrength.setBackgroundResource(R.drawable.layout_category_bg);
@@ -58,12 +56,12 @@ final class VoiceSettingsPage {
         deepFilterStrength.addView(deepFilterStrengthLabel);
         deepFilterStrengthSlider = new androidx.appcompat.widget.AppCompatSeekBar(activity);
         deepFilterStrengthSlider.setMax(VoiceAudioConfig.MAX_DEEP_FILTER_DB);
-        deepFilterStrengthSlider.setContentDescription("Сила шумоподавления DeepFilterNet3");
+        deepFilterStrengthSlider.setContentDescription("Сила подавления шума");
         deepFilterStrength.addView(deepFilterStrengthSlider, new LinearLayout.LayoutParams(-1, dp(48)));
         deepFilterStrength.addView(text("0 дБ — без обработки · 6 дБ — мягче · 30 дБ — сильнее.\nМеньше значение — больше исходного звука и меньше искажений голоса. Настройка действует со следующей записи.", 20, 0xffaaaaaa));
         deepFilterStrengthSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
-                deepFilterStrengthLabel.setText("Подавление DeepFilterNet3: до " + value + " дБ");
+                deepFilterStrengthLabel.setText("Сила подавления шума: до " + value + " дБ");
                 if (fromUser) prefs.edit().putInt(VoiceAudioConfig.DEEP_FILTER_DB_KEY, value).apply();
             }
             @Override public void onStartTrackingTouch(SeekBar bar) { }
@@ -114,7 +112,6 @@ final class VoiceSettingsPage {
         tryVoice.setEnabled(enabled.isChecked());
         tryVoice.setAlpha(enabled.isChecked() ? 1 : .45f);
         commands.removeAllViews();
-        row("Команда", "Фразы", true);
         Map<String, VoiceCommandCatalog.Command> actions = new LinkedHashMap<>();
         Map<String, LinkedHashSet<String>> phrases = new LinkedHashMap<>();
         for (VoiceCommandCatalog.Command command : VoiceCommands.load(activity)) {
@@ -122,20 +119,64 @@ final class VoiceSettingsPage {
             actions.putIfAbsent(key, command);
             phrases.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).addAll(command.phrases);
         }
-        for (Map.Entry<String, VoiceCommandCatalog.Command> entry : actions.entrySet()) {
-            VoiceCommandCatalog.Command command = entry.getValue();
-            boolean fuel = entry.getKey().equals(VoiceFuelCommand.PREFIX);
-            row(fuel ? "Топливо: поддержание заряда (SREV)"
-                            : command.title + (command.confirm ? "\nС подтверждением" : ""),
-                    (fuel ? "Топливо <число>: словами или цифрами. Любое число округляется до ближайших 5% в пределах 25–80%. Например: топливо семьдесят три → 75%.\n" : "")
-                            + String.join("; ", phrases.get(entry.getKey())), false);
+        for (VoiceCommandGroups.Group group : VoiceCommandGroups.Group.values()) {
+            Map<String, VoiceCommandCatalog.Command> members = new LinkedHashMap<>();
+            for (Map.Entry<String, VoiceCommandCatalog.Command> entry : actions.entrySet()) {
+                if (VoiceCommandGroups.forAction(entry.getValue().action).contains(group))
+                    members.put(entry.getKey(), entry.getValue());
+            }
+            commandGroup(group, members, phrases);
         }
+    }
+
+    private void commandGroup(VoiceCommandGroups.Group group,
+                              Map<String, VoiceCommandCatalog.Command> members,
+                              Map<String, LinkedHashSet<String>> phrases) {
+        MaterialButton header = new MaterialButton(activity);
+        header.setAllCaps(false);
+        header.setCornerRadius(dp(12));
+        header.setTextSize(TypedValue.COMPLEX_UNIT_PX, 26);
+        header.setTextColor(0xffffffff);
+        header.setBackgroundTintList(ColorStateList.valueOf(0xff373f4a));
+        header.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        header.setPadding(dp(16), dp(10), dp(16), dp(10));
+        header.setMinHeight(dp(64));
+        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(-1, -2);
+        headerParams.topMargin = dp(12);
+        commands.addView(header, headerParams);
+        LinearLayout body = new LinearLayout(activity);
+        body.setOrientation(LinearLayout.VERTICAL);
+        commands.addView(body, new LinearLayout.LayoutParams(-1, -2));
+        String key = "voiceCommandGroupExpanded_" + group.name();
+        Runnable update = () -> {
+            boolean expanded = prefs.getBoolean(key, false);
+            header.setText((expanded ? "▾  " : "▸  ") + group.title + " (" + members.size() + ")");
+            header.setContentDescription(group.title + ", " + (expanded ? "свернуть группу" : "раскрыть группу"));
+            body.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            // Build rows on first expansion; collapsed app lists can contain hundreds of phrases.
+            if (expanded && body.getChildCount() == 0) {
+                row(body, "Команда", "Фразы", true);
+                for (Map.Entry<String, VoiceCommandCatalog.Command> entry : members.entrySet()) {
+                    VoiceCommandCatalog.Command command = entry.getValue();
+                    boolean fuel = entry.getKey().equals(VoiceFuelCommand.PREFIX);
+                    row(body, fuel ? "Топливо: поддержание заряда (SREV)"
+                                    : command.title + (command.confirm ? "\nС подтверждением" : ""),
+                            (fuel ? "Топливо <число>: словами или цифрами. Любое число округляется до ближайших 5% в пределах 25–80%. Например: топливо семьдесят три → 75%.\n" : "")
+                                    + String.join("; ", phrases.get(entry.getKey())), false);
+                }
+            }
+        };
+        header.setOnClickListener(v -> {
+            prefs.edit().putBoolean(key, !prefs.getBoolean(key, false)).apply();
+            update.run();
+        });
+        update.run();
     }
 
     private void updateStrength() {
         VoiceAudioConfig selected = VoiceAudioConfig.read(prefs);
         deepFilterStrengthSlider.setProgress(selected.deepFilterDb);
-        deepFilterStrengthLabel.setText("Подавление DeepFilterNet3: до " + selected.deepFilterDb + " дБ");
+        deepFilterStrengthLabel.setText("Сила подавления шума: до " + selected.deepFilterDb + " дБ");
     }
 
     private Switch setting(LinearLayout content, String label) {
@@ -153,7 +194,7 @@ final class VoiceSettingsPage {
         return toggle;
     }
 
-    private void row(String action, String phrases, boolean heading) {
+    private void row(LinearLayout parent, String action, String phrases, boolean heading) {
         LinearLayout row = new LinearLayout(activity); row.setGravity(Gravity.TOP);
         row.setPadding(dp(16), dp(10), dp(16), dp(10));
         TextView title = text(action, heading ? 24 : 22, 0xffffffff);
@@ -163,9 +204,9 @@ final class VoiceSettingsPage {
         if (heading) { title.setTypeface(null, Typeface.BOLD); variants.setTypeface(null, Typeface.BOLD); }
         row.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         row.addView(variants, new LinearLayout.LayoutParams(0, -2, 3));
-        commands.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        parent.addView(row, new LinearLayout.LayoutParams(-1, -2));
         View divider = new View(activity); divider.setBackgroundColor(0xff373f4a);
-        commands.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
+        parent.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
     private TextView text(String value, int size, int color) {
