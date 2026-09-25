@@ -109,6 +109,7 @@ public class VoiceActivity extends AppCompatActivity {
         cancelSession();
         clearRecording();
         testOnly = getIntent().getBooleanExtra(TEST_ONLY, false);
+        closeControl.testMode(testOnly);
         session = UUID.randomUUID().toString(); ended = false; submitted = false; interrupted = false;
         status.setText("Подготовка помощника…"); transcript.setText(""); orb.state(false, false);
         details.setText("");
@@ -278,6 +279,7 @@ public class VoiceActivity extends AppCompatActivity {
         if (focus != null && audio != null) { audio.abandonAudioFocusRequest(focus); focus = null; }
     }
     private void playRecording() {
+        if (!testOnly) return;
         if (playback != null) { stopPlayback(); return; }
         if (!ended || recording == null || !recording.isFile()) return;
         ui.removeCallbacksAndMessages(null); // Hold the finished result screen while inspecting audio.

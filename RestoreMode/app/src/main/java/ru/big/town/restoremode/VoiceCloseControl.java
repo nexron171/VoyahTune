@@ -37,6 +37,7 @@ final class VoiceCloseControl {
         replay.setText("Прослушать запись"); replay.setAllCaps(false); replay.setTextSize(22);
         replay.setTextColor(Color.WHITE); replay.setBackgroundTintList(null); replay.setStateListAnimator(null);
         replay.setPadding(8, 0, 8, 0); replay.setEnabled(false); replay.setAlpha(.4f);
+        replay.setVisibility(View.GONE);
         replay.setOnClickListener(v -> playRecording.run());
         LinearLayout buttons = new LinearLayout(activity);
         buttons.setGravity(Gravity.CENTER_VERTICAL);
@@ -93,6 +94,10 @@ final class VoiceCloseControl {
             window.setAttributes(attrs);
             if (!glass.isShowing()) glass.show();
         });
+    }
+
+    void testMode(boolean enabled) {
+        if (replay != null) replay.setVisibility(enabled ? View.VISIBLE : View.GONE);
     }
 
     void recordingAvailable(boolean available) {
