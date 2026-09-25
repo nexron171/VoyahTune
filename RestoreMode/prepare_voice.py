@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pinned offline voice assets and native filters. Run automatically by Gradle.
 
-Build requirements: Python 3.11+, Rust stable with Android targets, Android NDK.
+Build requirements: Python 3.11+, Rust (rust-toolchain.toml), Android NDK.
 Downloads happen on the build machine only, never in the car.
 """
 import argparse
@@ -21,6 +21,36 @@ BUILD = ROOT / "app/build/voice-deps"
 
 def run(*args, **kwargs):
     subprocess.run([str(a) for a in args], check=True, **kwargs)
+
+
+def rust_environment():
+    """Find rustup/Cargo even when Gradle is launched without a shell's Rust PATH."""
+    env = os.environ.copy()
+    candidates = []
+    executable = "cargo.exe" if os.name == "nt" else "cargo"
+    if env.get("CARGO_HOME"):
+        candidates.append((Path(env["CARGO_HOME"]) / "bin" / executable, False))
+    on_path = shutil.which(executable, path=env.get("PATH", os.defpath))
+    if on_path:
+        candidates.append((Path(on_path), False))
+    candidates.append((Path.home() / ".cargo/bin" / executable, False))
+    cache = ROOT.parent / "Releases/cache"
+    candidates.append((cache / "cargo/bin" / executable, True))
+    for cargo, cached in candidates:
+        if not cargo.is_file() or not os.access(cargo, os.X_OK):
+            continue
+        # Keep the cargo symlink name: resolving it to rustup changes proxy dispatch.
+        cargo = cargo.absolute()
+        if cached or cargo.parent == (cache / "cargo/bin").absolute():
+            env.setdefault("CARGO_HOME", str(cache / "cargo"))
+            env.setdefault("RUSTUP_HOME", str(cache / "rustup"))
+        env["PATH"] = str(cargo.parent) + os.pathsep + env.get("PATH", os.defpath)
+        return cargo, env
+    raise RuntimeError(
+        "Rust cargo was not found in CARGO_HOME/bin, PATH, ~/.cargo/bin or "
+        "Releases/cache/cargo/bin. Install Rust with rustup or point CARGO_HOME/PATH "
+        "to an existing installation. See Docs/voice-control.md."
+    )
 
 
 def download(name, spec):
@@ -90,6 +120,10 @@ def prepare_assets():
 
 
 def native(ndk, abis):
+    cargo, rust_env = rust_environment()
+    # Select the app's pinned toolchain before removing previously built JNI libraries.
+    # Explicit RUSTUP_TOOLCHAIN from the caller still overrides rust-toolchain.toml.
+    run(cargo, "--version", cwd=ROOT, env=rust_env)
     host = "darwin-x86_64" if platform.system() == "Darwin" else "linux-x86_64"
     toolchain = ndk / "toolchains/llvm/prebuilt" / host / "bin"
     targets = {"arm64-v8a": ("aarch64-linux-android", "aarch64-linux-android"),
@@ -104,14 +138,14 @@ def native(ndk, abis):
         output = BUILD / "jniLibs" / abi
         output.mkdir(parents=True, exist_ok=True)
         clang = toolchain / (clang_target + "30-clang")
-        env = os.environ.copy()
+        env = rust_env.copy()
         env["CARGO_TARGET_" + target.upper().replace("-", "_") + "_LINKER"] = str(clang)
         env["CC_" + target.replace("-", "_")] = str(clang)
         env["AR_" + target.replace("-", "_")] = str(toolchain / "llvm-ar")
         env["CARGO_TARGET_DIR"] = str(BUILD / "rust-target")
         env["RUSTFLAGS"] = "-C link-arg=-Wl,-z,max-page-size=16384"
-        run("cargo", "build", "--locked", "--release", "--target", target,
-            "--manifest-path", ROOT / "voice-native/Cargo.toml", env=env)
+        run(cargo, "build", "--locked", "--release", "--target", target,
+            "--manifest-path", ROOT / "voice-native/Cargo.toml", cwd=ROOT, env=env)
         shutil.copyfile(BUILD / "rust-target" / target / "release/libvoyah_df.so", output / "libvoyah_df.so")
         run(toolchain / "llvm-strip", output / "libvoyah_df.so")
 

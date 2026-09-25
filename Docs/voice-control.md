@@ -389,11 +389,18 @@ CAN-примеры, русские названия приложений, кон
 Русская модель: HF revision `df6a54a4d8e5d43e82675e4f5dba2d507731a0d1`.
 Лицензии включены в `assets/voice-licenses`.
 
-Дополнительно к Android SDK/JDK нужны Python 3.11+ и Rust с Android targets:
+Дополнительно к Android SDK/JDK нужны Python 3.11+ и Rust через rustup.
+Версия Rust 1.98.1 и Android targets закреплены в `RestoreMode/rust-toolchain.toml`.
+Скрипт ищет Cargo в `CARGO_HOME/bin`, `PATH`, `~/.cargo/bin`, затем в
+`Releases/cache/cargo/bin`. Для локального кеша автоматически подключаются
+`CARGO_HOME` и `RUSTUP_HOME`; явно заданные переменные окружения сохраняются.
+Это работает и через `make_release.sh`, и при прямом запуске Gradle, без ручного
+добавления кешированного Rust в `PATH`. Если Rust не установлен ни в одном месте,
+скрипт сообщает об этом до удаления ранее собранных JNI-библиотек.
 
 ```sh
-rustup target add aarch64-linux-android x86_64-linux-android
 cd RestoreMode
+rustup target add --toolchain 1.98.1 aarch64-linux-android x86_64-linux-android
 ./gradlew :app:assembleFullDebug :app:assembleLightDebug
 ```
 

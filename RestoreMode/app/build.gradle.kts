@@ -108,6 +108,7 @@ val prepareVoiceDependencies = tasks.register<Exec>("prepareVoiceDependencies") 
 val prepareVoiceNative = tasks.register<Exec>("prepareVoiceNative") {
     dependsOn(prepareVoiceDependencies)
     inputs.files(rootProject.file("prepare_voice.py"), rootProject.file("voice-dependencies.json"),
+        rootProject.file("rust-toolchain.toml"),
         rootProject.fileTree("voice-native") { exclude("target/**") })
     outputs.dir(layout.buildDirectory.dir("voice-deps/jniLibs"))
     commandLine("python3", rootProject.file("prepare_voice.py"), "--ndk",
