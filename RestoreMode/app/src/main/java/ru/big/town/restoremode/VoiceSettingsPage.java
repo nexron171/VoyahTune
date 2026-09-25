@@ -12,6 +12,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Switch;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
@@ -23,12 +24,16 @@ import java.util.Map;
 /** Content of the voice section; the host owns the rail, title and one full-page scroll view. */
 final class VoiceSettingsPage {
     private static final int MICROPHONE_REQUEST = 41;
+    private static final int TEST_MICROPHONE_REQUEST = 42;
     private final AppCompatActivity activity;
     private final SharedPreferences prefs;
     private final Runnable changed;
     private final Switch enabled, shortcut;
     private final Button tryVoice;
     private final LinearLayout commands;
+    private final LinearLayout deepFilterStrength;
+    private final TextView deepFilterStrengthLabel;
+    private final SeekBar deepFilterStrengthSlider;
     private boolean updating;
 
     VoiceSettingsPage(AppCompatActivity activity, LinearLayout content,
@@ -39,7 +44,28 @@ final class VoiceSettingsPage {
                 + (BuildConfig.IS_FULL
                 ? " Удерживайте кнопку голосового помощника на руле. Повторное удержание начинает новую сессию. Прежнее назначение долгого нажатия сохранится и вернётся после отключения помощника."
                 : ""), 20, 0xffaaaaaa));
-        content.addView(text("Распознавание работает без интернета. Произносите одну команду за раз. Не обязательно произносить фразу целиком: достаточно ключевых слов, например «спорт» или «фары авто». Слова «выключи» и «переключи» определяют действие — их пропускать нельзя. Можно менять порядок слов и добавлять «пожалуйста». Неизвестная или неоднозначная фраза не выполняется.", 20, 0xffaaaaaa));
+        content.addView(text("Распознавание работает без интернета. Произносите одну команду за раз. Не обязательно произносить фразу целиком: достаточно ключевых слов, например «спорт» или «фары авто». Слова «выключи» и «переключи» определяют действие — их пропускать нельзя. Можно менять порядок слов и добавлять «пожалуйста». Помощник учитывает окончания и небольшие ошибки в названиях автомобильных команд. Неизвестная или неоднозначная фраза не выполняется.", 20, 0xffaaaaaa));
+        content.addView(text("Zipformer2 распознаёт фразу после паузы. DeepFilterNet3 снижает шум микрофона; силу обработки можно изменить ниже. Распознавание и шумоподавление работают без интернета.", 20, 0xffaaaaaa));
+        deepFilterStrength = new LinearLayout(activity);
+        deepFilterStrength.setOrientation(LinearLayout.VERTICAL);
+        deepFilterStrength.setBackgroundResource(R.drawable.layout_category_bg);
+        deepFilterStrength.setPadding(dp(16), dp(10), dp(16), dp(10));
+        content.addView(deepFilterStrength, new LinearLayout.LayoutParams(-1, -2));
+        deepFilterStrengthLabel = text("", 26, 0xffffffff);
+        deepFilterStrength.addView(deepFilterStrengthLabel);
+        deepFilterStrengthSlider = new androidx.appcompat.widget.AppCompatSeekBar(activity);
+        deepFilterStrengthSlider.setMax(VoiceAudioConfig.MAX_DEEP_FILTER_DB);
+        deepFilterStrengthSlider.setContentDescription("Сила шумоподавления DeepFilterNet3");
+        deepFilterStrength.addView(deepFilterStrengthSlider, new LinearLayout.LayoutParams(-1, dp(48)));
+        deepFilterStrength.addView(text("0 дБ — без обработки · 6 дБ — мягче · 30 дБ — сильнее.\nМеньше значение — больше исходного звука и меньше искажений голоса. Настройка действует со следующей записи.", 20, 0xffaaaaaa));
+        deepFilterStrengthSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
+                deepFilterStrengthLabel.setText("Подавление DeepFilterNet3: до " + value + " дБ");
+                if (fromUser) prefs.edit().putInt(VoiceAudioConfig.DEEP_FILTER_DB_KEY, value).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
         shortcut = setting(content, "Ярлык «Голосовая команда» на главном экране");
         MaterialButton tryButton = new MaterialButton(activity);
         tryButton.setCornerRadius(dp(20));
@@ -50,6 +76,18 @@ final class VoiceSettingsPage {
         LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(-2, dp(64));
         buttonParams.setMargins(0, dp(12), 0, dp(20)); content.addView(tryVoice, buttonParams);
         tryVoice.setOnClickListener(v -> activity.startActivity(new Intent(activity, VoiceActivity.class)));
+        MaterialButton testButton = new MaterialButton(activity);
+        testButton.setText("Проверить распознавание без выполнения");
+        testButton.setAllCaps(false);
+        testButton.setTextSize(TypedValue.COMPLEX_UNIT_PX, 24);
+        content.addView(testButton, new LinearLayout.LayoutParams(-1, dp(64)));
+        testButton.setOnClickListener(v -> {
+            if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                activity.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, TEST_MICROPHONE_REQUEST);
+                return;
+            }
+            activity.startActivity(new Intent(activity, VoiceActivity.class).putExtra(VoiceActivity.TEST_ONLY, true));
+        });
         commands = new LinearLayout(activity); commands.setOrientation(LinearLayout.VERTICAL);
         content.addView(commands, new LinearLayout.LayoutParams(-1, -2));
         enabled.setOnCheckedChangeListener((button, checked) -> {
@@ -68,6 +106,7 @@ final class VoiceSettingsPage {
         updating = true;
         enabled.setChecked(prefs.getBoolean(VoiceCommands.ENABLED, false));
         shortcut.setChecked(prefs.getBoolean("showVoiceCommand", false));
+        updateStrength();
         updating = false;
         tryVoice.setEnabled(enabled.isChecked());
         tryVoice.setAlpha(enabled.isChecked() ? 1 : .45f);
@@ -88,6 +127,12 @@ final class VoiceSettingsPage {
                     (fuel ? "Топливо <число>: словами или цифрами. Любое число округляется до ближайших 5% в пределах 25–80%. Например: топливо семьдесят три → 75%.\n" : "")
                             + String.join("; ", phrases.get(entry.getKey())), false);
         }
+    }
+
+    private void updateStrength() {
+        VoiceAudioConfig selected = VoiceAudioConfig.read(prefs);
+        deepFilterStrengthSlider.setProgress(selected.deepFilterDb);
+        deepFilterStrengthLabel.setText("Подавление DeepFilterNet3: до " + selected.deepFilterDb + " дБ");
     }
 
     private Switch setting(LinearLayout content, String label) {
@@ -134,6 +179,12 @@ final class VoiceSettingsPage {
         SplitConfigSync.pushSteering(activity, prefs); changed.run();
     }
     void onPermissionResult(int request, int[] grants) {
+        if (request == TEST_MICROPHONE_REQUEST) {
+            if (grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) {
+                activity.startActivity(new Intent(activity, VoiceActivity.class).putExtra(VoiceActivity.TEST_ONLY, true));
+            } else Toast.makeText(activity, "Для проверки разрешите доступ к микрофону", Toast.LENGTH_LONG).show();
+            return;
+        }
         if (request != MICROPHONE_REQUEST) return;
         boolean allowed = grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED;
         saveEnabled(allowed);

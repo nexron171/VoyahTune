@@ -23,7 +23,7 @@ final class VoiceCommands {
             if (example[1].startsWith("форсе")) continue;
             boolean on = example[1].endsWith(" вкл");
             String name = example[1].replace(" вкл", "").replace(" выкл", "");
-            VoiceCommandCatalog.add(out, "can:" + example[0].replace(" ", ""),
+            VoiceCommandCatalog.addVehicle(out, "can:" + example[0].replace(" ", ""),
                     name + (on ? ": включить" : ": выключить"),
                     (on ? "включи " : "выключи ") + name,
                     (on ? "включить " : "отключи ") + name);

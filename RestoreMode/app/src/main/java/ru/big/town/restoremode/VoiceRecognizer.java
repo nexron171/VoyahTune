@@ -7,26 +7,25 @@ import android.media.MediaRecorder;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import org.json.JSONObject;
-import org.vosk.Model;
-import org.vosk.Recognizer;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.util.concurrent.ExecutorService;
+import java.io.File;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Single process worker owns model, recognizer and recorder. Cancellation never blocks the UI. */
 final class VoiceRecognizer {
-    private static final String MODEL = "vosk-model-small-ru-0.22";
-    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
+    private static final ScheduledExecutorService WORKER = Executors.newSingleThreadScheduledExecutor();
     private static final AtomicLong GENERATION = new AtomicLong();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static Model model; // Worker only; retained for subsequent sessions.
+    private static long modelUse; // Worker only; independent of UI cancellation tokens.
     interface Listener {
         void listening();
+        default void processing() {}
+        default void details(String text) {}
+        default void recording(File file) { file.delete(); }
         void audio(float level, String partial);
         void result(String text);
         void error(String message);
@@ -41,7 +40,8 @@ final class VoiceRecognizer {
         final long token = GENERATION.incrementAndGet();
         generation = token;
         final Context app = context.getApplicationContext();
-        WORKER.execute(() -> recognize(app, token, listener));
+        VoiceAudioConfig config = VoiceAudioConfig.read(app.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE));
+        WORKER.execute(() -> recognize(app, token, listener, config));
     }
 
     private static void post(long token, Runnable action) {
@@ -49,85 +49,116 @@ final class VoiceRecognizer {
     }
 
     @android.annotation.SuppressLint("MissingPermission")
-    private static void recognize(Context context, long token, Listener listener) {
+    private static void recognize(Context context, long token, Listener listener, VoiceAudioConfig config) {
         AudioRecord recorder = null;
+        VoiceRecording recording = new VoiceRecording();
+        boolean recordingPublished = false;
+        File recordingDirectory = new File(context.getCacheDir(), VoiceRecording.DIRECTORY);
+        String stage = "подготовка модели";
+        long use = ++modelUse;
         try {
             if (GENERATION.get() != token) return;
-            if (model == null) model = new Model(unpack(context).getAbsolutePath());
-            if (GENERATION.get() != token) return;
-            int minimum = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT);
-            if (minimum <= 0) throw new IOException("Unsupported microphone format");
-            recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(6400, minimum));
-            if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IOException("Microphone unavailable");
-            // General ASR deliberately retains unknown words and negation. A closed grammar can
-            // force unrelated speech into a valid car command.
-            try (Recognizer recognizer = new Recognizer(model, 16000)) {
+            VoiceRecording.clear(recordingDirectory);
+            post(token, () -> listener.details(config.label()));
+            try (VoiceModels.Session engine = VoiceModels.open(context);
+                 VoiceNeuralFilter filter = new VoiceNeuralFilter(config.deepFilterDb)) {
+                if (GENERATION.get() != token) return;
+                stage = "микрофон 48 кГц";
+                int minimum = AudioRecord.getMinBufferSize(48000, AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT);
+                if (minimum <= 0) throw new IOException("Unsupported microphone format");
+                recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 48000,
+                        AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(48000, minimum));
+                if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IOException("Microphone unavailable");
+                final String description = config.label();
                 recorder.startRecording();
                 if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) throw new IOException("Recording failed");
                 post(token, listener::listening);
-                short[] buffer = new short[1600];
-                long deadline = SystemClock.elapsedRealtime() + 10000;
-                long nextUi = 0;
-                while (GENERATION.get() == token && SystemClock.elapsedRealtime() < deadline) {
-                    int count = recorder.read(buffer, 0, buffer.length, AudioRecord.READ_NON_BLOCKING);
+                stage = "обработка звука";
+                short[] buffer = new short[480];
+                float[] input = new float[480], clean = new float[480], samples = new float[160];
+                VoiceDecimator decimator = new VoiceDecimator();
+                long started = SystemClock.elapsedRealtime(), nextUi = 0, filterNanos = 0;
+                int filled = 0, frames = 0;
+                while (GENERATION.get() == token && frames < 1000 && SystemClock.elapsedRealtime() - started < 10000) {
+                    int count = recorder.read(buffer, filled, buffer.length - filled, AudioRecord.READ_NON_BLOCKING);
                     if (count < 0) throw new IOException("Audio read failed: " + count);
-                    if (count == 0) { Thread.sleep(15); continue; }
-                    double energy = 0;
-                    for (int i = 0; i < count; i++) energy += (double) buffer[i] * buffer[i];
-                    float rms = (float) Math.sqrt(energy / count) / 32768f;
-                    float level = Math.max(0, Math.min(1, (float) ((20 * Math.log10(Math.max(rms, 0.00001)) + 55) / 40)));
-                    if (recognizer.acceptWaveForm(buffer, count)) {
-                        String text = new JSONObject(recognizer.getResult()).optString("text");
-                        if (!text.isEmpty()) { post(token, () -> listener.result(text)); return; }
-                    }
+                    if (count == 0) { Thread.sleep(5); continue; }
+                    filled += count;
+                    if (filled < buffer.length) continue;
+                    filled = 0;
+                    for (int i = 0; i < 480; i++) input[i] = buffer[i] / 32768f;
+                    long filterStart = System.nanoTime();
+                    filter.process(input, clean);
+                    decimator.process(clean, samples);
+                    filterNanos += System.nanoTime() - filterStart;
+                    frames++;
+                    recording.append(samples);
+                    boolean endpoint = engine.accept(samples);
                     long now = SystemClock.elapsedRealtime();
+                    // Do not silently lose audio if the chosen combination cannot keep up.
+                    if (now - started - frames * 10L > 1500) {
+                        throw new IOException("Audio processing cannot keep up");
+                    }
+                    if (endpoint) break;
                     if (now >= nextUi) {
-                        String partial = new JSONObject(recognizer.getPartialResult()).optString("partial");
+                        double energy = 0;
+                        for (float sample : samples) energy += sample * sample;
+                        float rms = (float) Math.sqrt(energy / samples.length);
+                        float level = Math.max(0, Math.min(1, (float) ((20 * Math.log10(Math.max(rms, .00001)) + 55) / 40)));
+                        String partial = engine.partial();
                         post(token, () -> listener.audio(level, partial));
                         nextUi = now + 60;
                     }
                 }
-                if (GENERATION.get() == token) {
-                    String text = new JSONObject(recognizer.getFinalResult()).optString("text");
-                    post(token, () -> listener.result(text));
-                }
+                recorder.stop();
+                if (GENERATION.get() != token) return;
+                publishRecording(recordingDirectory, token, listener, recording);
+                recordingPublished = true;
+                stage = "распознавание фразы";
+                post(token, listener::processing);
+                long decodingStarted = SystemClock.elapsedRealtime();
+                String text = engine.finish();
+                long decodeMs = SystemClock.elapsedRealtime() - decodingStarted;
+                String stats = description + String.format(Locale.ROOT,
+                        "\nАудио %.1f с · фильтр %.0f мс/с · финал %d мс · память приложения %d МБ",
+                        frames / 100f, filterNanos / Math.max(1.0, frames * 10000.0), decodeMs,
+                        android.os.Debug.getPss() / 1024);
+                android.util.Log.i("VoyahVoice", stats.replace('\n', ' '));
+                post(token, () -> { listener.details(stats); listener.result(text); });
             }
         } catch (Exception | LinkageError e) {
-            android.util.Log.e("VoyahVoice", "Recognition failed", e);
-            post(token, () -> listener.error("Не удалось запустить распознавание. Проверьте доступ к микрофону."));
+            if (!recordingPublished) publishRecording(recordingDirectory, token, listener, recording);
+            android.util.Log.e("VoyahVoice", "Recognition failed: " + config.label() + " / " + stage, e);
+            String message = "Ошибка: " + stage
+                    + ("Audio processing cannot keep up".equals(e.getMessage())
+                    ? ". Обработка звука не успевает за записью. Попробуйте установить шумоподавление на 0 дБ."
+                    : ". Проверьте микрофон и повторите попытку.");
+            post(token, () -> listener.error(message));
         } finally {
             if (recorder != null) {
                 try { if (recorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) recorder.stop(); }
                 catch (RuntimeException ignored) { }
                 recorder.release();
             }
+            // Keep a warm ASR model for comparisons, then return its memory after one minute idle.
+            WORKER.schedule(() -> {
+                if (modelUse == use) VoiceModels.release();
+            }, 60, TimeUnit.SECONDS);
         }
     }
 
-    private static File unpack(Context context) throws IOException {
-        File root = new File(context.getNoBackupFilesDir(), MODEL);
-        File ready = new File(root, ".ready");
-        if (!ready.isFile()) {
-            copyAssets(context, MODEL, root);
-            if (!ready.createNewFile()) throw new IOException("Cannot mark model ready");
-        }
-        return root;
-    }
-
-    private static void copyAssets(Context context, String path, File destination) throws IOException {
-        String[] children = context.getAssets().list(path);
-        if (children != null && children.length > 0) {
-            if (!destination.isDirectory() && !destination.mkdirs()) throw new IOException("Cannot create model directory");
-            for (String child : children) copyAssets(context, path + "/" + child, new File(destination, child));
-        } else {
-            try (InputStream input = context.getAssets().open(path);
-                 FileOutputStream output = new FileOutputStream(destination)) {
-                byte[] buffer = new byte[65536];
-                int count;
-                while ((count = input.read(buffer)) >= 0) output.write(buffer, 0, count);
-            }
+    private static void publishRecording(File directory, long token, Listener listener, VoiceRecording recording) {
+        if (recording.empty() || GENERATION.get() != token) return;
+        try {
+            File file = recording.save(directory);
+            MAIN.post(() -> {
+                if (GENERATION.get() == token) listener.recording(file);
+                else file.delete();
+            });
+        } catch (IOException e) {
+            // Preview failure must not change recognition or cause a different command.
+            android.util.Log.w("VoyahVoice", "Cannot save temporary recording", e);
         }
     }
 }

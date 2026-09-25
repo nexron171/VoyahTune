@@ -17,10 +17,12 @@ import android.widget.LinearLayout;
 /** A small translucent child window confines system backdrop blur to the close button. */
 final class VoiceCloseControl {
     private Dialog glass;
+    private Button replay;
 
-    void attach(Activity activity, LinearLayout column) {
+    void attach(Activity activity, LinearLayout column, Runnable cancel, Runnable playRecording) {
         float density = activity.getResources().getDisplayMetrics().density;
-        int width = Math.round(264 * density), height = Math.round(72 * density);
+        int width = Math.min(Math.round(640 * density), activity.getResources().getDisplayMetrics().widthPixels - Math.round(32 * density));
+        int height = Math.round(72 * density);
         float corner = 24 * density;
         Button button = new Button(activity);
         button.setText("Отмена");
@@ -30,7 +32,18 @@ final class VoiceCloseControl {
         button.setBackgroundTintList(null);
         button.setStateListAnimator(null);
         button.setPadding(0, 0, 0, 0);
-        button.setOnClickListener(v -> activity.finish());
+        button.setOnClickListener(v -> cancel.run());
+        replay = new Button(activity);
+        replay.setText("Прослушать запись"); replay.setAllCaps(false); replay.setTextSize(22);
+        replay.setTextColor(Color.WHITE); replay.setBackgroundTintList(null); replay.setStateListAnimator(null);
+        replay.setPadding(8, 0, 8, 0); replay.setEnabled(false); replay.setAlpha(.4f);
+        replay.setOnClickListener(v -> playRecording.run());
+        LinearLayout buttons = new LinearLayout(activity);
+        buttons.setGravity(Gravity.CENTER_VERTICAL);
+        buttons.addView(button, new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams replayParams = new LinearLayout.LayoutParams(0, -1, 1.4f);
+        replayParams.leftMargin = Math.round(12 * density);
+        buttons.addView(replay, replayParams);
 
         LinearLayout.LayoutParams position = new LinearLayout.LayoutParams(width, height);
         position.gravity = Gravity.CENTER_HORIZONTAL;
@@ -44,7 +57,8 @@ final class VoiceCloseControl {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             // Android 11 has no public cross-window blur API; retain the translucent dark surface.
             button.setBackground(background);
-            column.addView(button, position);
+            replay.setBackground(background.getConstantState().newDrawable().mutate());
+            column.addView(buttons, position);
             return;
         }
 
@@ -54,7 +68,7 @@ final class VoiceCloseControl {
         glass = new Dialog(activity);
         glass.requestWindowFeature(Window.FEATURE_NO_TITLE);
         glass.setCancelable(false);
-        glass.setContentView(button);
+        glass.setContentView(buttons);
         Window window = glass.getWindow();
         window.setBackgroundDrawable(background);
         window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
@@ -67,6 +81,8 @@ final class VoiceCloseControl {
         button.setBackgroundColor(Color.TRANSPARENT);
         button.setForeground(new RippleDrawable(ColorStateList.valueOf(0x28ffffff),
                 null, shape(Color.WHITE, corner)));
+        replay.setBackgroundColor(Color.TRANSPARENT);
+        replay.setForeground(new RippleDrawable(ColorStateList.valueOf(0x28ffffff), null, shape(Color.WHITE, corner)));
         anchor.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
             if (activity.isFinishing() || activity.isDestroyed() || !anchor.isAttachedToWindow()) return;
             int[] location = new int[2];
@@ -78,6 +94,12 @@ final class VoiceCloseControl {
             if (!glass.isShowing()) glass.show();
         });
     }
+
+    void recordingAvailable(boolean available) {
+        if (replay == null) return;
+        replay.setEnabled(available); replay.setAlpha(available ? 1 : .4f);
+    }
+    void playing(boolean playing) { if (replay != null) replay.setText(playing ? "Остановить запись" : "Прослушать запись"); }
 
     private static GradientDrawable shape(int color, float radius) {
         GradientDrawable shape = new GradientDrawable();

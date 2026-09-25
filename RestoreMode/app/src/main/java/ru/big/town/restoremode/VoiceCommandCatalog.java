@@ -14,11 +14,26 @@ final class VoiceCommandCatalog {
         final String action, title;
         final List<String> phrases;
         final boolean confirm;
+        private final List<Set<String>> repairedPhrases = new ArrayList<>();
+        final List<VoiceFuzzyMatcher.Phrase> fuzzyPhrases = new ArrayList<>();
         Command(String action, String title, boolean confirm, String... phrases) {
+            this(action, title, confirm, false, phrases);
+        }
+        Command(String action, String title, boolean confirm, boolean allowRepair, String... phrases) {
             this.action = action;
             this.title = title;
             this.confirm = confirm;
             this.phrases = Collections.unmodifiableList(Arrays.asList(phrases));
+            if (allowRepair && !confirm) {
+                for (String phrase : phrases) {
+                    String repaired = VoiceCommandRepair.normalize(phrase, false);
+                    if (repaired != null) repairedPhrases.add(words(repaired));
+                    if (!action.startsWith(VoiceFuelCommand.PREFIX)) {
+                        VoiceFuzzyMatcher.Phrase fuzzy = VoiceFuzzyMatcher.prepare(phrase);
+                        if (fuzzy != null) fuzzyPhrases.add(fuzzy);
+                    }
+                }
+            }
         }
     }
 
@@ -26,7 +41,7 @@ final class VoiceCommandCatalog {
             "включи", "включить", "включите", "установи", "поставь",
             "режим", "режима", "на", "пожалуйста"));
     private static final Set<String> REJECT = new LinkedHashSet<>(Arrays.asList(
-            "не", "нет", "нельзя", "отмена", "отмени", "или", "потом", "затем", "если"));
+            "не", "ни", "нет", "нельзя", "отмена", "отмени", "или", "потом", "затем", "если"));
 
     static String normalize(String text) {
         return text == null ? "" : text.toLowerCase(Locale.ROOT).replace('ё', 'е')
@@ -64,7 +79,19 @@ final class VoiceCommandCatalog {
                 found = command;
             }
         }
-        return found;
+        if (found != null) return found;
+        // Only trusted vehicle phrases opt in. Apps, calls and user CAN remain exact-only.
+        String repaired = VoiceCommandRepair.normalize(text, true);
+        if (repaired == null) return VoiceFuzzyMatcher.match(commands, text);
+        input = words(repaired);
+        if (input == null || input.isEmpty()) return null;
+        found = VoiceFuelCommand.match(repaired);
+        for (Command command : commands) {
+            if (!command.repairedPhrases.contains(input)) continue;
+            if (found != null && !found.action.equals(command.action)) return null;
+            found = command;
+        }
+        return found != null ? found : VoiceFuzzyMatcher.match(commands, text);
     }
 
     static List<Command> builtIns() {
@@ -74,7 +101,7 @@ final class VoiceCommandCatalog {
         mode(all, "drive:COMFORT", "Режим движения: Комфорт", "комфорт", "комфортный");
         mode(all, "drive:OUTING", "Режим движения: Outing",
                 "загород", "загородный", "внедорожье", "внедорожный");
-        add(all, "drive:OUTING", "Режим Outing — поднять подвеску",
+        addVehicle(all, "drive:OUTING", "Режим Outing — поднять подвеску",
                 "поднять подвеску", "подними подвеску", "поднимите подвеску");
         mode(all, "drive:SNOW", "Режим движения: Снег", "снег", "снежный");
         mode(all, "drive:INDIVIDUAL", "Режим движения: Индивидуальный", "индивидуальный");
@@ -89,11 +116,11 @@ final class VoiceCommandCatalog {
         binary(all, "forced_ev", "Принудительный электрорежим", "форсированный электро", "форс и ви", "форсированный электрорежим", "принудительный электрорежим", "форсед и ви");
         binary(all, "pedestrian", "Звук предупреждения пешеходов", "звук пешеходов", "предупреждение пешеходов");
         binary(all, "headlights", "Ближний свет", "фары", "ближний свет");
-        add(all, "headlights:auto", "Штатный свет: Авто", "автоматический свет", "фары авто", "включи авто свет");
+        addVehicle(all, "headlights:auto", "Штатный свет: Авто", "автоматический свет", "фары авто", "включи авто свет");
         binary(all, "auto_light", "Автосвет VoyahTune", "автосвет воя тюн", "автосвет приложения");
-        add(all, "toggle_headlights", "Переключить фары: выкл / ближний",
+        addVehicle(all, "toggle_headlights", "Переключить фары: выкл / ближний",
                 "переключи фары", "переключить фары");
-        add(all, "toggle_headlights_auto", "Переключить фары: ближний / авто",
+        addVehicle(all, "toggle_headlights_auto", "Переключить фары: ближний / авто",
                 "переключи фары авто", "переключить фары авто",
                 "переключи авто свет", "переключить авто свет");
         portCap(all, "port_cap:fuel", "Открыть лючок бензобака (только в P)",
@@ -102,9 +129,9 @@ final class VoiceCommandCatalog {
         portCap(all, "port_cap:charge", "Открыть лючок зарядки (только в P)",
                 "зарядку", "зарядка", "люк зарядки", "лючок зарядки", "зарядный люк", "зарядный лючок",
                 "люк для зарядки", "лючок для зарядки", "люк зарядного порта", "лючок зарядного порта");
-        add(all, "power_hold", "Power Hold — оставить автомобиль включённым", "пауэр холд", "оставь машину включенной", "режим ожидания");
-        add(all, "wash", "Режим мойки", "мойка", "включи мойку", "режим мойки");
-        add(all, "battery_heat", "Запросить прогрев батареи", "прогрей батарею", "прогрев батареи", "включи подогрев батареи");
+        addVehicle(all, "power_hold", "Power Hold — оставить автомобиль включённым", "пауэр холд", "оставь машину включенной", "режим ожидания");
+        addVehicle(all, "wash", "Режим мойки", "мойка", "включи мойку", "режим мойки");
+        addVehicle(all, "battery_heat", "Запросить прогрев батареи", "прогрей батарею", "прогрев батареи", "включи подогрев батареи");
         add(all, "apply", "Применить сохранённые настройки", "примени настройки", "применить настройки", "восстанови настройки автомобиля");
         add(all, "open_voyahtune", "Открыть VoyahTune", "открой воя тюн", "открой приложение воя тюн", "открой настройки автомобиля");
         add(all, "system_back", "Назад", "назад", "вернись назад", "вернуться назад");
@@ -120,7 +147,7 @@ final class VoiceCommandCatalog {
         for (String name : names) {
             Collections.addAll(phrases, name, "открой " + name, "открыть " + name, "откройте " + name);
         }
-        all.add(new Command(action, title, false, phrases.toArray(new String[0])));
+        addVehicle(all, action, title, phrases.toArray(new String[0]));
     }
 
     private static void mode(List<Command> all, String action, String title, String... names) {
@@ -133,7 +160,7 @@ final class VoiceCommandCatalog {
                     "режим " + name, "включить режим " + name, "включить " + name + " режим",
                     "переключи на режим " + name, "переключи на " + name + " режим");
         }
-        all.add(new Command(action, title, false, phrases.toArray(new String[0])));
+        addVehicle(all, action, title, phrases.toArray(new String[0]));
     }
 
     private static void binary(List<Command> all, String action, String title, String... names) {
@@ -142,12 +169,16 @@ final class VoiceCommandCatalog {
             Collections.addAll(on, "включи " + name, "включить " + name);
             Collections.addAll(off, "выключи " + name, "отключи " + name, "выключить " + name);
         }
-        all.add(new Command(action + ":on", title + ": включить", false, on.toArray(new String[0])));
-        all.add(new Command(action + ":off", title + ": выключить", false, off.toArray(new String[0])));
+        addVehicle(all, action + ":on", title + ": включить", on.toArray(new String[0]));
+        addVehicle(all, action + ":off", title + ": выключить", off.toArray(new String[0]));
     }
 
     static void add(List<Command> all, String action, String title, String... phrases) {
         all.add(new Command(action, title, false, phrases));
+    }
+
+    static void addVehicle(List<Command> all, String action, String title, String... phrases) {
+        all.add(new Command(action, title, false, true, phrases));
     }
 
 }

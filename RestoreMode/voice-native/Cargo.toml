@@ -1,0 +1,16 @@
+[package]
+name = "voyah-voice-filter"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "voyah_df"
+crate-type = ["cdylib"]
+
+[dependencies]
+deep_filter = { path = "../app/build/voice-deps/df/libDF", default-features = false, features = ["tract", "default-model"] }
+ndarray = "0.15"
+
+[profile.release]
+lto = "thin"
+strip = true

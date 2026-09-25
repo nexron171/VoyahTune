@@ -8,6 +8,7 @@ import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -24,13 +25,16 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import java.util.List;
 import java.util.UUID;
+import java.io.File;
 
 /** Dedicated translucent task. A new wheel invocation replaces the current recognition session. */
 public class VoiceActivity extends AppCompatActivity {
+    static final String TEST_ONLY = "voiceTestOnly";
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final VoiceRecognizer recognizer = new VoiceRecognizer();
     private VoiceOrbView orb;
-    private TextView status, transcript;
+    private TextView status, transcript, details;
+    private boolean testOnly;
     private Messenger nativeService;
     private boolean bound, ended, submitted, interrupted;
     private String session;
@@ -39,6 +43,8 @@ public class VoiceActivity extends AppCompatActivity {
     private AudioFocusRequest focus;
     private AlertDialog confirmation;
     private VoiceSounds sounds;
+    private File recording;
+    private MediaPlayer playback;
     private final VoiceCloseControl closeControl = new VoiceCloseControl();
 
     private final ServiceConnection connection = new ServiceConnection() {
@@ -70,7 +76,9 @@ public class VoiceActivity extends AppCompatActivity {
         int size = (int) (360 * getResources().getDisplayMetrics().density);
         center.addView(orb, new LinearLayout.LayoutParams(size, size));
         status = label(26); transcript = label(40); center.addView(status); center.addView(transcript);
-        closeControl.attach(this, center);
+        details = label(16); details.setTag("voiceDiagnostics");
+        details.setTextColor(0xffbbbbbb); center.addView(details);
+        closeControl.attach(this, center, () -> { cancelSession(); finish(); }, this::playRecording);
         root.addView(center, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
         setContentView(root);
         audio = (AudioManager) getSystemService(AUDIO_SERVICE);
@@ -79,6 +87,7 @@ public class VoiceActivity extends AppCompatActivity {
     }
     private void ensureBinding() {
         if (isAnimationPreview() || ended || bound) return;
+        if (testOnly) { beginRecognition(); return; }
         try {
             bound = bindService(new Intent().setClassName("ru.big.town.anative", "ru.big.town.anative.SetModesService"), connection, BIND_AUTO_CREATE);
             if (!bound) fail("Сервис автомобиля недоступен");
@@ -98,8 +107,12 @@ public class VoiceActivity extends AppCompatActivity {
     }
     private void newSession(boolean activationCue) {
         cancelSession();
+        clearRecording();
+        testOnly = getIntent().getBooleanExtra(TEST_ONLY, false);
         session = UUID.randomUUID().toString(); ended = false; submitted = false; interrupted = false;
         status.setText("Подготовка распознавания…"); transcript.setText(""); orb.state(false, false);
+        details.setText("");
+        details.setVisibility(testOnly ? View.VISIBLE : View.GONE);
         if (isAnimationPreview()) {
             status.setText("Слушаю…");
             transcript.setText("Тест анимации · имитация голоса");
@@ -107,7 +120,7 @@ public class VoiceActivity extends AppCompatActivity {
             if (activationCue) sounds.activation();
             return;
         }
-        if (!getSharedPreferences("DrivePreferences", MODE_PRIVATE).getBoolean(VoiceCommands.ENABLED, false)) {
+        if (!testOnly && !getSharedPreferences("DrivePreferences", MODE_PRIVATE).getBoolean(VoiceCommands.ENABLED, false)) {
             fail("Голосовое управление выключено"); return;
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -139,7 +152,7 @@ public class VoiceActivity extends AppCompatActivity {
     }
     private void beginRecognition() {
         final String token = session;
-        if (!send("begin", null, null)) { fail("Сервис автомобиля недоступен"); return; }
+        if (!testOnly && !send("begin", null, null)) { fail("Сервис автомобиля недоступен"); return; }
         focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                 .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -159,6 +172,18 @@ public class VoiceActivity extends AppCompatActivity {
             @Override public void audio(float level, String partial) {
                 if (active()) { orb.level(level); transcript.setText(partial); }
             }
+            @Override public void processing() {
+                if (!active()) return;
+                status.setText("Распознаю…"); orb.state(false, false);
+                ui.removeCallbacksAndMessages(null);
+                ui.postDelayed(() -> fail("Распознавание занимает слишком много времени"), 15000);
+            }
+            @Override public void details(String text) { if (active() && testOnly) details.setText(text); }
+            @Override public void recording(File file) {
+                if (!active()) { file.delete(); return; }
+                if (recording != null) recording.delete();
+                recording = file;
+            }
             @Override public void result(String text) { if (active()) recognized(text); }
             @Override public void error(String message) { if (active()) fail(message); }
         });
@@ -167,6 +192,15 @@ public class VoiceActivity extends AppCompatActivity {
         recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
         orb.state(false, false); transcript.setText(text);
         VoiceCommandCatalog.Command command = VoiceCommandCatalog.match(commands, text);
+        if (testOnly) {
+            ended = true;
+            closeControl.recordingAvailable(recording != null);
+            if (command != null) orb.recognized(); else orb.state(false, true);
+            status.setText(command == null ? "Тест: команда не распознана" : "Тест: " + command.title);
+            transcript.setText(text.isEmpty() ? "Речь не распознана" : text);
+            details.append("\nПроверка без выполнения команды");
+            return;
+        }
         if (command == null) { fail(text.isEmpty() ? "Не расслышал команду" : "Команда не распознана"); return; }
         orb.recognized();
         if (command.confirm) {
@@ -192,6 +226,10 @@ public class VoiceActivity extends AppCompatActivity {
                 int refillLiters = data == null ? -1 : data.getInt("fuelRefillLiters", -1);
                 showSuccess(VoiceResultPresentation.successText(command.action, command.title, refillLiters),
                         VoiceResultPresentation.successDurationMs(command.action));
+                if (command.action.startsWith("fuel_charge:") && data != null
+                        && data.getBoolean("chargeTargetConfirmed", false)) {
+                    status.setText("Уровень поддержания заряда подтверждён");
+                }
             }
         };
         submitted = send("execute", command.action, reply);
@@ -209,7 +247,8 @@ public class VoiceActivity extends AppCompatActivity {
         ended = true; recognizer.cancel(); releaseFocus(); send("cancel", null, null);
         ui.removeCallbacksAndMessages(null); orb.state(false, true); status.setText(message);
         sounds.error();
-        ui.postDelayed(() -> finish(), 6000);
+        closeControl.recordingAvailable(recording != null);
+        if (!testOnly) ui.postDelayed(() -> finish(), 6000);
     }
     private void showSuccess(String title) {
         showSuccess(title, 3000);
@@ -218,10 +257,51 @@ public class VoiceActivity extends AppCompatActivity {
         ended = true; recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
         orb.recognized(); status.setText("Команда передана"); transcript.setText(title);
         sounds.success();
+        closeControl.recordingAvailable(recording != null);
         ui.postDelayed(() -> finish(), durationMs);
     }
     private void releaseFocus() {
         if (focus != null && audio != null) { audio.abandonAudioFocusRequest(focus); focus = null; }
+    }
+    private void playRecording() {
+        if (playback != null) { stopPlayback(); return; }
+        if (!ended || recording == null || !recording.isFile()) return;
+        ui.removeCallbacksAndMessages(null); // Hold the finished result screen while inspecting audio.
+        sounds.stop();
+        focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setOnAudioFocusChangeListener(change -> { if (change < 0) stopPlayback(); }, ui).build();
+        if (audio.requestAudioFocus(focus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            releaseFocus();
+            status.setText("Не удалось получить звук для прослушивания");
+            return;
+        }
+        MediaPlayer player = new MediaPlayer();
+        playback = player;
+        closeControl.playing(true);
+        player.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+        player.setOnPreparedListener(p -> { if (playback == p && !isFinishing()) p.start(); });
+        player.setOnCompletionListener(p -> { if (playback == p) stopPlayback(); });
+        player.setOnErrorListener((p, what, extra) -> {
+            if (playback != p) return true;
+            stopPlayback(); status.setText("Не удалось прослушать запись"); return true;
+        });
+        try { player.setDataSource(recording.getAbsolutePath()); player.prepareAsync(); }
+        catch (Exception e) { stopPlayback(); status.setText("Не удалось открыть запись"); }
+    }
+    private void stopPlayback() {
+        if (playback != null) {
+            playback.setOnPreparedListener(null); playback.setOnCompletionListener(null); playback.setOnErrorListener(null);
+            playback.release(); playback = null; releaseFocus();
+        }
+        closeControl.playing(false);
+    }
+    private void clearRecording() {
+        stopPlayback();
+        closeControl.recordingAvailable(false);
+        if (recording != null) { recording.delete(); recording = null; }
     }
     private void cancelSession() {
         sounds.stop();
@@ -236,6 +316,7 @@ public class VoiceActivity extends AppCompatActivity {
         if (interrupted) finish();
     }
     @Override protected void onPause() {
+        clearRecording();
         sounds.stop();
         interrupted = true;
         recognizer.cancel(); releaseFocus();
@@ -248,6 +329,7 @@ public class VoiceActivity extends AppCompatActivity {
         finish();
     }
     @Override protected void onDestroy() {
+        clearRecording();
         sounds.release();
         closeControl.dispose();
         recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);

@@ -8,6 +8,7 @@ import android.os.Looper;
 import android.os.ResultReceiver;
 import android.os.SystemClock;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 
 /** Invoked only through SetModesService's signature-protected binding, never public broadcasts. */
 final class VoiceCommandController {
@@ -88,10 +89,11 @@ final class VoiceCommandController {
         ApplyEngine.postUserCommand("voice " + action, () -> {
             if (!gate.active(token) || SystemClock.elapsedRealtime() > deadline) return;
             try {
-                // The charge target and SREV selection are two writes: recheck before each one.
+                // Recheck cancellation/deadline before every write and while awaiting feedback.
                 CanSender.runGuardedAction(
                         () -> gate.active(token) && SystemClock.elapsedRealtime() <= deadline,
-                        () -> accepted.set(execute(action, error, details)));
+                        () -> accepted.set(execute(action, error, details,
+                                () -> gate.active(token) && SystemClock.elapsedRealtime() <= deadline)));
             }
             catch (RuntimeException e) { android.util.Log.e("VoyahVoice", "Command failed: " + action, e); }
         }, () -> {
@@ -105,7 +107,7 @@ final class VoiceCommandController {
                 || action.startsWith("app:") || action.startsWith("split:") || action.startsWith("call:");
     }
 
-    private boolean execute(String action, String[] error, Bundle details) {
+    private boolean execute(String action, String[] error, Bundle details, BooleanSupplier active) {
         if (action.startsWith("port_cap:")) {
             PortCapController.OpenResult opened = PortCapController.open(service, action);
             PortCapController.Outcome result = opened.outcome;
@@ -130,14 +132,11 @@ final class VoiceCommandController {
                 error[0] = "Некорректный уровень поддержания заряда";
                 return false;
             }
-            boolean sent = MainActivity.sendSaveChargeCommand(service, percent);
-            if (sent) {
-                // An explicit SREV selection supersedes forced EV, including the restore snapshot.
-                MainActivity.persistSavedToggle(service, "forcedEv", false);
-                ApplyEngine.noteVehicleMode("energy", "SREV");
-                MainActivity.persistSavedMode(service, "energy", "SREV");
-            }
-            return sent;
+            SaveChargeSequence.Result result = SaveChargeController.apply(service, percent, active);
+            boolean confirmed = result.outcome == SaveChargeSequence.Outcome.CONFIRMED;
+            if (!confirmed) error[0] = SaveChargeController.error(result, percent);
+            details.putBoolean("chargeTargetConfirmed", confirmed);
+            return confirmed;
         }
         if (action.startsWith("drive:") || action.startsWith("energy:") || action.startsWith("recycle:")) {
             int split = action.indexOf(':');

@@ -1,0 +1,58 @@
+{
+  "encoder.int8.onnx": {
+    "url": "https://huggingface.co/alphacep/vosk-model-ru/resolve/df6a54a4d8e5d43e82675e4f5dba2d507731a0d1/am-onnx/encoder.int8.onnx",
+    "sha256": "eb6c12fbad810d5bc3e427802e604604c69b5943a91feebc43424dd09d9ec407"
+  },
+  "decoder.int8.onnx": {
+    "url": "https://huggingface.co/alphacep/vosk-model-ru/resolve/df6a54a4d8e5d43e82675e4f5dba2d507731a0d1/am-onnx/decoder.int8.onnx",
+    "sha256": "d6cb1c78563388bcb7c8a654a768ac2a8518c22542c5b13999b46a08c2557c81"
+  },
+  "joiner.int8.onnx": {
+    "url": "https://huggingface.co/alphacep/vosk-model-ru/resolve/df6a54a4d8e5d43e82675e4f5dba2d507731a0d1/am-onnx/joiner.int8.onnx",
+    "sha256": "93f2e1d12b78d53e7802f1606488c14bb3d764b15fadf5ef6c022f6ba1fa40f7"
+  },
+  "tokens.txt": {
+    "url": "https://huggingface.co/alphacep/vosk-model-ru/resolve/df6a54a4d8e5d43e82675e4f5dba2d507731a0d1/lang/tokens.txt",
+    "sha256": "93bbbc0bae6b78c0bbb743d4aa9fded3bb5ff3aac5f0200e3a769a5a05e0fdf6"
+  },
+  "silero_vad.onnx": {
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+    "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
+  },
+  "sherpa-LICENSE": {
+    "url": "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.13.8/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "vosk-README.md": {
+    "url": "https://huggingface.co/alphacep/vosk-model-ru/resolve/df6a54a4d8e5d43e82675e4f5dba2d507731a0d1/README.md",
+    "sha256": "f0368da122cbb179949a01dbb2c1fbce258c37237f0c97af58c6a99d42f86763"
+  },
+  "sherpa.aar": {
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar",
+    "sha256": "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
+  },
+  "df.tar.gz": {
+    "url": "https://api.github.com/repos/Rikorose/DeepFilterNet/tarball/v0.5.6",
+    "sha256": "e4c0003fc792634145dd2cc68ecf205fbe6f185287d5d8505c121ca742ded248"
+  },
+  "bpe.vocab": {
+    "url": "https://huggingface.co/alphacep/vosk-model-ru/resolve/df6a54a4d8e5d43e82675e4f5dba2d507731a0d1/lang/unigram_500.vocab",
+    "sha256": "b159479dd209823a82698ea4092b2627272d96fbe616b91409ed02bc6cfb8df4"
+  },
+  "silero-LICENSE": {
+    "url": "https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/LICENSE",
+    "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b"
+  },
+  "onnxruntime-LICENSE": {
+    "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.23.2/LICENSE",
+    "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+  },
+  "tract-LICENSE-MIT": {
+    "url": "https://raw.githubusercontent.com/sonos/tract/v0.19.16/LICENSE-MIT",
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+  },
+  "tract-LICENSE-APACHE": {
+    "url": "https://raw.githubusercontent.com/sonos/tract/v0.19.16/LICENSE-APACHE",
+    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+  }
+}

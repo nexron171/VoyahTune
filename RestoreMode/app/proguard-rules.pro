@@ -28,7 +28,14 @@
 #-dontoptimize
 -dontwarn javax.lang.model.element.Modifier
 
-# Vosk and JNA bind native symbols reflectively.
--keep class org.vosk.** { *; }
+# JNA binds native symbols reflectively.
 -keep class com.sun.jna.** { *; }
 -dontwarn java.awt.**
+
+# sherpa-onnx JNI resolves Kotlin config fields and constructors by their original names.
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-keep interface ru.big.town.restoremode.VoiceNeuralFilter$* { *; }
+
+# AndroidJUnitRunner shares the app's Kotlin runtime; its entry points are not all
+# reachable from application code when the debug APK is shrunk independently.
+-keep class kotlin.** { *; }
