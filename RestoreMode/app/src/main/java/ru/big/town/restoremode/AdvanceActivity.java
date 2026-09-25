@@ -119,6 +119,7 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_GRANT_INSTALL      = 26;
     static final int MSG_CLOSE_ALL          = 27;
     static final int MSG_SET_THEME          = 28;
+    static final int MSG_APPLY_SUSPENSION_MAINTENANCE = 37;
     static final int MSG_APPLY_FORCED_EV    = 35;
     private static final String NATIVE_PACKAGE = "ru.big.town.anative";
 
@@ -201,6 +202,9 @@ public class AdvanceActivity extends AppCompatActivity {
                 if ("forcedEv".equals(key)) {
                     RadioGroup group = findViewById(R.id.forcedEvGroup);
                     if (group != null) group.check(value ? R.id.forcedEvOn : R.id.forcedEvOff);
+                } else if ("suspensionMaintenance".equals(key)) {
+                    Switch toggle = findViewById(R.id.switchSuspensionMaintenance);
+                    if (toggle != null) toggle.setChecked(value);
                 } else if ("disablePedestrianSound".equals(key)) {
                     RadioGroup group = findViewById(R.id.pedestrianSoundGroup);
                     if (group != null) group.check(value ? R.id.pedestrianSoundOn : R.id.pedestrianSoundOff);
@@ -492,6 +496,7 @@ public class AdvanceActivity extends AppCompatActivity {
         bindShowSwitch(R.id.switchShowBatteryHeat, "showBatteryHeat", true);
         bindShowSwitch(R.id.switchShowVoiceCommand, "showVoiceCommand", false);
         bindShowSwitch(R.id.switchShowForcedEv,   "showForcedEv", false);
+        bindShowSwitch(R.id.switchShowSuspensionMaintenance, "showSuspensionMaintenance", false);
         bindShowSwitch(R.id.switchShowLaunchAppsWidget, "showLaunchAppsWidget", false,
                 R.id.launchAppsSizeRow);
         bindTileSizeSpinners(R.id.launchAppsSettingWidth, R.id.launchAppsSettingHeight,
@@ -528,6 +533,7 @@ public class AdvanceActivity extends AppCompatActivity {
         initCheckBox34();
         initPedestrianSoundGroup();
         initForcedEvGroup();
+        initSuspensionMaintenance();
 
         // Автоматический прогрев батареи: при <10°C на улице Native включит прогрев. После
         // синхронного обновления in-memory prefs отправляем точное package-targeted событие;
@@ -2004,6 +2010,7 @@ public class AdvanceActivity extends AppCompatActivity {
             {"recycle:LOW,MEDIUM",       "Рекуперация: Низкая → Стандартная"},
             {"recycle:LOW,HIGH",         "Рекуперация: Низкая → Высокая"},
             {"recycle:MEDIUM,HIGH",      "Рекуперация: Стандартная → Высокая"},
+            {"toggle_suspension_maintenance", "Сервисный режим подвески: вкл/выкл"},
             {"toggle_forced_ev",         "Force EV: вкл/выкл"},
             {"toggle_pedestrian_sound",  "Звук пешеходов: вкл/выкл"},
             {"toggle_headlights",        "Фары: выкл/ближний"},
@@ -2312,6 +2319,22 @@ public class AdvanceActivity extends AppCompatActivity {
             boolean off = (checkedId == R.id.pedestrianSoundOn);
             prefs.edit().putBoolean("disablePedestrianSound", off).apply();
             Log.i("$$$ Advance pedestrian $$$", off ? "DISABLED (muted)" : "ENABLED");
+        });
+    }
+
+    /** Сохранение и немедленное применение сервисного режима подвески. */
+    private void initSuspensionMaintenance() {
+        Switch toggle = findViewById(R.id.switchSuspensionMaintenance);
+        toggle.setChecked(prefs.getBoolean("suspensionMaintenance", false));
+        toggle.setOnCheckedChangeListener((button, enabled) -> {
+            if (syncingSettingUi) return;
+            prefs.edit().putBoolean("suspensionMaintenance", enabled).apply();
+            if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
+                try {
+                    GlobalVars.serviceMessenger.send(Message.obtain(null,
+                            MSG_APPLY_SUSPENSION_MAINTENANCE, enabled ? 1 : 0, 0));
+                } catch (RemoteException e) { Log.w("VoyahSuspension", "Service unavailable", e); }
+            }
         });
     }
 

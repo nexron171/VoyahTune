@@ -455,6 +455,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             cycleMode(ctx, action.substring("drive:".length()), "driveMode", completion);
         } else if (action.startsWith("recycle:")) {
             cycleMode(ctx, action.substring("recycle:".length()), "recycle", completion);
+        } else if ("toggle_suspension_maintenance".equals(action)) {
+            toggleSetting(ctx, "suspensionMaintenance", completion);
         } else if ("toggle_forced_ev".equals(action)) {
             toggleSetting(ctx, "forcedEv", completion);
         } else if ("toggle_pedestrian_sound".equals(action)) {
@@ -603,6 +605,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             boolean sent;
             if ("forcedEv".equals(key)) {
                 sent = MainActivity.sendForcedEvCommand(next);
+            } else if ("suspensionMaintenance".equals(key)) {
+                sent = MainActivity.sendSuspensionMaintenanceCommand(app, next);
             } else if ("disablePedestrianSound".equals(key)) {
                 // В pref хранится инвертированная семантика: true = звук выключен.
                 sent = MainActivity.sendPedestrianSoundCommand(next);

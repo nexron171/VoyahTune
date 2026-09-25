@@ -161,6 +161,12 @@ final class VoiceCommandController {
             if (sent) { ApplyEngine.noteVehicleMode(key, mode); MainActivity.persistSavedMode(service, key, mode); }
             return sent;
         }
+        if ("suspension_maintenance:on".equals(action) || "suspension_maintenance:off".equals(action)) {
+            boolean enabled = action.endsWith(":on");
+            boolean sent = MainActivity.sendSuspensionMaintenanceCommand(service, enabled);
+            if (sent) MainActivity.persistSavedToggle(service, "suspensionMaintenance", enabled);
+            return sent;
+        }
         if (action.startsWith("forced_ev:") || "toggle_forced_ev".equals(action)) {
             boolean on = "toggle_forced_ev".equals(action) ? !MainActivity.currentSavedToggle(service, "forcedEv") : action.endsWith(":on");
             boolean sent = MainActivity.sendForcedEvCommand(on);

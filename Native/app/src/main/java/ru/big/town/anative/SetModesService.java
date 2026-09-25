@@ -61,6 +61,7 @@ public class SetModesService extends Service {
     static final int MSG_AUTO_LIGHT_DISABLE         = 11; // выключить автосвет
     static final int MSG_LEAVE_CAR                  = 20; // быстрая активация leave car / power hold
     static final int MSG_APPLY_PEDESTRIAN           = 21; // применить звук пешеходов (arg1: 1=заглушить)
+    static final int MSG_APPLY_SUSPENSION_MAINTENANCE = 37; // arg1: 1=вкл
     static final int MSG_APPLY_FORCED_EV           = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int MSG_REBOOT                     = 22; // перезагрузка системы (голова)
     static final int MSG_WASH_MODE                  = 23; // активация режима мойки
@@ -199,6 +200,15 @@ public class SetModesService extends Service {
                     final boolean pedestrianDisabled = msg.arg1 == 1;
                     ApplyEngine.postUserCommand("pedestrian sound",
                             () -> MainActivity.sendPedestrianSoundCommand(pedestrianDisabled));
+                    break;
+
+                case MSG_APPLY_SUSPENSION_MAINTENANCE:
+                    final boolean maintenance = msg.arg1 == 1;
+                    ApplyEngine.postUserCommand("suspension maintenance", () -> {
+                        if (MainActivity.sendSuspensionMaintenanceCommand(SetModesService.this, maintenance)) {
+                            MainActivity.persistSavedToggle(SetModesService.this, "suspensionMaintenance", maintenance);
+                        }
+                    });
                     break;
 
                 case MSG_APPLY_FORCED_EV:

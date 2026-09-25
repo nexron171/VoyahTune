@@ -29,6 +29,7 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  int lightSensorThresholdOff=5;
     private  boolean disablePedestrianSound=false;
     private  boolean forcedEv=false;
+    private boolean suspensionMaintenance=false;
     private  boolean debugMode=false;
     private  boolean wiperColdMode=false;
     private  String customCommandStarButton1="";
@@ -120,6 +121,7 @@ public class RestoreModeContentProvider extends ContentProvider {
         lightSensorThresholdOff = sharedPreferences.getInt("lightSensorThresholdOff", 5);
         disablePedestrianSound  = sharedPreferences.getBoolean("disablePedestrianSound", false);
         forcedEv                = sharedPreferences.getBoolean("forcedEv", false);
+        suspensionMaintenance = sharedPreferences.getBoolean("suspensionMaintenance", false);
         debugMode               = sharedPreferences.getBoolean("debugMode",              false);
         wiperColdMode           = sharedPreferences.getBoolean("wiperColdMode",          false);
         customCommandStarButton1 = sharedPreferences.getString("customCommandStarButton1", "");
@@ -179,6 +181,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "driveRememberLast",        // 29 — null/нет колонки трактуется Native как true
                 "energyRememberLast",       // 30 — null/нет колонки трактуется Native как true
                 "recycleRememberLast",      // 31 — null/нет колонки трактуется Native как true
+                "suspensionMaintenance",    // 32 — сервисный режим подвески
         });
 
         cursor.addRow(new Object[]{
@@ -210,6 +213,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 driveRememberLast ? 1 : 0,
                 energyRememberLast ? 1 : 0,
                 recycleRememberLast ? 1 : 0,
+                suspensionMaintenance ? 1 : 0,
         });
        return cursor;
 
@@ -236,7 +240,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 if (v != null && !v.isEmpty()) { e.putString(key, v); n++; Log.i("$$$", "provider UPDATE " + key + "=" + v); }
             }
         }
-        for (String key : new String[]{"forcedEv", "disablePedestrianSound"}) {
+        for (String key : new String[]{"forcedEv", "disablePedestrianSound", "suspensionMaintenance"}) {
             if (values.containsKey(key)) {
                 Boolean v = values.getAsBoolean(key);
                 if (v != null) { e.putBoolean(key, v); n++; Log.i("$$$", "provider UPDATE " + key + "=" + v); }

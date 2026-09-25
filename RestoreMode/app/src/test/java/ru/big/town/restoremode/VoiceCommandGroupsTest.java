@@ -37,7 +37,7 @@ public class VoiceCommandGroupsTest {
     @Test public void roofAndShadeAreWindowsButFuelAndChargeCapsAreCarSettings() {
         for (String action : new String[]{"windows:driver:open", "windows:vent", "sunroof:vent", "sunshade:close"})
             assertEquals(action, EnumSet.of(WINDOWS), VoiceCommandGroups.forAction(action));
-        for (String action : new String[]{"port_cap:fuel", "port_cap:charge", "fuel_charge:80", "drive:OUTING"})
+        for (String action : new String[]{"port_cap:fuel", "port_cap:charge", "fuel_charge:80", "drive:OUTING", "suspension_maintenance:on", "suspension_maintenance:off"})
             assertEquals(action, EnumSet.of(CAR), VoiceCommandGroups.forAction(action));
         for (String action : new String[]{"seat:passenger:massage:waves", "seat:driver:vent:3"})
             assertEquals(action, EnumSet.of(SEATS), VoiceCommandGroups.forAction(action));

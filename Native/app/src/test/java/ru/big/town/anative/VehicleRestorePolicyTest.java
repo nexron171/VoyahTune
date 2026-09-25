@@ -10,6 +10,13 @@ import java.util.Map;
 import org.junit.Test;
 
 public class VehicleRestorePolicyTest {
+    @Test public void suspensionUsesOemHintSwitchValuesNotStaleZeroOneConstants() {
+        assertEquals("ASC_MAINTAIN_SWITCH", VehicleRestorePolicy.SUSPENSION_MAINTENANCE);
+        assertEquals(711, VehicleRestorePolicy.SUSPENSION_MAINTENANCE_ID);
+        assertEquals(2, VehicleRestorePolicy.suspensionMaintenanceState(true));
+        assertEquals(1, VehicleRestorePolicy.suspensionMaintenanceState(false));
+    }
+
     @Test
     public void saveChargeMatchesOemSliderEncodingAndAlwaysUsesSrev() {
         assertEquals("SREV_SOC_SET", VehicleRestorePolicy.SAVE_CHARGE_LEVEL);

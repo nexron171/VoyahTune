@@ -25,7 +25,7 @@ final class VoiceCommandGroups {
             groups.add(Group.HEATING);
         } else if (action.startsWith("drive:") || action.startsWith("energy:")
                 || action.startsWith(VoiceFuelCommand.PREFIX) || action.startsWith("recycle:")
-                || action.startsWith("forced_ev:") || action.startsWith("pedestrian:")
+                || action.startsWith("suspension_maintenance:") || action.startsWith("forced_ev:") || action.startsWith("pedestrian:")
                 || action.startsWith("headlights:") || action.startsWith("auto_light:")
                 || action.startsWith("port_cap:") || action.equals("toggle_headlights")
                 || action.equals("toggle_headlights_auto") || action.equals("power_hold")

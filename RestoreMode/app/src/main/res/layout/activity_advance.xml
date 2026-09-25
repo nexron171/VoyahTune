@@ -482,6 +482,34 @@
 
             </LinearLayout>
 
+            <!-- Виджет сервисного режима подвески на главном (по умолчанию скрыт) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/suspension_maintenance_title"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowSuspensionMaintenance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
             <!-- Виджет быстрого запуска -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -1915,6 +1943,36 @@
                     android:track="@drawable/switch_track" />
 
             </LinearLayout>
+
+            <!-- Сервисный режим подвески -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="5dp"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/suspension_maintenance_title"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchSuspensionMaintenance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
 
         </LinearLayout>
     </ScrollView>

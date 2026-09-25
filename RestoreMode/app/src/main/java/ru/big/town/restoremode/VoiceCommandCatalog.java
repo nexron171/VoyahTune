@@ -56,7 +56,9 @@ final class VoiceCommandCatalog {
             if (word.equals("переключи") || word.equals("переключите")) word = "переключить";
             String verb = word.equals("переключить") ? "switch"
                     : Arrays.asList("включи", "включить", "включите", "установи", "поставь").contains(word) ? "on"
-                    : Arrays.asList("выключи", "выключить", "отключи").contains(word) ? "off" : null;
+                    : Arrays.asList("выключи", "выключить", "выключите", "отключи", "отключить", "отключите").contains(word) ? "off"
+                    : Arrays.asList("заблокировать", "заблокируй", "заблокируйте").contains(word) ? "lock"
+                    : Arrays.asList("разблокировать", "разблокируй", "разблокируйте").contains(word) ? "unlock" : null;
             if (verb != null) {
                 if (intent != null && !intent.equals(verb)) return null;
                 intent = verb;
@@ -126,6 +128,7 @@ final class VoiceCommandCatalog {
         mode(all, "recycle:MEDIUM", "Рекуперация: Стандартная", "стандартная рекуперация", "средняя рекуперация");
         mode(all, "recycle:HIGH", "Рекуперация: Высокая", "высокая рекуперация", "сильная рекуперация");
         binary(all, "forced_ev", "Принудительный электрорежим", "форсированный электро", "форс и ви", "форсированный электрорежим", "принудительный электрорежим", "форсед и ви");
+        addSuspensionMaintenance(all);
         binary(all, "pedestrian", "Звук предупреждения пешеходов", "звук пешеходов", "предупреждение пешеходов");
         binary(all, "headlights", "Ближний свет", "фары", "ближний свет");
         addVehicle(all, "headlights:auto", "Штатный свет: Авто", "автоматический свет", "фары авто", "включи авто свет");
@@ -173,6 +176,21 @@ final class VoiceCommandCatalog {
                     "переключи на режим " + name, "переключи на " + name + " режим");
         }
         addVehicle(all, action, title, phrases.toArray(new String[0]));
+    }
+
+    private static void addSuspensionMaintenance(List<Command> all) {
+        List<String> on = new ArrayList<>(), off = new ArrayList<>();
+        for (String name : new String[]{"сервисный режим подвески", "режим обслуживания подвески"}) {
+            Collections.addAll(on, "включи " + name, "включить " + name, "включите " + name);
+            Collections.addAll(off, "выключи " + name, "выключить " + name,
+                    "отключи " + name, "отключить " + name);
+        }
+        Collections.addAll(on, "заблокировать подвеску", "заблокируй подвеску",
+                "заблокируйте подвеску", "заблокировать подвеска");
+        Collections.addAll(off, "разблокировать подвеску", "разблокируй подвеску",
+                "разблокируйте подвеску", "разблокировать подвеска");
+        addVehicle(all, "suspension_maintenance:on", "Сервисный режим подвески: включить", on.toArray(new String[0]));
+        addVehicle(all, "suspension_maintenance:off", "Сервисный режим подвески: выключить", off.toArray(new String[0]));
     }
 
     private static void binary(List<Command> all, String action, String title, String... names) {

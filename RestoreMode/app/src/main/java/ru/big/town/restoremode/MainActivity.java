@@ -81,6 +81,7 @@ public class MainActivity extends AppCompatActivity {
     static final int MSG_APPLY_PEDESTRIAN   = 21;
     static final int MSG_WASH_MODE          = 23;
     static final int MSG_SPLIT_LAUNCH_VD    = 34; // single → physical WM-clamped task; pair → VD split
+    static final int MSG_APPLY_SUSPENSION_MAINTENANCE = 37;
     static final int MSG_APPLY_FORCED_EV    = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int REQUEST_CODE           = 1;
     static final String ACTION_REQUEST_POWER_HOLD_STATUS =
@@ -120,7 +121,7 @@ public class MainActivity extends AppCompatActivity {
             DateTimeFormatter.ofPattern("dd.MM.yyyy, EEEE", Locale.forLanguageTag("ru"));
     private TextView tripDate, tripTimer, tripStatus;
     // Карточки главного экрана, скрываемые настройками раздела «Главный экран»
-    private View tripCard, cardPowerHold, cardWashMode, cardAutoLight, cardPedestrian, cardForcedEv;
+    private View tripCard, cardPowerHold, cardWashMode, cardAutoLight, cardPedestrian, cardForcedEv, cardSuspensionMaintenance;
     // Native-виджеты
     private View launchAppsWidget;
     private boolean tripActive = false, tripInDrive = false;
@@ -128,9 +129,9 @@ public class MainActivity extends AppCompatActivity {
     private String lastTripsJson = "[]"; // снимок лога для экрана истории
 
     // Тоггл-карточки на главном (автосвет / звук пешеходов): нейтральные, состояние — капсула-тег
-    private TextView autoLightBadge, pedestrianBadge, forcedEvBadge;
+    private TextView autoLightBadge, pedestrianBadge, forcedEvBadge, suspensionMaintenanceBadge;
     private TextView powerHoldBadge;
-    private boolean autoLightOn, pedestrianOn, forcedEvOn;
+    private boolean autoLightOn, pedestrianOn, forcedEvOn, suspensionMaintenanceOn;
 
     // -------- Виджет «Прогрев батареи» --------
     static final String ACTION_BATTERY_HEAT_UPDATE   = "ru.big.town.anative.BATTERY_HEAT_UPDATE";
@@ -296,6 +297,7 @@ public class MainActivity extends AppCompatActivity {
             boolean value = intent.getBooleanExtra("value", false);
             editor.putBoolean(key, value).apply();
             if ("forcedEv".equals(key)) forcedEvOn = value;
+            else if ("suspensionMaintenance".equals(key)) suspensionMaintenanceOn = value;
             else if ("disablePedestrianSound".equals(key)) pedestrianOn = !value;
             else return;
             updateToggleVisuals();
@@ -661,6 +663,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Клик по карточке «Forced EV» (вкл = удерживаем электротягу). */
+    public void onCardSuspensionMaintenance(View v) {
+        suspensionMaintenanceOn = !sharedPreferences.getBoolean("suspensionMaintenance", false);
+        editor.putBoolean("suspensionMaintenance", suspensionMaintenanceOn).apply();
+        sendMessageToService(MSG_APPLY_SUSPENSION_MAINTENANCE, suspensionMaintenanceOn ? 1 : 0);
+        updateToggleVisuals();
+    }
+
     public void onCardForcedEv(View v) {
         forcedEvOn = !forcedEvOn;
         editor.putBoolean("forcedEv", forcedEvOn).apply();
@@ -674,6 +683,7 @@ public class MainActivity extends AppCompatActivity {
         autoLightOn  = sharedPreferences.getBoolean("autoLight", false);
         pedestrianOn = !sharedPreferences.getBoolean("disablePedestrianSound", false);
         forcedEvOn   = sharedPreferences.getBoolean("forcedEv", false);
+        suspensionMaintenanceOn = sharedPreferences.getBoolean("suspensionMaintenance", false);
         updateToggleVisuals();
     }
 
@@ -682,6 +692,7 @@ public class MainActivity extends AppCompatActivity {
         applyBadge(autoLightBadge, autoLightOn);
         applyBadge(pedestrianBadge, pedestrianOn);
         applyBadge(forcedEvBadge, forcedEvOn);
+        applyBadge(suspensionMaintenanceBadge, suspensionMaintenanceOn);
     }
 
     private void applyBadge(TextView badge, boolean on) {
@@ -1089,6 +1100,7 @@ public class MainActivity extends AppCompatActivity {
             case "cardWashMode":     return sharedPreferences.getBoolean("showWashMode", true);
             case "cardAutoLight":    return sharedPreferences.getBoolean("showAutoLight", true);
             case "cardPedestrian":   return sharedPreferences.getBoolean("showPedestrian", true);
+            case "cardSuspensionMaintenance": return sharedPreferences.getBoolean("showSuspensionMaintenance", false);
             case "cardForcedEv":     return sharedPreferences.getBoolean("showForcedEv", false);
             case "cardVoiceCommand": return sharedPreferences.getBoolean("showVoiceCommand", false);
             case "cardBatteryHeat":  return sharedPreferences.getBoolean("showBatteryHeat", true);
@@ -1106,6 +1118,9 @@ public class MainActivity extends AppCompatActivity {
         setCardVisible(cardAutoLight,  "showAutoLight");
         setCardVisible(cardPedestrian, "showPedestrian");
         // Forced EV по умолчанию СКРЫТ — в отличие от остальных карточек (у них дефолт true).
+        if (cardSuspensionMaintenance != null) {
+            cardSuspensionMaintenance.setVisibility(sharedPreferences.getBoolean("showSuspensionMaintenance", false) ? View.VISIBLE : View.GONE);
+        }
         if (cardForcedEv != null) {
             cardForcedEv.setVisibility(sharedPreferences.getBoolean("showForcedEv", false) ? View.VISIBLE : View.GONE);
         }
@@ -1300,6 +1315,7 @@ public class MainActivity extends AppCompatActivity {
                     case "cardAndroidSettings": widgetView = inf.inflate(R.layout.tile_android_settings, splitTilesGrid, false); break;
                     case "cardAutoLight": widgetView = inf.inflate(R.layout.tile_auto_light, splitTilesGrid, false); break;
                     case "cardPedestrian": widgetView = inf.inflate(R.layout.tile_pedestrian, splitTilesGrid, false); break;
+                    case "cardSuspensionMaintenance": widgetView = inf.inflate(R.layout.tile_suspension_maintenance, splitTilesGrid, false); break;
                     case "cardForcedEv": widgetView = inf.inflate(R.layout.tile_forced_ev, splitTilesGrid, false); break;
                     case "cardBatteryHeat": widgetView = inf.inflate(R.layout.tile_battery_heat, splitTilesGrid, false); break;
                     case "launchAppsWidget": widgetView = inf.inflate(R.layout.tile_launch_apps, splitTilesGrid, false); break;
@@ -1335,6 +1351,10 @@ public class MainActivity extends AppCompatActivity {
                 } else if (tile.id.equals("cardPedestrian")) {
                     cardPedestrian = widgetView;
                     pedestrianBadge = widgetView.findViewById(R.id.pedestrianBadge);
+                    refreshToggles();
+                } else if (tile.id.equals("cardSuspensionMaintenance")) {
+                    cardSuspensionMaintenance = widgetView;
+                    suspensionMaintenanceBadge = widgetView.findViewById(R.id.suspensionMaintenanceBadge);
                     refreshToggles();
                 } else if (tile.id.equals("cardForcedEv")) {
                     cardForcedEv   = widgetView;

@@ -40,7 +40,7 @@ final class VoiceFuzzyMatcher {
                 intent = action;
             } else {
                 // Misspelt on/off/switch must never be corrected into a different operation.
-                if (word.contains("ключ") || word.startsWith("вкл") || word.startsWith("выкл")
+                if (word.contains("ключ") || word.contains("блок") || word.startsWith("вкл") || word.startsWith("выкл")
                         || word.startsWith("откл") || word.startsWith("перекл")) return null;
                 words.add(word);
             }
@@ -51,8 +51,10 @@ final class VoiceFuzzyMatcher {
 
     private static String action(String word) {
         if (Arrays.asList("включи", "включить", "включите", "установи", "поставь").contains(word)) return "on";
-        if (Arrays.asList("выключи", "выключить", "отключи").contains(word)) return "off";
+        if (Arrays.asList("выключи", "выключить", "выключите", "отключи", "отключить", "отключите").contains(word)) return "off";
         if (Arrays.asList("переключи", "переключить", "переключите").contains(word)) return "switch";
+        if (Arrays.asList("заблокировать", "заблокируй", "заблокируйте").contains(word)) return "lock";
+        if (Arrays.asList("разблокировать", "разблокируй", "разблокируйте").contains(word)) return "unlock";
         if (Arrays.asList("открой", "открыть", "откройте").contains(word)) return "open";
         if (Arrays.asList("закрой", "закрыть").contains(word)) return "close";
         return null;

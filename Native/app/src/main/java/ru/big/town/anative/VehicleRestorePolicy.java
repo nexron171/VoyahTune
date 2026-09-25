@@ -35,6 +35,14 @@ final class VehicleRestorePolicy {
     static final int PEDESTRIAN_SOUND_DISABLED = 1;
     static final int PEDESTRIAN_SOUND_ENABLED = 2;
 
+    // VehicleSettings HintSwitch: checked=2, unchecked=1 (not DFVehicleState's stale 0/1 constants).
+    static final String SUSPENSION_MAINTENANCE = "ASC_MAINTAIN_SWITCH";
+    static final int SUSPENSION_MAINTENANCE_ID = 711;
+
+    static int suspensionMaintenanceState(boolean enabled) {
+        return enabled ? 2 : 1;
+    }
+
     private VehicleRestorePolicy() {
     }
 
