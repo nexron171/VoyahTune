@@ -124,7 +124,8 @@ for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_
 echo   Old agent, markers, and keys removed. The new Apollo hook stays off until explicit opt-in.
 
 echo === Frida infrastructure ^(steering wheel + VirtualDisplay + boot-scoped Apollo^) ===
-adb.exe shell "mkdir -p /data/local/bin"
+rem Agents run as the target UID; fix parent traversal and clear inherited special bits.
+adb.exe shell "mkdir -p /data/local/bin /data/local/tmp && chown 0:0 /data/local /data/local/bin && chown 2000:2000 /data/local/tmp && chmod 00751 /data/local && chmod 00755 /data/local/bin && chmod 00771 /data/local/tmp && test x$(stat -c %%a:%%u:%%g /data/local) = x751:0:0 && test x$(stat -c %%a:%%u:%%g /data/local/bin) = x755:0:0 && test x$(stat -c %%a:%%u:%%g /data/local/tmp) = x771:2000:2000"
 if errorlevel 1 exit /b 1
 call :install_required_data_file load.bin /data/local/bin/load.bin 755
 if errorlevel 1 exit /b 1

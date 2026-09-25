@@ -13,7 +13,7 @@ class InstallerTests(unittest.TestCase):
   self.fixture=self.bundle/'adb/adb';shutil.copyfile(ROOT/'Installer/tests/fake_adb.py',self.fixture);self.fixture.chmod(0o755)
   # Entry name selects the host protocol. The same fixture also implements Android commands.
   self.fixture.rename(self.bundle/'adb/fake-adb');self.fixture.symlink_to('fake-adb')
-  for name in ['getprop','setprop','id','pm','cmd','dumpsys','settings','restorecon','chown','mount','am','pidof','sha256sum','pkill','ps','grep']:
+  for name in ['getprop','setprop','id','pm','cmd','dumpsys','settings','restorecon','chown','stat','mount','am','pidof','sha256sum','pkill','ps','grep']:
    p=self.base/'bin'/name;p.parent.mkdir(exist_ok=True);p.symlink_to(self.bundle/'adb/fake-adb')
   (self.bundle/'host-tools.json').write_text(json.dumps({'schema':1,'files':[{'path':'adb/adb','sha256':hashlib.sha256(self.fixture.read_bytes()).hexdigest()}]}))
   self.device=self.base/'device'

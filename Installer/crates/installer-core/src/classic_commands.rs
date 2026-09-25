@@ -57,7 +57,19 @@ pub const BOOT_READY: &str = r###"if [ -x /system/etc/init.voyahtune.load.sh ] &
 pub const BOOT_REMOVE_OLD: &str = r###"rm -f /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.setenforce.rc && sync"###;
 // Packaging/installer/full/install.sh:616
 pub const APOLLO_FILES: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"###;
-// Packaging/installer/full/install.sh:648
+// Packaging/installer/full/install.sh:629
+pub const PREPARE_DATA_DIRECTORIES: &str = r###"
+mkdir -p /data/local/bin /data/local/tmp &&
+chown 0:0 /data/local /data/local/bin &&
+chown 2000:2000 /data/local/tmp &&
+chmod 00751 /data/local &&
+chmod 00755 /data/local/bin &&
+chmod 00771 /data/local/tmp &&
+test x$(stat -c %a:%u:%g /data/local) = x751:0:0 &&
+test x$(stat -c %a:%u:%g /data/local/bin) = x755:0:0 &&
+test x$(stat -c %a:%u:%g /data/local/tmp) = x771:2000:2000
+"###;
+// Packaging/installer/full/install.sh:660
 pub const APP_CLIENT_MIGRATION: &str = r###"
     fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null)
     old_ifs=$IFS
@@ -77,12 +89,12 @@ pub const APP_CLIENT_MIGRATION: &str = r###"
     rm -f /data/local/bin/fullscreen_client.js \
         /data/local/bin/fullscreen_client.js.voyahtune.new \
         /data/local/tmp/voyahtune_fullscreen_client.* \
-        /data/local/tmp/voyahtune_app_client.* || exit 1
+        /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* || exit 1
     [ -s /data/local/bin/app_client.js ] || exit 1
     [ ! -e /data/local/bin/fullscreen_client.js ] || exit 1
     [ ! -e /data/local/bin/fullscreen_client.js.voyahtune.new ] || exit 1
     ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
-    ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
+    ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
 "###;
 // Packaging/installer/light/install.sh:40
 pub const STOP_LIGHT: &str = r###"
@@ -231,7 +243,7 @@ pub const LIGHT_TEARDOWN: &str = r###"
             /data/local/tmp/voyah_apollo.txt \
             /data/local/tmp/voyah_apollo.txt.1 \
             /data/local/tmp/voyah_apollo.txt.try || exit 1
-        rm -f /data/local/tmp/voyahtune_app_client.* \
+        rm -f /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* \
             /data/local/tmp/voyahtune_fullscreen_client.* || exit 1
         rm -rf /data/local/tmp/voyah_load.lock || exit 1
         for removed_path in \
@@ -253,7 +265,7 @@ pub const LIGHT_TEARDOWN: &str = r###"
                 /data/local/tmp/voyahtune-hook-status.v1; do
             [ ! -e "$removed_path" ] && [ ! -L "$removed_path" ] || exit 1
         done
-        ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
+        ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
         ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
         sync
     "###;
@@ -295,7 +307,7 @@ pub const REMOVE_EARLY_APOLLO: &str =
 // Packaging/installer/full/remove.sh:274
 pub const REMOVE_EARLY_KEYBOARD: &str = r###"rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"###;
 // Packaging/installer/full/remove.sh:275
-pub const REMOVE_EARLY_FULLSCREEN: &str = r###"rm -f /data/local/bin/app_client.js /data/local/bin/app_client.js.voyahtune.new /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_app_client.* /data/local/tmp/voyahtune_fullscreen_client.*"###;
+pub const REMOVE_EARLY_FULLSCREEN: &str = r###"rm -f /data/local/bin/app_client.js /data/local/bin/app_client.js.voyahtune.new /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* /data/local/tmp/voyahtune_fullscreen_client.*"###;
 // Packaging/installer/full/remove.sh:276
 pub const REMOVE_EARLY_MANIFEST: &str = r###"rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1 /data/local/tmp/voyahtune-hook-status.v1.*.new"###;
 // Packaging/installer/full/remove.sh:281
@@ -473,4 +485,4 @@ pub const REMOVE_PACKAGES: &str = r###"
 // Packaging/installer/full/remove.sh:483
 pub const REMOVE_SYSTEM: &str = r###"rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new /system/priv-app/.Native.apk.voyahtune.new && rm -rf /system/priv-app/Native && test ! -e /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml && test ! -e /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new && test ! -e /system/priv-app/.Native.apk.voyahtune.new && test ! -e /system/priv-app/Native"###;
 // Packaging/installer/full/remove.sh:431
-pub const REMOVE_CLIENT_CHECK: &str = r###"test ! -e /data/local/bin/app_client.js && test ! -e /data/local/bin/app_client.js.voyahtune.new && test ! -e /data/local/bin/fullscreen_client.js && test ! -e /data/local/bin/fullscreen_client.js.voyahtune.new && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1"###;
+pub const REMOVE_CLIENT_CHECK: &str = r###"test ! -e /data/local/bin/app_client.js && test ! -e /data/local/bin/app_client.js.voyahtune.new && test ! -e /data/local/bin/fullscreen_client.js && test ! -e /data/local/bin/fullscreen_client.js.voyahtune.new && ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1"###;

@@ -659,7 +659,7 @@ impl Engine {
         result
     }
     fn full_files(&self) -> Result<()> {
-        self.shell("mkdir -p /data/local/bin\n")?;
+        self.shell(c::PREPARE_DATA_DIRECTORIES)?;
         for name in payload::FULL_NAMES
             .iter()
             .filter(|s| !s.starts_with("voyahtune.load."))

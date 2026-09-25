@@ -2,7 +2,7 @@
 """Differential tests: run the original host script and its Rust port on isolated cars.
 The production GUI never executes these host scripts. They are the test oracle.
 """
-import hashlib,json,os,shutil,subprocess,unittest
+import hashlib,json,os,re,shutil,subprocess,unittest
 from pathlib import Path
 from integration import InstallerTests,ROOT,PAYLOAD
 class ClassicPortTests(unittest.TestCase):
@@ -37,6 +37,44 @@ class ClassicPortTests(unittest.TestCase):
   _,_,old,new=self.compare('full')
   self.assertEqual(old.returncode,0,old.stdout+old.stderr)
   self.assertEqual(new.returncode,0,new.stdout)
+ def test_full_repairs_restrictive_directory_permissions(self):
+  def seed(f):
+   for path in ['data/local','data/local/bin','data/local/tmp']:
+    (f.device/path).chmod(0o2700)
+   config=f.device/'data/local/bin/unrelated-private-file';config.write_text('keep');config.chmod(0o600)
+  reference,port,old,new=self.compare('full',seed=seed)
+  self.assertEqual(old.returncode,0,old.stdout+old.stderr)
+  for f in [reference,port]:
+   for path,mode,owner in [('data/local',0o751,'0:0'),('data/local/bin',0o755,'0:0'),('data/local/tmp',0o771,'2000:2000')]:
+    self.assertEqual((f.device/path).stat().st_mode & 0o7777,mode)
+    self.assertEqual(f.read_state()['owners'][path],owner)
+   self.assertEqual((f.device/'data/local/bin/unrelated-private-file').stat().st_mode & 0o7777,0o600)
+ def test_boot_and_windows_use_same_directory_preparation(self):
+  rust=(ROOT/'Installer/crates/installer-core/src/classic_commands.rs').read_text()
+  command=re.search(r'pub const PREPARE_DATA_DIRECTORIES: &str = r###"(.*?)"###;',rust,re.S)[1]
+  boot=(ROOT/'Packaging/system/voyahtune.load.sh').read_text()
+  function=re.search(r'prepare_data_directories\(\) \{(.*?)\n}',boot,re.S)[1]
+  windows=(ROOT/'Packaging/installer/full/install.bat').read_text()
+  bat=next(line[len('adb.exe shell "'):-1].replace('%%','%') for line in windows.splitlines() if line.startswith('adb.exe shell "mkdir -p /data/local/bin /data/local/tmp'))
+  normalize=lambda s:' '.join(s.split())
+  self.assertEqual(normalize(command),normalize(function))
+  self.assertEqual(normalize(command),normalize(bat))
+  f=self.fixture()
+  # Run the boot function through the fake Android shell, including a second, idempotent pass.
+  for path in ['data/local','data/local/bin','data/local/tmp']:(f.device/path).chmod(0o2700)
+  for _ in range(2):
+   result=subprocess.run([str(f.fixture),'shell','sh','-s'],input='prepare_data_directories() {'+function+'\n}\nprepare_data_directories\n',env=f.env,text=True,capture_output=True)
+   self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+  self.assertEqual((f.device/'data/local/bin').stat().st_mode & 0o7777,0o755)
+  # A successful chmod exit code is insufficient if the resulting mode/owner is wrong.
+  result=subprocess.run([str(f.fixture),'shell','sh','-s'],input='stat() { echo 2700:0:0; }\n'+command,env=f.env,text=True,capture_output=True)
+  self.assertNotEqual(result.returncode,0)
+ def test_full_directory_preparation_failure_stops_before_push(self):
+  reference,port,old,new=self.compare('full',{'failShell':'chmod 00755 /data/local/bin'})
+  self.assertNotEqual(old.returncode,0)
+  for f in [reference,port]:
+   self.assertFalse((f.device/'data/local/bin/load.bin').exists())
+   self.assertFalse(any(c['args']==['reboot'] for c in f.calls()))
  def seed_client_migration(self,f):
   for path in ['data/local/bin/fullscreen_client.js','data/local/bin/fullscreen_client.js.voyahtune.new','data/local/tmp/voyahtune_fullscreen_client.old','data/local/tmp/voyahtune_app_client.old']:
    (f.device/path).write_text('legacy client')

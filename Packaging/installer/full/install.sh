@@ -624,8 +624,20 @@ echo "  Старый agent, маркеры и ключи удалены; нов�
 # ВАЖНО: всё в /data/local/bin доступно загрузочному RC-сервису.
 # /sdcard монтируется позже, поэтому load.bin ТАМ держать нельзя (не запустится на буте).
 echo "=== Frida-инфраструктура (руль + VirtualDisplay + boot-scoped Apollo) ==="
-if ! adb shell "mkdir -p /data/local/bin"; then
-    echo "!!! Не удалось подготовить /data/local/bin — установка прервана."
+# Frida agents use the target process UID: readable files also need traversable parents.
+# Five octal digits explicitly clear inherited setgid/sticky bits on directories.
+if ! adb shell '
+mkdir -p /data/local/bin /data/local/tmp &&
+chown 0:0 /data/local /data/local/bin &&
+chown 2000:2000 /data/local/tmp &&
+chmod 00751 /data/local &&
+chmod 00755 /data/local/bin &&
+chmod 00771 /data/local/tmp &&
+test x$(stat -c %a:%u:%g /data/local) = x751:0:0 &&
+test x$(stat -c %a:%u:%g /data/local/bin) = x755:0:0 &&
+test x$(stat -c %a:%u:%g /data/local/tmp) = x771:2000:2000
+'; then
+    echo "!!! Не удалось установить/проверить права /data/local, bin и tmp — установка прервана."
     exit 1
 fi
 install_required_data_file load.bin /data/local/bin/load.bin 755 || exit 1
