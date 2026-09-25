@@ -110,7 +110,7 @@ public class VoiceActivity extends AppCompatActivity {
         clearRecording();
         testOnly = getIntent().getBooleanExtra(TEST_ONLY, false);
         session = UUID.randomUUID().toString(); ended = false; submitted = false; interrupted = false;
-        status.setText("Подготовка распознавания…"); transcript.setText(""); orb.state(false, false);
+        status.setText("Подготовка помощника…"); transcript.setText(""); orb.state(false, false);
         details.setText("");
         details.setVisibility(testOnly ? View.VISIBLE : View.GONE);
         if (isAnimationPreview()) {
@@ -127,7 +127,7 @@ public class VoiceActivity extends AppCompatActivity {
             fail("Разрешите микрофон в разделе «Голосовое управление»"); return;
         }
         commands = VoiceCommands.load(this);
-        ui.postDelayed(() -> fail("Не удалось подготовить распознавание"), 30000);
+        ui.postDelayed(() -> fail("Подготовка помощника занимает слишком много времени"), 90000);
     }
     /** Only the debug-source-set preview activity overrides this; release has no demo entry. */
     protected boolean isAnimationPreview() { return false; }
@@ -153,15 +153,23 @@ public class VoiceActivity extends AppCompatActivity {
     private void beginRecognition() {
         final String token = session;
         if (!testOnly && !send("begin", null, null)) { fail("Сервис автомобиля недоступен"); return; }
-        focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                .setOnAudioFocusChangeListener(change -> { if (change < 0 && token.equals(session)) fail("Микрофон занят другим приложением"); }, ui).build();
-        if (audio.requestAudioFocus(focus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            fail("Аудиоканал занят. Завершите звонок и повторите команду."); return;
-        }
         recognizer.start(this, new VoiceRecognizer.Listener() {
             private boolean active() { return token.equals(session) && !ended && !isFinishing(); }
+            @Override public void ready(Runnable beginCapture) {
+                if (!active() || interrupted || !getLifecycle().getCurrentState().isAtLeast(
+                        androidx.lifecycle.Lifecycle.State.STARTED)) {
+                    recognizer.cancel();
+                    return;
+                }
+                focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                        .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                        .setOnAudioFocusChangeListener(change -> { if (change < 0 && token.equals(session)) fail("Микрофон занят другим приложением"); }, ui).build();
+                if (audio.requestAudioFocus(focus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                    fail("Аудиоканал занят. Завершите звонок и повторите команду."); return;
+                }
+                beginCapture.run();
+            }
             @Override public void listening() {
                 if (!active()) return;
                 ui.removeCallbacksAndMessages(null);
@@ -174,6 +182,7 @@ public class VoiceActivity extends AppCompatActivity {
             }
             @Override public void processing() {
                 if (!active()) return;
+                releaseFocus(); // Recording has ended; decoding needs no audio channel.
                 status.setText("Распознаю…"); orb.state(false, false);
                 ui.removeCallbacksAndMessages(null);
                 ui.postDelayed(() -> fail("Распознавание занимает слишком много времени"), 15000);

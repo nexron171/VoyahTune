@@ -46,6 +46,7 @@ final class VoiceSettingsPage {
                 : ""), 20, 0xffaaaaaa));
         content.addView(text("Распознавание работает без интернета. Произносите одну команду за раз. Не обязательно произносить фразу целиком: достаточно ключевых слов, например «спорт» или «фары авто». Слова «выключи» и «переключи» определяют действие — их пропускать нельзя. Можно менять порядок слов и добавлять «пожалуйста». Помощник учитывает окончания и небольшие ошибки в названиях автомобильных команд. Неизвестная или неоднозначная фраза не выполняется.", 20, 0xffaaaaaa));
         content.addView(text("Zipformer2 распознаёт фразу после паузы. DeepFilterNet3 снижает шум микрофона; силу обработки можно изменить ниже. Распознавание и шумоподавление работают без интернета.", 20, 0xffaaaaaa));
+        content.addView(text("При включённом помощнике VoyahTune заранее готовит модели и сохраняет их в памяти для быстрого вызова. Микрофон включается только на время распознавания на экране помощника. Отключение помощника освобождает модели.", 20, 0xffaaaaaa));
         deepFilterStrength = new LinearLayout(activity);
         deepFilterStrength.setOrientation(LinearLayout.VERTICAL);
         deepFilterStrength.setBackgroundResource(R.drawable.layout_category_bg);
@@ -174,6 +175,7 @@ final class VoiceSettingsPage {
     private int dp(int value) { return Math.round(value * activity.getResources().getDisplayMetrics().density); }
     private void saveEnabled(boolean value) {
         prefs.edit().putBoolean(VoiceCommands.ENABLED, value).apply();
+        VoiceWarmupService.sync(activity);
         updating = true; enabled.setChecked(value); updating = false;
         tryVoice.setEnabled(value); tryVoice.setAlpha(value ? 1 : .45f);
         SplitConfigSync.pushSteering(activity, prefs); changed.run();

@@ -15,6 +15,35 @@ import static org.junit.Assert.*;
 public class VoicePipelineNativeTest {
     private static final int[] STRENGTHS = {0, 6, 30};
 
+    @Test public void warmedModelsSupportSuccessiveSessionsWithoutVadCarryover() throws Exception {
+        Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        try (VoiceEngine resident = new VoiceEngine(target, 6)) {
+            for (int session = 0; session < 2; session++) {
+                VoiceNeuralFilter filter = resident.prepareFilter(6);
+                try (VoiceModels.Session engine = VoiceModels.open(target)) {
+                    byte[] audio = fixture("command");
+                    VoiceDecimator decimator = new VoiceDecimator();
+                    float[] input = new float[480], clean = new float[480], samples = new float[160];
+                    for (int offset = 0; offset + 960 <= audio.length; offset += 960) {
+                        for (int i = 0; i < 480; i++) input[i] = (short) ((audio[offset + 2*i] & 255)
+                                | (audio[offset + 2*i + 1] << 8)) / 32768f;
+                        filter.process(input, clean); decimator.process(clean, samples);
+                        if (engine.accept(samples)) break;
+                    }
+                    String text = engine.finish();
+                    VoiceCommandCatalog.Command command = VoiceCommandCatalog.match(VoiceCommands.load(target), text);
+                    assertNotNull(text, command);
+                    assertEquals(VoiceCommandCatalog.match(VoiceCommands.load(target), "включи обогрев руля").action, command.action);
+                }
+                // The previous VAD segment must not survive Session.close/open.
+                try (VoiceModels.Session silence = VoiceModels.open(target)) {
+                    for (int frame = 0; frame < 100; frame++) silence.accept(new float[160]);
+                    assertEquals("", silence.finish());
+                }
+            }
+        }
+    }
+
     @Test public void recognizesRussianCommandAtEachStrength() throws Exception {
         Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
         byte[] audio = fixture("command");

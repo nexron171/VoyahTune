@@ -8,6 +8,8 @@ import java.util.Arrays;
 /** Worker-confined model cache; only one ASR model stays resident. */
 final class VoiceModels {
     private static OfflineRecognizer zipformer;
+    private static Vad detector;
+    private static boolean warmed;
 
     interface Session extends AutoCloseable {
         boolean accept(float[] samples) throws Exception;
@@ -16,7 +18,7 @@ final class VoiceModels {
         @Override void close();
     }
 
-    static Session open(Context context) throws Exception {
+    private static void load(Context context) throws Exception {
         if (zipformer == null) {
             File root = unpack(context, "zipformer-ru-0.54-int8");
             OfflineRecognizerConfig config = new OfflineRecognizerConfig();
@@ -36,19 +38,51 @@ final class VoiceModels {
             model.getTransducer().setJoiner(new File(root, "joiner.int8.onnx").getAbsolutePath());
             zipformer = new OfflineRecognizer(null, config);
         }
-        VadModelConfig vadConfig = new VadModelConfig();
-        vadConfig.setNumThreads(1);
-        vadConfig.setSampleRate(16000);
-        vadConfig.getSileroVadModelConfig().setModel("silero_vad.onnx");
-        vadConfig.getSileroVadModelConfig().setMinSilenceDuration(.7f);
-        vadConfig.getSileroVadModelConfig().setMinSpeechDuration(.15f);
-        vadConfig.getSileroVadModelConfig().setMaxSpeechDuration(10);
+        if (detector == null) {
+            VadModelConfig vadConfig = new VadModelConfig();
+            vadConfig.setNumThreads(1);
+            vadConfig.setSampleRate(16000);
+            vadConfig.getSileroVadModelConfig().setModel("silero_vad.onnx");
+            vadConfig.getSileroVadModelConfig().setMinSilenceDuration(.7f);
+            vadConfig.getSileroVadModelConfig().setMinSpeechDuration(.15f);
+            vadConfig.getSileroVadModelConfig().setMaxSpeechDuration(10);
+            detector = new Vad(context.getAssets(), vadConfig);
+        }
+    }
+
+    static void warmUp(Context context) throws Exception {
+        load(context);
+        if (warmed) return;
+        // Decode synthetic silence directly: VAD would normally skip this inference.
+        OfflineStream stream = zipformer.createStream();
+        try {
+            stream.acceptWaveform(new float[16000], 16000);
+            zipformer.decode(stream);
+            zipformer.getResult(stream);
+            detector.acceptWaveform(new float[16000]);
+        } finally {
+            stream.release();
+            resetDetector();
+        }
+        warmed = true;
+    }
+
+    static Session open(Context context) throws Exception {
+        load(context);
+        resetDetector();
         String hotwords = VoiceHotwords.fromCommands(VoiceCommands.load(context));
-        return new ZipformerSession(zipformer, new Vad(context.getAssets(), vadConfig), hotwords);
+        return new ZipformerSession(zipformer, detector, hotwords);
+    }
+
+    private static void resetDetector() {
+        detector.clear();
+        detector.reset();
     }
 
     static void release() {
+        if (detector != null) { detector.release(); detector = null; }
         if (zipformer != null) { zipformer.release(); zipformer = null; }
+        warmed = false;
     }
 
     private static final class ZipformerSession implements Session {
@@ -81,7 +115,7 @@ final class VoiceModels {
                 return recognizer.getResult(stream).getText().trim();
             } finally { stream.release(); }
         }
-        public void close() { vad.release(); }
+        public void close() { vad.clear(); vad.reset(); }
     }
 
     private static File unpack(Context context, String asset) throws IOException {
