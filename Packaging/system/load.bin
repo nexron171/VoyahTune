@@ -459,10 +459,10 @@ read_md_attempt_record() {
     [ -n "$MD_RECORD_RAW" ] || return 1
     case "$MD_RECORD_RAW" in
         *'|'*'|'*)
-            MD_RECORD_ID=${MD_RECORD_RAW%%|*}
-            MD_RECORD_REST=${MD_RECORD_RAW#*|}
-            MD_RECORD_COUNT=${MD_RECORD_REST%%|*}
-            MD_RECORD_NEXT=${MD_RECORD_REST#*|}
+            MD_RECORD_ID=${MD_RECORD_RAW%%\|*}
+            MD_RECORD_REST=${MD_RECORD_RAW#*\|}
+            MD_RECORD_COUNT=${MD_RECORD_REST%%\|*}
+            MD_RECORD_NEXT=${MD_RECORD_REST#*\|}
             case "$MD_RECORD_NEXT" in *'|'*) return 1 ;; esac
             ;;
         v2:*)
@@ -689,9 +689,9 @@ inject_keymanager_bg() {
         KM_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
 
         if [ -L "$SWK_KM_BUSY" ]; then
-            KM_BUSY_TARGET=${KM_BUSY_RECORD%%|*}
-            KM_BUSY_REST=${KM_BUSY_RECORD#*|}
-            KM_BUSY_STARTED=${KM_BUSY_REST%%|*}
+            KM_BUSY_TARGET=${KM_BUSY_RECORD%%\|*}
+            KM_BUSY_REST=${KM_BUSY_RECORD#*\|}
+            KM_BUSY_STARTED=${KM_BUSY_REST%%\|*}
             case "$KM_NOW" in
                 ''|*[!0-9]*) KM_BUSY_AGE=$SWK_KM_BUSY_TTL ;;
                 *)
@@ -811,12 +811,12 @@ prepare_app_client_attempt() {
     [ "$(cat "$FC_PREP_BLOCKED" 2>/dev/null)" != "$FC_PREP_BOOT" ] || return 1
     FC_PREP_RAPID=0
     FC_PREP_VALUE=$(cat "$FC_PREP_HISTORY" 2>/dev/null)
-    FC_PREP_OLD_BOOT=${FC_PREP_VALUE%%|*}
-    FC_PREP_REST=${FC_PREP_VALUE#*|}
-    FC_PREP_OLD_TIME=${FC_PREP_REST%%|*}
-    FC_PREP_REST=${FC_PREP_REST#*|}
-    FC_PREP_OLD_RAPID=${FC_PREP_REST%%|*}
-    FC_PREP_OLD_ID=${FC_PREP_REST#*|}
+    FC_PREP_OLD_BOOT=${FC_PREP_VALUE%%\|*}
+    FC_PREP_REST=${FC_PREP_VALUE#*\|}
+    FC_PREP_OLD_TIME=${FC_PREP_REST%%\|*}
+    FC_PREP_REST=${FC_PREP_REST#*\|}
+    FC_PREP_OLD_RAPID=${FC_PREP_REST%%\|*}
+    FC_PREP_OLD_ID=${FC_PREP_REST#*\|}
     if [ -n "$FC_PREP_VALUE" ] && [ "$FC_PREP_OLD_BOOT" = "$FC_PREP_BOOT" ] \
             && [ "$FC_PREP_OLD_ID" != "$FC_PREP_ID" ]; then
         case "$FC_PREP_OLD_TIME:$FC_PREP_OLD_RAPID" in
@@ -864,9 +864,9 @@ inject_app_client_bg() {
     FC_BUSY_NOW=$(uptime_seconds)
     FC_BUSY_RECORD=$(readlink "$APP_CLIENT_BUSY" 2>/dev/null)
     if [ -L "$APP_CLIENT_BUSY" ]; then
-        FC_BUSY_PID=${FC_BUSY_RECORD%%|*}
-        FC_BUSY_REST=${FC_BUSY_RECORD#*|}
-        FC_BUSY_STARTED=${FC_BUSY_REST%%|*}
+        FC_BUSY_PID=${FC_BUSY_RECORD%%\|*}
+        FC_BUSY_REST=${FC_BUSY_RECORD#*\|}
+        FC_BUSY_STARTED=${FC_BUSY_REST%%\|*}
         case "$FC_BUSY_NOW:$FC_BUSY_STARTED" in
             *[!0-9:]*|:*|*:) FC_BUSY_AGE=$APP_CLIENT_BUSY_TTL ;;
             *) FC_BUSY_AGE=$((FC_BUSY_NOW - FC_BUSY_STARTED)) ;;
@@ -1067,7 +1067,7 @@ steering_cycle() {
     fi
     STATUS_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
     if [ -n "$KMP_ID" ] && [ "$SWK_STATE" != active ] \
-            && [ "${STATUS_BUSY_RECORD%%|*}" = "$KMP" ]; then
+            && [ "${STATUS_BUSY_RECORD%%\|*}" = "$KMP" ]; then
         SWK_STATE=injecting
         # Agent readiness, not the injector's eventual exit, controls the visible ready state.
         if [ "$(cat "$SWK_KM_ATTEMPT" 2>/dev/null)" = "$KMP_ID" ] \
@@ -1231,6 +1231,8 @@ APOLLO_STATE=unknown
 KEYBOARD_EN_STATE=unknown
 KEYBOARD_RU_STATE=unknown
 
+# Android mksh treats an unquoted | in parameter-removal patterns as alternation. All record
+# delimiters below and in injector helpers MUST use \|, otherwise a live owner parses as empty.
 # Worker ownership is bound to boot + PID + start time, including across supervisor restarts.
 # These tokens identify shell workers, whereas process_identity also checks the Android package.
 worker_token() {
@@ -1391,7 +1393,7 @@ supervise_workers() {
     for LANE in $WORKER_LANES; do
         CHILD_TOKEN=
         for CHILD_RECORD in ${WORKER_CHILDREN:-}; do
-            [ "${CHILD_RECORD%%|*}" != "$LANE" ] || CHILD_TOKEN=${CHILD_RECORD#*|}
+            [ "${CHILD_RECORD%%\|*}" != "$LANE" ] || CHILD_TOKEN=${CHILD_RECORD#*\|}
         done
         if ! worker_token_is_live "$CHILD_TOKEN"; then
             [ -z "$CHILD_TOKEN" ] || wait "${CHILD_TOKEN%%:*}" 2>/dev/null
