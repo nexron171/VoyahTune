@@ -187,7 +187,7 @@ remove_full_hook_runtime_for_light() {
             /data/local/tmp/voyah_apollo.txt \
             /data/local/tmp/voyah_apollo.txt.1 \
             /data/local/tmp/voyah_apollo.txt.try || exit 1
-        rm -f /data/local/tmp/voyahtune_app_client.* \
+        rm -f /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* \
             /data/local/tmp/voyahtune_fullscreen_client.* || exit 1
         rm -rf /data/local/tmp/voyah_load.lock || exit 1
         for removed_path in \
@@ -209,7 +209,7 @@ remove_full_hook_runtime_for_light() {
                 /data/local/tmp/voyahtune-hook-status.v1; do
             [ ! -e "$removed_path" ] && [ ! -L "$removed_path" ] || exit 1
         done
-        ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
+        ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
         ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
         sync
     '

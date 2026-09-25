@@ -339,7 +339,9 @@ Java.perform(function () {
             return readerOnKeyEvent.call(this, ke);     // штатное действие кнопки
         };
         installMediaProxyReceiver(0);
-        Log.i(TAG, "[swk] keymanager hooks installed: STAR DVR VOICE PHONE media=3/4/6 (LONG_MS=" + LONG_MS + ")");
+        var ready = "[swk] keymanager hooks installed: STAR DVR VOICE PHONE media=3/4/6 (LONG_MS=" + LONG_MS + ")";
+        Log.i(TAG, ready);
+        console.log(ready); // Loader can observe readiness before frida-inject -e returns.
     } catch (e) {
         // Если класс не найден (скрипт заинжектили не в keymanager) — просто ничего не делаем.
         Log.e(TAG, "[swk] KeyManagerReader not found (not keymanager?): " + e);

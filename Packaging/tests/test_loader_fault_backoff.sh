@@ -51,16 +51,12 @@ for REQUIRED in \
         'MD_RETRY_CORE_SECONDS=2' \
         'MD_RETRY_SHORT_SECONDS=20' \
         'MD_RETRY_LONG_SECONDS=60' \
-        'MD_BOOTSTRAP_WAIT_SECONDS=15' \
-        'MD_PRIORITY_DEFER_CYCLES=1' \
         'reserve_md_injection_attempt "$MD_INJECT_ID" "$MD_ATTEMPT"' \
         'grep -qF "$MD_FAILURE_MARKER " "$MD_TRY"' \
         'grep -qF "$MD_READY_MARKER " "$MD_TRY"' \
         'record_md_injection_success "$MD_INJECT_ID" "$MD_ATTEMPT"' \
         'load_md_runtime_hook_state "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"' \
         'inject_multidisplay "$MDP" "$MDP_ID"' \
-        'bootstrap_multidisplay' \
-        '[ "$MD_LAST_FAILURE" != ready_marker_missing ]' \
         '[ "$STATUS_BOOT_COMPLETED" = 1 ] || return'; do
     require_fixed "$LOAD_BIN" "$REQUIRED"
 done
@@ -152,7 +148,7 @@ apollo_frida_line=$(printf '%s\n' "$apollo_function" \
 
 km_function=$(awk '
     /^inject_keymanager_bg\(\) \{/ { capture = 1 }
-    /^watchdog_cycle\(\) \{/ { capture = 0 }
+    /^steering_cycle\(\) \{/ { capture = 0 }
     capture { print }
 ' "$LOAD_BIN")
 [ -n "$km_function" ] || fail "cannot extract keymanager injector"
@@ -186,46 +182,12 @@ md_generic_failure_line=$(printf '%s\n' "$md_function" \
 [ "$md_agent_failure_line" -lt "$md_generic_failure_line" ] \
     || fail "agent core failure is hidden by generic 'class not found' parsing"
 
-watchdog_function=$(awk '
-    /^watchdog_cycle\(\) \{/ { capture = 1 }
-    /^SS=; SS_ID=/ { capture = 0 }
-    capture { print }
-' "$LOAD_BIN")
-watchdog_md_line=$(printf '%s\n' "$watchdog_function" \
-    | grep -nF 'MDP=$(pidof com.qinggan.systemservice)' | head -n1 | cut -d: -f1)
-watchdog_vd_line=$(printf '%s\n' "$watchdog_function" \
-    | grep -nF 'SS=$(pidof system_server)' | head -n1 | cut -d: -f1)
-watchdog_launcher_line=$(printf '%s\n' "$watchdog_function" \
-    | grep -nF 'LP=$(pidof com.qinggan.app.launcher)' | head -n1 | cut -d: -f1)
-watchdog_defer_line=$(printf '%s\n' "$watchdog_function" \
-    | grep -nF 'MD_PRIORITY_DEFER_CYCLES=$((MD_PRIORITY_DEFER_CYCLES - 1))' \
-    | head -n1 | cut -d: -f1)
-[ "$watchdog_md_line" -lt "$watchdog_vd_line" ] \
-    && [ "$watchdog_md_line" -lt "$watchdog_launcher_line" ] \
-    || fail "slow VD/launcher injection can still precede multidisplay"
-[ "$watchdog_launcher_line" -lt "$watchdog_vd_line" ] \
-    || fail "launcher dock can still wait behind the potentially slow VD attach"
-[ "$watchdog_defer_line" -lt "$watchdog_vd_line" ] \
-    || fail "absent early systemservice immediately falls into a blocking VD attach"
-bootstrap_call_line=$(grep -n '^bootstrap_multidisplay$' "$LOAD_BIN" | cut -d: -f1)
-watchdog_loop_line=$(grep -n '^while \[ 1 \]; do$' "$LOAD_BIN" | tail -n1 | cut -d: -f1)
-[ "$bootstrap_call_line" -lt "$watchdog_loop_line" ] \
-    || fail "bounded multidisplay discovery is not run before the general watchdog"
-md_bootstrap_function=$(awk '
-    /^bootstrap_multidisplay\(\) \{/ { capture = 1 }
-    /^# `timeout` uses/ { capture = 0 }
-    capture { print }
-' "$LOAD_BIN")
-launcher_probe_line=$(printf '%s\n' "$md_bootstrap_function" \
-    | grep -nF 'bootstrap_launcher_dock || true' | head -n1 | cut -d: -f1)
-bootstrap_sleep_line=$(printf '%s\n' "$md_bootstrap_function" \
-    | grep -nF 'sleep 1' | head -n1 | cut -d: -f1)
-[ -n "$launcher_probe_line" ] && [ "$launcher_probe_line" -lt "$bootstrap_sleep_line" ] \
-    || fail "cold-boot launcher is not probed on every bounded multidisplay wait cycle"
-grep -Fq 'WATCHDOG_CYCLE_SECONDS=5' "$LOAD_BIN" \
-    || fail "launcher restart discovery is slower than the 5-second wake target"
-grep -Fq 'sleep "$WATCHDOG_CYCLE_SECONDS"' "$LOAD_BIN" \
-    || fail "watchdog does not use its bounded cycle setting"
+# Scheduling is exercised behaviorally by test_parallel_hook_loader.py. This contract retains
+# early init and exact-identity/backoff guarantees without enforcing a serial hook queue.
+require_fixed "$LOAD_BIN" 'WATCHDOG_CYCLE_SECONDS=1'
+require_fixed "$LOAD_BIN" 'WORKER_LANES="steering multidisplay launcher vd apollo keyboard apps status"'
+require_fixed "$LOAD_BIN" 'supervise_workers'
+require_fixed "$LOAD_BIN" 'acquire_worker_lock'
 
 # Execute the real reservation helper: same identity is permanently rejected; a new exact identity
 # replaces the latch and is allowed once.

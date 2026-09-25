@@ -1,8 +1,8 @@
 #!/system/bin/sh
 # Самодостаточный Frida-оркестратор Open Voyah (не зависит от сторонних обвязок).
-# Держит хуки через ранний launcher pass + watchdog-цикл:
-#   1) launcherdock.js       в процессе лаунчера — немедленная отрисовка дока на cold boot;
-#   2) multidisplay.js       в com.qinggan.systemservice — server whitelist до общего watchdog;
+# Независимые supervised workers: ожидание одной инъекции не блокирует остальные.
+#   1) launcherdock.js       в процессе лаунчера — отрисовка дока сразу после появления лаунчера;
+#   2) multidisplay.js       в com.qinggan.systemservice — ранний server whitelist без ожидания других хуков;
 #   3) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
 #   4) steeringwheelkeys.js  в com.qinggan.keymanager.service — кнопки руля (3090, 173, медиа);
 #   5) apollo_tech.js        в com.qinggan.app.vehiclesetting — по сохранённой настройке VoyahTune.
@@ -17,7 +17,7 @@
 #     частичного core и точный ready-marker. Для него разрешены максимум три persistent попытки с
 #     backoff. Это лечит раннюю загрузку classloader/потерянный stdout, не создавая вечный цикл.
 #   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление). Запускаем одну
-#     фоновую попытку на PID под timeout; успех подтверждаем exit-code либо точным лог-маркером агента.
+#     фоновую попытку на PID под timeout; успех подтверждаем только точным ready-маркером агента.
 
 LOG_TAG="vt_load_bin"
 
@@ -62,56 +62,59 @@ previous_v2_load_owner() {
     fi
 }
 
-LEGACY_LOAD_OWNER=$(legacy_load_owner)
-other_loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
-PREVIOUS_V2_LOAD_OWNER=$(previous_v2_load_owner)
-other_loader_pid_is_live "$PREVIOUS_V2_LOAD_OWNER" && exit 0
+acquire_load_lock() {
+    LEGACY_LOAD_OWNER=$(legacy_load_owner)
+    other_loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
+    PREVIOUS_V2_LOAD_OWNER=$(previous_v2_load_owner)
+    other_loader_pid_is_live "$PREVIOUS_V2_LOAD_OWNER" && exit 0
 
-LOAD_LOCK_ATTEMPTS=0
-LOAD_LOCK_MAX_ATTEMPTS=30
-while [ 1 ]; do
-    if ln -s "$$" "$LOAD_LOCK" 2>/dev/null; then
-        LOAD_LOCK_OWNER=$$
-        break
-    fi
+    LOAD_LOCK_ATTEMPTS=0
+    LOAD_LOCK_MAX_ATTEMPTS=30
+    while [ 1 ]; do
+        if ln -s "$$" "$LOAD_LOCK" 2>/dev/null; then
+            LOAD_LOCK_OWNER=$$
+            break
+        fi
 
-    LOAD_LOCK_OWNER=$(readlink "$LOAD_LOCK" 2>/dev/null)
-    other_loader_pid_is_live "$LOAD_LOCK_OWNER" && exit 0
+        LOAD_LOCK_OWNER=$(readlink "$LOAD_LOCK" 2>/dev/null)
+        other_loader_pid_is_live "$LOAD_LOCK_OWNER" && exit 0
 
-    # Remove only the stale owner we inspected; if another loader won the race,
-    # its different PID target is left intact.
-    if [ -L "$LOAD_LOCK" ]; then
-        [ "$(readlink "$LOAD_LOCK" 2>/dev/null)" = "$LOAD_LOCK_OWNER" ] \
-            && rm -f "$LOAD_LOCK"
-    elif [ -e "$LOAD_LOCK" ]; then
-        # Миграция с legacy regular-file lock.
-        rm -f "$LOAD_LOCK"
-    fi
-    LOAD_LOCK_ATTEMPTS=$((LOAD_LOCK_ATTEMPTS + 1))
-    if [ "$LOAD_LOCK_ATTEMPTS" -ge "$LOAD_LOCK_MAX_ATTEMPTS" ]; then
-        log -p e -t vt_load_bin \
-            "owner lock unavailable after ${LOAD_LOCK_ATTEMPTS}s; stop without spinning"
-        exit 1
-    fi
-    sleep 1
-done
+        # Remove only the stale owner we inspected; if another loader won the race,
+        # its different PID target is left intact.
+        if [ -L "$LOAD_LOCK" ]; then
+            [ "$(readlink "$LOAD_LOCK" 2>/dev/null)" = "$LOAD_LOCK_OWNER" ] \
+                && rm -f "$LOAD_LOCK"
+        elif [ -e "$LOAD_LOCK" ]; then
+            # Миграция с legacy regular-file lock.
+            rm -f "$LOAD_LOCK"
+        fi
+        LOAD_LOCK_ATTEMPTS=$((LOAD_LOCK_ATTEMPTS + 1))
+        if [ "$LOAD_LOCK_ATTEMPTS" -ge "$LOAD_LOCK_MAX_ATTEMPTS" ]; then
+            log -p e -t vt_load_bin \
+                "owner lock unavailable after ${LOAD_LOCK_ATTEMPTS}s; stop without spinning"
+            exit 1
+        fi
+        sleep 1
+    done
 
-cleanup_load_lock() {
-    [ "$(readlink "$LOAD_LOCK" 2>/dev/null)" = "$$" ] && rm -f "$LOAD_LOCK"
+    cleanup_load_lock() {
+        [ "$(readlink "$LOAD_LOCK" 2>/dev/null)" = "$$" ] && rm -f "$LOAD_LOCK"
+    }
+
+    # У trapped signal default termination заменяется handler'ом, поэтому handler обязан вызвать exit.
+    trap 'cleanup_load_lock' 0
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    # An old loader could have acquired the legacy directory during an in-place update.
+    # Recheck after winning v2; EXIT cleanup releases only our own v2 symlink.
+    LEGACY_LOAD_OWNER=$(legacy_load_owner)
+    other_loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
+    PREVIOUS_V2_LOAD_OWNER=$(previous_v2_load_owner)
+    other_loader_pid_is_live "$PREVIOUS_V2_LOAD_OWNER" && exit 0
+
 }
-
-# У trapped signal default termination заменяется handler'ом, поэтому handler обязан вызвать exit.
-trap 'cleanup_load_lock' 0
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-# An old loader could have acquired the legacy directory during an in-place update.
-# Recheck after winning v2; EXIT cleanup releases only our own v2 symlink.
-LEGACY_LOAD_OWNER=$(legacy_load_owner)
-other_loader_pid_is_live "$LEGACY_LOAD_OWNER" && exit 0
-PREVIOUS_V2_LOAD_OWNER=$(previous_v2_load_owner)
-other_loader_pid_is_live "$PREVIOUS_V2_LOAD_OWNER" && exit 0
 
 FI=/data/local/bin/frida-inject
 HOOK_STATUS_FILE=/data/local/tmp/voyahtune-hook-status.v1
@@ -137,9 +140,10 @@ MD_MAX_ATTEMPTS=3
 MD_RETRY_CORE_SECONDS=2
 MD_RETRY_SHORT_SECONDS=20
 MD_RETRY_LONG_SECONDS=60
-MD_BOOTSTRAP_WAIT_SECONDS=15
-MD_PRIORITY_DEFER_CYCLES=1
-WATCHDOG_CYCLE_SECONDS=5
+WATCHDOG_CYCLE_SECONDS=1
+OPTIONAL_CYCLE_SECONDS=5
+WORKER_PREFIX=/data/local/tmp/voyahtune_worker
+WORKER_LANES="steering multidisplay launcher vd apollo keyboard apps status"
 APOLLO_MARK=/data/local/tmp/voyahtune_apollo.pid
 APOLLO_ATTEMPT=/data/local/tmp/voyahtune_apollo.attempt
 APOLLO_LOG=/data/local/tmp/voyahtune_apollo.txt
@@ -196,7 +200,7 @@ load_runtime_hook_state() {
 
 publish_hook_status() {
     STATUS_LOADER_STATE=$1
-    STATUS_LOADER_PID=$$
+    STATUS_LOADER_PID=${SUPERVISOR_PID:-$$}
     [ "$STATUS_LOADER_STATE" != stopped ] || STATUS_LOADER_PID=0
     STATUS_VD=$VD_STATE
     STATUS_SWK=$SWK_STATE
@@ -337,32 +341,6 @@ inject_ret() {
     fi
     logi "inject OK pid=$1 $2"
     return 0
-}
-
-# Cold-boot fast path: launcher обычно уже создан к запуску class late_start, тогда как Qinggan
-# systemservice ещё может отсутствовать все bounded 15 секунд. Один exact-identity attach здесь
-# позволяет сразу нарисовать compact dock. Никакого ожидания launcher PID нет: если он ещё не создан,
-# обычный MD-first watchdog подхватит его позже. Запуск приложений этот pass не инициирует.
-bootstrap_launcher_dock() {
-    LP=$(pidof com.qinggan.app.launcher 2>/dev/null)
-    LP=${LP%% *}
-    LP_ID=$(process_identity "$LP" com.qinggan.app.launcher 2>/dev/null) || LP_ID=
-    [ -n "$LP_ID" ] || return 1
-    load_runtime_hook_state "$LP_ID" "$LNCH_MARK" "$LNCH_ATTEMPT"
-    LNCH_STATE=$RUNTIME_STATE
-    [ "$LNCH_STATE" = waiting ] || {
-        [ "$LNCH_STATE" = active ]
-        return
-    }
-    if inject_ret "$LP" "$LNCH" /data/local/tmp/voyahtune_lnch.txt \
-            "$LNCH_MARK" "$LNCH_ATTEMPT" "$LP_ID" com.qinggan.app.launcher; then
-        LNCH_STATE=active
-        logi "launcher early bootstrap active pid=$LP"
-        return 0
-    else
-        LNCH_STATE=failed
-        return 1
-    fi
 }
 
 # VehicleSetting может удержать eternalized Frida session после того, как обвязка timeout завершила
@@ -681,57 +659,6 @@ inject_multidisplay() {
     return 0
 }
 
-# During late_start, give Qinggan systemservice a short bounded discovery window and perform the
-# first verified server-hook attempt before the general watchdog/VD attach. The cold-boot launcher
-# one-shot is the deliberate latency exception and never launches an application. An explicit core
-# rollback or missing stdout marker is safe to retry after 2s: the former removed partial hooks, the
-# latter is protected by the process sentinel. Exactly one such retry runs here; all later retries
-# remain in the regular bounded state.
-bootstrap_multidisplay() {
-    MD_BOOTSTRAP_ELAPSED=0
-    MDP=
-    MDP_ID=
-    while [ "$MD_BOOTSTRAP_ELAPSED" -lt "$MD_BOOTSTRAP_WAIT_SECONDS" ]; do
-        # Launcher appears around 10s on the live H97C, while Qinggan systemservice may take 30s+.
-        # Reuse this already-bounded loop so dock injection happens on the first visible identity.
-        bootstrap_launcher_dock || true
-        MDP=$(pidof com.qinggan.systemservice 2>/dev/null)
-        MDP=${MDP%% *}
-        MDP_ID=$(process_identity "$MDP" com.qinggan.systemservice 2>/dev/null) || MDP_ID=
-        [ -z "$MDP_ID" ] || break
-        sleep 1
-        MD_BOOTSTRAP_ELAPSED=$((MD_BOOTSTRAP_ELAPSED + 1))
-    done
-    [ -n "$MDP_ID" ] || {
-        logi "multidisplay bootstrap target absent after ${MD_BOOTSTRAP_ELAPSED}s; defer to watchdog"
-        return
-    }
-
-    load_md_runtime_hook_state "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
-    MD_STATE=$RUNTIME_STATE
-    [ "$MD_STATE" = waiting ] || return
-    inject_multidisplay "$MDP" "$MDP_ID" && {
-        MD_STATE=active
-        return
-    }
-
-    if [ "$MD_LAST_FAILURE" != agent_core_failure ] \
-            && [ "$MD_LAST_FAILURE" != ready_marker_missing ]; then
-        return
-    fi
-    sleep "$MD_RETRY_CORE_SECONDS"
-    MD_BOOTSTRAP_RETRY_PID=$(pidof com.qinggan.systemservice 2>/dev/null)
-    MD_BOOTSTRAP_RETRY_PID=${MD_BOOTSTRAP_RETRY_PID%% *}
-    MD_BOOTSTRAP_RETRY_ID=$(process_identity "$MD_BOOTSTRAP_RETRY_PID" \
-        com.qinggan.systemservice 2>/dev/null) || MD_BOOTSTRAP_RETRY_ID=
-    [ "$MD_BOOTSTRAP_RETRY_ID" = "$MDP_ID" ] || return
-    load_md_runtime_hook_state "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
-    [ "$RUNTIME_STATE" = waiting ] || return
-    if inject_multidisplay "$MDP" "$MDP_ID"; then
-        MD_STATE=active
-    fi
-}
-
 # `timeout` uses a clock that may pause in suspend on some Toybox builds, while /proc/uptime can
 # advance across suspend. Before expiring a TTL record, verify that its actual injector child is
 # gone; otherwise a long sleep could create a second injection while the first still has time left.
@@ -812,18 +739,23 @@ inject_keymanager_bg() {
         [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" = "$KM_RECORD" ] && rm -f "$SWK_KM_BUSY"
         return 0
     fi
+    # Clear the previous identity's ready marker before publishing a new background attempt.
+    KM_TRY="/data/local/tmp/voyahtune_swk.try"
+    : > "$KM_TRY"
     logi "inject steeringwheelkeys -> keymanager $KM_TARGET_PID (eternalize,one-shot)"
     (
         # Не наследуем loader traps: worker живёт не дольше timeout+KILL и сам чистит busy.
         trap - 0 HUP INT TERM
-        KM_TRY="/data/local/tmp/voyahtune_swk.try"
-        : > "$KM_TRY"
+        KM_ID_BEFORE=$(process_identity "$KM_TARGET_PID" com.qinggan.keymanager.service 2>/dev/null) \
+            || KM_ID_BEFORE=
+        if [ "$KM_ID_BEFORE" != "$KM_TARGET_ID" ]; then
+            [ "$(readlink "$SWK_KM_BUSY" 2>/dev/null)" != "$KM_RECORD" ] || rm -f "$SWK_KM_BUSY"
+            exit 1
+        fi
         timeout -k 5 30 "$FI" -p "$KM_TARGET_PID" -s "$SWK" -e > "$KM_TRY" 2>&1
         KM_RC=$?
         cat "$KM_TRY" >> /data/local/tmp/voyahtune_swk.txt
-        if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' "$KM_TRY"; then
-            loge "inject FAIL keymanager pid=$KM_TARGET_PID rc=$KM_RC (latched; no retry)"
-        elif [ "$KM_RC" -eq 0 ] || grep -qF '[swk] keymanager hooks installed:' "$KM_TRY"; then
+        if grep -qF '[swk] keymanager hooks installed:' "$KM_TRY"; then
             KM_ID_AFTER=$(process_identity "$KM_TARGET_PID" com.qinggan.keymanager.service 2>/dev/null) \
                 || KM_ID_AFTER=
             if [ "$KM_ID_AFTER" = "$KM_TARGET_ID" ]; then
@@ -847,8 +779,8 @@ inject_keymanager_bg() {
     ) &
 }
 
-# The per-app agent is intentionally lower priority than every core hook. Injection runs in one
-# global background worker, so a slow third-party process can never hold up dock/VD/steering status.
+# The optional per-app lane keeps one global background injector. A slow third-party process
+# can never hold up dock/VD/steering discovery or status.
 # Both the attempt and success markers are bound to exact boot+pid+start-time identity.
 app_client_inject_is_live() {
     # Inspect the bounded cmdline set instead of relying on the kernel's truncated process name.
@@ -1022,7 +954,7 @@ inject_app_client_bg() {
 }
 
 discover_app_client() {
-    # SettingsProvider is outside this process; keep both Binder reads bounded on the main cycle.
+    # SettingsProvider is outside this process; keep both Binder reads bounded within this optional lane.
     # DPI alone may request this agent only for the three exact MapKit packages below. Other apps
     # keep the server-side density override without acquiring an unnecessary client hook.
     FC_FULLSCREEN_LIST=$(timeout -k 1 1 settings get global "$APP_CLIENT_FULLSCREEN_SETTING" \
@@ -1050,6 +982,15 @@ discover_app_client() {
     for FC_PACKAGE in $FC_LIST; do
         IFS=$FC_SAVED_IFS
         FC_PACKAGE=$(printf '%s' "$FC_PACKAGE" | tr -d '[:space:]')
+        # Core OEM targets have dedicated workers. Optional app geometry must not attach another
+        # agent to them concurrently (the supported client scope is third-party applications).
+        case "$FC_PACKAGE" in
+            com.qinggan.keymanager.service|com.qinggan.systemservice|com.qinggan.app.launcher|\
+            com.qinggan.app.vehiclesetting|com.qinggan.app.qgime)
+                IFS=,
+                continue
+                ;;
+        esac
         case "$FC_PACKAGE" in ''|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue ;; esac
         FC_REQUIRE_MAPKIT=0
         case "$FC_PACKAGE" in
@@ -1115,15 +1056,37 @@ discover_app_client() {
     IFS=$FC_SAVED_IFS
 }
 
-watchdog_cycle() {
-    # 1) Сначала server whitelist: никакой потенциально 30-секундный attach не должен позволить
-    #    клиентам MultiDisplayManager закэшировать прежний false до установки этого hook.
+steering_cycle() {
+    KMP=$(pidof com.qinggan.keymanager.service 2>/dev/null)
+    KMP=${KMP%% *}
+    KMP_ID=$(process_identity "$KMP" com.qinggan.keymanager.service 2>/dev/null) || KMP_ID=
+    load_runtime_hook_state "$KMP_ID" "$SWK_KM_MARK" "$SWK_KM_ATTEMPT"
+    SWK_STATE=$RUNTIME_STATE
+    if [ -n "$KMP_ID" ] && [ "$SWK_STATE" = waiting ]; then
+        inject_keymanager_bg "$KMP" "$KMP_ID"
+    fi
+    STATUS_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
+    if [ -n "$KMP_ID" ] && [ "$SWK_STATE" != active ] \
+            && [ "${STATUS_BUSY_RECORD%%|*}" = "$KMP" ]; then
+        SWK_STATE=injecting
+        # Agent readiness, not the injector's eventual exit, controls the visible ready state.
+        if [ "$(cat "$SWK_KM_ATTEMPT" 2>/dev/null)" = "$KMP_ID" ] \
+                && grep -qF '[swk] keymanager hooks installed:' /data/local/tmp/voyahtune_swk.try \
+                    2>/dev/null; then
+            SWK_STATE=active
+        fi
+    fi
+    write_worker_state "$SWK_STATE" "$KMP" "$KMP_ID"
+}
+
+multidisplay_cycle() {
     MDP=$(pidof com.qinggan.systemservice)
     MDP=${MDP%% *}
     MDP_ID=$(process_identity "$MDP" com.qinggan.systemservice 2>/dev/null) || MDP_ID=
     load_md_runtime_hook_state "$MDP_ID" "$MD_MARK" "$MD_ATTEMPT"
     MD_STATE=$RUNTIME_STATE
     if [ -n "$MDP_ID" ] && [ "$MD_STATE" = waiting ]; then
+        write_worker_state injecting "$MDP" "$MDP_ID"
         if inject_multidisplay "$MDP" "$MDP_ID"; then
             MD_STATE=active
         else
@@ -1131,25 +1094,17 @@ watchdog_cycle() {
             MD_STATE=$RUNTIME_STATE
         fi
     fi
-    # If late_start won the race before Qinggan spawned systemservice (or a clean core retry is due),
-    # yield one complete short cycle instead of immediately blocking in launcher/VD attach.
-    # The counter makes this startup priority bounded even on firmware without this target.
-    if [ "$MD_STATE" != active ] && [ "$MD_STATE" != failed ] \
-            && [ "$MD_PRIORITY_DEFER_CYCLES" -gt 0 ]; then
-        MD_PRIORITY_DEFER_CYCLES=$((MD_PRIORITY_DEFER_CYCLES - 1))
-        publish_hook_status running
-        return
-    fi
-    MD_PRIORITY_DEFER_CYCLES=0
+    write_worker_state "$MD_STATE" "$MDP" "$MDP_ID"
+}
 
-    # 2) Переопределение дока — сразу после whitelist, до потенциально долгого system_server attach.
-    #    По -p pid; промах лачится для exact identity и не повторяется циклом.
+launcher_cycle() {
     LP=$(pidof com.qinggan.app.launcher)
     LP=${LP%% *}
     LP_ID=$(process_identity "$LP" com.qinggan.app.launcher 2>/dev/null) || LP_ID=
     load_runtime_hook_state "$LP_ID" "$LNCH_MARK" "$LNCH_ATTEMPT"
     LNCH_STATE=$RUNTIME_STATE
     if [ -n "$LP_ID" ] && [ "$LNCH_STATE" = waiting ]; then
+        write_worker_state injecting "$LP" "$LP_ID"
         if inject_ret "$LP" "$LNCH" /data/local/tmp/voyahtune_lnch.txt \
                 "$LNCH_MARK" "$LNCH_ATTEMPT" "$LP_ID" com.qinggan.app.launcher; then
             LNCH_STATE=active
@@ -1158,13 +1113,17 @@ watchdog_cycle() {
         fi
     fi
 
-    # 3) VD-хук + freeform в system_server (возвращает управление → verify-before-mark)
+    write_worker_state "$LNCH_STATE" "$LP" "$LP_ID"
+}
+
+vd_cycle() {
     SS=$(pidof system_server)
     SS=${SS%% *}
     SS_ID=$(process_identity "$SS" system_server 2>/dev/null) || SS_ID=
     load_runtime_hook_state "$SS_ID" "$VDMARK" "$VD_ATTEMPT"
     VD_STATE=$RUNTIME_STATE
     if [ -n "$SS_ID" ] && [ "$VD_STATE" = waiting ]; then
+        write_worker_state injecting "$SS" "$SS_ID"
         if inject_ret "$SS" "$VD" /data/local/tmp/voyahtune_vd_bypass.txt \
                 "$VDMARK" "$VD_ATTEMPT" "$SS_ID" system_server; then
             VD_STATE=active
@@ -1173,24 +1132,10 @@ watchdog_cycle() {
         fi
     fi
 
-    # 4) Кнопки руля в keymanager: фоновая one-shot/verified попытка (см. inject_keymanager_bg).
-    KMP=$(pidof com.qinggan.keymanager.service 2>/dev/null)
-    KMP=${KMP%% *}
-    KMP_ID=$(process_identity "$KMP" com.qinggan.keymanager.service 2>/dev/null) || KMP_ID=
-    load_runtime_hook_state "$KMP_ID" "$SWK_KM_MARK" "$SWK_KM_ATTEMPT"
-    SWK_STATE=$RUNTIME_STATE
-    if [ -n "$KMP_ID" ] && [ "$SWK_STATE" = waiting ]; then
-        inject_keymanager_bg "$KMP" "$KMP_ID"
-        STATUS_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
-        if [ "${STATUS_BUSY_RECORD%%|*}" = "$KMP" ]; then
-            SWK_STATE=injecting
-        elif [ -r "$SWK_KM_ATTEMPT" ]; then
-            SWK_STATE=failed
-        fi
-    fi
+    write_worker_state "$VD_STATE" "$SS" "$SS_ID"
+}
 
-    # 5) Apollo/ADAS follows the persisted VoyahTune target. Native republishes the exact current-
-    #    boot transport from the delayed restore chain; only then do we discover VehicleSetting.
+apollo_cycle() {
     if apollo_runtime_flag_enabled; then
         APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
         APOLLO_PID=${APOLLO_PID%% *}
@@ -1198,6 +1143,7 @@ watchdog_cycle() {
         load_runtime_hook_state "$APOLLO_ID" "$APOLLO_MARK" "$APOLLO_ATTEMPT"
         APOLLO_STATE=$RUNTIME_STATE
         if [ -n "$APOLLO_ID" ] && [ "$APOLLO_STATE" = waiting ]; then
+            write_worker_state injecting "$APOLLO_PID" "$APOLLO_ID"
             if inject_apollo "$APOLLO_PID" "$APOLLO_ID"; then
                 APOLLO_STATE=active
             else
@@ -1205,18 +1151,20 @@ watchdog_cycle() {
             fi
         fi
     else
+        APOLLO_PID=; APOLLO_ID=
         APOLLO_STATE=disabled
     fi
 
-    # 6) Штатная Qinggan-клавиатура. Режим читается ровно один раз на новую process identity,
-    #    а не на каждом watchdog-цикле. Native при изменении opt-in перезапускает только qgime,
-    #    поэтому новый режим получает новый PID/start-time; off/null/error безопасно лачится без hook.
+    write_worker_state "$APOLLO_STATE" "$APOLLO_PID" "$APOLLO_ID"
+}
+
+keyboard_cycle() {
     KEYBOARD_PID=$(pidof "$KEYBOARD_TARGET" 2>/dev/null)
     KEYBOARD_PID=${KEYBOARD_PID%% *}
     KEYBOARD_ID=$(process_identity "$KEYBOARD_PID" "$KEYBOARD_TARGET" 2>/dev/null) || KEYBOARD_ID=
     if [ -n "$KEYBOARD_ID" ] && [ "$KEYBOARD_SEEN_ID" != "$KEYBOARD_ID" ]; then
         KEYBOARD_SEEN_ID=$KEYBOARD_ID
-        KEYBOARD_MODE=$(settings get global "$KEYBOARD_SETTING" 2>/dev/null) || KEYBOARD_MODE=off
+        KEYBOARD_MODE=$(timeout -k 1 2 settings get global "$KEYBOARD_SETTING" 2>/dev/null) || KEYBOARD_MODE=off
         case "$KEYBOARD_MODE" in
             en|ru) KEYBOARD_MODE_CURRENT=$KEYBOARD_MODE ;;
             *)
@@ -1251,6 +1199,9 @@ watchdog_cycle() {
     esac
     if [ -n "$KEYBOARD_ID" ] && [ -n "$KEYBOARD_SCRIPT" ]; then
         if [ "$KEYBOARD_EN_STATE" = waiting ] || [ "$KEYBOARD_RU_STATE" = waiting ]; then
+            [ "$KEYBOARD_MODE_CURRENT" != en ] || KEYBOARD_EN_STATE=injecting
+            [ "$KEYBOARD_MODE_CURRENT" != ru ] || KEYBOARD_RU_STATE=injecting
+            write_worker_state "$KEYBOARD_EN_STATE" "$KEYBOARD_PID" "$KEYBOARD_ID" "$KEYBOARD_RU_STATE"
             if inject_ret "$KEYBOARD_PID" "$KEYBOARD_SCRIPT" "$KEYBOARD_LOG" \
                     "$KEYBOARD_MARK" "$KEYBOARD_ATTEMPT" "$KEYBOARD_ID" "$KEYBOARD_TARGET"; then
                 [ "$KEYBOARD_MODE_CURRENT" = en ] && KEYBOARD_EN_STATE=active
@@ -1262,12 +1213,9 @@ watchdog_cycle() {
         fi
     fi
 
-    # 7) Optional client geometry/MapKit-DPI repair. Discovery runs after every core hook; both
-    #    Binder reads have one-second timeouts and at most one exact-package worker runs in background.
-    discover_app_client
-
-    publish_hook_status running
+    write_worker_state "$KEYBOARD_EN_STATE" "$KEYBOARD_PID" "$KEYBOARD_ID" "$KEYBOARD_RU_STATE"
 }
+
 
 SS=; SS_ID=
 LP=; LP_ID=
@@ -1283,34 +1231,190 @@ APOLLO_STATE=unknown
 KEYBOARD_EN_STATE=unknown
 KEYBOARD_RU_STATE=unknown
 
-# Publish a cheap startup snapshot before any potentially slow Frida injection. The first watchdog
-# pass replaces these provisional states with exact process/marker states, but the diagnostics UI
-# never has to wait behind a sequence of bounded injector timeouts. Keyboard mode remains unknown
-# until qgime gets its one per-identity opt-in read.
-VD_STATE=waiting
-SWK_STATE=waiting
-LNCH_STATE=waiting
-MD_STATE=waiting
-if apollo_runtime_flag_enabled; then
-    APOLLO_STATE=waiting
-else
-    APOLLO_STATE=disabled
-fi
-KEYBOARD_EN_STATE=unknown
-KEYBOARD_RU_STATE=unknown
-publish_hook_status running
-
-cleanup_loader() {
-    publish_hook_status stopped
-    cleanup_load_lock
+# Worker ownership is bound to boot + PID + start time, including across supervisor restarts.
+# These tokens identify shell workers, whereas process_identity also checks the Android package.
+worker_token() {
+    WT_PID=$1
+    case "$WT_PID" in ''|*[!0-9]*) return 1 ;; esac
+    # These checks run each discovery tick: built-in reads avoid spawning awk/cat per worker.
+    IFS= read -r WT_STAT < "/proc/$WT_PID/stat" 2>/dev/null || return 1
+    WT_FIELDS=${WT_STAT##*) }
+    set -- $WT_FIELDS
+    [ "$#" -ge 20 ] || return 1
+    shift 19  # starttime is field 22; fields after the final ') ' begin at field 3.
+    WT_START=$1
+    IFS= read -r WT_BOOT < /proc/sys/kernel/random/boot_id 2>/dev/null || return 1
+    case "$WT_START" in ''|*[!0-9]*) return 1 ;; esac
+    [ -n "$WT_BOOT" ] && kill -0 "$WT_PID" 2>/dev/null || return 1
+    printf '%s:%s:%s\n' "$WT_PID" "$WT_START" "$WT_BOOT"
 }
-trap 'cleanup_loader' 0
 
-logi "voyah load.bin start"
-bootstrap_multidisplay
-publish_hook_status running
+worker_token_is_live() {
+    [ -n "$1" ] && [ "$(worker_token "${1%%:*}")" = "$1" ]
+}
 
+supervisor_is_live() {
+    [ "$(readlink "$LOAD_LOCK" 2>/dev/null)" = "$SUPERVISOR_PID" ] \
+        && worker_token_is_live "$SUPERVISOR_TOKEN"
+}
+
+# A killed worker may leave its timeout/injector child alive. Do not touch that lane's logs or
+# retry record until it is gone, even if the old worker lock itself is stale. Normal cycles never
+# pay this scan: it runs only when a replacement worker tries to acquire its lane.
+lane_injector_is_live() {
+    case "$WORKER_LANE" in
+        steering) WI_SCRIPT=$SWK ;;
+        multidisplay) WI_SCRIPT=$MD ;;
+        launcher) WI_SCRIPT=$LNCH ;;
+        vd) WI_SCRIPT=$VD ;;
+        apollo) WI_SCRIPT=$APOLLO ;;
+        keyboard) WI_SCRIPT=keyboard_ ;;
+        apps) WI_SCRIPT=$APP_CLIENT ;;
+        *) return 1 ;;
+    esac
+    for WI_PID in $(pidof frida-inject 2>/dev/null); do
+        WI_CMD=$(tr '\000' ' ' < "/proc/$WI_PID/cmdline" 2>/dev/null)
+        case "$WI_CMD" in *"$WI_SCRIPT"*) return 0 ;; esac
+    done
+    return 1
+}
+
+acquire_worker_lock() {
+    while supervisor_is_live; do
+        WL_PREVIOUS=$(readlink "$WORKER_LOCK" 2>/dev/null)
+        if ! worker_token_is_live "$WL_PREVIOUS" && ! lane_injector_is_live; then
+            # Only the supervisor's single child for this lane performs stale-owner cleanup.
+            if [ -n "$WL_PREVIOUS" ] \
+                    && [ "$(readlink "$WORKER_LOCK" 2>/dev/null)" = "$WL_PREVIOUS" ]; then
+                rm -f "$WORKER_LOCK"
+            fi
+            if ln -s "$WORKER_TOKEN" "$WORKER_LOCK" 2>/dev/null; then
+                return 0
+            fi
+        fi
+        sleep "$WATCHDOG_CYCLE_SECONDS"
+    done
+    return 1
+}
+
+# Small atomic snapshots are the only state shared between lanes. No child-shell variable is
+# expected to propagate to its parent. Repeated unchanged states cause no disk write or log spam.
+write_worker_state() {
+    WS_VALUE="$WORKER_TOKEN|$1|${2:-0}|${3:-none}|${4:-unknown}"
+    [ "${WS_LAST_VALUE:-}" != "$WS_VALUE" ] || return 0
+    WS_TMP="$WORKER_PREFIX.$WORKER_LANE.state.$$.new"
+    if printf '%s\n' "$WS_VALUE" > "$WS_TMP" \
+            && mv -f "$WS_TMP" "$WORKER_PREFIX.$WORKER_LANE.state"; then
+        WS_LAST_VALUE=$WS_VALUE
+        logi "hook lane=$WORKER_LANE state=$1 pid=${2:-0} uptime=$(uptime_seconds)"
+    else
+        rm -f "$WS_TMP"
+    fi
+}
+
+read_worker_state() {
+    RS_STATE=waiting; RS_SECOND=unknown; RS_PID=0
+    RS_TOKEN=; RS_SAVED_STATE=; RS_SAVED_PID=; RS_ID=; RS_SAVED_SECOND=
+    [ -r "$WORKER_PREFIX.$1.state" ] || return 0
+    IFS='|' read -r RS_TOKEN RS_SAVED_STATE RS_SAVED_PID RS_ID RS_SAVED_SECOND \
+        < "$WORKER_PREFIX.$1.state" || return 0
+    [ "$(readlink "$WORKER_PREFIX.$1.lock" 2>/dev/null)" = "$RS_TOKEN" ] \
+        && worker_token_is_live "$RS_TOKEN" || return 0
+    case "$RS_SAVED_PID" in ''|*[!0-9]*) return 0 ;; esac
+    # A target may have died since its worker published active. Never present the old PID as ready.
+    if [ "$RS_SAVED_PID" != 0 ]; then
+        [ "$(process_identity "$RS_SAVED_PID" "$2" 2>/dev/null)" = "$RS_ID" ] || return 0
+    fi
+    RS_STATE=$RS_SAVED_STATE; RS_SECOND=$RS_SAVED_SECOND; RS_PID=$RS_SAVED_PID
+}
+
+collect_worker_states() {
+    read_worker_state steering com.qinggan.keymanager.service
+    SWK_STATE=$RS_STATE; KMP=$RS_PID
+    read_worker_state multidisplay com.qinggan.systemservice
+    MD_STATE=$RS_STATE; MDP=$RS_PID
+    read_worker_state launcher com.qinggan.app.launcher
+    LNCH_STATE=$RS_STATE; LP=$RS_PID
+    read_worker_state vd system_server
+    VD_STATE=$RS_STATE; SS=$RS_PID
+    read_worker_state apollo "$APOLLO_TARGET"
+    APOLLO_STATE=$RS_STATE; APOLLO_PID=$RS_PID
+    read_worker_state keyboard "$KEYBOARD_TARGET"
+    KEYBOARD_EN_STATE=$RS_STATE; KEYBOARD_RU_STATE=$RS_SECOND; KEYBOARD_PID=$RS_PID
+}
+
+cleanup_worker() {
+    # Finish status publication before releasing its lane to a replacement supervisor.
+    if [ "$WORKER_LANE" = status ] && ! supervisor_is_live; then
+        collect_worker_states
+        publish_hook_status stopped
+    fi
+    [ "$(readlink "$WORKER_LOCK" 2>/dev/null)" != "$WORKER_TOKEN" ] \
+        || rm -f "$WORKER_LOCK"
+}
+
+run_worker() {
+    WORKER_LANE=$1
+    SUPERVISOR_TOKEN=$2
+    SUPERVISOR_PID=${SUPERVISOR_TOKEN%%:*}
+    case " $WORKER_LANES " in *" $WORKER_LANE "*) ;; *) return 1 ;; esac
+    WORKER_TOKEN=$(worker_token "$$") || return 1
+    WORKER_LOCK="$WORKER_PREFIX.$WORKER_LANE.lock"
+    acquire_worker_lock || return 1
+    trap 'cleanup_worker' 0
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    WORKER_INTERVAL=$WATCHDOG_CYCLE_SECONDS
+    case "$WORKER_LANE" in
+        apollo|keyboard|apps|status) WORKER_INTERVAL=$OPTIONAL_CYCLE_SECONDS ;;
+    esac
+    while supervisor_is_live; do
+        case "$WORKER_LANE" in
+            steering) steering_cycle ;;
+            multidisplay) multidisplay_cycle ;;
+            launcher) launcher_cycle ;;
+            vd) vd_cycle ;;
+            apollo) apollo_cycle ;;
+            keyboard) keyboard_cycle ;;
+            apps) discover_app_client ;;
+            status) collect_worker_states; publish_hook_status running ;;
+        esac
+        sleep "$WORKER_INTERVAL"
+    done
+}
+
+# Supervision never calls Android Binder or waits for an injection. Child tokens also cover the
+# fork-to-lock-publication gap, so a slow-starting shell cannot produce duplicate lane workers.
+supervise_workers() {
+    NEXT_WORKER_CHILDREN=
+    for LANE in $WORKER_LANES; do
+        CHILD_TOKEN=
+        for CHILD_RECORD in ${WORKER_CHILDREN:-}; do
+            [ "${CHILD_RECORD%%|*}" != "$LANE" ] || CHILD_TOKEN=${CHILD_RECORD#*|}
+        done
+        if ! worker_token_is_live "$CHILD_TOKEN"; then
+            [ -z "$CHILD_TOKEN" ] || wait "${CHILD_TOKEN%%:*}" 2>/dev/null
+            sh "$0" --worker "$LANE" "$SUPERVISOR_TOKEN" &
+            CHILD_PID=$!
+            CHILD_TOKEN=$(worker_token "$CHILD_PID") || CHILD_TOKEN=
+        fi
+        [ -z "$CHILD_TOKEN" ] \
+            || NEXT_WORKER_CHILDREN="$NEXT_WORKER_CHILDREN $LANE|$CHILD_TOKEN"
+    done
+    WORKER_CHILDREN=$NEXT_WORKER_CHILDREN
+}
+
+if [ "${1:-}" = --worker ]; then
+    run_worker "${2:-}" "${3:-}"
+    exit $?
+fi
+
+acquire_load_lock
+SUPERVISOR_TOKEN=$(worker_token "$$") || exit 1
+SUPERVISOR_PID=$$
+logi "voyah load.bin start (parallel workers) uptime=$(uptime_seconds)"
 while [ 1 ]; do
-    watchdog_cycle
+    supervise_workers
     sleep "$WATCHDOG_CYCLE_SECONDS"
 done

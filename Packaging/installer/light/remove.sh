@@ -74,7 +74,7 @@ if ! adb shell '
         /data/local/bin/voyahtune_skb_qwerty_ru.json \
         /data/local/bin/voyahtune-hook-manifest.json \
         /data/local/tmp/voyahtune-hook-status.v1 \
-        /data/local/tmp/voyahtune_app_client.* \
+        /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* \
         /data/local/tmp/voyahtune_fullscreen_client.* \
         /data/local/tmp/voyahtune_keyboard.pid \
         /data/local/tmp/voyahtune_keyboard.attempt \
@@ -130,7 +130,7 @@ if ! adb shell '
         /sdcard/tmp/voyah_native_log.txt; do
         if [ -e "$path" ] || [ -L "$path" ]; then exit 1; fi
     done
-    ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
+    ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
     ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
 '; then
     echo "!!! Не удалось полностью удалить собственные helper/state-файлы Open Voyah — перезагрузка отменена."

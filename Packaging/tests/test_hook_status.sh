@@ -65,10 +65,10 @@ require "$ACTIVITY" 'SYSTEM_METRICS_INTERVAL_MS = 5_000L'
 [ "$(grep -F -c 'postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS)' "$ACTIVITY")" -eq 1 ] \
     || fail "hook diagnostics must reuse the only Other timer"
 
-startup_publish_line=$(grep -n '^publish_hook_status running$' "$LOADER" | tail -n1 | cut -d: -f1)
-watchdog_loop_line=$(grep -n '^while \[ 1 \]; do$' "$LOADER" | tail -n1 | cut -d: -f1)
-[ -n "$startup_publish_line" ] && [ "$startup_publish_line" -lt "$watchdog_loop_line" ] \
-    || fail "initial status must be published before the injection watchdog loop"
+# Status collection/delivery owns a separate lane; Binder delays cannot block core discovery.
+require "$LOADER" 'status) collect_worker_states; publish_hook_status running ;;'
+require "$LOADER" 'STATUS_LOADER_PID=${SUPERVISOR_PID:-$$}'
+require "$LOADER" 'mv -f "$WS_TMP" "$WORKER_PREFIX.$WORKER_LANE.state"'
 
 require "$FULL_INSTALL" 'setprop ctl.stop voyahtune_load'
 require "$FULL_INSTALL" 'getprop init.svc.voyahtune_load'

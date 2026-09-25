@@ -664,12 +664,12 @@ if ! adb shell '
     rm -f /data/local/bin/fullscreen_client.js \
         /data/local/bin/fullscreen_client.js.voyahtune.new \
         /data/local/tmp/voyahtune_fullscreen_client.* \
-        /data/local/tmp/voyahtune_app_client.* || exit 1
+        /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* || exit 1
     [ -s /data/local/bin/app_client.js ] || exit 1
     [ ! -e /data/local/bin/fullscreen_client.js ] || exit 1
     [ ! -e /data/local/bin/fullscreen_client.js.voyahtune.new ] || exit 1
     ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
-    ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
+    ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
 '; then
     echo "!!! Не удалось завершить миграцию app_client.js — hook-loader будет возвращён."
     exit 1
