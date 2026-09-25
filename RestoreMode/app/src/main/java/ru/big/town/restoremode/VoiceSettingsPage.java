@@ -30,6 +30,7 @@ final class VoiceSettingsPage {
     private final Runnable changed;
     private final Switch enabled, shortcut;
     private final Button tryVoice;
+    private final MaterialButton steeringPress;
     private final LinearLayout commands;
     private final LinearLayout deepFilterStrength;
     private final TextView deepFilterStrengthLabel;
@@ -42,8 +43,28 @@ final class VoiceSettingsPage {
         enabled = setting(content, "Включить голосового помощника");
         content.addView(text("Вызов голосового помощника кнопкой на руле доступен только в Full. В Light помощник вызывается только из VoyahTune: кнопкой «Попробовать голосовую команду» или ярлыком «Голосовая команда» на главном экране."
                 + (BuildConfig.IS_FULL
-                ? " Удерживайте кнопку голосового помощника на руле. Повторное удержание начинает новую сессию. Прежнее назначение долгого нажатия сохранится и вернётся после отключения помощника."
+                ? " Выберите короткое или долгое нажатие кнопки голосового помощника на руле. Повторный вызов начинает новую сессию. Прежние действия выбранного нажатия сохранятся и вернутся после смены нажатия или отключения помощника."
                 : ""), 20, 0xffaaaaaa));
+        steeringPress = new MaterialButton(activity);
+        steeringPress.setAllCaps(false);
+        steeringPress.setTextSize(TypedValue.COMPLEX_UNIT_PX, 24);
+        steeringPress.setMinHeight(dp(64));
+        steeringPress.setEnabled(BuildConfig.IS_FULL);
+        steeringPress.setAlpha(BuildConfig.IS_FULL ? 1f : .45f);
+        content.addView(steeringPress, new LinearLayout.LayoutParams(-1, -2));
+        updateSteeringPress();
+        steeringPress.setOnClickListener(v -> new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
+                .setTitle("Вызов кнопкой на руле")
+                .setSingleChoiceItems(new String[]{"Короткое нажатие", "Долгое нажатие"},
+                        VoiceSteeringPolicy.SHORT.equals(selectedPress()) ? 0 : 1, (dialog, which) -> {
+                            prefs.edit().putString(VoiceSteeringPolicy.PRESS_KEY,
+                                    which == 0 ? VoiceSteeringPolicy.SHORT : VoiceSteeringPolicy.LONG).apply();
+                            updateSteeringPress();
+                            SplitConfigSync.pushSteering(activity, prefs);
+                            changed.run();
+                            dialog.dismiss();
+                        })
+                .setNegativeButton("Отмена", null).show());
         content.addView(text("Распознавание работает без интернета. Произносите одну команду за раз. Не обязательно произносить фразу целиком: достаточно ключевых слов, например «спорт» или «фары авто». Слова «выключи» и «переключи» определяют действие — их пропускать нельзя. Можно менять порядок слов и добавлять «пожалуйста». Помощник учитывает окончания и небольшие ошибки в названиях автомобильных команд. Неизвестная или неоднозначная фраза не выполняется.", 20, 0xffaaaaaa));
         content.addView(text("Массаж, подогрев и вентиляция: без указания места команда относится к водителю. Для переднего пассажира добавьте «пассажира», например «массаж пассажира волны» или «подогрев сиденья пассажира три». Уровни — от 1 до 3. Выбор уровня или типа массажа может одновременно включить функцию. Доступность зависит от комплектации и прошивки автомобиля.", 20, 0xffaaaaaa));
         content.addView(text("Окна: «открой» или «опусти» — открыть, «закрой» или «подними» — закрыть. Можно указать водителя, переднего пассажира, заднее левое/правое окно или группу: передние, задние, левые, правые. «Открой окна» относится ко всем четырём; для одного окна укажите место. «Проветривание» приоткрывает все четыре окна, «проветривание люка» — только люк. Величину открытия задаёт автомобиль. Шторка управляется отдельно: «открой шторку» / «закрой шторку». После отправки помощник не проверяет фактическое положение.", 20, 0xffaaaaaa));
@@ -108,6 +129,7 @@ final class VoiceSettingsPage {
         enabled.setChecked(prefs.getBoolean(VoiceCommands.ENABLED, false));
         shortcut.setChecked(prefs.getBoolean("showVoiceCommand", false));
         updateStrength();
+        updateSteeringPress();
         updating = false;
         tryVoice.setEnabled(enabled.isChecked());
         tryVoice.setAlpha(enabled.isChecked() ? 1 : .45f);
@@ -171,6 +193,16 @@ final class VoiceSettingsPage {
             update.run();
         });
         update.run();
+    }
+
+    private String selectedPress() {
+        return VoiceSteeringPolicy.normalize(prefs.getString(VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG));
+    }
+
+    private void updateSteeringPress() {
+        steeringPress.setText(BuildConfig.IS_FULL
+                ? "Кнопка на руле: " + (VoiceSteeringPolicy.SHORT.equals(selectedPress()) ? "короткое нажатие" : "долгое нажатие")
+                : "Кнопка на руле — только в Full");
     }
 
     private void updateStrength() {

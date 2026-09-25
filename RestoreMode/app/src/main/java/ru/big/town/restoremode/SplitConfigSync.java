@@ -60,9 +60,12 @@ final class SplitConfigSync {
         i.putExtra("steerStarLong", resolveSteerActions(prefs.getString("steerStarLong", "none"), prefs));
         i.putExtra("steerDvrShort", resolveSteerActions(prefs.getString("steerDvrShort", "none"), prefs));
         i.putExtra("steerDvrLong", resolveSteerActions(prefs.getString("steerDvrLong", "none"), prefs));
-        i.putExtra("steerVoiceShort", resolveSteerActions(prefs.getString("steerVoiceShort", "none"), prefs));
-        i.putExtra("steerVoiceLong", prefs.getBoolean(VoiceCommands.ENABLED, false)
-                ? VoiceCommands.START : resolveSteerActions(prefs.getString("steerVoiceLong", "none"), prefs));
+        for (String key : new String[]{"steerVoiceShort", "steerVoiceLong"}) {
+            i.putExtra(key, VoiceSteeringPolicy.publishedAction(BuildConfig.IS_FULL,
+                    prefs.getBoolean(VoiceCommands.ENABLED, false),
+                    prefs.getString(VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG), key,
+                    resolveSteerActions(prefs.getString(key, "none"), prefs)));
+        }
         i.putExtra("steerPhoneShort", resolveSteerActions(prefs.getString("steerPhoneShort", "none"), prefs));
         i.putExtra("steerPhoneLong", resolveSteerActions(prefs.getString("steerPhoneLong", "none"), prefs));
         context.sendBroadcast(i);

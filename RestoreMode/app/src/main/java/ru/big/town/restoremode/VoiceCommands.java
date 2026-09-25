@@ -13,7 +13,7 @@ import java.util.Set;
 /** Adds the actions already available in the UI to the shared built-in phrase catalog. */
 final class VoiceCommands {
     static final String ENABLED = "voiceAssistantEnabled";
-    static final String START = "voice_assistant";
+    static final String START = VoiceSteeringPolicy.ACTION;
     static final int MESSAGE = 36;
 
     static List<VoiceCommandCatalog.Command> load(Context context) {

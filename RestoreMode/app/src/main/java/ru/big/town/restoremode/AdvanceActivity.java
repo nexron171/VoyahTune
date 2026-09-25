@@ -2163,14 +2163,20 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private boolean voiceOwnsSlot(String key) {
-        return "steerVoiceLong".equals(key) && prefs.getBoolean(VoiceCommands.ENABLED, false);
+        return VoiceSteeringPolicy.ownsSlot(BuildConfig.IS_FULL, prefs.getBoolean(VoiceCommands.ENABLED, false),
+                prefs.getString(VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG), key);
     }
 
     private void refreshSteerActions() {
-        View voiceLong = findViewById(R.id.steerVoiceLongBtn);
-        if (voiceLong != null) {
-            voiceLong.setEnabled(!voiceOwnsSlot("steerVoiceLong"));
-            voiceLong.setAlpha(voiceOwnsSlot("steerVoiceLong") ? 0.4f : 1f);
+        int[] buttons = {R.id.steerVoiceShortBtn, R.id.steerVoiceLongBtn};
+        String[] keys = {"steerVoiceShort", "steerVoiceLong"};
+        for (int n = 0; n < buttons.length; n++) {
+            View button = findViewById(buttons[n]);
+            if (button != null) {
+                boolean reserved = voiceOwnsSlot(keys[n]);
+                button.setEnabled(!reserved);
+                button.setAlpha(reserved ? 0.4f : 1f);
+            }
         }
         renderSteerActionList("steerStarShort", steerStarShortList);
         renderSteerActionList("steerStarLong", steerStarLongList);
@@ -2187,7 +2193,8 @@ public class AdvanceActivity extends AppCompatActivity {
         container.removeAllViews();
         if (voiceOwnsSlot(key)) {
             TextView reserved = new TextView(this);
-            reserved.setText("Долгое нажатие занято голосовым помощником. Прежние действия сохранены. Отключить: Голосовое управление.");
+            reserved.setText(("steerVoiceShort".equals(key) ? "Короткое" : "Долгое")
+                    + " нажатие занято голосовым помощником. Прежние действия сохранены. Изменить нажатие или отключить помощника: Голосовое управление.");
             reserved.setTextColor(0xffa0a5b0); reserved.setTextSize(18);
             container.addView(reserved); return;
         }
