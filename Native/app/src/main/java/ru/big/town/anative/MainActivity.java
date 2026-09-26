@@ -400,6 +400,26 @@ public class MainActivity extends AppCompatActivity {
         return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
+    /** Narrow read for early polling: never starts services or mutates the full restore snapshot. */
+    static EarlyDriveModeRestore.Settings readEarlyDriveRestoreSettings(Context context) {
+        try (Cursor cursor = context.getContentResolver().query(Uri.parse(
+                "content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && cursor.getColumnCount() > 6) {
+                return new EarlyDriveModeRestore.Settings(cursor.getString(0),
+                        cursor.getInt(6) == 1,
+                        cursor.getColumnCount() > 12 && cursor.getInt(12) == 1);
+            }
+        } catch (RuntimeException e) {
+            Log.w(MODES_LOG, "Early drive settings unavailable; using saved cache");
+        }
+        SharedPreferences cache = nativePrefs(context);
+        if (!cache.getBoolean("cacheValid", false)) return null;
+        return new EarlyDriveModeRestore.Settings(cache.getString("cacheDriveMode", null),
+                cache.getBoolean("cacheDriveEnabled", false),
+                cache.getBoolean("cacheDebugMode", false));
+    }
+
     /** Missing or NULL opt-out fields are enabled; only an explicit numeric zero disables them. */
     private static boolean cursorBooleanDefaultTrue(Cursor cursor, int column) {
         return cursor.getColumnCount() <= column || cursor.isNull(column) || cursor.getInt(column) != 0;

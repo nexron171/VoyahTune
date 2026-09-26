@@ -3,7 +3,8 @@ set -eu
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 SRC="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative"
 ENGINE="$SRC/ApplyEngine.java"
-# Automatic restore is owned by door opening and its first subsequent Drive entry.
+# Full-snapshot automatic restore is owned by door opening and first subsequent Drive entry.
+# The separate early observer may repair only the drive profile during its 30-second window.
 [ "$(grep -R 'ApplyEngine.scheduleApply(' "$SRC" | wc -l | tr -d ' ')" -eq 2 ]
 grep -Fq 'ApplyEngine.scheduleApply("driver door opened")' "$SRC/VehicleStateControllers.java"
 grep -Fq 'ApplyEngine.scheduleApply("gear Drive")' "$SRC/VehicleStateControllers.java"

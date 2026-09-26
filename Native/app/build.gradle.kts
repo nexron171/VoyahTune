@@ -12,8 +12,8 @@ android {
         applicationId = "ru.big.town.anative"
         minSdk = 30
         targetSdk = 35
-        versionCode = 3
-        versionName = "3.12.0"
+        versionCode = 4
+        versionName = "3.13.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -1055,6 +1055,7 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        ApplyEngine.activateWake("service create");
         // A stale file from an earlier boot is fail-closed and removed on first service creation.
         ApolloSettingsRuntimeState.isEnabled(this);
         washModeController = WashModeController.create(this);
@@ -1482,6 +1483,7 @@ public class SetModesService extends Service {
         Log.i(TAG, "onDestroy()");
         voiceCommands.close();
         serviceDestroyed = true;
+        ApplyEngine.stopEarlyDriveRestore("service destroyed");
         for (VirtualDisplay display : embeddedDisplays.values()) {
             try { display.release(); } catch (Exception ignored) {}
         }

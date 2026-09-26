@@ -42,6 +42,7 @@ public final class ApplyEngine {
         final long gateGeneration;
         final long runGeneration;
         synchronized (RESTORE_LOCK) {
+            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), reason);
             runGeneration = RESTORE_RUN_STATE.cancelAndAdvance();
             gateGeneration = MODE_SYNC_POLICY.freeze();
         }
@@ -174,8 +175,15 @@ public final class ApplyEngine {
         synchronized (RESTORE_LOCK) {
             RESTORE_RUN_STATE.activate(RESTORE_RUN_STATE.currentGeneration());
             MODE_SYNC_POLICY.activateWake();
+            EarlyDriveModeRestore.activate(RESTORE_RUN_STATE.currentGeneration(), reason);
         }
         Log.i(TAG, "wake active: " + reason);
+    }
+
+    static void stopEarlyDriveRestore(String reason) {
+        synchronized (RESTORE_LOCK) {
+            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), reason);
+        }
     }
 
     /** Each event queues its own immediate pass, including events arriving during another pass. */
@@ -192,6 +200,7 @@ public final class ApplyEngine {
         final Handler h = bg();
         synchronized (RESTORE_LOCK) {
             final long wakeGeneration = RESTORE_RUN_STATE.currentGeneration();
+            EarlyDriveModeRestore.stop(wakeGeneration, reason);
             RESTORE_RUN_STATE.activate(wakeGeneration);
             final long restoreEpoch = manual ? RESTORE_RUN_STATE.cancelRestoreAndAdvance()
                     : RESTORE_RUN_STATE.currentRestoreEpoch();
@@ -322,6 +331,7 @@ public final class ApplyEngine {
             // An explicit command wins over every already queued/running automatic restore, but it
             // is not a new physical wake. Keeping wake generation intact means unrelated automated
             // wake actions retain their correct sleep cancellation token.
+            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), "user: " + reason);
             restoreEpoch = RESTORE_RUN_STATE.cancelRestoreAndAdvance();
             gateGeneration = MODE_SYNC_POLICY.cancelRestore();
         }
