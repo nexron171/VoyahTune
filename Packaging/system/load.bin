@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # Самодостаточный Frida-оркестратор Open Voyah (не зависит от сторонних обвязок).
-# Независимые supervised workers: ожидание одной инъекции не блокирует остальные.
+# Сначала приоритетный ACC attach, затем независимые supervised workers.
+#   0) voyahtune_acc_restore.js в CanBusService — гостевой сброс при ACC ON;
 #   1) launcherdock.js       в процессе лаунчера — отрисовка дока сразу после появления лаунчера;
 #   2) multidisplay.js       в com.qinggan.systemservice — ранний server whitelist без ожидания других хуков;
 #   3) vd_bypass.js          в system_server — trusted VirtualDisplay + инъекция ввода (VD-сплит) + freeform;
@@ -125,6 +126,14 @@ SWK=/data/local/bin/steeringwheelkeys.js
 LNCH=/data/local/bin/launcherdock.js
 MD=/data/local/bin/multidisplay.js
 APOLLO=/data/local/bin/apollo_tech.js
+ACC_RESTORE=/data/local/bin/voyahtune_acc_restore.js
+ACC_TARGET=com.qinggan.canbus.service
+ACC_MARK=/data/local/tmp/voyahtune_acc_restore.pid
+ACC_ATTEMPT=/data/local/tmp/voyahtune_acc_restore.attempt
+ACC_LOG=/data/local/tmp/voyahtune_acc_restore.txt
+ACC_READY_MARKER='[acc-restore] hook ready v1'
+ACC_POLL_SECONDS=0.1
+ACC_PRIORITY_MAX_SECONDS=45
 DRIVE_RESET=/data/local/bin/voyahtune_drive_reset.js
 DRIVE_RESET_MARK=/data/local/tmp/voyahtune_drive_reset.pid
 DRIVE_RESET_ATTEMPT=/data/local/tmp/voyahtune_drive_reset.attempt
@@ -149,7 +158,7 @@ MD_RETRY_LONG_SECONDS=60
 WATCHDOG_CYCLE_SECONDS=1
 OPTIONAL_CYCLE_SECONDS=5
 WORKER_PREFIX=/data/local/tmp/voyahtune_worker
-WORKER_LANES="steering multidisplay launcher vd apollo keyboard apps status"
+WORKER_LANES="acc steering multidisplay launcher vd apollo keyboard apps status"
 APOLLO_MARK=/data/local/tmp/voyahtune_apollo.pid
 APOLLO_ATTEMPT=/data/local/tmp/voyahtune_apollo.attempt
 APOLLO_LOG=/data/local/tmp/voyahtune_apollo.txt
@@ -1037,7 +1046,7 @@ discover_app_client() {
         # agent to them concurrently (the supported client scope is third-party applications).
         case "$FC_PACKAGE" in
             com.qinggan.keymanager.service|com.qinggan.systemservice|com.qinggan.app.launcher|\
-            com.qinggan.app.vehiclesetting|com.qinggan.app.qgime)
+            com.qinggan.canbus.service|com.qinggan.app.vehiclesetting|com.qinggan.app.qgime)
                 IFS=,
                 continue
                 ;;
@@ -1186,6 +1195,66 @@ vd_cycle() {
     write_worker_state "$VD_STATE" "$SS" "$SS_ID"
 }
 
+# ACC has a dedicated lane. Publish readiness while frida-inject -e is still alive;
+# the rest of boot must not wait for the 30s injector wrapper once the agent is installed.
+inject_acc_restore() {
+    ACC_PID=$1
+    ACC_ID=$2
+    reserve_injection_attempt "$ACC_ID" "$ACC_ATTEMPT" || return 1
+    ACC_BEFORE=$(process_identity "$ACC_PID" "$ACC_TARGET" 2>/dev/null) || ACC_BEFORE=
+    [ "$ACC_BEFORE" = "$ACC_ID" ] || return 1
+    ACC_TRY="$ACC_LOG.try"
+    : > "$ACC_TRY"
+    logi "acc attach start pid=$ACC_PID uptime=$(uptime_seconds)"
+    timeout -k 5 30 "$FI" -p "$ACC_PID" -s "$ACC_RESTORE" -e > "$ACC_TRY" 2>&1 &
+    ACC_CHILD=$!
+    ACC_READY=0
+    while :; do
+        ACC_CHILD_ALIVE=0
+        kill -0 "$ACC_CHILD" 2>/dev/null && ACC_CHILD_ALIVE=1
+        if [ "$ACC_READY" = 0 ] && grep -qF "$ACC_READY_MARKER" "$ACC_TRY"; then
+            ACC_AFTER=$(process_identity "$ACC_PID" "$ACC_TARGET" 2>/dev/null) || ACC_AFTER=
+            if [ "$ACC_AFTER" = "$ACC_ID" ]; then
+                ACC_MARK_TMP="$ACC_MARK.$$.new"
+                if printf '%s\n' "$ACC_ID" > "$ACC_MARK_TMP" && mv -f "$ACC_MARK_TMP" "$ACC_MARK"; then
+                    ACC_READY=1
+                    write_worker_state active "$ACC_PID" "$ACC_ID"
+                    logi "acc hook ready pid=$ACC_PID uptime=$(uptime_seconds)"
+                else
+                    rm -f "$ACC_MARK_TMP"
+                fi
+            fi
+        fi
+        [ "$ACC_CHILD_ALIVE" = 1 ] || break
+        if [ "$ACC_READY" = 1 ]; then sleep "$WATCHDOG_CYCLE_SECONDS"; else sleep "$ACC_POLL_SECONDS"; fi
+    done
+    wait "$ACC_CHILD"
+    ACC_RC=$?
+    cat "$ACC_TRY" >> "$ACC_LOG"
+    ACC_AFTER=$(process_identity "$ACC_PID" "$ACC_TARGET" 2>/dev/null) || ACC_AFTER=
+    if [ "$ACC_READY" = 1 ] && [ "$ACC_AFTER" = "$ACC_ID" ]; then return 0; fi
+    loge "acc inject FAIL pid=$ACC_PID rc=$ACC_RC (latched for this process)"
+    return 1
+}
+
+acc_cycle() {
+    ACC_PID=$(pidof "$ACC_TARGET" 2>/dev/null)
+    ACC_PID=${ACC_PID%% *}
+    ACC_ID=$(process_identity "$ACC_PID" "$ACC_TARGET" 2>/dev/null) || ACC_ID=
+    load_runtime_hook_state "$ACC_ID" "$ACC_MARK" "$ACC_ATTEMPT"
+    ACC_STATE=$RUNTIME_STATE
+    if [ -n "$ACC_ID" ] && [ "$ACC_STATE" = waiting ]; then
+        write_worker_state injecting "$ACC_PID" "$ACC_ID"
+        if inject_acc_restore "$ACC_PID" "$ACC_ID"; then ACC_STATE=active; else ACC_STATE=failed; fi
+    fi
+    write_worker_state "$ACC_STATE" "$ACC_PID" "$ACC_ID"
+    # Fine-grained discovery until the process appears; quiet once its one attempt is consumed.
+    case "$ACC_STATE" in
+        active|failed) WORKER_INTERVAL=$WATCHDOG_CYCLE_SECONDS ;;
+        *) WORKER_INTERVAL=$ACC_POLL_SECONDS ;;
+    esac
+}
+
 drive_reset_cycle() {
     DRIVE_RESET_PID=$(pidof "$DRIVE_RESET_TARGET" 2>/dev/null)
     DRIVE_RESET_PID=${DRIVE_RESET_PID%% *}
@@ -1328,6 +1397,7 @@ supervisor_is_live() {
 # pay this scan: it runs only when a replacement worker tries to acquire its lane.
 lane_injector_is_live() {
     case "$WORKER_LANE" in
+        acc) WI_SCRIPT=$ACC_RESTORE ;;
         steering) WI_SCRIPT=$SWK ;;
         multidisplay) WI_SCRIPT=$MD ;;
         launcher) WI_SCRIPT=$LNCH ;;
@@ -1439,6 +1509,7 @@ run_worker() {
     esac
     while supervisor_is_live; do
         case "$WORKER_LANE" in
+            acc) acc_cycle ;;
             steering) steering_cycle ;;
             multidisplay) multidisplay_cycle ;;
             launcher) launcher_cycle ;;
@@ -1452,11 +1523,34 @@ run_worker() {
     done
 }
 
+# Priority is bounded if CanBusService is absent or an agent never becomes ready.
+# Once released, unrelated worker recovery never waits for another ACC attach.
+acc_priority_blocks_others() {
+    [ "${ACC_PRIORITY_DONE:-0}" = 0 ] || return 1
+    ACC_PRIORITY_NOW=$(uptime_seconds)
+    if [ $((ACC_PRIORITY_NOW - ACC_PRIORITY_STARTED)) -ge "$ACC_PRIORITY_MAX_SECONDS" ]; then
+        ACC_PRIORITY_DONE=1
+        logi "acc priority window ended; start remaining hook workers"
+        return 1
+    fi
+    read_worker_state acc "$ACC_TARGET"
+    case "$RS_STATE" in
+        active|failed)
+            ACC_PRIORITY_DONE=1
+            logi "acc priority released state=$RS_STATE; start remaining hook workers"
+            return 1 ;;
+    esac
+    return 0
+}
+
 # Supervision never calls Android Binder or waits for an injection. Child tokens also cover the
 # fork-to-lock-publication gap, so a slow-starting shell cannot produce duplicate lane workers.
 supervise_workers() {
     NEXT_WORKER_CHILDREN=
+    SUPERVISOR_ACC_BLOCKED=0
+    if acc_priority_blocks_others; then SUPERVISOR_ACC_BLOCKED=1; fi
     for LANE in $WORKER_LANES; do
+        if [ "$LANE" != acc ] && [ "$SUPERVISOR_ACC_BLOCKED" = 1 ]; then continue; fi
         CHILD_TOKEN=
         for CHILD_RECORD in ${WORKER_CHILDREN:-}; do
             [ "${CHILD_RECORD%%\|*}" != "$LANE" ] || CHILD_TOKEN=${CHILD_RECORD#*\|}
@@ -1481,8 +1575,10 @@ fi
 acquire_load_lock
 SUPERVISOR_TOKEN=$(worker_token "$$") || exit 1
 SUPERVISOR_PID=$$
+ACC_PRIORITY_STARTED=$(uptime_seconds)
+ACC_PRIORITY_DONE=0
 logi "voyah load.bin start (parallel workers) uptime=$(uptime_seconds)"
 while [ 1 ]; do
     supervise_workers
-    sleep "$WATCHDOG_CYCLE_SECONDS"
+    if [ "$ACC_PRIORITY_DONE" = 0 ]; then sleep "$ACC_POLL_SECONDS"; else sleep "$WATCHDOG_CYCLE_SECONDS"; fi
 done

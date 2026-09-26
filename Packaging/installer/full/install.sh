@@ -28,7 +28,7 @@ fi
 # Полный локальный preflight до первого ADB-вызова.
 for FULL_REQUIRED_ASSET in load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js \
         app_client.js \
-        apollo_tech.js voyahtune_drive_reset.js keyboard_lock_en.js keyboard_ru.js \
+        apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js \
         voyahtune_keyboard_en_config.json \
         voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json \
         frida-inject-16.2.1-android-arm64 voyahtune.load.rc \
@@ -476,7 +476,7 @@ boot_hook_cleanup_snapshot() {
 }
 
 boot_hook_final_state() {
-    BOOT_HOOK_FINAL_STATE=$(adb shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; elif [ ! -e /system/etc/init.voyahtune.load.sh ] && [ ! -e /system/etc/init/voyahtune.setenforce.rc ] && [ ! -e /system/etc/init/voyahtune.load.rc ]; then echo ABSENT; else echo PARTIAL; fi" 2>/dev/null) || return 1
+    BOOT_HOOK_FINAL_STATE=$(adb shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/init/voyahtune.load.rc && grep -qFx '    start voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; elif [ ! -e /system/etc/init.voyahtune.load.sh ] && [ ! -e /system/etc/init/voyahtune.setenforce.rc ] && [ ! -e /system/etc/init/voyahtune.load.rc ]; then echo ABSENT; else echo PARTIAL; fi" 2>/dev/null) || return 1
     BOOT_HOOK_FINAL_STATE=$(printf '%s' "$BOOT_HOOK_FINAL_STATE" | tr -d '\r')
     case "$BOOT_HOOK_FINAL_STATE" in
         READY|ABSENT|PARTIAL) return 0 ;;
@@ -525,7 +525,7 @@ install_boot_hooks() {
         return 1
     fi
 
-    if ! adb shell "chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && grep -qF '/data/local/bin/load.bin' /system/etc/.voyahtune.load.sh.new && grep -qF 'on post-fs-data' /system/etc/.voyahtune.load.rc.new && grep -qF '/system/bin/setenforce 0' /system/etc/.voyahtune.load.rc.new && grep -qF 'service voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/.voyahtune.load.rc.new && grep -qF 'enable voyahtune_load' /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync"; then
+    if ! adb shell "chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && grep -qF '/data/local/bin/load.bin' /system/etc/.voyahtune.load.sh.new && grep -qF 'on post-fs-data' /system/etc/.voyahtune.load.rc.new && grep -qF '/system/bin/setenforce 0' /system/etc/.voyahtune.load.rc.new && grep -qF 'service voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/.voyahtune.load.rc.new && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/.voyahtune.load.rc.new && grep -qFx '    start voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'enable voyahtune_load' /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync"; then
         boot_hook_cleanup_stage
         echo "!!! Не удалось подготовить права/SELinux labels boot-hook — рабочая версия сохранена."
         return 1
@@ -548,7 +548,7 @@ install_boot_hooks() {
         fi
     fi
 
-    BOOT_HOOK_STATE=$(adb shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; else echo BROKEN; fi" 2>/dev/null) || {
+    BOOT_HOOK_STATE=$(adb shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/init/voyahtune.load.rc && grep -qFx '    start voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; else echo BROKEN; fi" 2>/dev/null) || {
         if boot_hook_rollback; then
             echo "!!! ADB не смог проверить boot-hook; предыдущая версия восстановлена."
             return 1
@@ -613,7 +613,7 @@ for APOLLO_SAFE_KEY in \
     fi
 done
 adb shell am force-stop com.qinggan.app.vehiclesetting 2>/dev/null
-adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
+adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
 for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master \
         open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported \
         open_voyah_apollo_profile_heartbeat; do
@@ -648,6 +648,7 @@ install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644 || exit
 install_required_data_file app_client.js /data/local/bin/app_client.js 644 || exit 1
 install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644 || exit 1
 install_required_data_file voyahtune_drive_reset.js /data/local/bin/voyahtune_drive_reset.js 644 || exit 1
+install_required_data_file voyahtune_acc_restore.js /data/local/bin/voyahtune_acc_restore.js 644 || exit 1
 install_required_data_file keyboard_lock_en.js /data/local/bin/keyboard_lock_en.js 644 || exit 1
 install_required_data_file keyboard_ru.js /data/local/bin/keyboard_ru.js 644 || exit 1
 install_required_data_file voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_en_config.json 644 || exit 1

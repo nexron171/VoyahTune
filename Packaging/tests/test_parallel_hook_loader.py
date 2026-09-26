@@ -22,7 +22,7 @@ class ParallelLoaderTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="voyahtune-loader-")
         self.root = Path(self.temp.name)
         self.processes = []
-        for pid in range(101, 107):
+        for pid in range(101, 108):
             (self.root / f"generation.{pid}").write_text("1\n")
         (self.root / "proc").mkdir()
         (self.root / "proc/uptime").write_text("100.00 0\n")
@@ -44,6 +44,10 @@ case "$script" in
     vd_bypass.js) gate=vd ;;
     multidisplay.js) echo '[multidisplay] hook ready v2 test'; gate=none ;;
     apollo_tech.js) echo '[apollo] hook ready'; gate=none ;;
+    voyahtune_acc_restore.js)
+        while [ -f "$root/hold_acc_ready" ]; do sleep 0.05; done
+        if [ ! -f "$root/missing_acc_ready" ]; then echo '[acc-restore] hook ready v1'; fi
+        if [ -f "$root/block_acc" ]; then gate=acc; else gate=none; fi ;;
     voyahtune_drive_reset.js)
         if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v1'; fi
         gate=none ;;
@@ -57,6 +61,7 @@ printf 'end %s %s\n' "$script" "$pid" >> "$root/events"
 # Host-only platform shims. Keep all worker and injection functions from the loader intact.
 FIXTURE=ROOT_PLACEHOLDER
 FI="$FIXTURE/frida-inject"
+ACC_POLL_SECONDS=0.02
 WATCHDOG_CYCLE_SECONDS=0.05
 OPTIONAL_CYCLE_SECONDS=0.05
 worker_token() {
@@ -78,6 +83,7 @@ pidof() {
         system_server) echo 104 ;;
         com.qinggan.app.vehiclesetting) echo 105 ;;
         com.qinggan.app.qgime) echo 106 ;;
+        com.qinggan.canbus.service) [ -e "$FIXTURE/missing_acc" ] || echo 107 ;;
         frida-inject)
             for f in "$FIXTURE"/proc/*/cmdline; do
                 [ -f "$f" ] || continue
@@ -159,9 +165,55 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         return subprocess.check_output(["sh", str(self.loader), "--probe", code],
                                        text=True, timeout=5).strip()
 
+    def test_acc_has_priority_until_ready_but_not_until_wrapper_exit(self):
+        (self.root / "hold_acc_ready").touch()
+        (self.root / "block_acc").touch()
+        self.start()
+        self.until(lambda: "start voyahtune_acc_restore.js" in self.events(), "ACC not started")
+        time.sleep(0.2)
+        self.assertEqual(["start voyahtune_acc_restore.js 107"], self.events().splitlines())
+        (self.root / "hold_acc_ready").unlink()
+        self.until(lambda: "start vd_bypass.js" in self.events(), "ACC ready did not release workers")
+        self.assertEqual("active", self.state("acc"))
+        self.assertNotIn("end voyahtune_acc_restore.js", self.events())
+
+    def test_late_canbus_still_attaches_first(self):
+        (self.root / "missing_acc").touch()
+        self.start()
+        self.until(lambda: self.state("acc") == "waiting", "No ACC discovery")
+        self.assertEqual("", self.events())
+        (self.root / "missing_acc").unlink()
+        self.until(lambda: "start vd_bypass.js" in self.events(), "Late CanBus blocked workers")
+        self.assertEqual("start voyahtune_acc_restore.js 107", self.events().splitlines()[0])
+
+    def test_absent_canbus_releases_priority_at_deadline_and_keeps_discovering(self):
+        (self.root / "missing_acc").touch()
+        self.start()
+        self.until(lambda: self.state("acc") == "waiting", "No ACC discovery")
+        self.assertEqual("", self.events())
+        (self.root / "proc/uptime").write_text("146.00 0\n")
+        self.until(lambda: "start vd_bypass.js" in self.events(), "Priority deadline blocked workers")
+        (self.root / "missing_acc").unlink()
+        self.until(lambda: self.state("acc") == "active", "CanBus discovery stopped after deadline")
+        self.assertNotIn("end vd_bypass.js", self.events())
+
+    def test_failed_acc_releases_workers_and_only_new_identity_retries(self):
+        (self.root / "missing_acc_ready").touch()
+        self.start()
+        self.until(lambda: "start vd_bypass.js" in self.events(), "Failed ACC blocked workers")
+        self.assertEqual("failed", self.state("acc"))
+        self.assertFalse((self.root / "voyahtune_acc_restore.pid").exists())
+        self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
+        (self.root / "missing_acc_ready").unlink()
+        time.sleep(0.2)
+        self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
+        (self.root / "generation.107").write_text("2\n")
+        self.until(lambda: self.state("acc") == "active", "New CanBus identity missed hook")
+        self.assertEqual(2, self.events().count("start voyahtune_acc_restore.js"))
+
     def test_all_core_hooks_start_while_vd_status_and_apps_are_blocked(self):
         self.start()
-        expected = ("steeringwheelkeys.js", "multidisplay.js", "launcherdock.js",
+        expected = ("voyahtune_acc_restore.js", "steeringwheelkeys.js", "multidisplay.js", "launcherdock.js",
                     "vd_bypass.js", "apollo_tech.js", "voyahtune_drive_reset.js", "keyboard_lock_en.js")
         self.until(lambda: all(f"start {name}" in self.events() for name in expected),
                    "A blocked lane prevented another core injection")
@@ -230,7 +282,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.release("status")
         self.release("apps")
         first = self.start()
-        lanes = ("steering", "multidisplay", "launcher", "vd", "apollo", "keyboard")
+        lanes = ("acc", "steering", "multidisplay", "launcher", "vd", "apollo", "keyboard")
         self.until(lambda: all(self.state(lane) == "active" for lane in lanes), "Initial hooks failed")
         owners = {lane: self.owner(lane) for lane in lanes}
         first.kill()
@@ -239,7 +291,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.until(lambda: all(self.owner(lane) not in (None, owners[lane]) for lane in lanes),
                    "Workers did not transfer to the replacement supervisor")
         self.until(lambda: all(self.state(lane) == "active" for lane in lanes), "Lost active state")
-        for script in ("steeringwheelkeys.js", "multidisplay.js", "launcherdock.js", "vd_bypass.js",
+        for script in ("voyahtune_acc_restore.js", "steeringwheelkeys.js", "multidisplay.js", "launcherdock.js", "vd_bypass.js",
                        "apollo_tech.js", "voyahtune_drive_reset.js", "keyboard_lock_en.js"):
             self.assertEqual(1, self.events().count(f"start {script}"), script)
         self.until(lambda: f"pid={second.pid};" in (self.root / "voyahtune-hook-status.v1").read_text(),

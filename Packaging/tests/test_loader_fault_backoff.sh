@@ -79,11 +79,13 @@ if grep -Fq 'inject_ret "$MDP"' "$LOAD_BIN"; then
     fail "multidisplay still uses exit-code-based generic injector"
 fi
 
-# init safety: post-fs-data guarantees mounted /data, while class late_start remains the second
-# barrier. The version marker forces an existing boot_completed-gated RC to be upgraded.
+# post-fs-data guarantees mounted /data; explicit start watches CanBus before late_start.
+# Version markers force old RC files to be upgraded.
 for REQUIRED in \
         'on post-fs-data' \
         'MD-priority-before-app-cache-v1' \
+        'ACC-priority-post-fs-data-v1' \
+        '    start voyahtune_load' \
         'enable voyahtune_load' \
         'class late_start' \
         'disabled'; do
@@ -96,12 +98,20 @@ fi
     || fail "Unix installer does not upgrade/verify the early-start RC at all three stages"
 [ "$(grep -Fc 'MD-priority-before-app-cache-v1' "$FULL_INSTALL_BAT")" -eq 3 ] \
     || fail "Windows installer does not upgrade/verify the early-start RC at all three stages"
+for installer in "$FULL_INSTALL" "$FULL_INSTALL_BAT"; do
+    [ "$(grep -Fc 'ACC-priority-post-fs-data-v1' "$installer")" -eq 3 ] \
+        || fail "installer misses ACC RC upgrade/verification"
+    [ "$(grep -Fc "grep -qFx '    start voyahtune_load'" "$installer")" -eq 3 ] \
+        || fail "installer does not verify explicit loader start"
+done
 rc_setenforce_line=$(grep -nF '/system/bin/setenforce 0' "$LOAD_RC" | cut -d: -f1)
 rc_enable_line=$(grep -nF '    enable voyahtune_load' "$LOAD_RC" | cut -d: -f1)
+rc_start_line=$(grep -nF '    start voyahtune_load' "$LOAD_RC" | cut -d: -f1)
 rc_service_line=$(grep -nF 'service voyahtune_load ' "$LOAD_RC" | cut -d: -f1)
 [ "$(grep -Fc '    enable voyahtune_load' "$LOAD_RC")" -eq 1 ] \
     && [ "$rc_setenforce_line" -lt "$rc_enable_line" ] \
-    && [ "$rc_enable_line" -lt "$rc_service_line" ] \
+    && [ "$rc_enable_line" -lt "$rc_start_line" ] \
+    && [ "$rc_start_line" -lt "$rc_service_line" ] \
     || fail "loader is enabled before synchronous post-fs-data setenforce"
 
 for FORBIDDEN in \
@@ -186,7 +196,7 @@ md_generic_failure_line=$(printf '%s\n' "$md_function" \
 # Scheduling is exercised behaviorally by test_parallel_hook_loader.py. This contract retains
 # early init and exact-identity/backoff guarantees without enforcing a serial hook queue.
 require_fixed "$LOAD_BIN" 'WATCHDOG_CYCLE_SECONDS=1'
-require_fixed "$LOAD_BIN" 'WORKER_LANES="steering multidisplay launcher vd apollo keyboard apps status"'
+require_fixed "$LOAD_BIN" 'WORKER_LANES="acc steering multidisplay launcher vd apollo keyboard apps status"'
 require_fixed "$LOAD_BIN" 'supervise_workers'
 require_fixed "$LOAD_BIN" 'acquire_worker_lock'
 

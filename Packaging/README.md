@@ -238,18 +238,19 @@ Fullscreen client запускается только для точного main
 новых process identity после attach блокируют дальнейшую инъекцию этого пакета до следующей загрузки,
 чтобы несовместимый APK не мог попасть в crash-loop.
 
-На cold boot тот же 15-секундный bootstrap каждую секунду ищет не только Qinggan systemservice, но и
-launcher. Как только launcher появляется, выполняется exact-identity one-shot launcher-dock: он только
-оформляет док и не запускает приложения, поэтому иконки не ждут более поздний systemservice или VD
-attach. Внутри последующего watchdog порядок приоритетов остаётся multidisplay whitelist, launcher
-dock, затем VD/system_server; новая identity launcher обнаруживается максимум за 5 секунд.
+Loader явно запускается в `post-fs-data` после синхронного `setenforce`, не дожидаясь
+`class late_start`. Первым он ищет `com.qinggan.canbus.service` с паузой 0,1 с
+и устанавливает `voyahtune_acc_restore.js`: агент подменяет гостевой пакет сброса
+режимов при ACC ON до постановки в очередь. Остальные workers стартуют после
+ready-marker, ошибки установки либо 45 секунд ожидания. Завершения обвязки Frida
+после ready-marker они не ждут. Этот приоритет повышает шанс перехвата первого
+вызова, но не гарантирует его при холодном старте Android.
 
-Loader включается в `post-fs-data` после синхронного `setenforce`, но остаётся `class late_start`.
-Перед общим watchdog он до 15 секунд ждёт `com.qinggan.systemservice` и устанавливает server whitelist
-раньше, чем приложения успеют закэшировать OEM-ответ. Это устраняет основной источник «иногда работает
-после перезапуска приложения». Activity-level `mEnable`, Home/SplitHost и top-task race намеренно не
-переопределяются вслепую; подробный разбор находится в
-`Docs/multidisplay-transfer-audit.md`.
+После начального приоритета ACC workers руля, MultiDisplay, дока, VD, Apollo,
+клавиатуры, приложений и диагностики работают независимо. Подробности:
+`Docs/acc-restore-hook.md`, `Docs/parallel-hook-loader.md`.
+Activity-level `mEnable`, Home/SplitHost и top-task race намеренно не
+переопределяются вслепую; разбор находится в `Docs/multidisplay-transfer-audit.md`.
 
 Это не меняет политику внутренних автомобильных watchdog: редкие собственные проверки, нужные для
 возврата целевого состояния, сохраняются. Оптимизация направлена прежде всего на работу,

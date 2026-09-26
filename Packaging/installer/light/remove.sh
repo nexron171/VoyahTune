@@ -61,8 +61,8 @@ fi
 # CE/DE, profiles и Android/data уже принадлежат PackageManager и вручную не удаляются.
 if ! adb shell '
     rm -f \
-        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
-        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
+        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
+        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new \
         /data/local/bin/app_client.js \
         /data/local/bin/app_client.js.voyahtune.new \
         /data/local/bin/fullscreen_client.js \
@@ -80,10 +80,10 @@ if ! adb shell '
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
         /data/local/tmp/voyahtune_keyboard.txt.try \
-        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
-        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
-        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
-        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
+        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid \
+        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt \
+        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try \
         /data/local/tmp/voyah_apollo.pid \
         /data/local/tmp/voyah_apollo.down \
         /data/local/tmp/voyah_apollo.disabled \
@@ -96,8 +96,8 @@ if ! adb shell '
         /sdcard/tmp/voyah_native_log.txt && \
     rm -rf /data/local/open_voyah && \
     for path in \
-        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
-        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
+        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
+        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new \
         /data/local/bin/app_client.js \
         /data/local/bin/app_client.js.voyahtune.new \
         /data/local/bin/fullscreen_client.js \
@@ -113,10 +113,10 @@ if ! adb shell '
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
         /data/local/tmp/voyahtune_keyboard.txt.try \
-        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
-        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
-        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
-        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
+        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid \
+        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt \
+        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try \
         /data/local/tmp/voyah_apollo.pid \
         /data/local/tmp/voyah_apollo.down \
         /data/local/tmp/voyah_apollo.disabled \

@@ -42,21 +42,21 @@ pub const BOOT_CLEAN_STAGE: &str = r###"rm -f /system/etc/.voyahtune.setenforce.
 // Packaging/installer/full/install.sh:475
 pub const BOOT_CLEAN_SNAPSHOT: &str = r###"rm -f /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent"###;
 // Packaging/installer/full/install.sh:479
-pub const BOOT_STATE: &str = r###"if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; elif [ ! -e /system/etc/init.voyahtune.load.sh ] && [ ! -e /system/etc/init/voyahtune.setenforce.rc ] && [ ! -e /system/etc/init/voyahtune.load.rc ]; then echo ABSENT; else echo PARTIAL; fi"###;
+pub const BOOT_STATE: &str = r###"if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/init/voyahtune.load.rc && grep -qFx '    start voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; elif [ ! -e /system/etc/init.voyahtune.load.sh ] && [ ! -e /system/etc/init/voyahtune.setenforce.rc ] && [ ! -e /system/etc/init/voyahtune.load.rc ]; then echo ABSENT; else echo PARTIAL; fi"###;
 // Packaging/installer/full/install.sh:489
 pub const BOOT_SNAPSHOT: &str = r###"if [ -f /system/etc/init/voyahtune.setenforce.rc ]; then cp -p /system/etc/init/voyahtune.setenforce.rc /system/etc/.voyahtune.setenforce.rc.previous; else : > /system/etc/.voyahtune.setenforce.rc.absent; fi && if [ -f /system/etc/init/voyahtune.load.rc ]; then cp -p /system/etc/init/voyahtune.load.rc /system/etc/.voyahtune.load.rc.previous; else : > /system/etc/.voyahtune.load.rc.absent; fi && if [ -f /system/etc/init.voyahtune.load.sh ]; then cp -p /system/etc/init.voyahtune.load.sh /system/etc/.voyahtune.load.sh.previous; else : > /system/etc/.voyahtune.load.sh.absent; fi && sync"###;
 // Packaging/installer/full/install.sh:496
 pub const BOOT_ROLLBACK: &str = r###"restore_one() { if [ -f "$1.previous" ]; then cp -p "$1.previous" "$1.rollback" && mv -f "$1.rollback" "$2"; elif [ -f "$1.absent" ]; then rm -f "$2"; else return 1; fi; }; if [ -f /system/etc/.voyahtune.load.rc.absent ]; then rm -f /system/etc/init/voyahtune.load.rc && restore_one /system/etc/.voyahtune.load.sh /system/etc/init.voyahtune.load.sh && restore_one /system/etc/.voyahtune.setenforce.rc /system/etc/init/voyahtune.setenforce.rc; elif [ -f /system/etc/.voyahtune.load.rc.previous ]; then restore_one /system/etc/.voyahtune.load.sh /system/etc/init.voyahtune.load.sh && restore_one /system/etc/.voyahtune.setenforce.rc /system/etc/init/voyahtune.setenforce.rc && restore_one /system/etc/.voyahtune.load.rc /system/etc/init/voyahtune.load.rc; else exit 1; fi && for f in /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh; do [ ! -e "$f" ] || restorecon "$f" || exit 1; done && sync"###;
 // Packaging/installer/full/install.sh:528
-pub const BOOT_PREPARE: &str = r###"chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && grep -qF '/data/local/bin/load.bin' /system/etc/.voyahtune.load.sh.new && grep -qF 'on post-fs-data' /system/etc/.voyahtune.load.rc.new && grep -qF '/system/bin/setenforce 0' /system/etc/.voyahtune.load.rc.new && grep -qF 'service voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/.voyahtune.load.rc.new && grep -qF 'enable voyahtune_load' /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync"###;
+pub const BOOT_PREPARE: &str = r###"chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && grep -qF '/data/local/bin/load.bin' /system/etc/.voyahtune.load.sh.new && grep -qF 'on post-fs-data' /system/etc/.voyahtune.load.rc.new && grep -qF '/system/bin/setenforce 0' /system/etc/.voyahtune.load.rc.new && grep -qF 'service voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/.voyahtune.load.rc.new && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/.voyahtune.load.rc.new && grep -qFx '    start voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'enable voyahtune_load' /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync"###;
 // Packaging/installer/full/install.sh:541
 pub const BOOT_PUBLISH: &str = r###"mv -f /system/etc/.voyahtune.load.sh.new /system/etc/init.voyahtune.load.sh && mv -f /system/etc/.voyahtune.load.rc.new /system/etc/init/voyahtune.load.rc && restorecon /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.load.rc && sync"###;
 // Packaging/installer/full/install.sh:551
-pub const BOOT_READY: &str = r###"if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; else echo BROKEN; fi"###;
+pub const BOOT_READY: &str = r###"if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/init/voyahtune.load.rc && grep -qFx '    start voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; else echo BROKEN; fi"###;
 // Packaging/installer/full/install.sh:571
 pub const BOOT_REMOVE_OLD: &str = r###"rm -f /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.setenforce.rc && sync"###;
 // Packaging/installer/full/install.sh:616
-pub const APOLLO_FILES: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"###;
+pub const APOLLO_FILES: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"###;
 // Packaging/installer/full/install.sh:629
 pub const PREPARE_DATA_DIRECTORIES: &str = r###"
 mkdir -p /data/local/bin /data/local/tmp &&
@@ -69,7 +69,7 @@ test x$(stat -c %a:%u:%g /data/local) = x751:0:0 &&
 test x$(stat -c %a:%u:%g /data/local/bin) = x755:0:0 &&
 test x$(stat -c %a:%u:%g /data/local/tmp) = x771:2000:2000
 "###;
-// Packaging/installer/full/install.sh:661
+// Packaging/installer/full/install.sh:662
 pub const APP_CLIENT_MIGRATION: &str = r###"
     fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null)
     old_ifs=$IFS
@@ -160,9 +160,9 @@ pub const LIGHT_TEARDOWN: &str = r###"
                     /data/local/bin/load.bin 2>/dev/null; then
             rm -f /data/local/bin/load.bin || exit 1
         fi
-        rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
-            /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
-            /data/local/bin/apollo_tech.js.voyahtune.new /data/local/bin/voyahtune_drive_reset.js.voyahtune.new \
+        rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
+            /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new \
+            /data/local/bin/apollo_tech.js.voyahtune.new /data/local/bin/voyahtune_drive_reset.js.voyahtune.new /data/local/bin/voyahtune_acc_restore.js.voyahtune.new \
             /data/local/bin/load.bin.voyahtune.new \
             /data/local/bin/frida-inject.voyahtune.new \
             /data/local/bin/app_client.js \
@@ -209,10 +209,10 @@ pub const LIGHT_TEARDOWN: &str = r###"
             /data/local/tmp/voyahtune_md.attempt \
             /data/local/tmp/voyahtune_md.txt \
             /data/local/tmp/voyahtune_md.txt.try \
-            /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
-            /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
-            /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
-            /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
+            /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid \
+            /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt \
+            /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt \
+            /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try \
             /data/local/tmp/voyahtune_keyboard.pid \
             /data/local/tmp/voyahtune_keyboard.attempt \
             /data/local/tmp/voyahtune_keyboard.txt \
@@ -258,7 +258,7 @@ pub const LIGHT_TEARDOWN: &str = r###"
                 /data/local/bin/app_client.js.voyahtune.new \
                 /data/local/bin/fullscreen_client.js \
                 /data/local/bin/fullscreen_client.js.voyahtune.new \
-                /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
+                /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
                 /data/local/bin/keyboard_lock_en.js \
                 /data/local/bin/keyboard_ru.js \
                 /data/local/bin/voyahtune-hook-manifest.json \
@@ -294,7 +294,7 @@ pub const REMOVE_BOOT: &str = r###"rm -f /system/etc/init/voyahtune.load.rc /sys
 // Packaging/installer/full/remove.sh:251
 pub const REMOVE_TRANSACTIONS: &str = r###"rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback /system/etc/init.logcat.sh.voyahtune.new /system/etc/init.logcat.sh.voyahtune.rollback"###;
 // Packaging/installer/full/remove.sh:259
-pub const REMOVE_PROCESSES: &str = r###"ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs kill -9"###;
+pub const REMOVE_PROCESSES: &str = r###"ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|voyahtune_acc_restore|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs kill -9"###;
 // Packaging/installer/full/remove.sh:263
 pub const STOP_FULLSCREEN: &str = r###"fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for fullscreen_pkg in $fullscreen_csv; do IFS=$old_ifs; case "$fullscreen_pkg" in ""|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop "$fullscreen_pkg" >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs"###;
 // Packaging/installer/full/remove.sh:270
@@ -302,7 +302,7 @@ pub const REMOVE_EARLY_VD: &str = r###"rm -f /data/local/bin/vd_bypass.js"###;
 // Packaging/installer/full/remove.sh:271
 pub const REMOVE_EARLY_HOOKS: &str = r###"rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"###;
 // Packaging/installer/full/remove.sh:273
-pub const REMOVE_EARLY_APOLLO: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new"###;
+pub const REMOVE_EARLY_APOLLO: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new"###;
 // Packaging/installer/full/remove.sh:274
 pub const REMOVE_EARLY_KEYBOARD: &str = r###"rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"###;
 // Packaging/installer/full/remove.sh:275
@@ -317,8 +317,8 @@ pub const REMOVE_FILES: &str = r###"
         /data/local/bin/launcherdock.js \
         /data/local/bin/multidisplay.js \
         /data/local/bin/keymng2.js \
-        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
-        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
+        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
+        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new \
         /data/local/bin/keyboard_lock_en.js \
         /data/local/bin/keyboard_ru.js \
         /data/local/bin/voyahtune_keyboard_en_config.json \
@@ -328,10 +328,10 @@ pub const REMOVE_FILES: &str = r###"
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
         /data/local/tmp/voyahtune_keyboard.txt.try \
-        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
-        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
-        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
-        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
+        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid \
+        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt \
+        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try \
         /data/local/tmp/voyahtune_load.v2.lock \
         /data/local/tmp/voyahtune_vd.pid \
         /data/local/tmp/voyahtune_vd.attempt \
@@ -386,8 +386,8 @@ pub const REMOVE_FILES: &str = r###"
         /data/local/bin/launcherdock.js \
         /data/local/bin/multidisplay.js \
         /data/local/bin/keymng2.js \
-        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
-        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
+        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
+        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new \
         /data/local/bin/keyboard_lock_en.js \
         /data/local/bin/keyboard_ru.js \
         /data/local/bin/voyahtune_keyboard_en_config.json \
@@ -397,10 +397,10 @@ pub const REMOVE_FILES: &str = r###"
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
         /data/local/tmp/voyahtune_keyboard.txt.try \
-        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
-        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
-        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
-        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
+        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid \
+        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt \
+        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try \
         /data/local/tmp/voyahtune_load.v2.lock \
         /data/local/tmp/voyahtune_vd.pid \
         /data/local/tmp/voyahtune_vd.attempt \

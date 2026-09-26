@@ -24,6 +24,7 @@ read_md_attempt_record "$WORK/attempt" || fail 'valid MD attempt record rejected
 printf '%s\n' 'v2:boot:123:456|2|120|extra' > "$WORK/attempt"
 if read_md_attempt_record "$WORK/attempt"; then fail 'malformed MD record accepted'; fi
 
+acc_priority_blocks_others() { return 1; }
 WORKER_LANES='steering multidisplay'
 WORKER_CHILDREN=' steering|11:100:boot multidisplay|12:200:boot'
 SUPERVISOR_TOKEN=10:50:boot
