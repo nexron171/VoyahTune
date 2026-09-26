@@ -59,7 +59,7 @@ require "$CONTRACT" 'METHOD_PUBLISH = "publishHookStatusV1"'
 require "$APP_MANIFEST" 'android:authorities="ru.big.town.restoremode.restoremodecontentprovider"'
 
 require "$LAYOUT" 'android:id="@+id/textHookStatus"'
-require "$ACTIVITY" 'HookStatusContract.renderForUi(hookPayload, BuildConfig.IS_FULL)'
+require "$ACTIVITY" 'HookStatusContract.renderForUi(hookPayload, InstallMode.isFull())'
 require "$ACTIVITY" 'activityResumed && currentSection == 6'
 require "$ACTIVITY" 'SYSTEM_METRICS_INTERVAL_MS = 5_000L'
 [ "$(grep -F -c 'postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS)' "$ACTIVITY")" -eq 1 ] \

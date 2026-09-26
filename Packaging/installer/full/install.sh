@@ -812,6 +812,7 @@ case "${YDNS_REQUEST:-keep}" in
         ;;
 esac
 
+adb shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode && settings put global voyahtune_install_mode full && test x\$(settings get global voyahtune_install_mode) = xfull" || exit 1
 if ! adb reboot; then
     echo "!!! ADB не смог перезагрузить ГУ; пробуем запустить установленный hook-loader без reboot."
     exit 1

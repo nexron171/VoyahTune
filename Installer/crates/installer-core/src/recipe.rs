@@ -31,7 +31,18 @@ pub struct InstallPackage {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Attributes {
+    pub path: String,
+    pub mode: u32,
+    pub variants: Vec<Variant>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Recipe {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directories: Vec<Attributes>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attributes: Vec<Attributes>,
     pub schema: u32,
     pub engine: String,
     pub files: Vec<CopyFile>,
@@ -78,7 +89,7 @@ fn owned(path: &str) -> bool {
                 "/sdcard/tmp/voyahtune_",
             ]
             .iter()
-            .any(|p| path.starts_with(p) && !path[p.len()..].contains('/')))
+            .any(|p| path.starts_with(p) && !path[p.len()..].is_empty()))
 }
 impl Recipe {
     pub fn validate(&self) -> Result<()> {
@@ -89,7 +100,9 @@ impl Recipe {
             )
             .detail(detail)
         };
-        if self.schema != 1 || self.engine != "qinggan-v1" {
+        if !((self.schema == 1 && self.engine == "qinggan-v1")
+            || (self.schema == 2 && self.engine == "qinggan-v2"))
+        {
             return Err(Error::new(
                 "ENGINE_REQUIRED",
                 "Этот комплект требует другую версию установщика",
@@ -98,6 +111,32 @@ impl Recipe {
         }
         if self.files.len() > 512 || self.packages.len() > 64 || self.remove_files.len() > 2048 {
             return Err(fail("Слишком большой манифест".into()));
+        }
+        if self.schema == 2 {
+            if self.packages.len() != 1
+                || !self.remove_packages.is_empty()
+                || !self.remove_prefixes.is_empty()
+                || self.files.iter().any(|f| f.variant_artifact)
+            {
+                return Err(fail(
+                    "Неподдерживаемые пакетные операции или prefix cleanup".into(),
+                ));
+            }
+        } else if !self.directories.is_empty() || !self.attributes.is_empty() {
+            return Err(fail("Новые операции требуют recipe schema 2".into()));
+        }
+        for attr in self.directories.iter().chain(&self.attributes) {
+            if !owned(&attr.path)
+                || !attr.path.starts_with("/data/local/")
+                || !attr
+                    .path
+                    .split('/')
+                    .any(|p| p.starts_with("voyahtune_") || p.starts_with("voyahtune-"))
+                || ![0o644, 0o755].contains(&attr.mode)
+                || attr.variants.is_empty()
+            {
+                return Err(fail(attr.path.clone()));
+            }
         }
         let mut destinations = BTreeSet::new();
         for file in &self.files {
@@ -139,7 +178,7 @@ impl Recipe {
             if !self.files.iter().any(|f| {
                 f.artifact == name
                     && f.variants == variants
-                    && f.variant_artifact == (name == "native.apk")
+                    && f.variant_artifact == (self.schema == 1 && name == "native.apk")
             }) {
                 return Err(fail(format!("Обязательная роль: {name}")));
             }
@@ -159,7 +198,7 @@ impl Recipe {
         if !self.packages.iter().any(|p| {
             p.package == RESTORE
                 && p.artifact == "restore_mode.apk"
-                && p.variant_artifact
+                && p.variant_artifact == (self.schema == 1)
                 && p.variants == [Variant::Full, Variant::Light]
         }) {
             return Err(fail("Обязательная роль: RestoreMode".into()));
@@ -193,7 +232,13 @@ impl Recipe {
             }
         }
         for path in &self.remove_directories {
-            if path != "/data/local/tmp/voyah_load.lock" {
+            if path != "/data/local/tmp/voyah_load.lock"
+                && !(owned(path)
+                    && path.starts_with("/data/local/")
+                    && path
+                        .split('/')
+                        .any(|p| p.starts_with("voyahtune_") || p.starts_with("voyahtune-")))
+            {
                 return Err(fail(path.clone()));
             }
         }

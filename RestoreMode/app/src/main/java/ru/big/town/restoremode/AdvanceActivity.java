@@ -1,5 +1,7 @@
 package ru.big.town.restoremode;
 
+import ru.big.town.common.InstallMode;
+
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -482,7 +484,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 prefs.getBoolean(PREF_SHOW_CUSTOM_COMMANDS, false) ? View.VISIBLE : View.GONE);
 
         // LIGHT: скрываем разделы «Приложения и разделение экрана» (2) и «Кнопки на руле» (5) — split/VD и Frida-руль.
-        if (!BuildConfig.IS_FULL) {
+        if (!InstallMode.isFull()) {
             if (navSplitScreen != null)     navSplitScreen.setVisibility(View.GONE);
             if (navSteeringButtons != null) navSteeringButtons.setVisibility(View.GONE);
         }
@@ -519,7 +521,7 @@ public class AdvanceActivity extends AppCompatActivity {
         initAppShortcuts();
         initAppWidgets();
         initDockOverride();
-        if (BuildConfig.IS_FULL) {
+        if (InstallMode.isFull()) {
             initFullscreenApps();
             initSplitScreen();
             initAppDpiList();
@@ -600,16 +602,16 @@ public class AdvanceActivity extends AppCompatActivity {
         Switch switchKeyboardEnglish = findViewById(R.id.switchKeyboardEnglish);
         Switch switchKeyboardRussian = findViewById(R.id.switchKeyboardRussian);
         if (switchKeyboardEnglish != null && switchKeyboardRussian != null) {
-            String keyboardMode = BuildConfig.IS_FULL
+            String keyboardMode = InstallMode.isFull()
                     ? SplitConfigSync.normalizeKeyboardMode(prefs.getString("keyboardMode", "off"))
                     : "off";
             switchKeyboardEnglish.setChecked("en".equals(keyboardMode));
             switchKeyboardRussian.setChecked("ru".equals(keyboardMode));
-            switchKeyboardEnglish.setEnabled(BuildConfig.IS_FULL);
-            switchKeyboardRussian.setEnabled(BuildConfig.IS_FULL);
+            switchKeyboardEnglish.setEnabled(InstallMode.isFull());
+            switchKeyboardRussian.setEnabled(InstallMode.isFull());
             final boolean[] updatingKeyboardSwitches = {false};
             switchKeyboardEnglish.setOnCheckedChangeListener((button, checked) -> {
-                if (updatingKeyboardSwitches[0] || !BuildConfig.IS_FULL) return;
+                if (updatingKeyboardSwitches[0] || !InstallMode.isFull()) return;
                 updatingKeyboardSwitches[0] = true;
                 if (checked) switchKeyboardRussian.setChecked(false);
                 String mode = checked ? "en" : (switchKeyboardRussian.isChecked() ? "ru" : "off");
@@ -618,7 +620,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 updatingKeyboardSwitches[0] = false;
             });
             switchKeyboardRussian.setOnCheckedChangeListener((button, checked) -> {
-                if (updatingKeyboardSwitches[0] || !BuildConfig.IS_FULL) return;
+                if (updatingKeyboardSwitches[0] || !InstallMode.isFull()) return;
                 updatingKeyboardSwitches[0] = true;
                 if (checked) switchKeyboardEnglish.setChecked(false);
                 String mode = checked ? "ru" : (switchKeyboardEnglish.isChecked() ? "en" : "off");
@@ -685,7 +687,7 @@ public class AdvanceActivity extends AppCompatActivity {
         }
 
         // Раздел «Кнопки на руле» (Frida-перехват кнопки-звёздочки) — только в full.
-        if (BuildConfig.IS_FULL) {
+        if (InstallMode.isFull()) {
             initSteeringButtons();
         }
     }
@@ -994,7 +996,7 @@ public class AdvanceActivity extends AppCompatActivity {
     private void initDockOverride() {
         // «Системный док» завязан на Frida-хук лаунчера → только full. В light прячем весь блок.
         View block = findViewById(R.id.dockOverrideBlock);
-        if (!BuildConfig.IS_FULL) {
+        if (!InstallMode.isFull()) {
             if (block != null) block.setVisibility(View.GONE);
             return;
         }
@@ -1806,7 +1808,7 @@ public class AdvanceActivity extends AppCompatActivity {
         String hookPayload = getSharedPreferences(
                 HookStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
                 .getString(HookStatusContract.PAYLOAD_KEY, null);
-        String hookStatus = HookStatusContract.renderForUi(hookPayload, BuildConfig.IS_FULL);
+        String hookStatus = HookStatusContract.renderForUi(hookPayload, InstallMode.isFull());
         return new SystemMetricsSnapshot(total, Math.max(0L, total - available), available, cpu,
                 hookStatus);
     }
@@ -1893,7 +1895,7 @@ public class AdvanceActivity extends AppCompatActivity {
         if (switchApolloSettingsActivation != null) {
             switchApolloSettingsActivation.setChecked(prefs.getBoolean(
                     ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED));
-            switchApolloSettingsActivation.setEnabled(BuildConfig.IS_FULL);
+            switchApolloSettingsActivation.setEnabled(InstallMode.isFull());
             switchApolloSettingsActivation.setOnCheckedChangeListener((button, checked) -> {
                 prefs.edit().putBoolean(ApolloSettings.STOCK_UI, checked).apply();
                 updateApolloUi();
@@ -1930,11 +1932,11 @@ public class AdvanceActivity extends AppCompatActivity {
 
     private void updateApolloUi() {
         if (textApolloFullOnly != null) {
-            textApolloFullOnly.setVisibility(BuildConfig.IS_FULL ? View.GONE : View.VISIBLE);
+            textApolloFullOnly.setVisibility(InstallMode.isFull() ? View.GONE : View.VISIBLE);
         }
 
         if (textApolloSettingsActivationStatus != null) {
-            if (!BuildConfig.IS_FULL) {
+            if (!InstallMode.isFull()) {
                 textApolloSettingsActivationStatus.setText(
                         "Недоступно в Light-версии: в ней нет Frida hook-loader.");
             } else if (switchApolloSettingsActivation != null
@@ -2196,7 +2198,7 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private boolean voiceOwnsSlot(String key) {
-        return VoiceSteeringPolicy.ownsSlot(BuildConfig.IS_FULL, prefs.getBoolean(VoiceCommands.ENABLED, false),
+        return VoiceSteeringPolicy.ownsSlot(InstallMode.isFull(), prefs.getBoolean(VoiceCommands.ENABLED, false),
                 prefs.getString(VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG), key);
     }
 

@@ -1,31 +1,45 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use installer_core::{engineering_menu, plans::Request, recovery, Error, Result};
+use installer_core::{
+    adb::Adb,
+    canbus::RemovalConsent,
+    catalog::{Cache, Catalog},
+    engine::{default_adb, Engine},
+    engineering_menu,
+    events::{Event, Events},
+    payload::{self, Payload},
+    plans::{Action, Dns, Plan, Request},
+    recovery, session, Error, Result,
+};
 use serde_json::{json, Value};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader},
     path::PathBuf,
-    process::{ChildStdin, Command, Stdio},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 use tauri::{Emitter, Manager, State};
+
 #[derive(Default)]
 struct Running {
     busy: bool,
-    stdin: Option<ChildStdin>,
+    cancel: Option<Arc<AtomicBool>>,
+    consent: Option<Arc<RemovalConsent>>,
     operation_dir: Option<PathBuf>,
     payload: Option<PathBuf>,
+    prepared: Option<(Plan, String, PathBuf)>,
+    catalog: Option<Catalog>,
 }
 #[derive(Default)]
 struct Runtime(Mutex<Running>);
-fn paths(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf)> {
+fn bundle(app: &tauri::AppHandle) -> Result<PathBuf> {
     let resources = app
         .path()
         .resource_dir()
         .map_err(|e| Error::new("RESOURCES", "Не найдены ресурсы приложения").detail(e))?;
-    // Keep Android ELF payloads outside usr/lib: linuxdeploy treats every ELF
-    // there as a host library and would attempt to modify the car's binaries.
-    let bundle = if cfg!(target_os = "linux") {
+    let path = if cfg!(target_os = "linux") {
         resources
             .parent()
             .and_then(|p| p.parent())
@@ -34,88 +48,63 @@ fn paths(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf)> {
     } else {
         resources.join("bundle")
     };
-    let name = if cfg!(windows) {
-        "voyahtune.exe"
-    } else {
-        "voyahtune"
-    };
-    let exe = std::env::current_exe()?;
-    let executable = exe.parent().unwrap().join(name);
-    // Development uses precisely the same prepared bundle as packaging.
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if cfg!(debug_assertions) && !bundle.join("host-tools.json").exists() {
-        let target = if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "aarch64") {
-                "aarch64-apple-darwin"
-            } else {
-                "x86_64-apple-darwin"
-            }
-        } else if cfg!(windows) {
-            "x86_64-pc-windows-msvc"
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/bundle");
+    Ok(
+        if cfg!(debug_assertions) && !path.join("host-tools.json").exists() {
+            dev
         } else {
-            "x86_64-unknown-linux-gnu"
-        };
-        return Ok((
-            dev.join(format!(
-                "binaries/voyahtune-{target}{}",
-                if cfg!(windows) { ".exe" } else { "" }
-            )),
-            dev.join("resources/bundle"),
-        ));
-    }
-    Ok((executable, bundle))
+            path
+        },
+    )
 }
-fn cli(app: &tauri::AppHandle, args: &[String]) -> Result<Command> {
-    let (exe, bundle) = paths(app)?;
-    if !exe.is_file() {
-        return Err(Error::new(
-            "CLI_MISSING",
-            "В установщике отсутствует исполняемый модуль",
-        )
-        .detail(exe.display()));
+fn saved_recovery_root(serial: &str) -> Result<PathBuf> {
+    if serial.is_empty() || serial.len() > 200 {
+        return Err(Error::new("INVALID_SERIAL", "Некорректный автомобиль"));
     }
-    let mut command = Command::new(exe);
-    command
-        .arg("--bundle")
-        .arg(bundle)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(payload) = app
-        .state::<Runtime>()
-        .0
-        .lock()
-        .map_err(|_| Error::new("DESKTOP_LOCK", "Состояние недоступно"))?
-        .payload
-        .clone()
-    {
-        command.arg("--payload").arg(payload);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    Ok(command)
+    // Match the operation directory identity; never use the serial as a path.
+    let key: String = serial
+        .as_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Ok(recovery::data_dir()?
+        .parent()
+        .unwrap()
+        .join("recovery")
+        .join(key))
 }
-fn query(app: &tauri::AppHandle, args: &[String]) -> Result<Value> {
-    let output = cli(app, args)?.output()?;
-    let value: Value = serde_json::from_slice(&output.stdout).map_err(|e| {
-        Error::new("CLI_PROTOCOL", "Исполняемый модуль вернул неверный ответ").detail(format!(
-            "{e}\n{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ))
-    })?;
-    if !output.status.success() {
-        return Err(
-            serde_json::from_value(value["error"].clone()).unwrap_or_else(|_| {
-                Error::new("CLI_FAILED", "Команда завершилась ошибкой").detail(value.to_string())
-            }),
-        );
+fn operation_payload(app: &tauri::AppHandle, serial: &str, action: Action) -> Result<Payload> {
+    if action == Action::Remove {
+        let saved = saved_recovery_root(serial)?;
+        if let Ok(text) = fs::read_to_string(saved.join("current.json")) {
+            let value: String = serde_json::from_str(&text).unwrap_or_default();
+            if value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()) {
+                if let Ok(payload) = Payload::open(&saved.join(value)) {
+                    return Ok(payload);
+                }
+            }
+        }
     }
-    Ok(value)
+    let selected = app.state::<Runtime>().0.lock().unwrap().payload.clone();
+    if let Some(root) = selected {
+        return Payload::open(&root);
+    }
+    if action == Action::Remove {
+        return Payload::open(&bundle(app)?.join("recovery"));
+    }
+    Err(Error::new(
+        "PAYLOAD_REQUIRED",
+        "Выберите и скачайте комплект или откройте локальный ZIP",
+    ))
+}
+fn select_payload(app: &tauri::AppHandle, payload: Payload) -> Result<Value> {
+    let runtime = app.state::<Runtime>();
+    let mut state = runtime.0.lock().unwrap();
+    state.payload = Some(payload.root.clone());
+    state.prepared = None;
+    Ok(
+        json!({"manifest":payload.manifest,"payloadRoot":payload.root,"toolingVersion":env!("CARGO_PKG_VERSION")}),
+    )
 }
 fn reserve(runtime: &Runtime) -> Result<()> {
     let mut r = runtime
@@ -129,12 +118,17 @@ fn reserve(runtime: &Runtime) -> Result<()> {
         ));
     }
     r.busy = true;
+    r.cancel = Some(Arc::new(AtomicBool::new(false)));
     Ok(())
+}
+fn operation_busy(runtime: &Runtime) -> bool {
+    runtime.0.lock().map(|r| r.busy).unwrap_or(true)
 }
 fn release(runtime: &Runtime) {
     if let Ok(mut r) = runtime.0.lock() {
         r.busy = false;
-        r.stdin = None;
+        r.cancel = None;
+        r.consent = None;
     }
 }
 #[tauri::command]
@@ -142,24 +136,155 @@ async fn release_info(app: tauri::AppHandle, path: Option<String>) -> Result<Val
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        // Load the selected package. Full integrity checks belong to explicit verify/build.
-        let mut args = vec!["info".to_owned()];
-        if let Some(path) = path.filter(|p| !p.trim().is_empty()) {
-            // cli() must not append the previous selection a second time.
-            let previous = handle.state::<Runtime>().0.lock().unwrap().payload.take();
-            args.extend(["--payload".into(), path]);
-            let value = query(&handle, &args);
-            handle.state::<Runtime>().0.lock().unwrap().payload = previous;
-            let value = value?;
-            handle.state::<Runtime>().0.lock().unwrap().payload =
-                value["payloadRoot"].as_str().map(PathBuf::from);
-            Ok(value)
+        let path = path
+            .filter(|p| !p.trim().is_empty())
+            .ok_or_else(|| Error::new("PAYLOAD_REQUIRED", "Укажите ZIP или папку комплекта"))?;
+        let path = PathBuf::from(path);
+        let cancel = handle
+            .state::<Runtime>()
+            .0
+            .lock()
+            .unwrap()
+            .cancel
+            .clone()
+            .unwrap();
+        let payload = if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+        {
+            Cache::user()?.import(&path, &cancel, &|event| {
+                let _ = handle.emit("payload-progress", event);
+            })?
         } else {
-            query(&handle, &args)
+            let root = if path.is_file() {
+                path.parent().unwrap()
+            } else {
+                &path
+            };
+            Payload::open(root)?
+        };
+        if payload.manifest.removal_only {
+            return Err(Error::new("PAYLOAD_REQUIRED", "Выбран комплект удаления"));
         }
+        select_payload(&handle, payload)
     })
     .await
     .map_err(|e| Error::new("WORKER", "Не удалось проверить релиз").detail(e))
+    .and_then(|v| v);
+    release(&app.state::<Runtime>());
+    result
+}
+#[tauri::command]
+async fn release_catalog(app: tauri::AppHandle, refresh: bool) -> Result<Value> {
+    reserve(&app.state::<Runtime>())?;
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = Cache::user()?.state(refresh)?;
+        handle.state::<Runtime>().0.lock().unwrap().catalog = Some(state.catalog.clone());
+        let mut value = serde_json::to_value(&state)?;
+        if let Ok(embedded) = Payload::load(&bundle(&handle)?.join("payload")) {
+            value["cached"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"version":embedded.manifest.release_version,"path":embedded.root}));
+        }
+        for (entry, release) in value["catalog"]["releases"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(state.catalog.releases.iter())
+        {
+            let error = release.requirements.validate().err().or_else(|| {
+                (release.payload.manifest_schema != 3).then(|| {
+                    Error::new(
+                        "INSTALLER_UPDATE_REQUIRED",
+                        "Обновите установщик для этого формата комплекта",
+                    )
+                })
+            });
+            let platform = if cfg!(target_os = "macos") {
+                "macos"
+            } else if cfg!(windows) {
+                "windows"
+            } else {
+                "linux"
+            };
+            entry["installerUpdates"] = json!(state
+                .catalog
+                .installer_updates(&release.requirements, platform));
+            entry["compatible"] = json!(error.is_none());
+            entry["incompatibility"] = json!(error.map(|e| e.message));
+        }
+        Ok(value)
+    })
+    .await
+    .map_err(|e| Error::new("WORKER", "Не удалось получить каталог").detail(e))
+    .and_then(|v| v);
+    release(&app.state::<Runtime>());
+    result
+}
+#[tauri::command]
+async fn open_release_link(app: tauri::AppHandle, url: String) -> Result<()> {
+    let allowed = app
+        .state::<Runtime>()
+        .0
+        .lock()
+        .unwrap()
+        .catalog
+        .as_ref()
+        .is_some_and(|c| {
+            c.releases.iter().any(|r| r.notes_url == url)
+                || c.installer_downloads.iter().any(|i| i.url == url)
+        });
+    if !allowed {
+        return Err(Error::new(
+            "LINK_INVALID",
+            "Ссылка отсутствует в проверенном каталоге",
+        ));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "macos")]
+        let result = std::process::Command::new("open").arg(&url).status();
+        #[cfg(target_os = "linux")]
+        let result = std::process::Command::new("xdg-open").arg(&url).status();
+        #[cfg(windows)]
+        let result = std::process::Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .status();
+        if !result?.success() {
+            return Err(Error::new(
+                "LINK_OPEN",
+                "Не удалось открыть ссылку в браузере",
+            ));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| Error::new("WORKER", "Не удалось открыть браузер").detail(e))?
+}
+#[tauri::command]
+async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Value> {
+    reserve(&app.state::<Runtime>())?;
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let (release, cancel) = {
+            let runtime = handle.state::<Runtime>();
+            let state = runtime.0.lock().unwrap();
+            let entry = state
+                .catalog
+                .as_ref()
+                .and_then(|c| c.releases.iter().find(|r| r.version == version))
+                .cloned()
+                .ok_or_else(|| Error::new("RELEASE_MISSING", "Обновите список и выберите релиз"))?;
+            (entry, state.cancel.clone().unwrap())
+        };
+        let payload = Cache::user()?.download(&release, &cancel, &|event| {
+            let _ = handle.emit("payload-progress", event);
+        })?;
+        select_payload(&handle, payload)
+    })
+    .await
+    .map_err(|e| Error::new("WORKER", "Не удалось скачать комплект").detail(e))
     .and_then(|v| v);
     release(&app.state::<Runtime>());
     result
@@ -172,35 +297,33 @@ fn engineering_code(date: Option<String>) -> Result<engineering_menu::Engineerin
 async fn devices(app: tauri::AppHandle) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || query(&handle, &["devices".into()]))
-        .await
-        .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
-        .and_then(|v| v);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let devices = Adb::new(default_adb(&bundle(&handle)?), Events::quiet())?.devices()?;
+        Ok(json!({"devices":devices}))
+    })
+    .await
+    .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
+    .and_then(|v| v);
     release(&app.state::<Runtime>());
     result
 }
 #[tauri::command]
-async fn plan(app: tauri::AppHandle, serial: String, action: String, dns: String) -> Result<Value> {
-    if !["full", "light", "remove"].contains(&action.as_str())
-        || !["keep", "on", "off"].contains(&dns.as_str())
-    {
-        return Err(Error::new("ARGUMENTS", "Неизвестное действие"));
-    }
+async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        query(
-            &handle,
-            &[
-                "plan".into(),
-                "--device".into(),
-                serial,
-                "--action".into(),
-                action,
-                "--dns".into(),
-                dns,
-            ],
-        )
+        let payload = operation_payload(&handle, &serial, action)?;
+        let plan = session::plan(
+            &default_adb(&bundle(&handle)?),
+            &payload,
+            &serial,
+            action,
+            dns,
+        )?;
+        let digest = payload::sha256(&payload.root.join("manifest.json"))?;
+        handle.state::<Runtime>().0.lock().unwrap().prepared =
+            Some((plan.clone(), digest, payload.root.clone()));
+        Ok(serde_json::to_value(plan)?)
     })
     .await
     .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
@@ -219,135 +342,99 @@ async fn apply(app: tauri::AppHandle, request: Request) -> Result<()> {
         .await
         .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
         .and_then(|v| v);
+    app.state::<Runtime>().0.lock().unwrap().prepared = None;
     release(&app.state::<Runtime>());
     result
 }
 fn run_operation(app: &tauri::AppHandle, request: Request) -> Result<()> {
-    app.state::<Runtime>().0.lock().unwrap().operation_dir = None;
-    let action = serde_json::to_value(request.action)?
-        .as_str()
+    let (mut plan, digest, root) = app
+        .state::<Runtime>()
+        .0
+        .lock()
         .unwrap()
-        .to_owned();
-    let dns = serde_json::to_value(request.dns)?
-        .as_str()
+        .prepared
+        .clone()
+        .ok_or_else(|| Error::new("PLAN_REQUIRED", "Сначала проверьте автомобиль и план"))?;
+    if plan.request.serial != request.serial || plan.request.action != request.action {
+        return Err(Error::new(
+            "PLAN_CHANGED",
+            "Выбор автомобиля или действия изменился. Постройте план заново.",
+        ));
+    }
+    let payload = Payload::open(&root)?;
+    if payload::sha256(&payload.root.join("manifest.json"))? != digest {
+        return Err(Error::new(
+            "PAYLOAD_CHANGED",
+            "Комплект изменился. Постройте план заново.",
+        ));
+    }
+    // DNS is an explicit choice on the review page, after initial diagnosis.
+    plan.request = request.clone();
+    let cancel = app
+        .state::<Runtime>()
+        .0
+        .lock()
         .unwrap()
-        .to_owned();
-    let mut child = cli(
-        app,
-        &[
-            "apply".into(),
-            "--device".into(),
-            request.serial,
-            "--action".into(),
-            action,
-            "--dns".into(),
-            dns,
-            "--token".into(),
-            request.inventory_token,
-            "--yes".into(),
-            "--interactive".into(),
-        ],
-    )?
-    .stdin(Stdio::piped())
-    .spawn()?;
-    app.state::<Runtime>().0.lock().unwrap().stdin = child.stdin.take();
-    let stderr = child.stderr.take().unwrap();
-    let stderr = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = stderr.take(1024 * 1024).read_to_string(&mut s);
-        s
-    });
-    let mut last_error = None;
-    for line in BufReader::new(child.stdout.take().unwrap()).lines() {
-        match line {
-            Ok(line) => match serde_json::from_str::<Value>(&line) {
-                Ok(event) => {
-                    let directory = event["data"]["logDirectory"]
-                        .as_str()
-                        .map(PathBuf::from)
-                        .or_else(|| {
-                            event["data"]["reportPath"]
-                                .as_str()
-                                .and_then(|p| PathBuf::from(p).parent().map(PathBuf::from))
-                        });
-                    if let Some(directory) = directory {
-                        app.state::<Runtime>().0.lock().unwrap().operation_dir = Some(directory);
-                    }
-                    if event["type"] == "error" {
-                        last_error = serde_json::from_value::<Error>(event["error"].clone()).ok();
-                    }
-                    if matches!(
-                        event["type"].as_str(),
-                        Some("operation-failed" | "operation-cancelled" | "operation-paused")
-                    ) {
-                        last_error = serde_json::from_value::<Error>(
-                            event["data"]["report"]["error"].clone(),
-                        )
-                        .ok();
-                    }
-                    let _ = app.emit("installer-event", event);
-                }
-                Err(e) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(
-                        Error::new("CLI_PROTOCOL", "Повреждён поток событий установщика").detail(e),
-                    );
-                }
-            },
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(e.into());
-            }
+        .cancel
+        .clone()
+        .unwrap();
+    let consent = Arc::new(RemovalConsent::new(false));
+    app.state::<Runtime>().0.lock().unwrap().consent = Some(consent.clone());
+    let handle = app.clone();
+    let output_cancel = cancel.clone();
+    let callback = Arc::new(move |event: &Event| {
+        if handle.emit("installer-event", event).is_err() {
+            output_cancel.store(true, Ordering::Relaxed);
         }
+    });
+    if request.action != Action::Remove {
+        let recovery_root = saved_recovery_root(&request.serial)?;
+        payload.save_removal(&recovery_root.join(&digest))?;
+        fs::create_dir_all(&recovery_root)?;
+        // Retain the cleanup recipe before mutation, including interrupted installs.
+        recovery::write_json(&recovery_root.join("current.json"), &digest)?;
     }
-    let status = child.wait()?;
-    let detail = stderr.join().unwrap_or_default();
-    if status.code() == Some(130) && last_error.as_ref().is_some_and(|e| e.code == "CANCELLED") {
-        return Ok(());
+    let mut engine = Engine::new(
+        &default_adb(&bundle(app)?),
+        payload,
+        &request.serial,
+        &recovery::data_dir()?,
+        callback,
+        cancel,
+    )?;
+    app.state::<Runtime>().0.lock().unwrap().operation_dir = Some(engine.operation.dir.clone());
+    recovery::write_json(&engine.operation.dir.join("plan.json"), &plan)?;
+    engine.canbus_consent = Some(consent);
+    match engine.run(request) {
+        Err(e) if e.code == "CANCELLED" => Ok(()),
+        result => result,
     }
-    if !status.success() {
-        return Err(last_error.unwrap_or_else(|| {
-            Error::new("CLI_EXIT", "Исполняемый модуль неожиданно завершился")
-                .detail(format!("{status}\n{detail}"))
-        }));
-    }
-    Ok(())
 }
 #[tauri::command]
 fn resolve_canbus_conflict(runtime: State<Runtime>, approved: bool) -> Result<()> {
-    let mut state = runtime
+    let state = runtime
         .0
         .lock()
         .map_err(|_| Error::new("DESKTOP_LOCK", "Состояние недоступно"))?;
-    let stdin = state
-        .stdin
-        .as_mut()
-        .ok_or_else(|| Error::new("NOT_RUNNING", "Операция уже завершена"))?;
-    writeln!(
-        stdin,
-        "{}",
-        serde_json::json!({"confirmRemoveVoyahHlService":approved})
-    )?;
-    stdin.flush()?;
+    state
+        .consent
+        .as_ref()
+        .ok_or_else(|| Error::new("NOT_RUNNING", "Операция уже завершена"))?
+        .answer(approved);
     Ok(())
 }
 #[tauri::command]
 fn cancel(runtime: State<Runtime>) -> Result<()> {
-    let mut r = runtime
+    let state = runtime
         .0
         .lock()
         .map_err(|_| Error::new("DESKTOP_LOCK", "Состояние недоступно"))?;
-    if let Some(stdin) = r.stdin.as_mut() {
-        stdin.write_all(b"{\"cancel\":true}\n")?;
-        stdin.flush()?;
-        return Ok(());
-    }
-    Err(Error::new(
-        "NOT_RUNNING",
-        "Операция ещё не запущена или уже завершена",
-    ))
+    state
+        .cancel
+        .as_ref()
+        .ok_or_else(|| Error::new("NOT_RUNNING", "Операция уже завершена"))?
+        .store(true, Ordering::Relaxed);
+    Ok(())
 }
 #[tauri::command]
 fn operation_events(runtime: State<Runtime>) -> Result<Vec<Value>> {
@@ -401,6 +488,7 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
         for name in [
             "events.jsonl",
             "plan.json",
+            "mode.json",
             "report.json",
             "backup.json",
             "after.json",
@@ -423,6 +511,9 @@ fn main() {
         .manage(Runtime::default())
         .invoke_handler(tauri::generate_handler![
             engineering_code,
+            release_catalog,
+            download_payload,
+            open_release_link,
             release_info,
             devices,
             plan,
@@ -434,18 +525,49 @@ fn main() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window
-                    .state::<Runtime>()
-                    .0
-                    .lock()
-                    .map(|r| r.busy)
-                    .unwrap_or(true)
-                {
+                if operation_busy(&window.state::<Runtime>()) {
                     api.prevent_close();
                     let _ = window.emit("installer-close-blocked", ());
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("Не удалось запустить VoyahTune Installer");
+        .build(tauri::generate_context!())
+        .expect("Не удалось запустить VoyahTune Installer")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if operation_busy(&app.state::<Runtime>()) {
+                    api.prevent_exit();
+                    let _ = app.emit("installer-close-blocked", ());
+                }
+            }
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn busy_cancel_and_consent_are_released_between_operations() {
+        let runtime = Runtime::default();
+        reserve(&runtime).unwrap();
+        assert!(operation_busy(&runtime));
+        assert_eq!(reserve(&runtime).unwrap_err().code, "OPERATION_BUSY");
+        let cancel = runtime.0.lock().unwrap().cancel.clone().unwrap();
+        cancel.store(true, Ordering::Relaxed);
+        runtime.0.lock().unwrap().consent = Some(Arc::new(RemovalConsent::new(false)));
+        release(&runtime);
+        assert!(runtime.0.lock().unwrap().consent.is_none());
+        reserve(&runtime).unwrap();
+        assert!(!runtime
+            .0
+            .lock()
+            .unwrap()
+            .cancel
+            .as_ref()
+            .unwrap()
+            .load(Ordering::Relaxed));
+        assert!(cancel.load(Ordering::Relaxed));
+        release(&runtime);
+        assert!(!runtime.0.lock().unwrap().busy);
+    }
 }

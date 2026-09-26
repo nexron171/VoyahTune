@@ -1,6 +1,6 @@
 #!/bin/sh
 # ./make_release.sh VERSION → Full/Light ZIP со скриптами установки и удаления.
-# ./make_release.sh VERSION --installers → три автономных GUI/CLI-установщика.
+# ./make_release.sh VERSION --installers → три автономных GUI-установщика.
 # ./make_release.sh VERSION --mac [--windows] [--linux] → только выбранные установщики.
 #
 #   ./make_release.sh 3.2.2              → Releases/build/VoyahTune-3.2.2{,-light} + Releases/dist/*.zip
@@ -19,7 +19,7 @@ set -e
 # Preserve the classic shell-only default. The Python branch consumes --installers.
 for release_arg in "$@"; do
     case "$release_arg" in
-        --installers|--mac|--windows|--linux)
+        --payload|--installers|--mac|--windows|--linux)
             exec python3 "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/Installer/scripts/release.py" "$@" ;;
     esac
 done
@@ -408,23 +408,17 @@ verify_release_payload() {
     sh -n "$out/remove.sh"
 }
 
-# Собрать APK одного флейвора и положить в папку релиза под финальными именами.
-# $1 = full|light, $2 = папка релиза
+# Build the same application bytes once, then copy them into both classic layouts.
+APKS_BUILT=0
 build_apks() {
-    flavor="$1"; out="$2"
-    # assembleFullRelease / assembleLightRelease — первая буква флейвора в верхнем регистре.
-    case "$flavor" in
-        full)  task="assembleFullRelease" ;;
-        light) task="assembleLightRelease" ;;
-    esac
-
-    echo "== Native: $task =="
-    (cd "$ROOT/Native" && ./gradlew "$task" -q)
-    cp "$ROOT/Native/app/build/outputs/apk/$flavor/release/app-$flavor-release.apk" "$out/native.apk"
-
-    echo "== RestoreMode: $task =="
-    (cd "$ROOT/RestoreMode" && ./gradlew "$task" -q)
-    cp "$ROOT/RestoreMode/app/build/outputs/apk/$flavor/release/app-$flavor-release.apk" "$out/restore_mode.apk"
+    out="$2"
+    if [ "$APKS_BUILT" = 0 ]; then
+        (cd "$ROOT/Native" && ./gradlew assembleRelease -q)
+        (cd "$ROOT/RestoreMode" && ./gradlew assembleRelease -q)
+        APKS_BUILT=1
+    fi
+    cp "$ROOT/Native/app/build/outputs/apk/release/app-release.apk" "$out/native.apk"
+    cp "$ROOT/RestoreMode/app/build/outputs/apk/release/app-release.apk" "$out/restore_mode.apk"
 }
 
 # Проверка, что в папке релиза лежат APK — при --no-build мы их не собираем, но релиз без них невалиден.

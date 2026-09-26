@@ -1,28 +1,30 @@
 # Подготовка окружения и выпуск VoyahTune
 
-Актуально на 9 сентября 2026 года. Команды выполняются из корня репозитория.
-`3.10.0` в примерах замените номером своего релиза.
+Актуально на 27 сентября 2026 года. Команды выполняются из корня репозитория.
+`3.13.0` в примерах замените номером своего релиза.
 
 ## 1. Выбрать формат релиза
 
 | Формат | Команда | Результат |
 | --- | --- | --- |
-| По старому, со скриптами | `./make_release.sh 3.10.0` | Отдельные Full и Light ZIP с install/remove |
-| По новому, с GUI и CLI | `./make_release.sh 3.10.0 --installers` | Три ZIP: macOS Universal, Windows x64, Linux x64 |
-| Только GUI для macOS | `./make_release.sh 3.10.0 --mac` | Один ZIP для Apple Silicon и Intel |
-| Только GUI для Windows/Linux | `./make_release.sh 3.10.0 --windows --linux` | Два ZIP для x64 |
+| По старому, со скриптами | `./make_release.sh 3.13.0` | Отдельные Full и Light ZIP с install/remove |
+| Только единый payload | `./make_release.sh 3.13.0 --payload` | `payload_3.13.0.zip` и заготовка записи каталога |
+| Payload и GUI macOS | `./make_release.sh 3.13.0 --mac` | Payload ZIP и самостоятельный Universal GUI ZIP |
+| Только установщик macOS | `./Installer/scripts/build-all-macos.sh --mac` | Universal GUI без сборки Android |
 
-Без флагов всегда используется старый формат. Флаги платформ сами включают новый
-формат и могут сочетаться. Windows ARM и Linux ARM не собираются.
+Без флагов используется классический формат. `--installers` собирает payload и GUI
+для всех платформ; флаги `--mac`, `--windows`, `--linux` ограничивают платформы.
+Windows ARM/Linux ARM не собираются. Текущая переработка проверяется только на macOS;
+Windows и реальное ГУ — отдельная последующая сессия.
 
-**GUI-инсталляторы пересобираются из исходников для каждого релиза вместе с полным
-payload.** Каждый содержит Full, Light и единое удаление, APK, ADB, hooks и остальные
-файлы. Windows-пакет включает offline WebView2. Пользователь не скачивает отдельный
-payload и не устанавливает ADB. Linux GUI требует графической системы с X11/XWayland
-и glibc уровня Ubuntu 22.04; необходимые USB-драйверы относятся к окружению ОС.
+GUI пересобирается только при изменении его логики. Обычный новый релиз — общий payload
+и обновление каталога. ADB и небольшой remover входят в GUI, APK скачиваются/импортируются
+из GUI. Установщик и VoyahTune имеют независимые версии. Пользовательского CLI нет.
+Windows-пакет включает offline WebView2; Linux требует X11/XWayland и glibc Ubuntu 22.04.
 
-Готовые установщики в Git не хранятся. Ручного манифеста для выпуска нет:
-служебные JSON внутри payload генерирует сборщик.
+Готовые архивы/бинарники хранятся в игнорируемом `Releases/`. В Git хранится spec и
+[каталог](../Installer/releases/index.json); запись каталога генерируется по готовому payload.
+[Контракты форматов и runtime-режимов](installer-protocol.md).
 
 ## 2. Один раз подготовить окружение
 
@@ -33,7 +35,7 @@ payload и не устанавливает ADB. Linux GUI требует гра�
 `make_release.sh --installers` сейчас требует macOS: Windows/Linux он собирает
 в подготовленных Linux-контейнерах Colima.
 
-На Windows/Linux можно нативно пересобрать установщик своей ОС из готового payload:
+На Windows/Linux можно нативно пересобрать установщик своей ОС без Android-сборки:
 см. [Installer/BUILDING.md](../Installer/BUILDING.md). Это отдельная сборка desktop,
 а не запуск полного macOS-оркестратора.
 
@@ -104,7 +106,7 @@ npm --version
 Desktop-зависимости устанавливаются автоматически через `npm ci` во время сборки.
 Глобально устанавливать Tauri CLI не требуется.
 
-Теперь можно выполнять `./make_release.sh 3.10.0 --mac`. При выборе только macOS
+Теперь можно выполнять `./make_release.sh 3.13.0 --mac`. При выборе только macOS
 Docker/Colima не проверяются и не запускаются.
 
 ### 2.4. Дополнительно для Windows/Linux из macOS
@@ -130,7 +132,7 @@ Docker Desktop не заменяет подготовку этой среды.
 Для выбранных платформ можно использовать `--check --windows --linux`.
 Проверка может запустить подготовленную VM/контейнеры; компиляции она не выполняет
 и Android SDK не проверяет. Первая сборка скачивает недостающие зависимости,
-ADB и упаковочные инструменты. Автономность относится к готовому установщику.
+ADB и упаковочные инструменты. После загрузки payload установка доступна без сети.
 
 ### 2.5. Что переносить на другой компьютер
 
@@ -138,7 +140,7 @@ ADB и упаковочные инструменты. Автономность �
 Сейчас release-сборки Native и RestoreMode используют debug signing config.
 Без этого файла новый компьютер сгенерирует другой ключ.
 
-При известном несовпадении подписи GUI/CLI удаляет соответствующее приложение
+При известном несовпадении подписи GUI удаляет соответствующее приложение
 с данными и устанавливает заново; для Native есть промежуточная перезагрузка.
 Классические скрипты этого механизма не получили: установка поверх APK с другой
 подписью завершится ошибкой Android. Для обновления с сохранением данных продолжайте
@@ -161,7 +163,7 @@ checkout контейнеры нужно пересоздать с правил�
 | Frida и готовые инструменты | `Packaging/tools/` |
 | DNS helper / готовый overlay APK | `Packaging/installer/common/`, `Packaging/vendor-overlay/` |
 | Классические установка/удаление | `Packaging/installer/full/`, `Packaging/installer/light/` |
-| Исполняемый процесс GUI/CLI | `Installer/crates/installer-core/src/engine.rs` |
+| Исполняемый процесс GUI | `Installer/crates/installer-core/src/engine.rs` |
 | Команды автомобиля / отображаемые шаги | `classic_commands.rs`, `plans.rs` в той же папке |
 | Интерфейс | `Installer/desktop/src/` |
 | Общая иконка | `Packaging/branding/app-icon.png` |
@@ -173,31 +175,25 @@ checkout контейнеры нужно пересоздать с правил�
 Иконки экспортируются отдельно: `node Installer/scripts/generate-icons.mjs`;
 зависимости описаны в [инструкции branding](../Packaging/branding/README.md).
 
-**При добавлении или удалении компонента обновите действия установки и удаления.**
-GUI-сборщик обнаруживает `.js/.json` в `Packaging/inject/`, но попадание файла в
-payload само по себе не добавляет действие в Rust-процесс. Для новых собственных
-имён используйте `voyahtune-…` / `voyahtune_…`. Проверьте раскладку в `make_release.sh`,
-старые `.sh/.bat`, Rust-порт и очистку. Состав других типов файлов задаёт
-`Installer/crates/installer-build/src/main.rs`.
-
-GUI выполняет перенесённую в Rust логику классических скриптов с прогрессом
-по шагам. Дополнительные проверки автомобиля и причины остановки, отсутствующие
-в классическом процессе, добавлять нельзя. Изменения процесса вносите в оба
-формата и проверяйте тестами соответствия. [Карта процесса](installer-classic-port.md).
+При добавлении собственного `.js/.json` GUI-сборщик создаёт действие recipe автоматически.
+В `Packaging/installer/payload-spec.json` укажите особые режимы/пути/права и добавьте
+устаревшие пути в накопительный `removeFiles`. Классические `.sh/.bat` обновляются отдельно.
+Новая системная роль/операция требует изменения core, capability и версии GUI.
+[Карта сохранённых специальных процедур](installer-classic-port.md).
 
 `manifest.json` и другие JSON внутри сборочного payload создаются автоматически:
 их не правят вручную. Не редактируйте `Releases/` вместо исходников.
 
 ### Версии и подписи
 
-1. Выберите SemVer-версию комплекта, например `3.10.0`. Она передаётся аргументом
+1. Выберите SemVer-версию комплекта, например `3.13.0`. Она передаётся аргументом
    `make_release.sh`; `@VERSION@` в исходных скриптах заменяется автоматически.
 2. Для изменившихся APK увеличьте `versionCode` относительно опубликованного
    выпуска и задайте `versionName` в `Native/app/build.gradle.kts` и
    `RestoreMode/app/build.gradle.kts`. Номер комплекта сам эти поля не меняет.
 3. При изменениях движка обновите `workspace.package.version` в
    `Installer/Cargo.toml` и записи локальных пакетов в `Installer/Cargo.lock`.
-   Это отдельная версия движка; версия desktop-пакета берётся из payload.
+   Это единая версия GUI/движка и desktop-пакетов, независимая от payload.
 4. Обновите описание изменений. Проверьте diff и сохраните готовые исходники
    в коммите перед распространяемой сборкой.
 
@@ -218,17 +214,17 @@ APK. Изменённое рабочее дерево даёт revision с `-dir
 ## 4. Собрать по старому: ZIP со скриптами
 
 ```sh
-./make_release.sh 3.10.0
+./make_release.sh 3.13.0
 ```
 
-Скрипт запускает проверки Packaging, собирает Full/Light APK обоих приложений,
+Скрипт запускает проверки Packaging, собирает единые APK обоих приложений,
 раскладывает файлы и создаёт:
 
 ```text
-Releases/dist/VoyahTune-3.10.0.zip
-Releases/dist/VoyahTune-3.10.0-light.zip
-Releases/build/VoyahTune-3.10.0/
-Releases/build/VoyahTune-3.10.0-light/
+Releases/dist/VoyahTune-3.13.0.zip
+Releases/dist/VoyahTune-3.13.0-light.zip
+Releases/build/VoyahTune-3.13.0/
+Releases/build/VoyahTune-3.13.0-light/
 ```
 
 В каждом ZIP — плоская папка с APK, ресурсами, `install.sh/.bat`, `remove.sh/.bat`
@@ -237,126 +233,87 @@ Releases/build/VoyahTune-3.10.0-light/
 
 | Команда | Назначение |
 | --- | --- |
-| `./make_release.sh 3.10.0 --full-only` | Только Full |
-| `./make_release.sh 3.10.0 --light-only` | Только Light |
-| `./make_release.sh 3.10.0 --no-zip` | Собрать APK и папки, без новых ZIP |
-| `./make_release.sh 3.10.0 --no-build` | Перепаковать с APK из существующих папок этой версии в `Releases/build/` |
+| `./make_release.sh 3.13.0 --full-only` | Только Full |
+| `./make_release.sh 3.13.0 --light-only` | Только Light |
+| `./make_release.sh 3.13.0 --no-zip` | Собрать APK и папки, без новых ZIP |
+| `./make_release.sh 3.13.0 --no-build` | Перепаковать с APK из существующих папок этой версии в `Releases/build/` |
 
 `--no-build` не обновляет APK из изменённых исходников; для нового выпуска
 используйте обычную команду. `--legacy VERSION` остаётся совместимым псевдонимом
 старого режима.
 
-## 5. Собрать по новому: автономные GUI/CLI
+## 5. Независимые payload и GUI
 
 ```sh
-./make_release.sh 3.10.0 --installers
+./make_release.sh 3.13.0 --payload
+./Installer/scripts/build-all-macos.sh --mac
 ```
 
-Команда собирает четыре APK с метаданными выпуска, формирует и проверяет payload,
-пересобирает desktop-приложения и встраивает файлы с ADB:
+Первая команда собирает одну общую пару APK с metadata для Full/Light и проверяет весь
+recipe/payload. Результаты: `Releases/dist/payload_3.13.0.zip`, `payload_3.13.0.json`,
+`Releases/build/installer-payload-3.13.0/`. Desktop/Colima не запускаются.
+Вторая команда собирает только GUI/ADB/recovery в `Releases/build/installers-1.0.0/`.
+`--payload DIRECTORY` у desktop-сборки допускает дополнительный offline bundle.
 
-```text
-Releases/dist/VoyahTune-3.10.0-installers/
-  VoyahTune-3.10.0-macos.zip
-  VoyahTune-3.10.0-windows.zip
-  VoyahTune-3.10.0-linux.zip
-  SHA256SUMS
-  release.json
-Releases/build/installer-payload-3.10.0/
-```
+Совместимая обёртка `./make_release.sh 3.13.0 --mac` делает обе операции и складывает
+GUI ZIP в `Releases/dist/VoyahTune-Installer-1.0.0/`, с SHA256SUMS и release.json.
+Без платформенных флагов `--installers` выбирает все три ОС. Версии в этих примерах
+замените фактическими версиями автомобильного комплекта и Cargo соответственно.
 
-В macOS ZIP находится `.app`, в Windows ZIP — NSIS `.exe`, в Linux ZIP — `.run`.
-Каждый включает полный payload и выбор Full/Light/удаления. Папку
-`installer-payload-3.10.0` пользователю передавать не нужно.
+Локальная повторная сборка атомарно заменяет прежние результаты после успеха.
+В каталоге GUI ZIP остаются только выбранные платформы. Ошибка сборки сохраняет
+предыдущие результаты. Опубликованные байты существующего релиза заменять нельзя.
+`--no-zip` собирает только внутренний payload; `--no-build` допускает только APK
+с точно совпадающими версией, revision, recipe и runtime metadata.
 
-Выбор платформ:
+Классические Full/Light ZIP используют одни APK из одной Gradle-сборки. Их установка
+тоже пишет режим и очищает ключ после удаления. `--full-only`
+и `--light-only` относятся к классическому формату доставки.
+Не запускайте две Android-сборки одного checkout одновременно.
+
+## 6. Проверки и публикация
+
+1. Выполните проверки [движка](installer-classic-port.md#как-проверять-изменения),
+   `npm --prefix Installer/desktop run check` и build интерфейса.
+2. Проверьте APK сертификаты и общий состав для Full/Light. Подписи должны совпадать
+   с прежним выпуском для сохранения данных. Universal APK имеют `supportedModes`, без flavor.
+3. Проверьте GUI без полного payload, каталог/кэш/локальный ZIP, требования обновления,
+   отмену загрузки, подтверждение автомобиля и CAN consent. `build-info.json` содержит
+   `installerVersion` и `embeddedPayload: false` для обычного GUI.
+4. На согласованном тестовом ГУ отдельно проверьте Full/Light, Light → Full,
+   soft cleanup Full → Light с сохранением данных, remove → Light, DNS, CE/DE и ранний запуск приложений/loader.
+   Fake ADB и macOS не подтверждают Windows или поведение автомобиля.
+
+Проверки готовых ресурсов выполняет сборочная утилита, не распространяемый CLI:
 
 ```sh
-./make_release.sh 3.10.0 --mac
-./make_release.sh 3.10.0 --windows
-./make_release.sh 3.10.0 --linux
-./make_release.sh 3.10.0 --mac --windows
+Installer/target/release/installer-build verify-payload Releases/build/installer-payload-3.13.0
+Installer/target/release/installer-build verify-host '/path/VoyahTune Installer.app/Contents/Resources/bundle'
+python3 Installer/scripts/update-catalog.py
 ```
 
-### Повторная сборка и специальные режимы
-
-Существующий локальный релиз не мешает повторной сборке: результат перезаписывается.
-В GUI-режиме каталог выпуска заменяется целиком после успеха. Например, `--mac`
-оставит только новый macOS ZIP и метаданные; прежние Windows/Linux ZIP удаляются
-из этого каталога. Для общего набора выбирайте платформы одной командой.
-
-В старом режиме замена выполняется отдельно для Full/Light: если Full завершён,
-а Light упал, Full уже обновлён. `--no-zip` не обновляет ранее созданные ZIP —
-не выдавайте их за результат новой сборки.
-
-| Команда | Назначение |
-| --- | --- |
-| `./make_release.sh 3.10.0 --installers --no-zip` | Собрать и проверить только payload, без desktop и ZIP |
-| `./make_release.sh 3.10.0 --mac --no-build` | Использовать прежние Gradle APK с совпадающими release-метаданными; desktop всё равно пересобрать |
-
-`--no-build` нового формата требует совпадения версии, revision и состава
-с метаданными APK. Для обычного выпуска его не используйте. `--full-only` и
-`--light-only` относятся только к старому формату: GUI всегда содержит оба набора.
-
-Если изменён только интерфейс и нужен установщик с прежним автомобильным
-комплектом, пересоберите desktop из готового payload:
+Последняя команда только валидирует локальный index. Публикация двухфазная:
+сначала загрузите проверенный ZIP в GitHub Release `v3.13.0` репозитория
+`nexron171/VoyahTune` (remote `github.com`), затем выполните:
 
 ```sh
-./Installer/scripts/build-all-macos.sh --mac \
-  --payload Releases/build/installer-payload-3.10.0
+python3 Installer/scripts/update-catalog.py \
+  --entry Releases/dist/payload_3.13.0.json --verify-remote
 ```
 
-Результат — `Releases/build/installers-3.10.0/` с `macos-universal.tar.gz` и
-`build-info.json`; без `--mac` там будут также `windows-x64.exe` и `linux-x64.run`.
-Эта низкоуровневая команда не обновляет release ZIP в `Releases/dist/`.
-Логи desktop-сборок: `Releases/cache/installer-all-*/`.
+Генератор проверяет публичный HTTPS asset, размер/SHA-256 и формат всего index, затем
+атомарно добавляет запись. Ошибка сети/хеша оставляет index прежним. Повтор идемпотентен;
+замена существующей версии и её requirements отклоняется. Только после этого коммитьте
+и публикуйте `Installer/releases/index.json` в ветке GitHub `master-od`. Если публикация
+index не состоялась, загруженный ZIP остаётся доступным для локального импорта;
+повторите публикацию index. Команды сборки сами не создают тег и не публикуют assets.
 
-Для обоих форматов выполните последовательно:
+Первый переход: один раз установить новый GUI 1.0.0. Старые автономные GUI не умеют
+читать каталог и не обновятся автоматически. Новый GUI принимает старую папку payload
+через legacy adapter, новые ZIP — schema 3. После первого скачивания интернет для
+установки не обязателен. Для будущей новой логики увеличьте версию GUI и requirements
+payload; добавьте HTTPS-ссылки обновления по платформам в `installerDownloads` каталога.
+Пока реальные GUI assets не опубликованы, таких ссылок в index нет.
 
-```sh
-./make_release.sh 3.10.0
-./make_release.sh 3.10.0 --installers
-```
-
-Не запускайте сборки параллельно в одном checkout: Gradle/target-каталоги общие.
-Скрипты не публикуют релиз, не создают тег и не устанавливают его на автомобиль.
-
-## 6. Проверить и передать релиз
-
-1. Проверьте успешное завершение команды и наличие ожидаемых ZIP.
-   Для GUI проверьте `releaseVersion`, `buildRevision`, `engineVersion`,
-   `embeddedPayload: true` и список платформ в `release.json`.
-2. Проверьте сертификаты APK и описание изменений.
-3. Для GUI выполните из каталога выпуска `shasum -a 256 -c SHA256SUMS` на macOS
-   или `sha256sum -c SHA256SUMS` на Linux. В Windows сравните результаты
-   `Get-FileHash -Algorithm SHA256` с файлом сумм.
-4. Распакуйте ZIP на каждой целевой ОС. Для GUI проверьте запуск без внешнего
-   payload, версию, выбор набора/удаления, ручное подтверждение автомобиля,
-   кнопку «Обновить», журнал и обновление шагов. Отдельно проверьте CLI.
-5. На тестовом автомобиле проверьте Full, Light, обновление прежней версии,
-   переходы Full ↔ Light и удаление. При том же ключе — сохранение настроек;
-   при смене ключа GUI — согласованную переустановку с очисткой данных.
-
-Явная проверка встроенного комплекта:
-
-```sh
-# macOS: путь к распакованному приложению
-'/path/to/VoyahTune Installer.app/Contents/MacOS/voyahtune' verify
-# Linux: путь к распакованному .run
-./VoyahTune-Installer.run --cli verify
-```
-
-Windows: `voyahtune.exe verify` из каталога установленного инструмента.
-`/S` у NSIS выполняет тихую установку самого инструмента на компьютер;
-действия с автомобилем автоматизируются через встроенный CLI.
-
-При изменениях установщика выполните проверки из
-[карты Rust-порта](installer-classic-port.md#как-проверять-изменения).
-Fake ADB проверяет соответствие скриптам, но не заменяет реальную ОС и автомобиль.
-Developer ID/notarization и Authenticode пока не настроены.
-
-Опубликуйте проверенные ZIP, описание выпуска и для GUI — `SHA256SUMS` и
-`release.json`; при необходимости создайте тег на соответствующий коммит.
-В Git сохраняйте исходники, ресурсы и скрипты, без сгенерированных APK,
-готовых установщиков и содержимого `Releases/`. Уже опубликованную версию
-не подменяйте: для изменившегося публичного комплекта используйте новый номер.
+Developer ID/notarization и Authenticode пока не настроены. Готовые локальные артефакты
+не считаются опубликованным релизом или подтверждением испытаний на ГУ.

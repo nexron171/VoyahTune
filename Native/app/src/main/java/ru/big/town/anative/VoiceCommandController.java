@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.InstallMode;
+
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -59,7 +61,7 @@ final class VoiceCommandController {
                     if ("system_back".equals(action)) BackButtonService.performBack(service);
                     else if (action.startsWith("app:")) {
                         String pkg = action.substring(4);
-                        if (BuildConfig.IS_FULL) {
+                        if (InstallMode.isFull()) {
                             ClusterMediaHostActivity.closeForPackage(pkg);
                             SplitHostActivity.closeActiveHost();
                             boolean fullscreen = FullscreenPackagePolicy.contains(

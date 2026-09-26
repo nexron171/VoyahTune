@@ -22,6 +22,11 @@ class ParallelLoaderTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="voyahtune-loader-")
         self.root = Path(self.temp.name)
         self.processes = []
+        (self.root / "mode").write_text("full\n")
+        settings=self.root/"settings"
+        settings.write_text("#!/bin/sh\ncat "+shlex.quote(str(self.root/"mode"))+"\n")
+        settings.chmod(0o755)
+        self.env={**os.environ,"PATH":str(self.root)+os.pathsep+os.environ["PATH"]}
         for pid in range(101, 108):
             (self.root / f"generation.{pid}").write_text("1\n")
         (self.root / "proc").mkdir()
@@ -119,7 +124,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
     def start(self):
         log = open(self.root / f"stderr.{len(self.processes)}", "w")
         proc = subprocess.Popen(["sh", str(self.loader)], stdout=log, stderr=log,
-                                start_new_session=True)
+                                start_new_session=True,env=self.env)
         log.close()
         self.processes.append(proc)
         return proc
@@ -163,7 +168,17 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
 
     def probe(self, code):
         return subprocess.check_output(["sh", str(self.loader), "--probe", code],
-                                       text=True, timeout=5).strip()
+                                       text=True, timeout=5,env=self.env).strip()
+
+    def test_light_unknown_and_unavailable_mode_do_not_start_any_hook(self):
+        for mode in ["light", "null", "invalid", ""]:
+            with self.subTest(mode=mode):
+                (self.root/"mode").write_text(mode)
+                self.assertEqual(self.start().wait(timeout=3),0)
+                self.assertEqual(self.events(),"")
+        (self.root/"mode").unlink()
+        self.assertEqual(self.start().wait(timeout=3),0)
+        self.assertEqual(self.events(),"")
 
     def test_acc_has_priority_until_ready_but_not_until_wrapper_exit(self):
         (self.root / "hold_acc_ready").touch()

@@ -13,8 +13,8 @@ LINUX_BUILD=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
-      echo 'Usage: ./Installer/scripts/build-all-macos.sh --payload DIRECTORY [--output Releases/build/DIRECTORY] [--mac] [--windows] [--linux]'
-      echo 'Standalone macOS Universal + Windows x64 + Linux x64, with embedded payload.'
+      echo 'Usage: ./Installer/scripts/build-all-macos.sh [--payload DIRECTORY] [--output Releases/build/DIRECTORY] [--mac] [--windows] [--linux]'
+      echo 'Standalone macOS Universal + Windows x64 + Linux x64, GUI with ADB; optional offline payload.'
       echo 'Use ./make_release.sh VERSION --installers for the complete release.'
       echo '--check: check the prepared build environment without building.'
       exit 0 ;;
@@ -33,20 +33,10 @@ if [[ $MAC == 0 && $WINDOWS == 0 && $LINUX_BUILD == 0 ]]; then MAC=1; WINDOWS=1;
 REMOTE=0
 if [[ $WINDOWS == 1 || $LINUX_BUILD == 1 ]]; then REMOTE=1; fi
 if [[ $CHECK != 1 ]]; then
-  [[ -n "$PAYLOAD" ]] || { echo 'Use ./make_release.sh VERSION --installers, or pass --payload DIRECTORY.' >&2; exit 2; }
-  PAYLOAD=$(python3 - "$PAYLOAD" <<'PYLOAD'
-import json,sys
-from pathlib import Path
-p=Path(sys.argv[1]).resolve()
-json.loads((p/'manifest.json').read_text())
-print(p)
-PYLOAD
-)
-  PACKAGE_VERSION=$(python3 - "$PAYLOAD/manifest.json" <<'PYLOAD'
-import json,sys
-print(json.load(open(sys.argv[1]))['releaseVersion'])
-PYLOAD
-)
+  PACKAGE_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/Cargo.toml","rb"))["workspace"]["package"]["version"])')
+  if [[ -n "$PAYLOAD" ]]; then
+    PAYLOAD=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$PAYLOAD")
+  fi
   OUTPUT=${OUTPUT:-"$ROOT/Releases/build/installers-$PACKAGE_VERSION"}
   OUTPUT=$(python3 - "$OUTPUT" "$ROOT/Releases" <<'PYLOAD'
 from pathlib import Path
@@ -163,8 +153,12 @@ for pair in "${PAIRS[@]}"; do
   rsync -a --delete --exclude target --exclude node_modules --exclude resources \
     --exclude binaries --exclude dist --exclude gen \
     Installer/ "Releases/build/hosts/$host/Installer/"
-  mkdir -p "Releases/build/hosts/$host/Releases/build/embedded-payload"
-  rsync -a --delete "$PAYLOAD/" "Releases/build/hosts/$host/Releases/build/embedded-payload/"
+  mkdir -p "Releases/build/hosts/$host/Packaging"
+  rsync -a --delete Packaging/ "Releases/build/hosts/$host/Packaging/"
+  if [[ -n "$PAYLOAD" ]]; then
+    mkdir -p "Releases/build/hosts/$host/Releases/build/embedded-payload"
+    rsync -a --delete "$PAYLOAD/" "Releases/build/hosts/$host/Releases/build/embedded-payload/"
+  fi
 done
 fi
 if [[ $LINUX_BUILD == 1 && -f "$PINNED_DEPLOYER" ]]; then
@@ -172,16 +166,22 @@ if [[ $LINUX_BUILD == 1 && -f "$PINNED_DEPLOYER" ]]; then
   cp "$PINNED_DEPLOYER" Releases/build/hosts/linux-amd64/Releases/cache/linuxdeploy-pinned.AppImage
 fi
 
+PAYLOAD_ARGS=()
+REMOTE_PAYLOAD_ARGS=()
+if [[ -n "$PAYLOAD" ]]; then
+  PAYLOAD_ARGS=(--payload "$PAYLOAD")
+  REMOTE_PAYLOAD_ARGS=(--payload /work/Releases/build/embedded-payload)
+fi
 if [[ $MAC == 1 ]]; then
 echo "macOS Universal tooling ${VERSION}…"
-CARGO_TARGET_DIR="$ROOT/Installer/target" node Installer/scripts/build.mjs --bundles app --payload "$PAYLOAD" >"$LOGS/macos.log" 2>&1
+CARGO_TARGET_DIR="$ROOT/Installer/target" node Installer/scripts/build.mjs --bundles app ${PAYLOAD_ARGS[@]+"${PAYLOAD_ARGS[@]}"} >"$LOGS/macos.log" 2>&1
 MAC_APP="$ROOT/Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app"
 COPYFILE_DISABLE=1 tar -czf "$STAGE/macos-universal.tar.gz" -C "$(dirname "$MAC_APP")" "$(basename "$MAC_APP")"
 
 fi
 if [[ $WINDOWS == 1 ]]; then
 echo 'Windows x64 tooling…'
-"${DOCKER[@]}" exec -w /work vti-windows node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc --payload /work/Releases/build/embedded-payload >"$LOGS/windows.log" 2>&1
+"${DOCKER[@]}" exec -w /work vti-windows node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/windows.log" 2>&1
 WIN_TARGET="$ROOT/Releases/build/hosts/windows/Installer/target/x86_64-pc-windows-msvc/release"
 cp "$WIN_TARGET/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_x64-setup.exe" "$STAGE/windows-x64.exe"
 "${DOCKER[@]}" exec vti-windows 7z t "/work/Installer/target/x86_64-pc-windows-msvc/release/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_x64-setup.exe" >"$LOGS/windows-verify.log" 2>&1
@@ -189,11 +189,11 @@ cp "$WIN_TARGET/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_x64-setup.exe
 fi
 if [[ $LINUX_BUILD == 1 ]]; then
 echo 'Linux x64 tooling…'
-"${DOCKER[@]}" exec -w /work vti-linux-amd64 node Installer/scripts/build.mjs --no-bundle --payload /work/Releases/build/embedded-payload >"$LOGS/linux.log" 2>&1
+"${DOCKER[@]}" exec -w /work vti-linux-amd64 node Installer/scripts/build.mjs --no-bundle ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/linux.log" 2>&1
 "${DOCKER[@]}" exec -i -w /work vti-linux-amd64 bash -s >"$LOGS/linux-package.log" 2>&1 <<'LINUX'
 set -euo pipefail
 mkdir -p /opt/target/release
-cp Installer/target/release/voyahtune-desktop Installer/target/release/installer-cli /opt/target/release/
+cp Installer/target/release/voyahtune-desktop /opt/target/release/
 rm -rf '/opt/target/release/bundle/appimage/VoyahTune Installer.AppDir' /opt/target/release/bundle/appimage_deb
 cd Installer/desktop
 if ! CARGO_TARGET_DIR=/opt/target npm run tauri -- bundle --bundles appimage --config src-tauri/tauri.release.conf.json >/tmp/vti-all-bundle.log 2>&1; then
@@ -222,7 +222,7 @@ cd /work
 python3 Installer/scripts/package-linux.py \
   --appdir '/opt/target/release/bundle/appimage/VoyahTune Installer.AppDir' \
   --output /work/Releases/dist/linux-all-x64.run
-/work/Releases/dist/linux-all-x64.run --cli verify
+/work/Installer/target/release/installer-build verify-host /work/Installer/desktop/src-tauri/resources/bundle
 LINUX
 cp Releases/build/hosts/linux-amd64/Releases/dist/linux-all-x64.run "$STAGE/linux-x64.run"
 chmod +x "$STAGE/linux-x64.run"
@@ -230,8 +230,9 @@ fi
 python3 - "$STAGE" "$OUTPUT" "$PAYLOAD" "$VERSION" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
-stage,dest,payload=map(Path,sys.argv[1:4])
-manifest=json.loads((payload/'manifest.json').read_text())
+stage,dest=map(Path,sys.argv[1:3])
+payload=Path(sys.argv[3]) if sys.argv[3] else None
+manifest=json.loads((payload/'manifest.json').read_text()) if payload else None
 def sha(p):
     h=hashlib.sha256()
     with p.open('rb') as f:
@@ -239,8 +240,9 @@ def sha(p):
     return h.hexdigest()
 platforms={name:{'file':file,'sha256':sha(stage/file),'bytes':(stage/file).stat().st_size}
     for name,file in [('macos','macos-universal.tar.gz'),('windows','windows-x64.exe'),('linux','linux-x64.run')] if (stage/file).is_file()}
-info={'releaseVersion':manifest['releaseVersion'],'buildRevision':manifest['buildRevision'],
-      'engineVersion':sys.argv[4],'payloadSha256':sha(payload/'manifest.json'),'embeddedPayload':True,'platforms':platforms}
+info={'installerVersion':sys.argv[4], 'engineVersion':sys.argv[4],
+      'releaseVersion':manifest['releaseVersion'] if manifest else None,
+      'payloadSha256':sha(payload/'manifest.json') if payload else None,'embeddedPayload':payload is not None,'platforms':platforms}
 (stage/'build-info.json').write_text(json.dumps(info,ensure_ascii=False,indent=2)+'\n')
 sys.path.insert(0, str(Path('Installer/scripts').resolve()))
 from release import publish_outputs

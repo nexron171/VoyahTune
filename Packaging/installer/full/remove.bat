@@ -144,6 +144,9 @@ if errorlevel 1 (
     echo !!! Could not completely remove Open Voyah system files. Reboot was cancelled.
     exit /b 1
 )
+adb.exe shell "settings delete global voyahtune_install_mode && test x$(settings get global voyahtune_install_mode) = xnull"
+if errorlevel 1 exit /b 1
+
 adb.exe reboot
 if errorlevel 1 (
     echo !!! Removal is prepared, but ADB could not reboot the device. Reboot it manually.

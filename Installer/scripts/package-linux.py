@@ -16,7 +16,7 @@ args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
 if not (args.appdir / 'AppRun').is_file():
     parser.error('Expected an extracted AppDir with AppRun')
-for name in ['voyahtune', 'voyahtune-desktop']:
+for name in ['voyahtune-desktop']:
     with (args.appdir / 'usr/bin' / name).open('rb') as binary:
         header = binary.read(20)
     if header[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<H', header, 18)[0] != 62:

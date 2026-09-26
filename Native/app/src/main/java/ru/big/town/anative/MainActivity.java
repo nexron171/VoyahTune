@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.InstallMode;
+
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.Context;
@@ -601,7 +603,7 @@ public class MainActivity extends AppCompatActivity {
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
-        if (BuildConfig.IS_FULL) {
+        if (InstallMode.isFull()) {
             final boolean stockUiTarget = apolloStockUiEnabled;
             plan.addOnce("Apollo stock subscription/exam UI", () -> {
                 ApolloSettingsRuntimeState.TargetApplyResult result =

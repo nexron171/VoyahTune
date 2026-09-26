@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/installer-core", "crates/installer-cli", "crates/installer-build", "desktop/src-tauri"]
-default-members = ["crates/installer-core", "crates/installer-cli", "crates/installer-build"]
+members = ["crates/installer-core", "crates/installer-build", "desktop/src-tauri"]
+default-members = ["crates/installer-core", "crates/installer-build"]
 
 [workspace.package]
-version = "0.3.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.88"
 

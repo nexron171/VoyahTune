@@ -27,8 +27,7 @@ pub const NATIVE_READY: &str = r###"
 // Packaging/installer/full/install.sh:128
 pub const NATIVE_BROADCAST: &str = r###"am broadcast -a com.qinggan.intent.QINGGAN_BOOT_COMPLETE -n ru.big.town.anative/.SetModesReceiverStatic >/dev/null"###;
 // Packaging/installer/full/install.sh:184
-pub const MOUNT: &str =
-    r###"mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null"###;
+pub const MOUNT: &str = r###"mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null"###;
 // Packaging/installer/full/install.sh:185
 pub const RW_TEST: &str = r###"touch /system/.ovw_rwtest 2>/dev/null && rm -f /system/.ovw_rwtest && echo RW || echo RO"###;
 // Packaging/installer/full/install.sh:346
@@ -96,7 +95,7 @@ pub const APP_CLIENT_MIGRATION: &str = r###"
     ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
     ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
 "###;
-// Packaging/installer/light/install.sh:40
+// Packaging/installer/light/install.sh:43
 pub const STOP_LIGHT: &str = r###"
         setprop ctl.stop voyahtune_load 2>/dev/null || exit 1
         stop_wait=0
@@ -106,8 +105,8 @@ pub const STOP_LIGHT: &str = r###"
             stop_wait=$((stop_wait + 1))
         done
     "###;
-// Packaging/installer/light/install.sh:54
-pub const LIGHT_TEARDOWN: &str = r###"
+// Packaging/installer/light/install.sh:57
+pub const LIGHT_RUNTIME_REMOVE: &str = r###"
         ACTIVE_RC=/system/etc/init/voyahtune.load.rc
         DISABLED_RC=/system/etc/init/voyahtune.load.rc.voyahtune-light-disabled
         rm -f "$DISABLED_RC" || exit 1
@@ -269,24 +268,6 @@ pub const LIGHT_TEARDOWN: &str = r###"
         ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
         sync
     "###;
-// Packaging/installer/light/install.sh:406
-pub const LIGHT_LEGACY_STATE: &str = r###"
-    if [ ! -e /system/etc/init.logcat.sh ]; then
-        echo CLEAN
-    elif [ ! -f /system/etc/init.logcat.sh ]; then
-        echo ERROR
-    else
-        grep -qF "# init.logcat.sh Open Voyah:" /system/etc/init.logcat.sh 2>/dev/null
-        legacy_grep_status=$?
-        if [ "$legacy_grep_status" -eq 0 ]; then
-            echo LEGACY
-        elif [ "$legacy_grep_status" -eq 1 ]; then
-            echo CLEAN
-        else
-            echo ERROR
-        fi
-    fi
-"###;
 // Packaging/installer/full/remove.sh:196
 pub const REMOVE_RW_TEST: &str = r###"touch /system/.ovw_remove_rwtest 2>/dev/null && rm -f /system/.ovw_remove_rwtest && echo RW || echo RO"###;
 // Packaging/installer/full/remove.sh:245

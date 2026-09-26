@@ -90,12 +90,12 @@ class ClassicPortTests(unittest.TestCase):
   _,_,old,new=self.compare('full',{'failShell':'for app_client_pkg in $fullscreen_csv'},self.seed_client_migration)
   self.assertNotEqual(old.returncode,0)
   self.assertNotEqual(new.returncode,0)
- def test_light_and_remove_clean_both_client_generations(self):
+ def test_remove_cleans_both_client_generations(self):
   def seed(f):
    self.seed_client_migration(f)
    for path in ['data/local/bin/app_client.js','data/local/bin/app_client.js.voyahtune.new']:
     (f.device/path).write_text('new client')
-  for action in ['light','remove']:
+  for action in ['remove']:
    with self.subTest(action=action):
     _,port,old,new=self.compare(action,seed=seed)
     self.assertEqual(old.returncode,0,old.stdout+old.stderr)
@@ -114,9 +114,9 @@ class ClassicPortTests(unittest.TestCase):
   f=self.fixture();base=f.device/'data/local/voyahtune-installer';(base/'lock').mkdir(parents=True);(base/'lock/owner').write_text('dead-operation');(base/'load.bin.installed').write_text('invalid-old-hash')
   p=f.plan('light');(f.device/'data/local/bin/keyboard_ru.js').write_text('changed after plan')
   self.assertEqual(f.apply(p).returncode,0);self.assertFalse((base/'lock').exists())
- def test_full_light_remove_sequence_matches_classic(self):
+ def test_full_remove_light_sequence_matches_classic(self):
   reference=self.fixture();port=self.fixture()
-  for action in ['full','light','remove']:
+  for action in ['full','remove','light']:
    old=self.classic(reference,action);new=port.apply(port.plan(action),okay=False)
    self.assertEqual(new.returncode,old.returncode,old.stdout[-1200:]+new.stdout[-2500:]);self.assertEqual(self.state(port),self.state(reference))
  def test_no_new_hash_gate_after_push(self):self.compare('full',{'corruptPush':True})
@@ -124,7 +124,10 @@ class ClassicPortTests(unittest.TestCase):
  def seed_legacy(self,f):
   p=f.device/'system/etc/init.logcat.sh';p.write_text('#!/system/bin/sh\n# init.logcat.sh Open Voyah:\n/system/bin/logcat -v threadtime\n')
  def test_legacy_migration_matches_classic(self):self.compare('full',seed=self.seed_legacy)
- def test_light_legacy_refusal_matches_classic(self):self.compare('light',seed=self.seed_legacy)
+ def test_gui_light_migrates_legacy_without_full_removal(self):
+  port=self.fixture();self.seed_legacy(port);port.seed_apps()
+  port.apply(port.plan('light'));port.assert_app_data(True)
+  self.assertNotIn('Open Voyah:',(port.device/'system/etc/init.logcat.sh').read_text())
  def test_legacy_rollback_on_boot_publish_failure_matches_classic(self):self.compare('full',{'failShell':'mv -f /system/etc/.voyahtune.load.sh.new'},self.seed_legacy)
  def test_changed_signatures_reset_both_apps(self):
   f=self.fixture();f.seed_apps(old_key=True);result=f.apply(f.plan('light'))

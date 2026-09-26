@@ -486,4 +486,6 @@ if ! adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.an
 fi
 # Примечание: persist.app.feature.leavecar (power hold) НЕ откатываем — это штатная функция авто.
 
+adb shell "settings delete global voyahtune_install_mode && test x\$(settings get global voyahtune_install_mode) = xnull" || exit 1
+
 adb reboot

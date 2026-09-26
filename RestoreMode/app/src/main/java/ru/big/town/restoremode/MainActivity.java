@@ -1,5 +1,7 @@
 package ru.big.town.restoremode;
 
+import ru.big.town.common.InstallMode;
+
 
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -952,7 +954,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Открыть приложение обычной задачей на выбранном дисплее: 0 — водитель, 1 — пассажир. */
     private void launchAppOnDisplay(String pkg, int displayId) {
-        if (!BuildConfig.IS_FULL) {
+        if (!InstallMode.isFull()) {
             launchAppNormally(pkg);
             return;
         }
@@ -971,7 +973,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Открыть приложение внутри выбранного app_widget, не меняя его настройки. */
     private void launchInsideAppWidget(String pkg, String widgetId) {
-        if (!BuildConfig.IS_FULL) {
+        if (!InstallMode.isFull()) {
             launchAppNormally(pkg);
             return;
         }
@@ -1253,7 +1255,7 @@ public class MainActivity extends AppCompatActivity {
         
         // Создаём карту сплитов по id для быстрого доступа
         Map<String, SplitStore.Preset> splitMap = new HashMap<>();
-        if (BuildConfig.IS_FULL) {
+        if (InstallMode.isFull()) {
             List<SplitStore.Preset> splits = SplitStore.load(sharedPreferences);
             for (SplitStore.Preset ps : splits) {
                 if (ps.ready()) {
@@ -1662,7 +1664,7 @@ public class MainActivity extends AppCompatActivity {
      *  - light → обычный запуск приложения (без VD/root).
      */
     private void onAppTileClick(String pkg) {
-        if (BuildConfig.IS_FULL) {
+        if (InstallMode.isFull()) {
             if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
             sendAppWindow(pkg);
         } else {
@@ -1720,7 +1722,7 @@ public class MainActivity extends AppCompatActivity {
     /** Переключить карточку в режим embedded VirtualDisplay для явно заданного пакета. */
     private void showEmbeddedAppWidget(View widgetView, AppWidgetStore.Entry entry,
                                        String packageName, int profileDpi) {
-        if (!BuildConfig.IS_FULL) {
+        if (!InstallMode.isFull()) {
             launchAppNormally(packageName);
             return;
         }
@@ -1754,7 +1756,7 @@ public class MainActivity extends AppCompatActivity {
                 expandBtn.setOnClickListener(v -> {
                     // Развернуть текущее приложение на весь экран (simpleLaunch)
                     releaseEmbeddedWidget(entry.id, widgetView);
-                    if (BuildConfig.IS_FULL) {
+                    if (InstallMode.isFull()) {
                         sendAppWindow(packageName);
                     } else {
                         launchAppNormally(packageName);

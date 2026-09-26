@@ -20,6 +20,10 @@
 #   • keymanager: тут frida-inject -e иногда ЗАВИСАЕТ (не возвращает управление). Запускаем одну
 #     фоновую попытку на PID под timeout; успех подтверждаем только точным ready-маркером агента.
 
+# Unified APK mode: no hooks before a completed Full installation.
+# During early boot Settings may not be available; init will retry this service.
+[ "$(settings get global voyahtune_install_mode 2>/dev/null)" = full ] || exit 0
+
 LOG_TAG="vt_load_bin"
 
 logi() { log -p i -t $LOG_TAG "$1"; }

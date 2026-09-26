@@ -1,21 +1,32 @@
-# Сборка автономных установщиков
+# Сборка VoyahTune Installer
 
-Готовые установщики не хранятся в Git. Их собирают из исходников для каждого
-автомобильного релиза вместе со всем payload:
+GUI выпускается независимо от автомобильного комплекта. Для нового payload:
 
 ```sh
-./make_release.sh 3.3.0 --installers
+./make_release.sh 3.13.0 --payload
 ```
 
-Без флага make_release.sh выпускает обычные Full/Light ZIP со скриптами.
-[Пошаговая инструкция выпуска](../Docs/releasing.md).
+Для самостоятельного macOS Universal GUI без APK:
+
+```sh
+./Installer/scripts/build-all-macos.sh --mac
+```
+
+Результат: `Releases/build/installers-1.0.0/macos-universal.tar.gz` и `build-info.json`.
+Версия GUI берётся из Cargo. При необходимости offline bundle задайте `--payload DIRECTORY`;
+обычная сборка включает только ADB и небольшой remover. Пользователь выбирает/скачивает
+версию в GUI. Пользовательского CLI нет, `installer-build` остаётся инструментом разработчика.
+
+`./make_release.sh VERSION --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
+macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.0.0/`. `--installers` по умолчанию
+выбирает все платформы; для текущей проверки используйте только `--mac`.
+Подробности и публикация: [Docs/releasing.md](../Docs/releasing.md).
 
 ## Полная сборка из macOS
 
-На подготовленном Mac команда выше собирает четыре Android APK, автоматически
-определяет состав Packaging, проверяет подписи/хеши и запускает три desktop-сборки.
-Результаты: `Releases/dist/VoyahTune-3.3.0-installers/`. В ZIP нет внешнего payload:
-он находится внутри `.app`, Windows NSIS и Linux `.run`.
+Обёртка `make_release.sh VERSION --installers` собирает два общих Android APK,
+проверенный ZIP payload и самостоятельные GUI. Результаты разделены:
+`Releases/dist/payload_VERSION.zip` и `Releases/dist/VoyahTune-Installer-INSTALLER_VERSION/`.
 
 Флаги `--mac`, `--windows`, `--linux` выбирают платформы и могут сочетаться.
 В `make_release.sh` они включают режим установщиков без отдельного `--installers`:
@@ -45,7 +56,7 @@ ARM64+x86-64, Windows/Linux — только x64. Для `--mac` Docker/Colima �
   --payload Releases/build/installer-payload-3.3.0
 ```
 
-Результат этой низкоуровневой команды — `Releases/build/installers-3.3.0/`:
+Результат этой низкоуровневой команды — `Releases/build/installers-1.0.0/`:
 macos-universal.tar.gz, windows-x64.exe, linux-x64.run и build-info.json.
 Можно указать другой каталог внутри Releases через `--output`.
 Существующий результат заменяется после успешной сборки всех выбранных платформ;
@@ -141,7 +152,7 @@ vti_docker exec vti-linux-amd64 uname -m
 ./make_release.sh 3.3.0 --installers
 ```
 
-Скрипт сам копирует исходники Installer и готовый payload в каталоги `hosts/`;
+Скрипт сам копирует исходники Installer и опциональный payload в каталоги `hosts/`;
 вручную заполнять их не требуется. Он проверяет точный bind mount `/work`, поэтому
 после переноса checkout на другой путь контейнеры нужно пересоздать. Не направляйте
 оба контейнера в один каталог. Удаление контейнера теряет его внутренний кэш;
@@ -170,8 +181,8 @@ node Installer/scripts/build.mjs --bundles app \
 ```
 
 Результат: `Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app`.
-Этот target игнорируется Git. Скрипт объединяет обе архитектуры GUI/CLI, включает
-Google ADB и payload, проверяет комплект внутри `.app`.
+Этот target игнорируется Git. Скрипт объединяет обе архитектуры GUI, включает
+Google ADB и ресурсы удаления (payload опционален), проверяет комплект внутри `.app`.
 
 Проверки:
 
@@ -199,9 +210,8 @@ node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc --payload 'C:\p
 При нативной сборке результат:
 `Installer/target/release/bundle/nsis/VoyahTune Installer_3.3.0_x64-setup.exe`.
 При кросс-сборке — `Installer/target/x86_64-pc-windows-msvc/release/bundle/nsis/`.
-Имя версии берётся из payload. NSIS включает offline WebView2, CLI, ADB и полный
-payload. Отдельного копирования соседней папки после установки больше нет.
-`/S` поддерживает тихую установку самого инструмента; CLI выполняет операции с автомобилем.
+Имя версии берётся из Cargo. NSIS включает offline WebView2, GUI, ADB и ресурсы удаления. Отдельного копирования соседней папки после установки больше нет.
+`/S` поддерживает тихую установку самого инструмента; операции с автомобилем доступны в GUI.
 Authenticode не настроен; запуск на настоящей Windows ещё требует проверки.
 
 В Linux-контейнере для кросс-сборки дополнительно:
@@ -234,16 +244,16 @@ CARGO_TARGET_DIR=/opt/target node Installer/scripts/build.mjs --payload /work/pa
 python3 Installer/scripts/package-linux.py \
   --appdir '/opt/target/release/bundle/appimage/VoyahTune Installer.AppDir' \
   --output Releases/dist/VoyahTune-Installer.run
-./Releases/dist/VoyahTune-Installer.run --cli verify
+./Releases/dist/VoyahTune-Installer.run
 ```
 
 `/opt/target` должен быть доступен на запись. При bind mount macOS упаковка AppDir
 выполняется на внутренней Linux-ФС: virtiofs может нарушать права и симлинки.
 Общая команда автоматически компилирует с кэшем, затем упаковывает внутри `/opt`.
-Полный payload находится в `usr/share/voyahtune-installer/bundle`, чтобы linuxdeploy
+Ресурсы находятся в `usr/share/voyahtune-installer/bundle`, чтобы linuxdeploy
 не принимал Android ELF за библиотеки Linux. Проверка после упаковки обнаруживает
 изменение файлов и хешей. `.run` работает без FUSE; `--extract NEW_DIRECTORY`
-извлекает весь AppDir вместе с payload. CLI не требует графической сессии.
+извлекает весь AppDir. GUI требует графической сессии.
 Для GUI нужен desktop/X11 или XWayland и glibc уровня Ubuntu22.04.
 
 ## Закреплённый linuxdeploy для Rosetta
@@ -277,9 +287,9 @@ shasum -a 256 Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 уже сохранённые PNG/ICO/ICNS и Android-ресурсы.
 
 Версия движка задаётся в Installer/Cargo.toml. Версия самого устанавливаемого
-комплекта и нативного пакета берётся из автоматически подготовленного payload.
+нативного пакета берётся из Cargo, автомобильного комплекта — из payload.
 Готовые binaries, validators, tooling.json в Packaging больше не используются.
 Публикуемые файлы — только результаты из Releases/dist.
 
-Проверяйте CLI verify, запуск на целевых ОС, Full/Light, обновление и удаление.
+Проверяйте `installer-build verify-host PATH`, запуск на целевых ОС, Full/Light, обновление и удаление.
 Успешная кросс-сборка Windows и fake ADB не заменяют проверки на реальной ОС и машине.

@@ -21,6 +21,9 @@ adb.exe root
 adb.exe wait-for-device
 adb.exe root
 
+echo If Full was installed, a clean removal is recommended. Light may also update in place.
+rem Previous mode does not restrict installation.
+
 echo === Preflight owner check for com.qinggan.permission.WRITE_CANBUS ===
 adb.exe shell dumpsys package permissions >nul 2>nul
 if errorlevel 1 (
@@ -148,6 +151,9 @@ if errorlevel 1 (
     echo !!! RestoreMode was not installed. Fix the error and run the installer again before rebooting.
     exit /b 1
 )
+
+adb.exe shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode && settings put global voyahtune_install_mode light && test x$(settings get global voyahtune_install_mode) = xlight"
+if errorlevel 1 exit /b 1
 
 adb.exe reboot
 if errorlevel 1 (

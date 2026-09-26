@@ -1654,3 +1654,7 @@ pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:380px
 .release-picker{padding:18px 22px;margin-bottom:24px}.release-picker h2{margin:0}.release-picker p{margin:8px 0 14px}.release-picker label{display:block}.release-picker input{display:block;width:100%;box-sizing:border-box;padding:10px;margin:6px 0 12px;border:1px solid #ccd5d5;border-radius:8px}
 
 .canbus-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px}
+
+.release-title{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.release-picker select{width:100%;padding:12px;border:1px solid #d4dcd9;border-radius:8px;background:white;font:inherit}.release-date{font-size:12px;color:#65736f}.prerelease-toggle{display:flex!important;flex-direction:row!important;gap:8px;align-items:center}.prerelease-toggle input{width:auto!important}.cached-releases{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.download-progress{display:flex;gap:16px;align-items:center}.release-picker details{margin-top:16px}.release-picker a{color:#117c6e}
+
+.link-button{border:0;background:none;color:var(--teal,#087e83);text-decoration:underline;cursor:pointer;padding:0;font:inherit}
