@@ -2,8 +2,6 @@
 
 Нативный GUI на Tauri/Svelte и общий Rust CLI для установки Full/Light и удаления VoyahTune. Реализация находится в разработке, на реальном автомобиле не проверялась.
 
-**[Состояние реализации, результаты проверок и оставшиеся задачи](../Docs/installer-implementation-status.md)** — актуальная точка продолжения (2026-09-08).
-
 - `crates/installer-core/` — ADB, инвентаризация, планы, операции и отчёты.
 - `crates/installer-cli/` — самостоятельный CLI и JSONL-протокол.
 - `crates/installer-build/` — сборка общего payload Full + Light из APK и `Packaging/`.
