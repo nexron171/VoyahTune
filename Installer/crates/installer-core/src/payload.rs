@@ -20,6 +20,7 @@ pub const FULL_NAMES: &[&str] = &[
     "vd_bypass.js",
     "app_client.js",
     "apollo_tech.js",
+    "voyahtune_drive_reset.js",
     "keyboard_lock_en.js",
     "keyboard_ru.js",
     "voyahtune_keyboard_en_config.json",

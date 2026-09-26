@@ -71,3 +71,10 @@
 /data/local/tmp/voyahtune_vd_bypass.txt.try
 /sdcard/tmp/voyah_native_log.txt
 /sdcard/tmp/voyahtune_native_log.txt
+/data/local/bin/voyahtune_drive_reset.js
+/data/local/bin/voyahtune_drive_reset.js.new
+/data/local/bin/voyahtune_drive_reset.js.voyahtune.new
+/data/local/tmp/voyahtune_drive_reset.pid
+/data/local/tmp/voyahtune_drive_reset.attempt
+/data/local/tmp/voyahtune_drive_reset.txt
+/data/local/tmp/voyahtune_drive_reset.txt.try

@@ -44,6 +44,9 @@ case "$script" in
     vd_bypass.js) gate=vd ;;
     multidisplay.js) echo '[multidisplay] hook ready v2 test'; gate=none ;;
     apollo_tech.js) echo '[apollo] hook ready'; gate=none ;;
+    voyahtune_drive_reset.js)
+        if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v1'; fi
+        gate=none ;;
     *) gate=none ;;
 esac
 while [ "$gate" != none ] && [ ! -f "$root/release_$gate" ]; do sleep 0.05; done
@@ -89,7 +92,7 @@ loge() { logi "$*"; }
 log() { :; }
 timeout() { shift 3; "$@"; }
 settings() { echo en; }
-apollo_runtime_flag_enabled() { return 0; }
+apollo_runtime_flag_enabled() { [ ! -f "$FIXTURE/disable_apollo" ]; }
 getprop() {
     while [ ! -f "$FIXTURE/release_status" ]; do sleep 0.05; done
     echo 0
@@ -159,7 +162,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
     def test_all_core_hooks_start_while_vd_status_and_apps_are_blocked(self):
         self.start()
         expected = ("steeringwheelkeys.js", "multidisplay.js", "launcherdock.js",
-                    "vd_bypass.js", "apollo_tech.js", "keyboard_lock_en.js")
+                    "vd_bypass.js", "apollo_tech.js", "voyahtune_drive_reset.js", "keyboard_lock_en.js")
         self.until(lambda: all(f"start {name}" in self.events() for name in expected),
                    "A blocked lane prevented another core injection")
         self.until(lambda: self.state("steering") == "active", "Missing early steering readiness")
@@ -183,6 +186,26 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / "missing_steering").unlink()
         self.until(lambda: self.state("steering") == "active", "Late keymanager was blocked")
         self.assertNotIn("end vd_bypass.js", self.events())
+
+    def test_drive_reset_is_independent_of_apollo_and_rearms_for_new_process(self):
+        (self.root / "disable_apollo").touch()
+        self.start()
+        marker = self.root / "voyahtune_drive_reset.pid"
+        self.until(lambda: marker.exists(), "Drive reset hook did not start with Apollo disabled")
+        self.assertNotIn("start apollo_tech.js", self.events())
+        self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js"))
+        (self.root / "generation.105").write_text("2\n")
+        self.until(lambda: marker.read_text().strip().endswith(":2"), "New VehicleSettings missed hook")
+        self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js"))
+
+    def test_failed_drive_reset_attach_does_not_loop_or_block_apollo(self):
+        (self.root / "missing_drive_ready").touch()
+        self.start()
+        self.until(lambda: self.state("apollo") == "active", "Drive hook failure blocked Apollo")
+        self.assertFalse((self.root / "voyahtune_drive_reset.pid").exists())
+        self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js"))
+        self.assertLess(self.events().index("end voyahtune_drive_reset.js"),
+                        self.events().index("start apollo_tech.js"))
 
     def test_dead_worker_waits_for_orphan_injector_and_only_new_identity_retries(self):
         self.start()
@@ -217,7 +240,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
                    "Workers did not transfer to the replacement supervisor")
         self.until(lambda: all(self.state(lane) == "active" for lane in lanes), "Lost active state")
         for script in ("steeringwheelkeys.js", "multidisplay.js", "launcherdock.js", "vd_bypass.js",
-                       "apollo_tech.js", "keyboard_lock_en.js"):
+                       "apollo_tech.js", "voyahtune_drive_reset.js", "keyboard_lock_en.js"):
             self.assertEqual(1, self.events().count(f"start {script}"), script)
         self.until(lambda: f"pid={second.pid};" in (self.root / "voyahtune-hook-status.v1").read_text(),
                    "Status still identifies the old supervisor")

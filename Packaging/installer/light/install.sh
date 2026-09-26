@@ -104,9 +104,9 @@ remove_full_hook_runtime_for_light() {
                     /data/local/bin/load.bin 2>/dev/null; then
             rm -f /data/local/bin/load.bin || exit 1
         fi
-        rm -f /data/local/bin/apollo_tech.js \
-            /data/local/bin/apollo_tech.js.new \
-            /data/local/bin/apollo_tech.js.voyahtune.new \
+        rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
+            /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
+            /data/local/bin/apollo_tech.js.voyahtune.new /data/local/bin/voyahtune_drive_reset.js.voyahtune.new \
             /data/local/bin/load.bin.voyahtune.new \
             /data/local/bin/frida-inject.voyahtune.new \
             /data/local/bin/app_client.js \
@@ -153,10 +153,10 @@ remove_full_hook_runtime_for_light() {
             /data/local/tmp/voyahtune_md.attempt \
             /data/local/tmp/voyahtune_md.txt \
             /data/local/tmp/voyahtune_md.txt.try \
-            /data/local/tmp/voyahtune_apollo.pid \
-            /data/local/tmp/voyahtune_apollo.attempt \
-            /data/local/tmp/voyahtune_apollo.txt \
-            /data/local/tmp/voyahtune_apollo.txt.try \
+            /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
+            /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
+            /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
+            /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
             /data/local/tmp/voyahtune_keyboard.pid \
             /data/local/tmp/voyahtune_keyboard.attempt \
             /data/local/tmp/voyahtune_keyboard.txt \
@@ -202,7 +202,7 @@ remove_full_hook_runtime_for_light() {
                 /data/local/bin/app_client.js.voyahtune.new \
                 /data/local/bin/fullscreen_client.js \
                 /data/local/bin/fullscreen_client.js.voyahtune.new \
-                /data/local/bin/apollo_tech.js \
+                /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
                 /data/local/bin/keyboard_lock_en.js \
                 /data/local/bin/keyboard_ru.js \
                 /data/local/bin/voyahtune-hook-manifest.json \

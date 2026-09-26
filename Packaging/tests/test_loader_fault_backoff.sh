@@ -135,6 +135,7 @@ frida_line=$(printf '%s\n' "$inject_function" | grep -nF 'timeout -k 5 30 "$FI"'
 
 apollo_function=$(awk '
     /^inject_apollo\(\) \{/ { capture = 1 }
+    /^inject_drive_reset\(\) \{/ { capture = 0 }
     /^# Монотонные секунды/ { capture = 0 }
     capture { print }
 ' "$LOAD_BIN")

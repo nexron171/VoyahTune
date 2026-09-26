@@ -125,6 +125,12 @@ SWK=/data/local/bin/steeringwheelkeys.js
 LNCH=/data/local/bin/launcherdock.js
 MD=/data/local/bin/multidisplay.js
 APOLLO=/data/local/bin/apollo_tech.js
+DRIVE_RESET=/data/local/bin/voyahtune_drive_reset.js
+DRIVE_RESET_MARK=/data/local/tmp/voyahtune_drive_reset.pid
+DRIVE_RESET_ATTEMPT=/data/local/tmp/voyahtune_drive_reset.attempt
+DRIVE_RESET_LOG=/data/local/tmp/voyahtune_drive_reset.txt
+DRIVE_RESET_TARGET=com.qinggan.app.vehiclesetting
+DRIVE_RESET_READY_MARKER='[drive-reset] hook ready v1'
 KEYBOARD_EN=/data/local/bin/keyboard_lock_en.js
 KEYBOARD_RU=/data/local/bin/keyboard_ru.js
 VDMARK=/data/local/tmp/voyahtune_vd.pid          # exact identity system_server с vd_bypass
@@ -388,6 +394,51 @@ inject_apollo() {
     fi
     rm -f "$APOLLO_TRY"
     logi "apollo VehicleSetting hook OK pid=$APOLLO_PID profile=persisted-target"
+    return 0
+}
+
+# Same process lane as Apollo: never attach two agents concurrently to VehicleSettings.
+inject_drive_reset() {
+    DRIVE_RESET_PID="$1"
+    DRIVE_RESET_ID="$2"
+    reserve_injection_attempt "$DRIVE_RESET_ID" "$DRIVE_RESET_ATTEMPT" || return 1
+    DRIVE_RESET_CURRENT_ID=$(process_identity "$DRIVE_RESET_PID" "$DRIVE_RESET_TARGET" 2>/dev/null) \
+        || DRIVE_RESET_CURRENT_ID=
+    if [ "$DRIVE_RESET_CURRENT_ID" != "$DRIVE_RESET_ID" ]; then
+        loge "drive-reset inject skipped: target identity changed before launch"
+        return 1
+    fi
+
+    DRIVE_RESET_TRY="$DRIVE_RESET_LOG.try"
+    : > "$DRIVE_RESET_TRY"
+    timeout -k 5 30 "$FI" -p "$DRIVE_RESET_PID" -s "$DRIVE_RESET" -e > "$DRIVE_RESET_TRY" 2>&1
+    DRIVE_RESET_RC=$?
+    cat "$DRIVE_RESET_TRY" >> "$DRIVE_RESET_LOG"
+    if grep -qiE 'unable to find|not found|failed to|cannot parse|no such process|error resolving' \
+            "$DRIVE_RESET_TRY"; then
+        loge "drive-reset inject FAIL pid=$DRIVE_RESET_PID rc=$DRIVE_RESET_RC (latched for this process)"
+        return 1
+    fi
+    if ! grep -qF "$DRIVE_RESET_READY_MARKER" "$DRIVE_RESET_TRY"; then
+        loge "drive-reset inject FAIL pid=$DRIVE_RESET_PID rc=$DRIVE_RESET_RC (latched for this process)"
+        return 1
+    fi
+
+    DRIVE_RESET_AFTER_ID=$(process_identity "$DRIVE_RESET_PID" "$DRIVE_RESET_TARGET" 2>/dev/null) \
+        || DRIVE_RESET_AFTER_ID=
+    if [ "$DRIVE_RESET_AFTER_ID" != "$DRIVE_RESET_ID" ]; then
+        loge "drive-reset inject result stale pid=$DRIVE_RESET_PID"
+        return 1
+    fi
+    DRIVE_RESET_MARK_TMP="$DRIVE_RESET_MARK.$$.new"
+    if ! printf '%s\n' "$DRIVE_RESET_ID" > "$DRIVE_RESET_MARK_TMP" \
+            || ! mv -f "$DRIVE_RESET_MARK_TMP" "$DRIVE_RESET_MARK"; then
+        rm -f "$DRIVE_RESET_MARK_TMP"
+        loge "drive-reset marker write FAIL pid=$DRIVE_RESET_PID"
+        return 1
+    fi
+    rm -f "$DRIVE_RESET_TRY"
+    logi "drive-reset VehicleSetting hook OK pid=$DRIVE_RESET_PID profile=saved-drive-energy-suspension"
     return 0
 }
 
@@ -1135,7 +1186,19 @@ vd_cycle() {
     write_worker_state "$VD_STATE" "$SS" "$SS_ID"
 }
 
+drive_reset_cycle() {
+    DRIVE_RESET_PID=$(pidof "$DRIVE_RESET_TARGET" 2>/dev/null)
+    DRIVE_RESET_PID=${DRIVE_RESET_PID%% *}
+    DRIVE_RESET_ID=$(process_identity "$DRIVE_RESET_PID" "$DRIVE_RESET_TARGET" 2>/dev/null) || DRIVE_RESET_ID=
+    load_runtime_hook_state "$DRIVE_RESET_ID" "$DRIVE_RESET_MARK" "$DRIVE_RESET_ATTEMPT"
+    if [ -n "$DRIVE_RESET_ID" ] && [ "$RUNTIME_STATE" = waiting ]; then
+        inject_drive_reset "$DRIVE_RESET_PID" "$DRIVE_RESET_ID" || :
+    fi
+}
+
 apollo_cycle() {
+    # Account-reset protection is independent of the optional Apollo subscription override.
+    drive_reset_cycle
     if apollo_runtime_flag_enabled; then
         APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
         APOLLO_PID=${APOLLO_PID%% *}
@@ -1277,6 +1340,9 @@ lane_injector_is_live() {
     for WI_PID in $(pidof frida-inject 2>/dev/null); do
         WI_CMD=$(tr '\000' ' ' < "/proc/$WI_PID/cmdline" 2>/dev/null)
         case "$WI_CMD" in *"$WI_SCRIPT"*) return 0 ;; esac
+        if [ "$WORKER_LANE" = apollo ]; then
+            case "$WI_CMD" in *"$DRIVE_RESET"*) return 0 ;; esac
+        fi
     done
     return 1
 }

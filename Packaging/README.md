@@ -38,6 +38,10 @@ Releases/dist/VoyahTune-3.2.2-light.zip
 клиентских окон, статуса Apollo и опциональной штатной клавиатуры. `light` не
 содержит Frida и `load.bin`. Управление сохранёнными Apollo-функциями входит в оба варианта.
 
+Full также содержит [хук сбросов аккаунта Sport+](../Docs/account-reset-hook.md):
+`voyahtune_drive_reset.js` подставляет сохранённые режимы вождения, энергии и
+сервисного режима подвески в запросы `resetSettings`/`resetOverseaDriveMode`.
+
 | Папка | Что | Куда идёт |
 |---|---|---|
 | `tools/` | ADB и `frida-inject-16.2.1-android-arm64` | full целиком; light — только ADB |

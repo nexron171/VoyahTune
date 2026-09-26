@@ -56,7 +56,7 @@ pub const BOOT_READY: &str = r###"if [ -x /system/etc/init.voyahtune.load.sh ] &
 // Packaging/installer/full/install.sh:571
 pub const BOOT_REMOVE_OLD: &str = r###"rm -f /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.setenforce.rc && sync"###;
 // Packaging/installer/full/install.sh:616
-pub const APOLLO_FILES: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"###;
+pub const APOLLO_FILES: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try"###;
 // Packaging/installer/full/install.sh:629
 pub const PREPARE_DATA_DIRECTORIES: &str = r###"
 mkdir -p /data/local/bin /data/local/tmp &&
@@ -69,7 +69,7 @@ test x$(stat -c %a:%u:%g /data/local) = x751:0:0 &&
 test x$(stat -c %a:%u:%g /data/local/bin) = x755:0:0 &&
 test x$(stat -c %a:%u:%g /data/local/tmp) = x771:2000:2000
 "###;
-// Packaging/installer/full/install.sh:660
+// Packaging/installer/full/install.sh:661
 pub const APP_CLIENT_MIGRATION: &str = r###"
     fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null)
     old_ifs=$IFS
@@ -160,9 +160,9 @@ pub const LIGHT_TEARDOWN: &str = r###"
                     /data/local/bin/load.bin 2>/dev/null; then
             rm -f /data/local/bin/load.bin || exit 1
         fi
-        rm -f /data/local/bin/apollo_tech.js \
-            /data/local/bin/apollo_tech.js.new \
-            /data/local/bin/apollo_tech.js.voyahtune.new \
+        rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
+            /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
+            /data/local/bin/apollo_tech.js.voyahtune.new /data/local/bin/voyahtune_drive_reset.js.voyahtune.new \
             /data/local/bin/load.bin.voyahtune.new \
             /data/local/bin/frida-inject.voyahtune.new \
             /data/local/bin/app_client.js \
@@ -209,10 +209,10 @@ pub const LIGHT_TEARDOWN: &str = r###"
             /data/local/tmp/voyahtune_md.attempt \
             /data/local/tmp/voyahtune_md.txt \
             /data/local/tmp/voyahtune_md.txt.try \
-            /data/local/tmp/voyahtune_apollo.pid \
-            /data/local/tmp/voyahtune_apollo.attempt \
-            /data/local/tmp/voyahtune_apollo.txt \
-            /data/local/tmp/voyahtune_apollo.txt.try \
+            /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
+            /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
+            /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
+            /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
             /data/local/tmp/voyahtune_keyboard.pid \
             /data/local/tmp/voyahtune_keyboard.attempt \
             /data/local/tmp/voyahtune_keyboard.txt \
@@ -258,7 +258,7 @@ pub const LIGHT_TEARDOWN: &str = r###"
                 /data/local/bin/app_client.js.voyahtune.new \
                 /data/local/bin/fullscreen_client.js \
                 /data/local/bin/fullscreen_client.js.voyahtune.new \
-                /data/local/bin/apollo_tech.js \
+                /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
                 /data/local/bin/keyboard_lock_en.js \
                 /data/local/bin/keyboard_ru.js \
                 /data/local/bin/voyahtune-hook-manifest.json \
@@ -294,7 +294,7 @@ pub const REMOVE_BOOT: &str = r###"rm -f /system/etc/init/voyahtune.load.rc /sys
 // Packaging/installer/full/remove.sh:251
 pub const REMOVE_TRANSACTIONS: &str = r###"rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback /system/etc/init.logcat.sh.voyahtune.new /system/etc/init.logcat.sh.voyahtune.rollback"###;
 // Packaging/installer/full/remove.sh:259
-pub const REMOVE_PROCESSES: &str = r###"ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs kill -9"###;
+pub const REMOVE_PROCESSES: &str = r###"ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs kill -9"###;
 // Packaging/installer/full/remove.sh:263
 pub const STOP_FULLSCREEN: &str = r###"fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for fullscreen_pkg in $fullscreen_csv; do IFS=$old_ifs; case "$fullscreen_pkg" in ""|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop "$fullscreen_pkg" >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs"###;
 // Packaging/installer/full/remove.sh:270
@@ -302,8 +302,7 @@ pub const REMOVE_EARLY_VD: &str = r###"rm -f /data/local/bin/vd_bypass.js"###;
 // Packaging/installer/full/remove.sh:271
 pub const REMOVE_EARLY_HOOKS: &str = r###"rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"###;
 // Packaging/installer/full/remove.sh:273
-pub const REMOVE_EARLY_APOLLO: &str =
-    r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"###;
+pub const REMOVE_EARLY_APOLLO: &str = r###"rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new"###;
 // Packaging/installer/full/remove.sh:274
 pub const REMOVE_EARLY_KEYBOARD: &str = r###"rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"###;
 // Packaging/installer/full/remove.sh:275
@@ -318,8 +317,8 @@ pub const REMOVE_FILES: &str = r###"
         /data/local/bin/launcherdock.js \
         /data/local/bin/multidisplay.js \
         /data/local/bin/keymng2.js \
-        /data/local/bin/apollo_tech.js \
-        /data/local/bin/apollo_tech.js.new \
+        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
+        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
         /data/local/bin/keyboard_lock_en.js \
         /data/local/bin/keyboard_ru.js \
         /data/local/bin/voyahtune_keyboard_en_config.json \
@@ -329,10 +328,10 @@ pub const REMOVE_FILES: &str = r###"
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
         /data/local/tmp/voyahtune_keyboard.txt.try \
-        /data/local/tmp/voyahtune_apollo.pid \
-        /data/local/tmp/voyahtune_apollo.attempt \
-        /data/local/tmp/voyahtune_apollo.txt \
-        /data/local/tmp/voyahtune_apollo.txt.try \
+        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
+        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
+        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
         /data/local/tmp/voyahtune_load.v2.lock \
         /data/local/tmp/voyahtune_vd.pid \
         /data/local/tmp/voyahtune_vd.attempt \
@@ -387,8 +386,8 @@ pub const REMOVE_FILES: &str = r###"
         /data/local/bin/launcherdock.js \
         /data/local/bin/multidisplay.js \
         /data/local/bin/keymng2.js \
-        /data/local/bin/apollo_tech.js \
-        /data/local/bin/apollo_tech.js.new \
+        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js \
+        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new \
         /data/local/bin/keyboard_lock_en.js \
         /data/local/bin/keyboard_ru.js \
         /data/local/bin/voyahtune_keyboard_en_config.json \
@@ -398,10 +397,10 @@ pub const REMOVE_FILES: &str = r###"
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
         /data/local/tmp/voyahtune_keyboard.txt.try \
-        /data/local/tmp/voyahtune_apollo.pid \
-        /data/local/tmp/voyahtune_apollo.attempt \
-        /data/local/tmp/voyahtune_apollo.txt \
-        /data/local/tmp/voyahtune_apollo.txt.try \
+        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid \
+        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt \
+        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try \
         /data/local/tmp/voyahtune_load.v2.lock \
         /data/local/tmp/voyahtune_vd.pid \
         /data/local/tmp/voyahtune_vd.attempt \
