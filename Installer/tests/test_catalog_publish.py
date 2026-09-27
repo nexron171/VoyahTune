@@ -8,6 +8,22 @@ class CatalogPublishTests(unittest.TestCase):
   e=dict(version='1.0.0',payload={'sha256':'a'},requirements={'minInstallerVersion':'1.0.0'})
   index={'releases':[]};self.assertTrue(u.merge(index,e));self.assertFalse(u.merge(index,e.copy()))
   with self.assertRaises(ValueError):u.merge(index,{**e,'payload':{'sha256':'b'}})
+ def test_ota_marker_can_change_without_replacing_published_archive(self):
+  entry=dict(version='1.0.0',payload={'sha256':'a'},requirements={'minInstallerVersion':'1.0.0'})
+  index={'releases':[entry.copy()]}
+  self.assertTrue(u.merge(index,{**entry,'ota':True}))
+  self.assertIs(index['releases'][0]['ota'],True)
+  self.assertFalse(u.merge(index,entry))
+  self.assertIs(index['releases'][0]['ota'],True)
+  self.assertFalse(u.merge(index,{**entry,'ota':True}))
+  with self.assertRaises(ValueError):u.merge(index,{**entry,'ota':False,'payload':{'sha256':'b'}})
+  self.assertIs(index['releases'][0]['ota'],True)
+  self.assertTrue(u.merge(index,{**entry,'ota':False}))
+  self.assertIs(index['releases'][0]['ota'],False)
+  self.assertEqual(index['releases'][0]['payload'],entry['payload'])
+ def test_ota_marker_rejects_non_boolean_values(self):
+  for invalid in ('true',1,None):
+   with self.assertRaises(ValueError):u.merge({'releases':[]},dict(version='1.0.0',ota=invalid))
  def test_remote_failure_never_changes_index(self):
   with tempfile.TemporaryDirectory() as d:
    index=Path(d)/'index.json';index.write_text('{"releases":[]}');before=index.read_bytes()

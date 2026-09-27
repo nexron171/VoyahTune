@@ -18,7 +18,7 @@ export async function subscribe(callback:(event:Event)=>void){if(import.meta.env
 export async function onCloseBlocked(callback:()=>void){return isTauri()?listen('installer-close-blocked',callback):()=>{};}
 
 export interface PayloadProgress {stage:string;bytes:number;total:number}
-export interface Release {installerUpdates?:{version:string;platform:string;url:string}[];version:string;publishedAt:string;channel:string;notesUrl:string;compatible:boolean;incompatibility?:string;payload:{size:number;sha256:string};requirements:{minInstallerVersion:string}}
+export interface Release {ota?:boolean;installerUpdates?:{version:string;platform:string;url:string}[];version:string;publishedAt:string;channel:string;notesUrl:string;compatible:boolean;incompatibility?:string;payload:{size:number;sha256:string};requirements:{minInstallerVersion:string}}
 export interface CachedPayload {version:string;path:string;deletable?:boolean}
 export interface CatalogState {catalog:{generatedAt:string;releases:Release[];installerDownloads:{version:string;platform:string;url:string}[]};cached:CachedPayload[];warning?:string;installerVersion:string}
 export async function onPayloadProgress(callback:(event:PayloadProgress)=>void){if(import.meta.env.DEV && new URLSearchParams(location.search).has('fixture'))return (await import('./dev-fixture')).onPayloadProgress(callback);return isTauri()?listen<PayloadProgress>('payload-progress',e=>callback(e.payload)):()=>{};}
