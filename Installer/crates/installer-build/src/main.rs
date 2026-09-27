@@ -24,6 +24,11 @@ enum CommandKind {
     VerifyHost {
         path: PathBuf,
     },
+    VerifyOta {
+        entry: PathBuf,
+        key: PathBuf,
+        payload: PathBuf,
+    },
     VerifyCatalog {
         path: PathBuf,
     },
@@ -48,15 +53,47 @@ struct Args {
     skip_android: bool,
 }
 fn main() {
-    let result=match Cli::parse().command {
-        CommandKind::Recovery { root, output } => build_recovery(&root, &output),
-        CommandKind::Build(args)=>run(args),
-        CommandKind::VerifyPayload { path } => Payload::open(&path).map(|payload| println!("{}",serde_json::json!({"valid":true,"manifest":payload.manifest,"payloadRoot":payload.root}))),
-        CommandKind::VerifyCatalog { path } => (|| -> Result<()> {
-            let mut catalog:installer_core::catalog::Catalog=serde_json::from_slice(&fs::read(path)?)?;
-            catalog.validate()?; println!("{}",serde_json::to_string_pretty(&catalog)?); Ok(())
+    let result = match Cli::parse().command {
+        CommandKind::VerifyOta {
+            entry,
+            key,
+            payload: directory,
+        } => (|| -> Result<()> {
+            let entry = serde_json::from_slice(&fs::read(entry)?)?;
+            let claims = installer_core::ota::verify(&entry, &fs::read(key)?)?;
+            installer_core::ota::verify_payload(&Payload::open(&directory)?, &claims)?;
+            println!("{}", serde_json::to_string(&claims)?);
+            Ok(())
         })(),
-        CommandKind::VerifyHost { path } => payload::verify_host(&path).map(|_| println!("{}",serde_json::json!({"valid":true}))),
+        CommandKind::Recovery { root, output } => build_recovery(&root, &output),
+        CommandKind::Build(args) => run(args),
+        CommandKind::VerifyPayload { path } => (|| -> Result<()> {
+            let p = Payload::open(&path)?;
+            let mut signers = std::collections::BTreeMap::new();
+            if !p.manifest.removal_only {
+                for (name, id) in [
+                    ("native.apk", payload::NATIVE),
+                    ("restore_mode.apk", payload::RESTORE),
+                ] {
+                    signers.insert(id, payload::verified_signers(&p.file(name)?)?);
+                }
+            }
+            println!(
+                "{}",
+                serde_json::json!({"valid":true,"manifest":p.manifest,"payloadRoot":p.root,"apkSigners":signers})
+            );
+            Ok(())
+        })(),
+        CommandKind::VerifyCatalog { path } => (|| -> Result<()> {
+            let mut catalog: installer_core::catalog::Catalog =
+                serde_json::from_slice(&fs::read(path)?)?;
+            catalog.validate()?;
+            println!("{}", serde_json::to_string_pretty(&catalog)?);
+            Ok(())
+        })(),
+        CommandKind::VerifyHost { path } => {
+            payload::verify_host(&path).map(|_| println!("{}", serde_json::json!({"valid":true})))
+        }
     };
     if let Err(e) = result {
         eprintln!("{e}");

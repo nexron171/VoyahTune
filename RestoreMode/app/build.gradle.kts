@@ -15,8 +15,11 @@ android {
         applicationId = "ru.big.town.restoremode"
         minSdk = 30
         targetSdk = 35
-        versionCode = 6
-        versionName = "3.14.0"
+        val release = providers.gradleProperty("voyahReleaseVersion").orElse("3.14.0").get()
+        val parts = release.substringBefore('-').split('.').map { it.toInt() }
+        require(parts.size == 3 && parts.all { it in 0..999 })
+        versionCode = parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
+        versionName = release
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true

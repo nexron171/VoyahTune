@@ -30,6 +30,12 @@ def merge(index,entry):
   if old['version']==entry['version']:
    if old['payload']!=entry['payload'] or old['requirements']!=entry['requirements']:
     raise ValueError('Published version is immutable; choose a new release version')
+   if 'otaMetadata' in entry:
+    if old.get('otaMetadata') not in (None, entry['otaMetadata']):
+     raise ValueError('Signed OTA metadata are immutable')
+    if old.get('otaMetadata') is None:
+     old['otaMetadata']=entry['otaMetadata'];old['ota']=entry.get('ota',False)
+     index['generatedAt']=datetime.now(timezone.utc).isoformat();return True
    # Availability may change without replacing the immutable archive. An entry
    # regenerated without the optional marker must not silently revoke OTA.
    if 'ota' in entry and old.get('ota',False)!=entry['ota']:
