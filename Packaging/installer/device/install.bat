@@ -40,10 +40,10 @@ if "%CANBUS_PERMISSION_OWNER%"=="" (
     goto :canbus_permission_ok
 )
 echo !!! com.qinggan.permission.WRITE_CANBUS already belongs to %CANBUS_PERMISSION_OWNER%.
-echo     Remove the incompatible package and repeat full install. /system is still unchanged.
+echo     Remove the incompatible package and repeat installation. /system is still unchanged.
 exit /b 1
 :canbus_permission_ok
-if "%CANBUS_PERMISSION_PRESENT%"=="0" echo   The permission is not declared yet. Full Native will create it.
+if "%CANBUS_PERMISSION_PRESENT%"=="0" echo   The permission is not declared yet. Native will create it.
 if "%CANBUS_PERMISSION_PRESENT%"=="1" echo   The permission belongs to ru.big.town.anative. This update is compatible.
 
 echo === Preparing writable /system ^(verity, overlay^) ===
@@ -163,11 +163,11 @@ rem target processes and remove the old file plus both generations of runtime ma
 echo === Migrating client agent fullscreen_client.js -^> app_client.js ===
 adb.exe shell "fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for app_client_pkg in $fullscreen_csv; do IFS=$old_ifs; case $app_client_pkg in ''|null|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop $app_client_pkg >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs; for app_client_pkg in ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android; do am force-stop $app_client_pkg >/dev/null 2>&1; done; rm -f /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_fullscreen_client.* /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* || exit 1; [ -s /data/local/bin/app_client.js ] || exit 1; [ ! -e /data/local/bin/fullscreen_client.js ] || exit 1; [ ! -e /data/local/bin/fullscreen_client.js.voyahtune.new ] || exit 1; ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1; ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1"
 if errorlevel 1 exit /b 1
-rem Remove the unused manifest left by previous full releases.
+rem Remove the unused manifest left by previous releases.
 adb.exe shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json.voyahtune.new"
 if errorlevel 1 exit /b 1
 
-echo === Migrating the previous full-release boot hook ===
+echo === Migrating the previous release boot hook ===
 call :migrate_legacy_init_logcat
 if errorlevel 1 exit /b 1
 
@@ -210,7 +210,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-adb.exe shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode && settings put global voyahtune_install_mode full && test x$(settings get global voyahtune_install_mode) = xfull"
+adb.exe shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode"
 if errorlevel 1 exit /b 1
 
 adb.exe reboot

@@ -179,7 +179,7 @@ public class TileOrderStore {
             }
         }
         
-        // Добавить новые сплиты (в режиме Full)
+        // Добавить новые сплиты
         List<SplitStore.Preset> splits = SplitStore.load(p);
         for (SplitStore.Preset ps : splits) {
             if (ps.ready()) {

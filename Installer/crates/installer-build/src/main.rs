@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use installer_core::{
-    payload::{self, Artifact, Manifest, Payload, Variant},
+    payload::{self, Artifact, Manifest, Payload},
     recovery::write_json,
     Error, Result,
 };
@@ -122,7 +122,7 @@ fn run(args: Args) -> Result<()> {
     fs::create_dir(&stage)?;
     let result = (|| {
         let mut manifest = Manifest {
-            schema: 3,
+            schema: 4,
             removal_only: false,
             requirements: Some(Default::default()),
             recipe,
@@ -154,13 +154,12 @@ fn run(args: Args) -> Result<()> {
                     "Исходник выходит за пределы проекта",
                 ));
             }
-            let variant: Option<Variant> = serde_json::from_value(item["variant"].clone())?;
-            copy(&stage, &source, name, variant, &mut manifest)?;
+            copy(&stage, &source, name, &mut manifest)?;
         }
         write_json(&stage.join("manifest.json"), &manifest)?;
         Payload::open(&stage)?;
         if args.output.exists() {
-            return Err(Error::new("OUTPUT_EXISTS","Папка payload уже существует. Укажите новый output; готовый комплект не перезаписывается."));
+            return Err(Error::new("OUTPUT_EXISTS","Папка payload уже существует. Укажите новый output; готовый релиз не перезаписывается."));
         }
         fs::rename(&stage, &args.output)?;
         println!(
@@ -180,7 +179,7 @@ fn build_recovery(root: &Path, output: &Path) -> Result<()> {
     let (recipe, sources) = discover(root)?;
     fs::create_dir_all(output)?;
     let mut manifest = Manifest {
-        schema: 3,
+        schema: 4,
         removal_only: true,
         requirements: Some(Default::default()),
         recipe,
@@ -196,7 +195,6 @@ fn build_recovery(root: &Path, output: &Path) -> Result<()> {
             output,
             &root.join(item["source"].as_str().unwrap()),
             item["name"].as_str().unwrap(),
-            None,
             &mut manifest,
         )?;
     }
@@ -214,7 +212,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         ("native.apk", "Native"),
         ("restore_mode.apk", "RestoreMode"),
     ] {
-        artifacts.push(serde_json::json!({"name":name,"variant":null,
+        artifacts.push(serde_json::json!({"name":name,
             "source":format!("{project}/app/build/outputs/apk/release/app-release.apk")}));
     }
     // Hooks/configs are discovered automatically, including newly added owned files.
@@ -236,8 +234,6 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
             recipe.files.push(CopyFile {
                 destination: format!("/data/local/bin/{name}"),
                 artifact: name,
-                variant_artifact: false,
-                variants: vec![Variant::Full],
                 mode: 0o644,
                 phase: Phase::Files,
             });
@@ -258,7 +254,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
             }
             _ => format!("Packaging/inject/{name}"),
         };
-        artifacts.push(serde_json::json!({"name":name,"variant":null,"source":source}));
+        artifacts.push(serde_json::json!({"name":name,"source":source}));
     }
     for (name, source) in [
         (
@@ -274,7 +270,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
             "Packaging/vendor-overlay/framework-res__config_ethernet_interfaces_yandexdns.apk",
         ),
     ] {
-        artifacts.push(serde_json::json!({"name":name,"variant":null,"source":source}));
+        artifacts.push(serde_json::json!({"name":name,"source":source}));
     }
     recipe.validate()?;
     Ok((
@@ -282,13 +278,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         serde_json::json!({"schema":1,"artifacts":artifacts}),
     ))
 }
-fn copy(
-    stage: &Path,
-    source: &Path,
-    name: &str,
-    variant: Option<Variant>,
-    manifest: &mut Manifest,
-) -> Result<()> {
+fn copy(stage: &Path, source: &Path, name: &str, manifest: &mut Manifest) -> Result<()> {
     if name.is_empty()
         || !name
             .bytes()
@@ -298,14 +288,13 @@ fn copy(
     {
         return Err(Error::new("SOURCE_PATH", "Недопустимое имя артефакта").detail(name));
     }
-    let path = format!("{}/{}", variant.map(|v| v.name()).unwrap_or("common"), name);
+    let path = format!("common/{name}");
     let target = stage.join(&path);
     fs::create_dir_all(target.parent().unwrap())?;
     fs::copy(source, &target)?;
     manifest.artifacts.push(Artifact {
         name: name.into(),
         path,
-        variant,
         sha256: payload::sha256(&target)?,
         size: target.metadata()?.len(),
     });
@@ -316,11 +305,11 @@ fn copy(
 mod tests {
     use super::*;
     #[test]
-    fn checkout_payload_contains_every_required_full_file() {
+    fn checkout_payload_contains_every_required_runtime_file() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let (recipe, sources) = discover(&root).unwrap();
         recipe.validate().unwrap();
-        for name in payload::FULL_NAMES {
+        for name in payload::RUNTIME_NAMES {
             let entry = sources["artifacts"]
                 .as_array()
                 .unwrap()

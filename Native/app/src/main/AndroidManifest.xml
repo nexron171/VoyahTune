@@ -9,7 +9,7 @@
     <!-- Перенос приложения между сплитом/фриформом БЕЗ убийства процесса: завершаем задачу приложения
          (removeTask), а не force-stop процесса — плейбек в foreground-сервисе выживает (музыка не глохнет).
          REAL_GET_TASKS — перечислить задачи всех приложений; REMOVE_TASKS — завершить чужую задачу.
-         OEM REMOVE_TASKS = signature|documenter: Full использует UID-scoped ATMS.removeTask hook. -->
+         OEM REMOVE_TASKS = signature|documenter: VoyahTune использует UID-scoped ATMS.removeTask hook. -->
     <uses-permission android:name="android.permission.REAL_GET_TASKS" />
     <uses-permission android:name="android.permission.REMOVE_TASKS" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />

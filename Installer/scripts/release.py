@@ -97,7 +97,7 @@ def payload_entry(folder,archive):
 
 def main():
     import tomllib
-    parser = argparse.ArgumentParser(description='Build a shared runtime-mode payload; optionally build GUI installers separately.')
+    parser = argparse.ArgumentParser(description='Build a single VoyahTune payload; optionally build GUI installers separately.')
     parser.add_argument('version')
     parser.add_argument('--payload', action='store_true', help='Build only the shared payload ZIP; no desktop tools or containers')
     parser.add_argument('--installers', action='store_true', help='Build standalone installers; all platforms unless selected below')

@@ -39,15 +39,13 @@ struct Cli {
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum Choice {
-    Full,
-    Light,
+    Install,
     Remove,
 }
 impl From<Choice> for Action {
     fn from(v: Choice) -> Self {
         match v {
-            Choice::Full => Self::Full,
-            Choice::Light => Self::Light,
+            Choice::Install => Self::Install,
             Choice::Remove => Self::Remove,
         }
     }
@@ -87,7 +85,7 @@ enum Commands {
     },
     /// Проверить только постоянные инструменты, без релизного payload и автомобиля.
     VerifyHost,
-    /// Проверить комплект установщика, не обращаясь к автомобилю.
+    /// Проверить файлы установщика, не обращаясь к автомобилю.
     Verify {
         #[arg(
             long,
@@ -95,7 +93,7 @@ enum Commands {
         )]
         payload_only: bool,
     },
-    /// Прочитать сведения о комплекте без дополнительных проверок целостности.
+    /// Прочитать сведения о релизе без дополнительных проверок целостности.
     Info,
     /// Один запрос списка ADB-устройств. Ничего не изменяет.
     Devices,
@@ -221,8 +219,7 @@ fn run(cli: Cli) -> Result<()> {
                 device: plan.request.serial,
                 token: plan.request.inventory_token,
                 action: match plan.request.action {
-                    Action::Full => Choice::Full,
-                    Action::Light => Choice::Light,
+                    Action::Install => Choice::Install,
                     Action::Remove => Choice::Remove,
                 },
                 dns: match plan.request.dns {

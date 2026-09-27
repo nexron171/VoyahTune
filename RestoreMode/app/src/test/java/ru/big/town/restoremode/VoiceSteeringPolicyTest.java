@@ -10,35 +10,35 @@ public class VoiceSteeringPolicyTest {
     @Test public void missingOrUnknownPreferencePreservesLongPressDefault() {
         for (String press : new String[]{null, "", "long", "unknown"}) {
             assertEquals("long", VoiceSteeringPolicy.normalize(press));
-            assertTrue(VoiceSteeringPolicy.ownsSlot(true, true, press, "steerVoiceLong"));
-            assertFalse(VoiceSteeringPolicy.ownsSlot(true, true, press, "steerVoiceShort"));
+            assertTrue(VoiceSteeringPolicy.ownsSlot(true, press, "steerVoiceLong"));
+            assertFalse(VoiceSteeringPolicy.ownsSlot(true, press, "steerVoiceShort"));
         }
     }
 
     @Test public void switchingPressRestoresOriginalActionsInTheOtherSlot() {
         for (String press : new String[]{"long", "short", "long"}) {
             assertEquals(press.equals("short") ? "voice_assistant" : SAVED_SHORT,
-                    VoiceSteeringPolicy.publishedAction(true, true, press, "steerVoiceShort", SAVED_SHORT));
+                    VoiceSteeringPolicy.publishedAction(true, press, "steerVoiceShort", SAVED_SHORT));
             assertEquals(press.equals("long") ? "voice_assistant" : SAVED_LONG,
-                    VoiceSteeringPolicy.publishedAction(true, true, press, "steerVoiceLong", SAVED_LONG));
+                    VoiceSteeringPolicy.publishedAction(true, press, "steerVoiceLong", SAVED_LONG));
             assertEquals(SAVED_SHORT,
-                    VoiceSteeringPolicy.publishedAction(true, false, press, "steerVoiceShort", SAVED_SHORT));
+                    VoiceSteeringPolicy.publishedAction(false, press, "steerVoiceShort", SAVED_SHORT));
             assertEquals(SAVED_LONG,
-                    VoiceSteeringPolicy.publishedAction(true, false, press, "steerVoiceLong", SAVED_LONG));
+                    VoiceSteeringPolicy.publishedAction(false, press, "steerVoiceLong", SAVED_LONG));
         }
     }
 
     @Test public void editorLocksExactlyThePublishedAssistantSlot() {
-        for (boolean full : new boolean[]{false, true}) for (boolean enabled : new boolean[]{false, true}) {
+        for (boolean enabled : new boolean[]{false, true}) {
             for (String press : new String[]{"short", "long"}) {
                 int locked = 0;
                 for (String slot : new String[]{"steerVoiceShort", "steerVoiceLong", "steerStarShort", "steerPhoneLong"}) {
-                    boolean owns = VoiceSteeringPolicy.ownsSlot(full, enabled, press, slot);
+                    boolean owns = VoiceSteeringPolicy.ownsSlot(enabled, press, slot);
                     if (owns) locked++;
                     assertEquals(owns, "voice_assistant".equals(
-                            VoiceSteeringPolicy.publishedAction(full, enabled, press, slot, "none")));
+                            VoiceSteeringPolicy.publishedAction(enabled, press, slot, "none")));
                 }
-                assertEquals(full && enabled ? 1 : 0, locked);
+                assertEquals(enabled ? 1 : 0, locked);
             }
         }
     }

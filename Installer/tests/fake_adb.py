@@ -35,7 +35,6 @@ def main():
    print('Success');return 1 if s.get('failPrepareCommand') else 0
   elif args[0]=='reboot':
    if s.get('failReboot'):print('injected reboot failure',file=sys.stderr);return 1
-   s.setdefault('modeAtReboot',[]).append(s.get('settings',{}).get('voyahtune_install_mode'))
    s['reboots']=s.get('reboots',0)+1;s['boot']=str(s['reboots']);s['root']=False
    put('/proc/sys/kernel/random/boot_id',s['boot']+'\n')
    package='ru.big.town.anative';path='/system/priv-app/Native/Native.apk'
@@ -125,18 +124,10 @@ def main():
   if args[0]=='list':
    for k,v in settings.items():print(k+'='+v)
   elif args[0]=='get':
-   if key=='voyahtune_install_mode' and s.get('modeWriteAttempted'):
-    if s.get('failModeReadAfterWrite'):print('injected mode read failure',file=sys.stderr);return 1
-    if 'modeReadbackAfterWrite' in s:print(s['modeReadbackAfterWrite']);return 0
    print(settings.get(key,'null'))
   elif args[0]=='put':
-   if key=='voyahtune_install_mode':
-    s['modeWriteAttempted']=True;save(s)
-    if s.get('failModeWrite'):print('injected mode write failure',file=sys.stderr);return 1
-    if s.get('ignoreModeWrite'):return 0
    settings[key]=args[3];save(s)
   elif args[0]=='delete':
-   if key=='voyahtune_install_mode' and s.get('ignoreModeDelete'):return 0
    settings.pop(key,None);save(s)
   else:raise RuntimeError(args)
  elif name=='chown':

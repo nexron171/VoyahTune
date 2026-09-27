@@ -4,7 +4,7 @@ members = ["crates/installer-core", "crates/installer-build", "desktop/src-tauri
 default-members = ["crates/installer-core", "crates/installer-build"]
 
 [workspace.package]
-version = "1.0.3"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.88"
 

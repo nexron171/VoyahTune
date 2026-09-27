@@ -308,7 +308,7 @@ main {
 
 .choices {
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-columns:repeat(2,minmax(0,1fr));
   gap:17px;
 }
 
@@ -1688,7 +1688,7 @@ pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:380px
 .delete-cache {color:var(--red);background:var(--red-light);}
 .mode-picker {border:0;padding:0;margin:20px 0 12px;min-width:0;}
 .mode-picker legend {font-size:14px;font-weight:600;margin-bottom:10px;}
-.mode-selectors {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+.mode-selectors {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
 .mode-selector {display:flex;align-items:center;gap:10px;padding:14px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:var(--panel);}
 .mode-selector input {accent-color:var(--teal);margin:0;flex-shrink:0;}
 .mode-selector strong {display:block;font-size:17px;}

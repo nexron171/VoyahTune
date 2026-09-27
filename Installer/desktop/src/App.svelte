@@ -21,19 +21,18 @@
     for(const entry of cached) if(!rows.some(row=>row.cached?.path===entry.path)) rows.push({version:entry.version,cached:entry});
     return rows.sort((a,b)=>b.version.localeCompare(a.version,undefined,{numeric:true}));
   });
-  const nextBlocked = $derived(busy ? (downloadBusy?'Дождитесь загрузки комплекта':'Дождитесь завершения проверки') : !action ? 'Не выбран вариант установки' : action!=='remove'&&!releaseVersion ? 'Не выбран релиз' : !eventsReady ? 'Журнал установки недоступен' : '');
+  const nextBlocked = $derived(busy ? (downloadBusy?'Дождитесь загрузки релиза':'Дождитесь завершения проверки') : !action ? 'Не выбрано действие' : action!=='remove'&&!releaseVersion ? 'Не выбран релиз' : !eventsReady ? 'Журнал установки недоступен' : '');
   const downloadPercent = $derived((downloadProgress?.stage==='download'||downloadProgress?.stage==='retry')&&downloadProgress.total>0 ? Math.min(100,Math.round(100*downloadProgress.bytes/downloadProgress.total)) : undefined);
-  const progressText = $derived(downloadProgress?.stage==='retry'?'Связь прервана. Продолжаем загрузку…':downloadProgress?.stage==='verify'?'Проверяем комплект…':downloadProgress?.stage==='extract'?'Распаковываем…':'Скачиваем…');
+  const progressText = $derived(downloadProgress?.stage==='retry'?'Связь прервана. Продолжаем загрузку…':downloadProgress?.stage==='verify'?'Проверяем релиз…':downloadProgress?.stage==='extract'?'Распаковываем…':'Скачиваем…');
   function showLog(node: HTMLDialogElement) { node.showModal(); return {destroy(){node.close();}}; }
   const stages = ['Выбор действия','Подключение','Проверка','Выполнение','Результат'];
-  const variants:{id:Action;name:string;subtitle:string;features:string[];details:string}[] = [
-    {id:'full',name:'Full',subtitle:'Полный набор',features:['Сохранение настроек автомобиля','Кнопки руля и два приложения рядом','Окна и штатная клавиатура'],details:'Включает функции Light, настройку кнопок руля, разделение экрана, управление окнами и дополнительные варианты штатной клавиатуры.'},
-    {id:'light',name:'Light',subtitle:'Базовый набор',features:['Сохранение настроек автомобиля','Восстановление настроек при запуске','Без изменения окон и клавиатуры'],details:'Сохранение и восстановление настроек автомобиля. Изменение кнопок руля, окон и клавиатуры в этот набор не входит.'},
-    {id:'remove',name:'Удаление',subtitle:'Полная очистка VoyahTune',features:['Приложения и их настройки','Компоненты Full и Light','Остатки предыдущих установок'],details:'Проверим оба набора и известные старые компоненты, восстановим собственные изменения DNS. Журнал и резервные копии на компьютере сохранятся.'}
+  const operations:{id:Action;name:string;subtitle:string;features:string[];details:string}[] = [
+    {id:'install',name:'Установка',subtitle:'Установить или обновить',features:['Сохранение настроек автомобиля','Кнопки руля и два приложения рядом','Окна и штатная клавиатура'],details:'Установка полного релиза VoyahTune: настройки автомобиля, кнопки руля, разделение экрана, управление окнами и штатная клавиатура.'},
+    {id:'remove',name:'Удаление',subtitle:'Полная очистка VoyahTune',features:['Приложения и их настройки','Системные компоненты','Остатки предыдущих установок'],details:'Удалим известные компоненты и настройки VoyahTune, восстановим собственные изменения DNS. Журнал и резервные копии на компьютере сохранятся.'}
   ];
   const connected = $derived(devices.length === 1 && devices[0].state === 'device');
-  const operationName = $derived(({install:'Установка',update:'Обновление',switch:'Переход на',repair:'Восстановление',remove:'Удаление'}[plan?.operation || 'install'] || 'Установка') + (action==='remove'?' VoyahTune':` ${action==='full'?'Full':'Light'}`));
-  const inventoryName = $derived(plan ? ({absent:'VoyahTune не установлен',complete:`${plan.inventory.variant?.toUpperCase()} · ${plan.inventory.version}`,unknown:'Старая сборка: набор не определён',partial:'Неполная установка',mixed:'Компоненты разных наборов или версий',remnants:'Остатки предыдущей установки'}[plan.inventory.state] || plan.inventory.state) : '');
+  const operationName = $derived(({install:'Установка',update:'Обновление',repair:'Восстановление',remove:'Удаление'}[plan?.operation || 'install'] || 'Установка') + ' VoyahTune');
+  const inventoryName = $derived(plan ? ({absent:'VoyahTune не установлен',complete:`VoyahTune · ${plan.inventory.version}`,unknown:'Старая сборка: версия не определена',partial:'Неполная установка',mixed:'Компоненты разных версий',remnants:'Остатки предыдущей установки'}[plan.inventory.state] || plan.inventory.state) : '');
   function acceptEvent(event:Event){
     if(events.some(e=>e.operationId===event.operationId&&e.sequence===event.sequence))return;
     events=[...events,event].slice(-1500);
@@ -101,7 +100,7 @@
   <div class="window-body">
     <aside class="sidebar"><div class="brand">VoyahTune<span>Установка на автомобиль</span></div>
       <nav aria-label="Этапы установки"><ol>{#each stages as stage,i}<li class:current={i===screen} class:done={i<screen} class="nav-item" aria-current={i===screen?'step':undefined}><span class="nav-number">{i<screen?'✓':i+1}</span><span class="nav-label">{stage}</span></li>{/each}</ol></nav>
-      <div class="sidebar-bottom"><span class="offline-dot"></span> Установка из загруженного комплекта<small>Установщик {catalog?.installerVersion||"…"}</small></div>
+      <div class="sidebar-bottom"><span class="offline-dot"></span> Установка из загруженного релиза<small>Установщик {catalog?.installerVersion||"…"}</small></div>
     </aside>
     <main id="main" aria-busy={busy&&!canbusNotice}>
       <div class="screen">
@@ -109,7 +108,7 @@
         <div class="screen-heading"><span class="eyebrow">НАЧАЛО РАБОТЫ</span><h1>Что вы хотите сделать?</h1><p class="subtitle">Выберите набор функций для автомобиля или удалите VoyahTune.</p></div>
         <section class="plan-panel release-picker">
           <div class="release-title"><h2>{releaseVersion ? `Выбран VoyahTune ${releaseVersion}` : 'Выберите версию VoyahTune'}</h2><button class="button secondary" disabled={busy} onclick={()=>updateCatalog(true)}>Обновить список</button></div>
-          {#if catalog?.warning}<p class="info-note">{catalog.warning} Скачанные комплекты доступны без интернета.</p>{/if}
+          {#if catalog?.warning}<p class="info-note">{catalog.warning} Скачанные релизы доступны без интернета.</p>{/if}
           {#if catalog?.catalog.generatedAt}<p class="release-date">Каталог: {catalog.catalog.generatedAt}</p>{/if}
           {#if releaseRows.length}
             <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users must be able to scroll the release list.) -->
@@ -119,26 +118,25 @@
                 <tbody>{#each releaseRows as row (row.cached?.path||row.version)}
                   {@const selected=!!row.cached&&releasePath===row.cached.path&&!!releaseVersion}
                   <tr class:selected>
-                    <td><div class="release-name"><strong>{row.version}</strong>{#if row.release}<button class="link-button release-notes" onclick={()=>openLink(row.release!.notesUrl)}>Что нового</button>{/if}</div><span class="release-meta">{row.release ? `${row.release.publishedAt} · ${(row.release.payload.size/1048576).toFixed(1)} МБ` : 'Локальный комплект'}</span>
+                    <td><div class="release-name"><strong>{row.version}</strong>{#if row.release}<button class="link-button release-notes" onclick={()=>openLink(row.release!.notesUrl)}>Что нового</button>{/if}</div><span class="release-meta">{row.release ? `${row.release.publishedAt} · ${(row.release.payload.size/1048576).toFixed(1)} МБ` : 'Локальный релиз'}</span>
                       {#if row.release?.compatible===false}<span class="release-incompatible">{row.release.incompatibility||`Нужен установщик ${row.release.requirements.minInstallerVersion}`}</span>
                         {#each row.release.installerUpdates||[] as update}<button class="link-button" onclick={()=>openLink(update.url)}>Установщик {update.version} · {update.platform}</button>{/each}
                       {/if}
                     </td>
                     <td class="release-status"><span class:teal={!!row.cached} aria-label={row.cached?'Скачан':'Не скачан'}>{row.cached?'✓':'—'}</span></td>
                     <td class="release-status"><span class:teal={selected} aria-label={selected?'Выбран':'Не выбран'}>{selected?'✓':'—'}</span></td>
-                    <td><div class="release-actions"><button class="button secondary" aria-label={`Выбрать релиз ${row.version}`} disabled={busy||row.release?.compatible===false||selected} onclick={()=>selectRelease(row)}>{downloadBusy&&selectedVersion===row.version?'Загрузка…':'Выбрать'}</button><button class="button delete-cache" aria-label={`Удалить скачанный релиз ${row.version}`} title={row.cached?.deletable?'Удалить комплект с компьютера':'Нет скачанного комплекта для удаления'} disabled={busy||!row.cached?.deletable} onclick={()=>row.cached&&deleteRelease(row.cached)}>Удалить</button></div></td>
+                    <td><div class="release-actions"><button class="button secondary" aria-label={`Выбрать релиз ${row.version}`} disabled={busy||row.release?.compatible===false||selected} onclick={()=>selectRelease(row)}>{downloadBusy&&selectedVersion===row.version?'Загрузка…':'Выбрать'}</button><button class="button delete-cache" aria-label={`Удалить скачанный релиз ${row.version}`} title={row.cached?.deletable?'Удалить релиз с компьютера':'Нет скачанного релиза для удаления'} disabled={busy||!row.cached?.deletable} onclick={()=>row.cached&&deleteRelease(row.cached)}>Удалить</button></div></td>
                   </tr>
                 {/each}</tbody>
               </table>
             </div>
-          {:else}<p>В каталоге пока нет релизов. Откройте локальный ZIP или папку комплекта.</p>{/if}
+          {:else}<p>В каталоге пока нет релизов. Откройте локальный ZIP или папку релиза.</p>{/if}
           {#if downloadBusy}<div class="download-progress"><div class="download-meter"><div class="download-label" role="status"><span>{progressText}</span><span>{downloadPercent===undefined?'':`${downloadPercent}%`}</span></div><progress aria-label={progressText} max="100" value={downloadPercent}></progress>{#if (downloadProgress?.stage==='download'||downloadProgress?.stage==='retry')&&downloadProgress.total>0}<small>{(downloadProgress.bytes/1048576).toFixed(1)} из {(downloadProgress.total/1048576).toFixed(1)} МБ</small>{/if}</div><button class="button secondary" onclick={cancelDownload}>Отменить загрузку</button></div>{/if}
-          <details><summary>Открыть локальный ZIP или папку</summary><label>Путь к ZIP или комплекту<input aria-label="Путь к комплекту" type="text" bind:value={localPath} disabled={busy} placeholder="/путь/payload_3.13.0.zip"></label><button class="button secondary" onclick={()=>loadRelease()} disabled={busy||!localPath}>Открыть комплект</button></details>
+          <details><summary>Открыть локальный ZIP или папку</summary><label>Путь к ZIP или релизу<input aria-label="Путь к релизу" type="text" bind:value={localPath} disabled={busy} placeholder="/путь/payload_3.13.0.zip"></label><button class="button secondary" onclick={()=>loadRelease()} disabled={busy||!localPath}>Открыть релиз</button></details>
 
         </section>
-        <fieldset class="mode-picker"><legend>Вариант установки</legend><div class="mode-selectors">{#each variants as v}<label class="mode-selector" class:selected={action===v.id} class:danger={v.id==='remove'}><input type="radio" name="action" value={v.id} checked={action===v.id} disabled={busy} onchange={()=>choose(v.id)}><span><strong>{v.name}</strong><small>{v.subtitle}</small></span></label>{/each}</div></fieldset>
-        {#if action}<p class="mode-description">{variants.find(v=>v.id===action)?.details}</p>{/if}
-        {#if action==='light'}<p class="info-note">Если раньше был установлен Full, перед Light рекомендуется полное удаление. Оно стирает настройки и данные VoyahTune. Установка Light поверх тоже доступна: удаляются только хуки и Frida-инфраструктура.</p>{/if}
+        <fieldset class="mode-picker"><legend>Операция</legend><div class="mode-selectors">{#each operations as v}<label class="mode-selector" class:selected={action===v.id} class:danger={v.id==='remove'}><input type="radio" name="action" value={v.id} checked={action===v.id} disabled={busy} onchange={()=>choose(v.id)}><span><strong>{v.name}</strong><small>{v.subtitle}</small></span></label>{/each}</div></fieldset>
+        {#if action}<p class="mode-description">{operations.find(v=>v.id===action)?.details}</p>{/if}
       {:else if screen===1}
         <div class="screen-heading"><span class="eyebrow">ПОДКЛЮЧЕНИЕ ПО USB</span><h1>Подключите автомобиль</h1><p class="subtitle">Включите отладку по USB в инженерном меню и подключите компьютер к головному устройству.</p></div>
         <div class="connection-grid"><section class="status-panel" class:success={connected} class:warning={!connected}>
@@ -151,7 +149,7 @@
         <aside class="code-panel" aria-label="Код инженерного меню"><h2>Инженерное меню</h2><p class="code-label">Код для входа</p><div class="code-line"><output class="engineering-code">{code||'—'}</output></div><p class="code-date">Дата расчёта: {date.split('-').reverse().join('.')} · Пекин</p><p class="code-source">{manualDate?'Дата задана вручную.':'По часам компьютера. Часы автомобиля пока не проверены.'}</p><label class="date-editor">Изменить дату расчёта<input type="date" min="0001-01-01" max="9999-12-31" bind:value={date} onchange={()=>{manualDate=true;updateCode();}}></label><p class="code-footnote">Если код не подходит, попробуйте увеличить число вручную: например, вместо 2921 введите 2922, или выберите следующий день в календаре. Возможна небольшая разница во времени; точный алгоритм смены кода в автомобиле неизвестен.</p></aside></div>
       {:else if screen===2 && plan}
         <div class="screen-heading"><span class="eyebrow">ПРОВЕРКА ЗАВЕРШЕНА</span><h1>{operationName}</h1><p class="subtitle">Проверьте план. Изменение файлов начнётся после вашего подтверждения.</p></div>
-        <section class="plan-panel"><div class="plan-summary"><div><h2>{plan.inventory.model}</h2><p>{plan.inventory.serial} · Android API {plan.inventory.sdk}</p></div><span class="badge">{action==='remove'?'Full + Light':action?.toUpperCase()}</span></div><div class="plan-body"><p><strong>Релиз комплекта:</strong> {releaseVersion||'Встроенные ресурсы удаления'}</p><p><strong>Сейчас в автомобиле:</strong> {inventoryName}</p><details><summary>По каким признакам определено состояние</summary><p>{action==='remove'?'Проверены наличие и пути приложений, системного Native и файлов VoyahTune. Подписи установленных APK при удалении не проверяются.':'Проверены активные APK, системный Native, подписанные метаданные набора и версии, наличие загрузочных файлов и их SHA-256. Текущий режим показан для справки и не ограничивает выбор установки.'}</p><pre>{JSON.stringify({packages:plan.inventory.packages,files:plan.inventory.files},null,2)}</pre></details><p>Текущий режим: {({absent:'не установлен',full:'Full',light:'Light',unknown:'не определён'}[plan.currentMode||'unknown'])} · выбран: {action==='remove'?'удаление':action}</p><ol class="plan-list">{#each plan.steps as step}<li>{step.title}</li>{/each}</ol></div></section>
+        <section class="plan-panel"><div class="plan-summary"><div><h2>{plan.inventory.model}</h2><p>{plan.inventory.serial} · Android API {plan.inventory.sdk}</p></div><span class="badge">{action==='remove'?'Удаление':'Установка'}</span></div><div class="plan-body"><p><strong>Релиз:</strong> {releaseVersion||'Встроенные ресурсы удаления'}</p><p><strong>Сейчас в автомобиле:</strong> {inventoryName}</p><details><summary>По каким признакам определено состояние</summary><p>{action==='remove'?'Проверены наличие и пути приложений, системного Native и файлов VoyahTune. Подписи установленных APK при удалении не проверяются.':'Проверены активные APK, системный Native, подписанные метаданные релиза, наличие загрузочных файлов и их SHA-256.'}</p><pre>{JSON.stringify({packages:plan.inventory.packages,files:plan.inventory.files},null,2)}</pre></details><ol class="plan-list">{#each plan.steps as step}<li>{step.title}</li>{/each}</ol></div></section>
         {#if action!=='remove'}<fieldset class="dns-box"><legend>Яндекс DNS</legend><p>Эта настройка позволяет иметь доступ к сервисам, которые доступны в белых списках.</p><div class="dns-options">{#each [{id:'keep',label:'Оставить как есть'},{id:'on',label:'Включить'},{id:'off',label:'Выключить'}] as item}<label><input type="radio" name="dns" value={item.id} bind:group={dns}>{item.label}</label>{/each}</div></fieldset>{/if}
         {#each plan.warnings as warning}<p class="info-note">ⓘ {warning}</p>{/each}
         {#if action==='remove'}<label class="confirmation"><input type="checkbox" bind:checked={removeConfirmed}> Подтверждаю удаление обоих наборов VoyahTune, их настроек и данных</label>{/if}
@@ -164,7 +162,7 @@
         {#if stopRequested}<p class="info-note">Остановка запрошена. Текущий шаг завершится, затем операция остановится.</p>{/if}
       {:else if screen===4}
         <div class="screen-heading"><span class="eyebrow">{outcome==='success'?'ГОТОВО':'ОПЕРАЦИЯ ОСТАНОВЛЕНА'}</span><h1>{outcome==='success'?(action==='remove'?'VoyahTune удалён':'VoyahTune готов к работе'):outcome==='cancelled'?'Операция отменена':outcome==='paused'?'Требуется ваше решение':'Не удалось завершить операцию'}</h1><p class="subtitle">{outcome==='success'?(action==='remove'?'Команды удаления выполнены. Автомобиль перезагружается.':'Запуск Native проверен после перезагрузки автомобиля.'):['cancelled','paused'].includes(outcome)?stopMessage:'Завершённые шаги могли изменить автомобиль. После устранения причины выполните новую проверку.'}</p></div>
-        {#if outcome==='success'}<section class="status-panel success"><h2>{action==='remove'?'Приложения и компоненты удалены':`Установлен ${action==='full'?'Full':'Light'}`}</h2><p>{action==='remove'?'Резервные копии и журнал сохранены на компьютере.':'Откройте VoyahTune на автомобиле, чтобы настроить доступные функции.'}</p></section>{/if}
+        {#if outcome==='success'}<section class="status-panel success"><h2>{action==='remove'?'Приложения и компоненты удалены':'VoyahTune установлен'}</h2><p>{action==='remove'?'Резервные копии и журнал сохранены на компьютере.':'Откройте VoyahTune на автомобиле, чтобы настроить доступные функции.'}</p></section>{/if}
       {/if}
       {#if closeNotice && busy}<p class="info-note" role="status">Сейчас выполняется проверка или установка. Дождитесь завершения; установку можно остановить кнопкой «Остановить после текущего шага».</p>{/if}
       {#if eventError}<section class="status-panel danger error-box" role="alert"><h2>{eventError.message}</h2><p>{eventError.nextAction}</p><pre>{eventError.detail}</pre></section>{/if}

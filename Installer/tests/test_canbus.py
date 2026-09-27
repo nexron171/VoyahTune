@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CAN permission consent/removal through the internal fixture driver, without APK builds or a car."""
+"""CAN permission consent/removal through the internal fixture driver, with a signed test payload and no car."""
 import hashlib
 import json
 import shutil
@@ -17,27 +17,6 @@ class CanbusTests(unittest.TestCase):
         self.f = fixture.InstallerTests()
         self.f.setUp()
         self.addCleanup(self.f.tearDown)
-        payload = self.f.bundle / 'payload'
-        payload.unlink()
-        payload.mkdir()
-        artifacts = []
-        # These tests exercise command sequencing, not APK integrity (covered separately).
-        sources = {
-            'dns.apk': fixture.ROOT / 'Packaging/vendor-overlay/framework-res__config_ethernet_interfaces_yandexdns.apk',
-            'whitelist.xml': fixture.ROOT / 'Packaging/system/privapp-permissions-ru.big.town.anative.xml',
-        }
-        for name, variant in [('dns.apk', None), ('whitelist.xml', None), ('dns-helper.sh', None),
-                              ('native.apk', 'light'), ('restore_mode.apk', 'light')]:
-            target = payload / name
-            if name in sources:
-                shutil.copyfile(sources[name], target)
-            else:
-                target.write_text('test fixture\n')
-            artifacts.append(dict(name=name, path=name, variant=variant,
-                                  size=target.stat().st_size,
-                                  sha256=hashlib.sha256(target.read_bytes()).hexdigest()))
-        (payload / 'manifest.json').write_text(json.dumps(dict(
-            schema=1, product='VoyahTune', releaseVersion='0.0.0', buildRevision='fixture', artifacts=artifacts)))
         self.directory = self.f.device / 'system/priv-app/VoyahHlCTRL'
         self.directory.mkdir()
         (self.directory / 'service.apk').write_bytes(b'original system APK')
@@ -50,7 +29,7 @@ class CanbusTests(unittest.TestCase):
 
     def args(self, *extra):
         return [str(fixture.DRIVER), '--bundle', str(self.f.bundle), 'apply', '--device', 'CAR-001',
-                '--action', 'light', '--token', 'fixture', '--yes', '--logs', str(self.f.base / 'logs'), *extra]
+                '--action', 'install', '--token', 'fixture', '--yes', '--logs', str(self.f.base / 'logs'), *extra]
 
     def run_cli(self, *extra):
         return subprocess.run(self.args(*extra), env=self.f.env, text=True, capture_output=True, timeout=60)
@@ -143,10 +122,8 @@ class CanbusTests(unittest.TestCase):
         self.assertFalse(self.directory.exists())
 
     def test_apply_plan_forwards_separate_removal_consent(self):
-        payload=self.f.bundle/'payload'
-        shutil.rmtree(payload);payload.symlink_to(fixture.PAYLOAD,target_is_directory=True)
         plan_file = self.f.base / 'plan.json'
-        plan_file.write_text(json.dumps(self.f.plan('light')))
+        plan_file.write_text(json.dumps(self.f.plan('install')))
         result = self.f.cli('apply-plan', str(plan_file), '--yes', '--remove-voyah-hl-service',
                             '--logs', str(self.f.base / 'logs'), okay=False)
         self.assertEqual(result.returncode, 0, result.stdout[-4000:])

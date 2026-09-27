@@ -8,7 +8,7 @@ import android.net.Uri;
 import android.util.Log;
 import ru.big.town.common.DriveSelectionPolicy;
 
-/** One persistent restore target shared by the widget, Native and the Full ACC hook. */
+/** One persistent restore target shared by the widget, Native and the ACC hook. */
 final class DriveSelectionStore {
     private static final Uri URI = Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
     static void applyConfigured(Context context) {

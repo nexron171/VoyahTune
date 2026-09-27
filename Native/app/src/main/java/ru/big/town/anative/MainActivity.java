@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-import ru.big.town.common.InstallMode;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -603,20 +602,19 @@ public class MainActivity extends AppCompatActivity {
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
-        if (InstallMode.isFull()) {
-            final boolean stockUiTarget = apolloStockUiEnabled;
-            plan.addOnce("Apollo stock subscription/exam UI", () -> {
-                ApolloSettingsRuntimeState.TargetApplyResult result =
-                        ApolloSettingsRuntimeState.applyTarget(context, stockUiTarget);
-                if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
-                    return CanRestorePlan.OperationResult.CONFIRMED;
-                }
-                if (result == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
-                    return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
-                }
-                return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
-            });
-        }
+        final boolean stockUiTarget = apolloStockUiEnabled;
+        plan.addOnce("Apollo stock subscription/exam UI", () -> {
+            ApolloSettingsRuntimeState.TargetApplyResult result =
+                    ApolloSettingsRuntimeState.applyTarget(context, stockUiTarget);
+            if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
+                return CanRestorePlan.OperationResult.CONFIRMED;
+            }
+            if (result == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
+                return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+            }
+            return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+        });
+
 
         if (driveEnabled) {
             if (!DriveModeCanTransport.appendStates(

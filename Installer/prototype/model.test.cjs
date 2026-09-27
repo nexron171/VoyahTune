@@ -21,10 +21,10 @@ test('confirmation requires exactly one compatible authorized device', () => {
   for (const [key, value] of Object.entries(M.connectionStates)) assert.equal(M.canConfirm(value), key === 'ready', key);
   assert.equal(M.canConfirm({ devices: [M.connectionStates.ready.devices[0], M.connectionStates.unauthorized.devices[0]] }), false);
 });
-test('remove plan covers both variants and final cleanup, even without APKs', () => {
-  for (const installed of ['full', 'light', 'mixed', 'none', 'remnants']) assert.equal(M.planTitle('remove', installed), 'Удаление VoyahTune');
+test('remove plan covers installed components and final cleanup, even without APKs', () => {
+  for (const installed of ['install', 'mixed', 'none', 'remnants']) assert.equal(M.planTitle('remove', installed), 'Удаление VoyahTune');
   assert.equal(M.removeSteps.length, 8);
   assert.equal(M.faultStep('cleanup', 'remove'), 7);
   assert.equal(M.faultStep('backup', 'remove'), -1);
-  assert.equal(M.faultStep('cleanup', 'full'), -1);
+  assert.equal(M.faultStep('cleanup', 'install'), -1);
 });

@@ -1,6 +1,6 @@
 # Подстраховка восстановления при событиях аккаунта Sport+
 
-В Full добавлен `Packaging/inject/voyahtune_drive_reset.js` для процесса
+В релиз входит `Packaging/inject/voyahtune_drive_reset.js` для процесса
 `com.qinggan.app.vehiclesetting`. Он ограничен H97X (`AppCommonUtils.is97X()`) и
 двумя методами `VehicleMemoryManager` из VehicleSettings Sport+ 13.1:
 
@@ -41,7 +41,7 @@ Individual дают штатные значения руль=2, педаль=1; 
 допускает новую попытку, перезапуск загрузчика не дублирует действующий хук.
 Частичная установка методов откатывается.
 
-Full-установщики и GUI включают скрипт. Удаление и переход в Light очищают файл,
+Установщики и GUI включают скрипт. Удаление очищают файл,
 маркеры и журнал. Диагностика: `VoyahDriveReset`, `[drive-reset] hook ready v1`,
 `/data/local/tmp/voyahtune_drive_reset.txt`.
 

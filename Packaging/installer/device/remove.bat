@@ -59,7 +59,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo === Migrating the previous full-release boot hook ===
+echo === Migrating the previous release boot hook ===
 call :migrate_legacy_init_logcat
 if errorlevel 1 (
     echo !!! DNS was restored, but boot components were not removed. Fix the error and run remove again.
@@ -144,8 +144,6 @@ if errorlevel 1 (
     echo !!! Could not completely remove Open Voyah system files. Reboot was cancelled.
     exit /b 1
 )
-adb.exe shell "settings delete global voyahtune_install_mode && test x$(settings get global voyahtune_install_mode) = xnull"
-if errorlevel 1 exit /b 1
 
 adb.exe reboot
 if errorlevel 1 (

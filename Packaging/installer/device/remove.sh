@@ -85,7 +85,7 @@ rollback_legacy_init_logcat() {
     LEGACY_INIT_MIGRATED=0
 }
 
-# Позволяет remover откатить непосредственную предыдущую full-установку. Чужой/OEM-файл не трогаем.
+# Позволяет remover откатить непосредственную предыдущую установку. Чужой/OEM-файл не трогаем.
 migrate_legacy_init_logcat() {
     if ! legacy_init_state; then
         echo "!!! Не удалось проверить $LEGACY_INIT_DEVICE — удаление прервано."
@@ -228,7 +228,7 @@ if ! restore_yandex_dns; then
     exit 1
 fi
 
-echo "=== Миграция boot-hook предыдущего full-релиза ==="
+echo "=== Миграция boot-hook предыдущего релиза ==="
 if ! migrate_legacy_init_logcat; then
     echo "!!! DNS уже восстановлен, boot-компоненты не удалялись. Исправьте ошибку и повторите remove."
     exit 1
@@ -486,6 +486,5 @@ if ! adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.an
 fi
 # Примечание: persist.app.feature.leavecar (power hold) НЕ откатываем — это штатная функция авто.
 
-adb shell "settings delete global voyahtune_install_mode && test x\$(settings get global voyahtune_install_mode) = xnull" || exit 1
 
 adb reboot

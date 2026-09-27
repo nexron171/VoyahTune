@@ -1,6 +1,5 @@
 package ru.big.town.restoremode;
 
-import ru.big.town.common.InstallMode;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -137,7 +136,6 @@ public class AdvanceActivity extends AppCompatActivity {
     private Switch switchApolloSettingsActivation, switchApolloTlc, switchApolloTrafficLights,
             switchApolloTrafficSigns;
     private RadioGroup apolloGreenSoundGroup;
-    private TextView textApolloSettingsActivationStatus, textApolloStatus, textApolloFullOnly;
     private View apolloGreenSoundContainer;
 
     // Кнопка «Применить» (верхняя панель) — блокировка + прогресс на время цикла отправки
@@ -486,11 +484,7 @@ public class AdvanceActivity extends AppCompatActivity {
         navCustomCommands.setVisibility(
                 prefs.getBoolean(PREF_SHOW_CUSTOM_COMMANDS, false) ? View.VISIBLE : View.GONE);
 
-        // LIGHT: скрываем разделы «Приложения и разделение экрана» (2) и «Кнопки на руле» (5) — split/VD и Frida-руль.
-        if (!InstallMode.isFull()) {
-            if (navSplitScreen != null)     navSplitScreen.setVisibility(View.GONE);
-            if (navSteeringButtons != null) navSteeringButtons.setVisibility(View.GONE);
-        }
+
 
         // Раздел «Главный экран»: тумблеры видимости карточек (по умолчанию все включены)
         bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer", true);
@@ -523,16 +517,14 @@ public class AdvanceActivity extends AppCompatActivity {
             sendBroadcast(i);
         });
 
-        // Ярлыки приложений на главном — в обоих флейворах (в light открывают приложение обычным
-        // способом, в full — на VD). Пресеты сплита и per-app DPI — только в full.
+        // Ярлыки приложений, пресеты сплита и per-app DPI.
         initAppShortcuts();
         initAppWidgets();
         initDockOverride();
-        if (InstallMode.isFull()) {
-            initFullscreenApps();
-            initSplitScreen();
-            initAppDpiList();
-        }
+        initFullscreenApps();
+        initSplitScreen();
+        initAppDpiList();
+
 
         // Раздел «Настройки автомобиля» (режимы + безопасность + комфорт слиты в один раздел)
         initModeRadios();
@@ -604,21 +596,17 @@ public class AdvanceActivity extends AppCompatActivity {
             pickerFullscreenGridColumns.setEnabled(checked);
         });
 
-        // Keyboard modifications are optional full-only Frida agents. The agents overlap in the
+        // Keyboard modifications are optional Frida agents. The agents overlap in the
         // Qinggan IME, so the two switches expose one mutually-exclusive off/en/ru preference.
         Switch switchKeyboardEnglish = findViewById(R.id.switchKeyboardEnglish);
         Switch switchKeyboardRussian = findViewById(R.id.switchKeyboardRussian);
         if (switchKeyboardEnglish != null && switchKeyboardRussian != null) {
-            String keyboardMode = InstallMode.isFull()
-                    ? SplitConfigSync.normalizeKeyboardMode(prefs.getString("keyboardMode", "off"))
-                    : "off";
+            String keyboardMode = SplitConfigSync.normalizeKeyboardMode(prefs.getString("keyboardMode", "off"));
             switchKeyboardEnglish.setChecked("en".equals(keyboardMode));
             switchKeyboardRussian.setChecked("ru".equals(keyboardMode));
-            switchKeyboardEnglish.setEnabled(InstallMode.isFull());
-            switchKeyboardRussian.setEnabled(InstallMode.isFull());
             final boolean[] updatingKeyboardSwitches = {false};
             switchKeyboardEnglish.setOnCheckedChangeListener((button, checked) -> {
-                if (updatingKeyboardSwitches[0] || !InstallMode.isFull()) return;
+                if (updatingKeyboardSwitches[0]) return;
                 updatingKeyboardSwitches[0] = true;
                 if (checked) switchKeyboardRussian.setChecked(false);
                 String mode = checked ? "en" : (switchKeyboardRussian.isChecked() ? "ru" : "off");
@@ -627,7 +615,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 updatingKeyboardSwitches[0] = false;
             });
             switchKeyboardRussian.setOnCheckedChangeListener((button, checked) -> {
-                if (updatingKeyboardSwitches[0] || !InstallMode.isFull()) return;
+                if (updatingKeyboardSwitches[0]) return;
                 updatingKeyboardSwitches[0] = true;
                 if (checked) switchKeyboardEnglish.setChecked(false);
                 String mode = checked ? "ru" : (switchKeyboardEnglish.isChecked() ? "en" : "off");
@@ -693,10 +681,9 @@ public class AdvanceActivity extends AppCompatActivity {
             });
         }
 
-        // Раздел «Кнопки на руле» (Frida-перехват кнопки-звёздочки) — только в full.
-        if (InstallMode.isFull()) {
-            initSteeringButtons();
-        }
+        // Раздел «Кнопки на руле» (Frida-перехват кнопки-звёздочки).
+        initSteeringButtons();
+
     }
 
     private void initDialWidgets() {
@@ -1001,12 +988,7 @@ public class AdvanceActivity extends AppCompatActivity {
     private Button dockSplit1Btn, dockSplit2Btn;
 
     private void initDockOverride() {
-        // «Системный док» завязан на Frida-хук лаунчера → только full. В light прячем весь блок.
-        View block = findViewById(R.id.dockOverrideBlock);
-        if (!InstallMode.isFull()) {
-            if (block != null) block.setVisibility(View.GONE);
-            return;
-        }
+
         dockApp1Btn = findViewById(R.id.buttonDockApp1);
         dockApp2Btn = findViewById(R.id.buttonDockApp2);
         dockSplit1Btn = findViewById(R.id.buttonDockSplit1);
@@ -1815,7 +1797,7 @@ public class AdvanceActivity extends AppCompatActivity {
         String hookPayload = getSharedPreferences(
                 HookStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
                 .getString(HookStatusContract.PAYLOAD_KEY, null);
-        String hookStatus = HookStatusContract.renderForUi(hookPayload, InstallMode.isFull());
+        String hookStatus = HookStatusContract.renderForUi(hookPayload);
         return new SystemMetricsSnapshot(total, Math.max(0L, total - available), available, cpu,
                 hookStatus);
     }
@@ -1887,6 +1869,8 @@ public class AdvanceActivity extends AppCompatActivity {
     // Apollo Tech — persisted subscription/exam reveal + persisted VoyahTune targets.
     // -------------------------------------------------------------------------
 
+    private TextView textApolloSettingsActivationStatus, textApolloStatus;
+
     private void initApolloTech() {
         switchApolloSettingsActivation = findViewById(R.id.switchApolloSettingsActivation);
         switchApolloTlc = findViewById(R.id.switchApolloTlc);
@@ -1897,12 +1881,10 @@ public class AdvanceActivity extends AppCompatActivity {
         textApolloSettingsActivationStatus = findViewById(
                 R.id.textApolloSettingsActivationStatus);
         textApolloStatus = findViewById(R.id.textApolloStatus);
-        textApolloFullOnly = findViewById(R.id.textApolloFullOnly);
 
         if (switchApolloSettingsActivation != null) {
             switchApolloSettingsActivation.setChecked(prefs.getBoolean(
                     ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED));
-            switchApolloSettingsActivation.setEnabled(InstallMode.isFull());
             switchApolloSettingsActivation.setOnCheckedChangeListener((button, checked) -> {
                 prefs.edit().putBoolean(ApolloSettings.STOCK_UI, checked).apply();
                 updateApolloUi();
@@ -1938,15 +1920,8 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void updateApolloUi() {
-        if (textApolloFullOnly != null) {
-            textApolloFullOnly.setVisibility(InstallMode.isFull() ? View.GONE : View.VISIBLE);
-        }
-
         if (textApolloSettingsActivationStatus != null) {
-            if (!InstallMode.isFull()) {
-                textApolloSettingsActivationStatus.setText(
-                        "Недоступно в Light-версии: в ней нет Frida hook-loader.");
-            } else if (switchApolloSettingsActivation != null
+            if (switchApolloSettingsActivation != null
                     && switchApolloSettingsActivation.isChecked()) {
                 textApolloSettingsActivationStatus.setText(
                         "Включено. Применяется вместе с остальными настройками.");
@@ -2205,7 +2180,7 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private boolean voiceOwnsSlot(String key) {
-        return VoiceSteeringPolicy.ownsSlot(InstallMode.isFull(), prefs.getBoolean(VoiceCommands.ENABLED, false),
+        return VoiceSteeringPolicy.ownsSlot( prefs.getBoolean(VoiceCommands.ENABLED, false),
                 prefs.getString(VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG), key);
     }
 

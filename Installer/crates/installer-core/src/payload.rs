@@ -8,11 +8,29 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+pub const MANIFEST_SCHEMA: u32 = 4;
+
+pub fn validate_schema(schema: u32) -> Result<()> {
+    if schema < MANIFEST_SCHEMA {
+        return Err(Error::new(
+            "PAYLOAD_SCHEMA_UNSUPPORTED",
+            "Архив прежнего формата не поддерживается. Выберите новый релиз VoyahTune.",
+        ));
+    }
+    if schema != MANIFEST_SCHEMA {
+        return Err(Error::new(
+            "INSTALLER_UPDATE_REQUIRED",
+            "Этот формат релиза требует обновления установщика",
+        ));
+    }
+    Ok(())
+}
+
 pub const NATIVE: &str = "ru.big.town.anative";
 pub const RESTORE: &str = "ru.big.town.restoremode";
 pub const NATIVE_PATH: &str = "/system/priv-app/Native/Native.apk";
 pub const WHITELIST: &str = "/system/etc/permissions/privapp-permissions-ru.big.town.anative.xml";
-pub const FULL_NAMES: &[&str] = &[
+pub const RUNTIME_NAMES: &[&str] = &[
     "load.bin",
     "steeringwheelkeys.js",
     "launcherdock.js",
@@ -31,20 +49,6 @@ pub const FULL_NAMES: &[&str] = &[
     "voyahtune.load.rc",
     "voyahtune.load.sh",
 ];
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Variant {
-    Full,
-    Light,
-}
-impl Variant {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Full => "full",
-            Self::Light => "light",
-        }
-    }
-}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BuildMetadata {
@@ -53,10 +57,6 @@ pub struct BuildMetadata {
     pub schema: u32,
     pub product: String,
     pub component: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variant: Option<Variant>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub supported_modes: Vec<Variant>,
     pub release_version: String,
     pub build_revision: String,
     #[serde(default)]
@@ -67,7 +67,6 @@ pub struct BuildMetadata {
 pub struct Artifact {
     pub name: String,
     pub path: String,
-    pub variant: Option<Variant>,
     pub sha256: String,
     pub size: u64,
 }
@@ -102,27 +101,28 @@ impl Payload {
         let root = root.canonicalize()?;
         let value: serde_json::Value =
             serde_json::from_reader(File::open(root.join("manifest.json"))?)?;
+        let schema = value["schema"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .ok_or_else(|| {
+                Error::new("PAYLOAD_SCHEMA", "Нет допустимой версии формата релиза")
+            })?;
+        validate_schema(schema)?;
         if let Some(requirements) = value.get("requirements") {
             serde_json::from_value::<crate::compatibility::Requirements>(requirements.clone())?
                 .validate()?;
         }
-        if !matches!(value["schema"].as_u64(), Some(1 | 2 | 3)) {
-            return Err(Error::new(
-                "INSTALLER_UPDATE_REQUIRED",
-                "Этот формат комплекта требует обновления установщика",
-            ));
-        }
         let manifest: Manifest = serde_json::from_value(value)?;
-        if ![1, 2, 3].contains(&manifest.schema)
+        if manifest.schema != 4
             || manifest.product != "VoyahTune"
             || semver::Version::parse(&manifest.release_version).is_err()
         {
             return Err(Error::new(
                 "PAYLOAD_SCHEMA",
-                "Неподдерживаемый формат или версия комплекта",
+                "Неподдерживаемый формат или версия релиза",
             ));
         }
-        if manifest.schema == 3 {
+        if manifest.schema == 4 {
             manifest
                 .requirements
                 .as_ref()
@@ -133,10 +133,10 @@ impl Payload {
                     )
                 })?
                 .validate()?;
-            if manifest.recipe.schema != 2 {
+            if manifest.recipe.schema != 3 {
                 return Err(Error::new(
                     "RECIPE_INVALID",
-                    "Новый payload требует recipe schema 2",
+                    "Новый payload требует recipe schema 3",
                 ));
             }
             manifest.recipe.validate()?;
@@ -168,25 +168,17 @@ impl Payload {
         }
         Ok(())
     }
-    pub fn artifact(&self, name: &str, variant: Option<Variant>) -> Result<&Artifact> {
+    pub fn artifact(&self, name: &str) -> Result<&Artifact> {
         self.manifest
             .artifacts
             .iter()
-            .find(|a| {
-                a.name == name
-                    && a.variant
-                        == if self.manifest.schema == 3 {
-                            None
-                        } else {
-                            variant
-                        }
-            })
+            .find(|a| a.name == name)
             .ok_or_else(|| {
                 Error::new(
                     "PAYLOAD_MISSING",
-                    "В комплекте отсутствует обязательный файл",
+                    "В релизе отсутствует обязательный файл",
                 )
-                .detail(format!("{name} {variant:?}"))
+                .detail(name)
             })
     }
     pub fn path(&self, a: &Artifact) -> Result<PathBuf> {
@@ -195,166 +187,89 @@ impl Payload {
                 .components()
                 .any(|c| !matches!(c, Component::Normal(_)))
         {
-            return Err(Error::new("PAYLOAD_PATH", "Недопустимый путь в комплекте").detail(&a.path));
+            return Err(Error::new("PAYLOAD_PATH", "Недопустимый путь в релизе").detail(&a.path));
         }
         let path = self.root.join(&a.path).canonicalize()?;
         if !path.starts_with(&self.root) {
             return Err(Error::new(
                 "PAYLOAD_PATH",
-                "Файл выходит за пределы комплекта",
+                "Файл выходит за пределы релиза",
             ));
         }
         Ok(path)
     }
-    pub fn file(&self, name: &str, variant: Option<Variant>) -> Result<PathBuf> {
-        self.path(self.artifact(name, variant)?)
+    pub fn file(&self, name: &str) -> Result<PathBuf> {
+        self.path(self.artifact(name)?)
     }
     pub fn verify(&self) -> Result<()> {
         self.manifest.recipe.validate()?;
-        if self.manifest.schema == 1
-            && serde_json::to_vec(&self.manifest.recipe)?
-                != serde_json::to_vec(&crate::recipe::Recipe::default())?
-        {
-            return Err(Error::new(
-                "RECIPE_SIGNATURE",
-                "Изменяемый манифест требует payload schema 2",
-            ));
-        }
         let recipe_sha = hex::encode(Sha256::digest(serde_json::to_vec(&serde_json::to_value(
             &self.manifest.recipe,
         )?)?));
         let mut seen = BTreeSet::new();
         for a in &self.manifest.artifacts {
-            if !seen.insert((a.name.clone(), a.variant.map(|v| v.name()))) {
+            if !seen.insert(a.name.clone()) {
                 return Err(Error::new(
                     "PAYLOAD_DUPLICATE",
-                    "Дублирующийся файл в комплекте",
-                ));
-            }
-            if self.manifest.schema == 3 && a.variant.is_some() {
-                return Err(Error::new(
-                    "PAYLOAD_INVALID",
-                    "Единый комплект не должен содержать flavor-specific артефакты",
+                    "Дублирующийся файл в релизе",
                 ));
             }
             let path = self.path(a)?;
             if a.size == 0 || path.metadata()?.len() != a.size || sha256(&path)? != a.sha256 {
                 return Err(Error::new(
                     "PAYLOAD_HASH",
-                    "Файл установщика повреждён. Загрузите полный комплект заново.",
+                    "Файл установщика повреждён. Загрузите полный релиз заново.",
                 )
                 .detail(&a.path));
             }
         }
         if self.manifest.removal_only {
             for name in ["dns-helper.sh", "init.logcat.original.sh"] {
-                self.file(name, None)?;
+                self.file(name)?;
             }
             return Ok(());
         }
-        let mut identities = std::collections::BTreeMap::new();
-        let mut identity = |path: PathBuf| -> Result<(BuildMetadata, Vec<String>)> {
-            if let Some(value) = identities.get(&path) {
-                return Ok(Clone::clone(value));
-            }
-            let metadata = apk_metadata(&path)?
+        for (name, component) in [("native.apk", NATIVE), ("restore_mode.apk", RESTORE)] {
+            let apk = self.file(name)?;
+            verified_signers(&apk)?;
+            let metadata = apk_metadata(&apk)?
                 .ok_or_else(|| Error::new("APK_METADATA", "APK не содержит метаданные сборки"))?;
-            let value = (metadata, verified_signers(&path)?);
-            identities.insert(path, value.clone());
-            Ok(value)
-        };
-        for variant in [Variant::Full, Variant::Light] {
-            for name in ["native.apk", "restore_mode.apk"] {
-                let (metadata, signers) = identity(self.file(name, Some(variant))?)?;
-                if signers != identity(self.file(name, Some(Variant::Full))?)?.1 {
-                    return Err(Error::new(
-                        "APK_SIGNERS",
-                        "Full и Light подписаны разными ключами",
-                    ));
-                }
-                if self.manifest.schema >= 2
-                    && metadata.recipe_sha256.as_deref() != Some(&recipe_sha)
+            if metadata.recipe_sha256.as_deref() != Some(&recipe_sha) {
+                return Err(Error::new(
+                    "RECIPE_SIGNATURE",
+                    "Манифест действий не совпадает с подписанным APK",
+                )
+                .detail(name));
+            }
+            for file in self.manifest.recipe.runtime() {
+                if metadata.runtime_hashes.get(&file.artifact)
+                    != Some(&self.artifact(&file.artifact)?.sha256)
                 {
                     return Err(Error::new(
-                        "RECIPE_SIGNATURE",
-                        "Манифест действий не совпадает с подписанным APK",
+                        "APK_RUNTIME_HASH",
+                        "Подписанные хеши компонентов не совпадают с релизом",
                     )
-                    .detail(name));
+                    .detail(&file.artifact));
                 }
-                for file in self.manifest.recipe.runtime(variant) {
-                    let source_variant = file.variant_artifact.then_some(variant);
-                    if metadata.runtime_hashes.get(&file.artifact)
-                        != Some(&self.artifact(&file.artifact, source_variant)?.sha256)
-                    {
-                        return Err(Error::new(
-                            "APK_RUNTIME_HASH",
-                            "Подписанные хеши компонентов не совпадают с комплектом",
-                        )
-                        .detail(&file.artifact));
-                    }
-                }
-                let component = if name == "native.apk" {
-                    NATIVE
-                } else {
-                    RESTORE
-                };
-                if metadata.schema != if self.manifest.schema == 3 { 2 } else { 1 }
-                    || (self.manifest.schema == 3
-                        && metadata.supported_modes != [Variant::Full, Variant::Light])
-                    || metadata.product != "VoyahTune"
-                    || metadata.component != component
-                    || metadata.variant
-                        != if self.manifest.schema == 3 {
-                            None
-                        } else {
-                            Some(variant)
-                        }
-                    || metadata.release_version != self.manifest.release_version
-                    || metadata.build_revision != self.manifest.build_revision
-                {
-                    return Err(Error::new(
-                        "APK_METADATA",
-                        "Метаданные APK не соответствуют комплекту",
-                    )
-                    .detail(name));
-                }
+            }
+            if metadata.schema != 3
+                || metadata.product != "VoyahTune"
+                || metadata.component != component
+                || metadata.release_version != self.manifest.release_version
+                || metadata.build_revision != self.manifest.build_revision
+            {
+                return Err(Error::new(
+                    "APK_METADATA",
+                    "Метаданные APK не соответствуют релизу",
+                )
+                .detail(name));
             }
         }
         for file in &self.manifest.recipe.files {
-            for variant in &file.variants {
-                self.artifact(&file.artifact, file.variant_artifact.then_some(*variant))?;
-            }
-        }
-        for package in &self.manifest.recipe.packages {
-            for variant in &package.variants {
-                let apk = self.file(
-                    &package.artifact,
-                    package.variant_artifact.then_some(*variant),
-                )?;
-                verified_signers(&apk)?;
-                let metadata = apk_metadata(&apk)?.ok_or_else(|| {
-                    Error::new("APK_METADATA", "APK не содержит метаданные сборки")
-                })?;
-                if metadata.component != package.package
-                    || metadata.variant
-                        != if self.manifest.schema == 3 {
-                            None
-                        } else {
-                            Some(*variant)
-                        }
-                    || metadata.release_version != self.manifest.release_version
-                    || metadata.build_revision != self.manifest.build_revision
-                {
-                    return Err(Error::new(
-                        "APK_METADATA",
-                        "Метаданные приложения не совпадают с манифестом",
-                    )
-                    .detail(&package.package));
-                }
-            }
+            self.artifact(&file.artifact)?;
         }
         for name in ["dns-helper.sh", "dns.apk", "init.logcat.original.sh"] {
-            self.artifact(name, None)?;
+            self.artifact(name)?;
         }
         Ok(())
     }
@@ -365,7 +280,7 @@ pub fn destination(name: &str) -> Option<(String, u32)> {
         "whitelist.xml" => Some((WHITELIST.into(), 0o644)),
         "voyahtune.load.rc" => Some(("/system/etc/init/voyahtune.load.rc".into(), 0o644)),
         "voyahtune.load.sh" => Some(("/system/etc/init.voyahtune.load.sh".into(), 0o755)),
-        name if FULL_NAMES.contains(&name) => Some((
+        name if RUNTIME_NAMES.contains(&name) => Some((
             format!("/data/local/bin/{name}"),
             if ["load.bin", "frida-inject"].contains(&name) {
                 0o755
@@ -483,7 +398,7 @@ pub fn verify_host(bundle: &Path) -> Result<()> {
     let root = bundle.canonicalize()?;
     let host: HostFiles = serde_json::from_reader(File::open(root.join("host-tools.json"))?)?;
     if host.schema != 1 || host.files.is_empty() {
-        return Err(Error::new("HOST_TOOLS", "Неполный комплект инструментов"));
+        return Err(Error::new("HOST_TOOLS", "Неполный набор инструментов"));
     }
     let mut has_adb = false;
     for file in host.files {
@@ -502,7 +417,7 @@ pub fn verify_host(bundle: &Path) -> Result<()> {
         if !path.starts_with(&root) || sha256(&path)? != file.sha256 {
             return Err(Error::new(
                 "HOST_TOOLS_HASH",
-                "Комплектный ADB или его библиотека повреждены",
+                "Встроенный ADB или его библиотека повреждены",
             )
             .detail(file.path));
         }
@@ -521,7 +436,7 @@ pub fn verify_host(bundle: &Path) -> Result<()> {
     if !has_adb {
         return Err(Error::new(
             "ADB_MISSING",
-            "В комплекте нет ADB для этой платформы",
+            "В установщике нет ADB для этой платформы",
         ));
     }
     Ok(())
@@ -559,12 +474,27 @@ pub fn locate(bundle: &Path, executable: &Path, explicit: Option<&Path>) -> Resu
             return Ok(directory);
         }
     }
-    Err(Error::new("PAYLOAD_MISSING", "Не найден встроенный комплект релиза VoyahTune").retry("Повторно распакуйте или переустановите полный установщик. Для диагностики можно указать путь к manifest.json."))
+    Err(Error::new("PAYLOAD_MISSING", "Не найден встроенный релиз VoyahTune").retry("Повторно распакуйте или переустановите полный установщик. Для диагностики можно указать путь к manifest.json."))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejects_retired_and_future_archives_before_reading_artifacts() {
+        let root = tempfile::tempdir().unwrap();
+        for (schema, expected) in [
+            (3, "PAYLOAD_SCHEMA_UNSUPPORTED"),
+            (99, "INSTALLER_UPDATE_REQUIRED"),
+        ] {
+            std::fs::write(
+                root.path().join("manifest.json"),
+                format!("{{\"schema\":{schema}}}"),
+            )
+            .unwrap();
+            assert_eq!(Payload::load(root.path()).err().unwrap().code, expected);
+        }
+    }
     #[test]
     fn only_owned_destinations() {
         assert!(destination("/system/bin/sh").is_none());

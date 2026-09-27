@@ -1,11 +1,10 @@
 (function (root) {
   'use strict';
-  const variants = {
-    full: { name: 'Full', subtitle: 'Полный набор', description: 'Настройки автомобиля и дополнительные возможности экранов.', features: ['Сохранение настроек автомобиля', 'Кнопки руля и два приложения рядом', 'Окна и штатная клавиатура'], details: 'Включает базовые функции Light, настройку кнопок руля, разделение экрана, управление окнами приложений и дополнительные варианты штатной клавиатуры. Доступные функции включаются и настраиваются в автомобиле.' },
-    light: { name: 'Light', subtitle: 'Базовый набор', description: 'Основные настройки автомобиля без изменения интерфейса экранов.', features: ['Сохранение настроек автомобиля', 'Восстановление настроек при запуске', 'Без изменения окон и клавиатуры'], details: 'Сохранение и восстановление настроек автомобиля. Изменение кнопок руля, управление окнами, разделение экрана и дополнительные варианты клавиатуры в этот набор не входят.' },
-    remove: { name: 'Удалить', subtitle: 'Полная очистка VoyahTune', description: 'Приложения, настройки и компоненты прежних установок.', features: ['Приложения и их настройки', 'Компоненты Full и Light', 'Остатки предыдущих установок'], details: 'Проверим компоненты Full, Light и известных старых версий, даже если приложения уже удалены. Восстановим собственные изменения штатных файлов и DNS. Журнал и резервные копии на компьютере сохранятся.' }
+  const operations = {
+    install: { name: 'VoyahTune', subtitle: 'Полный набор', description: 'Настройки автомобиля и дополнительные возможности экранов.', features: ['Сохранение настроек автомобиля', 'Кнопки руля и два приложения рядом', 'Окна и штатная клавиатура'], details: 'Включает сохранение настроек автомобиля, настройку кнопок руля, разделение экрана, управление окнами приложений и дополнительные варианты штатной клавиатуры. Доступные функции включаются и настраиваются в автомобиле.' },
+    remove: { name: 'Удалить', subtitle: 'Полная очистка VoyahTune', description: 'Приложения, настройки и компоненты прежних установок.', features: ['Приложения и их настройки', 'Системные компоненты', 'Остатки предыдущих установок'], details: 'Проверим компоненты VoyahTune и известных старых версий, даже если приложения уже удалены. Восстановим собственные изменения штатных файлов и DNS. Журнал и резервные копии на компьютере сохранятся.' }
   };
-  const installSteps = ['Проверка комплекта', 'Подключение и доступ', 'Резервная копия', 'Установка файлов', 'Настройка компонентов', 'Настройка DNS', 'Перезагрузка автомобиля', 'Проверка запуска'];
+  const installSteps = ['Проверка релиза', 'Подключение и доступ', 'Резервная копия', 'Установка файлов', 'Настройка компонентов', 'Настройка DNS', 'Перезагрузка автомобиля', 'Проверка запуска'];
   const removeSteps = ['Поиск всех компонентов', 'Подключение и доступ', 'Остановка компонентов', 'Восстановление штатных файлов', 'Удаление приложений и данных', 'Очистка настроек и остатков', 'Перезагрузка и проверка', 'Завершающая очистка'];
   const car = { serial: 'VOYAH-DEMO-001', model: 'Voyah Free', firmware: 'Android 11 · демонстрационное ГУ', status: 'device', compatible: true };
   const connectionStates = {
@@ -15,7 +14,7 @@
     unauthorized: { title: 'Разрешите доступ на автомобиле', text: 'На экране автомобиля подтвердите запрос «Разрешить отладку по USB», затем нажмите «Обновить».', icon: 'lock', tone: 'warning', devices: [{ ...car, status: 'unauthorized' }] },
     offline: { title: 'Автомобиль не отвечает', text: 'Устройство обнаружено, но связь недоступна. Переподключите кабель, затем нажмите «Обновить».', icon: 'usb', tone: 'warning', devices: [{ ...car, status: 'offline' }] },
     incompatible: { title: 'Не найден штатный сервис автомобиля', text: 'В списке системных компонентов не найден сервис Qinggan, необходимый для работы VoyahTune. Проверьте, что подключено головное устройство автомобиля.', icon: 'devices', tone: 'danger', detail: 'В демонстрационном ответе PackageManager отсутствует com.qinggan.canbus.service.', devices: [{ serial: 'PHONE-DEMO-002', model: 'Android Phone', status: 'device', compatible: false }] },
-    toolError: { title: 'Не удалось выполнить проверку', text: 'Комплектный ADB не запустился. Проверьте, не заблокирован ли файл средствами защиты, и повторите проверку.', icon: 'alert', tone: 'danger', detail: 'ADB_START_FAILED · Не удалось запустить host-tools/adb', devices: [] }
+    toolError: { title: 'Не удалось выполнить проверку', text: 'Встроенный ADB не запустился. Проверьте, не заблокирован ли файл средствами защиты, и повторите проверку.', icon: 'alert', tone: 'danger', detail: 'ADB_START_FAILED · Не удалось запустить host-tools/adb', devices: [] }
   };
   function engineeringCode(date) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Укажите дату в формате ГГГГ-ММ-ДД.');
@@ -33,13 +32,13 @@
     return !!result && result.devices.length === 1 && result.devices[0].status === 'device' && result.devices[0].compatible === true;
   }
   function installedLabel(value) {
-    return { none: 'VoyahTune не установлен', full: 'Full', light: 'Light', mixed: 'Light и остатки Full', remnants: 'Остатки предыдущей установки' }[value];
+    return { none: 'VoyahTune не установлен', install: 'VoyahTune', mixed: 'Неполная установка', remnants: 'Остатки предыдущей установки' }[value];
   }
   function planTitle(action, installed) {
     if (action === 'remove') return 'Удаление VoyahTune';
-    if (installed === action) return `Обновление ${variants[action].name}`;
-    if (['full', 'light', 'mixed'].includes(installed)) return `Переход на ${variants[action].name}`;
-    return `Установка ${variants[action].name}`;
+    if (installed === action) return `Обновление ${operations[action].name}`;
+    if (['install', 'mixed'].includes(installed)) return `Восстановление ${operations[action].name}`;
+    return `Установка ${operations[action].name}`;
   }
   function faultStep(fault, action) {
     if (fault === 'root') return 1;
@@ -57,7 +56,7 @@
     };
     return errors[fault];
   }
-  const api = { variants, installSteps, removeSteps, connectionStates, engineeringCode, beijingDate, canConfirm, installedLabel, planTitle, faultStep, errorInfo };
+  const api = { operations, installSteps, removeSteps, connectionStates, engineeringCode, beijingDate, canConfirm, installedLabel, planTitle, faultStep, errorInfo };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VoyahModel = api;
 })(typeof window === 'undefined' ? {} : window);

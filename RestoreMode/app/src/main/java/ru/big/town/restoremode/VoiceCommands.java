@@ -1,6 +1,5 @@
 package ru.big.town.restoremode;
 
-import ru.big.town.common.InstallMode;
 
 import android.content.Context;
 import android.content.Intent;
@@ -49,16 +48,15 @@ final class VoiceCommands {
             VoiceCommandCatalog.add(out, "app:" + pkg, "Открыть приложение: " + name,
                     "открой " + name, "запусти " + name, "открой приложение " + name);
         }
-        if (InstallMode.isFull()) {
-            List<SplitStore.Preset> splits = SplitStore.load(prefs);
-            for (int i = 0; i < splits.size(); i++) {
-                SplitStore.Preset split = splits.get(i);
-                if (!split.ready()) continue;
-                VoiceCommandCatalog.add(out, SplitConfigSync.resolveSteerAction("split:" + i, prefs),
-                        "Сплит " + (i + 1) + ": " + split.ll + " / " + split.rl,
-                        "открой сплит " + number(i + 1), "запусти сплит " + number(i + 1));
-            }
+        List<SplitStore.Preset> splits = SplitStore.load(prefs);
+        for (int i = 0; i < splits.size(); i++) {
+            SplitStore.Preset split = splits.get(i);
+            if (!split.ready()) continue;
+            VoiceCommandCatalog.add(out, SplitConfigSync.resolveSteerAction("split:" + i, prefs),
+                    "Сплит " + (i + 1) + ": " + split.ll + " / " + split.rl,
+                    "открой сплит " + number(i + 1), "запусти сплит " + number(i + 1));
         }
+
         for (DialWidgetStore.Entry entry : DialWidgetStore.load(prefs)) {
             String number = entry.number.replaceAll("[^0-9]", "");
             if (number.length() < 4 || number.length() > 10) continue;
@@ -82,7 +80,7 @@ final class VoiceCommands {
         for (String action : custom) out.add(new VoiceCommandCatalog.Command(action,
                 "Своя CAN-команда " + (++index) + ": " + action.substring(4), true,
                 "выполни команду " + number(index), "своя команда " + number(index)));
-        if (!InstallMode.isFull()) out.removeIf(command -> command.action.equals("system_back"));
+
         return out;
     }
 

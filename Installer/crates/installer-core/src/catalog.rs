@@ -178,7 +178,7 @@ fn network(e: impl ToString) -> Error {
         "Не удалось скачать файл. Проверьте подключение или откройте локальный ZIP.",
     )
     .detail(e)
-    .retry("Повторите загрузку или выберите сохранённый комплект.")
+    .retry("Повторите загрузку или выберите сохранённый релиз.")
 }
 fn cancelled(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::Relaxed) {
@@ -315,7 +315,7 @@ impl Cache {
         if !digest_valid(digest) || path.parent() != Some(folder.as_path()) {
             return Err(Error::new(
                 "CACHE_PATH",
-                "Удалять можно только скачанные комплекты из кэша",
+                "Удалять можно только скачанные релизы из кэша",
             ));
         }
         let root = self.root.canonicalize()?;
@@ -325,7 +325,7 @@ impl Cache {
         {
             return Err(Error::new(
                 "CACHE_PATH",
-                "Небезопасный путь комплекта в кэше",
+                "Небезопасный путь релиза в кэше",
             ));
         }
         let receipts = self.root.join("receipts");
@@ -349,13 +349,8 @@ impl Cache {
         progress: ProgressCallback,
     ) -> Result<Payload> {
         cancelled(cancel)?;
+        payload::validate_schema(release.payload.manifest_schema)?;
         release.requirements.validate()?;
-        if release.payload.manifest_schema != 3 {
-            return Err(Error::new(
-                "INSTALLER_UPDATE_REQUIRED",
-                "Обновите установщик для этого формата комплекта",
-            ));
-        }
         https_url(&release.payload.url)?;
         if !digest_valid(&release.payload.sha256)
             || release.payload.size == 0
@@ -419,10 +414,10 @@ impl Cache {
         if payload.manifest.removal_only {
             return Err(Error::new(
                 "PAYLOAD_REQUIRED",
-                "Это комплект удаления, а не установки",
+                "Это ресурсы удаления, а не установки",
             ));
         }
-        if payload.manifest.schema != 3 {
+        if payload.manifest.schema != 4 {
             return Err(Error::new(
                 "PAYLOAD_SCHEMA",
                 "Импорт ZIP требует новый единый payload. Старую папку можно открыть отдельно.",
@@ -566,7 +561,7 @@ fn extract(
             .checked_add(entry.size())
             .ok_or_else(|| invalid("Переполнение размера ZIP"))?;
         if total > MAX_EXTRACTED {
-            return Err(invalid("Слишком большой распакованный комплект"));
+            return Err(invalid("Слишком большой распакованный релиз"));
         }
         let output = target.join(&name);
         if entry.is_dir() {
@@ -674,7 +669,7 @@ mod tests {
                 url: "https://example.org/A.zip".into(),
                 size: 100,
                 sha256: "a".repeat(64),
-                manifest_schema: 3,
+                manifest_schema: 4,
             },
         });
         let (url, worker) = server("200 OK", &serde_json::to_string(&a).unwrap());
@@ -815,7 +810,7 @@ mod tests {
     fn archive_identity_must_match_catalog_requirements_and_version() {
         let requirements = Requirements::default();
         let mut payload=Payload {root:PathBuf::new(),manifest:serde_json::from_value(serde_json::json!({
-            "schema":3,"product":"VoyahTune","releaseVersion":"3.13.0","buildRevision":"fixture",
+            "schema":4,"product":"VoyahTune","releaseVersion":"3.13.0","buildRevision":"fixture",
             "requirements":requirements,"artifacts":[]
         })).unwrap()};
         let release = Release {
@@ -828,7 +823,7 @@ mod tests {
                 url: "https://example.org/payload.zip".into(),
                 size: 1,
                 sha256: "a".repeat(64),
-                manifest_schema: 3,
+                manifest_schema: 4,
             },
         };
         assert!(verify_release(&payload, &release).is_ok());
@@ -879,7 +874,7 @@ mod tests {
                 url: "https://example.org/file.zip".into(),
                 size: 1,
                 sha256: "a".repeat(64),
-                manifest_schema: 3,
+                manifest_schema: 4,
             },
             requirements: Requirements {
                 min_installer_version: "99.0.0".into(),

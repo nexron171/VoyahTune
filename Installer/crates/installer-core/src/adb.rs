@@ -49,7 +49,7 @@ impl Adb {
         let path = path.as_ref().canonicalize().map_err(|e| {
             Error::new(
                 "ADB_MISSING",
-                "Не найден комплектный ADB. Восстановите полный комплект установщика.",
+                "Не найден встроенный ADB. Восстановите файлы установщика.",
             )
             .detail(e)
         })?;
@@ -94,7 +94,7 @@ impl Adb {
         }
         self.events.emit("command-started", self.step.as_deref(), format!("adb {}", args.join(" ")), json!({"serial":self.serial,"timeoutSeconds":timeout.as_secs(),"script":input.map(String::from_utf8_lossy)}))?;
         let child = command.spawn().map_err(|e| {
-            Error::new("ADB_START_FAILED", "Не удалось запустить комплектный ADB").detail(e)
+            Error::new("ADB_START_FAILED", "Не удалось запустить встроенный ADB").detail(e)
         })?;
         let mut child = ChildGuard(child);
         // Drain both pipes concurrently; a full pipe must never deadlock push/pull or a failing shell.
