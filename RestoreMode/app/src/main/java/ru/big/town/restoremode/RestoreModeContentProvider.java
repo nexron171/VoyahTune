@@ -80,6 +80,20 @@ public class RestoreModeContentProvider extends ContentProvider {
      */
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
+        if ("otaHealth".equals(method)) {
+            int caller = Binder.getCallingUid();
+            try {
+                int nativeUid = getContext().getPackageManager().getApplicationInfo("ru.big.town.anative", 0).uid;
+                if (caller != 0 && (caller != nativeUid || getContext().getPackageManager().checkSignatures(
+                        "ru.big.town.anative", getContext().getPackageName()) != android.content.pm.PackageManager.SIGNATURE_MATCH)) {
+                    throw new SecurityException("Root or trusted Native only");
+                }
+            } catch (android.content.pm.PackageManager.NameNotFoundException e) { throw new SecurityException(e); }
+            Bundle health = new Bundle();
+            health.putBoolean("ready", sharedPreferences != null);
+            health.putString("version", BuildConfig.VERSION_NAME);
+            return health;
+        }
         if (!HookStatusContract.METHOD_PUBLISH.equals(method)) {
             return super.call(method, arg, extras);
         }

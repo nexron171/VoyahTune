@@ -24,5 +24,8 @@ if ! prepare_data_directories; then
     exit 1
 fi
 
+# A persistent block belongs to the independent updater. USB repair clears it.
+# Wait instead of exiting: init must not create a restart loop after an interrupted install.
+while [ -e /data/local/bin/voyahtune-update.block ]; do sleep 10; done
 logi "starting load.bin watchdog"
 exec /system/bin/sh /data/local/bin/load.bin >> /data/local/tmp/voyahtune_load.txt 2>&1
