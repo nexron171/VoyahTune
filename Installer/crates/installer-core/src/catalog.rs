@@ -130,6 +130,7 @@ pub struct CachedPayload {
     pub version: String,
     pub path: PathBuf,
     pub manifest_sha256: String,
+    pub deletable: bool,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,14 +209,27 @@ impl Cache {
         })
     }
     fn lock(&self) -> Result<File> {
+        self.lock_with(false)
+    }
+    /// Keep cached files available while another GUI instance may manage downloads.
+    pub fn retain_for_operation(&self) -> Result<File> {
+        self.lock_with(true)
+    }
+    fn lock_with(&self, shared: bool) -> Result<File> {
         fs::create_dir_all(&self.root)?;
         let file = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
+            .read(true)
             .write(true)
             .open(self.root.join("cache.lock"))?;
-        file.try_lock_exclusive().map_err(|e| {
-            Error::new("CACHE_BUSY", "Другой экземпляр установщика обновляет кэш").detail(e)
+        let locked = if shared {
+            fs2::FileExt::try_lock_shared(&file)
+        } else {
+            file.try_lock_exclusive()
+        };
+        locked.map_err(|e| {
+            Error::new("CACHE_BUSY", "Другой экземпляр установщика использует кэш").detail(e)
         })?;
         Ok(file)
     }
@@ -280,6 +294,7 @@ impl Cache {
                     version: p.manifest.release_version,
                     manifest_sha256: payload::sha256(&path.join("manifest.json"))?,
                     path,
+                    deletable: true,
                 });
             }
         }
@@ -289,6 +304,42 @@ impl Cache {
                 .cmp(&semver::Version::parse(&a.version).ok())
         });
         Ok(list)
+    }
+    /// Only content-addressed entries owned by this cache may be removed.
+    /// Imported source ZIPs, external folders and bundled recovery are untouched.
+    pub fn remove(&self, path: &Path) -> Result<()> {
+        let _lock = self.lock()?;
+        let folder = self.root.join("payloads");
+        let digest = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        if !digest_valid(digest) || path.parent() != Some(folder.as_path()) {
+            return Err(Error::new(
+                "CACHE_PATH",
+                "Удалять можно только скачанные комплекты из кэша",
+            ));
+        }
+        let root = self.root.canonicalize()?;
+        if folder.canonicalize()? != root.join("payloads")
+            || fs::symlink_metadata(path)?.file_type().is_symlink()
+            || path.canonicalize()? != root.join("payloads").join(digest)
+        {
+            return Err(Error::new(
+                "CACHE_PATH",
+                "Небезопасный путь комплекта в кэше",
+            ));
+        }
+        let receipts = self.root.join("receipts");
+        if receipts.exists() {
+            if receipts.canonicalize()? != root.join("receipts") {
+                return Err(Error::new("CACHE_PATH", "Небезопасный путь квитанций кэша"));
+            }
+            match fs::remove_file(receipts.join(digest)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        fs::remove_dir_all(path)?;
+        Ok(())
     }
     pub fn download(
         &self,
@@ -693,6 +744,67 @@ mod tests {
         assert_eq!(selected.payload.sha256, "a".repeat(64));
         worker.join().unwrap();
         assert!(https_url("http://127.0.0.1/archive.zip").is_err());
+    }
+    #[test]
+    fn remove_cache_preserves_sources_and_other_entries_and_respects_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = Cache {
+            root: tmp.path().join("downloads"),
+        };
+        let digest = "a".repeat(64);
+        let target = cache.root.join("payloads").join(&digest);
+        let other = cache.root.join("payloads").join("b".repeat(64));
+        fs::create_dir_all(&target).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::create_dir_all(cache.root.join("receipts")).unwrap();
+        fs::write(target.join("apk"), "payload").unwrap();
+        fs::write(cache.root.join("receipts").join(&digest), "receipt").unwrap();
+        let source = tmp.path().join("source.zip");
+        fs::write(&source, "original").unwrap();
+        let lock = cache.lock().unwrap();
+        assert_eq!(cache.remove(&target).unwrap_err().code, "CACHE_BUSY");
+        fs2::FileExt::unlock(&lock).unwrap();
+        drop(lock);
+        let in_use = cache.retain_for_operation().unwrap();
+        let another_reader = cache.retain_for_operation().unwrap();
+        assert_eq!(cache.remove(&target).unwrap_err().code, "CACHE_BUSY");
+        fs2::FileExt::unlock(&in_use).unwrap();
+        fs2::FileExt::unlock(&another_reader).unwrap();
+        assert_eq!(cache.remove(tmp.path()).unwrap_err().code, "CACHE_PATH");
+        assert_eq!(
+            cache
+                .remove(&cache.root.join("payloads/../").join(&digest))
+                .unwrap_err()
+                .code,
+            "CACHE_PATH"
+        );
+        cache.remove(&target).unwrap();
+        assert!(!target.exists());
+        assert!(!cache.root.join("receipts").join(&digest).exists());
+        assert!(other.is_dir());
+        assert_eq!(fs::read_to_string(source).unwrap(), "original");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn remove_cache_rejects_links_outside_cache() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = Cache {
+            root: tmp.path().join("downloads"),
+        };
+        let outside = tmp.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("keep"), "keep").unwrap();
+        fs::create_dir_all(cache.root.join("payloads")).unwrap();
+        let target = cache.root.join("payloads").join("a".repeat(64));
+        symlink(&outside, &target).unwrap();
+        assert_eq!(cache.remove(&target).unwrap_err().code, "CACHE_PATH");
+        fs::remove_file(&target).unwrap();
+        fs::remove_dir(cache.root.join("payloads")).unwrap();
+        symlink(&outside, cache.root.join("payloads")).unwrap();
+        fs::create_dir_all(outside.join("a".repeat(64))).unwrap();
+        assert_eq!(cache.remove(&target).unwrap_err().code, "CACHE_PATH");
+        assert!(outside.join("keep").exists());
     }
     #[test]
     fn cancellation_and_writer_errors_do_not_succeed() {

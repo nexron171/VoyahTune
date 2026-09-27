@@ -290,6 +290,29 @@ async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Valu
     result
 }
 #[tauri::command]
+async fn delete_payload(app: tauri::AppHandle, path: String) -> Result<Value> {
+    reserve(&app.state::<Runtime>())?;
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(path);
+        let canonical = path.canonicalize()?;
+        Cache::user()?.remove(&path)?;
+        let runtime = handle.state::<Runtime>();
+        let mut state = runtime.0.lock().unwrap();
+        let deselected = state.payload.as_ref() == Some(&canonical);
+        if deselected {
+            state.payload = None;
+            state.prepared = None;
+        }
+        Ok(json!({"deselected":deselected}))
+    })
+    .await
+    .map_err(|e| Error::new("WORKER", "Не удалось удалить скачанный комплект").detail(e))
+    .and_then(|v| v);
+    release(&app.state::<Runtime>());
+    result
+}
+#[tauri::command]
 fn engineering_code(date: Option<String>) -> Result<engineering_menu::EngineeringCode> {
     engineering_menu::calculate(date.as_deref())
 }
@@ -361,6 +384,13 @@ fn run_operation(app: &tauri::AppHandle, request: Request) -> Result<()> {
             "Выбор автомобиля или действия изменился. Постройте план заново.",
         ));
     }
+    // A second GUI must not delete cached APKs halfway through an installation.
+    let cache = Cache::user()?;
+    let _cache_guard = if root.starts_with(cache.root.join("payloads")) {
+        Some(cache.retain_for_operation()?)
+    } else {
+        None
+    };
     let payload = Payload::open(&root)?;
     if payload::sha256(&payload.root.join("manifest.json"))? != digest {
         return Err(Error::new(
@@ -513,6 +543,7 @@ fn main() {
             engineering_code,
             release_catalog,
             download_payload,
+            delete_payload,
             open_release_link,
             release_info,
             devices,
