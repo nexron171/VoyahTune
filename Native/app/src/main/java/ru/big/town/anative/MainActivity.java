@@ -805,9 +805,13 @@ public class MainActivity extends AppCompatActivity {
         persistSavedMode(context, isEnergy ? "energy" : "driveMode", mode);
     }
 
-    /** Saves an external/steering selection only after first Drive, with remember-last enabled. */
+    /** Explicit drive choices work in Parking; energy/recuperation retain the first-Drive gate. */
     public static void persistSavedMode(Context context, String modeKey, String mode) {
         if (context == null || mode == null || mode.isEmpty()) return;
+        if ("driveMode".equals(modeKey)) {
+            DriveSelectionStore.record(context, mode, ru.big.town.common.DriveSelectionPolicy.EXPLICIT);
+            return;
+        }
         if (modeColumn(modeKey) < 0 || !remembersMode(context, modeKey)) return;
         if (!ApplyEngine.canRememberModeSelection()) return;
         boolean written = false;

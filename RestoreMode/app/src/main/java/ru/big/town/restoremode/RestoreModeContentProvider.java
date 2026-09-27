@@ -10,10 +10,10 @@ import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
 import android.util.Log;
+import ru.big.town.common.DriveSelectionPolicy;
 
 public class RestoreModeContentProvider extends ContentProvider {
     private SharedPreferences sharedPreferences;
-    private String driveMode="INDIVIDUAL";
     private String energy="SREV";
     private  String recycle="LOW";
     private  String customCommand="";
@@ -104,7 +104,7 @@ public class RestoreModeContentProvider extends ContentProvider {
     public Cursor query(Uri uri, String[] projection, String selection,
                         String[] selectionArgs, String sortOrder) {
         Log.i("$$$", "QUERY1");
-        driveMode = sharedPreferences.getString("driveMode", "INDIVIDUAL");
+        DriveSelectionPolicy driveSelection = DriveSelectionPreferences.read(sharedPreferences);
         energy = sharedPreferences.getString("energy", "SREV");
         recycle = sharedPreferences.getString("recycle", "LOW");
         customCommand = sharedPreferences.getString("customCommand", "");
@@ -182,10 +182,13 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "energyRememberLast",       // 30 — null/нет колонки трактуется Native как true
                 "recycleRememberLast",      // 31 — null/нет колонки трактуется Native как true
                 "suspensionMaintenance",    // 32 — сервисный режим подвески
+                DriveSelectionPolicy.OVERRIDE, // 33
+                DriveSelectionPolicy.MEDIUM,   // 34
+                DriveSelectionPolicy.CONFIGURED, // 35
         });
 
         cursor.addRow(new Object[]{
-                driveMode, energy, recycle, customCommand, customCommandCount,
+                driveSelection.effective(), energy, recycle, customCommand, customCommandCount,
                 autoLight ? 1 : 0,
                 driveEnabled   ? 1 : 0,
                 recycleEnabled ? 1 : 0,
@@ -214,6 +217,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 energyRememberLast ? 1 : 0,
                 recycleRememberLast ? 1 : 0,
                 suspensionMaintenance ? 1 : 0,
+                driveSelection.override, driveSelection.medium, driveSelection.configured,
         });
        return cursor;
 
@@ -230,6 +234,13 @@ public class RestoreModeContentProvider extends ContentProvider {
     public int update(Uri uri, ContentValues values, String selection,
                       String[] selectionArgs) {
         if (values == null || sharedPreferences == null) return 0;
+        if (values.containsKey(DriveSelectionPolicy.SOURCE)) {
+            if (Binder.getCallingUid() != 0) getContext().enforceCallingOrSelfPermission(
+                    "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Drive selection update");
+            return DriveSelectionPreferences.select(sharedPreferences,
+                    values.getAsString(DriveSelectionPolicy.MODE),
+                    values.getAsString(DriveSelectionPolicy.SOURCE)) ? 1 : 0;
+        }
         SharedPreferences.Editor e = sharedPreferences.edit();
         int n = 0;
         for (String key : new String[]{"driveMode", "energy", "recycle"}) {

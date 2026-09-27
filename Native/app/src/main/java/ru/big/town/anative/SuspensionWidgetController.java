@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Map;
 import ru.big.town.common.SuspensionWidgetProtocol;
+import ru.big.town.common.DriveSelectionPolicy;
 
 /** Uses the shared OEM transport and event hub; sends only explicit UI requests. */
 final class SuspensionWidgetController {
@@ -77,13 +78,9 @@ final class SuspensionWidgetController {
             if (event.first == 751) direction = event.second;
             if (event.first == 711) maintenance = event.second;
             if (event.first == 1060) inhibit = event.second;
-            if (event.first == 545) { drive = event.second; rememberMedium(); }
+            if (event.first == 545) drive = event.second;
             checkCompletion(); publish();
         }
-    }
-    private void rememberMedium() {
-        if (SuspensionWidgetPolicy.mediumMode(drive)) context.getSharedPreferences("suspension_widget", 0)
-                .edit().putInt("mediumDrive", drive).apply();
     }
     private void refresh() {
         if (CanSender.isDebugMode()) { height = -1; message = "Данные автомобиля недоступны в эмуляции"; publish(); return; }
@@ -92,7 +89,7 @@ final class SuspensionWidgetController {
         height = value(values, HEIGHT); direction = value(values, DIRECTION);
         maintenance = value(values, MAINTENANCE); drive = value(values, DRIVE);
         inhibit = value(values, INHIBIT);
-        rememberMedium(); checkCompletion(); publish();
+        checkCompletion(); publish();
     }
     private static int value(Map<OemVehicleStateTransport.StateKey, Integer> values,
                              OemVehicleStateTransport.StateKey key) {
@@ -108,10 +105,9 @@ final class SuspensionWidgetController {
     private void select(int selection) {
         if (pending >= 0 || commandInFlight) { publish(); return; }
         if (CanSender.isDebugMode()) { message = "Управление недоступно в эмуляции"; publish(); return; }
-        int previous = context.getSharedPreferences("suspension_widget", 0).getInt("mediumDrive", 1);
         commandInFlight = true; message = "Отправляем команду…"; publish();
         ApplyEngine.postUserCommand("suspension widget", () -> {
-            String result = dispatch(selection, previous);
+            String result = dispatch(selection);
             worker.post(() -> {
                 commandInFlight = false;
                 if (closed) return;
@@ -128,8 +124,11 @@ final class SuspensionWidgetController {
             }
         }));
     }
-    private String dispatch(int selection, int previous) {
+    private String dispatch(int selection) {
         if (closed) return "Сервис остановлен";
+        DriveSelectionPolicy saved = DriveSelectionStore.read(context);
+        if (saved == null) return "Обновите RestoreMode: нет общего состояния режимов";
+        int previous = DriveSelectionPolicy.value(saved.medium);
         String mode = SuspensionWidgetPolicy.driveMode(selection, previous);
         Map<OemVehicleStateTransport.StateKey, Integer> profile = mode == null ? null
                 : DriveModeCanTransport.statesFor(context, mode);
@@ -151,7 +150,16 @@ final class SuspensionWidgetController {
             OemVehicleStateTransport.Result sent = selection == 0
                     ? session.sendVehicleState(new OemVehicleStateTransport.StateValue(ENTER, 2), "suspension easy entry")
                     : session.sendBundle(profile, "suspension drive " + mode);
-            return sent.accepted() ? "" : "Команда не отправлена";
+            if (!sent.accepted()) return "Команда не отправлена";
+            String selectedMode = mode;
+            if (selection == 0) {
+                ModeFeedbackDecoder.Feedback observed = ModeFeedbackDecoder.decode(545,
+                        observedDrive == null ? -1 : observedDrive);
+                selectedMode = observed == null ? null : observed.mode;
+            }
+            ApplyEngine.noteVehicleMode("driveMode", selectedMode);
+            return DriveSelectionStore.record(context, selectedMode, DriveSelectionPolicy.WIDGET)
+                    ? "" : "Команда отправлена, но режим не сохранён";
         });
         return result == null ? "Нет связи с автомобилем" : result;
     }
