@@ -24,10 +24,18 @@ def verify_remote(entry):
   raise ValueError('Published asset differs from the locally verified payload')
 
 def merge(index,entry):
+ if 'ota' in entry and type(entry['ota']) is not bool:
+  raise ValueError('ota must be a JSON boolean')
  for old in index['releases']:
   if old['version']==entry['version']:
    if old['payload']!=entry['payload'] or old['requirements']!=entry['requirements']:
     raise ValueError('Published version is immutable; choose a new release version')
+   # Availability may change without replacing the immutable archive. An entry
+   # regenerated without the optional marker must not silently revoke OTA.
+   if 'ota' in entry and old.get('ota',False)!=entry['ota']:
+    old['ota']=entry['ota']
+    index['generatedAt']=datetime.now(timezone.utc).isoformat()
+    return True
    return False
  index['releases'].append(entry)
  index['generatedAt']=datetime.now(timezone.utc).isoformat()

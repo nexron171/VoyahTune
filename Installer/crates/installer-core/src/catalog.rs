@@ -33,11 +33,17 @@ pub struct Archive {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Release {
     pub version: String,
+    /// Explicit opt-in for device updates; old/unmarked releases remain desktop-only.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ota: bool,
     pub published_at: String,
     pub channel: String,
     pub notes_url: String,
     pub payload: Archive,
     pub requirements: Requirements,
+}
+fn is_false(value: &bool) -> bool {
+    !value
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -55,6 +61,10 @@ pub struct Catalog {
     pub installer_downloads: Vec<InstallerDownload>,
 }
 impl Catalog {
+    /// Eligibility is separate from firmware, updater and payload compatibility checks.
+    pub fn ota_releases(&self) -> impl Iterator<Item = &Release> {
+        self.releases.iter().filter(|release| release.ota)
+    }
     pub fn installer_updates(
         &self,
         requirements: &Requirements,
@@ -648,6 +658,41 @@ mod tests {
         (url, worker)
     }
     #[test]
+    fn shared_catalog_requires_explicit_boolean_ota_opt_in() {
+        let entry = |version: &str| serde_json::json!({
+            "version": version, "publishedAt": "2026-09-27", "channel": "stable",
+            "notesUrl": "https://example.org/notes",
+            "payload": {"url": "https://example.org/payload.zip", "size": 1,
+                        "sha256": "a".repeat(64), "manifestSchema": 4},
+            "requirements": Requirements::default()
+        });
+        let mut value = serde_json::json!({
+            "schemaVersion": 1, "generatedAt": "2026-09-27", "installerDownloads": [],
+            "releases": [entry("3.14.0"), entry("3.13.0")]
+        });
+        let mut legacy: Catalog = serde_json::from_value(value.clone()).unwrap();
+        legacy.validate().unwrap();
+        assert_eq!(legacy.ota_releases().count(), 0);
+        assert!(serde_json::to_value(&legacy).unwrap()["releases"][0].get("ota").is_none());
+
+        value["releases"][0]["ota"] = serde_json::json!(true);
+        value["releases"][1]["ota"] = serde_json::json!(false);
+        let mut marked: Catalog = serde_json::from_value(value.clone()).unwrap();
+        marked.validate().unwrap();
+        assert_eq!(marked.releases.len(), 2); // Desktop still sees both.
+        assert_eq!(marked.ota_releases().count(), 1);
+        assert_eq!(marked.ota_releases().next().unwrap().version, "3.14.0");
+        let saved = serde_json::to_value(&marked).unwrap();
+        assert_eq!(saved["releases"][0]["ota"], true);
+        assert_eq!(serde_json::from_value::<Catalog>(saved).unwrap().ota_releases().count(), 1);
+
+        for invalid in [serde_json::json!("true"), serde_json::json!(1), serde_json::Value::Null] {
+            value["releases"][0]["ota"] = invalid;
+            assert!(serde_json::from_value::<Catalog>(value.clone()).is_err());
+        }
+    }
+
+    #[test]
     fn network_catalog_refresh_and_invalid_response_preserve_offline_copy() {
         let dir = tempfile::tempdir().unwrap();
         let cache = Cache {
@@ -661,6 +706,7 @@ mod tests {
         a.generated_at = "A".into();
         a.releases.push(Release {
             version: "3.13.0".into(),
+            ota: false,
             published_at: "2026-09-27".into(),
             channel: "stable".into(),
             notes_url: "https://example.org/A".into(),
@@ -815,6 +861,7 @@ mod tests {
         })).unwrap()};
         let release = Release {
             version: "3.13.0".into(),
+            ota: false,
             published_at: String::new(),
             channel: "stable".into(),
             notes_url: "https://example.org".into(),
@@ -867,6 +914,7 @@ mod tests {
     fn future_release_remains_visible_and_semver_is_numeric() {
         let release = |version: &str| Release {
             version: version.into(),
+            ota: false,
             published_at: "2026-09-26".into(),
             channel: "stable".into(),
             notes_url: "https://example.org/notes".into(),
