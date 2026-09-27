@@ -580,6 +580,7 @@ mod tests {
         a.releases.push(Release {
             version: "3.13.0".into(),
             ota: false,
+            ota_metadata: None,
             published_at: "2026-09-27".into(),
             channel: "stable".into(),
             notes_url: "https://example.org/A".into(),
@@ -735,6 +736,7 @@ mod tests {
         let release = Release {
             version: "3.13.0".into(),
             ota: false,
+            ota_metadata: None,
             published_at: String::new(),
             channel: "stable".into(),
             notes_url: "https://example.org".into(),
@@ -788,6 +790,7 @@ mod tests {
         let release = |version: &str| Release {
             version: version.into(),
             ota: false,
+            ota_metadata: None,
             published_at: "2026-09-26".into(),
             channel: "stable".into(),
             notes_url: "https://example.org/notes".into(),

@@ -7,3 +7,4 @@ pub mod payload;
 pub mod recipe;
 mod storage;
 pub use error::{Error, Result};
+pub mod ota;

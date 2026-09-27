@@ -20,6 +20,8 @@ pub struct Release {
     /// Explicit opt-in for device updates; old/unmarked releases remain desktop-only.
     #[serde(default, skip_serializing_if = "is_false")]
     pub ota: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ota_metadata: Option<crate::ota::Envelope>,
     pub published_at: String,
     pub channel: String,
     pub notes_url: String,

@@ -2883,6 +2883,7 @@ version = "1.1.0"
 dependencies = [
  "apksig",
  "hex",
+ "rsa",
  "semver",
  "serde",
  "serde_json",
