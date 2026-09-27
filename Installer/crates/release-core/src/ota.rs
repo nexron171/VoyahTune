@@ -125,6 +125,22 @@ pub fn verify_payload(p: &Payload, c: &Claims) -> Result<()> {
         ("native.apk", payload::NATIVE),
         ("restore_mode.apk", payload::RESTORE),
     ] {
+        let (actual_id, actual_code, actual_version) = crate::apk_identity::read(&p.file(file)?)?;
+        let version = semver::Version::parse(&c.version).map_err(|e| invalid(e.to_string()))?;
+        if version.major > 999 || version.minor > 999 || version.patch > 999 {
+            return Err(invalid("Версия вне диапазона versionCode"));
+        }
+        let expected_code = version
+            .major
+            .checked_mul(1_000_000)
+            .and_then(|v| v.checked_add(version.minor * 1000))
+            .and_then(|v| v.checked_add(version.patch))
+            .ok_or_else(|| invalid("versionCode overflow"))?;
+        if actual_id != package || actual_version != c.version || actual_code != expected_code {
+            return Err(invalid(format!(
+                "Package ID или версия APK {package} не совпадает с релизом"
+            )));
+        }
         if c.apk_signers.get(package) != Some(&payload::verified_signers(&p.file(file)?)?) {
             return Err(invalid(format!("Не совпадает подпись {package}")));
         }

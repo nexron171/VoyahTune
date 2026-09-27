@@ -257,6 +257,9 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
         })?;
     }
     phase(shared, "checking", "Проверка каталога релизов")?;
+    if device::prop("ro.build.fingerprint")? != snapshot(shared).fingerprint {
+        return Err(invalid("Прошивка ГУ изменилась. Требуется USB-установка"));
+    }
     let catalog = network::catalog(&url)?;
     let current = snapshot(shared);
     let key = fs::read("/system/etc/voyahtune-ota-key.der")?;

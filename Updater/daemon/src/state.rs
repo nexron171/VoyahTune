@@ -92,7 +92,7 @@ pub fn read<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<T> {
         .map_err(|e| crate::config::invalid(&format!("Состояние повреждено: {e}")))
 }
 pub fn due(s: &State, wall: u64, boot: &str, uptime: u64) -> bool {
-    if s.last_auto_wall == 0 {
+    if s.last_auto_boot.is_empty() {
         return true;
     }
     if wall < s.last_auto_wall || wall - s.last_auto_wall < 86400 {

@@ -16,7 +16,8 @@ def main():
     a=p.parse_args()
     if a.sequence<1: p.error('sequence must be positive')
     entry=json.loads(a.entry.read_text()); archive=entry['payload']
-    sha=hashlib.file_digest(a.archive.open('rb'),'sha256').hexdigest()
+    with a.archive.open('rb') as stream:
+        sha=hashlib.file_digest(stream,'sha256').hexdigest()
     if sha!=archive['sha256'] or a.archive.stat().st_size!=archive['size']:p.error('Archive differs from entry')
     checked=json.loads(subprocess.check_output([str(a.builder),'verify-payload',str(a.payload)],text=True))
     if checked['manifest']['releaseVersion']!=entry['version']:p.error('Payload version differs from entry')

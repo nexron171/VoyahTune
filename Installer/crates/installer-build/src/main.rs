@@ -107,6 +107,11 @@ fn run(args: Args) -> Result<()> {
     }
     let (recipe, source_spec) = discover(&root)?;
     recipe.validate()?;
+    fs::create_dir_all(root.join("Updater/build"))?;
+    write_json(
+        &root.join("Updater/build/bootstrap.json"),
+        &serde_json::json!({"schema":1,"version":args.version}),
+    )?;
     let parent = args.output.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
     let recipe_file = parent.join(format!(".recipe-{}.json", std::process::id()));
@@ -117,6 +122,35 @@ fn run(args: Args) -> Result<()> {
     let sources_file = parent.join(format!(".sources-{}.json", std::process::id()));
     write_json(&sources_file, &source_spec)?;
     if !args.skip_android {
+        let ndk = std::env::var_os("ANDROID_NDK_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("ANDROID_HOME").map(|p| PathBuf::from(p).join("ndk/27.0.12077973"))
+            })
+            .ok_or_else(|| {
+                Error::new("NDK_MISSING", "Задайте ANDROID_NDK_HOME для сборки updater")
+            })?;
+        let status = Command::new("python3")
+            .arg(root.join("Updater/build-daemon.py"))
+            .arg("--ndk")
+            .arg(ndk)
+            .status()?;
+        if !status.success() {
+            return Err(Error::new(
+                "UPDATER_BUILD",
+                "Не удалось собрать root-службу",
+            ));
+        }
+        let status = Command::new(root.join("Updater/gradlew"))
+            .current_dir(root.join("Updater"))
+            .args(["--offline", "assembleRelease"])
+            .status()?;
+        if !status.success() {
+            return Err(Error::new(
+                "UPDATER_BUILD",
+                "Не удалось собрать интерфейс обновления",
+            ));
+        }
         for project in ["Native", "RestoreMode"] {
             #[cfg(not(windows))]
             let mut cmd = Command::new(root.join(project).join("gradlew"));
@@ -264,7 +298,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         .collect();
     recipe.files.retain(|f| {
         let is_hook = f.artifact.ends_with(".js") || f.artifact.ends_with(".json");
-        !is_hook || names.contains(&f.artifact)
+        !is_hook || f.artifact == "voyahtune-ota-bootstrap.json" || names.contains(&f.artifact)
     });
     for name in names {
         if !recipe.files.iter().any(|f| f.artifact == name) {
@@ -282,6 +316,12 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         }
         let name = &file.artifact;
         let source = match name.as_str() {
+            "voyahtune-updater" => "Updater/build/daemon/arm64-v8a/voyahtune-updater".into(),
+            "voyahtune-updater.apk" => {
+                "Updater/app/build/outputs/apk/release/app-release.apk".into()
+            }
+            "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json".into(),
+            "voyahtune.updater.rc" | "voyahtune-ota-key.der" => format!("Packaging/system/{name}"),
             "whitelist.xml" => {
                 "Packaging/system/privapp-permissions-ru.big.town.anative.xml".into()
             }

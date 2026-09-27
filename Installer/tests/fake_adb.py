@@ -51,6 +51,8 @@ def main():
      s.pop('canbusOwner',None)
     if not s.get('retainCanbusPackage'):
      s['packages'].pop('com.voyah.hl.service',None)
+   if remote('/system/etc/init/voyahtune.updater.rc').exists() and remote('/data/local/bin/voyahtune-updater').exists():
+    s['updater']='running';s['packages']['ru.big.town.updater']='/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk';package_data('ru.big.town.updater')
    save(s)
   elif args[0]=='push':
    dest=remote(args[2]);dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(args[1],dest)
@@ -71,6 +73,8 @@ def main():
   elif args[0]=='shell':
    script=sys.stdin.read() if args[1:]==['sh','-s'] else ' '.join(args[1:]);record(args,script)
    if s.get('failShell') and s['failShell'] in script:print('injected shell failure',file=sys.stderr);return 1
+   if script.strip()=='/data/local/bin/voyahtune-updater --version':
+    print(json.dumps({'version':'0.1.0','ipcSchema':1}));return 0
    if 'sh /data/local/tmp/open_voyah_dns_overlay.sh' in script:
     # The DNS helper has separate repository tests; emulate only its host protocol here.
     if 'restore' in script:shutil.rmtree(remote('/data/local/open_voyah/qgdns'),ignore_errors=True)
@@ -90,8 +94,10 @@ def main():
     args[i]=arg.replace(str(root),'');break
   return subprocess.run(['/usr/bin/grep',*args]).returncode
  elif name=='getprop':
-  print({'ro.build.fingerprint':'qinggan/voyah/free:11/test','ro.product.model':'Voyah Free','ro.build.version.sdk':s.get('sdk','30'),'ro.product.cpu.abilist':s.get('abi','arm64-v8a,armeabi-v7a'),'sys.boot_completed':'1','init.svc.voyahtune_load':s.get('loader','')}.get(args[0],''))
+  print({'ro.build.fingerprint':'qinggan/voyah/free:11/test','ro.product.model':'Voyah Free','ro.build.version.sdk':s.get('sdk','30'),'ro.product.cpu.abilist':s.get('abi','arm64-v8a,armeabi-v7a'),'sys.boot_completed':'1','init.svc.voyahtune_load':s.get('loader',''),'init.svc.voyahtune_updater':s.get('updater','')}.get(args[0],''))
  elif name=='setprop':
+  if args[:2]==['ctl.stop','voyahtune_updater']:s['updater']='stopped';save(s)
+  if args[:2]==['ctl.start','voyahtune_updater']:s['updater']='running';save(s)
   if args[:2]==['ctl.stop','voyahtune_load']:s['loader']='stopped';save(s)
  elif name=='id':print('0' if s.get('root') else '2000')
  elif name=='pm':
@@ -112,7 +118,7 @@ def main():
   else:raise RuntimeError(args)
  elif name=='cmd':
   if args[:2]!=['package','install-existing']:raise RuntimeError(args)
-  package=args[-1];s['packages'][package]='/system/priv-app/Native/Native.apk';save(s);package_data(package);print('Package installed for user: 0')
+  package=args[-1];s['packages'][package]='/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk' if package=='ru.big.town.updater' else '/system/priv-app/Native/Native.apk';save(s);package_data(package);print('Package installed for user: 0')
  elif name=='dumpsys':
   print('Permissions:')
   if 'canbusOwner' in s:

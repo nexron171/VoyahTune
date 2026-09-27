@@ -2,7 +2,12 @@ use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 pub const INSTALLER_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const CAPABILITIES: &[&str] = &["qinggan-v3", "single-package-v1", "files-v1"];
+pub const CAPABILITIES: &[&str] = &[
+    "qinggan-v3",
+    "single-package-v1",
+    "files-v1",
+    "ota-bootstrap-v1",
+];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Requirements {
@@ -12,7 +17,7 @@ pub struct Requirements {
 impl Default for Requirements {
     fn default() -> Self {
         Self {
-            min_installer_version: "1.1.0".into(),
+            min_installer_version: "1.2.0".into(),
             required_capabilities: CAPABILITIES.iter().map(|s| s.to_string()).collect(),
         }
     }
