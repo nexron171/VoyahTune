@@ -123,6 +123,16 @@ public final class ApplyEngine {
         MODE_SYNC_POLICY.observe(modeKey, mode);
     }
 
+    /** Invalidate a D restore queued while a user drive command was being dispatched/saved. */
+    static void driveSelectionSaved() {
+        synchronized (RESTORE_LOCK) {
+            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), "drive selection saved");
+            RESTORE_RUN_STATE.cancelRestoreAndAdvance();
+            long generation = MODE_SYNC_POLICY.cancelRestore();
+            MODE_SYNC_POLICY.completeUserCommand(generation);
+        }
+    }
+
     /** Revalidates stable feedback without holding the restore-cancellation lock across Binder I/O. */
     static void persistModeFeedbackIfAllowed(Context context, boolean energy, String observedMode) {
         persistModeFeedbackIfAllowed(
@@ -131,6 +141,18 @@ public final class ApplyEngine {
 
     static void persistModeFeedbackIfAllowed(
             Context context, String modeKey, String observedMode) {
+        if ("driveMode".equals(modeKey)) {
+            boolean accept;
+            synchronized (RESTORE_LOCK) {
+                MODE_SYNC_POLICY.observe(modeKey, observedMode);
+                accept = MODE_SYNC_POLICY.canAcceptDriveSelection();
+            }
+            // This also releases a widget override when remember-last is disabled.
+            // It never requests a restore; the next normal trigger reads the effective target.
+            if (accept) DriveSelectionStore.record(context, observedMode,
+                    ru.big.town.common.DriveSelectionPolicy.FEEDBACK);
+            return;
+        }
         final long gateGeneration;
         synchronized (RESTORE_LOCK) {
             if (!shouldPersistModeFeedback(modeKey, observedMode)) return;
@@ -205,7 +227,7 @@ public final class ApplyEngine {
             final long restoreEpoch = manual ? RESTORE_RUN_STATE.cancelRestoreAndAdvance()
                     : RESTORE_RUN_STATE.currentRestoreEpoch();
             final long gateGeneration = beginRestoreGate(reason);
-            h.post(() -> applyInternal(onDone, gateGeneration, wakeGeneration, restoreEpoch));
+            h.post(() -> applyInternal(onDone, gateGeneration, wakeGeneration, restoreEpoch, manual));
         }
     }
 
@@ -381,10 +403,10 @@ public final class ApplyEngine {
     }
 
     private static void applyInternal(Runnable onDone, long gateGeneration,
-                                      long wakeGeneration, long restoreEpoch) {
+                                      long wakeGeneration, long restoreEpoch, boolean manual) {
         CycleResult result = CycleResult.FAILED;
         try {
-            result = runCycle(wakeGeneration, restoreEpoch);
+            result = runCycle(wakeGeneration, restoreEpoch, manual);
         } catch (Throwable t) {
             Log.e(TAG, "runCycle failed: " + t.getMessage(), t);
         } finally {
@@ -399,12 +421,16 @@ public final class ApplyEngine {
         }
     }
 
-    private static CycleResult runCycle(long wakeGeneration, long restoreEpoch) {
+    private static CycleResult runCycle(long wakeGeneration, long restoreEpoch, boolean manual) {
         BooleanSupplier current =
                 () -> RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch);
         if (!current.getAsBoolean()) return CycleResult.CANCELLED;
         Context ctx = GlobalVars.SAVE_CONTEXT;
         if (ctx == null) return CycleResult.FAILED;
+        if (manual) {
+            DriveSelectionStore.applyConfigured(ctx);
+            if (!current.getAsBoolean()) return CycleResult.CANCELLED;
+        }
         // Read once, using the last complete cache immediately if the provider is unavailable.
         int status = MainActivity.loadModes(ctx, true);
         if (!current.getAsBoolean()) return CycleResult.CANCELLED;

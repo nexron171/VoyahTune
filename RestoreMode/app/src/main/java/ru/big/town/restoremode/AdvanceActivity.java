@@ -169,6 +169,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
     // Реал-тайм слежение селектора за текущим режимом в машине: Native шлёт MODE_SYNCED при смене режима
     // (штатным меню/кнопкой руля/применением) → двигаем нужный radio, даже если экран настроек открыт.
+    private boolean syncingModeUi;
     private final BroadcastReceiver modeSyncReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -185,7 +186,9 @@ public class AdvanceActivity extends AppCompatActivity {
                     : "recycle".equals(modeKey) ? R.id.recycle_modes_group
                     : R.id.drive_modes_group;
             RadioGroup g = findViewById(groupId);
-            if (g != null) checkRadioByTag(g, mode);
+            syncingModeUi = true;
+            try { if (g != null) checkRadioByTag(g, mode); }
+            finally { syncingModeUi = false; }
         }
     };
 
@@ -2387,6 +2390,11 @@ public class AdvanceActivity extends AppCompatActivity {
         checkRadioByTag(energy,  prefs.getString("energy",    "SREV"));
         checkRadioByTag(recycle, prefs.getString("recycle",   "LOW"));
         if (drive != null)   drive.setOnCheckedChangeListener((g, id) -> saveRadio("driveMode", id));
+        // Selecting the already checked pinned profile also relinquishes a widget override.
+        if (drive != null) for (int i = 0; i < drive.getChildCount(); i++) {
+            View child = drive.getChildAt(i);
+            if (child instanceof RadioButton) child.setOnClickListener(v -> saveRadio("driveMode", v.getId()));
+        }
         if (energy != null)  energy.setOnCheckedChangeListener((g, id) -> saveRadio("energy", id));
         if (recycle != null) recycle.setOnCheckedChangeListener((g, id) -> saveRadio("recycle", id));
     }
@@ -2403,9 +2411,13 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void saveRadio(String key, int checkedId) {
+        if (syncingModeUi) return;
         View v = findViewById(checkedId);
         if (v != null && v.getTag() != null) {
-            prefs.edit().putString(key, v.getTag().toString()).apply();
+            if ("driveMode".equals(key)) {
+                DriveSelectionPreferences.select(prefs, v.getTag().toString(),
+                        ru.big.town.common.DriveSelectionPolicy.SETTINGS);
+            } else prefs.edit().putString(key, v.getTag().toString()).apply();
             Log.i("$$$ Advance mode $$$", key + "=" + v.getTag());
         }
     }

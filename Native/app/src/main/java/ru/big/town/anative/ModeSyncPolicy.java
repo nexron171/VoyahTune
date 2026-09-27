@@ -41,6 +41,9 @@ final class ModeSyncPolicy {
     /** Also guards steering selections, which are saved while their command is still running. */
     synchronized boolean canRememberSelection() { return wakeActive && driveEntered; }
 
+    /** Drive choices can be made in Parking; automatic restore echoes remain gated. */
+    synchronized boolean canAcceptDriveSelection() { return wakeActive && feedbackOpen; }
+
     synchronized long beginRestore() {
         wakeActive = true;
         feedbackOpen = false;
