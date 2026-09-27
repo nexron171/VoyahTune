@@ -402,7 +402,7 @@ CAN-примеры, русские названия приложений, кон
 ```sh
 cd RestoreMode
 rustup target add --toolchain 1.98.1 aarch64-linux-android x86_64-linux-android
-./gradlew :app:assembleFullDebug :app:assembleLightDebug
+./gradlew :app:assembleDebug
 ```
 
 Поддерживаемые ABI этой сборки: `arm64-v8a` (ГУ) и `x86_64` (эмуляторы).
@@ -466,7 +466,7 @@ Activity и её launcher-запись существуют только в `src
 
 ```sh
 cd RestoreMode
-./gradlew :app:assembleFullDebug
+./gradlew :app:assembleDebug
 adb -s emulator-5554 install -r app/build/outputs/apk/full/debug/app-full-debug.apk
 adb -s emulator-5554 shell am start -n ru.big.town.restoremode/.VoiceAnimationPreviewActivity
 ```

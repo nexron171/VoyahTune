@@ -12,12 +12,11 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const args=process.argv.slice(2);
 const flag=name=>args.includes(name);
 const option=name=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};
-if(option('--version'))throw Error('The release version is read from the payload manifest. Use --payload DIRECTORY.');
+if(option('--version'))throw Error('Installer version is defined in Installer/Cargo.toml.');
 const payloadPath=option('--payload')?resolve(option('--payload')):undefined;
-if(!payloadPath&&!flag('--prepare-only')&&!flag('--no-bundle'))throw Error('Standalone installers require --payload DIRECTORY. Use ./make_release.sh VERSION --installers.');
 const payloadManifest=payloadPath?JSON.parse(await readFile(join(payloadPath,'manifest.json'),'utf8')):undefined;
 const toolingVersion=(await readFile(join(root,'Installer/Cargo.toml'),'utf8')).match(/version = "([^"]+)"/)[1];
-const packageVersion=payloadManifest?.releaseVersion||toolingVersion;
+const packageVersion=toolingVersion;
 const env={...process.env};
 const cachedCargo=join(root,'Releases/cache/cargo');
 if(!env.CARGO_HOME&&existsSync(cachedCargo)){
@@ -46,11 +45,11 @@ if(platform==='darwin'&&process.platform!=='darwin')throw Error('macOS packages 
 if(platform==='linux'&&target!==host)throw Error('Build each Linux architecture in its matching container');
 const crossWindows=platform==='windows'&&process.platform!=='win32';
 const targetRoot=env.CARGO_TARGET_DIR?resolve(env.CARGO_TARGET_DIR):join(root,'Installer/target');
-const hostExe=join(targetRoot,'release',`installer-cli${process.platform==='win32'?'.exe':''}`);
+const hostExe=join(targetRoot,'release',`installer-build${process.platform==='win32'?'.exe':''}`);
 const cargoArgs=['--locked','--release','--manifest-path',join(root,'Installer/Cargo.toml')];
-run('cargo',['build',...cargoArgs,'-p','installer-cli','-p','installer-build']);
+run('cargo',['build',...cargoArgs,'-p','installer-build']);
 if(payloadPath){
-  const verified=JSON.parse(run(hostExe,['--payload',payloadPath,'verify','--payload-only'],root,true));
+  const verified=JSON.parse(run(hostExe,['verify-payload',payloadPath],root,true));
   if(verified.valid!==true)throw Error('Payload verification failed');
 }
 run('npm',['ci','--cache',join(root,'Releases/cache/npm')],desktop);
@@ -63,6 +62,7 @@ const bundle=join(resources,'bundle.staging');
 await rm(bundle,{recursive:true,force:true});
 await mkdir(join(bundle,'adb'),{recursive:true});
 if(payloadPath)await cp(payloadPath,join(bundle,'payload'),{recursive:true});
+run(hostExe,['recovery','--root',root,'--output',join(bundle,'recovery')]);
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const lock=JSON.parse(await readFile(join(root,'Installer/platform-tools.lock.json'),'utf8'));
 const adbVersion=lock.version;
@@ -98,38 +98,18 @@ async function recordFiles(directory,prefix){
   }
 }
 await recordFiles(join(bundle,'adb'),'adb');
+await recordFiles(join(bundle,'recovery'),'recovery');
 await writeFile(join(bundle,'host-tools.json'),JSON.stringify({schema:1,platform,target,version:adbVersion,files:hostFiles},null,2)+'\n');
-const verified=JSON.parse(run(hostExe,['--bundle',bundle,'verify-host'],root,true));
+const verified=JSON.parse(run(hostExe,['verify-host',bundle],root,true));
 if(verified.valid!==true)throw Error('Bundle verification failed');
-console.log(`Prepared engine ${toolingVersion}; embedded release ${packageVersion}`);
+console.log(`Prepared GUI ${toolingVersion}; optional payload ${payloadManifest?.releaseVersion||"none"}`);
 const finalBundle=join(resources,'bundle');
 await rm(finalBundle,{recursive:true,force:true});
 await rename(bundle,finalBundle);
 
-const binaries=join(desktop,'src-tauri/binaries');
-await mkdir(binaries,{recursive:true});
-const suffix=platform==='windows'?'.exe':'';
-const sidecar=join(binaries,`voyahtune-${target}${suffix}`);
-if(target==='universal-apple-darwin'){
-  const slices=['aarch64-apple-darwin','x86_64-apple-darwin'];
-  for(const slice of slices){
-    run('cargo',['build',...cargoArgs,'-p','installer-cli','--target',slice]);
-    await cp(join(targetRoot,slice,'release/installer-cli'),join(binaries,`voyahtune-${slice}`));
-  }
-  run('lipo',['-create',...slices.map(slice=>join(targetRoot,slice,'release/installer-cli')),'-output',sidecar]);
-}else if(target===host){
-  await cp(hostExe,sidecar);
-}else{
-  run(crossWindows?'cargo-xwin':'cargo',['build',...cargoArgs,'-p','installer-cli','--target',target]);
-  await cp(join(targetRoot,target,'release',`installer-cli${suffix}`),sidecar);
-}
-if(platform!=='windows')await chmod(sidecar,0o755);
-const portable=join(root,'Releases/dist',`voyahtune-cli-${toolingVersion}-${target}`);
-await rm(portable,{recursive:true,force:true});
-await mkdir(portable,{recursive:true});
-await cp(finalBundle,join(portable,'bundle'),{recursive:true});
-await cp(sidecar,join(portable,`voyahtune${suffix}`));
-if(flag('--prepare-only')){console.log(`Prepared bundle and CLI: ${portable}`);process.exit(0);}
+// Remove resources left by old builds: the GUI calls installer-core directly.
+await rm(join(desktop,'src-tauri/binaries'),{recursive:true,force:true});
+if(flag('--prepare-only')){console.log(`Prepared GUI resources: ${finalBundle}`);process.exit(0);}
 const releaseConfig={version:packageVersion};
 if(platform==='linux'){
   const files={'/usr/share/voyahtune-installer/bundle/':'resources/bundle/'};
@@ -148,13 +128,12 @@ run('npm',['run','tauri','--','build','--config','src-tauri/tauri.release.conf.j
 const output=join(targetRoot,...(target===host?[]:[target]),'release/bundle');
 if(platform==='darwin'&&!flag('--no-bundle')){
   const app=join(output,'macos/VoyahTune Installer.app/Contents');
-  const packaged=JSON.parse(run(join(app,'MacOS/voyahtune'),['verify-host'],root,true));
+  const packaged=JSON.parse(run(hostExe,['verify-host',join(app,'Resources/bundle')],root,true));
   if(packaged.valid!==true)throw Error('Packaged application verification failed');
   if(payloadPath){
-    const embedded=JSON.parse(run(join(app,'MacOS/voyahtune'),['verify'],root,true));
-    if(embedded.valid!==true||embedded.manifest.releaseVersion!==packageVersion||!embedded.payloadRoot.startsWith(app))throw Error('Embedded macOS payload verification failed');
+    const embedded=JSON.parse(run(hostExe,['verify-payload',join(app,'Resources/bundle/payload')],root,true));
+    if(embedded.valid!==true||embedded.manifest.releaseVersion!==payloadManifest.releaseVersion||!embedded.payloadRoot.startsWith(app))throw Error('Embedded macOS payload verification failed');
   }
   run(join(app,'Resources/bundle/adb/adb'),['version']);
 }
 console.log(`Native packages: ${output}`);
-console.log(`Portable CLI: ${portable}`);

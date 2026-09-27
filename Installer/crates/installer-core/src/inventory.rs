@@ -229,7 +229,16 @@ pub fn inspect_for_action(
         .lines()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    let (mut state, variant, version) = classify(&packages, &base_native, &files, payload);
+    let setting_mode = match adb
+        .read(&format!("settings get global {}\n", crate::mode::KEY))
+        .as_deref()
+    {
+        Ok("full") => Some(Variant::Full),
+        Ok("light") => Some(Variant::Light),
+        _ => None,
+    };
+    let (mut state, variant, version) =
+        classify(&packages, &base_native, &files, payload, setting_mode);
     if state == "absent" && !remnants.is_empty() {
         state = "remnants".into();
     }
@@ -270,6 +279,7 @@ fn classify(
     base: &Option<Package>,
     files: &BTreeMap<String, String>,
     payload: &Payload,
+    setting_mode: Option<Variant>,
 ) -> (String, Option<Variant>, Option<String>) {
     if packages.is_empty() && base.is_none() {
         return (
@@ -296,7 +306,7 @@ fn classify(
     if builds.len() != 3
         || builds
             .iter()
-            .any(|b| b.schema != 1 || b.product != "VoyahTune")
+            .any(|b| ![1, 2].contains(&b.schema) || b.product != "VoyahTune")
     {
         return ("unknown".into(), None, None);
     }
@@ -308,6 +318,13 @@ fn classify(
     }) {
         return ("mixed".into(), None, None);
     }
+    let Some(variant) = (if b.schema == 2 {
+        setting_mode
+    } else {
+        b.variant
+    }) else {
+        return ("unknown".into(), None, Some(b.release_version.clone()));
+    };
     let mut state = "complete";
     // Classify an older release using its signed hashes. An unknown retired
     // target is reported as partial, never guessed from the current release.
@@ -322,6 +339,9 @@ fn classify(
             state = "partial";
             continue;
         };
+        if b.schema == 2 && !file.variants.contains(&variant) {
+            continue;
+        }
         if files.get(&file.destination) != Some(hash) {
             state = "partial";
         }
@@ -330,12 +350,12 @@ fn classify(
         state = "unknown";
     }
     for file in &payload.manifest.recipe.files {
-        if !file.variants.contains(&b.variant) && files.contains_key(&file.destination) {
+        if !file.variants.contains(&variant) && files.contains_key(&file.destination) {
             state = "mixed";
         }
     }
     for package in &payload.manifest.recipe.packages {
-        if package.variants.contains(&b.variant) {
+        if package.variants.contains(&variant) {
             if !packages.contains_key(&package.package) {
                 state = "partial";
             }
@@ -348,13 +368,13 @@ fn classify(
         && b.build_revision == payload.manifest.build_revision
     {
         for (id, name) in [(NATIVE, "native.apk"), (RESTORE, "restore_mode.apk")] {
-            if packages[id].sha256 != payload.artifact(name, Some(b.variant)).unwrap().sha256 {
+            if packages[id].sha256 != payload.artifact(name, Some(variant)).unwrap().sha256 {
                 state = "partial";
             }
         }
         if base.as_ref().unwrap().sha256
             != payload
-                .artifact("native.apk", Some(b.variant))
+                .artifact("native.apk", Some(variant))
                 .unwrap()
                 .sha256
         {
@@ -365,11 +385,11 @@ fn classify(
         {
             state = "partial";
         }
-        for file in payload.manifest.recipe.runtime(b.variant) {
+        for file in payload.manifest.recipe.runtime(variant) {
             if files.get(&file.destination)
                 != Some(
                     &payload
-                        .artifact(&file.artifact, file.variant_artifact.then_some(b.variant))
+                        .artifact(&file.artifact, file.variant_artifact.then_some(variant))
                         .unwrap()
                         .sha256,
                 )
@@ -382,14 +402,14 @@ fn classify(
             .recipe
             .packages
             .iter()
-            .filter(|p| p.variants.contains(&b.variant))
+            .filter(|p| p.variants.contains(&variant))
         {
             if packages.get(&package.package).map(|p| &p.sha256)
                 != Some(
                     &payload
                         .artifact(
                             &package.artifact,
-                            package.variant_artifact.then_some(b.variant),
+                            package.variant_artifact.then_some(variant),
                         )
                         .unwrap()
                         .sha256,
@@ -399,11 +419,7 @@ fn classify(
             }
         }
     }
-    (
-        state.into(),
-        Some(b.variant),
-        Some(b.release_version.clone()),
-    )
+    (state.into(), Some(variant), Some(b.release_version.clone()))
 }
 
 /// UI information only: unavailable metadata must not become an installation gate.

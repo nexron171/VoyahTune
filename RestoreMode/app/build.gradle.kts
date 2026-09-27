@@ -15,7 +15,7 @@ android {
         applicationId = "ru.big.town.restoremode"
         minSdk = 30
         targetSdk = 35
-        versionCode = 4
+        versionCode = 5
         versionName = "3.13.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -64,18 +64,6 @@ android {
         buildConfig = true
     }
 
-    // Флейворы: full = сплит/док/кнопки на руле/VirtualDisplay; light = без них.
-    flavorDimensions += "tier"
-    productFlavors {
-        create("full") {
-            dimension = "tier"
-            buildConfigField("boolean", "IS_FULL", "true")
-        }
-        create("light") {
-            dimension = "tier"
-            buildConfigField("boolean", "IS_FULL", "false")
-        }
-    }
     dependenciesInfo {
         includeInApk = true
         includeInBundle = true
@@ -121,12 +109,11 @@ android.sourceSets.getByName("main") {
 tasks.named("preBuild") { dependsOn(prepareVoiceDependencies, prepareVoiceNative) }
 
 // Release identity travels inside the signed APK. It is independent of Android's
-// versionName/versionCode and distinguishes Full/Light for the desktop installer.
+// versionName/versionCode and describes one universal APK for both installation modes.
 abstract class VoyahBuildIdentity : DefaultTask() {
     @get:Input abstract val releaseVersion: Property<String>
     @get:Input abstract val revision: Property<String>
     @get:Input abstract val component: Property<String>
-    @get:Input abstract val tier: Property<String>
     @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val runtimeFiles: ConfigurableFileCollection
     @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
@@ -137,8 +124,8 @@ abstract class VoyahBuildIdentity : DefaultTask() {
         val dir = outputDirectory.get().asFile
         dir.mkdirs()
         dir.resolve("voyahtune-build.json").writeText(groovy.json.JsonOutput.toJson(mapOf(
-            "schema" to 1, "product" to "VoyahTune", "component" to component.get(),
-            "variant" to tier.get(), "releaseVersion" to releaseVersion.get(),
+            "schema" to 2, "product" to "VoyahTune", "component" to component.get(),
+            "supportedModes" to listOf("full", "light"), "releaseVersion" to releaseVersion.get(),
             "buildRevision" to revision.get(),
             "recipeSha256" to recipeFiles.files.singleOrNull()?.let { source ->
                 MessageDigest.getInstance("SHA-256").digest(source.readBytes()).joinToString("") { "%02x".format(it) }
@@ -168,12 +155,11 @@ androidComponents {
                 recipeFiles.from(recipeFile)
                 val recipe = groovy.json.JsonSlurper().parse(recipeFile) as Map<*, *>
                 val sources = groovy.json.JsonSlurper().parse(file(providers.gradleProperty("voyahReleaseSources").get())) as Map<*, *>
-                val selectedTier = variant.productFlavors.single { it.first == "tier" }.second
                 (recipe["files"] as List<*>).map { it as Map<*, *> }.filter {
-                    it["artifact"] != "native.apk" && (it["variants"] as List<*>).contains(selectedTier)
+                    it["artifact"] != "native.apk"
                 }.forEach { operation ->
                     val source = (sources["artifacts"] as List<*>).map { it as Map<*, *> }.single {
-                        it["name"] == operation["artifact"] && it["variant"] == (if (operation["variantArtifact"] == true) selectedTier else null)
+                        it["name"] == operation["artifact"] && it["variant"] == null
                     }
                     val runtimeSource = rootProject.projectDir.parentFile.resolve(source["source"] as String)
                     runtimeFiles.from(runtimeSource)
@@ -181,16 +167,17 @@ androidComponents {
                 }
             } else {
             runtimeFiles.from(packaging.resolve("system/privapp-permissions-ru.big.town.anative.xml"))
-            if (variant.productFlavors.single { it.first == "tier" }.second == "full") {
+            run {
                 runtimeFiles.from(fileTree(packaging.resolve("inject")) { include("*.js", "*.json") })
                 runtimeFiles.from(listOf("load.bin", "voyahtune.load.rc", "voyahtune.load.sh").map { packaging.resolve("system/$it") })
                 runtimeFiles.from(packaging.resolve("tools/frida-inject-16.2.1-android-arm64"))
             }
             }
             component.set(android.namespace!!)
-            tier.set(variant.productFlavors.single { it.first == "tier" }.second)
             outputDirectory.set(layout.buildDirectory.dir("generated/voyahIdentity/${variant.name}"))
         }
         variant.sources.assets?.addGeneratedSourceDirectory(identity, VoyahBuildIdentity::outputDirectory)
     }
 }
+
+android.sourceSets.getByName("main").java.srcDir(rootProject.projectDir.parentFile.resolve("SharedAndroid/src/main/java"))

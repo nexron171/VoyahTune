@@ -1,5 +1,7 @@
 package ru.big.town.restoremode;
 
+import ru.big.town.common.InstallMode;
+
 import android.Manifest;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -42,15 +44,15 @@ final class VoiceSettingsPage {
         this.activity = activity; this.prefs = prefs; this.changed = changed;
         enabled = setting(content, "Включить голосового помощника");
         content.addView(text("Вызов голосового помощника кнопкой на руле доступен только в Full. В Light помощник вызывается только из VoyahTune: кнопкой «Попробовать голосовую команду» или ярлыком «Голосовая команда» на главном экране."
-                + (BuildConfig.IS_FULL
+                + (InstallMode.isFull()
                 ? " Выберите короткое или долгое нажатие кнопки голосового помощника на руле. Повторный вызов начинает новую сессию. Прежние действия выбранного нажатия сохранятся и вернутся после смены нажатия или отключения помощника."
                 : ""), 20, 0xffaaaaaa));
         steeringPress = new MaterialButton(activity);
         steeringPress.setAllCaps(false);
         steeringPress.setTextSize(TypedValue.COMPLEX_UNIT_PX, 24);
         steeringPress.setMinHeight(dp(64));
-        steeringPress.setEnabled(BuildConfig.IS_FULL);
-        steeringPress.setAlpha(BuildConfig.IS_FULL ? 1f : .45f);
+        steeringPress.setEnabled(InstallMode.isFull());
+        steeringPress.setAlpha(InstallMode.isFull() ? 1f : .45f);
         content.addView(steeringPress, new LinearLayout.LayoutParams(-1, -2));
         updateSteeringPress();
         steeringPress.setOnClickListener(v -> new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
@@ -200,7 +202,7 @@ final class VoiceSettingsPage {
     }
 
     private void updateSteeringPress() {
-        steeringPress.setText(BuildConfig.IS_FULL
+        steeringPress.setText(InstallMode.isFull()
                 ? "Кнопка на руле: " + (VoiceSteeringPolicy.SHORT.equals(selectedPress()) ? "короткое нажатие" : "долгое нажатие")
                 : "Кнопка на руле — только в Full");
     }

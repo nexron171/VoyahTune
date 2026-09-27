@@ -34,6 +34,9 @@ adb root
 adb wait-for-device
 adb root
 
+# Light always tears down the old Full runtime before updating APKs.
+echo "Если ранее был Full, рекомендуется полное удаление; установка Light поверх сохраняет данные."
+
 # Full -> Light transition: best-effort stop through Android init. Atomic file operations and the
 # mandatory final reboot make PID scanning/killing unnecessary and avoid Android 11 toybox false matches.
 stop_full_hook_runtime_for_light() {
@@ -541,6 +544,7 @@ case "${YDNS_REQUEST:-keep}" in
 esac
 
 # Ребут нужен, чтобы менеджер пакетов перечитал privapp-whitelist для /system/priv-app.
+adb shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode && settings put global voyahtune_install_mode light && test x\$(settings get global voyahtune_install_mode) = xlight" || exit 1
 if ! adb reboot; then
     echo "!!! ADB не принял финальную перезагрузку; установка не подтверждена."
     exit 1

@@ -53,7 +53,10 @@ pub struct BuildMetadata {
     pub schema: u32,
     pub product: String,
     pub component: String,
-    pub variant: Variant,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<Variant>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supported_modes: Vec<Variant>,
     pub release_version: String,
     pub build_revision: String,
     #[serde(default)]
@@ -71,6 +74,10 @@ pub struct Artifact {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removal_only: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirements: Option<crate::compatibility::Requirements>,
     #[serde(default)]
     pub recipe: crate::recipe::Recipe,
     pub schema: u32,
@@ -93,8 +100,20 @@ impl Payload {
     /// Installation uses classic per-file checks; full integrity verification is explicit.
     pub fn load(root: &Path) -> Result<Self> {
         let root = root.canonicalize()?;
-        let manifest: Manifest = serde_json::from_reader(File::open(root.join("manifest.json"))?)?;
-        if ![1, 2].contains(&manifest.schema)
+        let value: serde_json::Value =
+            serde_json::from_reader(File::open(root.join("manifest.json"))?)?;
+        if let Some(requirements) = value.get("requirements") {
+            serde_json::from_value::<crate::compatibility::Requirements>(requirements.clone())?
+                .validate()?;
+        }
+        if !matches!(value["schema"].as_u64(), Some(1 | 2 | 3)) {
+            return Err(Error::new(
+                "INSTALLER_UPDATE_REQUIRED",
+                "Этот формат комплекта требует обновления установщика",
+            ));
+        }
+        let manifest: Manifest = serde_json::from_value(value)?;
+        if ![1, 2, 3].contains(&manifest.schema)
             || manifest.product != "VoyahTune"
             || semver::Version::parse(&manifest.release_version).is_err()
         {
@@ -103,14 +122,65 @@ impl Payload {
                 "Неподдерживаемый формат или версия комплекта",
             ));
         }
+        if manifest.schema == 3 {
+            manifest
+                .requirements
+                .as_ref()
+                .ok_or_else(|| {
+                    Error::new(
+                        "REQUIREMENTS_MISSING",
+                        "Нет требований к версии установщика",
+                    )
+                })?
+                .validate()?;
+            if manifest.recipe.schema != 2 {
+                return Err(Error::new(
+                    "RECIPE_INVALID",
+                    "Новый payload требует recipe schema 2",
+                ));
+            }
+            manifest.recipe.validate()?;
+        }
         let payload = Self { root, manifest };
         Ok(payload)
+    }
+    pub fn save_removal(&self, destination: &Path) -> Result<()> {
+        let parent = destination
+            .parent()
+            .ok_or_else(|| Error::new("RECOVERY_PATH", "Нет папки восстановления"))?;
+        std::fs::create_dir_all(parent)?;
+        let stage = tempfile::tempdir_in(parent)?;
+        let mut manifest = self.manifest.clone();
+        manifest.removal_only = true;
+        manifest
+            .artifacts
+            .retain(|a| ["dns-helper.sh", "init.logcat.original.sh"].contains(&a.name.as_str()));
+        for artifact in &manifest.artifacts {
+            let target = stage.path().join(&artifact.path);
+            std::fs::create_dir_all(target.parent().unwrap())?;
+            std::fs::copy(self.path(artifact)?, target)?;
+        }
+        crate::recovery::write_json(&stage.path().join("manifest.json"), &manifest)?;
+        Self::open(stage.path())?;
+        // Versioned recovery directories are immutable and separate from download cache.
+        if !destination.exists() {
+            std::fs::rename(stage.path(), destination)?;
+        }
+        Ok(())
     }
     pub fn artifact(&self, name: &str, variant: Option<Variant>) -> Result<&Artifact> {
         self.manifest
             .artifacts
             .iter()
-            .find(|a| a.name == name && a.variant == variant)
+            .find(|a| {
+                a.name == name
+                    && a.variant
+                        == if self.manifest.schema == 3 {
+                            None
+                        } else {
+                            variant
+                        }
+            })
             .ok_or_else(|| {
                 Error::new(
                     "PAYLOAD_MISSING",
@@ -120,9 +190,10 @@ impl Payload {
             })
     }
     pub fn path(&self, a: &Artifact) -> Result<PathBuf> {
-        if Path::new(&a.path)
-            .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
+        if !crate::catalog::safe_path(&a.path)
+            || Path::new(&a.path)
+                .components()
+                .any(|c| !matches!(c, Component::Normal(_)))
         {
             return Err(Error::new("PAYLOAD_PATH", "Недопустимый путь в комплекте").detail(&a.path));
         }
@@ -160,6 +231,12 @@ impl Payload {
                     "Дублирующийся файл в комплекте",
                 ));
             }
+            if self.manifest.schema == 3 && a.variant.is_some() {
+                return Err(Error::new(
+                    "PAYLOAD_INVALID",
+                    "Единый комплект не должен содержать flavor-specific артефакты",
+                ));
+            }
             let path = self.path(a)?;
             if a.size == 0 || path.metadata()?.len() != a.size || sha256(&path)? != a.sha256 {
                 return Err(Error::new(
@@ -169,20 +246,33 @@ impl Payload {
                 .detail(&a.path));
             }
         }
+        if self.manifest.removal_only {
+            for name in ["dns-helper.sh", "init.logcat.original.sh"] {
+                self.file(name, None)?;
+            }
+            return Ok(());
+        }
+        let mut identities = std::collections::BTreeMap::new();
+        let mut identity = |path: PathBuf| -> Result<(BuildMetadata, Vec<String>)> {
+            if let Some(value) = identities.get(&path) {
+                return Ok(Clone::clone(value));
+            }
+            let metadata = apk_metadata(&path)?
+                .ok_or_else(|| Error::new("APK_METADATA", "APK не содержит метаданные сборки"))?;
+            let value = (metadata, verified_signers(&path)?);
+            identities.insert(path, value.clone());
+            Ok(value)
+        };
         for variant in [Variant::Full, Variant::Light] {
             for name in ["native.apk", "restore_mode.apk"] {
-                let metadata =
-                    apk_metadata(&self.file(name, Some(variant))?)?.ok_or_else(|| {
-                        Error::new("APK_METADATA", "APK не содержит метаданные сборки")
-                    })?;
-                let signers = verified_signers(&self.file(name, Some(variant))?)?;
-                if signers != verified_signers(&self.file(name, Some(Variant::Full))?)? {
+                let (metadata, signers) = identity(self.file(name, Some(variant))?)?;
+                if signers != identity(self.file(name, Some(Variant::Full))?)?.1 {
                     return Err(Error::new(
                         "APK_SIGNERS",
                         "Full и Light подписаны разными ключами",
                     ));
                 }
-                if self.manifest.schema == 2
+                if self.manifest.schema >= 2
                     && metadata.recipe_sha256.as_deref() != Some(&recipe_sha)
                 {
                     return Err(Error::new(
@@ -208,10 +298,17 @@ impl Payload {
                 } else {
                     RESTORE
                 };
-                if metadata.schema != 1
+                if metadata.schema != if self.manifest.schema == 3 { 2 } else { 1 }
+                    || (self.manifest.schema == 3
+                        && metadata.supported_modes != [Variant::Full, Variant::Light])
                     || metadata.product != "VoyahTune"
                     || metadata.component != component
-                    || metadata.variant != variant
+                    || metadata.variant
+                        != if self.manifest.schema == 3 {
+                            None
+                        } else {
+                            Some(variant)
+                        }
                     || metadata.release_version != self.manifest.release_version
                     || metadata.build_revision != self.manifest.build_revision
                 {
@@ -239,7 +336,12 @@ impl Payload {
                     Error::new("APK_METADATA", "APK не содержит метаданные сборки")
                 })?;
                 if metadata.component != package.package
-                    || metadata.variant != *variant
+                    || metadata.variant
+                        != if self.manifest.schema == 3 {
+                            None
+                        } else {
+                            Some(*variant)
+                        }
                     || metadata.release_version != self.manifest.release_version
                     || metadata.build_revision != self.manifest.build_revision
                 {
@@ -388,7 +490,8 @@ pub fn verify_host(bundle: &Path) -> Result<()> {
         if Path::new(&file.path)
             .components()
             .any(|c| !matches!(c, Component::Normal(_)))
-            || !file.path.starts_with("adb/")
+            || !crate::catalog::safe_path(&file.path.replace('+', "_"))
+            || !(file.path.starts_with("adb/") || file.path.starts_with("recovery/"))
         {
             return Err(Error::new(
                 "HOST_TOOLS_PATH",

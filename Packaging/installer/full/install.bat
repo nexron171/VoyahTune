@@ -210,6 +210,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
+adb.exe shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode && settings put global voyahtune_install_mode full && test x$(settings get global voyahtune_install_mode) = xfull"
+if errorlevel 1 exit /b 1
+
 adb.exe reboot
 if errorlevel 1 (
     echo !!! The installation is prepared, but ADB could not reboot the device. Reboot it manually.

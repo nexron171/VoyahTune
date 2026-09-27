@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.InstallMode;
+
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -229,7 +231,7 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_SPLIT_LAUNCH_VD: {
-                    if (!BuildConfig.IS_FULL) { Log.i(TAG, "MSG_SPLIT_LAUNCH_VD игнор (light-сборка)"); break; }
+                    if (!InstallMode.isFull()) { Log.i(TAG, "MSG_SPLIT_LAUNCH_VD игнор (light-сборка)"); break; }
                     android.os.Bundle d = msg.getData();
                     String left = (d != null) ? d.getString("left") : null;
                     String right = (d != null) ? d.getString("right") : null;
@@ -1080,7 +1082,7 @@ public class SetModesService extends Service {
         setModesReceiverDynamic = new SetModesReceiverDynamic(
                 this::handleScreenOffFallback,
                 this::handleScreenOnFallback);
-        if (BuildConfig.IS_FULL) {
+        if (InstallMode.isFull()) {
             screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
             screenLiftTaskRestorer.register();
         }

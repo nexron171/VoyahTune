@@ -2,6 +2,10 @@
 # voyahtune.load.sh — тело Frida-оркестратора, запускается voyahtune_load из voyahtune.load.rc.
 # Извлечено из старого init.logcat.sh (монки-патча штатного логирования): здесь остаётся только
 # рут-обвязка, logcat своим порядком поднимает штатный /system/etc/init.logcat.sh (не тронут).
+# Unified APK mode: no hooks before a completed Full installation.
+# During early boot Settings may not be available; init will retry this service.
+[ "$(settings get global voyahtune_install_mode 2>/dev/null)" = full ] || exit 0
+
 LOG_TAG="vt_load_sh"
 logi () { /system/bin/log -t $LOG_TAG -p i "$@"; }
 

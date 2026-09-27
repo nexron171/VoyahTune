@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CAN permission consent/removal through the real CLI, without APK builds or a car."""
+"""CAN permission consent/removal through the internal fixture driver, without APK builds or a car."""
 import hashlib
 import json
 import shutil
@@ -49,7 +49,7 @@ class CanbusTests(unittest.TestCase):
         self.f.write_state()
 
     def args(self, *extra):
-        return [str(fixture.CLI), '--bundle', str(self.f.bundle), 'apply', '--device', 'CAR-001',
+        return [str(fixture.DRIVER), '--bundle', str(self.f.bundle), 'apply', '--device', 'CAR-001',
                 '--action', 'light', '--token', 'fixture', '--yes', '--logs', str(self.f.base / 'logs'), *extra]
 
     def run_cli(self, *extra):
@@ -143,6 +143,8 @@ class CanbusTests(unittest.TestCase):
         self.assertFalse(self.directory.exists())
 
     def test_apply_plan_forwards_separate_removal_consent(self):
+        payload=self.f.bundle/'payload'
+        shutil.rmtree(payload);payload.symlink_to(fixture.PAYLOAD,target_is_directory=True)
         plan_file = self.f.base / 'plan.json'
         plan_file.write_text(json.dumps(self.f.plan('light')))
         result = self.f.cli('apply-plan', str(plan_file), '--yes', '--remove-voyah-hl-service',

@@ -1,3 +1,4 @@
+// Test adapter for the fake ADB differential suite. Not a product CLI.
 use clap::{Parser, Subcommand, ValueEnum};
 use installer_core::{
     adb::Adb,
@@ -5,7 +6,6 @@ use installer_core::{
     engine::{default_adb, Engine},
     engineering_menu,
     events::Events,
-    inventory,
     payload::Payload,
     plans::{self, Action, Dns, Request},
     recovery, Error, Result,
@@ -21,9 +21,9 @@ use std::{
 };
 #[derive(Parser)]
 #[command(
-    name = "voyahtune",
+    name = "fixture-driver",
     version,
-    about = "Самодостаточный установщик VoyahTune. Все команды работают с комплектным ADB."
+    about = "Internal fake-device adapter; never distributed."
 )]
 struct Cli {
     #[arg(long, global = true, help = "Папка bundle, содержащая payload и adb")]
@@ -69,6 +69,17 @@ impl From<DnsChoice> for Dns {
 }
 #[derive(Subcommand)]
 enum Commands {
+    Import {
+        archive: PathBuf,
+        cache: PathBuf,
+    },
+    Removal {
+        payload: PathBuf,
+        output: PathBuf,
+    },
+    CacheList {
+        cache: PathBuf,
+    },
     /// Код инженерного меню для указанной даты; по умолчанию дата UTC+8.
     EngineeringCode {
         #[arg(long)]
@@ -141,6 +152,11 @@ enum Commands {
     },
 }
 fn main() {
+    // Internal fixture driver, never packaged. Refuse access to real vehicles.
+    if std::env::var_os("VOYAH_FAKE_ROOT").is_none() {
+        eprintln!("fixture-driver requires VOYAH_FAKE_ROOT");
+        std::process::exit(2);
+    }
     if let Err(error) = run(Cli::parse()) {
         let kind = match error.code.as_str() {
             "CANCELLED" => "cancelled",
@@ -156,6 +172,37 @@ fn main() {
     }
 }
 fn run(cli: Cli) -> Result<()> {
+    match &cli.command {
+        Commands::Import { archive, cache } => {
+            let payload = installer_core::catalog::Cache {
+                root: cache.clone(),
+            }
+            .import(archive, &AtomicBool::new(false), &|_| {})?;
+            println!(
+                "{}",
+                json!({"payloadRoot":payload.root,"manifest":payload.manifest})
+            );
+            return Ok(());
+        }
+        Commands::Removal { payload, output } => {
+            Payload::open(payload)?.save_removal(output)?;
+            return Ok(());
+        }
+        Commands::CacheList { cache } => {
+            println!(
+                "{}",
+                serde_json::to_string(
+                    &installer_core::catalog::Cache {
+                        root: cache.clone()
+                    }
+                    .list()?
+                )?
+            );
+            return Ok(());
+        }
+        _ => {}
+    }
+
     // The saved file contains the same explicit action, serial and state token
     // used by the GUI. Engine repeats inventory; a stale file cannot skip it.
     if let Commands::ApplyPlan {
@@ -254,15 +301,10 @@ fn run(cli: Cli) -> Result<()> {
             dns,
             output,
         } => {
-            let adb = Adb::new(default_adb(&bundle), Events::quiet())?.with_device(&device)?;
-            // Match the classic scripts: root first, then inspect protected files.
-            adb.require_single()?;
-            for args in [&["root"][..], &["wait-for-device"][..], &["root"][..]] {
-                let _ = adb.run(args, None, std::time::Duration::from_secs(20));
-            }
-            let plan = plans::plan(
-                inventory::diagnose(&adb, &payload, action.into()),
+            let plan = installer_core::session::plan(
+                &default_adb(&bundle),
                 &payload,
+                &device,
                 action.into(),
                 dns.into(),
             )?;

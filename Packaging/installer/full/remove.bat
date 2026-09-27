@@ -86,7 +86,7 @@ if errorlevel 1 echo   WARNING: some inactive transaction files remain; the boot
 adb.exe shell "pkill -f /data/local/bin/load.bin"
 adb.exe shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock"
 adb.exe shell "rm -rf /data/local/tmp/voyah_load.lock"
-adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|voyahtune_acc_restore|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs kill -9"
+adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|voyahtune_acc_restore|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs -r kill -9"
 adb.exe shell "am force-stop com.qinggan.app.vehiclesetting"
 adb.exe shell "am force-stop com.qinggan.app.qgime"
 adb.exe shell "fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for fullscreen_pkg in $fullscreen_csv; do IFS=$old_ifs; case $fullscreen_pkg in ''|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop $fullscreen_pkg >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs"
@@ -144,6 +144,9 @@ if errorlevel 1 (
     echo !!! Could not completely remove Open Voyah system files. Reboot was cancelled.
     exit /b 1
 )
+adb.exe shell "settings delete global voyahtune_install_mode && test x$(settings get global voyahtune_install_mode) = xnull"
+if errorlevel 1 exit /b 1
+
 adb.exe reboot
 if errorlevel 1 (
     echo !!! Removal is prepared, but ADB could not reboot the device. Reboot it manually.

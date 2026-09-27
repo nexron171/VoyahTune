@@ -1,5 +1,7 @@
 package ru.big.town.restoremode;
 
+import ru.big.town.common.InstallMode;
+
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -61,7 +63,7 @@ final class SplitConfigSync {
         i.putExtra("steerDvrShort", resolveSteerActions(prefs.getString("steerDvrShort", "none"), prefs));
         i.putExtra("steerDvrLong", resolveSteerActions(prefs.getString("steerDvrLong", "none"), prefs));
         for (String key : new String[]{"steerVoiceShort", "steerVoiceLong"}) {
-            i.putExtra(key, VoiceSteeringPolicy.publishedAction(BuildConfig.IS_FULL,
+            i.putExtra(key, VoiceSteeringPolicy.publishedAction(InstallMode.isFull(),
                     prefs.getBoolean(VoiceCommands.ENABLED, false),
                     prefs.getString(VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG), key,
                     resolveSteerActions(prefs.getString(key, "none"), prefs)));
