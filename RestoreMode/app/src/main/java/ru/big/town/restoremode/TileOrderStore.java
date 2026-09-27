@@ -71,6 +71,7 @@ public class TileOrderStore {
             out.add(new Tile(Tile.TYPE_WIDGET, "cardForcedEv"));
             out.add(new Tile(Tile.TYPE_WIDGET, "cardSuspensionMaintenance"));
             out.add(new Tile(Tile.TYPE_WIDGET, "cardBatteryHeat"));
+            out.add(new Tile(Tile.TYPE_WIDGET, "suspensionWidget"));
             out.add(new Tile(Tile.TYPE_WIDGET, "cardVoiceCommand"));
             // Native-виджеты (запуск приложений, громкость, запущенные приложения)
             out.add(new Tile(Tile.TYPE_WIDGET, "launchAppsWidget"));
@@ -139,7 +140,7 @@ public class TileOrderStore {
     /** Проверить, это известный виджет. */
     static boolean isKnownWidget(String widgetId) {
         // Список всех известных виджетов на главном экране
-         return widgetId.equals("tripCard") ||
+         return widgetId.equals("suspensionWidget") || widgetId.equals("tripCard") ||
                widgetId.equals("cardPowerHold") ||
                widgetId.equals("cardWashMode") ||
                widgetId.equals("cardAutoLight") ||
@@ -214,7 +215,7 @@ public class TileOrderStore {
         
         // Добавить известные виджеты, которые ещё не в списке
         String[] knownWidgets = {"tripCard", "cardPowerHold", "cardWashMode", "cardAutoLight",
-                 "cardPedestrian", "cardForcedEv", "cardSuspensionMaintenance", "cardBatteryHeat",
+                 "cardPedestrian", "cardForcedEv", "cardSuspensionMaintenance", "cardBatteryHeat", "suspensionWidget",
                      "cardSettings", "cardAndroidSettings", "cardVoiceCommand",
                      "launchAppsWidget"};
         for (String widgetId : knownWidgets) {

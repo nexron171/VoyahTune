@@ -13,6 +13,10 @@ class TileSizeStore {
     static final int LAUNCH_APPS_DEFAULT_WIDTH = 2;
     static final int LAUNCH_APPS_DEFAULT_HEIGHT = 3;
 
+    static final String SUSPENSION_WIDGET_ID = "suspensionWidget";
+    static final int SUSPENSION_DEFAULT_WIDTH = 4;
+    static final int SUSPENSION_DEFAULT_HEIGHT = 3;
+
     private static final String WIDTH_KEY_PREFIX = "tileWidth_";
     private static final String HEIGHT_KEY_PREFIX = "tileHeight_";
 

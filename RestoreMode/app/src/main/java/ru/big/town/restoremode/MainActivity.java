@@ -30,7 +30,6 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.util.Log;
-import android.view.DragEvent;
 import android.view.GestureDetector;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -180,7 +179,39 @@ public class MainActivity extends AppCompatActivity {
     private final Map<String, View> appWidgetTileViews = new HashMap<>();
 
     // -------- Drag-and-drop для переупорядочивания плиток --------
-    private int draggedTilePosition = -1;    // позиция в общем списке TileOrderStore
+    private TileDragController tileDragController;
+    private SuspensionWidgetView suspensionWidgetView;
+    private Bundle suspensionState = new Bundle();
+    private boolean suspensionScreenResumed;
+    private final Messenger suspensionClient = new Messenger(new Handler(android.os.Looper.getMainLooper(), msg -> {
+        if (msg.what != ru.big.town.common.SuspensionWidgetProtocol.STATE) return false;
+        suspensionState = new Bundle(msg.getData());
+        if (suspensionWidgetView != null) suspensionWidgetView.update(suspensionState);
+        return true;
+    }));
+    private final Runnable suspensionUnavailable = () -> {
+        if (suspensionScreenResumed && !suspensionState.containsKey(ru.big.town.common.SuspensionWidgetProtocol.HEIGHT)) {
+            suspensionState.putString(ru.big.town.common.SuspensionWidgetProtocol.MESSAGE, "Нужна связь с обновлённым Native");
+            if (suspensionWidgetView != null) suspensionWidgetView.update(suspensionState);
+        }
+    };
+
+    private void sendSuspensionMessage(int what, int level) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) return;
+        try {
+            Message msg = Message.obtain(null, what, level, 0);
+            msg.replyTo = suspensionClient;
+            GlobalVars.serviceMessenger.send(msg);
+        } catch (RemoteException e) { Log.w(TAG, "Suspension service unavailable", e); }
+    }
+
+    private void watchSuspension() {
+        uiHandler.removeCallbacks(suspensionUnavailable);
+        boolean show = suspensionScreenResumed && sharedPreferences.getBoolean("showSuspensionWidget", false);
+        sendSuspensionMessage(show ? ru.big.town.common.SuspensionWidgetProtocol.WATCH
+                : ru.big.town.common.SuspensionWidgetProtocol.UNWATCH, 0);
+        if (show) uiHandler.postDelayed(suspensionUnavailable, 5000);
+    }
     
     private final BroadcastReceiver tripReceiver = new BroadcastReceiver() {
         @Override
@@ -551,12 +582,15 @@ public class MainActivity extends AppCompatActivity {
             if (!connectionReported) {
                 connectionReported = true;
                 GlobalVars.clientConnected(new Messenger(service));
+                watchSuspension();
             }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
             clearReportedConnection();
+            suspensionState = new Bundle();
+            if (suspensionWidgetView != null) suspensionWidgetView.update(suspensionState);
         }
 
         @Override
@@ -1049,6 +1083,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        suspensionScreenResumed = true;
         registerReceiver(tripReceiver, new IntentFilter(ACTION_TRIP_UPDATE), RECEIVER_EXPORTED);
         Intent req = new Intent(ACTION_REQUEST_TRIP_UPDATE);
         req.setPackage("ru.big.town.anative");
@@ -1096,6 +1131,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isWidgetVisible(String widgetId) {
         switch (widgetId) {
+            case "suspensionWidget": return sharedPreferences.getBoolean("showSuspensionWidget", false);
             case "tripCard":         return sharedPreferences.getBoolean("showTripTimer", true);
             case "cardPowerHold":
             case "cardLeaveCar":     return sharedPreferences.getBoolean("showPowerHold", true);
@@ -1151,6 +1187,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (TileSizeStore.SUSPENSION_WIDGET_ID.equals(widgetId)) return TileSizeStore.dimensions(
+                sharedPreferences, widgetId, TileSizeStore.SUSPENSION_DEFAULT_WIDTH, TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
         if ("tripCard".equals(widgetId)) return new int[]{3, 2};
         if ("cardBatteryHeat".equals(widgetId)) return new int[]{3, 2};
         // Компактные карточки-иконки: одна ячейка.
@@ -1166,46 +1204,6 @@ public class MainActivity extends AppCompatActivity {
         return new int[]{2, 1};
     }
 
-    /** Найти и занять первую свободную прямоугольную область smart-grid. */
-    private int[] placeGridItem(List<boolean[]> occupiedColumns, int maxRows,
-                                int spanColumns, int spanRows) {
-        for (int column = 0; ; column++) {
-            while (occupiedColumns.size() < column + spanColumns) {
-                occupiedColumns.add(new boolean[maxRows]);
-            }
-            for (int row = 0; row <= maxRows - spanRows; row++) {
-                boolean free = true;
-                for (int checkColumn = column; checkColumn < column + spanColumns && free; checkColumn++) {
-                    for (int checkRow = row; checkRow < row + spanRows; checkRow++) {
-                        if (occupiedColumns.get(checkColumn)[checkRow]) {
-                            free = false;
-                            break;
-                        }
-                    }
-                }
-                if (!free) continue;
-                for (int markColumn = column; markColumn < column + spanColumns; markColumn++) {
-                    for (int markRow = row; markRow < row + spanRows; markRow++) {
-                        occupiedColumns.get(markColumn)[markRow] = true;
-                    }
-                }
-                return new int[]{column, row};
-            }
-        }
-    }
-
-    /** Подсветить или вернуть обычный вид карточки под курсором drag-and-drop. */
-    private void setDragTargetHighlight(View view, boolean highlighted) {
-        view.animate().cancel();
-        view.animate()
-                .scaleX(highlighted ? 1.04f : 1f)
-                .scaleY(highlighted ? 1.04f : 1f)
-                .alpha(highlighted ? 0.78f : 1f)
-                .setDuration(120L)
-                .start();
-        view.setElevation(highlighted ? 16f : 0f);
-    }
-
     /** Рисует все плитки (сплиты + приложения) в едином смешанном порядке из TileOrderStore, 12 в ряд. */
     private void renderSplitTiles() {
         if (splitTilesGrid == null) return;
@@ -1214,17 +1212,11 @@ public class MainActivity extends AppCompatActivity {
         splitTilesGrid.setPadding(splitTilesGrid.getPaddingLeft(),
                 fullscreenGrid ? 0 : gridPaddingTop,
                 splitTilesGrid.getPaddingRight(), gridPaddingBottom);
+        if (tileDragController != null) tileDragController.cancel();
         splitTilesGrid.removeAllViews();
+        suspensionWidgetView = null;
+        watchSuspension();
         appWidgetTileViews.clear();
-        splitTilesGrid.setOnDragListener((v, event) -> {
-            if (event.getAction() == DragEvent.ACTION_DROP) {
-                int insertionPos = findGridInsertionPosition(event.getX(), event.getY());
-                insertTileAt(draggedTilePosition, insertionPos);
-                renderSplitTiles();
-            }
-            return true;
-        });
-        
         PackageManager pm = getPackageManager();
         LayoutInflater inf = LayoutInflater.from(this);
         
@@ -1249,6 +1241,18 @@ public class MainActivity extends AppCompatActivity {
         final int topInset = fullscreenGrid ? contentInsetTop : 0;
         // Сколько левых колонок верхнего ряда растягивается до границы экрана.
         final int stretchedColumns = fullscreenGridColumns();
+        tileDragController = new TileDragController(splitTilesGrid, (column, row, width, height) -> {
+            GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+            params.width = tileW * width + (width - 1) * 2 * m;
+            params.columnSpec = GridLayout.spec(column, width);
+            params.rowSpec = GridLayout.spec(row, height);
+            applyTileVerticalMetrics(params, m, tileH, new int[]{column, row}, height,
+                    rowRemainder, topInset, stretchedColumns);
+            return params;
+        }, (from, before) -> {
+            insertTileAt(from, before);
+            renderSplitTiles();
+        });
         
         // Загружаем единый список всех плиток в нужном порядке
         List<TileOrderStore.Tile> tiles = TileOrderStore.load(sharedPreferences);
@@ -1289,8 +1293,7 @@ public class MainActivity extends AppCompatActivity {
                     startTileDrag(v, TileOrderStore.Tile.TYPE_DIAL, finalDialEntry.id);
                     return true;
                 });
-                setTileDragListener(dialView, tilePos);
-                int[] gridPosition = placeGridItem(occupied, rows, 2, 1);
+                int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams dialLp = new GridLayout.LayoutParams();
                 dialLp.width = tileW * 2 + m * 2;
                 dialLp.columnSpec = GridLayout.spec(gridPosition[0], 2);
@@ -1299,6 +1302,7 @@ public class MainActivity extends AppCompatActivity {
                         topInset, stretchedColumns);
                 dialView.setLayoutParams(dialLp);
                 splitTilesGrid.addView(dialView);
+                tileDragController.add(dialView, tilePos, 2, 1);
                 continue;
             }
             
@@ -1307,6 +1311,14 @@ public class MainActivity extends AppCompatActivity {
                 View widgetView = null;
                 
                 switch(tile.id) {
+                    case "suspensionWidget":
+                        suspensionWidgetView = new SuspensionWidgetView(this, level -> {
+                            if (!GlobalVars.isBound) { showSnack("Сервис не готов"); return; }
+                            sendSuspensionMessage(ru.big.town.common.SuspensionWidgetProtocol.SELECT, level);
+                        });
+                        suspensionWidgetView.update(suspensionState);
+                        widgetView = suspensionWidgetView;
+                        break;
                     case "tripCard": widgetView = inf.inflate(R.layout.tile_trip, splitTilesGrid, false); break;
                     // Исторический id карточки Power Hold: встречается в сохранённом порядке плиток.
                     case "cardPowerHold":
@@ -1380,11 +1392,10 @@ public class MainActivity extends AppCompatActivity {
                     return true;
                 });
                 
-                setTileDragListener(widgetView, tilePos);
                 
                 // Установить размер виджета в сетке
                 int[] dims = getWidgetDimensions(tile.id);
-                int[] gridPosition = placeGridItem(occupied, rows, dims[0], dims[1]);
+                int[] gridPosition = TileGridPacking.place(occupied, rows, dims[0], dims[1]);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
                 lp.width = tileW * dims[0] + (dims[0] - 1) * 2 * m;
                 lp.columnSpec = GridLayout.spec(gridPosition[0], dims[0]);
@@ -1394,6 +1405,7 @@ public class MainActivity extends AppCompatActivity {
                 widgetView.setLayoutParams(lp);
                 
                 splitTilesGrid.addView(widgetView);
+                tileDragController.add(widgetView, tilePos, dims[0], dims[1]);
                 continue;  // пропустить остальную обработку для этого элемента
             }
 
@@ -1404,27 +1416,9 @@ public class MainActivity extends AppCompatActivity {
                 appWidgetTileViews.put(entry.id, appWidgetView);
                 populateAppWidgetLauncher(appWidgetView, entry);
                 
-                // Перетаскивание всей плитки: кнопка в углу или долгий тап по карточке.
-                View dragHandleLauncher = appWidgetView.findViewById(R.id.appWidgetDragHandleLauncher);
-                if (dragHandleLauncher != null) {
-                    dragHandleLauncher.setVisibility(View.VISIBLE);
-                    dragHandleLauncher.setOnLongClickListener(v -> {
-                        startTileDrag(appWidgetView, TileOrderStore.Tile.TYPE_APP_WIDGET, entry.id);
-                        return true;
-                    });
-                }
-                
-                // Re-enable long click on root if needed.
-                
-                appWidgetView.setOnLongClickListener(v -> {
-                    startTileDrag(appWidgetView, TileOrderStore.Tile.TYPE_APP_WIDGET, entry.id);
-                    return true;
-                });
-                setTileDragListener(appWidgetView, tilePos);
-
                 int widgetWidth = AppWidgetStore.clampWidth(entry.width);
                 int widgetHeight = AppWidgetStore.clampHeight(entry.height);
-                int[] gridPosition = placeGridItem(occupied, rows, widgetWidth, widgetHeight);
+                int[] gridPosition = TileGridPacking.place(occupied, rows, widgetWidth, widgetHeight);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
                 lp.width = tileW * widgetWidth + (widgetWidth - 1) * 2 * m;
                 lp.columnSpec = GridLayout.spec(gridPosition[0], widgetWidth);
@@ -1433,6 +1427,7 @@ public class MainActivity extends AppCompatActivity {
                         topInset, stretchedColumns);
                 appWidgetView.setLayoutParams(lp);
                 splitTilesGrid.addView(appWidgetView);
+                tileDragController.add(appWidgetView, tilePos, widgetWidth, widgetHeight);
                 if (entry.autoStart) {
                     appWidgetView.postDelayed(() -> {
                         if (!embeddedWidgetSurfaces.containsKey(entry.id)) {
@@ -1470,9 +1465,8 @@ public class MainActivity extends AppCompatActivity {
                     return true;
                 });
                 
-                setTileDragListener(tileView, tilePos);
                 
-                int[] gridPosition = placeGridItem(occupied, rows, 2, 1);
+                int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
                 lp.width = tileW * 2 + m * 2;
                 lp.columnSpec = GridLayout.spec(gridPosition[0], 2);
@@ -1481,6 +1475,7 @@ public class MainActivity extends AppCompatActivity {
                         topInset, stretchedColumns);
                 tileView.setLayoutParams(lp);
                 splitTilesGrid.addView(tileView);
+                tileDragController.add(tileView, tilePos, 2, 1);
                 
             } else if (TileOrderStore.Tile.TYPE_APP.equals(tile.type)) {
                 // Это плитка приложения
@@ -1517,9 +1512,8 @@ public class MainActivity extends AppCompatActivity {
                     return true;
                 });
                 
-                setTileDragListener(tileView, tilePos);
                 
-                int[] gridPosition = placeGridItem(occupied, rows, 1, 1);
+                int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
                 lp.width = tileW;
                 lp.columnSpec = GridLayout.spec(gridPosition[0], 1);
@@ -1528,6 +1522,7 @@ public class MainActivity extends AppCompatActivity {
                         topInset, stretchedColumns);
                 tileView.setLayoutParams(lp);
                 splitTilesGrid.addView(tileView);
+                tileDragController.add(tileView, tilePos, 1, 1);
             }
         }
     }
@@ -1586,17 +1581,6 @@ public class MainActivity extends AppCompatActivity {
         return tileH * span + (span - 1) * 2 * m + extra;
     }
 
-    /** Drop по карточке меняет две карточки местами. */
-    private void swapTiles(int firstPos, int secondPos) {
-        if (firstPos < 0 || secondPos < 0 || firstPos == secondPos) return;
-        List<TileOrderStore.Tile> tiles = TileOrderStore.load(sharedPreferences);
-        if (firstPos >= tiles.size() || secondPos >= tiles.size()) return;
-        TileOrderStore.Tile first = tiles.get(firstPos);
-        tiles.set(firstPos, tiles.get(secondPos));
-        tiles.set(secondPos, first);
-        TileOrderStore.save(sharedPreferences, tiles);
-    }
-
     /** Drop между карточками вставляет элемент в найденную позицию и сдвигает остальные. */
     private void insertTileAt(int fromPos, int insertionPos) {
         List<TileOrderStore.Tile> tiles = TileOrderStore.load(sharedPreferences);
@@ -1608,54 +1592,8 @@ public class MainActivity extends AppCompatActivity {
         TileOrderStore.save(sharedPreferences, tiles);
     }
 
-    /** Найти позицию вставки по свободной области между уже отрисованными карточками. */
-    private int findGridInsertionPosition(float x, float y) {
-        List<TileOrderStore.Tile> tiles = TileOrderStore.load(sharedPreferences);
-        for (int i = 5; i < splitTilesGrid.getChildCount(); i++) {
-            View child = splitTilesGrid.getChildAt(i);
-            Object tag = child.getTag();
-            if (!(tag instanceof Integer) || child.getWidth() == 0 || child.getHeight() == 0) continue;
-            int tilePos = (Integer) tag;
-            if (y < child.getTop() || (y < child.getBottom() && x < child.getLeft())) {
-                return tilePos;
-            }
-        }
-        return tiles.size();
-    }
-
-    /** Обработчик drop по карточке: карточки меняются местами. */
-    private void setTileDragListener(View view, int tilePos) {
-        view.setTag(tilePos);
-        view.setOnDragListener((target, event) -> {
-            switch (event.getAction()) {
-                case DragEvent.ACTION_DRAG_ENTERED:
-                    setDragTargetHighlight(target, true);
-                    break;
-                case DragEvent.ACTION_DRAG_EXITED:
-                case DragEvent.ACTION_DRAG_ENDED:
-                    setDragTargetHighlight(target, false);
-                    break;
-                case DragEvent.ACTION_DROP:
-                    setDragTargetHighlight(target, false);
-                    swapTiles(draggedTilePosition, tilePos);
-                    renderSplitTiles();
-                    break;
-            }
-            return true;
-        });
-    }
-
-    /** Начать drag для элемента общего списка. */
     private void startTileDrag(View view, String type, String id) {
-        List<TileOrderStore.Tile> tiles = TileOrderStore.load(sharedPreferences);
-        for (int i = 0; i < tiles.size(); i++) {
-            TileOrderStore.Tile tile = tiles.get(i);
-            if (type.equals(tile.type) && id.equals(tile.id)) {
-                draggedTilePosition = i;
-                view.startDragAndDrop(null, new View.DragShadowBuilder(view), null, 0);
-                return;
-            }
-        }
+        if (tileDragController != null) tileDragController.start(view);
     }
 
     /**
@@ -1680,7 +1618,13 @@ public class MainActivity extends AppCompatActivity {
         PackageManager pm = getPackageManager();
         LayoutInflater inf = LayoutInflater.from(this);
         entry.ensureProfiles();
-        
+        // Clickable profile items and the scroll container consume touches before the root.
+        // Route long presses from each launcher surface to dragging the whole tile.
+        View.OnLongClickListener dragLauncher = v ->
+                tileDragController != null && tileDragController.start(widgetView);
+        widgetView.setOnLongClickListener(dragLauncher);
+        list.setOnLongClickListener(dragLauncher);
+
         for (int i = 0; i < entry.profiles.size(); i++) {
             final int index = i;
             AppWidgetStore.Profile profile = entry.profiles.get(i);
@@ -1701,16 +1645,25 @@ public class MainActivity extends AppCompatActivity {
                 AppWidgetStore.update(sharedPreferences, entry);
                 showEmbeddedAppWidget(widgetView, entry);
             });
+            item.setOnLongClickListener(dragLauncher);
             list.addView(item);
         }
         
         View scroll = widgetView.findViewById(R.id.appWidgetLauncherScroll);
-        if (scroll != null) scroll.setVisibility(View.VISIBLE);
+        if (scroll != null) {
+            scroll.setVisibility(View.VISIBLE);
+            scroll.setOnLongClickListener(dragLauncher);
+        }
         
         View closeBtn = widgetView.findViewById(R.id.appWidgetClose);
         if (closeBtn != null) closeBtn.setVisibility(View.VISIBLE);
         
         View dragHandleLauncher = widgetView.findViewById(R.id.appWidgetDragHandleLauncher);
+        if (dragHandleLauncher != null) {
+            dragHandleLauncher.setVisibility(View.VISIBLE);
+            dragHandleLauncher.setOnLongClickListener(dragLauncher);
+            dragHandleLauncher.bringToFront();
+        }
     }
 
     /** Переключить карточку в режим embedded VirtualDisplay (пакет из настроек виджета). */
@@ -1735,6 +1688,7 @@ public class MainActivity extends AppCompatActivity {
         if (scroll != null) scroll.setVisibility(View.GONE);
         
         View dragHandleLauncher = widgetView.findViewById(R.id.appWidgetDragHandleLauncher);
+        if (dragHandleLauncher != null) dragHandleLauncher.setVisibility(View.GONE);
         View controls = widgetView.findViewById(R.id.appWidgetControls);
         if (controls != null) {
             controls.setVisibility(View.GONE);
@@ -2023,6 +1977,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        suspensionScreenResumed = false;
+        watchSuspension();
+        suspensionState = new Bundle();
         for (String widgetId : new ArrayList<>(embeddedWidgetSurfaces.keySet())) {
             sendEmbeddedRelease(widgetId);
         }
@@ -2040,6 +1997,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        if (tileDragController != null) tileDragController.cancel();
+        uiHandler.removeCallbacks(suspensionUnavailable);
         uiHandler.removeCallbacks(tripTick);
         releaseMessengerBinding("onDestroy");
         super.onDestroy();

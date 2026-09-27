@@ -504,6 +504,10 @@ public class AdvanceActivity extends AppCompatActivity {
         bindTileSizeSpinners(R.id.launchAppsSettingWidth, R.id.launchAppsSettingHeight,
                 TileSizeStore.LAUNCH_APPS_WIDGET_ID,
                 TileSizeStore.LAUNCH_APPS_DEFAULT_WIDTH, TileSizeStore.LAUNCH_APPS_DEFAULT_HEIGHT);
+        bindShowSwitch(R.id.switchShowSuspensionWidget, "showSuspensionWidget", false, R.id.suspensionSizeRow);
+        bindTileSizeSpinners(R.id.suspensionSettingWidth, R.id.suspensionSettingHeight,
+                TileSizeStore.SUSPENSION_WIDGET_ID,
+                TileSizeStore.SUSPENSION_DEFAULT_WIDTH, TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
         initDialWidgets();
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
