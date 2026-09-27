@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 
 /** Private UI-to-daemon transport. No archive, caller Intent or shell command is forwarded. */
 final class RootClient {
-    private static final int MAX_RESPONSE = 256 * 1024;
+    private static final int MAX_RESPONSE = 8 * 1024 * 1024;
 
     JSONObject call(JSONObject request) throws Exception {
         try (LocalSocket socket = new LocalSocket()) {
@@ -23,9 +23,10 @@ final class RootClient {
             socket.getOutputStream().write(input);
             socket.getOutputStream().flush();
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            java.io.BufferedInputStream response = new java.io.BufferedInputStream(socket.getInputStream());
             boolean complete = false;
             while (bytes.size() < MAX_RESPONSE) {
-                int value = socket.getInputStream().read();
+                int value = response.read();
                 if (value == -1) break;
                 if (value == '\n') { complete = true; break; }
                 bytes.write(value);
