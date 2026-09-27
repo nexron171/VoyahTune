@@ -28,7 +28,9 @@ GUI на Tauri/Svelte напрямую использует Rust-движок. �
 
 ## Исходники
 
-- `crates/installer-core/`: payload, каталог/загрузка/кэш, ADB, план и исполнение.
+- `crates/release-core/`: общие с updater модели каталога, payload/recipe и проверки APK.
+- `crates/installer-core/`: загрузка/кэш компьютера, ADB, план и исполнение;
+  прежние пути импорта моделей экспортируют типы из `release-core`.
 - `crates/installer-build/`: утилита разработчика для payload/host verification и сборки.
 - `desktop/`: интерфейс, прямые Tauri commands и события библиотеки.
 - `releases/index.json`: каталог опубликованных payload и ссылок обновления инструмента.

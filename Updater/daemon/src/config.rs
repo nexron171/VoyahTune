@@ -7,8 +7,7 @@ use std::{
     path::Path,
 };
 
-pub const DEFAULT_CATALOG_URL: &str =
-    "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Installer/releases/index.json";
+pub const DEFAULT_CATALOG_URL: &str = release_core::catalog::CATALOG_URL;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
