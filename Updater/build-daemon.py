@@ -33,6 +33,8 @@ def main():
         env.setdefault('CARGO_HOME', str(cached))
         env.setdefault('RUSTUP_HOME', str(ROOT.parent / 'Releases/cache/rustup'))
     env['CARGO_TARGET_' + target.upper().replace('-', '_') + '_LINKER'] = str(clang)
+    env['CC_' + target.replace('-', '_')] = str(clang)
+    env['AR_' + target.replace('-', '_')] = str(toolchain / ('llvm-ar.exe' if os.name == 'nt' else 'llvm-ar'))
     env['CARGO_TARGET_DIR'] = str(ROOT / 'build/rust')
     subprocess.run([cargo, 'build', '--locked', '--offline', '--release', '--target', target,
                     '--manifest-path', str(ROOT / 'daemon/Cargo.toml')], cwd=ROOT, env=env, check=True)
