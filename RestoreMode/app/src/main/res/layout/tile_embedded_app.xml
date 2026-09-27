@@ -34,7 +34,7 @@
         android:src="@drawable/ic_drag_handle"
         android:padding="12dp"
         android:scaleType="fitCenter"
-        android:alpha="0.2"
+        android:alpha="0.85"
         android:visibility="visible"
         android:contentDescription="Перетащить" />
 

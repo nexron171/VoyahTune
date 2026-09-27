@@ -104,10 +104,18 @@ public class SetModesService extends Service {
 
     private final VoiceCommandController voiceCommands = new VoiceCommandController(this);
 
+    private SuspensionWidgetController suspensionWidget;
+
     class IncomingHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case ru.big.town.common.SuspensionWidgetProtocol.WATCH:
+                case ru.big.town.common.SuspensionWidgetProtocol.UNWATCH:
+                case ru.big.town.common.SuspensionWidgetProtocol.SELECT:
+                    if (suspensionWidget == null) suspensionWidget = new SuspensionWidgetController(SetModesService.this);
+                    suspensionWidget.handle(msg);
+                    break;
                 case 36: // Signature-protected voice session protocol.
                     try {
                         voiceCommands.handle(msg.getData());
@@ -1483,6 +1491,7 @@ public class SetModesService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        if (suspensionWidget != null) suspensionWidget.close();
         voiceCommands.close();
         serviceDestroyed = true;
         ApplyEngine.stopEarlyDriveRestore("service destroyed");

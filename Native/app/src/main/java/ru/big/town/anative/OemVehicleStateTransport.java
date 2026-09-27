@@ -124,6 +124,8 @@ final class OemVehicleStateTransport {
 
         default FuelLevel readFuelLevel() { return null; }
 
+        default Integer readVehicleSpeed() { return null; }
+
         Integer readVehicleState(StateKey key);
 
         Result sendVehicleState(StateValue state, String label);
@@ -393,6 +395,21 @@ final class OemVehicleStateTransport {
         public FuelLevel readFuelLevel() {
             // Debug emulation must not present invented fuel readings as vehicle data.
             return emulated ? null : transactFuelLevel(binder);
+        }
+
+        @Override
+        public Integer readVehicleSpeed() {
+            if (emulated || !isCurrentBinder(binder)) return null;
+            Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+            try {
+                data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                if (!binder.transact(26, data, reply, 0)) return null;
+                reply.readException();
+                return reply.readInt();
+            } catch (RemoteException | RuntimeException e) {
+                Log.w(TAG, "getVehicleSpeed failed", e);
+                return null;
+            } finally { reply.recycle(); data.recycle(); }
         }
 
         @Override
