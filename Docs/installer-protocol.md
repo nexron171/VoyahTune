@@ -1,14 +1,14 @@
 # Контракт установщика и payload
 
-Версия GUI/движка определяется `Installer/Cargo.toml` (первый независимый выпуск —
-1.1.0). Версия VoyahTune внутри payload независима от неё. Каталог имеет schemaVersion 1,
+Версия GUI/движка определяется `Installer/Cargo.toml` (текущая версия —
+1.2.0). Версия VoyahTune внутри payload независима от неё. Каталог имеет schemaVersion 1,
 новый payload — schema 4, recipe — schema 3 / engine `qinggan-v3`.
 
 ## Совместимость
 
 До обращения к автомобилю проверяются `requirements.minInstallerVersion` (SemVer)
 и `requirements.requiredCapabilities`. Текущие возможности: `qinggan-v3`,
-`single-package-v1`, `files-v1`. Изменение состава в рамках этих операций не требует
+`single-package-v1`, `files-v1`, `ota-bootstrap-v1`. Изменение состава в рамках этих операций не требует
 пересборки GUI. Новый обработчик/семантика получает новую capability и минимальную
 версию; неизвестные schema, поля операций и capability отклоняются целиком.
 Ошибка `INSTALLER_UPDATE_REQUIRED` сообщает требуемую и текущую версию.
@@ -32,6 +32,8 @@ GitHub — `nexron171/VoyahTune`, `master-od`; remote проекта назыв�
 допускает релиз к выбору службой OTA. Отсутствующее поле или `false` означает, что релиз
 доступен только установщику. GUI видит все записи независимо от этого признака.
 Маркер не заменяет проверку подлинности и совместимости релиза перед установкой.
+OTA также требует [подписанное поле `otaMetadata`](ota-release-format.md).
+В примере ниже оно опущено: без него запись не пригодна для применения OTA.
 
 Новый читатель поддерживает каталог schemaVersion 1 как с `ota`, так и без него.
 Прежние выпущенные установщики со строгим `deny_unknown_fields` отвергают новое поле:
@@ -58,8 +60,8 @@ GitHub — `nexron171/VoyahTune`, `master-od`; remote проекта назыв�
       "manifestSchema": 4
     },
     "requirements": {
-      "minInstallerVersion": "1.1.0",
-      "requiredCapabilities": ["qinggan-v3", "single-package-v1", "files-v1"]
+      "minInstallerVersion": "1.2.0",
+      "requiredCapabilities": ["qinggan-v3", "single-package-v1", "files-v1", "ota-bootstrap-v1"]
     }
   }]
 }
@@ -113,14 +115,14 @@ Native, whitelist, RestoreMode, boot и DNS остаются типизиров�
 | Фаза | Политика |
 | --- | --- |
 | Проверка локального payload | Все хеши, metadata APK, recipe и совместимость до записи на ГУ |
-| Root и диагностика | Прежняя root/wait/root последовательность |
+| Root и диагностика | Root/wait/root, общий OTA lock, остановка updater и выгрузка прежних логов |
 | CAN permission | Прежняя проверка; удаление VoyahHlCTRL только с отдельным согласием |
 | Remount | Прежняя процедура, включая перезагрузку при необходимости |
 | Backup / подписи | Backup перед заменой файлов; CE/DE reset только при смене подписи |
 | Runtime / files | Остановка hooks, обновление app_client и файловый recipe |
 | Boot | Backup/миграция init.logcat, staging/publish/rollback boot-hook |
 | Native / RestoreMode / DNS | Прежние процедуры APK, whitelist и DNS overlay |
-| Reboot / verify | Прежнее ожидание загрузки и проверка Native |
+| Reboot / verify | Ожидание загрузки, проверка Native, регистрации updater APK, init-службы и IPC 1 |
 | Remove | Отключение, DNS restore, boot cleanup, recipe cleanup, настройки, приложения, reboot |
 
 Ошибка не означает отката всех выполненных шагов. Сохраняются прежние локальные
