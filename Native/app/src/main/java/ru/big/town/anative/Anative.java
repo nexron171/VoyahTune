@@ -9,6 +9,10 @@ public class Anative extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        if (new java.io.File("/data/local/bin/voyahtune-update.block").exists()) {
+            android.os.Process.killProcess(android.os.Process.myPid());
+            throw new IllegalStateException("VoyahTune update requires USB repair");
+        }
         GlobalVars.SAVE_CONTEXT = getBaseContext();
 
         // Required initialization logic here!
