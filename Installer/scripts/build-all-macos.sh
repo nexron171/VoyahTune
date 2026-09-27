@@ -135,7 +135,7 @@ if [[ $WINDOWS == 1 ]]; then
   "${DOCKER[@]}" exec vti-windows rustup target list --toolchain "$TOOLCHAIN" --installed >"$LOGS/windows-targets.log"
   grep -Fx "$WINDOWS_TARGET" "$LOGS/windows-targets.log" >/dev/null
 fi
-if [[ $LINUX_BUILD == 1 ]]; then "${DOCKER[@]}" exec vti-linux-amd64 sh -c 'test "$(uname -m)" = x86_64 && command -v node && command -v cargo' >"$LOGS/linux-environment.log"; fi
+if [[ $LINUX_BUILD == 1 ]]; then "${DOCKER[@]}" exec vti-linux-amd64 sh -c 'test "$(uname -m)" = x86_64 && command -v node && command -v cargo && command -v patchelf && command -v strip' >"$LOGS/linux-environment.log"; fi
 fi
 if [[ -d "$ROOT/Releases/cache/cargo" && -z ${CARGO_HOME:-} ]]; then
   export CARGO_HOME="$ROOT/Releases/cache/cargo"
@@ -195,9 +195,21 @@ MAC_APP="$ROOT/Installer/target/universal-apple-darwin/release/bundle/macos/Voya
 COPYFILE_DISABLE=1 tar -czf "$STAGE/macos-universal.tar.gz" -C "$(dirname "$MAC_APP")" "$(basename "$MAC_APP")"
 
 fi
+# Build the common web frontend natively. In emulated x64 containers esbuild can
+# fail inside the Go garbage collector; only Rust and packaging run there.
+if [[ $REMOTE == 1 ]]; then
+  if [[ $MAC != 1 ]]; then
+    (cd Installer/desktop && npm ci --cache "$ROOT/Releases/cache/npm" && npm run build) >"$LOGS/frontend.log" 2>&1
+  fi
+  for pair in "${PAIRS[@]}"; do
+    host=${pair#*:}
+    mkdir -p "Releases/build/hosts/$host/Releases/build/frontend"
+    rsync -a --delete Installer/desktop/dist/ "Releases/build/hosts/$host/Releases/build/frontend/"
+  done
+fi
 if [[ $WINDOWS == 1 ]]; then
 echo "Windows $WINDOWS_ARCH tooling…"
-"${DOCKER[@]}" exec -w /work vti-windows node Installer/scripts/build.mjs --target "$WINDOWS_TARGET" ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/windows.log" 2>&1
+"${DOCKER[@]}" exec -w /work vti-windows node Installer/scripts/build.mjs --frontend-dist /work/Releases/build/frontend --target "$WINDOWS_TARGET" ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/windows.log" 2>&1
 WIN_TARGET="$ROOT/Releases/build/hosts/windows/Installer/target/$WINDOWS_TARGET/release"
 cp "$WIN_TARGET/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_${WINDOWS_ARCH}-setup.exe" "$STAGE/windows-$WINDOWS_ARCH.exe"
 "${DOCKER[@]}" exec vti-windows 7z t "/work/Installer/target/$WINDOWS_TARGET/release/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_${WINDOWS_ARCH}-setup.exe" >"$LOGS/windows-verify.log" 2>&1
@@ -205,7 +217,7 @@ cp "$WIN_TARGET/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_${WINDOWS_ARC
 fi
 if [[ $LINUX_BUILD == 1 ]]; then
 echo 'Linux x64 tooling…'
-"${DOCKER[@]}" exec -w /work vti-linux-amd64 node Installer/scripts/build.mjs --no-bundle ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/linux.log" 2>&1
+"${DOCKER[@]}" exec -w /work vti-linux-amd64 node Installer/scripts/build.mjs --frontend-dist /work/Releases/build/frontend --no-bundle ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/linux.log" 2>&1
 "${DOCKER[@]}" exec -i -w /work vti-linux-amd64 bash -s >"$LOGS/linux-package.log" 2>&1 <<'LINUX'
 set -euo pipefail
 mkdir -p /opt/target/release
@@ -221,6 +233,12 @@ if ! CARGO_TARGET_DIR=/opt/target npm run tauri -- bundle --bundles appimage --c
   # offset 944632 belongs to the SHA-256 checked immediately above.
   rm -rf /opt/vti-linuxdeploy-pinned
   unsquashfs -o 944632 -d /opt/vti-linuxdeploy-pinned /work/Releases/cache/linuxdeploy-pinned.AppImage
+  # The pinned static helper binaries can fail under x64 emulation as well.
+  # Use the prepared container's dynamically linked tools; keep failures fatal.
+  for helper in patchelf strip; do
+    test -x "/usr/bin/$helper"
+    ln -sf "/usr/bin/$helper" "/opt/vti-linuxdeploy-pinned/usr/bin/$helper"
+  done
   cat >/root/.cache/tauri/linuxdeploy-x86_64.AppImage <<'DEPLOYER'
 #!/bin/sh
 if [ "${1:-}" = --appimage-extract-and-run ]; then shift; fi
