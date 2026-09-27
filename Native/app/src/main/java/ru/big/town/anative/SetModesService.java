@@ -75,6 +75,7 @@ public class SetModesService extends Service {
     static final int MSG_LOGGING_ENABLE             = 32; // вкл/выкл захват логов в файл (arg1: 1=вкл)
     static final int MSG_LOGGING_SHARE              = 33; // «Выгрузить логи» → share лог-файла
     static final int MSG_SPLIT_LAUNCH_VD            = 34; // single → physical WM-clamped task; pair → VD split
+    static final int MSG_EMBEDDED_TRANSFER          = 38; // перенос/обмен запущенными экземплярами виджетов
     static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
     static final String ACTION_LOG_UPDATE  = "ru.big.town.anative.LOG_UPDATE";
     static final String ACTION_LOGGING_SET   = "ru.big.town.anative.LOGGING_SET";   // extra "on" bool
@@ -296,6 +297,18 @@ public class SetModesService extends Service {
                     Log.i(TAG, "handleMessage() MSG_LOGGING_SHARE");
                     shareLogFile();
                     break;
+
+                case MSG_EMBEDDED_TRANSFER: {
+                    if (!InstallMode.isFull()) { Log.i(TAG, "MSG_EMBEDDED_TRANSFER игнор (light-сборка)"); break; }
+                    android.os.Bundle t = msg.getData();
+                    if (t == null) break;
+                    if (t.getBoolean("embeddedMove", false)) {
+                        moveEmbeddedDisplay(t);
+                    } else if (t.getBoolean("embeddedSwap", false)) {
+                        swapEmbeddedDisplays(t);
+                    }
+                    break;
+                }
 
                 default:
                     Log.i(TAG, "handleMessage() default");
@@ -678,6 +691,105 @@ public class SetModesService extends Service {
         if (display != null) {
             try { display.release(); } catch (Exception ignored) {}
             Log.i(TAG, "embedded VD released widget=" + widgetId);
+        }
+    }
+
+    /**
+     * Перенести уже работающий экземпляр приложения из одного виджета в другой с сохранением
+     * состояния: тот же {@link VirtualDisplay} получает новый ключ и поверхность, повторного
+     * запуска приложения не происходит.
+     */
+    private void moveEmbeddedDisplay(android.os.Bundle d) {
+        String fromWidgetId = d.getString("fromWidgetId", "");
+        String toWidgetId = d.getString("widgetId", "");
+        String packageName = d.getString("package", "");
+        Surface surface = d.getParcelable("surface");
+        int width = d.getInt("width", 0);
+        int height = d.getInt("height", 0);
+        int dpi = d.getInt("dpi", 0);
+        if (toWidgetId == null || toWidgetId.isEmpty()) return;
+        try {
+            VirtualDisplay display = (fromWidgetId == null || fromWidgetId.isEmpty())
+                    ? null : embeddedDisplays.remove(fromWidgetId);
+            if (display != null) {
+                embeddedPackages.remove(fromWidgetId);
+                embeddedLaunched.remove(fromWidgetId);
+                embeddedLaunchAt.remove(fromWidgetId);
+            }
+            if (display == null) {
+                // Источник уже освобождён — запускаем заново в целевом виджете: лучше, чем чёрный квадрат.
+                Log.i(TAG, "embedded move: нет источника, запуск заново в " + toWidgetId);
+                startEmbeddedDisplay(toWidgetId, packageName, surface, width, height, dpi);
+                return;
+            }
+            VirtualDisplay stale = embeddedDisplays.get(toWidgetId);
+            if (stale != null && stale != display) {
+                releaseEmbeddedDisplay(toWidgetId);
+            }
+            embeddedDisplays.put(toWidgetId, display);
+            embeddedPackages.put(toWidgetId, packageName);
+            embeddedLaunched.put(toWidgetId, true);
+            embeddedLaunchAt.put(toWidgetId, SystemClock.elapsedRealtime());
+            if (surface != null && surface.isValid()) {
+                display.setSurface(surface);
+                if (width > 0 && height > 0) display.resize(width, height, dpi > 0 ? dpi : 213);
+            }
+            Log.i(TAG, "embedded VD moved " + fromWidgetId + " -> " + toWidgetId + " pkg=" + packageName);
+        } catch (Exception e) {
+            Log.e(TAG, "embedded move failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Поменять местами два работающих экземпляра: дисплеи обмениваются ключами и поверхностями,
+     * приложения продолжают работать и не перезапускаются.
+     */
+    private void swapEmbeddedDisplays(android.os.Bundle d) {
+        String idA = d.getString("widgetId", "");
+        String idB = d.getString("widgetId2", "");
+        if (idA == null || idB == null || idA.isEmpty() || idB.isEmpty() || idA.equals(idB)) return;
+        Surface surfaceA = d.getParcelable("surface");
+        Surface surfaceB = d.getParcelable("surface2");
+        int widthA = d.getInt("width", 0);
+        int heightA = d.getInt("height", 0);
+        int dpiA = d.getInt("dpi", 0);
+        int widthB = d.getInt("width2", 0);
+        int heightB = d.getInt("height2", 0);
+        int dpiB = d.getInt("dpi2", 0);
+        try {
+            VirtualDisplay displayA = embeddedDisplays.get(idA);
+            VirtualDisplay displayB = embeddedDisplays.get(idB);
+            if (displayA == null || displayB == null) {
+                Log.w(TAG, "embedded swap: нет дисплея для " + idA + " или " + idB);
+                return;
+            }
+            String packageA = embeddedPackages.get(idA);
+            String packageB = embeddedPackages.get(idB);
+            embeddedDisplays.put(idA, displayB);
+            embeddedDisplays.put(idB, displayA);
+            embeddedPackages.put(idA, packageB);
+            embeddedPackages.put(idB, packageA);
+            long now = SystemClock.elapsedRealtime();
+            embeddedLaunched.put(idA, true);
+            embeddedLaunched.put(idB, true);
+            embeddedLaunchAt.put(idA, now);
+            embeddedLaunchAt.put(idB, now);
+            // Сначала снимаем обе поверхности, иначе одну и ту же поверхность получили бы два
+            // дисплея. Затем виджет A показывает экземпляр из B — дисплей B переключаем на
+            // поверхность A, и наоборот.
+            try { displayA.setSurface(null); } catch (Exception ignored) {}
+            try { displayB.setSurface(null); } catch (Exception ignored) {}
+            if (surfaceA != null && surfaceA.isValid()) {
+                displayB.setSurface(surfaceA);
+                if (widthA > 0 && heightA > 0) displayB.resize(widthA, heightA, dpiA > 0 ? dpiA : 213);
+            }
+            if (surfaceB != null && surfaceB.isValid()) {
+                displayA.setSurface(surfaceB);
+                if (widthB > 0 && heightB > 0) displayA.resize(widthB, heightB, dpiB > 0 ? dpiB : 213);
+            }
+            Log.i(TAG, "embedded VD swapped " + idA + " <-> " + idB);
+        } catch (Exception e) {
+            Log.e(TAG, "embedded swap failed: " + e.getMessage());
         }
     }
 

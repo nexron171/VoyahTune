@@ -146,6 +146,27 @@ class AppWidgetStore {
         return entry;
     }
 
+    /** Обозначение виджета по порядку создания: A, B, C… ({@code index} — позиция с нуля). */
+    static String designation(int index) {
+        if (index < 0) return "";
+        if (index < 26) return String.valueOf((char) ('A' + index));
+        return String.valueOf(index + 1);
+    }
+
+    /** Обозначение конкретного виджета по его id в готовом списке или "" если он не найден. */
+    static String designation(List<Entry> entries, String id) {
+        if (entries == null || id == null) return "";
+        for (int i = 0; i < entries.size(); i++) {
+            if (id.equals(entries.get(i).id)) return designation(i);
+        }
+        return "";
+    }
+
+    /** Обозначение конкретного виджета по его id или "" если он не найден. */
+    static String designation(SharedPreferences preferences, String id) {
+        return designation(load(preferences), id);
+    }
+
     static void remove(SharedPreferences preferences, String id) {
         List<Entry> entries = load(preferences);
         entries.removeIf(entry -> entry.id.equals(id));

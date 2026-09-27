@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Обмен: две горизонтальные стрелки друг над другом, направленные в противоположные стороны. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M3,7h12v-3l6,4l-6,4v-3H3z M21,17H9v3l-6,-4l6,-4v3h12z" />
+</vector>
