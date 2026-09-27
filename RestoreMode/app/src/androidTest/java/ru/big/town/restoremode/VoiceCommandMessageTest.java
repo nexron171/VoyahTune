@@ -31,8 +31,16 @@ public class VoiceCommandMessageTest {
         ResultReceiver reply = wire.getParcelable("reply");
         assertEquals(ResultReceiver.class, reply.getClass());
         assertEquals("drive:SPORT", wire.getString("action"));
+        assertEquals(0, wire.getInt("index"));
+        assertEquals(1, wire.getInt("count"));
         reply.send(17, Bundle.EMPTY);
         assertEquals(17, received.get());
+    }
+
+    @Test public void sequencePositionSurvivesTheParcelBoundary() {
+        Bundle wire = roundTrip(VoiceCommandMessage.create("s", "execute", "drive:SPORT", null, 1, 3));
+        assertEquals(1, wire.getInt("index"));
+        assertEquals(3, wire.getInt("count"));
     }
 
     @Test public void beginAndCancelDoNotNeedAReply() {
@@ -66,13 +74,15 @@ public class VoiceCommandMessageTest {
                     responseCode.set(code); response.set(data); answered.countDown();
                 }
             };
-            remote.get().send(VoiceCommandMessage.create("test-session", "execute", "test:echo", callback));
+            remote.get().send(VoiceCommandMessage.create("test-session", "execute", "test:echo", callback, 2, 3));
             assertTrue("Remote callback was lost", answered.await(10, TimeUnit.SECONDS));
             assertEquals(36, responseCode.get());
             assertEquals("test-session", response.get().getString("session"));
             assertEquals("execute", response.get().getString("op"));
             assertEquals("test:echo", response.get().getString("action"));
             assertEquals(3000, response.get().getInt("displayMs"));
+            assertEquals(2, response.get().getInt("index"));
+            assertEquals(3, response.get().getInt("count"));
             assertNotEquals(android.os.Process.myPid(), response.get().getInt("pid"));
         } finally {
             context.unbindService(connection);
