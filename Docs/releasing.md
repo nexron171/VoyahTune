@@ -36,7 +36,9 @@ Windows проверяется отдельно. Объём уже выполн�
 GUI пересобирается только при изменении его логики. Обычный новый релиз — общий payload
 и обновление каталога. ADB и небольшой remover входят в GUI, APK скачиваются/импортируются
 из GUI. Установщик и VoyahTune имеют независимые версии. Пользовательского CLI нет.
-Windows-пакет включает offline WebView2; Linux требует X11/XWayland и glibc Ubuntu 22.04.
+Windows-пакет не включает WebView2: если runtime отсутствует, установщик скачивает
+bootstrapper Microsoft, который устанавливает WebView2 через интернет. Если WebView2
+уже установлен, повторная загрузка не требуется. Linux требует X11/XWayland и glibc Ubuntu 22.04.
 
 Готовые архивы/бинарники хранятся в игнорируемом `Releases/`. В Git хранится spec и
 [каталог](../Installer/releases/index.json); запись каталога генерируется по готовому payload.
@@ -211,8 +213,9 @@ checkout контейнеры нужно пересоздать с правил�
 2. Для изменившихся APK увеличьте `versionCode` относительно опубликованного
    выпуска и задайте `versionName` в `Native/app/build.gradle.kts` и
    `RestoreMode/app/build.gradle.kts`. Номер комплекта сам эти поля не меняет.
-3. При изменениях движка обновите `workspace.package.version` в
-   `Installer/Cargo.toml` и записи локальных пакетов в `Installer/Cargo.lock`.
+3. При выпуске изменённого установщика обновите `workspace.package.version` в
+   `Installer/Cargo.toml`, `version` в `Installer/desktop/src-tauri/tauri.conf.json`
+   и записи локальных пакетов в `Installer/Cargo.lock`.
    Это единая версия GUI/движка и desktop-пакетов, независимая от payload.
 4. Обновите описание изменений. Проверьте diff и сохраните готовые исходники
    в коммите перед распространяемой сборкой.

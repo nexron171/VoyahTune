@@ -210,7 +210,9 @@ node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc --payload 'C:\p
 При нативной сборке результат:
 `Installer/target/release/bundle/nsis/VoyahTune Installer_3.3.0_x64-setup.exe`.
 При кросс-сборке — `Installer/target/x86_64-pc-windows-msvc/release/bundle/nsis/`.
-Имя версии берётся из Cargo. NSIS включает offline WebView2, GUI, ADB и ресурсы удаления. Отдельного копирования соседней папки после установки больше нет.
+Имя версии берётся из Cargo. NSIS включает GUI, ADB и ресурсы удаления. WebView2 не включён: режим
+`downloadBootstrapper` скачивает и устанавливает его через интернет, только если
+runtime отсутствует на компьютере. Отдельного копирования соседней папки после установки больше нет.
 `/S` поддерживает тихую установку самого инструмента; операции с автомобилем доступны в GUI.
 Authenticode не настроен; запуск на настоящей Windows ещё требует проверки.
 
