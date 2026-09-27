@@ -1,5 +1,10 @@
 mod config;
+mod device;
+mod install;
+mod network;
 mod protocol;
+mod state;
+mod workflow;
 
 use fs2::FileExt;
 use serde_json::{json, Value};
@@ -8,7 +13,7 @@ use std::os::fd::AsRawFd;
 use std::{
     fs,
     fs::OpenOptions,
-    io::{self, BufReader, Read, Seek, SeekFrom, Write},
+    io::{self, BufReader, Read, Write},
     os::{
         fd::FromRawFd,
         unix::{
@@ -22,7 +27,7 @@ use std::{
 
 const ROOT: &str = "/data/local/voyahtune-updater";
 const UI_APK: &str = "/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk";
-const LOG_LIMIT: u64 = 256 * 1024;
+const LOG_LIMIT: u64 = 512 * 1024;
 
 fn log(root: &Path, event: &str) -> io::Result<()> {
     let path = root.join("updater.log");
@@ -44,15 +49,23 @@ fn log(root: &Path, event: &str) -> io::Result<()> {
 }
 
 fn logs(root: &Path) -> io::Result<String> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(root.join("updater.log"))?;
-    let size = file.metadata()?.len();
-    file.seek(SeekFrom::Start(size.saturating_sub(48 * 1024)))?;
-    let mut bytes = vec![];
-    file.take(48 * 1024).read_to_end(&mut bytes)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    let mut result = String::new();
+    for name in ["updater.log.1", "updater.log"] {
+        match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(root.join(name))
+        {
+            Ok(file) => {
+                let mut bytes = vec![];
+                file.take(LOG_LIMIT + 65536).read_to_end(&mut bytes)?;
+                result.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(target_os = "android")]
@@ -141,11 +154,8 @@ fn run() -> io::Result<()> {
         .custom_flags(libc::O_NOFOLLOW)
         .open(root.join("daemon.lock"))?;
     lock.try_lock_exclusive()?;
-    let mut settings = config::load(root);
     log(root, "service_started")?;
-    if settings.is_err() {
-        log(root, "settings_invalid; preserved for diagnosis")?;
-    }
+    let (shared, jobs) = workflow::start()?;
     let listener = listener_from_init()?;
     for stream in listener.incoming() {
         let mut stream = stream?;
@@ -154,29 +164,56 @@ fn run() -> io::Result<()> {
         if authorize(&stream).is_err() {
             continue;
         }
-        let response: io::Result<Value> =
-            (|| match protocol::read_request(&mut BufReader::new(&stream))? {
-                protocol::Request::Status {} => Ok(json!({
-                    "schema": 1, "ok": true, "serviceVersion": env!("CARGO_PKG_VERSION"),
-                    "pid": std::process::id(), "uid": 0,
-                    "state": if settings.is_ok() { "ready" } else { "settings_error" },
-                    "settings": settings.as_ref().ok(),
-                    "error": settings.as_ref().err().map(ToString::to_string),
-                    "capabilities": ["status", "catalog_settings", "logs"]
-                })),
-                protocol::Request::SetCatalogUrl { url } => {
-                    let current = settings.as_mut().map_err(|_| {
-                        config::invalid(
-                            "Настройки повреждены. Сохраните логи и используйте USB-установщик",
-                        )
-                    })?;
-                    if config::change_url(root, current, &url)? {
-                        log(root, "catalog_source_changed")?;
-                    }
-                    Ok(json!({"schema":1,"ok":true,"settings":current}))
+        let response: io::Result<Value> = (|| match protocol::read_request(&mut BufReader::new(
+            &stream,
+        ))? {
+            protocol::Request::Status {} => {
+                let rt = shared.lock().unwrap();
+                Ok(
+                    json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),
+                        "pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok(),
+                        "settingsError":rt.config.as_ref().err()}),
+                )
+            }
+            protocol::Request::SetCatalogUrl { url } => {
+                let mut rt = shared.lock().unwrap();
+                if rt.state.busy() {
+                    return Err(config::invalid("Нельзя менять источник во время операции"));
                 }
-                protocol::Request::Logs {} => Ok(json!({"schema":1,"ok":true,"logs":logs(root)?})),
-            })();
+                let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
+                if config::change_url(root, current, &url)? {
+                    rt.state.selected = None;
+                    rt.state.notice = None;
+                    if !rt.state.repair() {
+                        rt.state.phase = "idle".into();
+                        rt.state.step = "Источник изменён. Проверьте каталог".into();
+                    }
+                    state::save(root, "state.json", &rt.state)?;
+                    log(root, "catalog_source_changed")?;
+                }
+                Ok(json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok()}))
+            }
+            protocol::Request::Check { same_version } => {
+                workflow::queue(&shared, &jobs, workflow::Job::Check(same_version))?;
+                Ok(json!({"schema":1,"ok":true}))
+            }
+            protocol::Request::Download {} => {
+                workflow::queue(&shared, &jobs, workflow::Job::Download)?;
+                Ok(json!({"schema":1,"ok":true}))
+            }
+            protocol::Request::Apply {} => {
+                workflow::queue(&shared, &jobs, workflow::Job::Apply)?;
+                Ok(json!({"schema":1,"ok":true}))
+            }
+            protocol::Request::Dismiss {} => {
+                workflow::update(&shared, |s| {
+                    s.notice = None;
+                    s.notice_opened = true;
+                })?;
+                Ok(json!({"schema":1,"ok":true}))
+            }
+            protocol::Request::Logs {} => Ok(json!({"schema":1,"ok":true,"logs":logs(root)?})),
+        })();
         let response =
             response.unwrap_or_else(|e| json!({"schema":1,"ok":false,"error":e.to_string()}));
         // A client disconnect is not a daemon failure. No input is passed to shell/process execution.

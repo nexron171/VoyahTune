@@ -9,8 +9,17 @@ pub const UI_PACKAGE: &str = "ru.big.town.updater";
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     Status {},
-    SetCatalogUrl { url: String },
+    SetCatalogUrl {
+        url: String,
+    },
     Logs {},
+    Check {
+        #[serde(default)]
+        same_version: bool,
+    },
+    Download {},
+    Apply {},
+    Dismiss {},
 }
 
 pub fn read_request(reader: &mut impl BufRead) -> io::Result<Request> {

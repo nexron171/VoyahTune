@@ -12,6 +12,11 @@ url = "2"
 libc = "0.2"
 fs2 = "0.4"
 quick-xml = "0.42"
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+sha2 = "0.10"
+hex = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+semver = "1"
 
 [dev-dependencies]
 tempfile = "3"
