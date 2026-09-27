@@ -8,7 +8,7 @@
       "channel": "stable",
       "notesUrl": "https://github.com/nexron171/VoyahTune/releases/tag/v3.14.0",
       "payload": {
-        "url": "https://github.com/nexron171/VoyahTune/releases/download/v3.14.0/payload_3.14.0.zip",
+        "url": "https://storage.yandexcloud.net/voyahtune/v3.14.0/payload_3.14.0.zip",
         "size": 143048623,
         "sha256": "96396166f2c57998bac32acc951862436375c4d206dc34c573d935668d71f7dc",
         "manifestSchema": 3
