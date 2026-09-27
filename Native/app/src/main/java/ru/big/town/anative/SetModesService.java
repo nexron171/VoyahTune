@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-import ru.big.town.common.InstallMode;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -239,7 +238,7 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_SPLIT_LAUNCH_VD: {
-                    if (!InstallMode.isFull()) { Log.i(TAG, "MSG_SPLIT_LAUNCH_VD игнор (light-сборка)"); break; }
+
                     android.os.Bundle d = msg.getData();
                     String left = (d != null) ? d.getString("left") : null;
                     String right = (d != null) ? d.getString("right") : null;
@@ -1090,10 +1089,9 @@ public class SetModesService extends Service {
         setModesReceiverDynamic = new SetModesReceiverDynamic(
                 this::handleScreenOffFallback,
                 this::handleScreenOnFallback);
-        if (InstallMode.isFull()) {
-            screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
-            screenLiftTaskRestorer.register();
-        }
+        screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
+        screenLiftTaskRestorer.register();
+
         // Приёмник запроса снимка логов + восстановление захвата регистрируем в onCreate
         // (срабатывает и при простом bind, не только при startService).
         try {

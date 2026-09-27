@@ -1,20 +1,20 @@
 # Релизы VoyahTune
 
-По умолчанию `./make_release.sh VERSION` создаёт привычные Full/Light ZIP со
+По умолчанию `./make_release.sh VERSION` создаёт ZIP VoyahTune со
 скриптами установки и удаления. С флагом `--installers` собираются автономные
-установщики macOS/Windows/Linux со всем payload и ADB внутри.
+установщики macOS/Windows/Linux с ADB и встроенными ресурсами удаления.
 
 [Пошаговый выпуск](../Docs/releasing.md) · [Сборка установщиков](../Installer/BUILDING.md).
 Готовые пакеты находятся только в игнорируемом `Releases/`. Ручных JSON-манифестов
-состава нет; для GUI-комплекта файлы обнаруживаются сборщиком автоматически.
+состава нет; для релиза для GUI-установщика файлы обнаруживаются сборщиком автоматически.
 
-# Packaging — источник комплекта релиза
+# Packaging — источник релиза
 
 Здесь лежит всё, что попадает в релиз, кроме APK, собираемых из `Native/` и `RestoreMode/`.
 `Releases/` — сборочный вывод; править релизные файлы вручную там не нужно.
 
 Целевая архитектура общего GUI-установщика для macOS, Windows и Linux, включая
-удаление и сборку офлайн-комплектов: [архитектура установщика](../Docs/installer-architecture.md).
+удаление и сборку офлайн-релизов: [архитектура установщика](../Docs/installer-architecture.md).
 Следующий пример описывает формат по умолчанию — архивы со скриптами.
 
 ```bash
@@ -25,33 +25,30 @@
 
 ```text
 Releases/build/VoyahTune-3.2.2/
-Releases/build/VoyahTune-3.2.2-light/
 Releases/dist/VoyahTune-3.2.2.zip
-Releases/dist/VoyahTune-3.2.2-light.zip
 ```
 
-Флаги: `--full-only`, `--light-only`, `--no-build`, `--no-zip`.
+Флаги: `--no-build`, `--no-zip`.
 
 ## Состав
 
-`full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, полноэкранных
-клиентских окон, статуса Apollo и опциональной штатной клавиатуры. `light` не
-содержит Frida и `load.bin`. Управление сохранёнными Apollo-функциями входит в оба варианта.
+Релиз содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, полноэкранных
+клиентских окон, статуса Apollo и опциональной штатной клавиатуры.
 
-Full также содержит [хук сбросов аккаунта Sport+](../Docs/account-reset-hook.md):
+Релиз также содержит [хук сбросов аккаунта Sport+](../Docs/account-reset-hook.md):
 `voyahtune_drive_reset.js` подставляет сохранённые режимы вождения, энергии и
 сервисного режима подвески в запросы `resetSettings`/`resetOverseaDriveMode`.
 
 | Папка | Что | Куда идёт |
 |---|---|---|
-| `tools/` | ADB и `frida-inject-16.2.1-android-arm64` | full целиком; light — только ADB |
-| `inject/` | основные hooks и opt-in keyboard agents/config | только full |
-| `system/` | `load.bin`, init RC/wrapper, permission whitelist | full; whitelist также в light |
-| `vendor-overlay/` | зафиксированный DNS RRO APK и provenance | full и light |
-| `installer/common/` | общие DNS helper-файлы | full и light |
-| `installer/full/`, `installer/light/` | установщики и удаление | соответствующий вариант |
+| `tools/` | ADB и `frida-inject-16.2.1-android-arm64` | полный релиз |
+| `inject/` | основные hooks и opt-in keyboard agents/config | полный релиз |
+| `system/` | `load.bin`, init RC/wrapper, permission whitelist | полный релиз |
+| `vendor-overlay/` | зафиксированный DNS RRO APK и provenance | полный релиз |
+| `installer/common/` | общие DNS helper-файлы | полный релиз |
+| `installer/device/` | установщики и удаление | полный релиз |
 
-Light всё равно требует `adb root` и запись в `/system` для APK и permission whitelist. Full не
+Установка требует `adb root` и запись в `/system` для APK и permission whitelist. Установщик не
 заменяет штатный `/system/etc/init.logcat.sh`: загрузочная обвязка живёт в собственном
 `voyahtune.load.rc`. `init.logcat.original.sh` нужен только для безопасной миграции старого релиза.
 
@@ -66,7 +63,7 @@ split двух приложений и для приложения в медиа
 `ClusterMediaHostActivity` открывается поверх штатной карточки на найденном `Cluster-Media-Display`
 (номер дисплея не фиксирован) и выводит отдельный VD 574×464, 160 dpi в прямоугольник
 `(66,200)–(640,664)`. Геометрия проверена для текущей простой темы кластера 1920×720; аппаратная маска
-приборов остаётся поверх Android. Функция доступна только в Full и использует существующий `vd_bypass`.
+приборов остаётся поверх Android. Функция использует существующий `vd_bypass`.
 При коротком нажатии Native закрывает хост, освобождает VD и возвращает штатную медиакарточку.
 `AppDisplayLauncher` сохраняет задачу на том же экране, а при смене экрана завершает старую задачу
 без force-stop процесса и открывает приложение на явно указанном физическом дисплее. Это обходит
@@ -127,16 +124,16 @@ Per-app DPI хранится в `DrivePreferences` и event-driven зеркал�
 сохранённый исходный factor.
 Loader берёт эти три пакета из `voyahtune_dpi_packages`, но не инъектирует client-agent в остальные
 приложения только из-за выбранного DPI.
-При обновлении full-установщик сначала атомарно публикует `app_client.js`, затем останавливает
+При обновлении установщик сначала атомарно публикует `app_client.js`, затем останавливает
 возможные legacy client-процессы и удаляет прежний `fullscreen_client.js` вместе с его маркерами.
 
-В разделе «Другое» full-варианта есть два выключенных по умолчанию взаимоисключающих режима штатной
+В разделе «Другое» VoyahTune есть два выключенных по умолчанию взаимоисключающих режима штатной
 Qinggan-клавиатуры. «Английская раскладка» запрещает IME сохранять китайский input mode; «Русская
 клавиатура» переносит из voboost полноценную ЙЦУКЕН-раскладку и переключение EN ↔ RU. Выбор
 зеркалируется в `Settings.Global/voyahtune_keyboard_mode`. При изменении Native перезапускает только
 `com.qinggan.app.qgime`, чтобы выгрузить прежний eternalized hook. `load.bin` читает режим ровно один
 раз на новую exact process identity и делает не более одной попытки injection; постоянного Settings
-polling нет. Light и remove выгружают qgime, удаляют agents/config/markers и возвращают штатный IME.
+polling нет. Удаление выгружают qgime, удаляют agents/config/markers и возвращают штатный IME.
 
 ## Режим ручной мойки
 
@@ -166,7 +163,7 @@ Device-helper проверяет checksum, Android API 30, ожидаемую к
 
 ## Apollo/ADAS: сохранённые подписка/экзамен и функции VoyahTune
 
-Full-релиз содержит `apollo_tech.js`. Переключатель «Активация функций Apollo» в разделе Apollo Tech
+Релиз содержит `apollo_tech.js`. Переключатель «Активация функций Apollo» в разделе Apollo Tech
 хранится в `DrivePreferences`, как остальные настройки автомобиля, и по умолчанию выключен. Кнопка
 «Применить» применяет его сразу; автоматическое восстановление выполняется при открытии
 водительской двери и при первом последующем переводе селектора в Drive. После этого переключения
@@ -200,7 +197,7 @@ CAN callback и не запускает TSP/polling менеджера.
 файла. В состоянии off он не вызывает даже `pidof` VehicleSetting. После изменения сохранённой
 настройки Native перезапускает только `com.qinggan.app.vehiclesetting`, и новая process identity получает одну попытку
 Frida-injection. При выключении процесс также перезапускается, чтобы eternalized hook не оставался в
-памяти. Light-релиз не содержит Frida и держит переключатель недоступным.
+памяти.
 
 Старые opt-in/master/profile/heartbeat ключи по-прежнему удаляются установщиками как одноразовая
 миграция. Remove останавливает VehicleSetting, выгружает eternalized agent и удаляет новый exact
@@ -221,9 +218,9 @@ VoyahTune. Переключатели сохраняют только целев
 штатный all-on вектор активной подписки. При всех выключенных функциях VoyahTune посылает только
 выключенные PLC/GLA/TSR switches и не формирует all-off `0x40A`, который мог бы затронуть ACC/ICA.
 
-## Full loader и нагрузка
+## Загрузчик и нагрузка
 
-Постоянный 5-секундный watchdog full-варианта обслуживает VD, launcher, keymanager, multidisplay,
+Постоянный 5-секундный watchdog VoyahTune обслуживает VD, launcher, keymanager, multidisplay,
 VehicleSetting, opt-in Qinggan IME и запущенные пакеты из fullscreen allowlist. Режим клавиатуры читается только при появлении новой qgime
 identity; в выключенном по умолчанию состоянии это одно чтение на жизнь процесса. Обычно каждая точная
 identity получает не более одной тяжёлой Frida-попытки. Узкое исключение — idempotent multidisplay-agent:
@@ -256,7 +253,7 @@ Activity-level `mEnable`, Home/SplitHost и top-task race намеренно н�
 возврата целевого состояния, сохраняются. Оптимизация направлена прежде всего на работу,
 размножаемую входящим потоком CAN-событий.
 
-Full installer проверяет наличие обязательных файлов, останавливает прежний loader и устанавливает
+Установщик проверяет наличие обязательных файлов, останавливает прежний loader и устанавливает
 каждый Frida-агент через временный файл с атомарным `mv`. Хэши JS-файлов и отдельный hook-manifest
 не используются; после запуска `load.bin` сразу переходит к обнаружению целевых процессов и
 установке агентов.
@@ -320,12 +317,11 @@ feedback `POWER_HOLD_MODE_SWITCH=1` из общего process-wide `CanBusEventH
 
 ## Установка и диагностика Apollo
 
-Full installer сам перезагружает ГУ. При сохранённой включённой настройке успех виден
+Установщик сам перезагружает ГУ. При сохранённой включённой настройке успех виден
 по `[apollo] hook ready profile=persisted-target` в `/data/local/tmp/voyahtune_apollo.txt` или logcat tag
 `VoyahApollo`; hook подменяет данные подписки и экзамена, но не заставляет VehicleSettings показывать
 соответствующий блок. Перезагрузка ГУ не сбрасывает пользовательский выбор: Native восстанавливает
-его вместе с функциональными переключателями VoyahTune. В light `[apollo] hook ready` не ожидается,
-но функциональные переключатели продолжают работать.
+его вместе с функциональными переключателями VoyahTune.
 
 ## Версия и структура релиза
 

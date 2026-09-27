@@ -1,19 +1,11 @@
 package ru.big.town.restoremode;
 
-import android.content.Context;
-import ru.big.town.common.InstallMode;
-
 import android.app.Activity;
 import android.app.Application;
 import android.os.Bundle;
 
 /** Start warmup when VoyahTune becomes visible, not when a provider wakes its process. */
 public final class VoyahApplication extends Application {
-    @Override protected void attachBaseContext(Context base) {
-        super.attachBaseContext(base);
-        InstallMode.initialize(this);
-    }
-
     @Override public void onCreate() {
         super.onCreate();
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {

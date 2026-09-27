@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-import ru.big.town.common.InstallMode;
 
 import android.app.Activity;
 import android.app.ActivityOptions;
@@ -169,8 +168,7 @@ public class SplitHostActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // LIGHT-сборка: VD-сплит-хост отключён (нет Frida/trusted-display) — сразу закрываемся.
-        if (!InstallMode.isFull()) { finish(); return; }
+
         taskLane = SplitHostTaskLane.get(getApplicationContext());
         workGate = new SplitHostGenerationGate(taskLane.registerHost(this));
         activeHost = new WeakReference<>(this);

@@ -19,7 +19,7 @@ pub fn plan(
     if action != Action::Remove && payload.manifest.removal_only {
         return Err(crate::Error::new(
             "PAYLOAD_REQUIRED",
-            "Выберите комплект для установки",
+            "Выберите релиз для установки",
         ));
     }
     payload.verify()?;
@@ -28,13 +28,11 @@ pub fn plan(
     for args in [&["root"][..], &["wait-for-device"][..], &["root"][..]] {
         let _ = adb.run(args, None, Duration::from_secs(20));
     }
-    let current = crate::mode::inspect(&adb);
-    let mut plan = plans::plan(
+    let plan = plans::plan(
         inventory::diagnose(&adb, payload, action),
         payload,
         action,
         dns,
     )?;
-    plan.current_mode = Some(current);
     Ok(plan)
 }

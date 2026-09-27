@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-import ru.big.town.common.InstallMode;
 
 import android.content.Context;
 import android.content.Intent;
@@ -61,18 +60,13 @@ final class VoiceCommandController {
                     if ("system_back".equals(action)) BackButtonService.performBack(service);
                     else if (action.startsWith("app:")) {
                         String pkg = action.substring(4);
-                        if (InstallMode.isFull()) {
-                            ClusterMediaHostActivity.closeForPackage(pkg);
-                            SplitHostActivity.closeActiveHost();
-                            boolean fullscreen = FullscreenPackagePolicy.contains(
-                                    android.provider.Settings.Global.getString(service.getContentResolver(), "voyahtune_fullscreen_apps"), pkg);
-                            AppDisplayLauncher.launch(service, pkg, 0, fullscreen,
-                                    () -> gate.active(token), () -> respond(reply, false, "Не удалось открыть приложение"));
-                        } else {
-                            Intent launch = service.getPackageManager().getLaunchIntentForPackage(pkg);
-                            if (launch == null) throw new IllegalArgumentException("No launcher");
-                            service.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                        }
+                        ClusterMediaHostActivity.closeForPackage(pkg);
+                        SplitHostActivity.closeActiveHost();
+                        boolean fullscreen = FullscreenPackagePolicy.contains(
+                                android.provider.Settings.Global.getString(service.getContentResolver(), "voyahtune_fullscreen_apps"), pkg);
+                        AppDisplayLauncher.launch(service, pkg, 0, fullscreen,
+                                () -> gate.active(token), () -> respond(reply, false, "Не удалось открыть приложение"));
+
                     } else SetModesReceiverDynamic.handleSteerAction(service, action, null);
                     if (resultDisplayMs == 0) respond(reply, true, null);
                 } catch (RuntimeException e) { respond(reply, false, "Не удалось открыть приложение"); }

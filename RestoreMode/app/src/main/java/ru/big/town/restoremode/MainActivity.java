@@ -1,6 +1,5 @@
 package ru.big.town.restoremode;
 
-import ru.big.town.common.InstallMode;
 
 
 import android.content.BroadcastReceiver;
@@ -988,10 +987,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Открыть приложение обычной задачей на выбранном дисплее: 0 — водитель, 1 — пассажир. */
     private void launchAppOnDisplay(String pkg, int displayId) {
-        if (!InstallMode.isFull()) {
-            launchAppNormally(pkg);
-            return;
-        }
+
         try {
             Intent intent = new Intent(ACTION_OPEN_ON_DISPLAY)
                     .setPackage("ru.big.town.anative")
@@ -1007,10 +1003,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Открыть приложение внутри выбранного app_widget, не меняя его настройки. */
     private void launchInsideAppWidget(String pkg, String widgetId) {
-        if (!InstallMode.isFull()) {
-            launchAppNormally(pkg);
-            return;
-        }
+
         AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
         if (entry == null) {
             showSnack("Виджет приложения не найден");
@@ -1259,14 +1252,13 @@ public class MainActivity extends AppCompatActivity {
         
         // Создаём карту сплитов по id для быстрого доступа
         Map<String, SplitStore.Preset> splitMap = new HashMap<>();
-        if (InstallMode.isFull()) {
-            List<SplitStore.Preset> splits = SplitStore.load(sharedPreferences);
-            for (SplitStore.Preset ps : splits) {
-                if (ps.ready()) {
-                    splitMap.put(ps.id, ps);
-                }
+        List<SplitStore.Preset> splits = SplitStore.load(sharedPreferences);
+        for (SplitStore.Preset ps : splits) {
+            if (ps.ready()) {
+                splitMap.put(ps.id, ps);
             }
         }
+
         
         List<boolean[]> occupied = new ArrayList<>();
         for (int pos = 0; pos < tiles.size(); pos++) {
@@ -1598,16 +1590,12 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Клик по плитке-ярлыку приложения:
-     *  - full  → открыть обычной задачей, которую системный hook ужмёт в окно;
-     *  - light → обычный запуск приложения (без VD/root).
+     * Открыть обычной задачей, которую системный hook ужмёт в окно.
      */
     private void onAppTileClick(String pkg) {
-        if (InstallMode.isFull()) {
-            if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
-            sendAppWindow(pkg);
-        } else {
-            launchAppNormally(pkg);
-        }
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
+        sendAppWindow(pkg);
+
     }
 
     private void populateAppWidgetLauncher(View widgetView, AppWidgetStore.Entry entry) {
@@ -1675,10 +1663,7 @@ public class MainActivity extends AppCompatActivity {
     /** Переключить карточку в режим embedded VirtualDisplay для явно заданного пакета. */
     private void showEmbeddedAppWidget(View widgetView, AppWidgetStore.Entry entry,
                                        String packageName, int profileDpi) {
-        if (!InstallMode.isFull()) {
-            launchAppNormally(packageName);
-            return;
-        }
+
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
             showSnack("Сервис не готов");
             return;
@@ -1710,11 +1695,8 @@ public class MainActivity extends AppCompatActivity {
                 expandBtn.setOnClickListener(v -> {
                     // Развернуть текущее приложение на весь экран (simpleLaunch)
                     releaseEmbeddedWidget(entry.id, widgetView);
-                    if (InstallMode.isFull()) {
-                        sendAppWindow(packageName);
-                    } else {
-                        launchAppNormally(packageName);
-                    }
+                    sendAppWindow(packageName);
+
                 });
             }
         }
@@ -1896,7 +1878,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** LIGHT: обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
+    /** Обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
     private void launchAppNormally(String pkg) {
         try {
             Intent i = getPackageManager().getLaunchIntentForPackage(pkg);

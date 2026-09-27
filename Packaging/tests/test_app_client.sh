@@ -4,14 +4,10 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 AGENT="$ROOT/Packaging/inject/app_client.js"
 LOADER="$ROOT/Packaging/system/load.bin"
-FULL_INSTALL="$ROOT/Packaging/installer/full/install.sh"
-FULL_INSTALL_BAT="$ROOT/Packaging/installer/full/install.bat"
-FULL_REMOVE="$ROOT/Packaging/installer/full/remove.sh"
-FULL_REMOVE_BAT="$ROOT/Packaging/installer/full/remove.bat"
-LIGHT_INSTALL="$ROOT/Packaging/installer/light/install.sh"
-LIGHT_INSTALL_BAT="$ROOT/Packaging/installer/light/install.bat"
-LIGHT_REMOVE="$ROOT/Packaging/installer/light/remove.sh"
-LIGHT_REMOVE_BAT="$ROOT/Packaging/installer/light/remove.bat"
+FULL_INSTALL="$ROOT/Packaging/installer/device/install.sh"
+FULL_INSTALL_BAT="$ROOT/Packaging/installer/device/install.bat"
+FULL_REMOVE="$ROOT/Packaging/installer/device/remove.sh"
+FULL_REMOVE_BAT="$ROOT/Packaging/installer/device/remove.bat"
 RELEASE="$ROOT/make_release.sh"
 
 fail() { echo "app client contract test failed: $*" >&2; exit 1; }
@@ -33,8 +29,6 @@ fi
 sh -n "$LOADER"
 sh -n "$FULL_INSTALL"
 sh -n "$FULL_REMOVE"
-sh -n "$LIGHT_INSTALL"
-sh -n "$LIGHT_REMOVE"
 
 # Client geometry: never mutate app-owned LayoutParams in the hooks. Only the base Activity window
 # on the two physical displays receives a cloned MATCH_PARENT width; height/status-bar geometry is
@@ -131,8 +125,7 @@ require_before "$FULL_INSTALL_BAT" \
     'rm -f /data/local/bin/fullscreen_client.js'
 forbid "$FULL_INSTALL" 'install_required_data_file fullscreen_client.js'
 forbid "$FULL_INSTALL_BAT" 'install_required_data_file fullscreen_client.js'
-for CLEANER in "$FULL_REMOVE" "$FULL_REMOVE_BAT" "$LIGHT_INSTALL" "$LIGHT_INSTALL_BAT" \
-        "$LIGHT_REMOVE" "$LIGHT_REMOVE_BAT"; do
+for CLEANER in "$FULL_REMOVE" "$FULL_REMOVE_BAT"; do
     require "$CLEANER" '/data/local/bin/app_client.js'
     require "$CLEANER" '/data/local/bin/fullscreen_client.js'
     require "$CLEANER" 'voyahtune_app_client.*'

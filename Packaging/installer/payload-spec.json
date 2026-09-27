@@ -1,65 +1,39 @@
 {
-  "schema": 2,
-  "engine": "qinggan-v2",
+  "schema": 3,
+  "engine": "qinggan-v3",
   "files": [
     {
       "artifact": "native.apk",
-      "variantArtifact": false,
-      "variants": [
-        "full",
-        "light"
-      ],
       "destination": "/system/priv-app/Native/Native.apk",
       "mode": 420,
       "phase": "files"
     },
     {
       "artifact": "load.bin",
-      "variantArtifact": false,
-      "variants": [
-        "full"
-      ],
       "destination": "/data/local/bin/load.bin",
       "mode": 493,
       "phase": "files"
     },
     {
       "artifact": "frida-inject",
-      "variantArtifact": false,
-      "variants": [
-        "full"
-      ],
       "destination": "/data/local/bin/frida-inject",
       "mode": 493,
       "phase": "files"
     },
     {
       "artifact": "voyahtune.load.rc",
-      "variantArtifact": false,
-      "variants": [
-        "full"
-      ],
       "destination": "/system/etc/init/voyahtune.load.rc",
       "mode": 420,
       "phase": "boot-hooks"
     },
     {
       "artifact": "voyahtune.load.sh",
-      "variantArtifact": false,
-      "variants": [
-        "full"
-      ],
       "destination": "/system/etc/init.voyahtune.load.sh",
       "mode": 493,
       "phase": "boot-hooks"
     },
     {
       "artifact": "whitelist.xml",
-      "variantArtifact": false,
-      "variants": [
-        "full",
-        "light"
-      ],
       "destination": "/system/etc/permissions/privapp-permissions-ru.big.town.anative.xml",
       "mode": 420,
       "phase": "files"
@@ -68,12 +42,7 @@
   "packages": [
     {
       "artifact": "restore_mode.apk",
-      "package": "ru.big.town.restoremode",
-      "variantArtifact": false,
-      "variants": [
-        "full",
-        "light"
-      ]
+      "package": "ru.big.town.restoremode"
     }
   ],
   "removeFiles": [

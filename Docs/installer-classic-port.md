@@ -1,49 +1,37 @@
 # Процесс установки GUI: порт классических скриптов
 
-Актуально на 2026-09-27. GUI **не запускает install.sh/install.bat/remove.sh**.
-Порядок, ветвления, повторы и обработка результатов перенесены в Rust.
-Согласованные дополнения: soft cleanup перед Light, единые APK и commit Settings.Global.
-[Контракт нового recipe](installer-protocol.md) дополняет сохранённые специальные процедуры.
+Актуально для единого процесса Installer 1.1.0. GUI не запускает host install/remove:
+порядок и команды исполняет Rust. [Контракт recipe](installer-protocol.md).
 
 ## Где менять процесс
 
 - `Installer/crates/installer-core/src/engine.rs`: `execute()` задаёт порядок;
   методы ниже реализуют действия и обработку ошибок. Это исполняемая логика процесса.
 - `Installer/crates/installer-core/src/plans.rs`: `classic_steps()` задаёт названия
-  и порядок отображаемых шагов Full, Light и удаления.
+  и порядок отображаемых шагов установки и удаления.
 - `Installer/crates/installer-core/src/classic_commands.rs`: тела **удалённых**
   команд `adb shell`, перенесённые из скриптов. Здесь нет запуска host-сценариев.
   Над каждым фрагментом указан исходный файл и строка.
 - `Installer/desktop/src/App.svelte`: отображение событий, текущего шага,
   завершённых шагов, ошибок и журнала. Здесь нет логики установки на автомобиль.
 
-Эталоны: `Packaging/installer/full/install.sh`, `light/install.sh`, `full/remove.sh`
+Эталоны: `Packaging/installer/device/install.sh`, `Packaging/installer/device/remove.sh`
 и соответствующие `.bat`. Единое удаление использует полный remover независимо
 от установленного набора, как было согласовано для GUI.
 
 ## Порядок действий
 
-| Шаг | Full | Light | Удаление обоих наборов |
-|---|---|---|---|
-| Подготовка | Обязательные файлы, DNS helper/RRO | APK, whitelist, DNS helper/RRO | DNS helper, fallback init.logcat |
-| Root | root → wait-for-device → root | То же | То же |
-| Режим | Повторная проверка перед изменениями | Full/unknown запрещены | Очистка флага в конце |
-| CAN permission | Проверка WRITE_CANBUS из старого install | То же | Нет |
-| /system | disable-verity; remount; при необходимости один reboot | То же | remount и проверка записи, без нового reboot-цикла |
-| Бэкап | Восемь прежних файлов; ошибка останавливает | Native/whitelist; ошибка pull не останавливает | Нет общего обязательного бэкапа |
-| Подпись | Согласованная переустановка при смене ключа | То же | Подписи не проверяются |
-| Runtime | best-effort stop, отключение старого Apollo | Остановка приложений/loader, soft cleanup hooks/Frida без удаления данных | Сначала отключение Apollo, восстановление DNS, миграция init.logcat |
-| Файлы | Атомарная установка Frida/JS/JSON | Файлы recipe с вариантом Light | stop сервиса; удаление boot/runtime; возврат host-бэкапов load.bin/frida при наличии |
-| Boot | Миграция legacy init.logcat, транзакция boot-hook с rollback | Legacy init.logcat мигрирует; Full boot-hook удаляется | Удаление штатным полным remover-процессом |
-| Приложения | Native/whitelist, настройки, RestoreMode | Native/whitelist, power hold, RestoreMode | Очистка прежнего списка Settings; PackageManager uninstall; удаление priv-app/whitelist |
-| DNS | Выбор GUI передаётся прежнему helper | То же | Выполнен до удаления компонентов |
-| Завершение | Commit/read-back режима, reboot, ожидание Android, восстановление CE/DE и проверка запуска Native | То же | Заканчивается reboot; новой postflight-инвентаризации нет |
+| Шаг | Установка | Удаление |
+| --- | --- | --- |
+| Root/system | root, remount, при необходимости reboot | root, remount и проверка записи |
+| Backup/signatures | Backup; при другом APK-ключе отдельный reset данных | Без проверки APK-подписей |
+| Runtime/files | Остановка loader, полный recipe, legacy init.logcat и boot transaction | Остановка, восстановление DNS/legacy, удаление runtime |
+| Apps | Native/whitelist и RestoreMode | PackageManager uninstall и удаление системных файлов |
+| Завершение | Reboot, CE/DE и запуск Native | Reboot |
 
-За исключением описанного нового soft cleanup Light, если классический скрипт игнорирует результат команды, Rust пишет его в журнал
-и продолжает. Если скрипт проверяет результат, Rust останавливает соответствующий
-шаг с конкретной командой и выводом. Это относится, например, к best-effort stop,
-необязательным freeform-настройкам, `disable-verity`, бэкапу Light и cleanup stage.
-Проверки boot-hook/rollback и Native lifecycle сохранены: они уже есть в скриптах.
+Прежняя проверка checked/best-effort результатов сохранена. Нет выбора вариантов
+установки и специальных переходов между ними. Существующий релиз обновляется
+обычным процессом поверх либо после удаления.
 
 Windows-вариант старого permission-check допускает неизвестного владельца;
 эта особенность сохранена. Проверка синтаксиса legacy init.logcat через локальный
@@ -66,9 +54,9 @@ Windows-вариант старого permission-check допускает неи
   с данными и устанавливается заново. Native требует промежуточного reboot, чтобы
   Android убрал старую регистрацию; RestoreMode допускает повтор после конкретного
   `INSTALL_FAILED_UPDATE_INCOMPATIBLE` о подписи. Иные ошибки APK не запускают сброс.
-- Выбор Full/Light/единого удаления и DNS выполняется в GUI.
+- Выбор установки/удаления и DNS выполняется в GUI.
 - Отмена — явное действие пользователя между шагами. Восстановление loader следует
-  прежнему exit-recovery: Full до принятого reboot. Light всегда удаляет Full runtime с сохранением данных и настроек; прежний режим не ограничивает установку.
+  прежнему exit-recovery: до принятого reboot.
 - Журнал и резервные копии находятся на компьютере. `backup/` рядом с каталогами
   операций одного автомобиля сохраняет предыдущие файлы, как каталог старого релиза.
 
@@ -77,7 +65,7 @@ Windows-вариант старого permission-check допускает неи
 `inventoryToken` оставлен в структуре Request, условием запуска он не является.
 
 Постоянного mutex на автомобиле и файлового mutex операций на компьютере нет.
-Старый `/data/local/voyahtune-installer/lock/owner` очищается best effort после root и проверки режима;
+Старый `/data/local/voyahtune-installer/lock/owner` очищается best effort после root;
 новый маркер не создаётся. Старые receipt/ownership/hash-записи движка не используются
 как условия продолжения. GUI предотвращает повторное нажатие во время своей операции.
 
@@ -109,5 +97,5 @@ VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
 соответствия. Для изменившихся удалённых команд обновите привязку в
 `sync-classic-commands.py` и запустите его без `--check`, затем форматирование Rust.
 Новый install/remove-шаг должен появиться и в `classic_steps()`.
-Новые файлы schema 3 исполняются по recipe без изменения движка. Если выпускается
+Новые файлы schema 4 исполняются по recipe без изменения движка. Если выпускается
 также классический ZIP, его фиксированные списки обновляются отдельно.

@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>broadcast {@link #ACTION_NOW_PLAYING} с текстовыми extras (push: живое обновление UI).</li>
  * </ul>
  *
- * <p>Фича не завязана на Frida/VD — работает в обоих флейворах (Native priv-app и в full, и в light).
+ * <p>Фича не завязана на Frida/VD — Native является priv-app.
  */
 public class NowPlayingService extends Service {
 

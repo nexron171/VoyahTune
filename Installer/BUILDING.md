@@ -1,6 +1,6 @@
 # Сборка VoyahTune Installer
 
-GUI выпускается независимо от автомобильного комплекта. Для нового payload:
+GUI выпускается независимо от автомобильного релиза. Для нового payload:
 
 ```sh
 ./make_release.sh 3.13.0 --payload
@@ -60,7 +60,7 @@ ARM64+x86-64, Windows/Linux — только x64. Для `--mac` Docker/Colima �
 macos-universal.tar.gz, windows-x64.exe, linux-x64.run и build-info.json.
 Можно указать другой каталог внутри Releases через `--output`.
 Существующий результат заменяется после успешной сборки всех выбранных платформ;
-при ошибке прежний комплект сохраняется. Логи: `Releases/cache/installer-all-XXXXXX/`.
+при ошибке прежний релиз сохраняется. Логи: `Releases/cache/installer-all-XXXXXX/`.
 
 Скрипт использует Colima profile `v` в `Releases/cache/colima` и два постоянных
 контейнера. Он запускает среду при необходимости и останавливает только то,
@@ -182,7 +182,7 @@ node Installer/scripts/build.mjs --bundles app \
 
 Результат: `Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app`.
 Этот target игнорируется Git. Скрипт объединяет обе архитектуры GUI, включает
-Google ADB и ресурсы удаления (payload опционален), проверяет комплект внутри `.app`.
+Google ADB и ресурсы удаления (payload опционален), проверяет релиз внутри `.app`.
 
 Проверки:
 
@@ -246,7 +246,7 @@ node Installer/scripts/build.mjs --target i686-pc-windows-msvc
 
 При кросс-сборке сборщик выбирает x86 SDK для cargo-xwin и отдельный кэш
 `Releases/cache/cargo-xwin-x86` (можно переопределить через `XWIN_CACHE_DIR`).
-Сборщик проверяет, что комплектные ADB EXE и DLL тоже имеют архитектуру x86.
+Сборщик проверяет, что встроенные ADB EXE и DLL тоже имеют архитектуру x86.
 Payload общий с x64 и macOS; отдельные APK или каталог для x86 не нужны.
 WebView2 скачивается при необходимости. Windows 11 не имеет 32-битного выпуска ОС;
 для 64-битной Windows используйте установщик x64. Проверка архива и архитектуры
@@ -317,9 +317,9 @@ shasum -a 256 Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 уже сохранённые PNG/ICO/ICNS и Android-ресурсы.
 
 Версия движка задаётся в Installer/Cargo.toml. Версия самого устанавливаемого
-нативного пакета берётся из Cargo, автомобильного комплекта — из payload.
+нативного пакета берётся из Cargo, автомобильного релиза — из payload.
 Готовые binaries, validators, tooling.json в Packaging больше не используются.
 Публикуемые файлы — только результаты из Releases/dist.
 
-Проверяйте `installer-build verify-host PATH`, запуск на целевых ОС, Full/Light, обновление и удаление.
+Проверяйте `installer-build verify-host PATH`, запуск на целевых ОС, установку, обновление и удаление.
 Успешная кросс-сборка Windows и fake ADB не заменяют проверки на реальной ОС и машине.

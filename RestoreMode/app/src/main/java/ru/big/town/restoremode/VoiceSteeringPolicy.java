@@ -8,12 +8,12 @@ final class VoiceSteeringPolicy {
 
     static String normalize(String press) { return SHORT.equals(press) ? SHORT : LONG; }
 
-    static boolean ownsSlot(boolean full, boolean enabled, String press, String slot) {
+    static boolean ownsSlot(boolean enabled, String press, String slot) {
         String selected = SHORT.equals(normalize(press)) ? "steerVoiceShort" : "steerVoiceLong";
-        return full && enabled && selected.equals(slot);
+        return enabled && selected.equals(slot);
     }
 
-    static String publishedAction(boolean full, boolean enabled, String press, String slot, String saved) {
-        return ownsSlot(full, enabled, press, slot) ? ACTION : saved;
+    static String publishedAction(boolean enabled, String press, String slot, String saved) {
+        return ownsSlot(enabled, press, slot) ? ACTION : saved;
     }
 }

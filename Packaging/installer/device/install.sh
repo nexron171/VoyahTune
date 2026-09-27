@@ -44,7 +44,7 @@ adb root
 adb wait-for-device
 adb root
 
-# Просим Android init остановить текущий loader перед публикацией нового комплекта. Это best-effort:
+# Просим Android init остановить текущий loader перед публикацией нового релиза. Это best-effort:
 # каждый файл публикуется atomic mv, а финальный reboot гарантирует запуск уже новой версии.
 # Не сканируем/не убиваем PID: Android 11 toybox даёт ложные self/zombie matches.
 stop_hook_runtime_for_update() {
@@ -163,7 +163,7 @@ case "$CANBUS_PERMISSION_DUMP" in
             else
                 echo "!!! Владелец com.qinggan.permission.WRITE_CANBUS не определён однозначно."
             fi
-            echo "    Удалите несовместимый пакет и повторите full install; /system ещё не изменялся."
+            echo "    Удалите несовместимый пакет и повторите установку; /system ещё не изменялся."
             exit 1
         fi
         echo "  Permission уже принадлежит ru.big.town.anative — совместимое обновление."
@@ -334,7 +334,7 @@ backup_pull_with_absent() {
     esac
 }
 
-# Непосредственный предыдущий full-релиз заменял OEM init.logcat.sh. Мигрируем только файл с нашим
+# Непосредственный предыдущий релиз заменял OEM init.logcat.sh. Мигрируем только файл с нашим
 # ownership-marker; любой неизвестный/OEM-вариант оставляем без изменений.
 LEGACY_INIT_MARKER="# init.logcat.sh Open Voyah:"
 LEGACY_INIT_DEVICE="/system/etc/init.logcat.sh"
@@ -688,10 +688,10 @@ if ! adb shell '
     echo "!!! Не удалось завершить миграцию app_client.js — hook-loader будет возвращён."
     exit 1
 fi
-# Удаляем неиспользуемый manifest, оставшийся от предыдущих full-релизов.
+# Удаляем неиспользуемый manifest, оставшийся от предыдущих релизов.
 adb shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json.voyahtune.new" || exit 1
 
-echo "=== Миграция boot-hook предыдущего full-релиза ==="
+echo "=== Миграция boot-hook предыдущего релиза ==="
 if ! migrate_legacy_init_logcat; then
     exit 1
 fi
@@ -702,7 +702,7 @@ install_boot_hooks
 BOOT_HOOK_INSTALL_STATUS=$?
 if [ "$BOOT_HOOK_INSTALL_STATUS" -ne 0 ]; then
     # Возвращать legacy-hook безопасно только когда RC остался неизменённым или его rollback подтверждён.
-    # При status=2 на устройстве может быть частично опубликованный RC-комплект: не создаём второй path.
+    # При status=2 на устройстве может быть частично опубликованный RC-релиз: не создаём второй path.
     if [ "$BOOT_HOOK_INSTALL_STATUS" -eq 1 ]; then
         if boot_hook_final_state; then
             case "$BOOT_HOOK_FINAL_STATE" in
@@ -712,10 +712,10 @@ if [ "$BOOT_HOOK_INSTALL_STATUS" -ne 0 ]; then
                     fi
                     ;;
                 READY)
-                    echo "  Предыдущий полный RC-комплект сохранён; legacy init.logcat.sh не возвращаем."
+                    echo "  Предыдущий полный RC-релиз сохранён; legacy init.logcat.sh не возвращаем."
                     ;;
                 PARTIAL)
-                    echo "!!! После rollback остался неполный RC-комплект; legacy hook не возвращаем во избежание двух boot-path."
+                    echo "!!! После rollback остался неполный RC-релиз; legacy hook не возвращаем во избежание двух boot-path."
                     echo "    Не перезагружайте ГУ; повторите installer."
                     ;;
             esac
@@ -812,7 +812,7 @@ case "${YDNS_REQUEST:-keep}" in
         ;;
 esac
 
-adb shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode && settings put global voyahtune_install_mode full && test x\$(settings get global voyahtune_install_mode) = xfull" || exit 1
+adb shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode" || exit 1
 if ! adb reboot; then
     echo "!!! ADB не смог перезагрузить ГУ; пробуем запустить установленный hook-loader без reboot."
     exit 1

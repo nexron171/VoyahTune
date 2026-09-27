@@ -6,8 +6,8 @@ REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 LOAD_BIN="$REPO_ROOT/Packaging/system/load.bin"
 MULTIDISPLAY="$REPO_ROOT/Packaging/inject/multidisplay.js"
 LOAD_RC="$REPO_ROOT/Packaging/system/voyahtune.load.rc"
-FULL_INSTALL="$REPO_ROOT/Packaging/installer/full/install.sh"
-FULL_INSTALL_BAT="$REPO_ROOT/Packaging/installer/full/install.bat"
+FULL_INSTALL="$REPO_ROOT/Packaging/installer/device/install.sh"
+FULL_INSTALL_BAT="$REPO_ROOT/Packaging/installer/device/install.bat"
 
 fail() {
     echo "FAIL: $*" >&2

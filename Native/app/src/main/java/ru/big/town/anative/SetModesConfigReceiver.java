@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-import ru.big.town.common.InstallMode;
 
 import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
@@ -20,7 +19,7 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (!InstallMode.isFull()) return;
+
         String action = intent.getAction();
         if ("ru.big.town.anative.STEER_CONFIG".equals(action)) {
             String[] buttons = {"Star", "Dvr", "Voice", "Phone"};

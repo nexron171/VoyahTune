@@ -66,7 +66,6 @@ require_fixed "$RESTORER" 'options.setLaunchDisplayId(saved.displayId);'
 require_fixed "$RESTORER" 'int actualType = readLiftProperty(type);'
 require_fixed "$RESTORER" 'if (actualType != type) {'
 require_fixed "$SERVICE" 'screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());'
-require_fixed "$SERVICE" 'if (InstallMode.isFull()) {'
 require_fixed "$SERVICE" 'if (liftRestorer != null) liftRestorer.close();'
 require_fixed "$MANIFEST" '<uses-permission android:name="android.permission.REORDER_TASKS" />'
 

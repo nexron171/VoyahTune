@@ -22,9 +22,8 @@ class ParallelLoaderTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="voyahtune-loader-")
         self.root = Path(self.temp.name)
         self.processes = []
-        (self.root / "mode").write_text("full\n")
         settings=self.root/"settings"
-        settings.write_text("#!/bin/sh\ncat "+shlex.quote(str(self.root/"mode"))+"\n")
+        settings.write_text("#!/bin/sh\nexit 1\n")
         settings.chmod(0o755)
         self.env={**os.environ,"PATH":str(self.root)+os.pathsep+os.environ["PATH"]}
         for pid in range(101, 108):
@@ -169,16 +168,6 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
     def probe(self, code):
         return subprocess.check_output(["sh", str(self.loader), "--probe", code],
                                        text=True, timeout=5,env=self.env).strip()
-
-    def test_light_unknown_and_unavailable_mode_do_not_start_any_hook(self):
-        for mode in ["light", "null", "invalid", ""]:
-            with self.subTest(mode=mode):
-                (self.root/"mode").write_text(mode)
-                self.assertEqual(self.start().wait(timeout=3),0)
-                self.assertEqual(self.events(),"")
-        (self.root/"mode").unlink()
-        self.assertEqual(self.start().wait(timeout=3),0)
-        self.assertEqual(self.events(),"")
 
     def test_acc_has_priority_until_ready_but_not_until_wrapper_exit(self):
         (self.root / "hold_acc_ready").touch()

@@ -125,10 +125,8 @@ def main():
    for k,v in settings.items():print(k+'='+v)
   elif args[0]=='get':print(settings.get(key,'null'))
   elif args[0]=='put':
-   if key=='voyahtune_install_mode' and s.get('ignoreModeWrite'):return 0
    settings[key]=args[3];save(s)
   elif args[0]=='delete':
-   if key=='voyahtune_install_mode' and s.get('ignoreModeDelete'):return 0
    settings.pop(key,None);save(s)
   else:raise RuntimeError(args)
  elif name=='chown':

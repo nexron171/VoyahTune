@@ -15,10 +15,8 @@ require_fixed() {
 }
 
 for remover in \
-        "$ROOT/Packaging/installer/full/remove.sh" \
-        "$ROOT/Packaging/installer/full/remove.bat" \
-        "$ROOT/Packaging/installer/light/remove.sh" \
-        "$ROOT/Packaging/installer/light/remove.bat"; do
+        "$ROOT/Packaging/installer/device/remove.sh" \
+        "$ROOT/Packaging/installer/device/remove.bat"; do
     require_fixed "$remover" 'pm uninstall --user 0 ru.big.town.anative'
     require_fixed "$remover" 'pm uninstall ru.big.town.restoremode'
     if grep -Eiv '^[[:space:]]*(#|rem[[:space:]])' "$remover" \
@@ -28,10 +26,8 @@ for remover in \
 done
 
 for installer in \
-        "$ROOT/Packaging/installer/full/install.sh" \
-        "$ROOT/Packaging/installer/full/install.bat" \
-        "$ROOT/Packaging/installer/light/install.sh" \
-        "$ROOT/Packaging/installer/light/install.bat"; do
+        "$ROOT/Packaging/installer/device/install.sh" \
+        "$ROOT/Packaging/installer/device/install.bat"; do
     require_fixed "$installer" 'pm uninstall -k --user 0 ru.big.town.anative'
     require_fixed "$installer" 'cmd package install-existing --user 0 --wait ru.big.town.anative'
     require_fixed "$installer" '/data/user/0/ru.big.town.anative'
@@ -40,10 +36,8 @@ for installer in \
     require_fixed "$installer" 'pidof ru.big.town.anative'
 done
 
-sh -n "$ROOT/Packaging/installer/full/install.sh"
-sh -n "$ROOT/Packaging/installer/full/remove.sh"
-sh -n "$ROOT/Packaging/installer/light/install.sh"
-sh -n "$ROOT/Packaging/installer/light/remove.sh"
+sh -n "$ROOT/Packaging/installer/device/install.sh"
+sh -n "$ROOT/Packaging/installer/device/remove.sh"
 require_fixed "$RELEASE_BUILDER" 'test_android11_package_lifecycle.sh'
 require_fixed "$RELEASE_BUILDER" 'sh -n "$out/install.sh"'
 require_fixed "$RELEASE_BUILDER" 'sh -n "$out/remove.sh"'

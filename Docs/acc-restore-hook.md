@@ -1,6 +1,6 @@
 # Ранний перехват гостевого ACC ON на Sport+
 
-Full-агент `Packaging/inject/voyahtune_acc_restore.js` устанавливается в
+Агент `Packaging/inject/voyahtune_acc_restore.js` устанавливается в
 `com.qinggan.canbus.service`. В H97X он перехватывает
 `DongfengH97CCanBusComponentImpl.onBCM_PEPSChangeData(int[], boolean)`,
 когда младшие три бита первого байта равны 2 (ON), а текущий ACC ещё не равен 2.
@@ -39,7 +39,7 @@ Eco этим обработчиком после него не отправля�
 
 `voyahtune.load.rc` явно запускает loader в `post-fs-data`, когда /data уже
 смонтирована, сразу после существующего синхронного setenforce. Ожидания
-`late_start`, boot_completed или Native нет. Full-установщики проверяют новый
+`late_start`, boot_completed или Native нет. Установщики проверяют новый
 маркер RC и обновляют старый boot-hook.
 
 Первым запускается выделенный ACC worker. Пока CanBus отсутствует, пауза поиска
@@ -77,5 +77,5 @@ ACC ON. Если Android/CanBus запущен заново, его первый
 Диагностика: logcat `VoyahAccRestore`, `vt_load_bin` (attach/ready с uptime);
 `/data/local/tmp/voyahtune_acc_restore.txt` и `.txt.try`;
 `/data/local/tmp/voyahtune_worker.acc.state`. Публичный hook-status v1 не расширен.
-При удалении Full и переходе в Light очищаются скрипт, маркеры и логи.
+При удалении очищаются скрипт, маркеры и логи.
 Уже внедрённый агент остаётся до перезапуска целевого процесса/ГУ.

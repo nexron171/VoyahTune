@@ -8,7 +8,6 @@ pub mod engineering_menu;
 pub mod error;
 pub mod events;
 pub mod inventory;
-pub mod mode;
 pub mod payload;
 pub mod plans;
 pub mod recipe;

@@ -1,5 +1,5 @@
 use crate::{
-    payload::{self, Variant, NATIVE_PATH, RESTORE, WHITELIST},
+    payload::{self, NATIVE_PATH, RESTORE, WHITELIST},
     Error, Result,
 };
 use serde::{Deserialize, Serialize};
@@ -15,8 +15,6 @@ pub enum Phase {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CopyFile {
     pub artifact: String,
-    pub variant_artifact: bool,
-    pub variants: Vec<Variant>,
     pub destination: String,
     pub mode: u32,
     pub phase: Phase,
@@ -26,15 +24,12 @@ pub struct CopyFile {
 pub struct InstallPackage {
     pub artifact: String,
     pub package: String,
-    pub variant_artifact: bool,
-    pub variants: Vec<Variant>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Attributes {
     pub path: String,
     pub mode: u32,
-    pub variants: Vec<Variant>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,7 +49,8 @@ pub struct Recipe {
 }
 impl Default for Recipe {
     fn default() -> Self {
-        serde_json::from_str(include_str!("legacy-recipe.json")).expect("frozen legacy recipe")
+        serde_json::from_str(include_str!("default-recipe.json"))
+            .expect("default installation recipe")
     }
 }
 fn clean(path: &str) -> bool {
@@ -73,7 +69,7 @@ fn owned(path: &str) -> bool {
     clean(path)
         && (path == NATIVE_PATH
             || path == WHITELIST
-            || payload::FULL_NAMES
+            || payload::RUNTIME_NAMES
                 .iter()
                 .any(|n| payload::destination(n).is_some_and(|d| d.0 == path))
             || include_str!("cleanup_paths.txt").lines().any(|p| p == path)
@@ -100,30 +96,23 @@ impl Recipe {
             )
             .detail(detail)
         };
-        if !((self.schema == 1 && self.engine == "qinggan-v1")
-            || (self.schema == 2 && self.engine == "qinggan-v2"))
-        {
+        if self.schema != 3 || self.engine != "qinggan-v3" {
             return Err(Error::new(
                 "ENGINE_REQUIRED",
-                "Этот комплект требует другую версию установщика",
+                "Этот релиз требует другую версию установщика",
             )
             .detail(&self.engine));
         }
         if self.files.len() > 512 || self.packages.len() > 64 || self.remove_files.len() > 2048 {
             return Err(fail("Слишком большой манифест".into()));
         }
-        if self.schema == 2 {
-            if self.packages.len() != 1
-                || !self.remove_packages.is_empty()
-                || !self.remove_prefixes.is_empty()
-                || self.files.iter().any(|f| f.variant_artifact)
-            {
-                return Err(fail(
-                    "Неподдерживаемые пакетные операции или prefix cleanup".into(),
-                ));
-            }
-        } else if !self.directories.is_empty() || !self.attributes.is_empty() {
-            return Err(fail("Новые операции требуют recipe schema 2".into()));
+        if self.packages.len() != 1
+            || !self.remove_packages.is_empty()
+            || !self.remove_prefixes.is_empty()
+        {
+            return Err(fail(
+                "Неподдерживаемые пакетные операции или prefix cleanup".into(),
+            ));
         }
         for attr in self.directories.iter().chain(&self.attributes) {
             if !owned(&attr.path)
@@ -133,7 +122,6 @@ impl Recipe {
                     .split('/')
                     .any(|p| p.starts_with("voyahtune_") || p.starts_with("voyahtune-"))
                 || ![0o644, 0o755].contains(&attr.mode)
-                || attr.variants.is_empty()
             {
                 return Err(fail(attr.path.clone()));
             }
@@ -143,7 +131,6 @@ impl Recipe {
             if !owned(&file.destination)
                 || !destinations.insert(&file.destination)
                 || ![0o644, 0o755].contains(&file.mode)
-                || file.variants.is_empty()
             {
                 return Err(fail(file.destination.clone()));
             }
@@ -167,26 +154,21 @@ impl Recipe {
                 return Err(fail(file.artifact.clone()));
             }
         }
-        for (name, variants) in [
-            ("native.apk", vec![Variant::Full, Variant::Light]),
-            ("whitelist.xml", vec![Variant::Full, Variant::Light]),
-            ("load.bin", vec![Variant::Full]),
-            ("frida-inject", vec![Variant::Full]),
-            ("voyahtune.load.rc", vec![Variant::Full]),
-            ("voyahtune.load.sh", vec![Variant::Full]),
+        for name in [
+            "native.apk",
+            "whitelist.xml",
+            "load.bin",
+            "frida-inject",
+            "voyahtune.load.rc",
+            "voyahtune.load.sh",
         ] {
-            if !self.files.iter().any(|f| {
-                f.artifact == name
-                    && f.variants == variants
-                    && f.variant_artifact == (self.schema == 1 && name == "native.apk")
-            }) {
+            if !self.files.iter().any(|f| f.artifact == name) {
                 return Err(fail(format!("Обязательная роль: {name}")));
             }
         }
         let mut ids = BTreeSet::new();
         for package in &self.packages {
             if !ids.insert(&package.package)
-                || package.variants.is_empty()
                 || !(package.package == RESTORE || package.package.starts_with("ru.voyahtune."))
                 || !package.package.split('.').all(|s| {
                     !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
@@ -195,12 +177,11 @@ impl Recipe {
                 return Err(fail(package.package.clone()));
             }
         }
-        if !self.packages.iter().any(|p| {
-            p.package == RESTORE
-                && p.artifact == "restore_mode.apk"
-                && p.variant_artifact == (self.schema == 1)
-                && p.variants == [Variant::Full, Variant::Light]
-        }) {
+        if !self
+            .packages
+            .iter()
+            .any(|p| p.package == RESTORE && p.artifact == "restore_mode.apk")
+        {
             return Err(fail("Обязательная роль: RestoreMode".into()));
         }
         for id in &self.remove_packages {
@@ -256,10 +237,10 @@ impl Recipe {
         }
         Ok(())
     }
-    pub fn runtime(&self, variant: Variant) -> impl Iterator<Item = &CopyFile> {
+    pub fn runtime(&self) -> impl Iterator<Item = &CopyFile> {
         self.files
             .iter()
-            .filter(move |f| f.artifact != "native.apk" && f.variants.contains(&variant))
+            .filter(move |f| f.artifact != "native.apk")
     }
     pub fn cleanup_files(&self) -> Vec<String> {
         self.remove_files
@@ -288,8 +269,7 @@ mod tests {
         let mut recipe = Recipe::default();
         recipe.files.push(CopyFile {
             artifact: "voyahtune-new.json".into(),
-            variant_artifact: false,
-            variants: vec![Variant::Full, Variant::Light],
+
             destination: "/data/local/bin/voyahtune-new.json".into(),
             mode: 0o644,
             phase: Phase::Files,
