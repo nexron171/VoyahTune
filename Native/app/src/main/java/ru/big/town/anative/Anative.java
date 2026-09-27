@@ -6,13 +6,17 @@ import android.content.res.Configuration;
 public class Anative extends Application {
     // Called when the application is starting, before any other application objects have been created.
     // Overriding this method is totally optional!
-    @Override
-    public void onCreate() {
-        super.onCreate();
+    @Override protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(base);
         if (new java.io.File("/data/local/bin/voyahtune-update.block").exists()) {
             android.os.Process.killProcess(android.os.Process.myPid());
             throw new IllegalStateException("VoyahTune update requires USB repair");
         }
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
         GlobalVars.SAVE_CONTEXT = getBaseContext();
 
         // Required initialization logic here!

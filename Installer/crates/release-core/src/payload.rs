@@ -267,6 +267,16 @@ impl Payload {
 pub fn destination(name: &str) -> Option<(String, u32)> {
     match name {
         "native.apk" => Some((NATIVE_PATH.into(), 0o644)),
+        "voyahtune-updater" => Some(("/data/local/bin/voyahtune-updater".into(), 0o755)),
+        "voyahtune-updater.apk" => Some((
+            "/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk".into(),
+            0o644,
+        )),
+        "voyahtune.updater.rc" => Some(("/system/etc/init/voyahtune.updater.rc".into(), 0o644)),
+        "voyahtune-ota-key.der" => Some(("/system/etc/voyahtune-ota-key.der".into(), 0o644)),
+        "voyahtune-ota-bootstrap.json" => {
+            Some(("/system/etc/voyahtune-ota-bootstrap.json".into(), 0o644))
+        }
         "whitelist.xml" => Some((WHITELIST.into(), 0o644)),
         "voyahtune.load.rc" => Some(("/system/etc/init/voyahtune.load.rc".into(), 0o644)),
         "voyahtune.load.sh" => Some(("/system/etc/init.voyahtune.load.sh".into(), 0o755)),

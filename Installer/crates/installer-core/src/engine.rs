@@ -36,6 +36,7 @@ pub struct Engine {
     pub canbus_consent: Option<Arc<RemovalConsent>>,
     restart_loader: bool,
     legacy_migrated: bool,
+    ota_locked: bool,
 }
 impl Engine {
     pub fn new(
@@ -61,6 +62,7 @@ impl Engine {
             canbus_consent: None,
             restart_loader: false,
             legacy_migrated: false,
+            ota_locked: false,
         })
     }
     pub fn run(&mut self, request: Request) -> Result<()> {
@@ -71,6 +73,10 @@ impl Engine {
             ));
         }
         let result = self.execute(request);
+        self.ota_unlock();
+        if result.is_err() {
+            self.ignore("if [ -x /data/local/bin/voyahtune-updater ]; then setprop ctl.start voyahtune_updater; fi\n");
+        }
         // Restart the loader only before the accepted final reboot.
         if self.restart_loader {
             self.ignore("setprop ctl.start voyahtune_load 2>/dev/null || true\n");
@@ -200,6 +206,11 @@ impl Engine {
                 Ok(())
             },
         )?;
+        self.step(
+            "updater-lock",
+            "Блокировка установки и сохранение OTA-логов",
+            |e| e.ota_prepare(),
+        )?;
         self.ignore(&format!("rm -f {DEVICE_STATE}/lock/owner 2>/dev/null; rmdir {DEVICE_STATE}/lock 2>/dev/null; rmdir {DEVICE_STATE} 2>/dev/null; true\n"));
         if r.action != Action::Remove {
             self.step(
@@ -213,6 +224,8 @@ impl Engine {
             "Подготовка системного раздела",
             |e| e.writable(r.action == Action::Remove),
         )?;
+        self.ota_lock()?; // remount may have rebooted; retain this desktop operation across boot.
+        self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
         if r.action == Action::Install {
             self.step("backup", "Сохранение файлов перед заменой", |e| e.backup())?;
 
@@ -244,6 +257,10 @@ impl Engine {
                 |e| e.packages(),
             )?;
             self.step("dns", "Настройка DNS", |e| e.dns_choice(r.dns))?;
+            self.step("updater-bootstrap", "Подготовка первого запуска OTA", |e| {
+                e.shell("rm -f /data/local/voyahtune-updater/state.json /data/local/voyahtune-updater/.state.json.new /data/local/bin/voyahtune-update.block && sync\n")?;
+                Ok(())
+            })?;
             self.step(
                 "reboot",
                 "Перезагрузка автомобиля",
@@ -256,7 +273,19 @@ impl Engine {
             )?;
             self.step("verify", "Проверка запуска Native", |e| {
                 e.wait_boot(true)?;
-                e.native_ready()
+                e.native_ready()?;
+                e.shell("cmd package install-existing --user 0 --wait ru.big.town.updater\n")?;
+                let service = e.shell("getprop init.svc.voyahtune_updater\n")?;
+                if service != "running" {
+                    return Err(e.fail("Root-служба OTA не запустилась", service));
+                }
+                let version: serde_json::Value = serde_json::from_str(
+                    &e.shell("/data/local/bin/voyahtune-updater --version\n")?,
+                )?;
+                if version["ipcSchema"] != 1 {
+                    return Err(e.fail("Несовместимый IPC updater", version));
+                }
+                Ok(())
             })?;
         } else {
             self.step("deactivate", "Отключение Apollo", |e| {
@@ -303,6 +332,67 @@ impl Engine {
                     Ok(())
                 },
             )?;
+        }
+        Ok(())
+    }
+    fn ota_lock(&mut self) -> Result<()> {
+        let owner = quote(&format!("desktop:{}", self.operation.id));
+        self.shell(&format!(r#"lock=/data/local/voyahtune-install.lock
+boot=$(cat /proc/sys/kernel/random/boot_id) || exit 1
+[ ! -L "$lock" ] || exit 1
+if mkdir "$lock" 2>/dev/null; then :
+else
+    old=$(cat "$lock/owner" 2>/dev/null)
+    if [ "$old" = {owner} ]; then :
+    elif [ "$old" = ota ] && {{ [ "$(cat "$lock/boot" 2>/dev/null)" != "$boot" ] || [ "$(/data/local/bin/voyahtune-updater --repair-status 2>/dev/null)" = repair-required ]; }}; then
+        rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" && mkdir "$lock" || exit 1
+    else echo 'OTA или другой установщик уже использует ГУ'; exit 1; fi
+fi
+printf '%s' {owner} > "$lock/owner" && printf '%s' "$boot" > "$lock/boot" && chmod 700 "$lock" && sync
+"#))?;
+        self.ota_locked = true;
+        Ok(())
+    }
+    fn ota_unlock(&mut self) {
+        if !self.ota_locked {
+            return;
+        }
+        let owner = quote(&format!("desktop:{}", self.operation.id));
+        self.ignore(&format!("if [ \"$(cat /data/local/voyahtune-install.lock/owner 2>/dev/null)\" = {owner} ]; then rm -f /data/local/voyahtune-install.lock/owner /data/local/voyahtune-install.lock/boot; rmdir /data/local/voyahtune-install.lock; fi\n"));
+        self.ota_locked = false;
+    }
+    fn ota_prepare(&mut self) -> Result<()> {
+        self.ota_lock()?;
+        self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
+        for _ in 0..20 {
+            if self.shell("getprop init.svc.voyahtune_updater\n")? != "running" {
+                break;
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+        if self.shell("getprop init.svc.voyahtune_updater\n")? == "running" {
+            return Err(self.fail(
+                "Не удалось остановить OTA-службу",
+                "Повторите после завершения OTA",
+            ));
+        }
+        let diagnostics = self.operation.dir.join("ota-diagnostics");
+        fs::create_dir_all(&diagnostics)?;
+        for name in [
+            "state.json",
+            "state.corrupt.json",
+            "updater.log",
+            "updater.log.1",
+            "command.log",
+        ] {
+            let remote = format!("/data/local/voyahtune-updater/{name}");
+            if self.shell(&format!(
+                "if [ -f {} ]; then echo PRESENT; fi\n",
+                quote(&remote)
+            ))? == "PRESENT"
+            {
+                self.adb.pull(&remote, &diagnostics.join(name))?;
+            }
         }
         Ok(())
     }
@@ -677,6 +767,9 @@ impl Engine {
             f.phase == crate::recipe::Phase::Files
                 && !["native.apk", "whitelist.xml"].contains(&f.artifact.as_str())
         }) {
+            if file.artifact == "voyahtune-updater.apk" {
+                self.shell("mkdir -p /system/priv-app/VoyahTuneUpdater && chown 0:0 /system/priv-app/VoyahTuneUpdater && chmod 755 /system/priv-app/VoyahTuneUpdater\n")?;
+            }
             let stage = format!("{}.voyahtune.new", file.destination);
             self.push_file(
                 &self.payload.file(&file.artifact)?,
@@ -1012,6 +1105,10 @@ impl Engine {
         self.shell(c::REMOVE_FILES)?;
         self.shell("test ! -e /data/local/bin/voyahtune-hook-manifest.json && test ! -e /data/local/tmp/voyahtune-hook-status.v1\n")?;
         self.shell(c::REMOVE_CLIENT_CHECK)?;
+        self.ignore(
+            "am force-stop ru.big.town.updater; pm uninstall --user 0 ru.big.town.updater\n",
+        );
+        self.shell("rm -f /data/local/bin/voyahtune-update.block && rm -rf /data/local/voyahtune-updater /system/priv-app/VoyahTuneUpdater\n")?;
 
         for path in self.payload.manifest.recipe.cleanup_files() {
             self.shell(&format!("rm -f {}\n", quote(&path)))?;

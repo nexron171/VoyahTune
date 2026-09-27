@@ -223,7 +223,27 @@ fn run() -> io::Result<()> {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!(
+            "{}",
+            json!({"version":env!("CARGO_PKG_VERSION"),"ipcSchema":1})
+        );
+        return;
+    }
+    if std::env::args().nth(1).as_deref() == Some("--repair-status") {
+        if unsafe { libc::geteuid() } != 0 {
+            std::process::exit(1);
+        }
+        match state::read::<state::State>(&Path::new(ROOT).join("state.json")) {
+            Ok(s) if s.schema == 1 && s.repair() => {
+                println!("repair-required");
+                return;
+            }
+            _ => std::process::exit(1),
+        }
+    }
     if let Err(error) = run() {
+        let _ = log(Path::new(ROOT), &format!("service_fatal {error}"));
         eprintln!("voyahtune-updater: {error}");
         std::process::exit(1);
     }

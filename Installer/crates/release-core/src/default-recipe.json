@@ -15,72 +15,6 @@
       "phase": "files"
     },
     {
-      "artifact": "steeringwheelkeys.js",
-      "destination": "/data/local/bin/steeringwheelkeys.js",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "launcherdock.js",
-      "destination": "/data/local/bin/launcherdock.js",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "multidisplay.js",
-      "destination": "/data/local/bin/multidisplay.js",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "vd_bypass.js",
-      "destination": "/data/local/bin/vd_bypass.js",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "fullscreen_client.js",
-      "destination": "/data/local/bin/fullscreen_client.js",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "apollo_tech.js",
-      "destination": "/data/local/bin/apollo_tech.js",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "keyboard_lock_en.js",
-      "destination": "/data/local/bin/keyboard_lock_en.js",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "keyboard_ru.js",
-      "destination": "/data/local/bin/keyboard_ru.js",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "voyahtune_keyboard_en_config.json",
-      "destination": "/data/local/bin/voyahtune_keyboard_en_config.json",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "voyahtune_keyboard_ru_config.json",
-      "destination": "/data/local/bin/voyahtune_keyboard_ru_config.json",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
-      "artifact": "voyahtune_skb_qwerty_ru.json",
-      "destination": "/data/local/bin/voyahtune_skb_qwerty_ru.json",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
       "artifact": "frida-inject",
       "destination": "/data/local/bin/frida-inject",
       "mode": 493,
@@ -101,6 +35,36 @@
     {
       "artifact": "whitelist.xml",
       "destination": "/system/etc/permissions/privapp-permissions-ru.big.town.anative.xml",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-updater",
+      "destination": "/data/local/bin/voyahtune-updater",
+      "mode": 493,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-updater.apk",
+      "destination": "/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune.updater.rc",
+      "destination": "/system/etc/init/voyahtune.updater.rc",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-ota-key.der",
+      "destination": "/system/etc/voyahtune-ota-key.der",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-ota-bootstrap.json",
+      "destination": "/system/etc/voyahtune-ota-bootstrap.json",
       "mode": 420,
       "phase": "files"
     }

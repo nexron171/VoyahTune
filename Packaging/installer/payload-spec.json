@@ -37,6 +37,36 @@
       "destination": "/system/etc/permissions/privapp-permissions-ru.big.town.anative.xml",
       "mode": 420,
       "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-updater",
+      "destination": "/data/local/bin/voyahtune-updater",
+      "mode": 493,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-updater.apk",
+      "destination": "/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune.updater.rc",
+      "destination": "/system/etc/init/voyahtune.updater.rc",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-ota-key.der",
+      "destination": "/system/etc/voyahtune-ota-key.der",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-ota-bootstrap.json",
+      "destination": "/system/etc/voyahtune-ota-bootstrap.json",
+      "mode": 420,
+      "phase": "files"
     }
   ],
   "packages": [

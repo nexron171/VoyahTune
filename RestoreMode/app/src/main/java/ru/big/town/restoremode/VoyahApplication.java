@@ -6,12 +6,16 @@ import android.os.Bundle;
 
 /** Start warmup when VoyahTune becomes visible, not when a provider wakes its process. */
 public final class VoyahApplication extends Application {
-    @Override public void onCreate() {
-        super.onCreate();
+    @Override protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(base);
         if (new java.io.File("/data/local/bin/voyahtune-update.block").exists()) {
             android.os.Process.killProcess(android.os.Process.myPid());
             throw new IllegalStateException("VoyahTune update requires USB repair");
         }
+    }
+
+    @Override public void onCreate() {
+        super.onCreate();
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
             @Override public void onActivityStarted(Activity activity) {
                 if (activity instanceof VoiceActivity && ((VoiceActivity) activity).isAnimationPreview()) return;

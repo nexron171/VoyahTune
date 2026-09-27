@@ -54,6 +54,30 @@ class InstallerTests(unittest.TestCase):
   for package in ['ru.big.town.anative','ru.big.town.restoremode']:
    for parent in ['data/user/0','data/user_de/0']:
     self.assertEqual((self.device/parent/package/'settings-marker').exists(),present)
+ def test_ota_bootstrap_install_repair_diagnostics_and_remove(self):
+  self.seed_apps()
+  lock=self.device/'data/local/voyahtune-install.lock';lock.mkdir()
+  (lock/'owner').write_text('ota');(lock/'boot').write_text('previous-boot')
+  diagnostics=self.device/'data/local/voyahtune-updater';diagnostics.mkdir()
+  (diagnostics/'updater.log').write_text('FAILED interrupted apply')
+  (diagnostics/'state.json').write_text('{"phase":"repair-required"}')
+  (self.device/'data/local/bin/voyahtune-update.block').write_text('interrupted')
+  self.apply(self.plan());self.assert_app_data(True)
+  for path in ['data/local/bin/voyahtune-updater','system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk','system/etc/init/voyahtune.updater.rc','system/etc/voyahtune-ota-key.der']:
+   self.assertTrue((self.device/path).is_file(),path)
+  self.assertFalse(lock.exists());self.assertFalse((self.device/'data/local/bin/voyahtune-update.block').exists())
+  logs=list((self.base/'logs').rglob('ota-diagnostics/updater.log'))
+  self.assertEqual(len(logs),1);self.assertEqual(logs[0].read_text(),'FAILED interrupted apply')
+  self.apply(self.plan('remove'))
+  self.assertFalse(diagnostics.exists())
+  self.assertFalse((self.device/'system/priv-app/VoyahTuneUpdater').exists())
+ def test_live_ota_lock_blocks_desktop_before_file_changes(self):
+  lock=self.device/'data/local/voyahtune-install.lock';lock.mkdir()
+  (lock/'owner').write_text('ota');(lock/'boot').write_text('0')
+  result=self.apply(self.plan(),okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertEqual((lock/'owner').read_text(),'ota')
+  self.assertFalse((self.device/'system/priv-app/Native/Native.apk').exists())
  def test_remove_does_not_verify_old_or_broken_signatures(self):
   self.seed_apps(old_key=True,broken=True)
   p=self.plan('remove');self.assertTrue(all(not app['signers'] for app in p['inventory']['packages'].values()))

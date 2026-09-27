@@ -67,7 +67,16 @@ fn clean(path: &str) -> bool {
 // its own namespace; shared/legacy names require the existing guarded handlers.
 fn owned(path: &str) -> bool {
     clean(path)
-        && (path == NATIVE_PATH
+        && ([
+            "voyahtune-updater",
+            "voyahtune-updater.apk",
+            "voyahtune.updater.rc",
+            "voyahtune-ota-key.der",
+            "voyahtune-ota-bootstrap.json",
+        ]
+        .iter()
+        .any(|name| payload::destination(name).is_some_and(|(p, _)| p == path))
+            || path == NATIVE_PATH
             || path == WHITELIST
             || payload::RUNTIME_NAMES
                 .iter()
@@ -140,6 +149,11 @@ impl Recipe {
             }
             // Special engine roles have fixed targets and restoration semantics.
             if [
+                "voyahtune-updater",
+                "voyahtune-updater.apk",
+                "voyahtune.updater.rc",
+                "voyahtune-ota-key.der",
+                "voyahtune-ota-bootstrap.json",
                 "native.apk",
                 "whitelist.xml",
                 "load.bin",

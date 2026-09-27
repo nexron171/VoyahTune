@@ -91,7 +91,8 @@ fn native_status(safety: bool) -> io::Result<String> {
 fn preflight(p: &Payload) -> io::Result<()> {
     compatible(p)?;
     let status = native_status(true)?;
-    if !status.contains("otaReady=true")
+    if status.contains("error=")
+        || !status.contains("otaReady=true")
         || !status.contains("parked=true")
         || !status.contains("stationary=true")
     {
@@ -142,24 +143,30 @@ impl OperationLock {
         match fs::create_dir(LOCK) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                if fs::read_to_string(Path::new(LOCK).join("owner"))?.trim() != "ota" {
+                    return Err(invalid("Компьютерный установщик использует ГУ"));
+                }
                 let old = fs::read_to_string(Path::new(LOCK).join("boot"))?;
                 if old.trim() == device::boot() {
                     return Err(invalid("Другая установка использует ГУ"));
                 }
                 device::no_links(Path::new(LOCK))?;
                 fs::remove_file(Path::new(LOCK).join("boot"))?;
+                fs::remove_file(Path::new(LOCK).join("owner"))?;
                 fs::remove_dir(LOCK)?;
                 fs::create_dir(LOCK)?;
             }
             Err(e) => return Err(e),
         }
         fs::write(Path::new(LOCK).join("boot"), device::boot())?;
+        fs::write(Path::new(LOCK).join("owner"), "ota")?;
         Ok(Self)
     }
 }
 impl Drop for OperationLock {
     fn drop(&mut self) {
         let _ = fs::remove_file(Path::new(LOCK).join("boot"));
+        let _ = fs::remove_file(Path::new(LOCK).join("owner"));
         let _ = fs::remove_dir(LOCK);
     }
 }
@@ -169,6 +176,16 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     workflow::phase(shared, "applying", "Проверка условий установки")?;
     preflight(&p)?;
     device::wake(true)?;
+    let fresh = native_status(true)?;
+    if fresh.contains("error=")
+        || !fresh.contains("otaReady=true")
+        || !fresh.contains("parked=true")
+        || !fresh.contains("stationary=true")
+    {
+        return Err(invalid(&format!(
+            "Состояние автомобиля изменилось перед установкой: {fresh}"
+        )));
+    }
     let mut block = fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -235,8 +252,17 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
         if path.starts_with("/sdcard/") {
             continue;
         } // Legacy external logs are outside OTA ownership.
-        device::no_links(Path::new(path))?;
+          // Unlink an obsolete symlink itself; never traverse its target.
+        device::no_links(Path::new(path).parent().unwrap())?;
         match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    for path in &p.manifest.recipe.remove_directories {
+        device::no_links(Path::new(path))?;
+        match fs::remove_dir_all(path) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
@@ -277,6 +303,21 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     thread::sleep(Duration::from_secs(30));
     Err(invalid("ГУ не перезагрузилось после команды reboot"))
 }
+fn target_pids(target: &str) -> io::Result<Vec<u32>> {
+    let mut pids = Vec::new();
+    for entry in fs::read_dir("/proc")? {
+        let entry = entry?;
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        if let Ok(cmdline) = fs::read(entry.path().join("cmdline")) {
+            if cmdline.split(|b| *b == 0).next() == Some(target.as_bytes()) {
+                pids.push(pid);
+            }
+        }
+    }
+    Ok(pids)
+}
 fn hook_health() -> io::Result<String> {
     let data = fs::read_to_string("/data/local/tmp/voyahtune-hook-status.v1")?;
     if !data.starts_with("v=1;loader=running;pid=") {
@@ -293,20 +334,51 @@ fn hook_health() -> io::Result<String> {
     if pid == 0 || !Path::new(&format!("/proc/{pid}")).exists() {
         return Err(invalid("Процесс загрузчика отсутствует"));
     }
-    for hook in parts {
-        let (name, value) = hook
-            .split_once('=')
-            .ok_or_else(|| invalid("Некорректный статус hook"))?;
+    let targets = [
+        ("vd-bypass", "system_server", false),
+        ("steering-wheel", "com.qinggan.keymanager.service", false),
+        ("launcher-dock", "com.qinggan.app.launcher", false),
+        ("multi-display", "com.qinggan.systemservice", false),
+        ("apollo-tech", "com.qinggan.app.vehiclesetting", true),
+        ("keyboard-en", "com.qinggan.app.qgime", true),
+        ("keyboard-ru", "com.qinggan.app.qgime", true),
+    ];
+    let statuses: Vec<_> = parts.collect();
+    for (name, target, optional) in targets {
+        let prefix = format!("{name}=");
+        let value = statuses
+            .iter()
+            .find_map(|s| s.strip_prefix(&prefix))
+            .ok_or_else(|| invalid(&format!("Нет статуса hook {name}")))?;
         let (state, pid) = value
             .split_once(':')
-            .ok_or_else(|| invalid("Некорректный PID hook"))?;
-        if state == "active" {
-            let pid = pid.parse::<u32>().map_err(error)?;
-            if pid == 0 || !Path::new(&format!("/proc/{pid}")).exists() {
-                return Err(invalid(&format!("Целевой процесс {name} завершился")));
+            .ok_or_else(|| invalid("Некорректный статус hook"))?;
+        let live = target_pids(target)?;
+        match state {
+            "active" if live.contains(&pid.parse::<u32>().map_err(error)?) => {}
+            "disabled" if optional => {}
+            "waiting" if live.is_empty() => {}
+            _ => return Err(invalid(&format!("Hook {name}: {state}, PID {pid}"))),
+        }
+    }
+    // These mandatory agents publish identity markers outside the UI status contract.
+    for (target, marker) in [
+        ("com.qinggan.canbus.service", "voyahtune_acc_restore.pid"),
+        (
+            "com.qinggan.app.vehiclesetting",
+            "voyahtune_drive_reset.pid",
+        ),
+    ] {
+        for pid in target_pids(target)? {
+            let stat = fs::read_to_string(format!("/proc/{pid}/stat"))?;
+            let start = stat
+                .rsplit_once(") ")
+                .and_then(|(_, rest)| rest.split_whitespace().nth(19))
+                .ok_or_else(|| invalid("Нет времени старта процесса hook"))?;
+            let expected = format!("v2:{}:{pid}:{start}", device::boot());
+            if fs::read_to_string(format!("/data/local/tmp/{marker}"))?.trim() != expected {
+                return Err(invalid(&format!("Hook {marker} ещё не запущен в {target}")));
             }
-        } else if state != "disabled" && state != "waiting" {
-            return Err(invalid(&format!("Hook {name}: {state}")));
         }
     }
     Ok(data)
@@ -371,7 +443,7 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
     while Instant::now() < deadline {
         let result = (|| -> io::Result<String> {
             let native = native_status(false)?;
-            if !native.contains("otaReady=true") {
+            if native.contains("error=") || !native.contains("otaReady=true") {
                 return Err(invalid(&native));
             }
             hook_health()?;
