@@ -1,0 +1,8 @@
+<resources>
+    <style name="UpdaterTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#78C5B4</item>
+        <item name="android:windowBackground">#151B1E</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

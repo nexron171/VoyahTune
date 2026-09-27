@@ -2563,6 +2563,13 @@
 
         </LinearLayout>
 
+        <Button
+            android:id="@+id/buttonOpenUpdates"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:text="Обновления VoyahTune" />
+
         <!-- Диагностика ресурсов существует только пока открыт раздел «Другое». -->
         <LinearLayout
             android:layout_width="match_parent"

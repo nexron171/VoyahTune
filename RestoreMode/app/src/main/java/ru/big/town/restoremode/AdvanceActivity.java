@@ -570,6 +570,18 @@ public class AdvanceActivity extends AppCompatActivity {
 
         TextView textAppVersion = findViewById(R.id.textAppVersion);
         textAppVersion.setText(BuildConfig.VERSION_NAME);
+        findViewById(R.id.buttonOpenUpdates).setOnClickListener(v -> {
+            Intent updates = new Intent(Intent.ACTION_MAIN)
+                    .setComponent(new android.content.ComponentName(
+                            "ru.big.town.updater", "ru.big.town.updater.MainActivity"));
+            try {
+                startActivity(updates);
+            } catch (android.content.ActivityNotFoundException | SecurityException unavailable) {
+                android.widget.Toast.makeText(this,
+                        "Обновления недоступны. Установите релиз с поддержкой OTA через USB с компьютера.",
+                        android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
 
         // Раздел «Другое»: тоггл «Режим отладки»
         Switch switchDebugMode = findViewById(R.id.switchDebugMode);
