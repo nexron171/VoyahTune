@@ -256,7 +256,7 @@ fi
 adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null
 adb shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock" 2>/dev/null
 adb shell "rm -rf /data/local/tmp/voyah_load.lock" 2>/dev/null
-adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|voyahtune_acc_restore|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
+adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|voyahtune_acc_restore|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print \$2}' | xargs -r kill -9" 2>/dev/null
 # Eternalized agent живёт в target без frida-inject; force-stop выгружает его до финального reboot.
 adb shell "am force-stop com.qinggan.app.vehiclesetting" 2>/dev/null
 adb shell "am force-stop com.qinggan.app.qgime" 2>/dev/null

@@ -24,6 +24,8 @@ use std::{
     thread,
     time::Duration,
 };
+// pkill uses status 1 for an already absent process; other failures remain warnings.
+const STOP_LOADER: &str = "pkill -f /data/local/bin/load.bin; stop_status=$?; if [ $stop_status -gt 1 ]; then exit $stop_status; fi\n";
 const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
 const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
 pub struct Engine {
@@ -644,11 +646,10 @@ impl Engine {
             return self.soft_remove_full_runtime();
         }
         self.restart_loader = true;
-        self.ignore(if v == Variant::Full {
-            c::STOP_FULL
-        } else {
-            c::STOP_LIGHT
-        });
+        // Light has no init service. Absence is already stopped, not a failure.
+        if let Err(error) = self.stop_runtime_for_update() {
+            self.warning(&error);
+        }
         self.apollo_safe(true)?;
         self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
         if v == Variant::Light {
@@ -678,7 +679,7 @@ impl Engine {
         self.remove_boot()?;
         // After boot removal, an interrupted cleanup must never restart Full.
         self.restart_loader = false;
-        self.ignore("pkill -f /data/local/bin/load.bin\n");
+        self.ignore(STOP_LOADER);
         self.ignore(c::REMOVE_PROCESSES);
         self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
         self.ignore("am force-stop com.qinggan.app.qgime\n");
@@ -1048,6 +1049,11 @@ impl Engine {
         }
         result
     }
+    fn stop_runtime_for_update(&self) -> Result<()> {
+        self.stop_service()?;
+        self.shell("rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock && rm -rf /data/local/tmp/voyah_load.lock\n")?;
+        Ok(())
+    }
     fn stop_service(&self) -> Result<()> {
         let state = self.shell("getprop init.svc.voyahtune_load\n")?;
         if state.is_empty() || state == "stopped" {
@@ -1076,7 +1082,7 @@ impl Engine {
         Ok(())
     }
     fn remove_files(&self) -> Result<()> {
-        self.ignore("pkill -f /data/local/bin/load.bin\n");
+        self.ignore(STOP_LOADER);
         self.ignore(
             "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock\n",
         );
@@ -1241,4 +1247,45 @@ pub fn default_adb(bundle: &Path) -> PathBuf {
     bundle
         .join("adb")
         .join(if cfg!(windows) { "adb.exe" } else { "adb" })
+}
+
+#[cfg(all(test, unix))]
+mod runtime_stop_tests {
+    use super::*;
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+
+    #[test]
+    fn absent_loader_is_success_but_real_pkill_errors_are_preserved() {
+        for code in [0, 1, 2, 127] {
+            let output = Command::new("sh")
+                .args(["-c", &format!("pkill() {{ return {code}; }}\n{STOP_LOADER}")])
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(if code <= 1 { 0 } else { code }));
+        }
+    }
+
+    #[test]
+    fn hook_stop_skips_empty_input_and_only_targets_owned_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let kill = dir.path().join("kill");
+        fs::write(&kill, "#!/bin/sh\nprintf '%s\\n' \"$*\"\nexit \"${TEST_KILL_STATUS:-0}\"\n").unwrap();
+        fs::set_permissions(&kill, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:{}", dir.path().display(), std::env::var("PATH").unwrap());
+        for (rows, expected, code) in [
+            ("", "", 0),
+            ("root 101 1 frida-inject -s /data/local/bin/vd_bypass.js\nroot 102 1 frida-inject -s /other/app.js\nroot 103 1 unrelated-process", "-9 101\n", 0),
+            ("root 101 1 frida-inject -s /data/local/bin/vd_bypass.js", "-9 101\n", 1),
+        ] {
+            let output = Command::new("sh")
+                .env("PATH", &path)
+                .env("TEST_ROWS", rows)
+                .env("TEST_KILL_STATUS", code.to_string())
+                .args(["-c", &format!("ps() {{ [ -z \"$TEST_ROWS\" ] || printf '%s\\n' \"$TEST_ROWS\"; }}\n{}", c::REMOVE_PROCESSES)])
+                .output()
+                .unwrap();
+            assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+            assert_eq!(output.status.success(), code == 0);
+        }
+    }
 }

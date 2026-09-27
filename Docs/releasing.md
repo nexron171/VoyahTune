@@ -1,21 +1,37 @@
 # Подготовка окружения и выпуск VoyahTune
 
 Актуально на 27 сентября 2026 года. Команды выполняются из корня репозитория.
-`3.13.0` в примерах замените номером своего релиза.
+`3.14.0` в примерах — условный **новый** релиз. Замените его своим ещё не
+опубликованным номером. Версия установщика задаётся отдельно.
+
+Обычный выпуск состоит из шести действий:
+
+1. Подготовить исходники, версии APK, описание изменений и коммит.
+2. Собрать `./make_release.sh 3.14.0 --payload`.
+3. Проверить полученный комплект и установку в согласованном объёме.
+4. Загрузить `payload_3.14.0.zip` в опубликованный GitHub Release `v3.14.0`.
+5. Добавить сгенерированную запись в каталог с проверкой удалённого ZIP и опубликовать
+   `Installer/releases/index.json` в ветке `master-od`.
+6. В прежнем GUI нажать «Обновить список», скачать новый комплект и проверить его выбор.
+
+**Если процесс установки не изменился, GUI пересобирать и распространять заново не нужно.**
+Сборка создаёт локальные файлы; загрузка в GitHub Releases и публикация каталога —
+отдельные действия. Ни одна команда сборки не выполняет их автоматически.
 
 ## 1. Выбрать формат релиза
 
 | Формат | Команда | Результат |
 | --- | --- | --- |
-| По старому, со скриптами | `./make_release.sh 3.13.0` | Отдельные Full и Light ZIP с install/remove |
-| Только единый payload | `./make_release.sh 3.13.0 --payload` | `payload_3.13.0.zip` и заготовка записи каталога |
-| Payload и GUI macOS | `./make_release.sh 3.13.0 --mac` | Payload ZIP и самостоятельный Universal GUI ZIP |
+| По старому, со скриптами | `./make_release.sh 3.14.0` | Отдельные Full и Light ZIP с install/remove |
+| Только единый payload | `./make_release.sh 3.14.0 --payload` | `payload_3.14.0.zip` и заготовка записи каталога |
+| Payload и GUI macOS | `./make_release.sh 3.14.0 --mac` | Payload ZIP и самостоятельный Universal GUI ZIP |
 | Только установщик macOS | `./Installer/scripts/build-all-macos.sh --mac` | Universal GUI без сборки Android |
 
 Без флагов используется классический формат. `--installers` собирает payload и GUI
 для всех платформ; флаги `--mac`, `--windows`, `--linux` ограничивают платформы.
 Windows ARM/Linux ARM не собираются. Текущая переработка проверяется только на macOS;
-Windows и реальное ГУ — отдельная последующая сессия.
+Windows проверяется отдельно. Объём уже выполненной проверки на ГУ указан
+в [архитектуре установщика](installer-architecture.md); новый релиз требует своих проверок.
 
 GUI пересобирается только при изменении его логики. Обычный новый релиз — общий payload
 и обновление каталога. ADB и небольшой remover входят в GUI, APK скачиваются/импортируются
@@ -90,7 +106,7 @@ test -s Native/app/lib/android.car.jar
 необходимый входной файл проекта. Rust, Tauri, Python и Docker для старого формата
 не нужны.
 
-### 2.3. Дополнительно для GUI macOS
+### 2.3. Дополнительно для payload и GUI macOS
 
 Установите Python 3.12+ и Rust через rustup. Версия Rust закреплена в
 `Installer/rust-toolchain.toml`, сейчас это `1.98.1`:
@@ -103,10 +119,14 @@ npm --version
 ./Installer/scripts/build-all-macos.sh --check --mac
 ```
 
+Для `--payload` также нужны Python и Rust: Python запускает сборку, Rust-утилита
+формирует и проверяет payload. Desktop и контейнеры в этом режиме не собираются;
+два Apple target и проверка `--check --mac` нужны при сборке самого GUI.
+
 Desktop-зависимости устанавливаются автоматически через `npm ci` во время сборки.
 Глобально устанавливать Tauri CLI не требуется.
 
-Теперь можно выполнять `./make_release.sh 3.13.0 --mac`. При выборе только macOS
+Теперь можно выполнять `./make_release.sh 3.14.0 --mac`. При выборе только macOS
 Docker/Colima не проверяются и не запускаются.
 
 ### 2.4. Дополнительно для Windows/Linux из macOS
@@ -186,7 +206,7 @@ checkout контейнеры нужно пересоздать с правил�
 
 ### Версии и подписи
 
-1. Выберите SemVer-версию комплекта, например `3.13.0`. Она передаётся аргументом
+1. Выберите SemVer-версию комплекта, например `3.14.0`. Она передаётся аргументом
    `make_release.sh`; `@VERSION@` в исходных скриптах заменяется автоматически.
 2. Для изменившихся APK увеличьте `versionCode` относительно опубликованного
    выпуска и задайте `versionName` в `Native/app/build.gradle.kts` и
@@ -214,17 +234,17 @@ APK. Изменённое рабочее дерево даёт revision с `-dir
 ## 4. Собрать по старому: ZIP со скриптами
 
 ```sh
-./make_release.sh 3.13.0
+./make_release.sh 3.14.0
 ```
 
 Скрипт запускает проверки Packaging, собирает единые APK обоих приложений,
 раскладывает файлы и создаёт:
 
 ```text
-Releases/dist/VoyahTune-3.13.0.zip
-Releases/dist/VoyahTune-3.13.0-light.zip
-Releases/build/VoyahTune-3.13.0/
-Releases/build/VoyahTune-3.13.0-light/
+Releases/dist/VoyahTune-3.14.0.zip
+Releases/dist/VoyahTune-3.14.0-light.zip
+Releases/build/VoyahTune-3.14.0/
+Releases/build/VoyahTune-3.14.0-light/
 ```
 
 В каждом ZIP — плоская папка с APK, ресурсами, `install.sh/.bat`, `remove.sh/.bat`
@@ -233,10 +253,10 @@ Releases/build/VoyahTune-3.13.0-light/
 
 | Команда | Назначение |
 | --- | --- |
-| `./make_release.sh 3.13.0 --full-only` | Только Full |
-| `./make_release.sh 3.13.0 --light-only` | Только Light |
-| `./make_release.sh 3.13.0 --no-zip` | Собрать APK и папки, без новых ZIP |
-| `./make_release.sh 3.13.0 --no-build` | Перепаковать с APK из существующих папок этой версии в `Releases/build/` |
+| `./make_release.sh 3.14.0 --full-only` | Только Full |
+| `./make_release.sh 3.14.0 --light-only` | Только Light |
+| `./make_release.sh 3.14.0 --no-zip` | Собрать APK и папки, без новых ZIP |
+| `./make_release.sh 3.14.0 --no-build` | Перепаковать с APK из существующих папок этой версии в `Releases/build/` |
 
 `--no-build` не обновляет APK из изменённых исходников; для нового выпуска
 используйте обычную команду. `--legacy VERSION` остаётся совместимым псевдонимом
@@ -245,17 +265,17 @@ Releases/build/VoyahTune-3.13.0-light/
 ## 5. Независимые payload и GUI
 
 ```sh
-./make_release.sh 3.13.0 --payload
+./make_release.sh 3.14.0 --payload
 ./Installer/scripts/build-all-macos.sh --mac
 ```
 
 Первая команда собирает одну общую пару APK с metadata для Full/Light и проверяет весь
-recipe/payload. Результаты: `Releases/dist/payload_3.13.0.zip`, `payload_3.13.0.json`,
-`Releases/build/installer-payload-3.13.0/`. Desktop/Colima не запускаются.
+recipe/payload. Результаты: `Releases/dist/payload_3.14.0.zip`, `payload_3.14.0.json`,
+`Releases/build/installer-payload-3.14.0/`. Desktop/Colima не запускаются.
 Вторая команда собирает только GUI/ADB/recovery в `Releases/build/installers-1.0.0/`.
 `--payload DIRECTORY` у desktop-сборки допускает дополнительный offline bundle.
 
-Совместимая обёртка `./make_release.sh 3.13.0 --mac` делает обе операции и складывает
+Совместимая обёртка `./make_release.sh 3.14.0 --mac` делает обе операции и складывает
 GUI ZIP в `Releases/dist/VoyahTune-Installer-1.0.0/`, с SHA256SUMS и release.json.
 Без платформенных флагов `--installers` выбирает все три ОС. Версии в этих примерах
 замените фактическими версиями автомобильного комплекта и Cargo соответственно.
@@ -271,49 +291,262 @@ GUI ZIP в `Releases/dist/VoyahTune-Installer-1.0.0/`, с SHA256SUMS и release.
 и `--light-only` относятся к классическому формату доставки.
 Не запускайте две Android-сборки одного checkout одновременно.
 
-## 6. Проверки и публикация
+## 6. Выпустить новый payload и обновить каталог
 
-1. Выполните проверки [движка](installer-classic-port.md#как-проверять-изменения),
-   `npm --prefix Installer/desktop run check` и build интерфейса.
-2. Проверьте APK сертификаты и общий состав для Full/Light. Подписи должны совпадать
-   с прежним выпуском для сохранения данных. Universal APK имеют `supportedModes`, без flavor.
-3. Проверьте GUI без полного payload, каталог/кэш/локальный ZIP, требования обновления,
-   отмену загрузки, подтверждение автомобиля и CAN consent. `build-info.json` содержит
-   `installerVersion` и `embeddedPayload: false` для обычного GUI.
-4. На согласованном тестовом ГУ отдельно проверьте Full/Light, Light → Full,
-   soft cleanup Full → Light с сохранением данных, remove → Light, DNS, CE/DE и ранний запуск приложений/loader.
-   Fake ADB и macOS не подтверждают Windows или поведение автомобиля.
+### 6.1. Собрать и проверить локальный результат
 
-Проверки готовых ресурсов выполняет сборочная утилита, не распространяемый CLI:
+После подготовки исходников, версий и коммита из раздела 3 выполните:
 
 ```sh
-Installer/target/release/installer-build verify-payload Releases/build/installer-payload-3.13.0
-Installer/target/release/installer-build verify-host '/path/VoyahTune Installer.app/Contents/Resources/bundle'
-python3 Installer/scripts/update-catalog.py
+./make_release.sh 3.14.0 --payload
+Installer/target/release/installer-build verify-payload Releases/build/installer-payload-3.14.0
+python3 -m json.tool Releases/dist/payload_3.14.0.json
 ```
 
-Последняя команда только валидирует локальный index. Публикация двухфазная:
-сначала загрузите проверенный ZIP в GitHub Release `v3.13.0` репозитория
-`nexron171/VoyahTune` (remote `github.com`), затем выполните:
+Здесь и ниже указан стандартный `Installer/target`. Если используете собственный
+`CARGO_TARGET_DIR`, скорректируйте путь к `installer-build`; скрипт каталога принимает
+`--builder /абсолютный/путь/installer-build`.
+
+| Файл | Назначение | Куда публиковать |
+| --- | --- | --- |
+| `Releases/dist/payload_3.14.0.zip` | Готовый общий комплект Full/Light | Asset GitHub Release `v3.14.0` |
+| `Releases/dist/payload_3.14.0.json` | Сгенерированная запись: URL, размер, SHA-256, требования | Передать в `update-catalog.py`; GUI этот отдельный файл не читает |
+| `Releases/build/installer-payload-3.14.0/` | Распакованный payload для проверки и локального импорта | Публиковать папку не требуется |
+| `Installer/releases/index.json` | Общий каталог всех доступных версий | В GitHub-ветку `master-od` по этому точному пути |
+
+В корне ZIP должен находиться `manifest.json`, а не дополнительная папка-обёртка.
+Не перепаковывайте ZIP после генерации JSON: размер и SHA-256 относятся к точным байтам
+архива. `manifest.json`, recipe и подписанные metadata APK генерируются сборщиком.
+
+Перед публикацией:
+
+- Выполните проверки затронутых компонентов: Android JVM-тесты для изменений APK;
+  тесты соответствующих hooks/loader для Packaging; Rust и GUI check/build для движка
+  и интерфейса. Проверки Packaging, вызванные сборкой, не заменяют всю нужную матрицу.
+- Сравните сертификаты обоих APK с предыдущим выпуском. Другой ключ вызывает
+  переустановку с потерей данных; выпуск с сохранением настроек требует прежнего ключа.
+- Проверьте `releaseVersion`, `buildRevision`, общий состав APK и `requirements`
+  в распакованном manifest и сгенерированной записи. Для распространяемой сборки
+  используйте зафиксированный коммит без суффикса `-dirty`.
+- Откройте ZIP в уже выпущенном совместимом GUI. При согласованной проверке на ГУ
+  проверьте обновление поверх, Full → Light с мягкой очисткой, повторный Light,
+  Light → Full, настройки, DNS и запуск после перезагрузки. Полное удаление и смена
+  подписи — отдельные сценарии с потерей данных, их не смешивают с проверкой сохранности.
+
+Команды основных проверок из корня репозитория; выбирайте по изменённым компонентам:
+
+```sh
+(cd Native && ./gradlew testDebugUnitTest)
+(cd RestoreMode && ./gradlew testDebugUnitTest)
+cargo test --manifest-path Installer/Cargo.toml
+cargo test --manifest-path Installer/desktop/src-tauri/Cargo.toml
+npm --prefix Installer/desktop run check
+npm --prefix Installer/desktop run build
+python3 Installer/scripts/sync-classic-commands.py --check
+```
+
+Список профильных сценариев Packaging и fake ADB приведён в
+[карте проверок установщика](installer-classic-port.md#как-проверять-изменения).
+`installer-build` — внутренний инструмент разработчика, в пользовательский GUI он не входит.
+
+### 6.2. Опубликовать ZIP в GitHub Releases
+
+В репозитории `nexron171/VoyahTune` создайте выпуск через GitHub Releases:
+
+1. Убедитесь, что коммит исходников, по которому собран payload, уже доступен в GitHub.
+2. Создайте или выберите тег **`v3.14.0`**, указывающий именно на этот коммит.
+   Не привязывайте тег к случайному текущему HEAD другой ветки.
+3. Заполните название и описание изменений, укажите требования и реально проверенные
+   платформы/прошивки. Черновик можно использовать для подготовки.
+4. Прикрепите **`Releases/dist/payload_3.14.0.zip`** как asset с именем
+   **`payload_3.14.0.zip`** и опубликуйте выпуск. На следующем шаге ZIP должен быть
+   публично доступен без авторизации; asset в draft для этого не подходит.
+
+Ожидаемый адрес, который сборщик уже записал в JSON:
+
+```text
+https://github.com/nexron171/VoyahTune/releases/download/v3.14.0/payload_3.14.0.zip
+```
+
+Автоматические архивы GitHub «Source code» не являются payload.
+Если выбрали другой тег, репозиторий или имя asset, до обновления каталога исправьте
+`payload.url` и при необходимости `notesUrl` в сгенерированном `payload_3.14.0.json`.
+Не меняйте размер, SHA-256 и требования, чтобы замаскировать несовпадение сборки.
+
+### 6.3. Добавить релиз в локальный каталог
+
+Начните с актуального `Installer/releases/index.json` из `master-od`, сохранив
+имеющиеся записи. Затем выполните из корня checkout:
 
 ```sh
 python3 Installer/scripts/update-catalog.py \
-  --entry Releases/dist/payload_3.13.0.json --verify-remote
+  --entry Releases/dist/payload_3.14.0.json \
+  --verify-remote
+python3 Installer/scripts/update-catalog.py
+git diff -- Installer/releases/index.json
+git diff --check
 ```
 
-Генератор проверяет публичный HTTPS asset, размер/SHA-256 и формат всего index, затем
-атомарно добавляет запись. Ошибка сети/хеша оставляет index прежним. Повтор идемпотентен;
-замена существующей версии и её requirements отклоняется. Только после этого коммитьте
-и публикуйте `Installer/releases/index.json` в ветке GitHub `master-od`. Если публикация
-index не состоялась, загруженный ZIP остаётся доступным для локального импорта;
-повторите публикацию index. Команды сборки сами не создают тег и не публикуют assets.
+Первая команда валидирует объединённый каталог, полностью скачивает опубликованный
+ZIP по HTTPS, сверяет размер и SHA-256 и только после успеха атомарно обновляет index.
+Проверка использует публичный URL, а не авторизованную сессию браузера. При ошибке
+сети или хеша index остаётся прежним. Вторая команда только валидирует локальный index;
+она ничего не публикует и не проверяет все удалённые архивы заново.
 
-Первый переход: один раз установить новый GUI 1.0.0. Старые автономные GUI не умеют
-читать каталог и не обновятся автоматически. Новый GUI принимает старую папку payload
-через legacy adapter, новые ZIP — schema 3. После первого скачивания интернет для
-установки не обязателен. Для будущей новой логики увеличьте версию GUI и requirements
-payload; добавьте HTTPS-ссылки обновления по платформам в `installerDownloads` каталога.
-Пока реальные GUI assets не опубликованы, таких ссылок в index нет.
+В diff должны появиться одна новая запись и новое `generatedAt`. Старые версии
+сохраняются. Повтор с тем же payload и requirements безопасен и не создаёт дубликат;
+повторная удалённая проверка при этом всё равно выполняется. Замена URL/размера/хеша
+или requirements уже существующей версии отклоняется — нужен новый номер выпуска.
 
-Developer ID/notarization и Authenticode пока не настроены. Готовые локальные артефакты
-не считаются опубликованным релизом или подтверждением испытаний на ГУ.
+### 6.4. Опубликовать каталог в правильную ветку
+
+Сохраните изменение `Installer/releases/index.json` отдельным коммитом и доставьте
+его в **`master-od` репозитория `nexron171/VoyahTune`** обычным для проекта способом:
+через merge/PR или публикацию подготовленного коммита. Если работаете в
+`installer-remake` или другой ветке, один push этой ветки не обновляет каталог для
+пользователей. Перед объединением подтяните актуальный index, чтобы не потерять
+параллельно опубликованные релизы.
+
+GUI читает единственный фиксированный адрес:
+
+```text
+https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Installer/releases/index.json
+```
+
+После публикации скачайте именно публичный index и проверьте, что новая версия в нём есть:
+
+```sh
+curl --fail --location \
+  'https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Installer/releases/index.json' \
+  --output Releases/dist/published-index.json
+Installer/target/release/installer-build verify-catalog Releases/dist/published-index.json
+python3 - <<'PY_CHECK'
+import json
+from pathlib import Path
+index = json.loads(Path('Releases/dist/published-index.json').read_text())
+assert any(r['version'] == '3.14.0' for r in index['releases']), 'Новый релиз ещё не опубликован в каталоге'
+print('Релиз 3.14.0 присутствует в публичном каталоге')
+PY_CHECK
+```
+
+Размещение index только среди assets GitHub Release, в `Releases/` или другой ветке
+не меняет этот адрес. Локальный файл без commit/push также не виден пользователям.
+
+### 6.5. Проверить выпуск в прежнем GUI
+
+1. Запустите уже выпущенный установщик или нажмите **«Обновить список»**.
+2. Убедитесь, что в «Доступных релизах» появилась `3.14.0`, а ссылка изменений ведёт
+   на нужный GitHub Release.
+3. Нажмите **«Скачать и выбрать 3.14.0»**. GUI проверит ZIP, распакует его и предложит
+   Full и Light из одного комплекта. Сам выбор и скачивание ещё не запускают установку.
+4. Для проверки именно сетевого скачивания используйте GUI-профиль/компьютер,
+   где этого ZIP ещё нет в кэше. Мгновенный выбор уже скачанного комплекта подтверждает
+   работу кэша, но не загрузку asset из GitHub.
+5. После скачивания проверьте повторный выбор из «Скачанных комплектов» без сети.
+   Установка на автомобиль выполняется отдельно в согласованном объёме.
+
+Текущий GUI показывает только `channel: "stable"`: переключатель предварительных
+версий скрыт. Сборка `3.14.0-rc.1` автоматически создаст запись `prerelease`, которая
+не появится в обычном списке. Флажок prerelease на странице GitHub не управляет
+фильтром GUI — тот читает поле `channel` из index. Для предварительных проверок
+используйте локальный импорт ZIP.
+
+## 7. Если требуется новая версия установщика
+
+Изменение APK, hooks, конфигурации или состава файлов в пределах существующего recipe
+обычно требует только нового payload. Пересобирайте GUI при изменении его интерфейса,
+движка, специальной процедуры установки/удаления, комплектного ADB/recovery или
+поддерживаемого протокола. Исправление GUI само по себе не требует выпуска нового payload.
+
+Если новый payload требует новой логики:
+
+1. Увеличьте версию установщика в `Installer/Cargo.toml` и соответствующие записи
+   `Installer/Cargo.lock`. Release-конфигурация Tauri получает версию из Cargo при сборке.
+2. Задайте минимально необходимую версию в `Requirements::default()` файла
+   [compatibility.rs](../Installer/crates/installer-core/src/compatibility.rs).
+   При новой семантике добавьте capability в `CAPABILITIES` и реализуйте её поддержку.
+   Сейчас сборщик берёт requirements из этого кода; отдельного аргумента командной
+   строки или поля `payload-spec.json` для minInstallerVersion нет.
+3. Соберите и проверьте GUI, затем соберите требующий его payload. Поля `requirements`
+   внутри ZIP и в каталоге должны совпасть; повысить минимум только в index нельзя.
+   Не повышайте минимум для payload, который по-прежнему поддерживается старым GUI.
+4. Сначала опубликуйте проверенный GUI для поддерживаемых платформ. Затем опубликуйте
+   payload и каталог по разделу 6. Старый GUI покажет новый релиз и требование обновления.
+
+Только macOS GUI, без пересборки Android:
+
+```sh
+./Installer/scripts/build-all-macos.sh --mac
+```
+
+Результат — `Releases/build/installers-<версия-GUI>/macos-universal.tar.gz` и
+`build-info.json`. Внутри архива самостоятельный `.app`. Чтобы получить привычный ZIP
+для публикации, запакуйте готовый `.app` на macOS, сохранив его структуру и права:
+
+```sh
+INSTALLER_VERSION=1.1.0  # замените фактической версией из Cargo.toml
+mkdir -p Releases/dist
+ditto -c -k --keepParent \
+  'Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app' \
+  "Releases/dist/VoyahTune-Installer-${INSTALLER_VERSION}-macos.zip"
+```
+
+Если нужен и новый payload, и GUI за один запуск, используйте
+`./make_release.sh 3.14.0 --mac`: готовые GUI ZIP будут в
+`Releases/dist/VoyahTune-Installer-<версия-GUI>/`. Флаг `--installers` без ограничения
+платформ запускает также Windows/Linux; для текущей macOS-проверки его не используйте.
+
+После публикации GUI добавьте в массив `installerDownloads` общего index объект
+с фактическими версией, платформой и HTTPS-ссылкой на скачивание. Например, если GUI
+1.1.0 опубликован под отдельным тегом `installer-v1.1.0` с указанным именем ZIP:
+
+```json
+{
+  "version": "1.1.0",
+  "platform": "macos",
+  "url": "https://github.com/nexron171/VoyahTune/releases/download/installer-v1.1.0/VoyahTune-Installer-1.1.0-macos.zip"
+}
+```
+
+Это пример, а не уже опубликованный адрес. Допустимы `macos`, `windows`, `linux`;
+ссылки добавляют только для реально выпущенных платформ. При ручном изменении
+`installerDownloads` обновите `generatedAt` в UTC, выполните
+`python3 Installer/scripts/update-catalog.py`, проверьте доступность ссылки без
+авторизации и опубликуйте index в `master-od`. Валидатор проверяет формат этих ссылок,
+но не скачивает установщики. GUI предлагает ссылку подходящей платформы; автоматической
+замены собственного исполняемого файла нет.
+
+Первый переход со старого автономного установщика на GUI с каталогом требует одной
+ручной установки нового GUI. Developer ID/notarization и Authenticode пока не настроены.
+
+## 8. Если релиз не появился или публикация прервалась
+
+| Симптом | Что проверить / сделать |
+| --- | --- |
+| ZIP есть в Release, версии нет в GUI | Добавлена ли запись в публичный index ветки `master-od`; нажато ли «Обновить список» |
+| Каталог отвечает 404 | Репозиторий, ветка и путь из фиксированного URL; локальный index недостаточен |
+| Asset отвечает 404 | Выпуск опубликован, не draft; точные тег `vVERSION` и имя `payload_VERSION.zip`; публичный доступ |
+| Версия есть в JSON, но скрыта | `channel` должен быть `stable`; SemVer с `-rc`/`-beta` не является stable |
+| GUI требует обновление | Сверить minInstallerVersion/capabilities; опубликовать подходящий GUI и ссылку, не занижать требования |
+| Ошибка размера/SHA-256 | Загружен тот же ZIP, из которого создан entry; архив не переименован с заменой содержимого и не перепакован |
+| После обновления показывается старый список | Проверить публичный raw index; при сетевой ошибке GUI использует прежний кэш и показывает предупреждение |
+| `Published version is immutable` | Эту версию уже публиковали с другими байтами/requirements; выпускать исправление под новым номером |
+| ZIP опубликован, commit index не доставлен | Повторить проверку entry и публикацию index; пересборка ZIP не нужна |
+
+Если опубликован ошибочный релиз, сначала уберите его запись из актуального index,
+обновите `generatedAt`, провалидируйте и опубликуйте каталог. Затем выпустите исправление
+под новым номером. Не подменяйте байты уже объявленного payload. Удаление записи из
+каталога не удаляет скачанный кэш у пользователей и не откатывает установленный комплект;
+автоматический downgrade не предусмотрен.
+
+## 9. Чеклист выпуска
+
+- [ ] Выбраны новый номер комплекта, версии APK и прежние ключи подписи.
+- [ ] Исходники и описание изменений зафиксированы; сборка соответствует выбранному коммиту.
+- [ ] Единый payload Full/Light собран, manifest/recipe/requirements и сертификаты проверены.
+- [ ] Проверки затронутых компонентов и согласованные испытания выполнены, ограничения записаны.
+- [ ] ZIP загружен в опубликованный GitHub Release; тег соответствует коммиту сборки.
+- [ ] `update-catalog.py --entry ... --verify-remote` успешно проверил опубликованные байты.
+- [ ] Каталог опубликован в `master-od`; новая версия найдена в публичном raw index.
+- [ ] Прежний совместимый GUI увидел релиз, скачал и выбрал его; отдельно проверен кэш.
+- [ ] Если понадобился новый GUI: опубликованы проверенные пакеты и ссылки `installerDownloads`.

@@ -51,6 +51,13 @@ class ModeTests(InstallerTests):
   self.assertEqual(self.read_state()['settings'],expected);self.assertEqual(dns.read_text(),'saved DNS')
   self.assertNotIn('Open Voyah:',(self.device/'system/etc/init.logcat.sh').read_text())
   self.assertFalse(any('pm uninstall' in (c['script'] or '') for c in self.calls()))
+ def test_full_without_existing_loader_does_not_stop_missing_service(self):
+  self.seed_apps();self.state['settings']['voyahtune_install_mode']='light'
+  self.state['loader']='';self.state['failShell']='setprop ctl.stop voyahtune_load';self.write_state()
+  result=self.apply(self.plan('full'))
+  self.assertNotIn('diagnostic-warning',result.stdout)
+  self.assertFalse(any('setprop ctl.stop voyahtune_load' in (c['script'] or '') for c in self.calls()))
+  self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],'full')
  def test_unknown_mode_light_updates_without_question(self):
   self.seed_apps();self.state['settings'].clear();self.write_state()
   self.apply(self.plan('light'));self.assert_app_data(True);self.assert_light_clean()

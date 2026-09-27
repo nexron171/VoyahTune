@@ -24,8 +24,7 @@ def commands(path):
    i+=1
   if s[start:start+1] in "\"'":res[s.count('\n',0,m.start())+1]=out
  return res
-SPECS = {'full/install.sh': {'STOP_FULL': 51,
-                     'NATIVE_READY': 97,
+SPECS = {'full/install.sh': {'NATIVE_READY': 97,
                      'NATIVE_BROADCAST': 128,
                      'MOUNT': 184,
                      'RW_TEST': 185,
@@ -44,7 +43,7 @@ SPECS = {'full/install.sh': {'STOP_FULL': 51,
                      'APOLLO_FILES': 616,
                      'PREPARE_DATA_DIRECTORIES': 629,
                      'APP_CLIENT_MIGRATION': 662},
- 'light/install.sh': {'STOP_LIGHT': 43, 'LIGHT_RUNTIME_REMOVE': 57},
+ 'light/install.sh': {'LIGHT_RUNTIME_REMOVE': 57},
  'full/remove.sh': {'REMOVE_RW_TEST': 196,
                     'REMOVE_BOOT': 245,
                     'REMOVE_TRANSACTIONS': 251,
