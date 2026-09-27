@@ -9,12 +9,13 @@ PAYLOAD=''
 OUTPUT=''
 MAC=0
 WINDOWS=0
+WINDOWS_ARCH=x64
 LINUX_BUILD=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
-      echo 'Usage: ./Installer/scripts/build-all-macos.sh [--payload DIRECTORY] [--output Releases/build/DIRECTORY] [--mac] [--windows] [--linux]'
-      echo 'Standalone macOS Universal + Windows x64 + Linux x64, GUI with ADB; optional offline payload.'
+      echo 'Usage: ./Installer/scripts/build-all-macos.sh [--payload DIRECTORY] [--output Releases/build/DIRECTORY] [--mac] [--windows] [--windows-arch x64|x86] [--linux]'
+      echo 'Standalone macOS Universal + Windows x64/x86 + Linux x64, GUI with ADB; optional offline payload.'
       echo 'Use ./make_release.sh VERSION --installers for the complete release.'
       echo '--check: check the prepared build environment without building.'
       exit 0 ;;
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
     --mac) MAC=1; shift ;;
     --windows) WINDOWS=1; shift ;;
     --linux) LINUX_BUILD=1; shift ;;
+    --windows-arch)
+      [[ $# -ge 2 ]] || { echo 'Missing --windows-arch value' >&2; exit 2; }
+      [[ $2 == x64 || $2 == x86 ]] || { echo 'Windows architecture must be x64 or x86' >&2; exit 2; }
+      WINDOWS_ARCH=$2; WINDOWS=1; shift 2 ;;
     --payload|--output)
       [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 2; }
       if [[ $1 == --payload ]]; then PAYLOAD=$2; else OUTPUT=$2; fi
@@ -30,6 +35,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ $MAC == 0 && $WINDOWS == 0 && $LINUX_BUILD == 0 ]]; then MAC=1; WINDOWS=1; LINUX_BUILD=1; fi
+WINDOWS_TARGET=x86_64-pc-windows-msvc
+if [[ $WINDOWS_ARCH == x86 ]]; then WINDOWS_TARGET=i686-pc-windows-msvc; fi
+TOOLCHAIN=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/rust-toolchain.toml","rb"))["toolchain"]["channel"])')
 REMOTE=0
 if [[ $WINDOWS == 1 || $LINUX_BUILD == 1 ]]; then REMOTE=1; fi
 if [[ $CHECK != 1 ]]; then
@@ -37,7 +45,9 @@ if [[ $CHECK != 1 ]]; then
   if [[ -n "$PAYLOAD" ]]; then
     PAYLOAD=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$PAYLOAD")
   fi
-  OUTPUT=${OUTPUT:-"$ROOT/Releases/build/installers-$PACKAGE_VERSION"}
+  DEFAULT_OUTPUT="$ROOT/Releases/build/installers-$PACKAGE_VERSION"
+  if [[ $WINDOWS_ARCH == x86 ]]; then DEFAULT_OUTPUT="$DEFAULT_OUTPUT-windows-x86"; fi
+  OUTPUT=${OUTPUT:-"$DEFAULT_OUTPUT"}
   OUTPUT=$(python3 - "$OUTPUT" "$ROOT/Releases" <<'PYLOAD'
 from pathlib import Path
 import sys
@@ -117,7 +127,14 @@ PY
     STARTED_CONTAINERS+=("$container")
   fi
 done
-if [[ $WINDOWS == 1 ]]; then "${DOCKER[@]}" exec vti-windows sh -c 'command -v cargo-xwin && command -v 7z && rustup target list --installed | grep -Fx x86_64-pc-windows-msvc' >"$LOGS/windows-environment.log"; fi
+if [[ $WINDOWS == 1 ]]; then
+  "${DOCKER[@]}" exec vti-windows sh -c 'command -v cargo-xwin && command -v 7z' >"$LOGS/windows-environment.log"
+  if [[ $CHECK != 1 ]]; then
+    "${DOCKER[@]}" exec vti-windows rustup target add --toolchain "$TOOLCHAIN" "$WINDOWS_TARGET" >>"$LOGS/windows-environment.log" 2>&1
+  fi
+  "${DOCKER[@]}" exec vti-windows rustup target list --toolchain "$TOOLCHAIN" --installed >"$LOGS/windows-targets.log"
+  grep -Fx "$WINDOWS_TARGET" "$LOGS/windows-targets.log" >/dev/null
+fi
 if [[ $LINUX_BUILD == 1 ]]; then "${DOCKER[@]}" exec vti-linux-amd64 sh -c 'test "$(uname -m)" = x86_64 && command -v node && command -v cargo' >"$LOGS/linux-environment.log"; fi
 fi
 if [[ -d "$ROOT/Releases/cache/cargo" && -z ${CARGO_HOME:-} ]]; then
@@ -125,7 +142,6 @@ if [[ -d "$ROOT/Releases/cache/cargo" && -z ${CARGO_HOME:-} ]]; then
   export RUSTUP_HOME="$ROOT/Releases/cache/rustup"
   export PATH="$CARGO_HOME/bin:$PATH"
 fi
-TOOLCHAIN=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/rust-toolchain.toml","rb"))["toolchain"]["channel"])')
 if [[ $MAC == 1 ]]; then
 rustup target list --toolchain "$TOOLCHAIN" --installed >"$LOGS/macos-targets.log"
 grep -Fx aarch64-apple-darwin "$LOGS/macos-targets.log" >/dev/null
@@ -180,11 +196,11 @@ COPYFILE_DISABLE=1 tar -czf "$STAGE/macos-universal.tar.gz" -C "$(dirname "$MAC_
 
 fi
 if [[ $WINDOWS == 1 ]]; then
-echo 'Windows x64 tooling…'
-"${DOCKER[@]}" exec -w /work vti-windows node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/windows.log" 2>&1
-WIN_TARGET="$ROOT/Releases/build/hosts/windows/Installer/target/x86_64-pc-windows-msvc/release"
-cp "$WIN_TARGET/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_x64-setup.exe" "$STAGE/windows-x64.exe"
-"${DOCKER[@]}" exec vti-windows 7z t "/work/Installer/target/x86_64-pc-windows-msvc/release/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_x64-setup.exe" >"$LOGS/windows-verify.log" 2>&1
+echo "Windows $WINDOWS_ARCH tooling…"
+"${DOCKER[@]}" exec -w /work vti-windows node Installer/scripts/build.mjs --target "$WINDOWS_TARGET" ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/windows.log" 2>&1
+WIN_TARGET="$ROOT/Releases/build/hosts/windows/Installer/target/$WINDOWS_TARGET/release"
+cp "$WIN_TARGET/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_${WINDOWS_ARCH}-setup.exe" "$STAGE/windows-$WINDOWS_ARCH.exe"
+"${DOCKER[@]}" exec vti-windows 7z t "/work/Installer/target/$WINDOWS_TARGET/release/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_${WINDOWS_ARCH}-setup.exe" >"$LOGS/windows-verify.log" 2>&1
 
 fi
 if [[ $LINUX_BUILD == 1 ]]; then
@@ -227,7 +243,7 @@ LINUX
 cp Releases/build/hosts/linux-amd64/Releases/dist/linux-all-x64.run "$STAGE/linux-x64.run"
 chmod +x "$STAGE/linux-x64.run"
 fi
-python3 - "$STAGE" "$OUTPUT" "$PAYLOAD" "$VERSION" <<'PY'
+python3 - "$STAGE" "$OUTPUT" "$PAYLOAD" "$VERSION" "$WINDOWS_ARCH" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
 stage,dest=map(Path,sys.argv[1:3])
@@ -239,7 +255,8 @@ def sha(p):
         for block in iter(lambda:f.read(1024*1024),b''): h.update(block)
     return h.hexdigest()
 platforms={name:{'file':file,'sha256':sha(stage/file),'bytes':(stage/file).stat().st_size}
-    for name,file in [('macos','macos-universal.tar.gz'),('windows','windows-x64.exe'),('linux','linux-x64.run')] if (stage/file).is_file()}
+    for name,file in [('macos','macos-universal.tar.gz'),('windows',f'windows-{sys.argv[5]}.exe'),('linux','linux-x64.run')] if (stage/file).is_file()}
+if 'windows' in platforms: platforms['windows']['architecture']=sys.argv[5]
 info={'installerVersion':sys.argv[4], 'engineVersion':sys.argv[4],
       'releaseVersion':manifest['releaseVersion'] if manifest else None,
       'payloadSha256':sha(payload/'manifest.json') if payload else None,'embeddedPayload':payload is not None,'platforms':platforms}
