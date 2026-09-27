@@ -1,6 +1,9 @@
 package ru.big.town.updater;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.os.Handler;
+import android.os.Looper;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -28,7 +31,12 @@ public final class MainActivity extends Activity {
     private TextView status;
     private TextView logs;
     private EditText catalogUrl;
-    private Button refresh;
+    private Button refresh, check, download, install, test;
+    private TextView releaseInfo;
+    private boolean operationBusy, hasRelease, verified, repair;
+    private String noticeShowing;
+    private final Handler poll = new Handler(Looper.getMainLooper());
+    private final Runnable tick = new Runnable() { public void run() { if (!busy) refresh(); poll.postDelayed(this, 2000); } };
     private Button save;
     private Button showLogs;
     private Button exportLogs;
@@ -49,10 +57,16 @@ public final class MainActivity extends Activity {
         text(content, "Обновления VoyahTune", 28);
         status = text(content, "Подключение к службе…", 19);
         refresh = button(content, "Обновить состояние", v -> refresh());
-        button(content, "Проверить обновления", null).setEnabled(false);
-        button(content, "Скачать", null).setEnabled(false);
-        button(content, "Установить", null).setEnabled(false);
-        text(content, "Операции обновления недоступны в этой версии службы.", 16);
+        releaseInfo = text(content, "", 18);
+        check = button(content, "Проверить обновления", v -> action("check", false));
+        download = button(content, "Скачать", v -> action("download", false));
+        install = button(content, "Установить", v -> new AlertDialog.Builder(this)
+            .setTitle("Установить обновление?")
+            .setMessage("Автомобиль должен стоять в P с включённым питанием. Сохраняйте питание до завершения. Головное устройство перезагрузится. При сбое потребуется установка через USB с компьютера.")
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Установить и перезагрузить", (dialog, which) -> action("apply", false)).show());
+        test = button(content, "Проверить релиз для повторной установки", v -> action("check", true));
+        text(content, "Повторная установка позволяет проверить обновление на текущей версии.", 15);
         text(content, "Адрес каталога релизов", 22);
         catalogUrl = new EditText(this);
         catalogUrl.setSingleLine(true);
@@ -81,19 +95,57 @@ public final class MainActivity extends Activity {
         refresh();
     }
 
+    @Override protected void onResume() { super.onResume(); poll.post(tick); }
+    @Override protected void onPause() { poll.removeCallbacks(tick); super.onPause(); }
+    private void action(String command, boolean sameVersion) {
+        request(command, sameVersion ? "same" : null, result -> refresh());
+    }
     private void refresh() {
         request("status", null, result -> {
             JSONObject settings = result.optJSONObject("settings");
             if (settings != null && !loadedSettings) {
-                catalogUrl.setText(settings.optString("catalogUrl"));
-                loadedSettings = true;
+                catalogUrl.setText(settings.optString("catalogUrl")); loadedSettings = true;
             }
-            if ("ready".equals(result.optString("state"))) {
-                status.setText("Служба работает · " + result.optString("serviceVersion"));
-            } else {
-                showError(result.optString("error", "Ошибка настроек службы"));
+            JSONObject state = result.getJSONObject("state");
+            String phase = state.getString("phase");
+            operationBusy = java.util.Arrays.asList("checking", "downloading", "verifying", "applying", "reboot-pending", "validating").contains(phase);
+            repair = "repair-required".equals(phase);
+            verified = "verified".equals(phase);
+            JSONObject selected = state.optJSONObject("selected"); hasRelease = selected != null;
+            String details = "Установлено: " + state.optString("installedVersion");
+            if (selected != null) {
+                JSONObject archive = selected.getJSONObject("payload");
+                details += "\nДоступно: " + selected.getString("version") + " · " + (archive.getLong("size") / (1024 * 1024)) + " МБ";
+                details += "\nОписание: " + selected.optString("notesUrl");
             }
+            releaseInfo.setText(details);
+            String stage = state.optString("step");
+            long total = state.optLong("total"), bytes = state.optLong("bytes");
+            if (total > 0) stage += "\n" + (100 * bytes / total) + "% · " + bytes + " / " + total;
+            status.setText(stage);
+            if (!state.isNull("error")) showError(state.optString("error"));
+            if (!result.isNull("settingsError")) showError(result.optString("settingsError"));
+            setBusy(false);
+            if (!state.isNull("notice")) showNotice(state.getString("notice"), state.optString("error"));
+            else noticeShowing = null;
         });
+    }
+    private void showNotice(String notice, String error) {
+        if (notice.equals(noticeShowing)) return;
+        noticeShowing = notice;
+        String title = "error".equals(notice) ? "Ошибка обновления VoyahTune"
+            : "success".equals(notice) ? "VoyahTune обновлён" : "Доступна новая версия VoyahTune";
+        String message = "error".equals(notice) ? error + "\nПосмотрите или выгрузите логи. Установите релиз через USB с компьютера."
+            : "success".equals(notice) ? "Проверка запуска служб завершена успешно." : "Версия " + notice + ". Скачать её можно в меню обновления.";
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setMessage(message)
+            .setPositiveButton("Открыть меню", (d,w) -> {})
+            .setNegativeButton("Скрыть", (d,w) -> finish()).create();
+        dialog.setOnDismissListener(d -> {
+            // Dismissing only acknowledges the notice. It never downloads or installs.
+            if (!worker.isShutdown()) worker.execute(() -> { try { client.call(new JSONObject().put("command", "dismiss")); } catch (Exception ignored) {} });
+        });
+        dialog.setOnCancelListener(d -> finish());
+        dialog.show();
     }
 
     private void saveUrl() {
@@ -128,7 +180,8 @@ public final class MainActivity extends Activity {
         worker.execute(() -> {
             try {
                 JSONObject request = new JSONObject().put("command", command);
-                if (url != null) request.put("url", url);
+                if (url != null && "set_catalog_url".equals(command)) request.put("url", url);
+                if ("check".equals(command)) request.put("same_version", "same".equals(url));
                 JSONObject result = client.call(request);
                 runOnUiThread(() -> {
                     if (isDestroyed()) return;
@@ -148,10 +201,14 @@ public final class MainActivity extends Activity {
     private void setBusy(boolean value) {
         busy = value;
         refresh.setEnabled(!value);
-        save.setEnabled(!value);
+        save.setEnabled(!value && !operationBusy);
+        check.setEnabled(!value && !operationBusy && !repair);
+        test.setEnabled(!value && !operationBusy && !repair);
+        download.setEnabled(!value && !operationBusy && !repair && hasRelease);
+        install.setEnabled(!value && !operationBusy && !repair && verified);
         showLogs.setEnabled(!value);
         exportLogs.setEnabled(!value);
-        catalogUrl.setEnabled(!value);
+        catalogUrl.setEnabled(!value && !operationBusy);
     }
     private void showError(String reason) {
         status.setText("Ошибка: " + (reason == null ? "служба недоступна" : reason)
@@ -172,7 +229,7 @@ public final class MainActivity extends Activity {
             }
         });
     }
-    @Override protected void onDestroy() { worker.shutdown(); super.onDestroy(); }
+    @Override protected void onDestroy() { poll.removeCallbacks(tick); worker.shutdown(); super.onDestroy(); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private TextView text(LinearLayout content, String value, int size) {
         TextView view = new TextView(this);
