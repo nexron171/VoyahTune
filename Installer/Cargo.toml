@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/installer-core", "crates/installer-build", "desktop/src-tauri"]
-default-members = ["crates/installer-core", "crates/installer-build"]
+members = ["crates/release-core", "crates/installer-core", "crates/installer-build", "desktop/src-tauri"]
+default-members = ["crates/release-core", "crates/installer-core", "crates/installer-build"]
 
 [workspace.package]
 version = "1.1.0"

@@ -1,11 +1,11 @@
 //! Release catalog, verified downloads and offline cache. No vehicle commands here.
 use crate::{
-    compatibility::{Requirements, INSTALLER_VERSION},
+    compatibility::INSTALLER_VERSION,
     payload::{self, Payload},
     recovery, Error, Result,
 };
 use fs2::FileExt;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
@@ -15,125 +15,11 @@ use std::{
     time::Duration,
 };
 
-pub const CATALOG_URL: &str =
-    "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Installer/releases/index.json";
+pub use release_core::catalog::CATALOG_URL;
 const MAX_CATALOG: u64 = 4 * 1024 * 1024;
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED: u64 = 4 * 1024 * 1024 * 1024;
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Archive {
-    pub url: String,
-    pub size: u64,
-    pub sha256: String,
-    pub manifest_schema: u32,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Release {
-    pub version: String,
-    /// Explicit opt-in for device updates; old/unmarked releases remain desktop-only.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub ota: bool,
-    pub published_at: String,
-    pub channel: String,
-    pub notes_url: String,
-    pub payload: Archive,
-    pub requirements: Requirements,
-}
-fn is_false(value: &bool) -> bool {
-    !value
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct InstallerDownload {
-    pub version: String,
-    pub platform: String,
-    pub url: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Catalog {
-    pub schema_version: u32,
-    pub generated_at: String,
-    pub releases: Vec<Release>,
-    pub installer_downloads: Vec<InstallerDownload>,
-}
-impl Catalog {
-    /// Eligibility is separate from firmware, updater and payload compatibility checks.
-    pub fn ota_releases(&self) -> impl Iterator<Item = &Release> {
-        self.releases.iter().filter(|release| release.ota)
-    }
-    pub fn installer_updates(
-        &self,
-        requirements: &Requirements,
-        platform: &str,
-    ) -> Vec<InstallerDownload> {
-        let Ok(minimum) = semver::Version::parse(&requirements.min_installer_version) else {
-            return vec![];
-        };
-        let mut updates: Vec<_> = self
-            .installer_downloads
-            .iter()
-            .filter(|u| {
-                u.platform == platform
-                    && semver::Version::parse(&u.version).is_ok_and(|v| v >= minimum)
-            })
-            .cloned()
-            .collect();
-        updates.sort_by(|a, b| {
-            semver::Version::parse(&b.version)
-                .unwrap()
-                .cmp(&semver::Version::parse(&a.version).unwrap())
-        });
-        updates
-    }
-    pub fn empty() -> Self {
-        Self {
-            schema_version: 1,
-            generated_at: String::new(),
-            releases: vec![],
-            installer_downloads: vec![],
-        }
-    }
-    pub fn validate(&mut self) -> Result<()> {
-        if self.schema_version != 1 || self.releases.len() > 1000 {
-            return Err(invalid("Неподдерживаемый каталог релизов"));
-        }
-        let mut versions = BTreeSet::new();
-        for r in &self.releases {
-            let version = semver::Version::parse(&r.version).map_err(|e| invalid(e.to_string()))?;
-            if !versions.insert(&r.version)
-                || !["stable", "prerelease"].contains(&r.channel.as_str())
-                || (r.channel == "stable" && !version.pre.is_empty())
-                || r.payload.size == 0
-                || r.payload.size > MAX_ARCHIVE
-                || !digest_valid(&r.payload.sha256)
-                || r.payload.manifest_schema < 3
-            {
-                return Err(invalid(format!("Некорректная запись {}", r.version)));
-            }
-            // Future requirements are displayed, not rejected with the entire catalog.
-            semver::Version::parse(&r.requirements.min_installer_version)
-                .map_err(|e| invalid(e.to_string()))?;
-            https_url(&r.payload.url)?;
-            https_url(&r.notes_url)?;
-        }
-        for i in &self.installer_downloads {
-            semver::Version::parse(&i.version).map_err(|e| invalid(e.to_string()))?;
-            if !["macos", "windows", "linux"].contains(&i.platform.as_str()) {
-                return Err(invalid("Неизвестная платформа"));
-            }
-            https_url(&i.url)?;
-        }
-        self.releases.sort_by(|a, b| {
-            semver::Version::parse(&b.version)
-                .unwrap()
-                .cmp(&semver::Version::parse(&a.version).unwrap())
-        });
-        Ok(())
-    }
-}
+pub use release_core::catalog::{Archive, Catalog, InstallerDownload, Release};
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedPayload {
@@ -332,10 +218,7 @@ impl Cache {
             || fs::symlink_metadata(path)?.file_type().is_symlink()
             || path.canonicalize()? != root.join("payloads").join(digest)
         {
-            return Err(Error::new(
-                "CACHE_PATH",
-                "Небезопасный путь релиза в кэше",
-            ));
+            return Err(Error::new("CACHE_PATH", "Небезопасный путь релиза в кэше"));
         }
         let receipts = self.root.join("receipts");
         if receipts.exists() {
@@ -611,51 +494,11 @@ fn extract(
     }
     Ok(())
 }
-/// Portable paths: reject traversal, Windows drives/devices and ambiguous names on macOS/Windows.
-pub fn safe_path(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() < 1024
-        && name.split('/').all(|part| {
-            !part.is_empty()
-                && part != "."
-                && part != ".."
-                && !part.ends_with('.')
-                && part
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
-                && !matches!(
-                    part.split('.')
-                        .next()
-                        .unwrap()
-                        .to_ascii_lowercase()
-                        .as_str(),
-                    "con"
-                        | "prn"
-                        | "aux"
-                        | "nul"
-                        | "com1"
-                        | "com2"
-                        | "com3"
-                        | "com4"
-                        | "com5"
-                        | "com6"
-                        | "com7"
-                        | "com8"
-                        | "com9"
-                        | "lpt1"
-                        | "lpt2"
-                        | "lpt3"
-                        | "lpt4"
-                        | "lpt5"
-                        | "lpt6"
-                        | "lpt7"
-                        | "lpt8"
-                        | "lpt9"
-                )
-        })
-}
+pub use release_core::paths::safe_path;
+
 #[cfg(test)]
 mod tests {
+    use crate::compatibility::Requirements;
     use super::*;
     fn server(status: &str, body: &str) -> (String, std::thread::JoinHandle<()>) {
         use std::net::TcpListener;
@@ -675,13 +518,15 @@ mod tests {
     }
     #[test]
     fn shared_catalog_requires_explicit_boolean_ota_opt_in() {
-        let entry = |version: &str| serde_json::json!({
-            "version": version, "publishedAt": "2026-09-27", "channel": "stable",
-            "notesUrl": "https://example.org/notes",
-            "payload": {"url": "https://example.org/payload.zip", "size": 1,
-                        "sha256": "a".repeat(64), "manifestSchema": 4},
-            "requirements": Requirements::default()
-        });
+        let entry = |version: &str| {
+            serde_json::json!({
+                "version": version, "publishedAt": "2026-09-27", "channel": "stable",
+                "notesUrl": "https://example.org/notes",
+                "payload": {"url": "https://example.org/payload.zip", "size": 1,
+                            "sha256": "a".repeat(64), "manifestSchema": 4},
+                "requirements": Requirements::default()
+            })
+        };
         let mut value = serde_json::json!({
             "schemaVersion": 1, "generatedAt": "2026-09-27", "installerDownloads": [],
             "releases": [entry("3.14.0"), entry("3.13.0")]
@@ -689,7 +534,9 @@ mod tests {
         let mut legacy: Catalog = serde_json::from_value(value.clone()).unwrap();
         legacy.validate().unwrap();
         assert_eq!(legacy.ota_releases().count(), 0);
-        assert!(serde_json::to_value(&legacy).unwrap()["releases"][0].get("ota").is_none());
+        assert!(serde_json::to_value(&legacy).unwrap()["releases"][0]
+            .get("ota")
+            .is_none());
 
         value["releases"][0]["ota"] = serde_json::json!(true);
         value["releases"][1]["ota"] = serde_json::json!(false);
@@ -700,9 +547,19 @@ mod tests {
         assert_eq!(marked.ota_releases().next().unwrap().version, "3.14.0");
         let saved = serde_json::to_value(&marked).unwrap();
         assert_eq!(saved["releases"][0]["ota"], true);
-        assert_eq!(serde_json::from_value::<Catalog>(saved).unwrap().ota_releases().count(), 1);
+        assert_eq!(
+            serde_json::from_value::<Catalog>(saved)
+                .unwrap()
+                .ota_releases()
+                .count(),
+            1
+        );
 
-        for invalid in [serde_json::json!("true"), serde_json::json!(1), serde_json::Value::Null] {
+        for invalid in [
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::Value::Null,
+        ] {
             value["releases"][0]["ota"] = invalid;
             assert!(serde_json::from_value::<Catalog>(value.clone()).is_err());
         }
