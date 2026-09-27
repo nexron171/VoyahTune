@@ -23,14 +23,17 @@ Schema 1 связывает версию, монотонный `sequence`, SHA-2
 
 ```sh
 python3 Installer/scripts/sign-ota.py \
-  --entry Releases/dist/payload_3.14.0.json \
-  --archive Releases/dist/payload_3.14.0.zip \
-  --payload Releases/build/installer-payload-3.14.0 \
+  --entry Releases/dist/payload_3.15.0.json \
+  --archive Releases/dist/payload_3.15.0.zip \
+  --payload Releases/build/installer-payload-3.15.0 \
   --key Releases/keys/ota-release.pem --sequence 1 \
-  --output Releases/dist/payload_3.14.0.ota.json
+  --output Releases/dist/payload_3.15.0.ota.json
 ```
 
 Инструмент проверяет размер/SHA архива и существующие подписи/metadata payload.
+OTA verifier также читает бинарный AndroidManifest обоих APK: package ID, versionName
+и versionCode должны соответствовать релизу. URL архива может меняться между HTTPS-хостами:
+подпись привязана к содержимому и размеру архива, а не к поставщику хранения.
 `installer-build verify-ota ENTRY PUBLIC_KEY PAYLOAD_DIRECTORY` отдельно проверяет
 подпись metadata и соответствие распакованному релизу. Публикация выполняется обычным
 `update-catalog.py --entry … --verify-remote`; скрипт подписания ничего не публикует.
