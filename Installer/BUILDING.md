@@ -291,7 +291,10 @@ python3 Installer/scripts/package-linux.py \
 У AppImage runtime linuxdeploy и output plugin есть несовместимость с Rosetta.
 Общая команда обходит её автоматически: проверяет SHA, извлекает SquashFS напрямую,
 запускает внутренний AppRun и задаёт PATH для GTK/GStreamer plugins. Затем создаёт
-`.run`, которому AppImage runtime не нужен.
+`.run`, которому AppImage runtime не нужен. В извлечённом linuxdeploy используются
+`/usr/bin/patchelf` и `/usr/bin/strip` подготовленного контейнера: его статические
+встроенные копии также дали сбой под эмуляцией. Ошибки обработки библиотек
+не игнорируются; после упаковки проверяются вложенные ресурсы.
 
 На новом Mac подготовьте кэш (он не хранится в Git):
 
@@ -323,3 +326,12 @@ shasum -a 256 Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 
 Проверяйте `installer-build verify-host PATH`, запуск на целевых ОС, установку, обновление и удаление.
 Успешная кросс-сборка Windows и fake ADB не заменяют проверки на реальной ОС и машине.
+
+## Web-интерфейс при сборке через macOS
+
+`build-all-macos.sh` собирает общий Svelte/Vite интерфейс нативно на macOS и передаёт
+готовый `dist` контейнерам Windows/Linux. Rust и упаковка выполняются в соответствующем
+контейнере. Это исключает запуск Go runtime esbuild под эмуляцией x64, где наблюдался
+сбой сборщика мусора. При самостоятельной нативной сборке `build.mjs` по-прежнему
+собирает web-интерфейс обычным способом; `--frontend-dist PATH` разрешает явно передать
+свежую сборку и требует наличие `index.html`.

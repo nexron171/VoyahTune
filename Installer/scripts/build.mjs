@@ -121,6 +121,13 @@ await rename(bundle,finalBundle);
 await rm(join(desktop,'src-tauri/binaries'),{recursive:true,force:true});
 if(flag('--prepare-only')){console.log(`Prepared GUI resources: ${finalBundle}`);process.exit(0);}
 const releaseConfig={version:packageVersion};
+// Platform-independent web assets may be built on the native host to avoid running
+// esbuild's Go runtime under x64 emulation. The orchestrator supplies a fresh build.
+if(option('--frontend-dist')){
+  const frontend=resolve(option('--frontend-dist'));
+  if(!existsSync(join(frontend,'index.html')))throw Error('Prebuilt frontend is missing index.html');
+  releaseConfig.build={frontendDist:frontend,beforeBuildCommand:'node -e "process.exit(0)"'};
+}
 if(platform==='linux'){
   const files={'/usr/share/voyahtune-installer/bundle/':'resources/bundle/'};
   releaseConfig.bundle={resources:[],linux:{appimage:{files},deb:{files}}};
