@@ -1667,7 +1667,7 @@ public class MainActivity extends AppCompatActivity {
             scroll.setOnLongClickListener(dragLauncher);
         }
 
-        View controls = widgetView.findViewById(R.id.appWidgetControls);
+        View controls = widgetView.findViewById(R.id.appWidgetOverlayControls);
         if (controls != null) controls.setVisibility(View.GONE);
 
         View dragHandleLauncher = widgetView.findViewById(R.id.appWidgetDragHandleLauncher);
@@ -1743,7 +1743,7 @@ public class MainActivity extends AppCompatActivity {
         View launcherControls = widgetView.findViewById(R.id.appWidgetLauncherControls);
         if (launcherControls != null) launcherControls.setVisibility(View.GONE);
 
-        View controls = widgetView.findViewById(R.id.appWidgetControls);
+        View controls = widgetView.findViewById(R.id.appWidgetOverlayControls);
         if (controls != null) {
             controls.setVisibility(View.GONE);
             View closeBtn = widgetView.findViewById(R.id.appWidgetClose);
@@ -1780,6 +1780,15 @@ public class MainActivity extends AppCompatActivity {
             if (swapBtn != null) {
                 swapBtn.setVisibility(View.VISIBLE);
                 swapBtn.setOnClickListener(v -> showSwapAppWidgetMenu(swapBtn, widgetId));
+            }
+
+            View dpiPlus = widgetView.findViewById(R.id.appWidgetDpiPlus);
+            if (dpiPlus != null) {
+                dpiPlus.setOnClickListener(v -> changeAppWidgetDpi(widgetId, 1));
+            }
+            View dpiMinus = widgetView.findViewById(R.id.appWidgetDpiMinus);
+            if (dpiMinus != null) {
+                dpiMinus.setOnClickListener(v -> changeAppWidgetDpi(widgetId, -1));
             }
         }
         
@@ -1899,6 +1908,35 @@ public class MainActivity extends AppCompatActivity {
         return dpi == null ? 0 : dpi;
     }
 
+    /** Изменить DPI запущенного в виджете приложения на соседнее значение из списка. */
+    private void changeAppWidgetDpi(String widgetId, int direction) {
+        AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
+        if (entry == null) return;
+        int current = AppWidgetStore.normalizeDpi(runningDpi(widgetId));
+        int index = 0;
+        for (int i = 0; i < AppWidgetStore.DPI_VALUES.length; i++) {
+            if (AppWidgetStore.DPI_VALUES[i] == current) { index = i; break; }
+        }
+        int next = Math.max(0, Math.min(AppWidgetStore.DPI_VALUES.length - 1, index + direction));
+        if (next == index) return;
+        int value = AppWidgetStore.DPI_VALUES[next];
+
+        // Сохраняем выбранный DPI в настройке виджета — он применится и при следующем запуске.
+        AppWidgetStore.Profile profile = entry.selected();
+        profile.dpi = value;
+        entry.dpi = value;
+        AppWidgetStore.update(sharedPreferences, entry);
+
+        // Переподключаем поверхность: Native пересчитывает плотность дисплея по новому DPI.
+        embeddedWidgetDpi.put(widgetId, value);
+        Surface output = embeddedWidgetOutputs.get(widgetId);
+        if (output != null) {
+            sendEmbeddedSurface(widgetId, embeddedWidgetPackages.get(widgetId), value, output,
+                    embeddedPixelWidth(widgetId), embeddedPixelHeight(widgetId));
+        }
+        showSnack(value == 0 ? "DPI: Авто" : "DPI: " + value);
+    }
+
     private void releaseEmbeddedWidget(String widgetId, View widgetView) {
         removeEmbeddedSurface(widgetId, widgetView);
         sendEmbeddedRelease(widgetId);
@@ -1930,7 +1968,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        View controls = widgetView.findViewById(R.id.appWidgetControls);
+        View controls = widgetView.findViewById(R.id.appWidgetOverlayControls);
         if (controls != null) controls.setVisibility(View.GONE);
 
         View expandBtn = widgetView.findViewById(R.id.appWidgetExpand);
