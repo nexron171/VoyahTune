@@ -3,32 +3,6 @@
   "generatedAt": "2026-09-27T08:53:50.333710+00:00",
   "releases": [
     {
-      "version": "3.15.0",
-      "publishedAt": "2026-09-28T05:32:52.946624+00:00",
-      "channel": "stable",
-      "notesUrl": "https://github.com/nexron171/VoyahTune/releases/tag/v3.15.0",
-      "payload": {
-        "url": "https://storage.yandexcloud.net/voyahtune/payload_3.15.0.zip",
-        "size": 149407190,
-        "sha256": "92347612bec3e147d4bf54aee0f4f08e9646fe219ba2c47605367faa6827d84d",
-        "manifestSchema": 4
-      },
-      "requirements": {
-        "minInstallerVersion": "1.2.0",
-        "requiredCapabilities": [
-          "qinggan-v3",
-          "single-package-v1",
-          "files-v1",
-          "ota-bootstrap-v1"
-        ]
-      },
-      "ota": true,
-      "otaMetadata": {
-        "body": "{\"schema\":1,\"version\":\"3.15.0\",\"sequence\":2,\"archiveSha256\":\"92347612bec3e147d4bf54aee0f4f08e9646fe219ba2c47605367faa6827d84d\",\"archiveSize\":149407190,\"manifestSha256\":\"8f6946485cfcd9f6fe01c9a745463fc247bc9054c05c8b1ddd64b8e2ebdb84a8\",\"minUpdaterVersion\":\"0.1.0\",\"sourceVersions\":\">=3.15.0, <4.0.0\",\"firmwarePolicy\":\"bootstrap-fingerprint\",\"capabilities\":[\"qinggan-ota-v1\"],\"apkSigners\":{\"ru.big.town.anative\":[\"cb30412f0a691285b990033321d784054776db18eb95f9150677896057b5e164\"],\"ru.big.town.restoremode\":[\"cb30412f0a691285b990033321d784054776db18eb95f9150677896057b5e164\"]}}",
-        "signature": "6cd690191a7774fd4fb6c6b30d1b9bfaf1840790a014a84cbdb8197670eae09b6ebde17f6ae5e859f489a269c1e7b0be5e82f150136c21c8a8fa780a39d69a22928c3cd122e9b9bbdefe6bd0b28ed2abcb0d8a2e06693174904a59811e79bb9076ac90986f454444ca41ea21fd9db5bd10fd4ffac8bb667914b504b0d48e67f9f7253c21ba85878c789997901add151b205b39ada53e613b4f3713c117444b1b6d261f1e40c746e396e08823889de3ea907df6789d0e593687966726a208712661e7985d7eb6f3566004aef146b4d8a9b91019d4eeb222b09e02f819bbcb4347a95ae184bee81f6a45d07844e6edfbb8dcb74f8f8882fc1888b2ae571cd28465db23ac11095b05a7523592f68ad6c13404cddfe08b01fbfee163ac82dcd4fe7f5a795052b435522d40fd94cd0cc9841423ec85f8319177f697971f8f0e1620fc70c6be9458d89fbdd4dd92783fc287dd6c4e8e496f6e33956ae7e371b1a95759f05910393e6c51e3768e7aa94ebc89d54748ae13afc31de206cb6f98f79c4073"
-      }
-    },
-    {
       "version": "3.14.0",
       "publishedAt": "2026-09-27T08:52:13.333979+00:00",
       "channel": "stable",
