@@ -106,6 +106,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
     // Автосвет (перенесён в «Комфорт»)
     private RadioGroup autoLightGroup;
+    private Switch extendedAutoLightSwitch;
     private TextView textSensorLevel;
     private CheckBox checkBox34;
 
@@ -2556,9 +2557,16 @@ public class AdvanceActivity extends AppCompatActivity {
 
     private void initAutoLight() {
         autoLightGroup  = findViewById(R.id.autoLightGroup);
+        extendedAutoLightSwitch = findViewById(R.id.extendedAutoLightSwitch);
         textSensorLevel = findViewById(R.id.textSensorLevel);
         if (autoLightGroup == null) return;
 
+        extendedAutoLightSwitch.setChecked(prefs.getBoolean("extendedAutoLight", false));
+        extendedAutoLightSwitch.setOnCheckedChangeListener((button, checked) -> {
+            if (syncingSettingUi) return;
+            prefs.edit().putBoolean("extendedAutoLight", checked).apply();
+            SplitConfigSync.pushAutoLight(this, prefs);
+        });
         boolean on = prefs.getBoolean("autoLight", false);
         autoLightGroup.check(on ? R.id.autoLightOn : R.id.autoLightOff);
         autoLightGroup.setOnCheckedChangeListener((group, checkedId) -> {
@@ -2601,6 +2609,7 @@ public class AdvanceActivity extends AppCompatActivity {
         if (autoLightGroup != null) {
             syncingSettingUi = true;
             autoLightGroup.check(prefs.getBoolean("autoLight", false) ? R.id.autoLightOn : R.id.autoLightOff);
+            extendedAutoLightSwitch.setChecked(prefs.getBoolean("extendedAutoLight", false));
             syncingSettingUi = false;
         }
         updateSystemMetricsPolling();

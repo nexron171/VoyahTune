@@ -8,7 +8,7 @@ import android.content.SharedPreferences;
 import java.util.List;
 
 /**
- * Единая event-driven публикация сохранённой конфигурации в Native. Fullscreen/Dock/steering/DPI/keyboard
+ * Единая event-driven публикация сохранённой конфигурации в Native. Fullscreen/Dock/steering/DPI/keyboard/autolight
  * зеркалируются при изменении, старте и физическом пробуждении без периодического чтения.
  */
 final class SplitConfigSync {
@@ -23,6 +23,13 @@ final class SplitConfigSync {
         pushDock(context, prefs);
         pushSteering(context, prefs);
         pushKeyboard(context, prefs);
+        pushAutoLight(context, prefs);
+    }
+
+    static void pushAutoLight(Context context, SharedPreferences prefs) {
+        Intent i = configIntent("ru.big.town.anative.AUTO_LIGHT_CONFIG");
+        i.putExtra("extendedAutoLight", prefs.getBoolean("extendedAutoLight", false));
+        context.sendBroadcast(i);
     }
 
     static void pushFullscreenApps(Context context, SharedPreferences prefs) {

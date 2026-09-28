@@ -163,8 +163,8 @@ final class CanBusEventHub {
     }
 
     /**
-     * Temporarily preserves the legacy TX20 snapshot request for BatteryHeatService.
-     * The request is synchronous, but always executes on the hub IO thread; incoming code 36 is
+     * Requests the OEM snapshot for subscribers such as battery heat and auto light.
+     * The request is synchronous, but executes on the isolated query thread; incoming code 36 is
      * still filtered by the union of subscribers before an event is allocated.
      */
     void requestVehicleStateSnapshot() {

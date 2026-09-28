@@ -1844,14 +1844,14 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Автоматический ближний свет"
+                            android:text="Автоматический свет"
                             android:textColor="#ffffff"
                             android:textSize="26px" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="На автомобилях ОД С+ отключает матричный свет"
+                            android:text="Без расширенной логики включает ближний в темноте"
                             android:textColor="#888888"
                             android:textSize="20px" />
 
@@ -1913,6 +1913,27 @@
                     </RadioGroup>
 
                 </LinearLayout>
+
+                <Switch
+                    android:id="@+id/extendedAutoLightSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="56dp"
+                    android:layout_marginHorizontal="6dp"
+                    android:text="Расширенная логика автосвета"
+                    android:textColor="#ffffff"
+                    android:textSize="26px"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginBottom="8dp"
+                    android:text="Работает при включённом автосвете. В темноте выбирает штатный Auto, если автодальний включён в настройках автомобиля; иначе — ближний. В тоннеле — ближний."
+                    android:textColor="#aaaaaa"
+                    android:textSize="20px" />
 
             </LinearLayout>
 
