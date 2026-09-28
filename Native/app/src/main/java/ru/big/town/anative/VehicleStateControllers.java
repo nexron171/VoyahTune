@@ -99,6 +99,7 @@ final class VehicleStateControllers {
                 driverDoorStateController.reset();
                 break;
             case DOOR:
+                if (event.first == 1) ApplyEngine.stopEarlyDriveRestore("driver door open");
                 if (restoreTriggers.onDoor(event.first)) {
                     ApplyEngine.noteDriverDoorOpened();
                     ApplyEngine.scheduleApply("driver door opened");
@@ -110,6 +111,7 @@ final class VehicleStateControllers {
                                 : DriverDoorStateController.Source.SNAPSHOT);
                 break;
             case GEAR:
+                if (event.first == 3) ApplyEngine.stopEarlyDriveRestore("gear Drive");
                 if (restoreTriggers.onGear(event.first)) {
                     ApplyEngine.scheduleApply("gear Drive");
                 }

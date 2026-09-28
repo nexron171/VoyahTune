@@ -113,11 +113,9 @@ mark_line=$(printf '%s\n' "$fc_function" \
 [ "$reserve_line" -lt "$inject_line" ] || fail "client injection is not reserved before Frida"
 [ "$ready_line" -lt "$mark_line" ] || fail "client active marker precedes agent readiness"
 
-discover_line=$(grep -nF '    discover_app_client' "$LOADER" | tail -n1 | cut -d: -f1)
-keyboard_line=$(grep -nF 'KEYBOARD_SCRIPT' "$LOADER" | tail -n1 | cut -d: -f1)
-publish_line=$(grep -nF '    publish_hook_status running' "$LOADER" | tail -n1 | cut -d: -f1)
-[ "$keyboard_line" -lt "$discover_line" ] && [ "$discover_line" -lt "$publish_line" ] \
-    || fail "optional client discovery can delay or precede core hook work"
+# Optional discovery owns its lane and retains its one global app-client injection worker.
+require "$LOADER" 'apps) discover_app_client ;;'
+require "$LOADER" 'APP_CLIENT_BUSY=/data/local/tmp/voyahtune_app_client.busy'
 
 for INSTALLER in "$FULL_INSTALL" "$FULL_INSTALL_BAT"; do
     require "$INSTALLER" 'app_client.js'

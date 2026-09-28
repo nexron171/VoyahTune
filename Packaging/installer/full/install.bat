@@ -11,7 +11,7 @@ exit /b %FULL_INSTALL_RESULT%
 
 :install_main
 cd /d "%~dp0" || exit /b 1
-for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
+for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
     exit /b 1
 )
@@ -119,12 +119,13 @@ if errorlevel 1 exit /b 1
 call :put_apollo_safe_key open_voyah_apollo_profile_heartbeat
 if errorlevel 1 exit /b 1
 adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
-adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
+adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
 for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
 echo   Old agent, markers, and keys removed. The new Apollo hook stays off until explicit opt-in.
 
 echo === Frida infrastructure ^(steering wheel + VirtualDisplay + boot-scoped Apollo^) ===
-adb.exe shell "mkdir -p /data/local/bin"
+rem Agents run as the target UID; fix parent traversal and clear inherited special bits.
+adb.exe shell "mkdir -p /data/local/bin /data/local/tmp && chown 0:0 /data/local /data/local/bin && chown 2000:2000 /data/local/tmp && chmod 00751 /data/local && chmod 00755 /data/local/bin && chmod 00771 /data/local/tmp && test x$(stat -c %%a:%%u:%%g /data/local) = x751:0:0 && test x$(stat -c %%a:%%u:%%g /data/local/bin) = x755:0:0 && test x$(stat -c %%a:%%u:%%g /data/local/tmp) = x771:2000:2000"
 if errorlevel 1 exit /b 1
 call :install_required_data_file load.bin /data/local/bin/load.bin 755
 if errorlevel 1 exit /b 1
@@ -139,6 +140,10 @@ if errorlevel 1 exit /b 1
 call :install_required_data_file app_client.js /data/local/bin/app_client.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644
+if errorlevel 1 exit /b 1
+call :install_required_data_file voyahtune_drive_reset.js /data/local/bin/voyahtune_drive_reset.js 644
+if errorlevel 1 exit /b 1
+call :install_required_data_file voyahtune_acc_restore.js /data/local/bin/voyahtune_acc_restore.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file keyboard_lock_en.js /data/local/bin/keyboard_lock_en.js 644
 if errorlevel 1 exit /b 1
@@ -156,7 +161,7 @@ if errorlevel 1 exit /b 1
 rem app_client.js replaces fullscreen_client.js. Publish the new file first, then unload legacy
 rem target processes and remove the old file plus both generations of runtime markers.
 echo === Migrating client agent fullscreen_client.js -^> app_client.js ===
-adb.exe shell "fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for app_client_pkg in $fullscreen_csv; do IFS=$old_ifs; case $app_client_pkg in ''|null|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop $app_client_pkg >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs; for app_client_pkg in ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android; do am force-stop $app_client_pkg >/dev/null 2>&1; done; rm -f /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_fullscreen_client.* /data/local/tmp/voyahtune_app_client.* || exit 1; [ -s /data/local/bin/app_client.js ] || exit 1; [ ! -e /data/local/bin/fullscreen_client.js ] || exit 1; [ ! -e /data/local/bin/fullscreen_client.js.voyahtune.new ] || exit 1; ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1; ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1"
+adb.exe shell "fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for app_client_pkg in $fullscreen_csv; do IFS=$old_ifs; case $app_client_pkg in ''|null|.*|*.|*..*|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop $app_client_pkg >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs; for app_client_pkg in ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android; do am force-stop $app_client_pkg >/dev/null 2>&1; done; rm -f /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_fullscreen_client.* /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* || exit 1; [ -s /data/local/bin/app_client.js ] || exit 1; [ ! -e /data/local/bin/fullscreen_client.js ] || exit 1; [ ! -e /data/local/bin/fullscreen_client.js.voyahtune.new ] || exit 1; ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1; ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1"
 if errorlevel 1 exit /b 1
 rem Remove the unused manifest left by previous full releases.
 adb.exe shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json.voyahtune.new"
@@ -204,6 +209,9 @@ if errorlevel 1 (
     echo !!! RestoreMode was not installed. Fix the error and run the installer again before rebooting.
     exit /b 1
 )
+
+adb.exe shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode && settings put global voyahtune_install_mode full && test x$(settings get global voyahtune_install_mode) = xfull"
+if errorlevel 1 exit /b 1
 
 adb.exe reboot
 if errorlevel 1 (
@@ -552,7 +560,7 @@ exit /b %errorlevel%
 :read_boot_hook_final_state
 set "BOOT_HOOK_FINAL_STATE_FILE=%TEMP%\open_voyah_boot_final_%RANDOM%_%RANDOM%.tmp"
 set "BOOT_HOOK_FINAL_STATE="
-adb.exe shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; elif [ ! -e /system/etc/init.voyahtune.load.sh ] && [ ! -e /system/etc/init/voyahtune.setenforce.rc ] && [ ! -e /system/etc/init/voyahtune.load.rc ]; then echo ABSENT; else echo PARTIAL; fi" > "%BOOT_HOOK_FINAL_STATE_FILE%" 2>nul
+adb.exe shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/init/voyahtune.load.rc && grep -qFx '    start voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; elif [ ! -e /system/etc/init.voyahtune.load.sh ] && [ ! -e /system/etc/init/voyahtune.setenforce.rc ] && [ ! -e /system/etc/init/voyahtune.load.rc ]; then echo ABSENT; else echo PARTIAL; fi" > "%BOOT_HOOK_FINAL_STATE_FILE%" 2>nul
 if errorlevel 1 (
     del "%BOOT_HOOK_FINAL_STATE_FILE%" >nul 2>nul
     exit /b 1
@@ -612,7 +620,7 @@ adb.exe push voyahtune.load.sh /system/etc/.voyahtune.load.sh.new
 if errorlevel 1 goto :boot_hook_stage_failed
 adb.exe push voyahtune.load.rc /system/etc/.voyahtune.load.rc.new
 if errorlevel 1 goto :boot_hook_stage_failed
-adb.exe shell "chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && grep -qF '/data/local/bin/load.bin' /system/etc/.voyahtune.load.sh.new && grep -qF 'on post-fs-data' /system/etc/.voyahtune.load.rc.new && grep -qF '/system/bin/setenforce 0' /system/etc/.voyahtune.load.rc.new && grep -qF 'service voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/.voyahtune.load.rc.new && grep -qF 'enable voyahtune_load' /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync"
+adb.exe shell "chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && grep -qF '/data/local/bin/load.bin' /system/etc/.voyahtune.load.sh.new && grep -qF 'on post-fs-data' /system/etc/.voyahtune.load.rc.new && grep -qF '/system/bin/setenforce 0' /system/etc/.voyahtune.load.rc.new && grep -qF 'service voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/.voyahtune.load.rc.new && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/.voyahtune.load.rc.new && grep -qFx '    start voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'enable voyahtune_load' /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync"
 if errorlevel 1 goto :boot_hook_stage_failed
 call :boot_hook_snapshot
 if errorlevel 1 goto :boot_hook_snapshot_failed
@@ -622,7 +630,7 @@ if errorlevel 1 goto :boot_hook_publish_failed
 
 set "BOOT_HOOK_STATE_FILE=%TEMP%\open_voyah_boot_hook_%RANDOM%_%RANDOM%.tmp"
 set "BOOT_HOOK_STATE="
-adb.exe shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; else echo BROKEN; fi" > "%BOOT_HOOK_STATE_FILE%" 2>nul
+adb.exe shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/init/voyahtune.load.rc && grep -qFx '    start voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; else echo BROKEN; fi" > "%BOOT_HOOK_STATE_FILE%" 2>nul
 if errorlevel 1 (
     del "%BOOT_HOOK_STATE_FILE%" >nul 2>nul
     goto :boot_hook_verify_failed

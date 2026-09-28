@@ -13,7 +13,7 @@
 Здесь лежит всё, что попадает в релиз, кроме APK, собираемых из `Native/` и `RestoreMode/`.
 `Releases/` — сборочный вывод; править релизные файлы вручную там не нужно.
 
-Целевая архитектура общего GUI/CLI-установщика для macOS, Windows и Linux, включая
+Целевая архитектура общего GUI-установщика для macOS, Windows и Linux, включая
 удаление и сборку офлайн-комплектов: [архитектура установщика](../Docs/installer-architecture.md).
 Следующий пример описывает формат по умолчанию — архивы со скриптами.
 
@@ -37,6 +37,10 @@ Releases/dist/VoyahTune-3.2.2-light.zip
 `full` содержит Frida-перехваты для руля, VirtualDisplay, launcher, multidisplay, полноэкранных
 клиентских окон, статуса Apollo и опциональной штатной клавиатуры. `light` не
 содержит Frida и `load.bin`. Управление сохранёнными Apollo-функциями входит в оба варианта.
+
+Full также содержит [хук сбросов аккаунта Sport+](../Docs/account-reset-hook.md):
+`voyahtune_drive_reset.js` подставляет сохранённые режимы вождения, энергии и
+сервисного режима подвески в запросы `resetSettings`/`resetOverseaDriveMode`.
 
 | Папка | Что | Куда идёт |
 |---|---|---|
@@ -234,18 +238,19 @@ Fullscreen client запускается только для точного main
 новых process identity после attach блокируют дальнейшую инъекцию этого пакета до следующей загрузки,
 чтобы несовместимый APK не мог попасть в crash-loop.
 
-На cold boot тот же 15-секундный bootstrap каждую секунду ищет не только Qinggan systemservice, но и
-launcher. Как только launcher появляется, выполняется exact-identity one-shot launcher-dock: он только
-оформляет док и не запускает приложения, поэтому иконки не ждут более поздний systemservice или VD
-attach. Внутри последующего watchdog порядок приоритетов остаётся multidisplay whitelist, launcher
-dock, затем VD/system_server; новая identity launcher обнаруживается максимум за 5 секунд.
+Loader явно запускается в `post-fs-data` после синхронного `setenforce`, не дожидаясь
+`class late_start`. Первым он ищет `com.qinggan.canbus.service` с паузой 0,1 с
+и устанавливает `voyahtune_acc_restore.js`: агент подменяет гостевой пакет сброса
+режимов при ACC ON до постановки в очередь. Остальные workers стартуют после
+ready-marker, ошибки установки либо 45 секунд ожидания. Завершения обвязки Frida
+после ready-marker они не ждут. Этот приоритет повышает шанс перехвата первого
+вызова, но не гарантирует его при холодном старте Android.
 
-Loader включается в `post-fs-data` после синхронного `setenforce`, но остаётся `class late_start`.
-Перед общим watchdog он до 15 секунд ждёт `com.qinggan.systemservice` и устанавливает server whitelist
-раньше, чем приложения успеют закэшировать OEM-ответ. Это устраняет основной источник «иногда работает
-после перезапуска приложения». Activity-level `mEnable`, Home/SplitHost и top-task race намеренно не
-переопределяются вслепую; подробный разбор находится в
-`Docs/multidisplay-transfer-audit.md`.
+После начального приоритета ACC workers руля, MultiDisplay, дока, VD, Apollo,
+клавиатуры, приложений и диагностики работают независимо. Подробности:
+`Docs/acc-restore-hook.md`, `Docs/parallel-hook-loader.md`.
+Activity-level `mEnable`, Home/SplitHost и top-task race намеренно не
+переопределяются вслепую.
 
 Это не меняет политику внутренних автомобильных watchdog: редкие собственные проверки, нужные для
 возврата целевого состояния, сохраняются. Оптимизация направлена прежде всего на работу,
@@ -282,10 +287,8 @@ ADB serial и отказывается заменять или удалять н
 bash Utils/android11-oem-stubs/tests/static-checks.sh
 ```
 
-Исследовательские функции из Voboost намеренно не добавлены в hook-set без проверки OEM ABI:
-результаты аудита `phone-num`/`weather-widget` находятся в
-`Docs/voboost-phone-weather-audit.md`, а поэтапный безопасный план телефонных номеров — в
-`Docs/phone-number-improvement-plan.md`.
+Исследовательские функции `phone-num`/`weather-widget` из Voboost намеренно не добавлены
+в hook-set без проверки OEM ABI.
 
 Режимы восстанавливаются независимо по открытию водительской двери и переходу в Drive, без
 дедупликации между этими событиями. Чтение настроек и отправка выполняются один раз, без таймеров

@@ -82,6 +82,9 @@ tmp
 CONTEXT.md
 /vibe/
 
+# Local plans, audits, investigations and checklists.
+/Plans/
+
 # Релизы — сборочный вывод, в репозитории не хранятся.
 # Источник комплекта (инжект-скрипты, установщики, boot-обвязка, tools) — в Packaging/.
 # Собрать: ./make_release.sh <версия>
@@ -101,3 +104,5 @@ CONTEXT.md
 
 /Installer/desktop/src-tauri/tauri.release.conf.json
 /Installer/tests/__pycache__/
+
+/Installer/scripts/__pycache__/

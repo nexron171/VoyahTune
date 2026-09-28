@@ -13,6 +13,16 @@ final class VehicleRestorePolicy {
     static final int SOC_REV = 3;
     static final int SOC_SREV = 4;
     static final int SOC_FORCE_EV = 5;
+    static final String SAVE_CHARGE_LEVEL = "SREV_SOC_SET";
+    static final int SAVE_CHARGE_LEVEL_ID = 1196;
+
+    /** UI normalizes speech; the service accepts only a valid, already rounded target. */
+    static int requireSaveChargeLevel(int percent) {
+        if (percent < 25 || percent > 80 || percent % 5 != 0) {
+            throw new IllegalArgumentException("Unsupported SREV charge target: " + percent);
+        }
+        return (percent - 25) / 5;
+    }
 
     static final String REGEN_LEVEL = "HUM_ENERGY_PTREGEN_LEVL";
     static final int REGEN_LEVEL_ID = 619;
@@ -24,6 +34,14 @@ final class VehicleRestorePolicy {
     static final int PEDESTRIAN_SOUND_ID = 665;
     static final int PEDESTRIAN_SOUND_DISABLED = 1;
     static final int PEDESTRIAN_SOUND_ENABLED = 2;
+
+    // VehicleSettings HintSwitch: checked=2, unchecked=1 (not DFVehicleState's stale 0/1 constants).
+    static final String SUSPENSION_MAINTENANCE = "ASC_MAINTAIN_SWITCH";
+    static final int SUSPENSION_MAINTENANCE_ID = 711;
+
+    static int suspensionMaintenanceState(boolean enabled) {
+        return enabled ? 2 : 1;
+    }
 
     private VehicleRestorePolicy() {
     }

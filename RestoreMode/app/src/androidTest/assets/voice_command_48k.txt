@@ -1,0 +1,5 @@
+Synthetic fixture: «включи подогрев руля».
+Additional fixtures: «не включай подогрев руля» and «сегодня хорошая погода».
+Generated with macOS say, Russian Milena voice, 2026-09-24.
+Raw mono signed PCM16 little endian, 48000 Hz, 250 ms leading and 1 s trailing silence.
+This is a pipeline smoke test, not a road-noise accuracy benchmark.

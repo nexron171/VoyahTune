@@ -20,11 +20,6 @@ printf '%s\n' 'Подготовка VoyahTune…' >&2
 tail -n +"$archive_line" "$0" | tar -xz -C "$work" "$architecture"
 app="$work/$architecture"
 export APPDIR="$app"
-if [ "${1:-}" = --cli ]; then
-  shift
-  "$app/usr/bin/voyahtune" --bundle "$app/usr/share/voyahtune-installer/bundle" "$@"
-else
-  "$app/AppRun" "$@"
-fi
+"$app/AppRun" "$@"
 exit $?
 __VOYAHTUNE_ARCHIVE__

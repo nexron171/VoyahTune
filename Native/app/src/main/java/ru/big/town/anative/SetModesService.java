@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.InstallMode;
+
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -61,6 +63,7 @@ public class SetModesService extends Service {
     static final int MSG_AUTO_LIGHT_DISABLE         = 11; // выключить автосвет
     static final int MSG_LEAVE_CAR                  = 20; // быстрая активация leave car / power hold
     static final int MSG_APPLY_PEDESTRIAN           = 21; // применить звук пешеходов (arg1: 1=заглушить)
+    static final int MSG_APPLY_SUSPENSION_MAINTENANCE = 37; // arg1: 1=вкл
     static final int MSG_APPLY_FORCED_EV           = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int MSG_REBOOT                     = 22; // перезагрузка системы (голова)
     static final int MSG_WASH_MODE                  = 23; // активация режима мойки
@@ -99,10 +102,29 @@ public class SetModesService extends Service {
     private static final long CAR_POWER_RECONNECT_DELAY_MS = 5_000L;
     private static final long CAR_POWER_CONNECT_WATCHDOG_MS = 15_000L;
 
+    private final VoiceCommandController voiceCommands = new VoiceCommandController(this);
+
+    private SuspensionWidgetController suspensionWidget;
+
     class IncomingHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case ru.big.town.common.SuspensionWidgetProtocol.WATCH:
+                case ru.big.town.common.SuspensionWidgetProtocol.UNWATCH:
+                case ru.big.town.common.SuspensionWidgetProtocol.SELECT:
+                    if (suspensionWidget == null) suspensionWidget = new SuspensionWidgetController(SetModesService.this);
+                    suspensionWidget.handle(msg);
+                    break;
+                case 36: // Signature-protected voice session protocol.
+                    try {
+                        voiceCommands.handle(msg.getData());
+                    } catch (android.os.BadParcelableException e) {
+                        // An older client can include its own ResultReceiver subclass.
+                        // Reject the unreadable request without crashing the vehicle service.
+                        Log.e(TAG, "Invalid voice command parcel; update VoyahTune UI", e);
+                    }
+                    break;
                 case MSG_APPLY_DRIVE_MODES:
                     clientMessenger = msg.replyTo;
                     // MSG_RESULT отправим по ЗАВЕРШЕНИИ цикла применения, чтобы клиент держал
@@ -190,6 +212,15 @@ public class SetModesService extends Service {
                             () -> MainActivity.sendPedestrianSoundCommand(pedestrianDisabled));
                     break;
 
+                case MSG_APPLY_SUSPENSION_MAINTENANCE:
+                    final boolean maintenance = msg.arg1 == 1;
+                    ApplyEngine.postUserCommand("suspension maintenance", () -> {
+                        if (MainActivity.sendSuspensionMaintenanceCommand(SetModesService.this, maintenance)) {
+                            MainActivity.persistSavedToggle(SetModesService.this, "suspensionMaintenance", maintenance);
+                        }
+                    });
+                    break;
+
                 case MSG_APPLY_FORCED_EV:
                     Log.i(TAG, "handleMessage() MSG_APPLY_FORCED_EV arg1=" + msg.arg1);
                     final boolean forcedEvEnabled = msg.arg1 == 1;
@@ -208,7 +239,7 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_SPLIT_LAUNCH_VD: {
-                    if (!BuildConfig.IS_FULL) { Log.i(TAG, "MSG_SPLIT_LAUNCH_VD игнор (light-сборка)"); break; }
+                    if (!InstallMode.isFull()) { Log.i(TAG, "MSG_SPLIT_LAUNCH_VD игнор (light-сборка)"); break; }
                     android.os.Bundle d = msg.getData();
                     String left = (d != null) ? d.getString("left") : null;
                     String right = (d != null) ? d.getString("right") : null;
@@ -270,6 +301,51 @@ public class SetModesService extends Service {
                     Log.i(TAG, "handleMessage() default");
                     super.handleMessage(msg);
             }
+        }
+    }
+
+    WashModePolicy.Outcome activateVoiceWash() {
+        return washModeController == null ? WashModePolicy.Outcome.TRANSPORT_FAILURE : washModeController.activate();
+    }
+
+    void activateVoicePowerHold(java.util.function.BooleanSupplier active,
+                                java.util.function.Consumer<PowerHoldPolicy.Outcome> completed) {
+        PowerHoldStatusTracker tracker = powerHoldStatusTracker;
+        if (tracker == null) { completed.accept(PowerHoldPolicy.Outcome.TRANSPORT_FAILURE); return; }
+        tracker.beginActivation(generation -> {
+            AtomicReference<PowerHoldPolicy.Outcome> outcome = new AtomicReference<>(PowerHoldPolicy.Outcome.TRANSPORT_FAILURE);
+            ApplyEngine.postUserCommand("voice power hold", () -> {
+                if (active.getAsBoolean() && powerHoldController != null) outcome.set(powerHoldController.activate());
+            }, () -> {
+                tracker.finishActivation(generation, outcome.get());
+                completed.accept(outcome.get());
+            });
+        });
+    }
+
+    boolean isVoiceServiceAction(String action) {
+        return action.equals("apply") || action.equals("battery_heat") || action.equals("close_all")
+                || action.equals("reboot") || action.startsWith("auto_light:");
+    }
+
+    void executeVoiceServiceAction(String action, android.os.ResultReceiver reply) {
+        try {
+            if (action.equals("apply")) {
+                ApplyEngine.applyNow(() -> VoiceCommandController.respond(reply, true, null));
+                return;
+            } else if (action.equals("battery_heat")) {
+                sendBroadcast(new Intent(BatteryHeatService.ACTION_BATTERY_HEAT_ACTIVATE).setPackage(getPackageName()));
+            } else if (action.equals("close_all")) closeAllApps();
+            else if (action.equals("reboot")) rebootSystem();
+            else if (action.startsWith("auto_light:")) {
+                boolean enabled = action.endsWith(":on");
+                saveAutoLightState(enabled);
+                if (enabled) startLightSensorService(); else stopLightSensorService();
+            }
+            VoiceCommandController.respond(reply, true, null);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Voice command failed", e);
+            VoiceCommandController.respond(reply, false, "Не удалось выполнить команду");
         }
     }
 
@@ -989,6 +1065,7 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        ApplyEngine.activateWake("service create");
         // A stale file from an earlier boot is fail-closed and removed on first service creation.
         ApolloSettingsRuntimeState.isEnabled(this);
         washModeController = WashModeController.create(this);
@@ -1013,7 +1090,7 @@ public class SetModesService extends Service {
         setModesReceiverDynamic = new SetModesReceiverDynamic(
                 this::handleScreenOffFallback,
                 this::handleScreenOnFallback);
-        if (BuildConfig.IS_FULL) {
+        if (InstallMode.isFull()) {
             screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
             screenLiftTaskRestorer.register();
         }
@@ -1414,7 +1491,10 @@ public class SetModesService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        if (suspensionWidget != null) suspensionWidget.close();
+        voiceCommands.close();
         serviceDestroyed = true;
+        ApplyEngine.stopEarlyDriveRestore("service destroyed");
         for (VirtualDisplay display : embeddedDisplays.values()) {
             try { display.release(); } catch (Exception ignored) {}
         }

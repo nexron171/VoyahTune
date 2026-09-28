@@ -2,7 +2,7 @@
 """Differential tests: run the original host script and its Rust port on isolated cars.
 The production GUI never executes these host scripts. They are the test oracle.
 """
-import hashlib,json,os,shutil,subprocess,unittest
+import hashlib,json,os,re,shutil,subprocess,unittest
 from pathlib import Path
 from integration import InstallerTests,ROOT,PAYLOAD
 class ClassicPortTests(unittest.TestCase):
@@ -37,6 +37,44 @@ class ClassicPortTests(unittest.TestCase):
   _,_,old,new=self.compare('full')
   self.assertEqual(old.returncode,0,old.stdout+old.stderr)
   self.assertEqual(new.returncode,0,new.stdout)
+ def test_full_repairs_restrictive_directory_permissions(self):
+  def seed(f):
+   for path in ['data/local','data/local/bin','data/local/tmp']:
+    (f.device/path).chmod(0o2700)
+   config=f.device/'data/local/bin/unrelated-private-file';config.write_text('keep');config.chmod(0o600)
+  reference,port,old,new=self.compare('full',seed=seed)
+  self.assertEqual(old.returncode,0,old.stdout+old.stderr)
+  for f in [reference,port]:
+   for path,mode,owner in [('data/local',0o751,'0:0'),('data/local/bin',0o755,'0:0'),('data/local/tmp',0o771,'2000:2000')]:
+    self.assertEqual((f.device/path).stat().st_mode & 0o7777,mode)
+    self.assertEqual(f.read_state()['owners'][path],owner)
+   self.assertEqual((f.device/'data/local/bin/unrelated-private-file').stat().st_mode & 0o7777,0o600)
+ def test_boot_and_windows_use_same_directory_preparation(self):
+  rust=(ROOT/'Installer/crates/installer-core/src/classic_commands.rs').read_text()
+  command=re.search(r'pub const PREPARE_DATA_DIRECTORIES: &str = r###"(.*?)"###;',rust,re.S)[1]
+  boot=(ROOT/'Packaging/system/voyahtune.load.sh').read_text()
+  function=re.search(r'prepare_data_directories\(\) \{(.*?)\n}',boot,re.S)[1]
+  windows=(ROOT/'Packaging/installer/full/install.bat').read_text()
+  bat=next(line[len('adb.exe shell "'):-1].replace('%%','%') for line in windows.splitlines() if line.startswith('adb.exe shell "mkdir -p /data/local/bin /data/local/tmp'))
+  normalize=lambda s:' '.join(s.split())
+  self.assertEqual(normalize(command),normalize(function))
+  self.assertEqual(normalize(command),normalize(bat))
+  f=self.fixture()
+  # Run the boot function through the fake Android shell, including a second, idempotent pass.
+  for path in ['data/local','data/local/bin','data/local/tmp']:(f.device/path).chmod(0o2700)
+  for _ in range(2):
+   result=subprocess.run([str(f.fixture),'shell','sh','-s'],input='prepare_data_directories() {'+function+'\n}\nprepare_data_directories\n',env=f.env,text=True,capture_output=True)
+   self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+  self.assertEqual((f.device/'data/local/bin').stat().st_mode & 0o7777,0o755)
+  # A successful chmod exit code is insufficient if the resulting mode/owner is wrong.
+  result=subprocess.run([str(f.fixture),'shell','sh','-s'],input='stat() { echo 2700:0:0; }\n'+command,env=f.env,text=True,capture_output=True)
+  self.assertNotEqual(result.returncode,0)
+ def test_full_directory_preparation_failure_stops_before_push(self):
+  reference,port,old,new=self.compare('full',{'failShell':'chmod 00755 /data/local/bin'})
+  self.assertNotEqual(old.returncode,0)
+  for f in [reference,port]:
+   self.assertFalse((f.device/'data/local/bin/load.bin').exists())
+   self.assertFalse(any(c['args']==['reboot'] for c in f.calls()))
  def seed_client_migration(self,f):
   for path in ['data/local/bin/fullscreen_client.js','data/local/bin/fullscreen_client.js.voyahtune.new','data/local/tmp/voyahtune_fullscreen_client.old','data/local/tmp/voyahtune_app_client.old']:
    (f.device/path).write_text('legacy client')
@@ -52,12 +90,12 @@ class ClassicPortTests(unittest.TestCase):
   _,_,old,new=self.compare('full',{'failShell':'for app_client_pkg in $fullscreen_csv'},self.seed_client_migration)
   self.assertNotEqual(old.returncode,0)
   self.assertNotEqual(new.returncode,0)
- def test_light_and_remove_clean_both_client_generations(self):
+ def test_remove_cleans_both_client_generations(self):
   def seed(f):
    self.seed_client_migration(f)
    for path in ['data/local/bin/app_client.js','data/local/bin/app_client.js.voyahtune.new']:
     (f.device/path).write_text('new client')
-  for action in ['light','remove']:
+  for action in ['remove']:
    with self.subTest(action=action):
     _,port,old,new=self.compare(action,seed=seed)
     self.assertEqual(old.returncode,0,old.stdout+old.stderr)
@@ -76,9 +114,9 @@ class ClassicPortTests(unittest.TestCase):
   f=self.fixture();base=f.device/'data/local/voyahtune-installer';(base/'lock').mkdir(parents=True);(base/'lock/owner').write_text('dead-operation');(base/'load.bin.installed').write_text('invalid-old-hash')
   p=f.plan('light');(f.device/'data/local/bin/keyboard_ru.js').write_text('changed after plan')
   self.assertEqual(f.apply(p).returncode,0);self.assertFalse((base/'lock').exists())
- def test_full_light_remove_sequence_matches_classic(self):
+ def test_full_remove_light_sequence_matches_classic(self):
   reference=self.fixture();port=self.fixture()
-  for action in ['full','light','remove']:
+  for action in ['full','remove','light']:
    old=self.classic(reference,action);new=port.apply(port.plan(action),okay=False)
    self.assertEqual(new.returncode,old.returncode,old.stdout[-1200:]+new.stdout[-2500:]);self.assertEqual(self.state(port),self.state(reference))
  def test_no_new_hash_gate_after_push(self):self.compare('full',{'corruptPush':True})
@@ -86,7 +124,10 @@ class ClassicPortTests(unittest.TestCase):
  def seed_legacy(self,f):
   p=f.device/'system/etc/init.logcat.sh';p.write_text('#!/system/bin/sh\n# init.logcat.sh Open Voyah:\n/system/bin/logcat -v threadtime\n')
  def test_legacy_migration_matches_classic(self):self.compare('full',seed=self.seed_legacy)
- def test_light_legacy_refusal_matches_classic(self):self.compare('light',seed=self.seed_legacy)
+ def test_gui_light_migrates_legacy_without_full_removal(self):
+  port=self.fixture();self.seed_legacy(port);port.seed_apps()
+  port.apply(port.plan('light'));port.assert_app_data(True)
+  self.assertNotIn('Open Voyah:',(port.device/'system/etc/init.logcat.sh').read_text())
  def test_legacy_rollback_on_boot_publish_failure_matches_classic(self):self.compare('full',{'failShell':'mv -f /system/etc/.voyahtune.load.sh.new'},self.seed_legacy)
  def test_changed_signatures_reset_both_apps(self):
   f=self.fixture();f.seed_apps(old_key=True);result=f.apply(f.plan('light'))

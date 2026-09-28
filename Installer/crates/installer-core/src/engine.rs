@@ -7,7 +7,7 @@ use crate::{
     canbus::{self, RemovalConsent},
     classic_commands as c,
     events::{EventCallback, Events},
-    inventory,
+    inventory, mode,
     payload::{self, Payload, Variant, NATIVE, NATIVE_PATH, RESTORE},
     plans::{self, Action, Dns, Request},
     recovery::{self, Operation, DEVICE_STATE},
@@ -24,6 +24,8 @@ use std::{
     thread,
     time::Duration,
 };
+// pkill uses status 1 for an already absent process; other failures remain warnings.
+const STOP_LOADER: &str = "pkill -f /data/local/bin/load.bin; stop_status=$?; if [ $stop_status -gt 1 ]; then exit $stop_status; fi\n";
 const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
 const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
 pub struct Engine {
@@ -74,11 +76,21 @@ impl Engine {
         if self.restart_loader {
             self.ignore("setprop ctl.start voyahtune_load 2>/dev/null || true\n");
         }
-        let report = match &result {
-            Ok(()) => json!({"success":true,"operationId":self.operation.id}),
+        let mut report = match &result {
+            Ok(()) => {
+                json!({"success":true,"operationId":self.operation.id,"releaseVersion":self.payload.manifest.release_version,"installerVersion":env!("CARGO_PKG_VERSION"),"payloadManifest":self.payload.manifest})
+            }
             Err(e) => json!({"success":false,"operationId":self.operation.id,"error":e,
                 "recovery":"Завершённые изменения могли сохраниться. Повторите установку или удаление после устранения указанной причины."}),
         };
+        report["releaseVersion"] = json!(self.payload.manifest.release_version);
+        report["installerVersion"] = json!(crate::compatibility::INSTALLER_VERSION);
+        report["manifestSha256"] =
+            json!(payload::sha256(&self.payload.root.join("manifest.json"))?);
+        report["payloadManifest"] = json!(self.payload.manifest);
+        if let Ok(bytes) = fs::read(self.operation.dir.join("mode.json")) {
+            report["mode"] = serde_json::from_slice(&bytes)?;
+        }
         recovery::write_json(&self.operation.dir.join("report.json"), &report)?;
         self.adb.events.emit(
             if result.is_ok() {
@@ -181,11 +193,29 @@ impl Engine {
                 e.local_files(r.action)
             },
         )?;
-        self.step("root","Получение системного доступа",|e|{
-            e.root_sequence(false)?;
-            // Migration of our obsolete mutex only. Failure is diagnostic, never a gate.
-            e.ignore(&format!("rm -f {DEVICE_STATE}/lock/owner 2>/dev/null; rmdir {DEVICE_STATE}/lock 2>/dev/null; rmdir {DEVICE_STATE} 2>/dev/null; true\n"));Ok(())
-        })?;
+        self.step(
+            "root",
+            "Получение системного доступа",
+            |e| {
+                e.root_sequence(false)?;
+                Ok(())
+            },
+        )?;
+        if r.action != Action::Remove {
+            self.step(
+                "mode-check",
+                "Чтение текущего режима",
+                |e| {
+                    let current = mode::inspect(&e.adb);
+                    recovery::write_json(
+                        &e.operation.dir.join("mode.json"),
+                        &json!({"previous":current,"target":r.action}),
+                    )?;
+                    Ok(())
+                },
+            )?;
+        }
+        self.ignore(&format!("rm -f {DEVICE_STATE}/lock/owner 2>/dev/null; rmdir {DEVICE_STATE}/lock 2>/dev/null; rmdir {DEVICE_STATE} 2>/dev/null; true\n"));
         if r.action != Action::Remove {
             self.step(
                 "permission",
@@ -200,16 +230,24 @@ impl Engine {
         )?;
         if let Some(v) = r.action.variant() {
             self.step("backup", "Сохранение файлов перед заменой", |e| e.backup(v))?;
+            if v == Variant::Light {
+                self.step("runtime", "Удаление hooks и Frida без очистки данных", |e| e.freeze(v))?;
+            }
             self.step(
                 "signing-reset",
                 "Переустановка при смене подписи",
                 |e| e.signing_reset(r.action),
             )?;
-            self.step("runtime", "Остановка старых hooks", |e| {
-                e.freeze(v)
-            })?;
             if v == Variant::Full {
-                self.step("files", "Установка Frida и скриптов", |e| e.full_files())?;
+                self.step("runtime", "Остановка старых hooks", |e| e.freeze(v))?;
+            }
+            if self.payload.manifest.schema == 3 {
+                self.step("files", "Установка файлов комплекта", |e| e.recipe_files(v))?;
+            }
+            if v == Variant::Full {
+                if self.payload.manifest.schema != 3 {
+                    self.step("files", "Установка Frida и скриптов", |e| e.full_files())?;
+                }
                 self.step(
                     "migration",
                     "Миграция старого init.logcat.sh",
@@ -226,6 +264,10 @@ impl Engine {
                 |e| e.packages(v),
             )?;
             self.step("dns", "Настройка DNS", |e| e.dns_choice(r.dns))?;
+            self.step("mode", "Сохранение режима приложения", |e| {
+                e.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
+                mode::commit(&e.adb,v)
+            })?;
             self.step(
                 "reboot",
                 "Перезагрузка автомобиля",
@@ -275,6 +317,9 @@ impl Engine {
                 e.shell(c::REMOVE_SYSTEM)?;
                 Ok(())
             })?;
+            self.step("mode", "Удаление флага режима", |e| {
+                mode::clear(&e.adb)
+            })?;
             // The classic remover ends with adb reboot, without postflight inventory.
             self.step(
                 "reboot",
@@ -288,15 +333,22 @@ impl Engine {
         Ok(())
     }
     fn local_files(&self, a: Action) -> Result<()> {
+        if a != Action::Remove && self.payload.manifest.removal_only {
+            return Err(Error::new(
+                "PAYLOAD_REQUIRED",
+                "Комплект удаления нельзя использовать для установки",
+            ));
+        }
         let mut names = vec!["dns-helper.sh"];
         if a != Action::Remove {
             names.extend(["dns.apk", "whitelist.xml"]);
         }
-        if a != Action::Light {
-            names.push("init.logcat.original.sh");
-        }
-        if a == Action::Full {
+        names.push("init.logcat.original.sh");
+        if a == Action::Full && self.payload.manifest.schema != 3 {
             names.extend(payload::FULL_NAMES.iter().copied());
+        }
+        if self.payload.manifest.schema == 3 {
+            self.payload.verify()?;
         }
         for name in names {
             let p = self.payload.file(name, None)?;
@@ -357,11 +409,11 @@ impl Engine {
         }
         if self.canbus_consent.as_ref().and_then(|c| c.decision()) != Some(true) {
             self.adb.events.emit("canbus-conflict", self.adb.step.as_deref(), canbus::NOTICE,
-                json!({"package":canbus::PACKAGE,"awaitingConfirmation":self.canbus_consent.is_some(),"cliFlag":"--remove-voyah-hl-service"}))?;
+                json!({"package":canbus::PACKAGE,"awaitingConfirmation":self.canbus_consent.is_some()}))?;
         }
         let Some(consent) = &self.canbus_consent else {
             return Err(Error::new("ACTION_REQUIRED", canbus::NOTICE)
-                .retry("Для удаления com.voyah.hl.service повторите команду с --remove-voyah-hl-service или используйте --interactive."));
+                .retry("Подтвердите удаление com.voyah.hl.service в окне установщика."));
         };
         loop {
             if self.cancel.load(Ordering::Relaxed) || consent.decision() == Some(false) {
@@ -590,24 +642,18 @@ impl Engine {
         Ok(())
     }
     fn freeze(&mut self, v: Variant) -> Result<()> {
-        if v == Variant::Light && self.shell(c::LIGHT_LEGACY_STATE).unwrap_or_default() != "CLEAN" {
-            return Err(self.fail(
-                "Найден legacy Full hook. Сначала выполните удаление",
-                LEGACY_INIT,
-            ));
+        if v == Variant::Light {
+            return self.soft_remove_full_runtime();
         }
         self.restart_loader = true;
-        self.ignore(if v == Variant::Full {
-            c::STOP_FULL
-        } else {
-            c::STOP_LIGHT
-        });
+        // Light has no init service. Absence is already stopped, not a failure.
+        if let Err(error) = self.stop_runtime_for_update() {
+            self.warning(&error);
+        }
         self.apollo_safe(true)?;
         self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
         if v == Variant::Light {
-            self.ignore("am force-stop com.qinggan.app.qgime\n");
             self.restart_loader = false;
-            self.shell(c::LIGHT_TEARDOWN)?;
         } else {
             self.ignore(c::APOLLO_FILES);
         }
@@ -624,6 +670,36 @@ impl Engine {
         if v == Variant::Light {
             self.ignore("settings delete global voyahtune_keyboard_mode\n");
         }
+        Ok(())
+    }
+    fn soft_remove_full_runtime(&mut self) -> Result<()> {
+        // Old APKs can still activate their hooks; stop them without clearing data.
+        self.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
+        self.migrate_legacy()?;
+        self.remove_boot()?;
+        // After boot removal, an interrupted cleanup must never restart Full.
+        self.restart_loader = false;
+        self.ignore(STOP_LOADER);
+        self.ignore(c::REMOVE_PROCESSES);
+        self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
+        self.ignore("am force-stop com.qinggan.app.qgime\n");
+        self.shell(c::LIGHT_RUNTIME_REMOVE)?;
+        let recipe = &self.payload.manifest.recipe;
+        // Include new Full-only files from future payloads, not only today's hooks.
+        for file in recipe.files.iter().filter(|f| !f.variants.contains(&Variant::Light)) {
+            let path = quote(&file.destination);
+            self.shell(&format!("rm -f {path} && test ! -e {path} && test ! -L {path}\n"))?;
+        }
+        for directory in recipe.directories.iter().filter(|d| !d.variants.contains(&Variant::Light)) {
+            let prefix = format!("{}/", directory.path);
+            if recipe.files.iter().any(|f| f.variants.contains(&Variant::Light) && f.destination.starts_with(&prefix))
+                || recipe.directories.iter().any(|d| d.variants.contains(&Variant::Light) && d.path.starts_with(&prefix)) {
+                continue;
+            }
+            let path = quote(&directory.path);
+            self.shell(&format!("rm -rf {path} && test ! -e {path} && test ! -L {path}\n"))?;
+        }
+        self.shell("test ! -e /data/local/bin/load.bin && test ! -e /data/local/bin/frida-inject\n")?;
         Ok(())
     }
     fn push_file(
@@ -658,8 +734,55 @@ impl Engine {
         }
         result
     }
+    fn recipe_files(&self, variant: Variant) -> Result<()> {
+        self.shell(c::PREPARE_DATA_DIRECTORIES)?;
+        let recipe = &self.payload.manifest.recipe;
+        for directory in recipe
+            .directories
+            .iter()
+            .filter(|d| d.variants.contains(&variant))
+        {
+            let p = quote(&directory.path);
+            self.shell(&format!(
+                "mkdir -p {p} && chown 0:0 {p} && chmod {:o} {p}\n",
+                directory.mode
+            ))?;
+        }
+        for file in recipe.files.iter().filter(|f| {
+            f.variants.contains(&variant)
+                && f.phase == crate::recipe::Phase::Files
+                && !["native.apk", "whitelist.xml"].contains(&f.artifact.as_str())
+        }) {
+            let stage = format!("{}.voyahtune.new", file.destination);
+            self.push_file(
+                &self.payload.file(&file.artifact, None)?,
+                &stage,
+                &file.destination,
+                file.mode,
+                file.destination.starts_with("/system/"),
+            )?;
+        }
+        for attr in recipe
+            .attributes
+            .iter()
+            .filter(|a| a.variants.contains(&variant))
+        {
+            let p = quote(&attr.path);
+            self.shell(&format!("chown 0:0 {p} && chmod {:o} {p}\n", attr.mode))?;
+        }
+        if variant == Variant::Full {
+            self.shell(c::APP_CLIENT_MIGRATION)?;
+        }
+        // Retired exact paths are cumulative. Never delete an active target.
+        for path in &recipe.remove_files {
+            if !recipe.files.iter().any(|f| f.destination == *path) {
+                self.shell(&format!("rm -f {}\n", quote(path)))?;
+            }
+        }
+        Ok(())
+    }
     fn full_files(&self) -> Result<()> {
-        self.shell("mkdir -p /data/local/bin\n")?;
+        self.shell(c::PREPARE_DATA_DIRECTORIES)?;
         for name in payload::FULL_NAMES
             .iter()
             .filter(|s| !s.starts_with("voyahtune.load."))
@@ -926,6 +1049,11 @@ impl Engine {
         }
         result
     }
+    fn stop_runtime_for_update(&self) -> Result<()> {
+        self.stop_service()?;
+        self.shell("rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock && rm -rf /data/local/tmp/voyah_load.lock\n")?;
+        Ok(())
+    }
     fn stop_service(&self) -> Result<()> {
         let state = self.shell("getprop init.svc.voyahtune_load\n")?;
         if state.is_empty() || state == "stopped" {
@@ -954,7 +1082,7 @@ impl Engine {
         Ok(())
     }
     fn remove_files(&self) -> Result<()> {
-        self.ignore("pkill -f /data/local/bin/load.bin\n");
+        self.ignore(STOP_LOADER);
         self.ignore(
             "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock\n",
         );
@@ -987,6 +1115,28 @@ impl Engine {
         self.shell(c::REMOVE_FILES)?;
         self.shell("test ! -e /data/local/bin/voyahtune-hook-manifest.json && test ! -e /data/local/tmp/voyahtune-hook-status.v1\n")?;
         self.shell(c::REMOVE_CLIENT_CHECK)?;
+        if self.payload.manifest.schema == 3 {
+            for path in self.payload.manifest.recipe.cleanup_files() {
+                self.shell(&format!("rm -f {}\n", quote(&path)))?;
+            }
+            for path in self
+                .payload
+                .manifest
+                .recipe
+                .remove_directories
+                .iter()
+                .chain(
+                    self.payload
+                        .manifest
+                        .recipe
+                        .directories
+                        .iter()
+                        .map(|d| &d.path),
+                )
+            {
+                self.shell(&format!("rm -rf {}\n", quote(path)))?;
+            }
+        }
         Ok(())
     }
     fn restore_host_file(&self, name: &str) {
@@ -1097,4 +1247,45 @@ pub fn default_adb(bundle: &Path) -> PathBuf {
     bundle
         .join("adb")
         .join(if cfg!(windows) { "adb.exe" } else { "adb" })
+}
+
+#[cfg(all(test, unix))]
+mod runtime_stop_tests {
+    use super::*;
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+
+    #[test]
+    fn absent_loader_is_success_but_real_pkill_errors_are_preserved() {
+        for code in [0, 1, 2, 127] {
+            let output = Command::new("sh")
+                .args(["-c", &format!("pkill() {{ return {code}; }}\n{STOP_LOADER}")])
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(if code <= 1 { 0 } else { code }));
+        }
+    }
+
+    #[test]
+    fn hook_stop_skips_empty_input_and_only_targets_owned_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let kill = dir.path().join("kill");
+        fs::write(&kill, "#!/bin/sh\nprintf '%s\\n' \"$*\"\nexit \"${TEST_KILL_STATUS:-0}\"\n").unwrap();
+        fs::set_permissions(&kill, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:{}", dir.path().display(), std::env::var("PATH").unwrap());
+        for (rows, expected, code) in [
+            ("", "", 0),
+            ("root 101 1 frida-inject -s /data/local/bin/vd_bypass.js\nroot 102 1 frida-inject -s /other/app.js\nroot 103 1 unrelated-process", "-9 101\n", 0),
+            ("root 101 1 frida-inject -s /data/local/bin/vd_bypass.js", "-9 101\n", 1),
+        ] {
+            let output = Command::new("sh")
+                .env("PATH", &path)
+                .env("TEST_ROWS", rows)
+                .env("TEST_KILL_STATUS", code.to_string())
+                .args(["-c", &format!("ps() {{ [ -z \"$TEST_ROWS\" ] || printf '%s\\n' \"$TEST_ROWS\"; }}\n{}", c::REMOVE_PROCESSES)])
+                .output()
+                .unwrap();
+            assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+            assert_eq!(output.status.success(), code == 0);
+        }
+    }
 }

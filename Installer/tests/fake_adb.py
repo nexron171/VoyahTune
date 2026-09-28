@@ -34,6 +34,7 @@ def main():
   elif args[0] in ['disable-verity','remount']:
    print('Success');return 1 if s.get('failPrepareCommand') else 0
   elif args[0]=='reboot':
+   if s.get('failReboot'):print('injected reboot failure',file=sys.stderr);return 1
    s['reboots']=s.get('reboots',0)+1;s['boot']=str(s['reboots']);s['root']=False
    put('/proc/sys/kernel/random/boot_id',s['boot']+'\n')
    package='ru.big.town.anative';path='/system/priv-app/Native/Native.apk'
@@ -123,10 +124,27 @@ def main():
   if args[0]=='list':
    for k,v in settings.items():print(k+'='+v)
   elif args[0]=='get':print(settings.get(key,'null'))
-  elif args[0]=='put':settings[key]=args[3];save(s)
-  elif args[0]=='delete':settings.pop(key,None);save(s)
+  elif args[0]=='put':
+   if key=='voyahtune_install_mode' and s.get('ignoreModeWrite'):return 0
+   settings[key]=args[3];save(s)
+  elif args[0]=='delete':
+   if key=='voyahtune_install_mode' and s.get('ignoreModeDelete'):return 0
+   settings.pop(key,None);save(s)
   else:raise RuntimeError(args)
- elif name in ['restorecon','chown','mount','am','pkill','ps']:pass
+ elif name=='chown':
+  # Emulate Android ownership without requiring host root. Modes remain real filesystem modes.
+  owners=s.setdefault('owners',{})
+  for path in args[1:]:
+   if not Path(path).exists():return 1
+   owners[str(Path(path).relative_to(root))]=args[0]
+  save(s)
+ elif name=='stat':
+  if args[:2]!=['-c','%a:%u:%g']:raise RuntimeError(args)
+  p=Path(args[2]);owner=s.get('owners',{}).get(str(p.relative_to(root)),'0:0')
+  print(f'{p.stat().st_mode & 0o7777:o}:{owner}')
+ elif name=='am':
+  if args[:2]==['force-stop',s.get('failForceStop')]:return 1
+ elif name in ['restorecon','mount','pkill','ps']:pass
  elif name=='pidof':print('101')
  elif name=='sha256sum':
   for path in args:print(hashlib.sha256(Path(path).read_bytes()).hexdigest()+'  '+path)

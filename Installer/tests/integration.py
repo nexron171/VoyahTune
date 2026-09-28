@@ -3,17 +3,18 @@
 import hashlib,json,os,shutil,subprocess,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
-CLI=Path(os.environ.get('VOYAH_TEST_CLI',ROOT/'Installer/target/debug/installer-cli'))
+DRIVER=Path(os.environ.get('VOYAH_TEST_DRIVER',ROOT/'Installer/target/release/examples/fixture-driver'))
 PAYLOAD=Path(os.environ.get('VOYAH_TEST_PAYLOAD',ROOT/'Releases/build/installer-payload-dev-v2'))
 class InstallerTests(unittest.TestCase):
  maxDiff=1500
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory(prefix='voyah-installer-test-');self.base=Path(self.tmp.name);self.bundle=self.base/'bundle';(self.bundle/'adb').mkdir(parents=True)
   (self.bundle/'payload').symlink_to(PAYLOAD,target_is_directory=True)
+  sleep=self.bundle/'adb/sleep';sleep.write_text('#!/bin/sh\nexit 0\n');sleep.chmod(0o755)
   self.fixture=self.bundle/'adb/adb';shutil.copyfile(ROOT/'Installer/tests/fake_adb.py',self.fixture);self.fixture.chmod(0o755)
   # Entry name selects the host protocol. The same fixture also implements Android commands.
   self.fixture.rename(self.bundle/'adb/fake-adb');self.fixture.symlink_to('fake-adb')
-  for name in ['getprop','setprop','id','pm','cmd','dumpsys','settings','restorecon','chown','mount','am','pidof','sha256sum','pkill','ps','grep']:
+  for name in ['getprop','setprop','id','pm','cmd','dumpsys','settings','restorecon','chown','stat','mount','am','pidof','sha256sum','pkill','ps','grep']:
    p=self.base/'bin'/name;p.parent.mkdir(exist_ok=True);p.symlink_to(self.bundle/'adb/fake-adb')
   (self.bundle/'host-tools.json').write_text(json.dumps({'schema':1,'files':[{'path':'adb/adb','sha256':hashlib.sha256(self.fixture.read_bytes()).hexdigest()}]}))
   self.device=self.base/'device'
@@ -25,15 +26,18 @@ class InstallerTests(unittest.TestCase):
  def write_state(self): (self.base/'state.json').write_text(json.dumps(self.state))
  def read_state(self):self.state=json.loads((self.base/'state.json').read_text());return self.state
  def cli(self,*args,okay=True):
-  result=subprocess.run([str(CLI),'--bundle',str(self.bundle),*args],env=self.env,text=True,capture_output=True,timeout=120)
+  result=subprocess.run([str(DRIVER),'--bundle',str(self.bundle),*args],env=self.env,text=True,capture_output=True,timeout=120)
   if okay:self.assertEqual(result.returncode,0,result.stdout[-5000:]+result.stderr)
   return result
  def plan(self,action='full'):
   return json.loads(self.cli('plan','--device','CAR-001','--action',action).stdout)
  def apply(self,plan,okay=True):return self.cli('apply','--device','CAR-001','--action',plan['request']['action'],'--token',plan['request']['inventoryToken'],'--yes','--logs',str(self.base/'logs'),okay=okay)
+ def artifact(self,name):
+  manifest=json.loads((PAYLOAD/'manifest.json').read_text())
+  return PAYLOAD/next(a['path'] for a in manifest['artifacts'] if a['name']==name and a.get('variant') in (None,'light'))
  def seed_apps(self,old_key=False,broken=False):
-  files={'ru.big.town.anative':('/system/priv-app/Native/Native.apk',ROOT/'Native/app/release/app-release.apk' if old_key else PAYLOAD/'light/native.apk'),
-         'ru.big.town.restoremode':('/data/app/ru.big.town.restoremode/base.apk',ROOT/'RestoreMode/app/debug/app-debug.apk' if old_key else PAYLOAD/'light/restore_mode.apk')}
+  files={'ru.big.town.anative':('/system/priv-app/Native/Native.apk',ROOT/'Native/app/release/app-release.apk' if old_key else self.artifact('native.apk')),
+         'ru.big.town.restoremode':('/data/app/ru.big.town.restoremode/base.apk',ROOT/'RestoreMode/app/debug/app-debug.apk' if old_key else self.artifact('restore_mode.apk'))}
   for package,(path,source) in files.items():
    target=self.device/path.lstrip('/');target.parent.mkdir(parents=True,exist_ok=True)
    if broken:target.write_bytes(b'broken unsigned APK')
@@ -41,6 +45,7 @@ class InstallerTests(unittest.TestCase):
    self.state['packages'][package]=path
    for parent in ['data/user/0','data/user_de/0']:
     data=self.device/parent/package;data.mkdir(parents=True,exist_ok=True);(data/'settings-marker').write_text('preserve unless reset')
+  self.state['settings']['voyahtune_install_mode']='light'
   if old_key:
    self.state['rejectRestoreUpdate']=True
    self.state['nativeOldHash']=hashlib.sha256((self.device/'system/priv-app/Native/Native.apk').read_bytes()).hexdigest()
@@ -91,7 +96,7 @@ class InstallerTests(unittest.TestCase):
   file_check=next(i for i,c in enumerate(calls) if 'sha256sum' in (c['script'] or ''))
   self.assertLess(root,file_check)
  def test_cancellation_is_reported_without_mutations(self):
-  p=self.plan();r=subprocess.run([str(CLI),'--bundle',str(self.bundle),'apply','--device','CAR-001','--action','full','--token',p['request']['inventoryToken'],'--yes','--interactive','--logs',str(self.base/'logs')],env=self.env,input='{"cancel":true}\n',text=True,capture_output=True,timeout=120)
+  p=self.plan();r=subprocess.run([str(DRIVER),'--bundle',str(self.bundle),'apply','--device','CAR-001','--action','full','--token',p['request']['inventoryToken'],'--yes','--interactive','--logs',str(self.base/'logs')],env=self.env,input='{"cancel":true}\n',text=True,capture_output=True,timeout=120)
   self.assertEqual(r.returncode,130,r.stdout[-5000:]);self.assertIn('CANCELLED',r.stdout[-5000:]);self.assertFalse((self.device/'data/local/voyahtune-installer').exists())
  def test_multiple_including_unauthorized_blocks_plan(self):
   self.state['devices']=[['CAR-001','device'],['PHONE','unauthorized']];self.write_state();r=self.cli('plan','--device','CAR-001','--action','full',okay=False);self.assertNotEqual(r.returncode,0);self.assertIn('MULTIPLE_DEVICES',r.stdout);self.assertFalse((self.device/'data/local/voyahtune-installer').exists())

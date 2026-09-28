@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.InstallMode;
+
 import static ru.big.town.anative.SetModesService.MSG_APPLY_DRIVE_MODES_STAR_BUTTON;
 import static ru.big.town.anative.SetModesService.STATE_SHUTDOWN_PREPARE;
 
@@ -61,7 +63,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         // Одиночное приложение из дока открываем обычной задачей целевого пакета на физическом дисплее.
         // Возврат из медиакарточки восстанавливает OEM-карточку и учитывает экран нажатия. Только full.
-        if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && BuildConfig.IS_FULL) {
+        if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && InstallMode.isFull()) {
             // Accept only configured dock packages and the two physical application screens.
             String pkg = intent.getStringExtra("pkg");
             int displayId = intent.getIntExtra("display", 0);
@@ -76,7 +78,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         // Плитка «Быстрый запуск»: открыть приложение на выбранном физическом дисплее.
         // 0 — водительский экран, 1 — пассажирский. Как и OPEN_FREEFORM, только в full-сборке.
-        if ("ru.big.town.anative.OPEN_ON_DISPLAY".equals(receivedIntent) && BuildConfig.IS_FULL) {
+        if ("ru.big.town.anative.OPEN_ON_DISPLAY".equals(receivedIntent) && InstallMode.isFull()) {
             String pkg = intent.getStringExtra("pkg");
             int displayId = intent.getIntExtra("display", 0);
             if (displayId != 0 && displayId != 1) {
@@ -91,7 +93,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // Launcher hook routes an allowlisted All Apps tile here so ActivityOptions can normalize a
         // reused freeform task before the activity is resumed. The exported bridge accepts only the
         // exact package persisted by the protected fullscreen config receiver.
-        if ("ru.big.town.anative.OPEN_FULLSCREEN".equals(receivedIntent) && BuildConfig.IS_FULL) {
+        if ("ru.big.town.anative.OPEN_FULLSCREEN".equals(receivedIntent) && InstallMode.isFull()) {
             String pkg = intent.getStringExtra("pkg");
             int displayId = intent.getIntExtra("display", 0);
             if (displayId != 0 && displayId != 1) {
@@ -106,7 +108,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // Long press resolves only protected slot config: split or the slot app in the cluster.
         // Keep the legacy action for an older launcher hook during upgrades.
         if (("ru.big.town.anative.OPEN_DOCK_SPLIT".equals(receivedIntent)
-                || "ru.big.town.anative.OPEN_DOCK_LONG_PRESS".equals(receivedIntent)) && BuildConfig.IS_FULL) {
+                || "ru.big.town.anative.OPEN_DOCK_LONG_PRESS".equals(receivedIntent)) && InstallMode.isFull()) {
             int slot = intent.getIntExtra("slot", 0);
             if (slot == 1 || slot == 2) {
                 android.content.ContentResolver cr = context.getContentResolver();
@@ -137,7 +139,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
 
         // Исполнение назначенного действия кнопки руля. Только full.
-        if ("ru.big.town.anative.STEER_ACTION".equals(receivedIntent) && BuildConfig.IS_FULL) {
+        if ("ru.big.town.anative.STEER_ACTION".equals(receivedIntent) && InstallMode.isFull()) {
             String action = intent.getStringExtra("action");
             if (isConfiguredSteerAction(context, action)) handleSteerActions(context, action);
             else Log.w(TAG, "STEER_ACTION отклонён: действие не настроено: " + action);
@@ -444,7 +446,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      * Один пункт последовательности. Асинхронные CAN-действия вызывают completion через exactly-once
      * terminal callback ApplyEngine; синхронные действия завершаются сразу после вызова API.
      */
-    private static void handleSteerAction(Context ctx, String action, Runnable completion) {
+    static void handleSteerAction(Context ctx, String action, Runnable completion) {
         if (action == null || action.isEmpty()) {
             completeSteerAction(completion);
             return;
@@ -455,6 +457,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             cycleMode(ctx, action.substring("drive:".length()), "driveMode", completion);
         } else if (action.startsWith("recycle:")) {
             cycleMode(ctx, action.substring("recycle:".length()), "recycle", completion);
+        } else if ("toggle_suspension_maintenance".equals(action)) {
+            toggleSetting(ctx, "suspensionMaintenance", completion);
         } else if ("toggle_forced_ev".equals(action)) {
             toggleSetting(ctx, "forcedEv", completion);
         } else if ("toggle_pedestrian_sound".equals(action)) {
@@ -467,7 +471,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             sendCustomCan(action, completion);
         } else {
             try {
-                if ("system_back".equals(action)) {
+                if ("voice_assistant".equals(action)) {
+                    Intent voice = new Intent().setClassName("ru.big.town.restoremode", "ru.big.town.restoremode.VoiceActivity");
+                    voice.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+                    options.setLaunchDisplayId(0);
+                    android.os.Bundle voiceOptions = options.toBundle();
+                    voiceOptions.putInt("android.activity.windowingMode", 1);
+                    ctx.startActivity(voice, voiceOptions);
+                } else if ("system_back".equals(action)) {
                     BackButtonService.performBack(ctx);
                 } else if (action.startsWith("app:")) {
                     // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.
@@ -595,6 +607,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             boolean sent;
             if ("forcedEv".equals(key)) {
                 sent = MainActivity.sendForcedEvCommand(next);
+            } else if ("suspensionMaintenance".equals(key)) {
+                sent = MainActivity.sendSuspensionMaintenanceCommand(app, next);
             } else if ("disablePedestrianSound".equals(key)) {
                 // В pref хранится инвертированная семантика: true = звук выключен.
                 sent = MainActivity.sendPedestrianSoundCommand(next);

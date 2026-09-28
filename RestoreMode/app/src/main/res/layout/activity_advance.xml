@@ -122,6 +122,18 @@
             android:textColor="#FFFFFF"
             android:textSize="26px" />
 
+        <TextView
+            android:id="@+id/navVoiceControl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Голосовое управление"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
         <!-- Раздел: Другое -->
         <TextView
             android:id="@+id/navOther"
@@ -210,6 +222,22 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
+
+    <ScrollView
+        android:id="@+id/pageVoiceControl"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        android:visibility="gone">
+        <LinearLayout
+            android:id="@+id/voiceSettingsContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="28dp"
+            android:paddingVertical="20dp" />
+    </ScrollView>
 
     <!-- Раздел: Главный экран -->
     <ScrollView
@@ -402,6 +430,30 @@
 
             </LinearLayout>
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Голосовая команда"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+                <Switch
+                    android:id="@+id/switchShowVoiceCommand"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+            </LinearLayout>
+
             <!-- Виджет Forced EV на главном (по умолчанию скрыт) -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -423,6 +475,34 @@
 
                 <Switch
                     android:id="@+id/switchShowForcedEv"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+            <!-- Виджет сервисного режима подвески на главном (по умолчанию скрыт) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/suspension_maintenance_title"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchShowSuspensionMaintenance"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:thumb="@drawable/switch_thumb"
@@ -501,6 +581,61 @@
                     android:textColor="#FFFFFF" />
 
             </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="Виджет подвески" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowSuspensionWidget" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <!-- Размер плитки «Подвеска» (Ш×В в ячейках), виден при включённом тумблере -->
+            <LinearLayout
+                android:id="@+id/suspensionSizeRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Ширина"
+                    android:textColor="#E0E0E0"
+                    android:textSize="24px" />
+
+                <Spinner
+                    android:id="@+id/suspensionSettingWidth"
+                    android:layout_width="120dp"
+                    android:layout_height="60dp"
+                    android:layout_marginStart="8dp"
+                    android:textColor="#FFFFFF" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="24dp"
+                    android:text="Высота"
+                    android:textColor="#E0E0E0"
+                    android:textSize="24px" />
+
+                <Spinner
+                    android:id="@+id/suspensionSettingHeight"
+                    android:layout_width="120dp"
+                    android:layout_height="60dp"
+                    android:layout_marginStart="8dp"
+                    android:textColor="#FFFFFF" />
+
+            </LinearLayout>
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Самый низкий — удобная посадка без смены режима. Остальные уровни выбирают соответствующий режим движения."
+                android:textColor="#AAAAAA" android:textSize="20px" />
 
             <!-- Карточки «Набрать номер» (0..100) -->
             <LinearLayout
@@ -1864,6 +1999,36 @@
 
             </LinearLayout>
 
+            <!-- Сервисный режим подвески -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="5dp"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/suspension_maintenance_title"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+
+                <Switch
+                    android:id="@+id/switchSuspensionMaintenance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+
+            </LinearLayout>
+
+
         </LinearLayout>
     </ScrollView>
     <!-- конец pageDriveModes -->
@@ -2381,6 +2546,34 @@
         android:orientation="vertical"
         android:paddingHorizontal="28dp"
         android:paddingVertical="20dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/layout_category_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Версия приложения"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <TextView
+                android:id="@+id/textAppVersion"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:textColor="#AAAAAA"
+                android:textSize="26px" />
+
+        </LinearLayout>
 
         <!-- Диагностика ресурсов существует только пока открыт раздел «Другое». -->
         <LinearLayout

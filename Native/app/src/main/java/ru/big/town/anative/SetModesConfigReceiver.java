@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.InstallMode;
+
 import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -18,7 +20,7 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (!BuildConfig.IS_FULL) return;
+        if (!InstallMode.isFull()) return;
         String action = intent.getAction();
         if ("ru.big.town.anative.STEER_CONFIG".equals(action)) {
             String[] buttons = {"Star", "Dvr", "Voice", "Phone"};
@@ -33,6 +35,8 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 needsBackService |= SteeringActionSequence.contains(
                         intent.getStringExtra(longKey), "system_back");
             }
+            needsBackService |= SteeringActionSequence.contains(intent.getStringExtra("steerVoiceLong"), "voice_assistant");
+            needsBackService |= SteeringActionSequence.contains(intent.getStringExtra("steerVoiceShort"), "voice_assistant");
             BackButtonService.setSteeringBackEnabled(context, needsBackService);
             Log.i(TAG, "STEER_CONFIG зеркалирован");
         } else if ("ru.big.town.anative.DOCK_CONFIG".equals(action)) {

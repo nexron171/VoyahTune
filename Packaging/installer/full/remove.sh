@@ -256,7 +256,7 @@ fi
 adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null
 adb shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock" 2>/dev/null
 adb shell "rm -rf /data/local/tmp/voyah_load.lock" 2>/dev/null
-adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print \$2}' | xargs kill -9" 2>/dev/null
+adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|voyahtune_acc_restore|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print \$2}' | xargs -r kill -9" 2>/dev/null
 # Eternalized agent живёт в target без frida-inject; force-stop выгружает его до финального reboot.
 adb shell "am force-stop com.qinggan.app.vehiclesetting" 2>/dev/null
 adb shell "am force-stop com.qinggan.app.qgime" 2>/dev/null
@@ -270,9 +270,9 @@ if [ -f backup/load.bin ]; then adb push backup/load.bin /data/local/bin/load.bi
 adb shell "rm -f /data/local/bin/vd_bypass.js"
 adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"   # keymng2 — легаси до объединения хуков руля
 # Apollo entitlement hook принадлежит Open Voyah и при remove удаляется без восстановления backup.
-adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/apollo_tech.js.new"
+adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new"
 adb shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"
-adb shell "rm -f /data/local/bin/app_client.js /data/local/bin/app_client.js.voyahtune.new /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_app_client.* /data/local/tmp/voyahtune_fullscreen_client.*"
+adb shell "rm -f /data/local/bin/app_client.js /data/local/bin/app_client.js.voyahtune.new /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* /data/local/tmp/voyahtune_fullscreen_client.*"
 adb shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1 /data/local/tmp/voyahtune-hook-status.v1.*.new"
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
 # Project-owned Frida scripts, PID/lock markers and diagnostic logs. Generic CUNBA/Frida files
@@ -285,8 +285,8 @@ if ! adb shell '
         /data/local/bin/launcherdock.js \
         /data/local/bin/multidisplay.js \
         /data/local/bin/keymng2.js \
-        /data/local/bin/apollo_tech.js \
-        /data/local/bin/apollo_tech.js.new \
+        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
+        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new \
         /data/local/bin/keyboard_lock_en.js \
         /data/local/bin/keyboard_ru.js \
         /data/local/bin/voyahtune_keyboard_en_config.json \
@@ -296,10 +296,10 @@ if ! adb shell '
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
         /data/local/tmp/voyahtune_keyboard.txt.try \
-        /data/local/tmp/voyahtune_apollo.pid \
-        /data/local/tmp/voyahtune_apollo.attempt \
-        /data/local/tmp/voyahtune_apollo.txt \
-        /data/local/tmp/voyahtune_apollo.txt.try \
+        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid \
+        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt \
+        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try \
         /data/local/tmp/voyahtune_load.v2.lock \
         /data/local/tmp/voyahtune_vd.pid \
         /data/local/tmp/voyahtune_vd.attempt \
@@ -354,8 +354,8 @@ if ! adb shell '
         /data/local/bin/launcherdock.js \
         /data/local/bin/multidisplay.js \
         /data/local/bin/keymng2.js \
-        /data/local/bin/apollo_tech.js \
-        /data/local/bin/apollo_tech.js.new \
+        /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
+        /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new \
         /data/local/bin/keyboard_lock_en.js \
         /data/local/bin/keyboard_ru.js \
         /data/local/bin/voyahtune_keyboard_en_config.json \
@@ -365,10 +365,10 @@ if ! adb shell '
         /data/local/tmp/voyahtune_keyboard.attempt \
         /data/local/tmp/voyahtune_keyboard.txt \
         /data/local/tmp/voyahtune_keyboard.txt.try \
-        /data/local/tmp/voyahtune_apollo.pid \
-        /data/local/tmp/voyahtune_apollo.attempt \
-        /data/local/tmp/voyahtune_apollo.txt \
-        /data/local/tmp/voyahtune_apollo.txt.try \
+        /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid \
+        /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt \
+        /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt \
+        /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try \
         /data/local/tmp/voyahtune_load.v2.lock \
         /data/local/tmp/voyahtune_vd.pid \
         /data/local/tmp/voyahtune_vd.attempt \
@@ -428,7 +428,7 @@ if ! adb shell 'test ! -e /data/local/bin/voyahtune-hook-manifest.json && test !
     echo "!!! Legacy hook manifest/status не удалены — перезагрузка отменена."
     exit 1
 fi
-if ! adb shell 'test ! -e /data/local/bin/app_client.js && test ! -e /data/local/bin/app_client.js.voyahtune.new && test ! -e /data/local/bin/fullscreen_client.js && test ! -e /data/local/bin/fullscreen_client.js.voyahtune.new && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1'; then
+if ! adb shell 'test ! -e /data/local/bin/app_client.js && test ! -e /data/local/bin/app_client.js.voyahtune.new && test ! -e /data/local/bin/fullscreen_client.js && test ! -e /data/local/bin/fullscreen_client.js.voyahtune.new && ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1'; then
     echo "!!! App client или его legacy-файлы удалены не полностью — перезагрузка отменена."
     exit 1
 fi
@@ -485,5 +485,7 @@ if ! adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.an
     exit 1
 fi
 # Примечание: persist.app.feature.leavecar (power hold) НЕ откатываем — это штатная функция авто.
+
+adb shell "settings delete global voyahtune_install_mode && test x\$(settings get global voyahtune_install_mode) = xnull" || exit 1
 
 adb reboot

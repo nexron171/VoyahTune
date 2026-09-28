@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.InstallMode;
+
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.Context;
@@ -37,6 +39,7 @@ public class MainActivity extends AppCompatActivity {
     private static boolean disablePedestrianSound = false;
     /** Форсированный электрорежим (колонка 19 провайдера RestoreMode). */
     private static boolean forcedEv = false;
+    private static boolean suspensionMaintenance = false;
     private static boolean fragranceEnabled = false;
     private static int fragranceTaste = FragranceRestorePolicy.DEFAULT_TASTE;
     private static int fragranceDuration = FragranceRestorePolicy.DEFAULT_DURATION;
@@ -321,6 +324,7 @@ public class MainActivity extends AppCompatActivity {
                 // col 11 — «Отключить звук для пешеходов» (1=отключить, fallback=false)
                 disablePedestrianSound = cursor.getColumnCount() > 11 && cursor.getInt(11) == 1;
                 forcedEv = cursor.getColumnCount() > 19 && cursor.getInt(19) == 1;
+                suspensionMaintenance = cursor.getColumnCount() > 32 && cursor.getInt(32) == 1;
                 fragranceEnabled = cursor.getColumnCount() > 20 && cursor.getInt(20) == 1;
                 FragranceRestorePolicy.Settings fragrance = FragranceRestorePolicy.normalize(
                         cursor.getColumnCount() > 21 ? cursor.getInt(21)
@@ -398,6 +402,26 @@ public class MainActivity extends AppCompatActivity {
         return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
+    /** Narrow read for early polling: never starts services or mutates the full restore snapshot. */
+    static EarlyDriveModeRestore.Settings readEarlyDriveRestoreSettings(Context context) {
+        try (Cursor cursor = context.getContentResolver().query(Uri.parse(
+                "content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && cursor.getColumnCount() > 6) {
+                return new EarlyDriveModeRestore.Settings(cursor.getString(0),
+                        cursor.getInt(6) == 1,
+                        cursor.getColumnCount() > 12 && cursor.getInt(12) == 1);
+            }
+        } catch (RuntimeException e) {
+            Log.w(MODES_LOG, "Early drive settings unavailable; using saved cache");
+        }
+        SharedPreferences cache = nativePrefs(context);
+        if (!cache.getBoolean("cacheValid", false)) return null;
+        return new EarlyDriveModeRestore.Settings(cache.getString("cacheDriveMode", null),
+                cache.getBoolean("cacheDriveEnabled", false),
+                cache.getBoolean("cacheDebugMode", false));
+    }
+
     /** Missing or NULL opt-out fields are enabled; only an explicit numeric zero disables them. */
     private static boolean cursorBooleanDefaultTrue(Cursor cursor, int column) {
         return cursor.getColumnCount() <= column || cursor.isNull(column) || cursor.getInt(column) != 0;
@@ -419,6 +443,7 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheRecycleRememberLast", recycleRememberLast)
                 .putBoolean("cacheDisablePedestrianSound", disablePedestrianSound)
                 .putBoolean("cacheForcedEv", forcedEv)
+                .putBoolean("cacheSuspensionMaintenance", suspensionMaintenance)
                 .putBoolean("cacheFragranceEnabled", fragranceEnabled)
                 .putInt("cacheFragranceTaste", fragranceTaste)
                 .putInt("cacheFragranceDuration", fragranceDuration)
@@ -455,6 +480,7 @@ public class MainActivity extends AppCompatActivity {
         recycleRememberLast = p.getBoolean("cacheRecycleRememberLast", true);
         disablePedestrianSound = p.getBoolean("cacheDisablePedestrianSound", false);
         forcedEv = p.getBoolean("cacheForcedEv", false);
+        suspensionMaintenance = p.getBoolean("cacheSuspensionMaintenance", false);
         fragranceEnabled = p.getBoolean("cacheFragranceEnabled", false);
         FragranceRestorePolicy.Settings fragrance = FragranceRestorePolicy.normalize(
                 p.getInt("cacheFragranceTaste", FragranceRestorePolicy.DEFAULT_TASTE),
@@ -520,6 +546,15 @@ public class MainActivity extends AppCompatActivity {
         return setCanValues(1, arraysStr2arraysBytes(BATTERY_HEAT_FRAMES), "battery preheat");
     }
 
+    /** Use the OEM chassis setter so adjacent fields follow the installed firmware's encoding. */
+    public static boolean sendSuspensionMaintenanceCommand(Context context, boolean enabled) {
+        return OemVehicleStateTransport.sendVehicleState(context,
+                VehicleRestorePolicy.SUSPENSION_MAINTENANCE,
+                VehicleRestorePolicy.SUSPENSION_MAINTENANCE_ID,
+                VehicleRestorePolicy.suspensionMaintenanceState(enabled),
+                "suspension maintenance " + (enabled ? "on" : "off")).accepted();
+    }
+
     /** Немедленно применить звук пешеходов (тоггл с главного экрана). disabled=true → заглушить. */
     public static boolean sendPedestrianSoundCommand(boolean disabled) {
         return OemVehicleStateTransport.sendVehicleState(
@@ -568,7 +603,7 @@ public class MainActivity extends AppCompatActivity {
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
-        if (BuildConfig.IS_FULL) {
+        if (InstallMode.isFull()) {
             final boolean stockUiTarget = apolloStockUiEnabled;
             plan.addOnce("Apollo stock subscription/exam UI", () -> {
                 ApolloSettingsRuntimeState.TargetApplyResult result =
@@ -645,6 +680,11 @@ public class MainActivity extends AppCompatActivity {
                         VehicleRestorePolicy.PEDESTRIAN_SOUND_ID,
                         VehicleRestorePolicy.pedestrianSoundState(pedestrianDisabled),
                         "pedestrian sound restore").accepted()
+                        ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
+                        : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
+        final boolean maintenance = suspensionMaintenance;
+        plan.addOnce("suspension maintenance " + (maintenance ? "on" : "off"),
+                () -> sendSuspensionMaintenanceCommand(context, maintenance)
                         ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
                         : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
         return plan.build();
@@ -828,7 +868,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Прочитать сохранённое состояние бинарного действия кнопки руля. */
     public static boolean currentSavedToggle(Context context, String key) {
-        int column = "disablePedestrianSound".equals(key) ? 11 : "forcedEv".equals(key) ? 19 : -1;
+        int column = "disablePedestrianSound".equals(key) ? 11 : "forcedEv".equals(key) ? 19 : "suspensionMaintenance".equals(key) ? 32 : -1;
         if (column < 0) return false;
         Cursor c = null;
         try {
@@ -842,12 +882,14 @@ public class MainActivity extends AppCompatActivity {
         } finally {
             if (c != null) c.close();
         }
-        return "forcedEv".equals(key) ? forcedEv : disablePedestrianSound;
+        return "forcedEv".equals(key) ? forcedEv
+                : "suspensionMaintenance".equals(key) ? suspensionMaintenance : disablePedestrianSound;
     }
 
     /** Сохранить бинарное действие и синхронизировать открытый UI VoyahTune. */
     public static void persistSavedToggle(Context context, String key, boolean value) {
-        if (context == null || (!"forcedEv".equals(key) && !"disablePedestrianSound".equals(key))) return;
+        if (context == null || (!"forcedEv".equals(key) && !"disablePedestrianSound".equals(key)
+                && !"suspensionMaintenance".equals(key))) return;
         boolean written = false;
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
@@ -856,7 +898,9 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Log.w(MODES_LOG, "persistSavedToggle provider " + key + ": " + e.getMessage());
         }
-        if ("forcedEv".equals(key)) forcedEv = value; else disablePedestrianSound = value;
+        if ("forcedEv".equals(key)) forcedEv = value;
+        else if ("suspensionMaintenance".equals(key)) suspensionMaintenance = value;
+        else disablePedestrianSound = value;
         try {
             Intent bi = new Intent("ru.big.town.anative.SETTING_SYNCED");
             bi.setPackage("ru.big.town.restoremode");
@@ -867,7 +911,9 @@ public class MainActivity extends AppCompatActivity {
         if (written) {
             try {
                 context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
-                        .putBoolean("forcedEv".equals(key) ? "cacheForcedEv" : "cacheDisablePedestrianSound", value)
+                        .putBoolean("forcedEv".equals(key) ? "cacheForcedEv"
+                                : "suspensionMaintenance".equals(key) ? "cacheSuspensionMaintenance"
+                                : "cacheDisablePedestrianSound", value)
                         .apply();
             } catch (Exception ignored) {}
             Log.i(MODES_LOG, "persistSavedToggle " + key + "=" + value + " (provider ok)");

@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use installer_core::{
     payload::{self, Artifact, Manifest, Payload, Variant},
     recovery::write_json,
@@ -10,7 +10,31 @@ use std::{
     process::Command,
 };
 #[derive(Parser)]
-#[command(about = "Сборка единого offline payload Full + Light из исходников проекта")]
+#[command(about = "Инструменты сборки VoyahTune (не включаются в GUI)")]
+struct Cli {
+    #[command(subcommand)]
+    command: CommandKind,
+}
+#[derive(Subcommand)]
+enum CommandKind {
+    Build(Args),
+    VerifyPayload {
+        path: PathBuf,
+    },
+    VerifyHost {
+        path: PathBuf,
+    },
+    VerifyCatalog {
+        path: PathBuf,
+    },
+    Recovery {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+}
+#[derive(clap::Args)]
 struct Args {
     #[arg(long)]
     root: PathBuf,
@@ -24,7 +48,17 @@ struct Args {
     skip_android: bool,
 }
 fn main() {
-    if let Err(e) = run(Args::parse()) {
+    let result=match Cli::parse().command {
+        CommandKind::Recovery { root, output } => build_recovery(&root, &output),
+        CommandKind::Build(args)=>run(args),
+        CommandKind::VerifyPayload { path } => Payload::open(&path).map(|payload| println!("{}",serde_json::json!({"valid":true,"manifest":payload.manifest,"payloadRoot":payload.root}))),
+        CommandKind::VerifyCatalog { path } => (|| -> Result<()> {
+            let mut catalog:installer_core::catalog::Catalog=serde_json::from_slice(&fs::read(path)?)?;
+            catalog.validate()?; println!("{}",serde_json::to_string_pretty(&catalog)?); Ok(())
+        })(),
+        CommandKind::VerifyHost { path } => payload::verify_host(&path).map(|_| println!("{}",serde_json::json!({"valid":true}))),
+    };
+    if let Err(e) = result {
         eprintln!("{e}");
         std::process::exit(1)
     }
@@ -59,8 +93,7 @@ fn run(args: Args) -> Result<()> {
                 .current_dir(root.join(project))
                 .args([
                     "--no-daemon",
-                    "assembleFullRelease",
-                    "assembleLightRelease",
+                    "assembleRelease",
                     &format!("-PvoyahReleaseVersion={}", args.version),
                     &format!("-PvoyahBuildRevision={}", args.revision),
                     &format!(
@@ -89,7 +122,9 @@ fn run(args: Args) -> Result<()> {
     fs::create_dir(&stage)?;
     let result = (|| {
         let mut manifest = Manifest {
-            schema: 2,
+            schema: 3,
+            removal_only: false,
+            requirements: Some(Default::default()),
             recipe,
             product: "VoyahTune".into(),
             release_version: args.version,
@@ -141,19 +176,46 @@ fn run(args: Args) -> Result<()> {
     }
     result
 }
+fn build_recovery(root: &Path, output: &Path) -> Result<()> {
+    let (recipe, sources) = discover(root)?;
+    fs::create_dir_all(output)?;
+    let mut manifest = Manifest {
+        schema: 3,
+        removal_only: true,
+        requirements: Some(Default::default()),
+        recipe,
+        product: "VoyahTune".into(),
+        release_version: env!("CARGO_PKG_VERSION").into(),
+        build_revision: "builtin-remover".into(),
+        artifacts: vec![],
+    };
+    for item in sources["artifacts"].as_array().unwrap().iter().filter(|a| {
+        ["dns-helper.sh", "init.logcat.original.sh"].contains(&a["name"].as_str().unwrap())
+    }) {
+        copy(
+            output,
+            &root.join(item["source"].as_str().unwrap()),
+            item["name"].as_str().unwrap(),
+            None,
+            &mut manifest,
+        )?;
+    }
+    write_json(&output.join("manifest.json"), &manifest)?;
+    Payload::open(output)?;
+    Ok(())
+}
 // Developer inputs are application sources and Packaging files, not a release manifest.
 fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::Value)> {
     use installer_core::recipe::{CopyFile, Phase, Recipe};
-    let mut recipe = Recipe::default();
+    let spec = root.join("Packaging/installer/payload-spec.json");
+    let mut recipe: Recipe = serde_json::from_slice(&fs::read(spec)?)?;
     let mut artifacts = Vec::new();
-    for variant in ["full", "light"] {
-        for (name, project) in [
-            ("native.apk", "Native"),
-            ("restore_mode.apk", "RestoreMode"),
-        ] {
-            artifacts.push(serde_json::json!({"name":name,"variant":variant,
-                "source":format!("{project}/app/build/outputs/apk/{variant}/release/app-{variant}-release.apk")}));
-        }
+    for (name, project) in [
+        ("native.apk", "Native"),
+        ("restore_mode.apk", "RestoreMode"),
+    ] {
+        artifacts.push(serde_json::json!({"name":name,"variant":null,
+            "source":format!("{project}/app/build/outputs/apk/release/app-release.apk")}));
     }
     // Hooks/configs are discovered automatically, including newly added owned files.
     let mut inject = fs::read_dir(root.join("Packaging/inject"))?
@@ -181,10 +243,6 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
             });
         }
     }
-    recipe.remove_prefixes.extend([
-        "/data/local/bin/voyahtune-".into(),
-        "/data/local/bin/voyahtune_".into(),
-    ]);
     for file in &recipe.files {
         if file.artifact == "native.apk" {
             continue;
@@ -285,6 +343,14 @@ mod tests {
         let root = std::env::temp_dir().join(format!("voyahtune-discovery-{}", std::process::id()));
         let inject = root.join("Packaging/inject");
         fs::create_dir_all(&inject).unwrap();
+        let spec = root.join("Packaging/installer/payload-spec.json");
+        fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../Packaging/installer/payload-spec.json"),
+            &spec,
+        )
+        .unwrap();
         let hook = inject.join("voyahtune-discovery.js");
         fs::write(&hook, "// test hook").unwrap();
         fs::write(inject.join("notes.txt"), "not an installable file").unwrap();
@@ -300,15 +366,22 @@ mod tests {
             .any(|a| a["name"] == "voyahtune-discovery.js"));
         assert!(!sources.to_string().contains("notes.txt"));
         fs::remove_file(hook).unwrap();
+        // Retired paths are explicit source history, not inferred from a prefix.
+        let mut retired: installer_core::recipe::Recipe =
+            serde_json::from_slice(&fs::read(&spec).unwrap()).unwrap();
+        retired
+            .remove_files
+            .push("/data/local/bin/voyahtune-discovery.js".into());
+        fs::write(&spec, serde_json::to_vec(&retired).unwrap()).unwrap();
         let (recipe, _) = discover(&root).unwrap();
         assert!(!recipe
             .files
             .iter()
             .any(|f| f.artifact == "voyahtune-discovery.js"));
         assert!(recipe
-            .remove_prefixes
+            .remove_files
             .iter()
-            .any(|p| "/data/local/bin/voyahtune-discovery.js".starts_with(p)));
+            .any(|p| p == "/data/local/bin/voyahtune-discovery.js"));
         fs::write(
             inject.join("unowned.js"),
             "// must not claim third-party paths",

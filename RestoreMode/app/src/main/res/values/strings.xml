@@ -50,4 +50,5 @@
         68 08 02 00 00 f0 2c 54 08 00 - форсе EV вкл\n
         68 08 02 00 00 f0 2c 24 08 00 - форсе EV выкл
     </string>
+    <string name="suspension_maintenance_title">Сервисный режим подвески</string>
 </resources>

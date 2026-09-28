@@ -34,6 +34,9 @@ adb root
 adb wait-for-device
 adb root
 
+# Light always tears down the old Full runtime before updating APKs.
+echo "Если ранее был Full, рекомендуется полное удаление; установка Light поверх сохраняет данные."
+
 # Full -> Light transition: best-effort stop through Android init. Atomic file operations and the
 # mandatory final reboot make PID scanning/killing unnecessary and avoid Android 11 toybox false matches.
 stop_full_hook_runtime_for_light() {
@@ -104,9 +107,9 @@ remove_full_hook_runtime_for_light() {
                     /data/local/bin/load.bin 2>/dev/null; then
             rm -f /data/local/bin/load.bin || exit 1
         fi
-        rm -f /data/local/bin/apollo_tech.js \
-            /data/local/bin/apollo_tech.js.new \
-            /data/local/bin/apollo_tech.js.voyahtune.new \
+        rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
+            /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new \
+            /data/local/bin/apollo_tech.js.voyahtune.new /data/local/bin/voyahtune_drive_reset.js.voyahtune.new /data/local/bin/voyahtune_acc_restore.js.voyahtune.new \
             /data/local/bin/load.bin.voyahtune.new \
             /data/local/bin/frida-inject.voyahtune.new \
             /data/local/bin/app_client.js \
@@ -153,10 +156,10 @@ remove_full_hook_runtime_for_light() {
             /data/local/tmp/voyahtune_md.attempt \
             /data/local/tmp/voyahtune_md.txt \
             /data/local/tmp/voyahtune_md.txt.try \
-            /data/local/tmp/voyahtune_apollo.pid \
-            /data/local/tmp/voyahtune_apollo.attempt \
-            /data/local/tmp/voyahtune_apollo.txt \
-            /data/local/tmp/voyahtune_apollo.txt.try \
+            /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid \
+            /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt \
+            /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt \
+            /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try \
             /data/local/tmp/voyahtune_keyboard.pid \
             /data/local/tmp/voyahtune_keyboard.attempt \
             /data/local/tmp/voyahtune_keyboard.txt \
@@ -187,7 +190,7 @@ remove_full_hook_runtime_for_light() {
             /data/local/tmp/voyah_apollo.txt \
             /data/local/tmp/voyah_apollo.txt.1 \
             /data/local/tmp/voyah_apollo.txt.try || exit 1
-        rm -f /data/local/tmp/voyahtune_app_client.* \
+        rm -f /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* \
             /data/local/tmp/voyahtune_fullscreen_client.* || exit 1
         rm -rf /data/local/tmp/voyah_load.lock || exit 1
         for removed_path in \
@@ -202,14 +205,14 @@ remove_full_hook_runtime_for_light() {
                 /data/local/bin/app_client.js.voyahtune.new \
                 /data/local/bin/fullscreen_client.js \
                 /data/local/bin/fullscreen_client.js.voyahtune.new \
-                /data/local/bin/apollo_tech.js \
+                /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js \
                 /data/local/bin/keyboard_lock_en.js \
                 /data/local/bin/keyboard_ru.js \
                 /data/local/bin/voyahtune-hook-manifest.json \
                 /data/local/tmp/voyahtune-hook-status.v1; do
             [ ! -e "$removed_path" ] && [ ! -L "$removed_path" ] || exit 1
         done
-        ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
+        ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 || exit 1
         ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1 || exit 1
         sync
     '
@@ -541,6 +544,7 @@ case "${YDNS_REQUEST:-keep}" in
 esac
 
 # Ребут нужен, чтобы менеджер пакетов перечитал privapp-whitelist для /system/priv-app.
+adb shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode && settings put global voyahtune_install_mode light && test x\$(settings get global voyahtune_install_mode) = xlight" || exit 1
 if ! adb reboot; then
     echo "!!! ADB не принял финальную перезагрузку; установка не подтверждена."
     exit 1

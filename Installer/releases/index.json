@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-27T08:53:50.333710+00:00",
+  "releases": [
+    {
+      "version": "3.14.0",
+      "publishedAt": "2026-09-27T08:52:13.333979+00:00",
+      "channel": "stable",
+      "notesUrl": "https://github.com/nexron171/VoyahTune/releases/tag/v3.14.0",
+      "payload": {
+        "url": "https://storage.yandexcloud.net/voyahtune/v3.14.0/payload_3.14.0.zip",
+        "size": 143048623,
+        "sha256": "96396166f2c57998bac32acc951862436375c4d206dc34c573d935668d71f7dc",
+        "manifestSchema": 3
+      },
+      "requirements": {
+        "minInstallerVersion": "1.0.0",
+        "requiredCapabilities": [
+          "qinggan-v2",
+          "runtime-mode-v1",
+          "files-v1"
+        ]
+      }
+    },
+    {
+      "version": "3.13.0",
+      "publishedAt": "2026-09-26T21:05:44.936329+00:00",
+      "channel": "stable",
+      "notesUrl": "https://github.com/nexron171/VoyahTune/releases/tag/v3.13.0",
+      "payload": {
+        "url": "https://github.com/nexron171/VoyahTune/releases/download/v3.13.0/payload_3.13.0.zip",
+        "size": 143048658,
+        "sha256": "de61710c021c54fb81aea85f14f11d3293c0c57dc9148d1293ccd0b8945b7557",
+        "manifestSchema": 3
+      },
+      "requirements": {
+        "minInstallerVersion": "1.0.0",
+        "requiredCapabilities": [
+          "qinggan-v2",
+          "runtime-mode-v1",
+          "files-v1"
+        ]
+      }
+    }
+  ],
+  "installerDownloads": [
+    {
+      "version": "1.0.2",
+      "platform": "macos",
+      "url": "https://github.com/nexron171/VoyahTune/releases/download/v3.14.0/VoyahTune-Installer-1.0.2-macos.zip"
+    },
+    {
+      "version": "1.0.2",
+      "platform": "windows",
+      "url": "https://github.com/nexron171/VoyahTune/releases/download/v3.14.0/VoyahTune-Installer-1.0.2-windows-x64.exe"
+    }
+  ]
+}

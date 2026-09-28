@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.InstallMode;
+
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
@@ -42,7 +44,7 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
     private boolean closing;
 
     static void launch(Context context, String pkg) {
-        if (!BuildConfig.IS_FULL || pkg == null || pkg.isEmpty() || "none".equals(pkg)) return;
+        if (!InstallMode.isFull() || pkg == null || pkg.isEmpty() || "none".equals(pkg)) return;
         Context app = context.getApplicationContext();
         int mediaId = findMediaDisplayId(app);
         if (mediaId < 0 || app.getPackageManager().getLaunchIntentForPackage(pkg) == null) {
@@ -107,7 +109,7 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
         Display media = getDisplay();
         Point size = new Point();
         if (media != null) media.getRealSize(size);
-        if (!BuildConfig.IS_FULL || !SESSION.owns(generation, packageName)
+        if (!InstallMode.isFull() || !SESSION.owns(generation, packageName)
                 || media == null || !MEDIA_DISPLAY_NAME.equals(media.getName())
                 || size.x != 1920 || size.y != 720) {
             finishAndRemoveTask();

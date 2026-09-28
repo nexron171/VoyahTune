@@ -1,6 +1,6 @@
 #!/bin/sh
 # ./make_release.sh VERSION → Full/Light ZIP со скриптами установки и удаления.
-# ./make_release.sh VERSION --installers → три автономных GUI/CLI-установщика.
+# ./make_release.sh VERSION --installers → три автономных GUI-установщика.
 # ./make_release.sh VERSION --mac [--windows] [--linux] → только выбранные установщики.
 #
 #   ./make_release.sh 3.2.2              → Releases/build/VoyahTune-3.2.2{,-light} + Releases/dist/*.zip
@@ -19,7 +19,7 @@ set -e
 # Preserve the classic shell-only default. The Python branch consumes --installers.
 for release_arg in "$@"; do
     case "$release_arg" in
-        --installers|--mac|--windows|--linux)
+        --payload|--installers|--mac|--windows|--linux)
             exec python3 "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/Installer/scripts/release.py" "$@" ;;
     esac
 done
@@ -232,6 +232,14 @@ verify_common_release_assets() {
         echo "MapKit DPI client guard failed; release was not created." >&2
         exit 1
     fi
+    if ! sh "$COMMON/tests/test_acc_restore_hook.sh"; then
+        echo "ACC restore hook guard failed; release was not created." >&2
+        exit 1
+    fi
+    if ! sh "$COMMON/tests/test_drive_reset_hook.sh"; then
+        echo "Account reset hook guard failed; release was not created." >&2
+        exit 1
+    fi
     if ! bash "$ROOT/Utils/android11-oem-stubs/tests/static-checks.sh"; then
         echo "Android 11 OEM stub harness guard failed; release was not created." >&2
         exit 1
@@ -388,7 +396,7 @@ verify_release_payload() {
     flavor="$2"
     required="README.txt native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
     if [ "$flavor" = full ]; then
-        required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
+        required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
     fi
     for payload in $required; do
         if [ ! -s "$out/$payload" ]; then
@@ -400,23 +408,17 @@ verify_release_payload() {
     sh -n "$out/remove.sh"
 }
 
-# Собрать APK одного флейвора и положить в папку релиза под финальными именами.
-# $1 = full|light, $2 = папка релиза
+# Build the same application bytes once, then copy them into both classic layouts.
+APKS_BUILT=0
 build_apks() {
-    flavor="$1"; out="$2"
-    # assembleFullRelease / assembleLightRelease — первая буква флейвора в верхнем регистре.
-    case "$flavor" in
-        full)  task="assembleFullRelease" ;;
-        light) task="assembleLightRelease" ;;
-    esac
-
-    echo "== Native: $task =="
-    (cd "$ROOT/Native" && ./gradlew "$task" -q)
-    cp "$ROOT/Native/app/build/outputs/apk/$flavor/release/app-$flavor-release.apk" "$out/native.apk"
-
-    echo "== RestoreMode: $task =="
-    (cd "$ROOT/RestoreMode" && ./gradlew "$task" -q)
-    cp "$ROOT/RestoreMode/app/build/outputs/apk/$flavor/release/app-$flavor-release.apk" "$out/restore_mode.apk"
+    out="$2"
+    if [ "$APKS_BUILT" = 0 ]; then
+        (cd "$ROOT/Native" && ./gradlew assembleRelease -q)
+        (cd "$ROOT/RestoreMode" && ./gradlew assembleRelease -q)
+        APKS_BUILT=1
+    fi
+    cp "$ROOT/Native/app/build/outputs/apk/release/app-release.apk" "$out/native.apk"
+    cp "$ROOT/RestoreMode/app/build/outputs/apk/release/app-release.apk" "$out/restore_mode.apk"
 }
 
 # Проверка, что в папке релиза лежат APK — при --no-build мы их не собираем, но релиз без них невалиден.
