@@ -241,7 +241,7 @@ impl Drop for OperationLock {
 pub fn apply(shared: &Shared) -> io::Result<()> {
     let _lock = OperationLock::acquire()?;
     let (p, claims) = workflow::verified(shared)?;
-    workflow::phase(shared, "applying", "Проверка условий установки")?;
+    workflow::phase(shared, "preparing", "Проверка условий установки")?;
     preflight(&p)?;
     device::wake(true)?;
     let fresh = native_status(true)?;
@@ -254,6 +254,8 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             "Состояние автомобиля изменилось перед установкой: {fresh}"
         )));
     }
+    // Persist the non-retryable boundary before blocking app launches or changing release files.
+    workflow::phase(shared, "applying", "Блокировка запуска приложений")?;
     let mut block = fs::OpenOptions::new()
         .write(true)
         .create(true)

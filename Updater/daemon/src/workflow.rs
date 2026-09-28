@@ -46,15 +46,7 @@ pub fn phase(shared: &Shared, name: &str, step: &str) -> io::Result<()> {
 fn fail(shared: &Shared, error: &io::Error, repair: bool) {
     let message = error.to_string();
     let _ = crate::log(root(), &format!("FAILED {message}"));
-    let _ = update(shared, |s| {
-        s.phase = if repair { "repair-required" } else { "failed" }.into();
-        s.error = Some(message);
-        s.step = "Установите релиз через USB с компьютера".into();
-        if repair {
-            s.notice = Some("error".into());
-            s.notice_opened = false;
-        }
-    });
+    let _ = update(shared, |s| s.fail(message, repair));
 }
 pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     let config = config::load(root()).map_err(|e| e.to_string());
@@ -88,21 +80,7 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     if state.fingerprint.is_empty() {
         return Err(invalid("Не определена прошивка ГУ"));
     }
-    if state.phase == "applying"
-        || (state.phase == "reboot-pending" && state.apply_boot == device::boot())
-    {
-        state.phase = "repair-required".into();
-        state.error = Some("Установка была прервана; автоматическое продолжение отключено".into());
-        state.notice = Some("error".into());
-        state.notice_opened = false;
-    } else if matches!(
-        state.phase.as_str(),
-        "checking" | "downloading" | "verifying"
-    ) {
-        state.phase = "failed".into();
-        state.error =
-            Some("Подготовка обновления прервана. Выполните проверку и загрузку повторно".into());
-    }
+    state.recover_interrupted(&device::boot());
     if let Ok(c) = &config {
         if state.source_generation != c.source_generation && !state.repair() {
             state.selected = None;
@@ -136,7 +114,15 @@ pub fn queue(shared: &Shared, tx: &mpsc::Sender<Job>, job: Job) -> io::Result<()
     rt.state.phase = match job {
         Job::Check(_) => "checking",
         Job::Download => "downloading",
-        Job::Apply => "applying",
+        Job::Apply => "preparing",
+    }
+    .into();
+    rt.state.error = None;
+    rt.state.notice = None;
+    rt.state.step = match job {
+        Job::Check(_) => "Проверка каталога релизов",
+        Job::Download => "Скачивание архива",
+        Job::Apply => "Проверка условий установки",
     }
     .into();
     state::save(root(), "state.json", &rt.state)?;
@@ -160,7 +146,8 @@ fn run(shared: Shared, rx: mpsc::Receiver<Job>) {
                 };
                 let _ = device::wake(false);
                 if let Err(e) = result {
-                    fail(&shared, &e, apply);
+                    let repair = apply && snapshot(&shared).installation_started();
+                    fail(&shared, &e, repair);
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => return,

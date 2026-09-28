@@ -127,7 +127,7 @@ public final class MainActivity extends Activity {
             }
             JSONObject state = result.getJSONObject("state");
             String phase = state.getString("phase");
-            operationBusy = java.util.Arrays.asList("checking", "downloading", "verifying", "applying", "reboot-pending", "validating").contains(phase);
+            operationBusy = java.util.Arrays.asList("checking", "downloading", "verifying", "preparing", "applying", "reboot-pending", "validating").contains(phase);
             repair = "repair-required".equals(phase);
             verified = "verified".equals(phase);
             JSONObject selected = state.optJSONObject("selected"); hasRelease = selected != null;
@@ -141,7 +141,7 @@ public final class MainActivity extends Activity {
             long total = state.optLong("total"), bytes = state.optLong("bytes");
             if (total > 0) stage += "\n" + (100 * bytes / total) + "% · " + bytes + " / " + total;
             status.setText(stage);
-            if (!state.isNull("error")) showError(state.optString("error"));
+            if (!state.isNull("error")) showError(state.optString("error"), verified);
             if (!result.isNull("settingsError")) showError(result.optString("settingsError"));
             setBusy(false);
             if (!state.isNull("notice")) showNotice(state.getString("notice"), state.optString("error"));
@@ -229,8 +229,13 @@ public final class MainActivity extends Activity {
         catalogUrl.setEnabled(!value && !operationBusy);
     }
     private void showError(String reason) {
+        showError(reason, false);
+    }
+    private void showError(String reason, boolean retryInstall) {
         status.setText("Ошибка: " + (reason == null ? "служба недоступна" : reason)
-            + "\nПосмотрите или выгрузите логи. Установите релиз через USB с компьютера.");
+            + (retryInstall
+                ? "\nУстраните причину и повторите установку. Можно посмотреть или выгрузить логи."
+                : "\nПосмотрите или выгрузите логи. Установите релиз через USB с компьютера."));
     }
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
