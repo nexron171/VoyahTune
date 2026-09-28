@@ -21,6 +21,8 @@ public class VoiceReplyTestService extends Service {
             result.putString("action", data.getString("action"));
             result.putString("op", data.getString("op"));
             result.putInt("displayMs", data.getInt("resultDisplayMs"));
+            result.putInt("index", data.getInt("index"));
+            result.putInt("count", data.getInt("count"));
             result.putInt("pid", android.os.Process.myPid());
             reply.send(message.what, result);
             return true;

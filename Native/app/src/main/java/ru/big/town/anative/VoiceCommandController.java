@@ -29,9 +29,18 @@ final class VoiceCommandController {
         String operation = data.getString("op", "");
         if ("begin".equals(operation)) { gate.begin(token); return; }
         if ("cancel".equals(operation)) { gate.cancel(token); return; }
-        if (!"execute".equals(operation) || !gate.submit(token)) return;
+        if (!"execute".equals(operation)) return;
+        // Older clients omit the sequence fields; one command per session stays the default.
+        int index = data.getInt("index", 0);
+        int count = data.getInt("count", 1);
+        if (count < 1 || index < 0 || index >= count || !gate.submit(token, index)) return;
         String action = data.getString("action", "");
         ResultReceiver reply = data.getParcelable("reply");
+        if (isNavigation(action) && index != count - 1) {
+            // The sequence keeps its result list on screen, so navigation is allowed only last.
+            respond(reply, false, "Навигация только последней командой");
+            return;
+        }
         long deadline = SystemClock.elapsedRealtime() + 7000;
         if (SeatCommand.handles(action) || WindowCommand.handles(action)) {
             // Submission commits this one-shot action. Closing/replacing the voice UI must not

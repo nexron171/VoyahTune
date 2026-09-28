@@ -23,6 +23,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.io.File;
@@ -30,10 +31,22 @@ import java.io.File;
 /** Dedicated translucent task. A new wheel invocation replaces the current recognition session. */
 public class VoiceActivity extends AppCompatActivity {
     static final String TEST_ONLY = "voiceTestOnly";
+    private static final int COLOR_REJECTED = 0xffff6b6b;
+    private static final int COLOR_REJECTED_NOTE = 0xffffb0b0;
+    private static final int COLOR_NOTE = 0xffbbbbbb;
+    private static final long COMMAND_TIMEOUT_MS = 8000;
+    private static final long SEQUENCE_BUDGET_MS = 20000;
+    private static final long SEQUENCE_ROW_MS = 1200;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final VoiceRecognizer recognizer = new VoiceRecognizer();
     private VoiceOrbView orb;
     private TextView status, transcript, details;
+    private LinearLayout resultList;
+    private final List<TextView> rowNotes = new ArrayList<>();
+    private List<VoiceCommandSequence.Segment> sequence;
+    private Runnable commandTimeout;
+    private int sequenceNext, sequenceAccepted;
+    private long sequenceDuration;
     private boolean testOnly;
     private Messenger nativeService;
     private boolean bound, ended, submitted, interrupted;
@@ -76,6 +89,9 @@ public class VoiceActivity extends AppCompatActivity {
         int size = (int) (360 * getResources().getDisplayMetrics().density);
         center.addView(orb, new LinearLayout.LayoutParams(size, size));
         status = label(26); transcript = label(40); center.addView(status); center.addView(transcript);
+        resultList = new LinearLayout(this);
+        resultList.setOrientation(LinearLayout.VERTICAL); resultList.setGravity(Gravity.CENTER);
+        center.addView(resultList);
         details = label(16); details.setTag("voiceDiagnostics");
         details.setTextColor(0xffbbbbbb); center.addView(details);
         closeControl.attach(this, center, () -> { cancelSession(); finish(); }, this::playRecording);
@@ -111,6 +127,8 @@ public class VoiceActivity extends AppCompatActivity {
         testOnly = getIntent().getBooleanExtra(TEST_ONLY, false);
         closeControl.testMode(testOnly);
         session = UUID.randomUUID().toString(); ended = false; submitted = false; interrupted = false;
+        sequence = null; sequenceNext = 0; sequenceAccepted = 0; sequenceDuration = 0; commandTimeout = null;
+        clearRows();
         status.setText("Подготовка помощника…"); transcript.setText(""); orb.state(false, false);
         details.setText("");
         details.setVisibility(testOnly ? View.VISIBLE : View.GONE);
@@ -149,6 +167,12 @@ public class VoiceActivity extends AppCompatActivity {
                     VoiceResultPresentation.successDurationMs("port_cap:fuel"));
         } else if ("error".equals(state)) {
             fail("Тестовая ошибка · закрытие через 6 секунд");
+        } else if ("sequence".equals(state)) {
+            ended = true;
+            showRows(VoiceCommandSequence.sample());
+            orb.recognized(); status.setText("Команды переданы");
+            sounds.success();
+            ui.postDelayed(() -> finish(), 6000);
         }
     }
     private void beginRecognition() {
@@ -201,7 +225,9 @@ public class VoiceActivity extends AppCompatActivity {
     private void recognized(String text) {
         recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
         orb.state(false, false); transcript.setText(text);
-        VoiceCommandCatalog.Command command = VoiceCommandCatalog.match(commands, text);
+        List<VoiceCommandSequence.Segment> segments = VoiceCommandSequence.parse(commands, text);
+        if (segments.size() > 1) { recognizedSequence(text, segments); return; }
+        VoiceCommandCatalog.Command command = segments.isEmpty() ? null : segments.get(0).command;
         if (testOnly) {
             ended = true;
             closeControl.recordingAvailable(recording != null);
@@ -221,6 +247,115 @@ public class VoiceActivity extends AppCompatActivity {
                     .setNegativeButton("Отмена", (d, w) -> finish()).setOnCancelListener(d -> finish()).create();
             confirmation.show();
         } else execute(command);
+    }
+    /** Segments run in speech order; rejected ones are shown in red and never sent. */
+    private void recognizedSequence(String text, List<VoiceCommandSequence.Segment> segments) {
+        sequence = segments; sequenceNext = 0; sequenceAccepted = 0; sequenceDuration = 0;
+        showRows(segments);
+        int rejected = 0;
+        for (VoiceCommandSequence.Segment segment : segments) if (!segment.accepted()) rejected++;
+        if (testOnly) {
+            ended = true;
+            closeControl.recordingAvailable(recording != null);
+            if (rejected < segments.size()) orb.recognized(); else orb.state(false, true);
+            status.setText("Тест: команд " + segments.size() + ", отклонено " + rejected);
+            transcript.setText(text.isEmpty() ? "Речь не распознана" : text);
+            details.append("\nПроверка без выполнения команд");
+            return;
+        }
+        if (rejected == segments.size()) { fail("Команды не распознаны"); return; }
+        orb.recognized();
+        status.setText("Передаю команды…");
+        ui.postDelayed(() -> fail("Выполнение команд занимает слишком много времени"), SEQUENCE_BUDGET_MS);
+        stepSequence();
+    }
+    private void stepSequence() {
+        while (sequenceNext < sequence.size() && !sequence.get(sequenceNext).accepted()) sequenceNext++;
+        if (sequenceNext >= sequence.size()) { finishSequence(); return; }
+        final int at = sequenceNext;
+        final String token = session;
+        status.setText("Команда " + (at + 1) + " из " + sequence.size() + "…");
+        rowNotes.get(at).setTextColor(COLOR_NOTE); rowNotes.get(at).setText("Отправляю…");
+        ResultReceiver reply = new ResultReceiver(ui) {
+            @Override protected void onReceiveResult(int code, Bundle data) {
+                if (!token.equals(session) || ended || isFinishing()) return;
+                ui.removeCallbacks(commandTimeout);
+                completeStep(at, code == 1 ? null : data == null ? "Не удалось выполнить команду"
+                        : data.getString("error", "Не удалось выполнить команду"), data);
+            }
+        };
+        commandTimeout = null;
+        submitted = send("execute", sequence.get(at).command.action, reply, at, sequence.size());
+        if (!submitted) { completeStep(at, "Не удалось отправить команду", null); return; }
+        commandTimeout = () -> {
+            if (!token.equals(session) || ended || isFinishing() || sequenceNext != at) return;
+            completeStep(at, "Сервис не ответил на команду", null);
+        };
+        ui.postDelayed(commandTimeout, COMMAND_TIMEOUT_MS);
+    }
+    /** A failing segment is reported in place; the remaining commands still run. */
+    private void completeStep(int at, String error, Bundle data) {
+        if (error == null) {
+            sequenceAccepted++;
+            rowNotes.get(at).setText(noteFor(sequence.get(at).command, data));
+            sequenceDuration = Math.max(sequenceDuration,
+                    VoiceResultPresentation.successDurationMs(sequence.get(at).command.action));
+        } else {
+            rowNotes.get(at).setTextColor(COLOR_REJECTED_NOTE); rowNotes.get(at).setText(error);
+        }
+        sequenceNext = at + 1;
+        stepSequence();
+    }
+    private String noteFor(VoiceCommandCatalog.Command command, Bundle data) {
+        if (command.action.startsWith("auto_light:")) {
+            getSharedPreferences("DrivePreferences", MODE_PRIVATE).edit()
+                    .putBoolean("autoLight", command.action.endsWith(":on")).apply();
+        }
+        if ("port_cap:fuel".equals(command.action)) {
+            int refillLiters = data == null ? -1 : data.getInt("fuelRefillLiters", -1);
+            return VoiceResultPresentation.successText(command.action, command.title, refillLiters);
+        }
+        if (command.action.startsWith("fuel_charge:") && data != null
+                && data.getBoolean("chargeTargetConfirmed", false)) {
+            return "Уровень поддержания заряда подтверждён";
+        }
+        if (VoiceSeatCommands.isAction(command.action) || command.action.startsWith("wheel_heat:")
+                || VoiceWindowCommands.isAction(command.action)) {
+            return "Команда отправлена";
+        }
+        return "Выполнено";
+    }
+    private void finishSequence() {
+        if (ended || isFinishing()) return;
+        if (sequenceAccepted == 0) { fail("Команды не выполнены"); return; }
+        ended = true; recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
+        orb.recognized(); status.setText("Команды переданы");
+        sounds.success();
+        closeControl.recordingAvailable(recording != null);
+        long duration = Math.max(3000, Math.max(sequenceDuration, SEQUENCE_ROW_MS * sequenceAccepted));
+        ui.postDelayed(() -> finish(), duration);
+    }
+    private void showRows(List<VoiceCommandSequence.Segment> segments) {
+        clearRows();
+        for (int at = 0; at < segments.size(); at++) {
+            VoiceCommandSequence.Segment segment = segments.get(at);
+            TextView title = label(22);
+            title.setText((at + 1) + ". " + (segment.accepted() ? segment.command.title : segment.text));
+            TextView note = label(16);
+            note.setTextColor(COLOR_NOTE);
+            if (segment.accepted()) {
+                note.setText("");
+            } else {
+                title.setTextColor(COLOR_REJECTED);
+                note.setTextColor(COLOR_REJECTED_NOTE);
+                note.setText(segment.reason);
+            }
+            resultList.addView(title); resultList.addView(note);
+            rowNotes.add(note);
+        }
+    }
+    private void clearRows() {
+        resultList.removeAllViews(); rowNotes.clear();
     }
     private void execute(VoiceCommandCatalog.Command command) {
         final String token = session;
@@ -252,9 +387,12 @@ public class VoiceActivity extends AppCompatActivity {
         ui.postDelayed(() -> fail("Сервис не ответил на команду"), 8000);
     }
     private boolean send(String op, String action, ResultReceiver reply) {
+        return send(op, action, reply, 0, 1);
+    }
+    private boolean send(String op, String action, ResultReceiver reply, int index, int count) {
         if (nativeService == null || session == null) return false;
         try {
-            nativeService.send(VoiceCommandMessage.create(session, op, action, reply)); return true;
+            nativeService.send(VoiceCommandMessage.create(session, op, action, reply, index, count)); return true;
         } catch (Exception e) { return false; }
     }
     private void fail(String message) {
