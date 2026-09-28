@@ -57,12 +57,6 @@
       "phase": "files"
     },
     {
-      "artifact": "voyahtune-ota-key.der",
-      "destination": "/system/etc/voyahtune-ota-key.der",
-      "mode": 420,
-      "phase": "files"
-    },
-    {
       "artifact": "voyahtune-ota-bootstrap.json",
       "destination": "/system/etc/voyahtune-ota-bootstrap.json",
       "mode": 420,

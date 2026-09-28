@@ -32,9 +32,9 @@ pub fn catalog(url: &str) -> io::Result<Catalog> {
     if bytes.len() > 4 * 1024 * 1024 {
         return Err(invalid("Слишком большой каталог"));
     }
-    let mut c: Catalog = serde_json::from_slice(&bytes).map_err(|e| invalid(&e.to_string()))?;
-    c.validate().map_err(|e| invalid(&e.to_string()))?;
-    Ok(c)
+    let c: release_core::catalog::UpdateCatalog =
+        serde_json::from_slice(&bytes).map_err(|e| invalid(&e.to_string()))?;
+    c.resolve().map_err(|e| invalid(&e.to_string()))
 }
 pub fn download(
     url: &str,

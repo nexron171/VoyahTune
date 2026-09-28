@@ -18,7 +18,6 @@ const STABLE: &[&str] = &[
     "voyahtune-updater",
     "voyahtune-updater.apk",
     "voyahtune.updater.rc",
-    "voyahtune-ota-key.der",
     "voyahtune-ota-bootstrap.json",
 ];
 fn error(e: impl ToString) -> io::Error {
@@ -290,10 +289,7 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     })?;
     crate::log(
         root(),
-        &format!(
-            "reboot_pending version={} sequence={}",
-            claims.version, claims.sequence
-        ),
+        &format!("reboot_pending version={}", claims.version),
     )?;
     fs::remove_file(BLOCK)?;
     fs::File::open("/data/local/bin")?.sync_all()?;
@@ -422,9 +418,7 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
         .selected
         .clone()
         .ok_or_else(|| invalid("Нет релиза для проверки после загрузки"))?;
-    let claims =
-        release_core::ota::verify(&expected, &fs::read("/system/etc/voyahtune-ota-key.der")?)
-            .map_err(error)?;
+    let claims = release_core::ota::verify(&expected).map_err(error)?;
     // Query actual registered packages, not staging hashes. Android owns installed version/signature state.
     for package in [payload::NATIVE, payload::RESTORE] {
         package_path(package)?;
@@ -476,7 +470,6 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
                         s.phase = "committed".into();
                         s.step = "Обновление установлено, службы работают".into();
                         s.installed_version = claims.version.clone();
-                        s.installed_sequence = claims.sequence;
                         s.installed_archive_sha256 = claims.archive_sha256.clone();
                         s.selected = None;
                         s.error = None;

@@ -273,7 +273,6 @@ pub fn destination(name: &str) -> Option<(String, u32)> {
             0o644,
         )),
         "voyahtune.updater.rc" => Some(("/system/etc/init/voyahtune.updater.rc".into(), 0o644)),
-        "voyahtune-ota-key.der" => Some(("/system/etc/voyahtune-ota-key.der".into(), 0o644)),
         "voyahtune-ota-bootstrap.json" => {
             Some(("/system/etc/voyahtune-ota-bootstrap.json".into(), 0o644))
         }

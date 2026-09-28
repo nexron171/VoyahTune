@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 pub const CATALOG_URL: &str =
-    "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Installer/releases/index.json";
+    "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Archive {
@@ -17,19 +17,11 @@ pub struct Archive {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Release {
     pub version: String,
-    /// Explicit opt-in for device updates; old/unmarked releases remain desktop-only.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub ota: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ota_metadata: Option<crate::ota::Envelope>,
     pub published_at: String,
     pub channel: String,
     pub notes_url: String,
     pub payload: Archive,
     pub requirements: Requirements,
-}
-fn is_false(value: &bool) -> bool {
-    !value
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -49,7 +41,7 @@ pub struct Catalog {
 impl Catalog {
     /// Eligibility is separate from firmware, updater and payload compatibility checks.
     pub fn ota_releases(&self) -> impl Iterator<Item = &Release> {
-        self.releases.iter().filter(|release| release.ota)
+        self.releases.iter()
     }
     pub fn installer_updates(
         &self,
@@ -139,4 +131,87 @@ fn https_url(value: &str) -> Result<()> {
         return Err(invalid("Требуется HTTPS URL без учётных данных"));
     }
     Ok(())
+}
+
+/// Public catalog for OTA and the new installer. Internal UI/cache models stay separate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateCatalog {
+    pub releases: Vec<UpdateRelease>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateRelease {
+    pub version: String,
+    pub url: String,
+    pub size: u64,
+    pub sha256: String,
+}
+impl UpdateRelease {
+    pub fn into_release(self) -> Release {
+        Release {
+            version: self.version.clone(),
+            published_at: String::new(),
+            channel: if self.version.split('+').next().unwrap_or("").contains('-') {
+                "prerelease".into()
+            } else {
+                "stable".into()
+            },
+            notes_url: self.url.clone(),
+            payload: Archive {
+                url: self.url,
+                size: self.size,
+                sha256: self.sha256,
+                manifest_schema: 4,
+            },
+            requirements: Requirements::default(),
+        }
+    }
+}
+impl UpdateCatalog {
+    pub fn resolve(self) -> Result<Catalog> {
+        let mut catalog = Catalog::empty();
+        catalog.releases = self
+            .releases
+            .into_iter()
+            .map(UpdateRelease::into_release)
+            .collect();
+        catalog.validate()?;
+        Ok(catalog)
+    }
+    pub fn validate(&self) -> Result<()> {
+        self.clone().resolve().map(|_| ())
+    }
+}
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    #[test]
+    fn simple_catalog_validates_identity_urls_and_duplicates() {
+        let entry = UpdateRelease {
+            version: "3.15.0".into(),
+            url: "https://example.org/payload.zip".into(),
+            size: 149407190,
+            sha256: "a".repeat(64),
+        };
+        let mut c = UpdateCatalog {
+            releases: vec![entry.clone()],
+        };
+        c.validate().unwrap();
+        c.releases.push(entry);
+        assert!(c.validate().is_err());
+        c.releases.pop();
+        c.releases[0].url = "http://example.org/payload.zip".into();
+        assert!(c.validate().is_err());
+        c.releases[0].url = "https://example.org/payload.zip".into();
+        c.releases[0].sha256 = "invalid".into();
+        assert!(c.validate().is_err());
+    }
+    #[test]
+    fn old_catalog_and_removed_metadata_are_rejected() {
+        assert!(
+            serde_json::from_str::<UpdateCatalog>(r#"{"schemaVersion":1,"releases":[]}"#).is_err()
+        );
+        assert!(serde_json::from_str::<UpdateRelease>(r#"{"version":"3.15.0","url":"https://example.org/a","size":1,"sha256":"a","signature":"x"}"#).is_err());
+    }
 }

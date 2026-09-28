@@ -4,30 +4,26 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('catalog_update',Path(__file__).resolve().parents[1]/'scripts/update-catalog.py')
 u=importlib.util.module_from_spec(spec);spec.loader.exec_module(u)
 class CatalogPublishTests(unittest.TestCase):
+ def entry(self):
+  return dict(version='3.15.0',url='https://example.org/payload.zip',size=10,sha256='a'*64)
  def test_existing_version_is_immutable_and_repeating_is_idempotent(self):
-  e=dict(version='1.0.0',payload={'sha256':'a'},requirements={'minInstallerVersion':'1.0.0'})
-  index={'releases':[]};self.assertTrue(u.merge(index,e));self.assertFalse(u.merge(index,e.copy()))
-  with self.assertRaises(ValueError):u.merge(index,{**e,'payload':{'sha256':'b'}})
- def test_ota_marker_can_change_without_replacing_published_archive(self):
-  entry=dict(version='1.0.0',payload={'sha256':'a'},requirements={'minInstallerVersion':'1.0.0'})
-  index={'releases':[entry.copy()]}
-  self.assertTrue(u.merge(index,{**entry,'ota':True}))
-  self.assertIs(index['releases'][0]['ota'],True)
-  self.assertFalse(u.merge(index,entry))
-  self.assertIs(index['releases'][0]['ota'],True)
-  self.assertFalse(u.merge(index,{**entry,'ota':True}))
-  with self.assertRaises(ValueError):u.merge(index,{**entry,'ota':False,'payload':{'sha256':'b'}})
-  self.assertIs(index['releases'][0]['ota'],True)
-  self.assertTrue(u.merge(index,{**entry,'ota':False}))
-  self.assertIs(index['releases'][0]['ota'],False)
-  self.assertEqual(index['releases'][0]['payload'],entry['payload'])
- def test_ota_marker_rejects_non_boolean_values(self):
-  for invalid in ('true',1,None):
-   with self.assertRaises(ValueError):u.merge({'releases':[]},dict(version='1.0.0',ota=invalid))
+  e=self.entry();index={'releases':[]}
+  self.assertTrue(u.merge(index,e));self.assertFalse(u.merge(index,e.copy()))
+  for changed in ({'sha256':'b'*64},{'size':11}):
+   with self.assertRaises(ValueError):u.merge(index,{**e,**changed})
+ def test_mirror_url_can_change_without_replacing_archive(self):
+  e=self.entry();index={'releases':[e.copy()]}
+  self.assertTrue(u.merge(index,{**e,'url':'https://mirror.example.org/payload.zip'}))
+  self.assertEqual(index['releases'][0]['sha256'],e['sha256'])
+ def test_removed_metadata_and_missing_fields_are_rejected(self):
+  for key in ('signature','metadata','ota','otaMetadata'):
+   with self.assertRaises(ValueError):u.merge({'releases':[]},{**self.entry(),key:True})
+  e=self.entry();del e['sha256']
+  with self.assertRaises(ValueError):u.merge({'releases':[]},e)
  def test_remote_failure_never_changes_index(self):
   with tempfile.TemporaryDirectory() as d:
    index=Path(d)/'index.json';index.write_text('{"releases":[]}');before=index.read_bytes()
-   entry=Path(d)/'entry.json';entry.write_text(json.dumps(dict(version='1.0.0',payload={},requirements={})))
+   entry=Path(d)/'entry.json';entry.write_text(json.dumps(self.entry()))
    with patch.object(u.subprocess,'check_output',return_value='{}'),patch.object(u,'verify_remote',side_effect=ValueError('404')):
     with self.assertRaises(ValueError):u.update(index,entry,Path('builder'),True)
    self.assertEqual(index.read_bytes(),before)

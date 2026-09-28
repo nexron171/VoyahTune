@@ -71,7 +71,6 @@ fn owned(path: &str) -> bool {
             "voyahtune-updater",
             "voyahtune-updater.apk",
             "voyahtune.updater.rc",
-            "voyahtune-ota-key.der",
             "voyahtune-ota-bootstrap.json",
         ]
         .iter()
@@ -152,7 +151,6 @@ impl Recipe {
                 "voyahtune-updater",
                 "voyahtune-updater.apk",
                 "voyahtune.updater.rc",
-                "voyahtune-ota-key.der",
                 "voyahtune-ota-bootstrap.json",
                 "native.apk",
                 "whitelist.xml",

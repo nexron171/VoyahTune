@@ -218,24 +218,17 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
         return Err(invalid("Релиз выбран из прежнего источника"));
     }
     let r = s.selected.ok_or_else(|| invalid("Нет выбранного релиза"))?;
-    let key = fs::read("/system/etc/voyahtune-ota-key.der")?;
-    let c = ota::verify(&r, &key).map_err(|e| invalid(&e.to_string()))?;
+    let c = ota::verify(&r).map_err(|e| invalid(&e.to_string()))?;
     if c.version == s.installed_version
-        && s.installed_sequence > 0
-        && (c.sequence != s.installed_sequence || c.archive_sha256 != s.installed_archive_sha256)
+        && !s.installed_archive_sha256.is_empty()
+        && c.archive_sha256 != s.installed_archive_sha256
     {
         return Err(invalid(
             "Повторная установка разрешена только для того же архива",
         ));
     }
-    ota::compatible(
-        &c,
-        &s.installed_version,
-        env!("CARGO_PKG_VERSION"),
-        s.installed_sequence,
-        s.same_version,
-    )
-    .map_err(|e| invalid(&e.to_string()))?;
+    ota::compatible(&c, &s.installed_version, s.same_version)
+        .map_err(|e| invalid(&e.to_string()))?;
     if device::prop("ro.build.fingerprint")? != s.fingerprint {
         return Err(invalid(
             "Прошивка ГУ изменилась: установите VoyahTune через USB",
@@ -262,22 +255,14 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     }
     let catalog = network::catalog(&url)?;
     let current = snapshot(shared);
-    let key = fs::read("/system/etc/voyahtune-ota-key.der")?;
     let mut chosen = None;
     let mut rejected = None;
     for r in catalog
         .ota_releases()
         .filter(|r| r.channel == "stable" && (!same || r.version == current.installed_version))
     {
-        let result = ota::verify(r, &key).and_then(|c| {
-            ota::compatible(
-                &c,
-                &current.installed_version,
-                env!("CARGO_PKG_VERSION"),
-                current.installed_sequence,
-                same,
-            )
-        });
+        let result =
+            ota::verify(r).and_then(|c| ota::compatible(&c, &current.installed_version, same));
         match result {
             Ok(()) => {
                 chosen = Some(r.clone());

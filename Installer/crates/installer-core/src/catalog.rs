@@ -20,7 +20,9 @@ pub use release_core::catalog::CATALOG_URL;
 const MAX_CATALOG: u64 = 4 * 1024 * 1024;
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED: u64 = 4 * 1024 * 1024 * 1024;
-pub use release_core::catalog::{Archive, Catalog, InstallerDownload, Release};
+pub use release_core::catalog::{
+    Archive, Catalog, InstallerDownload, Release, UpdateCatalog, UpdateRelease,
+};
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedPayload {
@@ -139,7 +141,7 @@ impl Cache {
         refresh: bool,
     ) -> Result<CatalogState> {
         let _lock = self.lock()?;
-        let stored = self.root.join("catalog.json");
+        let stored = self.root.join("ota-catalog.json");
         let mut warning = None;
         let mut catalog = None;
         if refresh {
@@ -358,20 +360,25 @@ fn fetch_catalog(client: &ureq::Agent, url: &str) -> Result<Catalog> {
         .limit(MAX_CATALOG)
         .read_to_vec()
         .map_err(network)?;
-    let mut catalog: Catalog = serde_json::from_slice(&bytes)?;
-    catalog.validate()?;
-    Ok(catalog)
+    let catalog: release_core::catalog::UpdateCatalog = serde_json::from_slice(&bytes)?;
+    catalog.resolve()
 }
 fn verify_release(payload: &Payload, release: &Release) -> Result<()> {
     if payload.manifest.release_version != release.version
         || payload.manifest.schema != release.payload.manifest_schema
-        || payload.manifest.requirements.as_ref() != Some(&release.requirements)
     {
         return Err(Error::new(
             "CATALOG_MISMATCH",
             "Манифест архива не соответствует выбранному релизу",
         ));
     }
+    // Requirements come from the verified manifest, not the discovery catalog.
+    payload
+        .manifest
+        .requirements
+        .as_ref()
+        .ok_or_else(|| invalid("Нет требований релиза"))?
+        .validate()?;
     Ok(())
 }
 fn transfer(
@@ -482,8 +489,23 @@ pub use release_core::paths::safe_path;
 
 #[cfg(test)]
 mod tests {
-    use crate::compatibility::Requirements;
     use super::*;
+    use crate::compatibility::Requirements;
+    fn public_catalog(c: &Catalog) -> String {
+        serde_json::to_string(&UpdateCatalog {
+            releases: c
+                .releases
+                .iter()
+                .map(|r| UpdateRelease {
+                    version: r.version.clone(),
+                    url: r.payload.url.clone(),
+                    size: r.payload.size,
+                    sha256: r.payload.sha256.clone(),
+                })
+                .collect(),
+        })
+        .unwrap()
+    }
     fn server(status: &str, body: &str) -> (String, std::thread::JoinHandle<()>) {
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -501,55 +523,6 @@ mod tests {
         (url, worker)
     }
     #[test]
-    fn shared_catalog_requires_explicit_boolean_ota_opt_in() {
-        let entry = |version: &str| {
-            serde_json::json!({
-                "version": version, "publishedAt": "2026-09-27", "channel": "stable",
-                "notesUrl": "https://example.org/notes",
-                "payload": {"url": "https://example.org/payload.zip", "size": 1,
-                            "sha256": "a".repeat(64), "manifestSchema": 4},
-                "requirements": Requirements::default()
-            })
-        };
-        let mut value = serde_json::json!({
-            "schemaVersion": 1, "generatedAt": "2026-09-27", "installerDownloads": [],
-            "releases": [entry("3.14.0"), entry("3.13.0")]
-        });
-        let mut legacy: Catalog = serde_json::from_value(value.clone()).unwrap();
-        legacy.validate().unwrap();
-        assert_eq!(legacy.ota_releases().count(), 0);
-        assert!(serde_json::to_value(&legacy).unwrap()["releases"][0]
-            .get("ota")
-            .is_none());
-
-        value["releases"][0]["ota"] = serde_json::json!(true);
-        value["releases"][1]["ota"] = serde_json::json!(false);
-        let mut marked: Catalog = serde_json::from_value(value.clone()).unwrap();
-        marked.validate().unwrap();
-        assert_eq!(marked.releases.len(), 2); // Desktop still sees both.
-        assert_eq!(marked.ota_releases().count(), 1);
-        assert_eq!(marked.ota_releases().next().unwrap().version, "3.14.0");
-        let saved = serde_json::to_value(&marked).unwrap();
-        assert_eq!(saved["releases"][0]["ota"], true);
-        assert_eq!(
-            serde_json::from_value::<Catalog>(saved)
-                .unwrap()
-                .ota_releases()
-                .count(),
-            1
-        );
-
-        for invalid in [
-            serde_json::json!("true"),
-            serde_json::json!(1),
-            serde_json::Value::Null,
-        ] {
-            value["releases"][0]["ota"] = invalid;
-            assert!(serde_json::from_value::<Catalog>(value.clone()).is_err());
-        }
-    }
-
-    #[test]
     fn network_catalog_refresh_and_invalid_response_preserve_offline_copy() {
         let dir = tempfile::tempdir().unwrap();
         let cache = Cache {
@@ -560,11 +533,8 @@ mod tests {
             .build()
             .new_agent();
         let mut a = Catalog::empty();
-        a.generated_at = "A".into();
         a.releases.push(Release {
             version: "3.13.0".into(),
-            ota: false,
-            ota_metadata: None,
             published_at: "2026-09-27".into(),
             channel: "stable".into(),
             notes_url: "https://example.org/A".into(),
@@ -576,14 +546,15 @@ mod tests {
                 manifest_schema: 4,
             },
         });
-        let (url, worker) = server("200 OK", &serde_json::to_string(&a).unwrap());
+        let (url, worker) = server("200 OK", &public_catalog(&a));
         assert_eq!(
             cache
                 .state_with(|| fetch_catalog(&client, &url), true)
                 .unwrap()
                 .catalog
-                .generated_at,
-            "A"
+                .releases[0]
+                .version,
+            "3.13.0"
         );
         worker.join().unwrap();
         for (status, body) in [
@@ -595,14 +566,13 @@ mod tests {
             let state = cache
                 .state_with(|| fetch_catalog(&client, &url), true)
                 .unwrap();
-            assert_eq!(state.catalog.generated_at, "A");
+            assert_eq!(state.catalog.releases[0].version, "3.13.0");
             assert!(state.warning.is_some());
             worker.join().unwrap();
         }
         let offline = cache.state_with(|| Err(network("offline")), true).unwrap();
-        assert_eq!(offline.catalog.generated_at, "A");
+        assert_eq!(offline.catalog.releases[0].version, "3.13.0");
         assert!(offline.warning.is_some());
-        a.generated_at = "B".into();
         let selected = a.releases[0].clone();
         let mut next = selected.clone();
         next.version = "3.13.1".into();
@@ -613,11 +583,11 @@ mod tests {
         let reopened = Cache {
             root: dir.path().into(),
         };
-        let (url, worker) = server("200 OK", &serde_json::to_string(&a).unwrap());
+        let (url, worker) = server("200 OK", &public_catalog(&a));
         let refreshed = reopened
             .state_with(|| fetch_catalog(&client, &url), true)
             .unwrap();
-        assert_eq!(refreshed.catalog.generated_at, "B");
+        assert_eq!(refreshed.catalog.releases[0].version, "3.13.1");
         assert!(refreshed
             .catalog
             .releases
@@ -711,7 +681,7 @@ mod tests {
         .is_err());
     }
     #[test]
-    fn archive_identity_must_match_catalog_requirements_and_version() {
+    fn archive_identity_and_manifest_requirements_are_checked() {
         let requirements = Requirements::default();
         let mut payload=Payload {root:PathBuf::new(),manifest:serde_json::from_value(serde_json::json!({
             "schema":4,"product":"VoyahTune","releaseVersion":"3.13.0","buildRevision":"fixture",
@@ -719,8 +689,6 @@ mod tests {
         })).unwrap()};
         let release = Release {
             version: "3.13.0".into(),
-            ota: false,
-            ota_metadata: None,
             published_at: String::new(),
             channel: "stable".into(),
             notes_url: "https://example.org".into(),
@@ -738,10 +706,10 @@ mod tests {
             .requirements
             .as_mut()
             .unwrap()
-            .min_installer_version = "0.1.0".into();
+            .min_installer_version = "99.0.0".into();
         assert_eq!(
             verify_release(&payload, &release).unwrap_err().code,
-            "CATALOG_MISMATCH"
+            "INSTALLER_UPDATE_REQUIRED"
         );
         payload.manifest.requirements = Some(release.requirements.clone());
         payload.manifest.release_version = "3.13.1".into();
@@ -773,8 +741,6 @@ mod tests {
     fn future_release_remains_visible_and_semver_is_numeric() {
         let release = |version: &str| Release {
             version: version.into(),
-            ota: false,
-            ota_metadata: None,
             published_at: "2026-09-26".into(),
             channel: "stable".into(),
             notes_url: "https://example.org/notes".into(),
