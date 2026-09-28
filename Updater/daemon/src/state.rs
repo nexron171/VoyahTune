@@ -32,11 +32,64 @@ impl State {
     pub fn busy(&self) -> bool {
         matches!(
             self.phase.as_str(),
-            "checking" | "downloading" | "verifying" | "applying" | "reboot-pending" | "validating"
+            "checking"
+                | "downloading"
+                | "verifying"
+                | "preparing"
+                | "applying"
+                | "reboot-pending"
+                | "validating"
         )
     }
     pub fn repair(&self) -> bool {
         self.phase == "repair-required"
+    }
+    pub fn installation_started(&self) -> bool {
+        matches!(
+            self.phase.as_str(),
+            "applying" | "reboot-pending" | "validating" | "repair-required"
+        )
+    }
+    pub fn fail(&mut self, message: String, repair: bool) {
+        let retry_apply = !repair && self.phase == "preparing" && self.selected.is_some();
+        self.phase = if repair {
+            "repair-required"
+        } else if retry_apply {
+            "verified"
+        } else {
+            "failed"
+        }
+        .into();
+        self.error = Some(message);
+        self.step = if retry_apply {
+            "Устраните причину ошибки и повторите установку"
+        } else {
+            "Установите релиз через USB с компьютера"
+        }
+        .into();
+        self.notice = if repair { Some("error".into()) } else { None };
+        self.notice_opened = false;
+    }
+    pub fn recover_interrupted(&mut self, boot: &str) {
+        if self.phase == "applying" || (self.phase == "reboot-pending" && self.apply_boot == boot) {
+            self.fail(
+                "Установка была прервана; автоматическое продолжение отключено".into(),
+                true,
+            );
+        } else if self.phase == "preparing" {
+            self.fail(
+                "Предварительная проверка прервана. Можно повторить установку".into(),
+                false,
+            );
+        } else if matches!(
+            self.phase.as_str(),
+            "checking" | "downloading" | "verifying"
+        ) {
+            self.fail(
+                "Подготовка обновления прервана. Выполните проверку и загрузку повторно".into(),
+                false,
+            );
+        }
     }
     pub fn fresh(version: String, fingerprint: String) -> Self {
         Self {
@@ -101,6 +154,80 @@ pub fn due(s: &State, wall: u64, boot: &str, uptime: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn preparing() -> State {
+        let mut s = State::fresh("3.15.0".into(), "rom".into());
+        s.phase = "preparing".into();
+        s.same_version = true;
+        s.selected = Some(Release {
+            version: "3.15.0".into(),
+            published_at: String::new(),
+            channel: "stable".into(),
+            notes_url: String::new(),
+            payload: release_core::catalog::Archive {
+                url: "https://example.com/release.zip".into(),
+                size: 100,
+                sha256: "a".repeat(64),
+                manifest_schema: 4,
+            },
+            requirements: Default::default(),
+        });
+        s
+    }
+    #[test]
+    fn preflight_failure_keeps_download_for_retry_across_restart() {
+        let t = tempfile::tempdir().unwrap();
+        let mut s = preparing();
+        assert!(s.busy());
+        let repair = s.installation_started();
+        s.fail("Автомобиль не в P".into(), repair);
+        save(t.path(), "state.json", &s).unwrap();
+        let mut restored: State = read(&t.path().join("state.json")).unwrap();
+        restored.recover_interrupted("boot");
+        assert_eq!(restored.phase, "verified");
+        assert_eq!(restored.error.as_deref(), Some("Автомобиль не в P"));
+        assert!(!restored.busy() && !restored.repair());
+        assert_eq!(restored.selected.unwrap().payload.sha256, "a".repeat(64));
+        assert!(restored.same_version);
+        assert!(restored.notice.is_none());
+    }
+    #[test]
+    fn interrupted_preflight_is_retryable_but_applying_requires_repair() {
+        let t = tempfile::tempdir().unwrap();
+        for phase in ["preparing", "applying"] {
+            let mut s = preparing();
+            s.phase = phase.into();
+            save(t.path(), "state.json", &s).unwrap();
+            let mut restored: State = read(&t.path().join("state.json")).unwrap();
+            restored.recover_interrupted("next-boot");
+            assert_eq!(
+                restored.phase,
+                if phase == "preparing" {
+                    "verified"
+                } else {
+                    "repair-required"
+                }
+            );
+        }
+    }
+    #[test]
+    fn errors_after_apply_boundary_and_reboot_failure_require_repair() {
+        for phase in ["applying", "reboot-pending", "validating"] {
+            let mut s = preparing();
+            s.phase = phase.into();
+            let repair = s.installation_started();
+            s.fail("Ошибка записи или запуска".into(), repair);
+            assert!(s.repair());
+            assert_eq!(s.notice.as_deref(), Some("error"));
+        }
+        let mut pending = preparing();
+        pending.phase = "reboot-pending".into();
+        pending.apply_boot = "before".into();
+        let mut after = pending.clone();
+        after.recover_interrupted("after");
+        assert_eq!(after.phase, "reboot-pending");
+        pending.recover_interrupted("before");
+        assert!(pending.repair());
+    }
     #[test]
     fn daily_attempt_survives_restart_and_clock_rollback() {
         let mut s = State::fresh("3.14.0".into(), "rom".into());
