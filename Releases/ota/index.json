@@ -1,0 +1,10 @@
+{
+  "releases": [
+    {
+      "version": "3.15.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/payload_3.15.0.zip",
+      "size": 149372721,
+      "sha256": "a56e4b729e7fa6087e8783c57189facb347bc794a0580977d6c6bc6e844cf686"
+    }
+  ]
+}
