@@ -32,10 +32,21 @@ class ModeTests(InstallerTests):
       for parent in ['data/user/0','data/user_de/0']:
        p=self.device/parent/package/'settings-marker';p.parent.mkdir(parents=True,exist_ok=True);p.write_text('keep')
     self.read_state();self.state['settings']['voyahtune_user_test']='keep';self.write_state()
-    self.apply(self.plan(action));settings=self.read_state()['settings']
+    plan=self.plan(action);start=len(self.calls())
+    self.apply(plan);settings=self.read_state()['settings']
     if action=='remove':self.assertNotIn('voyahtune_install_mode',settings)
     else:
      self.assertEqual(settings['voyahtune_install_mode'],action)
+     # Observe the flag at the actual reboot boundary, not only after postflight.
+     self.assertEqual(self.state['modeAtReboot'][-1],action)
+     calls=self.calls()[start:]
+     write=next(i for i,c in enumerate(calls) if f'settings put global voyahtune_install_mode {action}' in (c['script'] or ''))
+     read=next(i for i,c in enumerate(calls) if i>write and 'settings get global voyahtune_install_mode' in (c['script'] or ''))
+     reboot=max(i for i,c in enumerate(calls) if c['args']==['reboot'])
+     self.assertLess(write,read);self.assertLess(read,reboot)
+     stop=next(i for i,c in enumerate(calls) if 'am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode' in (c['script'] or ''))
+     self.assertLess(stop,write)
+     self.assertTrue(all(i<write for i,c in enumerate(calls) if c['args'][0] in ['push','install']))
      if installed:self.assert_app_data(True)
      if action=='light':self.assert_light_clean()
      installed.append(tuple((self.device/p).read_bytes() for p in ['system/priv-app/Native/Native.apk','data/app/ru.big.town.restoremode/base.apk']))
@@ -71,10 +82,33 @@ class ModeTests(InstallerTests):
   self.assertFalse(any(c['args'][0] in ['install','reboot'] for c in self.calls()))
   self.assertFalse(any('setprop ctl.start voyahtune_load' in (c['script'] or '') for c in self.calls()))
  def test_failed_mode_write_cannot_report_success(self):
-  plan=self.plan('light');self.read_state();self.state['ignoreModeWrite']=True;self.write_state()
-  result=self.apply(plan,okay=False);self.assertIn('MODE_WRITE_FAILED',result.stdout)
-  self.assertNotIn('voyahtune_install_mode',self.read_state()['settings'])
-  self.assertFalse(any(c['args']==['reboot'] for c in self.calls()))
+  for action in ['full','light']:
+   with self.subTest(action=action):
+    self.read_state();previous='light' if action=='full' else 'full'
+    self.state['settings']['voyahtune_install_mode']=previous
+    self.state['ignoreModeWrite']=True;self.write_state()
+    plan=self.plan(action);start=len(self.calls())
+    result=self.apply(plan,okay=False)
+    self.assertNotEqual(result.returncode,0);self.assertIn('MODE_WRITE_FAILED',result.stdout)
+    self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],previous)
+    self.assertFalse(any(c['args']==['reboot'] for c in self.calls()[start:]))
+    self.assertNotIn('operation-completed',result.stdout)
+ def test_mode_command_and_readback_errors_block_final_reboot(self):
+  for action in ['full','light']:
+   for failure in ['failModeWrite','failModeReadAfterWrite','modeReadbackAfterWrite']:
+    with self.subTest(action=action,failure=failure):
+     self.read_state()
+     for key in ['failModeWrite','failModeReadAfterWrite','modeReadbackAfterWrite','modeWriteAttempted']:
+      self.state.pop(key,None)
+     self.state['settings'].pop('voyahtune_install_mode',None)
+     self.state[failure]='invalid' if failure=='modeReadbackAfterWrite' else True
+     self.write_state();plan=self.plan(action);start=len(self.calls())
+     result=self.apply(plan,okay=False)
+     self.assertNotEqual(result.returncode,0)
+     self.assertNotIn('operation-completed',result.stdout)
+     self.assertFalse(any(c['args']==['reboot'] for c in self.calls()[start:]))
+     self.assertTrue(self.read_state()['modeWriteAttempted'])
+     if failure=='modeReadbackAfterWrite':self.assertIn('MODE_WRITE_FAILED',result.stdout)
  def test_failure_before_mode_commit_keeps_previous_mode(self):
   self.state['settings']['voyahtune_install_mode']='full';self.state['installError']='INSTALL_FAILED_INSUFFICIENT_STORAGE';self.write_state()
   result=self.apply(self.plan('light'),okay=False);self.assertNotEqual(result.returncode,0)
