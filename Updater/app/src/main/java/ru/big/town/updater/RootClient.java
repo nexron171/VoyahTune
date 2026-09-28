@@ -13,8 +13,9 @@ final class RootClient {
 
     JSONObject call(JSONObject request) throws Exception {
         try (LocalSocket socket = new LocalSocket()) {
-            socket.setSoTimeout(5000);
             socket.connect(new LocalSocketAddress("voyahtune_updater", LocalSocketAddress.Namespace.RESERVED));
+            // connect() creates the underlying Android socket before options can be set.
+            socket.setSoTimeout(5000);
             if (socket.getPeerCredentials().getUid() != 0) {
                 throw new IOException("Ответ получен не от root-службы");
             }
