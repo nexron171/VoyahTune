@@ -1,7 +1,7 @@
 # Контракт установщика и payload
 
 Версия GUI/движка определяется `Installer/Cargo.toml` (текущая версия —
-1.2.0). Версия VoyahTune внутри payload независима от неё. Каталог имеет schemaVersion 1,
+1.2.0). Версия VoyahTune внутри payload независима от неё. Публичный каталог имеет простой формат `releases[]`,
 новый payload — schema 4, recipe — schema 3 / engine `qinggan-v3`.
 
 ## Совместимость
@@ -19,57 +19,17 @@
 
 ## Каталог
 
-Отслеживаемый файл: [index.json](../Installer/releases/index.json). Публичная ветка
-GitHub — `nexron171/VoyahTune`, `master-od`; remote проекта называется `github.com`,
-а не `origin`. URL чтения:
-`https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Installer/releases/index.json`.
-В каталог добавляются только опубликованные и проверенные архивы. Недоступность URL
-не препятствует локальному импорту ZIP или использованию скачанных релизов.
-Порядок сборки, загрузки asset и публикации index описан в
-[инструкции выпуска](releasing.md).
+Новый установщик и root-служба читают [Releases/ota/index.json](../Releases/ota/index.json):
+`https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json`.
+Формат — объект с массивом `releases`; у записи только `version`, `url`, `size`, `sha256`.
+[Описание полей и проверки](ota-release-format.md).
 
-Поле `ota` в записи `releases[]` — необязательный JSON boolean. Только `"ota": true`
-допускает релиз к выбору службой OTA. Отсутствующее поле или `false` означает, что релиз
-доступен только установщику. GUI видит все записи независимо от этого признака.
-Маркер не заменяет проверку подлинности и совместимости релиза перед установкой.
-OTA также требует [подписанное поле `otaMetadata`](ota-release-format.md).
-В примере ниже оно опущено: без него запись не пригодна для применения OTA.
-
-Новый читатель поддерживает каталог schemaVersion 1 как с `ota`, так и без него.
-Прежние выпущенные установщики со строгим `deny_unknown_fields` отвергают новое поле:
-до публикации первого маркера необходимо выпустить установщик с этим читателем.
-Уже скачанные архивы у прежнего GUI сохраняются, но новый каталог он прочитать не сможет.
-
-Условный пример будущей записи (это не опубликованный релиз; SHA замените хешем ZIP):
-
-```json
-{
-  "schemaVersion": 1,
-  "generatedAt": "2026-09-27T00:00:00Z",
-  "installerDownloads": [],
-  "releases": [{
-    "version": "3.15.0",
-    "ota": true,
-    "publishedAt": "2026-09-27T00:00:00Z",
-    "channel": "stable",
-    "notesUrl": "https://github.com/nexron171/VoyahTune/releases/tag/v3.15.0",
-    "payload": {
-      "url": "https://github.com/nexron171/VoyahTune/releases/download/v3.15.0/payload_3.15.0.zip",
-      "size": 123456,
-      "sha256": "REPLACE_WITH_64_HEX_CHARACTERS",
-      "manifestSchema": 4
-    },
-    "requirements": {
-      "minInstallerVersion": "1.2.0",
-      "requiredCapabilities": ["qinggan-v3", "single-package-v1", "files-v1", "ota-bootstrap-v1"]
-    }
-  }]
-}
-```
-
-`installerDownloads` содержит объекты `version`, `platform` (`macos`, `windows`,
-`linux`) и HTTPS `url`. Несовместимые новые версии остаются видны. Сортировка — SemVer.
-Невалидный/недоступный сетевой каталог не заменяет последний сохранённый.
+Старый `Installer/releases/index.json` сохраняет прежний формат и прежние релизы.
+Новый клиент не обращается к нему и использует отдельный файл локального кэша.
+Невалидный/недоступный каталог не заменяет последнюю сохранённую копию.
+Сортировка — SemVer. Совместимость проверяется после скачивания по манифесту архива;
+в публичном каталоге нет requirements, installerDownloads или ссылок на описание выпуска.
+Локальный импорт ZIP и ранее скачанные релизы доступны без сети.
 
 ## Payload и файловые операции
 

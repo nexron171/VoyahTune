@@ -188,32 +188,9 @@ async fn release_catalog(app: tauri::AppHandle, refresh: bool) -> Result<Value> 
                 .unwrap()
                 .push(json!({"version":embedded.manifest.release_version,"path":embedded.root}));
         }
-        for (entry, release) in value["catalog"]["releases"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .zip(state.catalog.releases.iter())
-        {
-            let error = installer_core::payload::validate_schema(release.payload.manifest_schema)
-                .and_then(|_| release.requirements.validate())
-                .err();
-            let platform = if cfg!(target_os = "macos") {
-                "macos"
-            } else if cfg!(windows) {
-                "windows"
-            } else {
-                "linux"
-            };
-            entry["installerUpdates"] = if release.payload.manifest_schema
-                < installer_core::payload::MANIFEST_SCHEMA
-            {
-                json!([])
-            } else {
-                json!(state.catalog.installer_updates(&release.requirements, platform))
-            };
-            entry["compatible"] = json!(error.is_none());
-            entry["incompatibility"] = json!(error.map(|e| e.message));
-        }
+        // The public catalog only describes the archive. Compatibility is checked
+        // from its verified manifest after download, before selecting/installing it.
+
         Ok(value)
     })
     .await

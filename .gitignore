@@ -85,8 +85,8 @@ CONTEXT.md
 # Local plans, audits, investigations and checklists.
 /Plans/
 
-# Релизы — сборочный вывод, в репозитории не хранятся.
-# Источник комплекта (инжект-скрипты, установщики, boot-обвязка, tools) — в Packaging/.
+# Сборочный вывод игнорируется; публичный каталог OTA хранится в Git.
+# Источник релиза (инжект-скрипты, установщики, boot-обвязка, tools) — в Packaging/.
 # Собрать: ./make_release.sh <версия>
 /Releases/*
 !/Releases/ota/

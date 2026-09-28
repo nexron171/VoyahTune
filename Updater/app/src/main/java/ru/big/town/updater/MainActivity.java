@@ -116,7 +116,6 @@ public final class MainActivity extends Activity {
             if (selected != null) {
                 JSONObject archive = selected.getJSONObject("payload");
                 details += "\nДоступно: " + selected.getString("version") + " · " + (archive.getLong("size") / (1024 * 1024)) + " МБ";
-                details += "\nОписание: " + selected.optString("notesUrl");
             }
             releaseInfo.setText(details);
             String stage = state.optString("step");
