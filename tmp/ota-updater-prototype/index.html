@@ -75,7 +75,7 @@ function render(){
  text('service-text',phase==='disconnected'?'Нет связи со службой':'Служба доступна');$('service').classList.toggle('offline',phase==='disconnected');
  $('app').classList.toggle('error',phase==='error'||phase==='disconnected');
  document.querySelectorAll('[data-step]').forEach(el=>{const n=Number(el.dataset.step);el.classList.toggle('active',n===step&&phase!=='success'&&phase!=='latest');el.classList.toggle('done',n<step||phase==='success'||phase==='latest');const marker=el.querySelector('.step-num'),v=n<step||phase==='success'||phase==='latest'?'✓':String(n+1);if(marker.textContent!==v)marker.textContent=v; if(n===step){if(el.getAttribute('aria-current')!=='step')el.setAttribute('aria-current','step');}else if(el.hasAttribute('aria-current'))el.removeAttribute('aria-current');});
- const failed=phase==='error'||phase==='disconnected', downloading=phase==='downloading', verifying=phase==='verifying', meter=downloading||verifying;
+ const failed=phase==='error'||phase==='disconnected', downloading=phase==='downloading', verifying=phase==='verifying', preparing=phase==='preparing', indeterminate=verifying||preparing, meter=downloading||indeterminate;
  hidden('meter',!meter);hidden('error-detail',!failed);hidden('caption',meter||failed);
  text('error-detail',phase==='error'?'RestoreMode: PackageManager вернул ошибку.\nINSTALL_FAILED_INSUFFICIENT_STORAGE\nНедостаточно места для установки APK.':'Не удалось подключиться к root-службе.\nLocalSocket: connection refused.\nДанные о ходе установки недоступны.');
  text('caption',({available:'',ready:'После подтверждения головное устройство перезагрузится.',preparing:'Проверяем автомобиль, свободное место и файлы релиза.',installing:'Текущий шаг: установка RestoreMode.',reboot:'Результат будет известен после проверки новой загрузки.',validating:'Ожидаем стабильную работу служб без сбоев.',success:'Проверка запуска завершена успешно.',latest:'Следующая автоматическая проверка — не раньше чем через 24 часа.',checking:'Обращаемся к выбранному каталогу релизов.',verifying:'Проверяем размер архива и SHA-256.'})[phase]||'');
@@ -85,10 +85,10 @@ function render(){
  text('footer-note',failed?'Для восстановления потребуется USB и компьютер.':running?'Обновление выполняется автономно. Не отключайте питание.':phase==='success'?'Установка и проверка запуска завершены.':phase==='downloading'?'Установка будет доступна после проверки архива.':'Проверка новых версий — автоматически, не чаще одного раза в 24 часа.');
  $('footer-note').classList.toggle('footer-note-success',phase==='success');
  hidden('percent',!downloading);hidden('amount',!downloading);
- $('progress').classList.toggle('indeterminate',verifying);
- text('meter-label',verifying?'Проверка целостности архива':'Загрузка архива');
- text('meter-note',verifying?'Проверяем размер и SHA-256':'Можно пользоваться VoyahTune');
- const progressLabel=verifying?'Проверка архива':'Прогресс скачивания';
+ $('progress').classList.toggle('indeterminate',indeterminate);
+ text('meter-label',preparing?'Подготовка к установке':verifying?'Проверка целостности архива':'Загрузка архива');
+ text('meter-note',preparing?'Проверяем условия и распаковываем релиз':verifying?'Проверяем размер и SHA-256':'Можно пользоваться VoyahTune');
+ const progressLabel=preparing?'Подготовка к установке':verifying?'Проверка архива':'Прогресс скачивания';
  if($('progress').getAttribute('aria-label')!==progressLabel)$('progress').setAttribute('aria-label',progressLabel);
  if(!downloading&&$('progress').hasAttribute('aria-valuenow'))$('progress').removeAttribute('aria-valuenow');
  if(downloading){text('percent',percent+'%');text('amount',Math.round(145*percent/100)+' из 145 МБ');const width=percent+'%';if($('fill').style.width!==width)$('fill').style.width=width;if($('progress').getAttribute('aria-valuenow')!==String(percent))$('progress').setAttribute('aria-valuenow',String(percent));}
