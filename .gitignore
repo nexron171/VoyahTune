@@ -88,7 +88,10 @@ CONTEXT.md
 # Релизы — сборочный вывод, в репозитории не хранятся.
 # Источник комплекта (инжект-скрипты, установщики, boot-обвязка, tools) — в Packaging/.
 # Собрать: ./make_release.sh <версия>
-/Releases/
+/Releases/*
+!/Releases/ota/
+/Releases/ota/*
+!/Releases/ota/index.json
 
 # Compiled installers and validators must never be committed.
 /Packaging/installer-tools/*

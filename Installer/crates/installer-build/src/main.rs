@@ -26,7 +26,6 @@ enum CommandKind {
     },
     VerifyOta {
         entry: PathBuf,
-        key: PathBuf,
         payload: PathBuf,
     },
     VerifyCatalog {
@@ -56,11 +55,11 @@ fn main() {
     let result = match Cli::parse().command {
         CommandKind::VerifyOta {
             entry,
-            key,
             payload: directory,
         } => (|| -> Result<()> {
-            let entry = serde_json::from_slice(&fs::read(entry)?)?;
-            let claims = installer_core::ota::verify(&entry, &fs::read(key)?)?;
+            let entry: installer_core::catalog::UpdateRelease =
+                serde_json::from_slice(&fs::read(entry)?)?;
+            let claims = installer_core::ota::verify(&entry.into_release())?;
             installer_core::ota::verify_payload(&Payload::open(&directory)?, &claims)?;
             println!("{}", serde_json::to_string(&claims)?);
             Ok(())
@@ -85,7 +84,7 @@ fn main() {
             Ok(())
         })(),
         CommandKind::VerifyCatalog { path } => (|| -> Result<()> {
-            let mut catalog: installer_core::catalog::Catalog =
+            let catalog: installer_core::catalog::UpdateCatalog =
                 serde_json::from_slice(&fs::read(path)?)?;
             catalog.validate()?;
             println!("{}", serde_json::to_string_pretty(&catalog)?);
@@ -321,7 +320,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
                 "Updater/app/build/outputs/apk/release/app-release.apk".into()
             }
             "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json".into(),
-            "voyahtune.updater.rc" | "voyahtune-ota-key.der" => format!("Packaging/system/{name}"),
+            "voyahtune.updater.rc" => format!("Packaging/system/{name}"),
             "whitelist.xml" => {
                 "Packaging/system/privapp-permissions-ru.big.town.anative.xml".into()
             }

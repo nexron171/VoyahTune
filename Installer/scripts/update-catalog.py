@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Verify a published immutable payload before atomically adding it to the catalog."""
 import argparse, hashlib, json, subprocess, tempfile, urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 ROOT=Path(__file__).resolve().parents[2]
@@ -12,7 +11,7 @@ class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
   return super().redirect_request(req,fp,code,msg,headers,newurl)
 
 def verify_remote(entry):
- asset=entry['payload'];url=asset['url']
+ asset=entry;url=asset['url']
  if urlparse(url).scheme!='https':raise ValueError('Asset must use HTTPS')
  digest=hashlib.sha256();size=0
  with urllib.request.build_opener(HTTPSRedirect()).open(url,timeout=30) as response:
@@ -24,27 +23,16 @@ def verify_remote(entry):
   raise ValueError('Published asset differs from the locally verified payload')
 
 def merge(index,entry):
- if 'ota' in entry and type(entry['ota']) is not bool:
-  raise ValueError('ota must be a JSON boolean')
+ if set(entry) != {'version','url','size','sha256'}:
+  raise ValueError('Release must contain only version, url, size and sha256')
  for old in index['releases']:
   if old['version']==entry['version']:
-   if old['payload']!=entry['payload'] or old['requirements']!=entry['requirements']:
+   if any(old[k]!=entry[k] for k in ('size','sha256')):
     raise ValueError('Published version is immutable; choose a new release version')
-   if 'otaMetadata' in entry:
-    if old.get('otaMetadata') not in (None, entry['otaMetadata']):
-     raise ValueError('Signed OTA metadata are immutable')
-    if old.get('otaMetadata') is None:
-     old['otaMetadata']=entry['otaMetadata'];old['ota']=entry.get('ota',False)
-     index['generatedAt']=datetime.now(timezone.utc).isoformat();return True
-   # Availability may change without replacing the immutable archive. An entry
-   # regenerated without the optional marker must not silently revoke OTA.
-   if 'ota' in entry and old.get('ota',False)!=entry['ota']:
-    old['ota']=entry['ota']
-    index['generatedAt']=datetime.now(timezone.utc).isoformat()
-    return True
+   if old['url']!=entry['url']:
+    old['url']=entry['url'];return True
    return False
  index['releases'].append(entry)
- index['generatedAt']=datetime.now(timezone.utc).isoformat()
  return True
 
 def update(index_path,entry_path,builder,verify):
@@ -65,7 +53,7 @@ def update(index_path,entry_path,builder,verify):
 
 def main():
  p=argparse.ArgumentParser(description=__doc__)
- p.add_argument('--index',type=Path,default=ROOT/'Installer/releases/index.json')
+ p.add_argument('--index',type=Path,default=ROOT/'Releases/ota/index.json')
  p.add_argument('--entry',type=Path,help='Generated Releases/dist/payload_VERSION.json')
  p.add_argument('--builder',type=Path,default=ROOT/'Installer/target/release/installer-build')
  p.add_argument('--verify-remote',action='store_true')

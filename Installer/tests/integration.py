@@ -63,7 +63,7 @@ class InstallerTests(unittest.TestCase):
   (diagnostics/'state.json').write_text('{"phase":"repair-required"}')
   (self.device/'data/local/bin/voyahtune-update.block').write_text('interrupted')
   self.apply(self.plan());self.assert_app_data(True)
-  for path in ['data/local/bin/voyahtune-updater','system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk','system/etc/init/voyahtune.updater.rc','system/etc/voyahtune-ota-key.der']:
+  for path in ['data/local/bin/voyahtune-updater','system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk','system/etc/init/voyahtune.updater.rc']:
    self.assertTrue((self.device/path).is_file(),path)
   self.assertFalse(lock.exists());self.assertFalse((self.device/'data/local/bin/voyahtune-update.block').exists())
   logs=list((self.base/'logs').rglob('ota-diagnostics/updater.log'))

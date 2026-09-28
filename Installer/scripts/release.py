@@ -84,15 +84,11 @@ def zip_payload(folder,output):
 
 
 def payload_entry(folder,archive):
-    from datetime import datetime,timezone
     manifest=json.loads((folder/'manifest.json').read_text())
     version=manifest['releaseVersion']
-    return {'version':version,'publishedAt':datetime.now(timezone.utc).isoformat(),
-            'channel':'prerelease' if '-' in version.split('+')[0] else 'stable',
-            'notesUrl':f'https://github.com/nexron171/VoyahTune/releases/tag/v{version}',
-            'payload':{'url':f'https://github.com/nexron171/VoyahTune/releases/download/v{version}/{archive.name}',
-                       'size':archive.stat().st_size,'sha256':sha(archive),'manifestSchema':manifest['schema']},
-            'requirements':manifest['requirements']}
+    return {'version':version,
+            'url':f'https://github.com/nexron171/VoyahTune/releases/download/v{version}/{archive.name}',
+            'size':archive.stat().st_size,'sha256':sha(archive)}
 
 
 def main():
