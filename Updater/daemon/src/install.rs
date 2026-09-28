@@ -26,19 +26,88 @@ fn error(e: impl ToString) -> io::Error {
 fn root() -> &'static Path {
     Path::new(crate::ROOT)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use release_core::{
+        payload::Artifact,
+        recipe::{CopyFile, Phase},
+    };
+
+    fn compatibility_fixture(root: &Path) -> Payload {
+        let root = root.canonicalize().unwrap();
+        let mut p = Payload {
+            root: root.clone(),
+            manifest: serde_json::from_value(serde_json::json!({
+                "schema": 4, "product": "VoyahTune", "releaseVersion": "3.15.0",
+                "buildRevision": "test", "artifacts": [],
+                "recipe": {"schema": 3, "engine": "qinggan-v3", "files": [],
+                    "packages": [], "removeFiles": [], "removeDirectories": [],
+                    "removePrefixes": [], "removePackages": []}
+            }))
+            .unwrap(),
+        };
+        for name in STABLE.iter().copied().chain(["voyahtune.load.rc"]) {
+            let installed = root.join(name);
+            let archived = root.join(format!("archive-{name}"));
+            fs::write(&installed, b"installed").unwrap();
+            let bytes: &[u8] = if name == "voyahtune.load.rc" {
+                b"installed"
+            } else {
+                b"different"
+            };
+            fs::write(&archived, bytes).unwrap();
+            p.manifest.artifacts.push(Artifact {
+                name: name.into(),
+                path: archived.file_name().unwrap().to_str().unwrap().into(),
+                sha256: payload::sha256(&archived).unwrap(),
+                size: bytes.len() as u64,
+            });
+            p.manifest.recipe.files.push(CopyFile {
+                artifact: name.into(),
+                destination: installed.to_str().unwrap().into(),
+                mode: 0o644,
+                phase: Phase::Files,
+            });
+        }
+        p
+    }
+
+    #[test]
+    fn different_updater_archive_does_not_block_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = compatibility_fixture(dir.path());
+        compatible(&p).unwrap();
+        for name in STABLE {
+            assert_eq!(fs::read(p.root.join(name)).unwrap(), b"installed");
+        }
+    }
+
+    #[test]
+    fn changed_loader_init_still_requires_usb() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = compatibility_fixture(dir.path());
+        fs::write(p.root.join("voyahtune.load.rc"), b"different init contract").unwrap();
+        assert!(compatible(&p)
+            .unwrap_err()
+            .to_string()
+            .contains("voyahtune.load.rc требует установки через USB"));
+    }
+}
+
 pub fn compatible(p: &Payload) -> io::Result<()> {
     for f in &p.manifest.recipe.files {
-        if STABLE.contains(&f.artifact.as_str()) || f.artifact == "voyahtune.load.rc" {
-            // Updating the updater or the init contract requires USB in this first OTA line.
-            if f.artifact != "voyahtune-ota-bootstrap.json"
-                && payload::sha256(Path::new(&f.destination)).map_err(error)?
-                    != p.artifact(&f.artifact).map_err(error)?.sha256
-            {
-                return Err(invalid(&format!(
-                    "{} требует установки через USB",
-                    f.artifact
-                )));
-            }
+        // STABLE files are never installed by OTA, so their archive bytes may differ.
+        // The loader init contract is applied and still requires an exact match.
+        if f.artifact == "voyahtune.load.rc"
+            && payload::sha256(Path::new(&f.destination)).map_err(error)?
+                != p.artifact(&f.artifact).map_err(error)?.sha256
+        {
+            return Err(invalid(&format!(
+                "{} требует установки через USB",
+                f.artifact
+            )));
         }
         device::no_links(Path::new(&f.destination))?;
     }
