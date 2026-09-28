@@ -11,6 +11,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.View;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -53,7 +54,9 @@ public final class MainActivity extends Activity {
         int padding = dp(28);
         content.setPadding(padding, padding, padding, padding);
         scroll.addView(content);
+        applyWindowInsets(scroll);
         setContentView(scroll);
+        scroll.requestApplyInsets();
         text(content, "Обновления VoyahTune", 28);
         status = text(content, "Подключение к службе…", 19);
         refresh = button(content, "Обновить состояние", v -> refresh());
@@ -87,6 +90,22 @@ public final class MainActivity extends Activity {
         logs.setTextIsSelectable(true);
         button(content, "Закрыть", v -> finish());
         refresh();
+    }
+
+    private void applyWindowInsets(View root) {
+        // Qinggan's dock overlays the window without reporting an inset.
+        // Match the spacing used by the RestoreMode settings screen.
+        final int nativeDock = dp(145);
+        int statusBarId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        final int statusBarHeight = statusBarId > 0
+                ? getResources().getDimensionPixelSize(statusBarId) : 0;
+        root.setPadding(nativeDock, statusBarHeight, 0, 0);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+            int top = bars.top > 0 ? bars.top : statusBarHeight;
+            view.setPadding(nativeDock + bars.left, top, bars.right, bars.bottom);
+            return insets;
+        });
     }
 
     @Override protected void onNewIntent(Intent intent) {
