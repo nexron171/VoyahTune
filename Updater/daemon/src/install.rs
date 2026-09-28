@@ -94,6 +94,50 @@ mod tests {
             .to_string()
             .contains("voyahtune.load.rc требует установки через USB"));
     }
+
+    #[test]
+    fn keyboard_not_started_is_not_an_injection_failure() {
+        for name in ["keyboard-en", "keyboard-ru"] {
+            check_hook_state(name, "unknown:0", true, &[]).unwrap();
+            assert!(check_hook_state(name, "unknown:0", true, &[42]).is_err());
+            assert!(check_hook_state(name, "unknown:42", true, &[]).is_err());
+            for state in ["failed:0", "injecting:0", "active:42"] {
+                assert!(check_hook_state(name, state, true, &[]).is_err());
+            }
+        }
+        assert!(check_hook_state("apollo-tech", "unknown:0", true, &[]).is_err());
+        assert!(check_hook_state("vd-bypass", "unknown:0", false, &[]).is_err());
+    }
+
+    #[test]
+    fn live_hook_requires_active_matching_pid_or_optional_disabled() {
+        check_hook_state("vd-bypass", "active:42", false, &[42]).unwrap();
+        check_hook_state("keyboard-ru", "disabled:42", true, &[42]).unwrap();
+        check_hook_state("vd-bypass", "waiting:0", false, &[]).unwrap();
+        for state in ["active:41", "waiting:0", "failed:42", "disabled:42"] {
+            assert!(check_hook_state("vd-bypass", state, false, &[42]).is_err());
+        }
+    }
+
+    #[test]
+    fn missing_native_data_is_reported_without_recreating_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let ce = dir.path().join("user/0").join(payload::NATIVE);
+        let de = dir.path().join("user_de/0").join(payload::NATIVE);
+        assert!(check_native_data(dir.path())
+            .unwrap_err()
+            .to_string()
+            .contains("user/0"));
+        assert!(!ce.exists());
+        fs::create_dir_all(&ce).unwrap();
+        assert!(check_native_data(dir.path())
+            .unwrap_err()
+            .to_string()
+            .contains("user_de/0"));
+        assert!(!de.exists());
+        fs::create_dir_all(de).unwrap();
+        check_native_data(dir.path()).unwrap();
+    }
 }
 
 pub fn compatible(p: &Payload) -> io::Result<()> {
@@ -385,6 +429,39 @@ fn target_pids(target: &str) -> io::Result<Vec<u32>> {
     }
     Ok(pids)
 }
+fn check_hook_state(name: &str, value: &str, optional: bool, live: &[u32]) -> io::Result<()> {
+    let (state, pid) = value
+        .split_once(':')
+        .ok_or_else(|| invalid("Некорректный статус hook"))?;
+    let pid = pid.parse::<u32>().map_err(error)?;
+    match state {
+        "active" if pid != 0 && live.contains(&pid) => Ok(()),
+        "disabled" if optional => Ok(()),
+        "waiting" if pid == 0 && live.is_empty() => Ok(()),
+        // load.bin reads the keyboard setting only on qgime's first process attach.
+        // Until then both keyboard lanes report unknown:0; this is not an injection failure.
+        "unknown"
+            if matches!(name, "keyboard-en" | "keyboard-ru") && pid == 0 && live.is_empty() =>
+        {
+            Ok(())
+        }
+        _ => Err(invalid(&format!("Hook {name}: {state}, PID {pid}"))),
+    }
+}
+
+fn check_native_data(data: &Path) -> io::Result<()> {
+    for directory in ["user/0", "user_de/0"] {
+        let path = data.join(directory).join(payload::NATIVE);
+        if !path.is_dir() {
+            return Err(invalid(&format!(
+                "Нет каталога данных Native: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn hook_health() -> io::Result<String> {
     let data = fs::read_to_string("/data/local/tmp/voyahtune-hook-status.v1")?;
     if !data.starts_with("v=1;loader=running;pid=") {
@@ -417,16 +494,8 @@ fn hook_health() -> io::Result<String> {
             .iter()
             .find_map(|s| s.strip_prefix(&prefix))
             .ok_or_else(|| invalid(&format!("Нет статуса hook {name}")))?;
-        let (state, pid) = value
-            .split_once(':')
-            .ok_or_else(|| invalid("Некорректный статус hook"))?;
         let live = target_pids(target)?;
-        match state {
-            "active" if live.contains(&pid.parse::<u32>().map_err(error)?) => {}
-            "disabled" if optional => {}
-            "waiting" if live.is_empty() => {}
-            _ => return Err(invalid(&format!("Hook {name}: {state}, PID {pid}"))),
-        }
+        check_hook_state(name, value, optional, &live)?;
     }
     // These mandatory agents publish identity markers outside the UI status contract.
     for (target, marker) in [
@@ -459,18 +528,20 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
         }
         thread::sleep(Duration::from_secs(3));
     }
-    command(
-        "/system/bin/cmd",
-        &[
-            "package",
-            "install-existing",
-            "--user",
-            "0",
-            "--wait",
-            payload::NATIVE,
-        ],
-        60,
-    )?;
+    // apply() has already installed both APKs for user 0. Postboot only observes
+    // registration/data; repeating install-existing --wait can hang on this OEM ROM.
+    let packages = command("/system/bin/pm", &["list", "packages", "--user", "0"], 30)?;
+    for package in [payload::NATIVE, payload::RESTORE] {
+        if !packages
+            .lines()
+            .any(|line| line.trim() == format!("package:{package}"))
+        {
+            return Err(invalid(&format!(
+                "APK {package} не установлен для пользователя 0"
+            )));
+        }
+    }
+    check_native_data(Path::new("/data"))?;
     command(
         "/system/bin/am",
         &[
@@ -505,13 +576,18 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(180);
     let mut last = "Службы не готовы".to_owned();
     let mut previous_pids = None;
+    let mut previous_hooks = None;
     while Instant::now() < deadline {
         let result = (|| -> io::Result<String> {
             let native = native_status(false)?;
             if native.contains("error=") || !native.contains("otaReady=true") {
                 return Err(invalid(&native));
             }
-            hook_health()?;
+            let hooks = hook_health()?;
+            if previous_hooks.as_ref() != Some(&hooks) {
+                crate::log(root(), &format!("postboot_hooks {}", hooks.trim()))?;
+                previous_hooks = Some(hooks);
+            }
             let native_pid = command("/system/bin/pidof", &[payload::NATIVE], 10)?;
             let restore_pid = command("/system/bin/pidof", &[payload::RESTORE], 10)?;
             Ok(format!("{native_pid}/{restore_pid}"))
@@ -563,7 +639,11 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
                 }
             }
             Err(e) => {
-                last = e.to_string();
+                let message = e.to_string();
+                if last != message {
+                    crate::log(root(), &format!("postboot_wait {message}"))?;
+                }
+                last = message;
                 ready_since = None;
             }
         }
