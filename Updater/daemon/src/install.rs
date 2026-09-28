@@ -286,7 +286,19 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     let _lock = OperationLock::acquire()?;
     let (p, claims) = workflow::verified(shared)?;
     workflow::phase(shared, "preparing", "Проверка условий установки")?;
+    workflow::update(shared, |s| {
+        s.completed_steps = 0;
+        s.total_steps = 8;
+    })?;
     preflight(&p)?;
+    let dns_choice = shared
+        .lock()
+        .unwrap()
+        .config
+        .as_ref()
+        .map_err(|e| invalid(e))?
+        .dns_enabled;
+    let dns_action = crate::dns::prepare(&p, dns_choice)?;
     device::wake(true)?;
     let fresh = native_status(true)?;
     if fresh.contains("error=")
@@ -298,6 +310,7 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             "Состояние автомобиля изменилось перед установкой: {fresh}"
         )));
     }
+    workflow::update(shared, |s| s.completed_steps = 1)?;
     // Persist the non-retryable boundary before blocking app launches or changing release files.
     workflow::phase(shared, "applying", "Блокировка запуска приложений")?;
     let mut block = fs::OpenOptions::new()
@@ -334,6 +347,7 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
         &["-f", "/data/local/bin/frida-inject"],
         10,
     );
+    workflow::update(shared, |s| s.completed_steps = 2)?;
     for f in &p.manifest.recipe.files {
         if STABLE.contains(&f.artifact.as_str()) {
             continue;
@@ -345,6 +359,8 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             f.mode,
         )?;
     }
+    workflow::update(shared, |s| s.completed_steps = 3)?;
+    workflow::phase(shared, "applying", "Права доступа и очистка старых файлов")?;
     for dir in &p.manifest.recipe.directories {
         device::no_links(Path::new(&dir.path))?;
         fs::create_dir_all(&dir.path)?;
@@ -382,10 +398,22 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             Err(e) => return Err(e),
         }
     }
-    workflow::phase(shared, "applying", "Установка APK с сохранением данных")?;
+    workflow::update(shared, |s| s.completed_steps = 4)?;
     let restore = Path::new("/data/local/tmp/voyahtune-restore-ota.apk");
     device::atomic_copy(&p.file("restore_mode.apk").map_err(error)?, restore, 0o644)?;
-    for apk in [payload::NATIVE_PATH, restore.to_str().unwrap()] {
+    for (index, apk) in [payload::NATIVE_PATH, restore.to_str().unwrap()]
+        .iter()
+        .enumerate()
+    {
+        workflow::phase(
+            shared,
+            "applying",
+            if index == 0 {
+                "Установка Native"
+            } else {
+                "Установка RestoreMode"
+            },
+        )?;
         let output = command(
             "/system/bin/pm",
             &["install", "-r", "--user", "0", apk],
@@ -394,8 +422,15 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
         if !output.lines().any(|s| s.trim() == "Success") {
             return Err(invalid(&format!("PackageManager: {output}")));
         }
+        workflow::update(shared, |s| s.completed_steps = 5 + index as u32)?;
     }
     fs::remove_file(restore)?;
+    workflow::phase(shared, "applying", crate::dns::title(dns_action))?;
+    crate::dns::apply(&p, dns_action)?;
+    workflow::update(shared, |s| s.completed_steps = 7)?;
+    workflow::phase(shared, "applying", "Синхронизация перед перезагрузкой")?;
+    command("/system/bin/sync", &[], 30)?;
+    workflow::update(shared, |s| s.completed_steps = 8)?;
     // Persist reboot intent only after every file and APK operation succeeded.
     workflow::update(shared, |s| {
         s.phase = "reboot-pending".into();

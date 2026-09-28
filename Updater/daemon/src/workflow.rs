@@ -118,6 +118,8 @@ pub fn queue(shared: &Shared, tx: &mpsc::Sender<Job>, job: Job) -> io::Result<()
     }
     .into();
     rt.state.error = None;
+    rt.state.completed_steps = 0;
+    rt.state.total_steps = 0;
     rt.state.notice = None;
     rt.state.step = match job {
         Job::Check(_) => "Проверка каталога релизов",

@@ -8,7 +8,10 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+static COMMAND_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn command(program: &str, args: &[&str], seconds: u64) -> io::Result<String> {
+    let _guard = COMMAND_LOCK.lock().unwrap();
     let path = Path::new(crate::ROOT).join("command.log");
     let out = OpenOptions::new()
         .write(true)

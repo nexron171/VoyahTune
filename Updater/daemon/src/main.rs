@@ -1,5 +1,6 @@
 mod config;
 mod device;
+mod dns;
 mod install;
 mod network;
 mod protocol;
@@ -171,9 +172,39 @@ fn run() -> io::Result<()> {
                 let rt = shared.lock().unwrap();
                 Ok(
                     json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),
-                        "pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok(),
+                        "capabilities":["install-step-progress","dns-settings"],"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok(),
                         "settingsError":rt.config.as_ref().err()}),
                 )
+            }
+            protocol::Request::GetSettings {} => {
+                let rt = shared.lock().unwrap();
+                if rt.state.busy() {
+                    return Err(config::invalid("Дождитесь завершения операции"));
+                }
+                let status = dns::status();
+                Ok(
+                    json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok(),
+                    "dnsStatus":status.as_ref().ok(),"dnsError":status.as_ref().err().map(ToString::to_string)}),
+                )
+            }
+            protocol::Request::SetSettings { url, dns_enabled } => {
+                let mut rt = shared.lock().unwrap();
+                if rt.state.busy() || rt.state.repair() {
+                    return Err(config::invalid("Сейчас нельзя менять настройки"));
+                }
+                if dns_enabled.is_some() {
+                    dns::plan(&dns::status()?, dns_enabled)?;
+                }
+                let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
+                let changed = config::change_settings(root, current, &url, dns_enabled)?;
+                if changed {
+                    rt.state.selected = None;
+                    rt.state.notice = None;
+                    rt.state.phase = "idle".into();
+                    rt.state.step = "Источник изменён. Проверьте каталог".into();
+                }
+                state::save(root, "state.json", &rt.state)?;
+                Ok(json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok()}))
             }
             protocol::Request::SetCatalogUrl { url } => {
                 let mut rt = shared.lock().unwrap();

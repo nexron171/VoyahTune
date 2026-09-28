@@ -12,6 +12,10 @@ pub struct State {
     pub schema: u32,
     pub phase: String,
     pub step: String,
+    #[serde(default)]
+    pub completed_steps: u32,
+    #[serde(default)]
+    pub total_steps: u32,
     pub error: Option<String>,
     pub installed_version: String,
     pub fingerprint: String,
@@ -96,6 +100,8 @@ impl State {
             schema: 1,
             phase: "idle".into(),
             step: "Готово к проверке обновлений".into(),
+            completed_steps: 0,
+            total_steps: 0,
             error: None,
             installed_version: version,
             fingerprint,
@@ -247,5 +253,19 @@ mod tests {
         save(t.path(), "state.json", &s).unwrap();
         let r: State = read(&t.path().join("state.json")).unwrap();
         assert_eq!(r.installed_version, "3.14.0");
+    }
+}
+
+#[cfg(test)]
+mod progress_compatibility_tests {
+    use super::*;
+    #[test]
+    fn older_journal_has_no_fabricated_step_progress() {
+        let mut old =
+            serde_json::to_value(State::fresh("3.16.0".into(), "firmware".into())).unwrap();
+        old.as_object_mut().unwrap().remove("completedSteps");
+        old.as_object_mut().unwrap().remove("totalSteps");
+        let parsed: State = serde_json::from_value(old).unwrap();
+        assert_eq!((parsed.completed_steps, parsed.total_steps), (0, 0));
     }
 }

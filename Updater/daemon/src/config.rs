@@ -15,6 +15,8 @@ pub struct Config {
     pub schema: u32,
     pub catalog_url: String,
     pub source_generation: u64,
+    #[serde(default)]
+    pub dns_enabled: Option<bool>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -22,6 +24,7 @@ impl Default for Config {
             schema: 1,
             catalog_url: DEFAULT_CATALOG_URL.into(),
             source_generation: 0,
+            dns_enabled: None,
         }
     }
 }
@@ -177,5 +180,53 @@ mod tests {
         std::os::unix::fs::symlink(&other, root.path().join("settings.json")).unwrap();
         assert!(load(root.path()).is_err());
         assert_eq!(fs::read(other).unwrap(), b"untouched");
+    }
+}
+
+/// Save the URL and the next-install DNS choice together; changing DNS alone does not invalidate an archive.
+pub fn change_settings(
+    root: &Path,
+    current: &mut Config,
+    input: &str,
+    dns: Option<bool>,
+) -> io::Result<bool> {
+    let url = normalize_url(input)?;
+    let changed = current.catalog_url != url;
+    let mut next = current.clone();
+    next.catalog_url = url;
+    next.dns_enabled = dns;
+    if changed {
+        next.source_generation = next
+            .source_generation
+            .checked_add(1)
+            .ok_or_else(|| invalid("Счётчик источника исчерпан"))?;
+    }
+    save(root, &next)?;
+    *current = next;
+    Ok(changed)
+}
+
+#[cfg(test)]
+mod dns_tests {
+    use super::*;
+    #[test]
+    fn old_settings_default_to_preserving_dns_and_changes_are_atomic() {
+        let original: Config = serde_json::from_value(
+            serde_json::json!({"schema":1,"catalogUrl":DEFAULT_CATALOG_URL,"sourceGeneration":0}),
+        )
+        .unwrap();
+        assert_eq!(original.dns_enabled, None);
+        let root = tempfile::tempdir().unwrap();
+        let mut config = original;
+        assert!(
+            !change_settings(root.path(), &mut config, DEFAULT_CATALOG_URL, Some(true)).unwrap()
+        );
+        assert_eq!(load(root.path()).unwrap().dns_enabled, Some(true));
+        let before = config.clone();
+        assert!(
+            change_settings(root.path(), &mut config, "http://example.com", Some(false)).is_err()
+        );
+        assert_eq!(config, before);
+        assert_eq!(load(root.path()).unwrap(), before);
     }
 }

@@ -9,6 +9,11 @@ pub const UI_PACKAGE: &str = "ru.big.town.updater";
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     Status {},
+    GetSettings {},
+    SetSettings {
+        url: String,
+        dns_enabled: Option<bool>,
+    },
     SetCatalogUrl {
         url: String,
     },
