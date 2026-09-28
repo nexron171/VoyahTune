@@ -271,10 +271,10 @@ impl Engine {
                     Ok(())
                 },
             )?;
-            self.step("verify", "Проверка запуска Native", |e| {
+            self.step("verify", "Проверка Native и готовности OTA", |e| {
                 e.wait_boot(true)?;
                 e.native_ready()?;
-                e.shell("cmd package install-existing --user 0 --wait ru.big.town.updater\n")?;
+                e.updater_ready()?;
                 let service = e.shell("getprop init.svc.voyahtune_updater\n")?;
                 if service != "running" {
                     return Err(e.fail("Root-служба OTA не запустилась", service));
@@ -833,6 +833,32 @@ printf '%s' {owner} > "$lock/owner" && printf '%s' "$boot" > "$lock/boot" && chm
         }
 
         self.install_restore(&self.payload.file("restore_mode.apk")?)
+    }
+    fn updater_ready(&self) -> Result<()> {
+        // ROM 650 can register a new system APK without its DE directory.
+        // PackageManager must create app data with the correct UID and context.
+        const READY: &str = r#"
+            if pm list packages --user 0 2>/dev/null | grep -qx 'package:ru.big.town.updater' \
+                    && pm path ru.big.town.updater 2>/dev/null | grep -q '^package:' \
+                    && [ -d /data/user/0/ru.big.town.updater ] \
+                    && [ -d /data/user_de/0/ru.big.town.updater ]; then
+                echo READY
+            else
+                echo BROKEN
+            fi
+        "#;
+        self.shell("cmd package install-existing --user 0 --wait ru.big.town.updater\n")?;
+        if self.shell(READY)? != "READY" {
+            self.shell("am force-stop ru.big.town.updater && pm uninstall -k --user 0 ru.big.town.updater\n")?;
+            self.shell("cmd package install-existing --user 0 --wait ru.big.town.updater\n")?;
+        }
+        if self.shell(READY)? != "READY" {
+            return Err(self.fail(
+                "PackageManager не создал CE/DE Updater",
+                "ru.big.town.updater",
+            ));
+        }
+        Ok(())
     }
     fn native_ready(&self) -> Result<()> {
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
