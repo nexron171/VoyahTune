@@ -97,6 +97,10 @@ pidof() {
             ;;
     esac
 }
+drive_agent_attempt_finished() {
+    fixture_drive_agent_attempt_finished "$@"
+    printf '%s\n' "$1" >> "$FIXTURE/finished_attempts"
+}
 prepare_drive_health() { mkdir -p "${1%/*}"; [ -e "$1" ] || : > "$1"; }
 logi() { printf '%s\n' "$*" >> "$FIXTURE/log"; }
 loge() { logi "$*"; }
@@ -115,6 +119,7 @@ discover_app_client() {
 if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
 '''.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root)))
         source = SOURCE.replace("/data/local/tmp", str(self.root)).replace("/data/local/open_voyah", str(self.root / "runtime"))
+        source = source.replace("drive_agent_attempt_finished() {", "fixture_drive_agent_attempt_finished() {")
         source = source.replace("/proc/", str(self.root / "proc") + "/")
         entry = 'if [ "${1:-}" = --worker ]; then'
         source = source.replace(entry, overrides + "\n" + entry)
@@ -227,7 +232,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
     def test_expired_acc_pulse_reinstalls_without_process_restart(self):
         self.start()
         self.until(lambda: self.state("acc") == "active", "ACC not ready")
-        self.until(lambda: (self.root / "runtime/drive_hooks/voyahtune_acc_restore.attempt.retry").exists(), "No retry record")
+        self.until(lambda: (self.root / "finished_attempts").exists() and "voyahtune_acc_restore.attempt" in (self.root / "finished_attempts").read_text(), "Attempt not finished")
         (self.root / "proc/uptime").write_text("116.00 0\n")
         self.until(lambda: self.events().count("start voyahtune_acc_restore.js") == 2, "Expired pulse not repaired")
 
