@@ -5,6 +5,12 @@
       "url": "https://storage.yandexcloud.net/voyahtune/payload_3.15.0.zip",
       "size": 149407190,
       "sha256": "92347612bec3e147d4bf54aee0f4f08e9646fe219ba2c47605367faa6827d84d"
+    },
+    {
+      "version": "3.16.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/v3.16.0/payload_3.16.0.zip",
+      "size": 149379895,
+      "sha256": "4a1f98265793bea69407bc9015f6fbfbdb6826921d145c6b448fa3af00d36449"
     }
   ]
 }
