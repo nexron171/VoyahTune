@@ -1604,7 +1604,6 @@ public class SetModesService extends Service {
         if (suspensionWidget != null) suspensionWidget.close();
         voiceCommands.close();
         serviceDestroyed = true;
-        ApplyEngine.stopEarlyDriveRestore("service destroyed");
         for (VirtualDisplay display : embeddedDisplays.values()) {
             try { display.release(); } catch (Exception ignored) {}
         }

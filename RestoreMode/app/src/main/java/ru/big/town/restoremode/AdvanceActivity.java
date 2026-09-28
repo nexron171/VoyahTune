@@ -2404,6 +2404,8 @@ public class AdvanceActivity extends AppCompatActivity {
             if ("driveMode".equals(key)) {
                 DriveSelectionPreferences.select(prefs, v.getTag().toString(),
                         ru.big.town.common.DriveSelectionPolicy.SETTINGS);
+            } else if ("energy".equals(key)) {
+                DriveSelectionPreferences.selectEnergy(prefs, v.getTag().toString(), true);
             } else prefs.edit().putString(key, v.getTag().toString()).apply();
             Log.i("$$$ Advance mode $$$", key + "=" + v.getTag());
         }

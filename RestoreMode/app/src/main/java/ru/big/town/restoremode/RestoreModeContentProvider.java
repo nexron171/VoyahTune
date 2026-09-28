@@ -128,7 +128,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                         String[] selectionArgs, String sortOrder) {
         Log.i("$$$", "QUERY1");
         DriveSelectionPolicy driveSelection = DriveSelectionPreferences.read(sharedPreferences);
-        energy = sharedPreferences.getString("energy", "SREV");
+        energy = DriveSelectionPreferences.energy(sharedPreferences);
         recycle = sharedPreferences.getString("recycle", "LOW");
         customCommand = sharedPreferences.getString("customCommand", "");
         customCommandCount = sharedPreferences.getInt("customCommandCount", 1);
@@ -264,6 +264,11 @@ public class RestoreModeContentProvider extends ContentProvider {
             return DriveSelectionPreferences.select(sharedPreferences,
                     values.getAsString(DriveSelectionPolicy.MODE),
                     values.getAsString(DriveSelectionPolicy.SOURCE)) ? 1 : 0;
+        }
+        if (values.containsKey("energySelection")) {
+            if (Binder.getCallingUid() != 0) getContext().enforceCallingOrSelfPermission(
+                    "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Energy selection update");
+            return DriveSelectionPreferences.selectEnergy(sharedPreferences, values.getAsString("energySelection"), false) ? 1 : 0;
         }
         SharedPreferences.Editor e = sharedPreferences.edit();
         int n = 0;

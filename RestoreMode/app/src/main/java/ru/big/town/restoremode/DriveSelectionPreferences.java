@@ -23,7 +23,22 @@ final class DriveSelectionPreferences {
                 .putString(DriveSelectionPolicy.MEDIUM, after.medium)
                 .putString(DriveSelectionPolicy.CURRENT, after.current)
                 .putLong(REV, prefs.getLong(REV, 0) + 1)
-                .putString(START, "user").commit();
+                .commit();
+    }
+    static synchronized boolean selectEnergy(SharedPreferences prefs, String mode, boolean settings) {
+        if (!validEnergy(mode)) return false;
+        SharedPreferences.Editor e = prefs.edit().putString("currentTripEnergy", mode).putBoolean("forcedEv", "FORCE_EV".equals(mode))
+                .putLong(REV, prefs.getLong(REV, 0) + 1);
+        if (!"FORCE_EV".equals(mode) && (settings || prefs.getBoolean("energyRememberLast", true))) e.putString("energy", mode);
+        return e.commit();
+    }
+    static boolean validEnergy(String mode) {
+        return "SMART".equals(mode) || "EV".equals(mode) || "REV".equals(mode)
+                || "SREV".equals(mode) || "FORCE_EV".equals(mode);
+    }
+    static synchronized String energy(SharedPreferences prefs) {
+        String current = prefs.getString("currentTripEnergy", "");
+        return validEnergy(current) ? current : prefs.getString("energy", "SREV");
     }
     static synchronized Bundle hook(SharedPreferences prefs, String action, Bundle args, int boot) {
         if (args == null) args = new Bundle();
@@ -40,19 +55,25 @@ final class DriveSelectionPreferences {
                     boolean preserve = prefs.getInt(BOOT, -1) == -1 && previous == -1;
                     e.putLong(CYCLE, prefs.getLong(CYCLE, 0) + 1)
                             .putLong(REV, prefs.getLong(REV, 0) + 1);
-                    if (!preserve) e.putString(DriveSelectionPolicy.CURRENT, "").putString(START, "pending");
+                    if (!preserve) e.putString(DriveSelectionPolicy.CURRENT, "").putString("currentTripEnergy", "").putString(START, "pending");
                 }
                 if (!e.commit()) throw new IllegalStateException("ACC state not persisted");
             }
+        } else if ("manual".equals(action)) {
+            if (prefs.getBoolean("driveEnabled", false)) select(prefs, prefs.getString("driveMode", "INDIVIDUAL"), DriveSelectionPolicy.SETTINGS);
+            if (prefs.getBoolean("energyEnabled", false) || prefs.getBoolean("forcedEv", false))
+                selectEnergy(prefs, prefs.getBoolean("forcedEv", false) ? "FORCE_EV" : prefs.getString("energy", "SREV"), true);
         } else if ("user".equals(action)) {
-            if (!select(prefs, args.getString("mode"), DriveSelectionPolicy.EXPLICIT)) {
-                throw new IllegalArgumentException("Invalid user mode");
-            }
+            if (args.containsKey("mode") && !select(prefs, args.getString("mode"), DriveSelectionPolicy.EXPLICIT))
+                throw new IllegalArgumentException("Invalid user drive mode");
+            if (args.containsKey("energy") && !selectEnergy(prefs, args.getString("energy"), false))
+                throw new IllegalArgumentException("Invalid user energy mode");
         } else if ("claim".equals(action)) {
             String state = prefs.getString(START, "pending");
             boolean claim = "pending".equals(state) && prefs.getInt(ACC, -1) == 2
                     && args.getLong("revision", -1) == prefs.getLong(REV, 0)
-                    && prefs.getBoolean("driveEnabled", false) && !prefs.getBoolean("debugMode", false);
+                    && (prefs.getBoolean("driveEnabled", false) || prefs.getBoolean("energyEnabled", false)
+                        || prefs.getBoolean("forcedEv", false)) && !prefs.getBoolean("debugMode", false);
             if (claim && !prefs.edit().putString(START, "claimed").commit()) {
                 throw new IllegalStateException("Startup claim not persisted");
             }
@@ -75,6 +96,7 @@ final class DriveSelectionPreferences {
         Bundle result = new Bundle();
         result.putInt("protocol", 2);
         result.putString("mode", read(prefs).effective());
+        result.putString("energy", energy(prefs));
         result.putLong("revision", prefs.getLong(REV, 0));
         result.putLong("cycle", prefs.getLong(CYCLE, 0));
         result.putInt("acc", prefs.getInt(ACC, -1));

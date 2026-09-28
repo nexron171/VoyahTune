@@ -4,8 +4,8 @@
 Java.perform(function () {
     "use strict";
     var TAG = "VoyahDriveReset";
-    var READY = "[drive-reset] hook ready v1";
-    var SENTINEL = "open_voyah.drive_reset.v1";
+    var READY = "[drive-reset] hook ready v2";
+    var SENTINEL = "open_voyah.drive_reset.v2";
     var installed = [];
     var Log = Java.use("android.util.Log");
     var System = Java.use("java.lang.System");
@@ -17,8 +17,31 @@ Java.perform(function () {
         method.implementation = implementation;
         installed.push(method);
     }
+    var HEALTH_PATH = "/data/local/open_voyah/drive_hooks/voyahtune_drive_reset.health";
+    var Clock = Java.use("android.os.SystemClock");
+    var Process = Java.use("android.os.Process");
+    var FileWriter = Java.use("java.io.FileWriter");
+    var pulseTimer = null;
+    function healthy() {
+        var last = Number(System.getProperty(SENTINEL + ".pulse", "0"));
+        return last > 0 && Number(Clock.elapsedRealtime()) - last < 15000;
+    }
+    function pulse() {
+        if (installed.some(function (m) { return m.implementation === null; })) {
+            log("agent unhealthy: hook removed");
+            if (pulseTimer !== null) clearInterval(pulseTimer);
+            return;
+        }
+        var now = Number(Clock.elapsedRealtime());
+        System.setProperty(SENTINEL + ".pulse", String(now));
+        try {
+            var out = FileWriter.$new(HEALTH_PATH, false);
+            try { out.write(String(Process.myPid()) + "|" + Math.floor(now / 1000) + "|v2\n"); }
+            finally { out.close(); }
+        } catch (e) { log("health write unavailable: " + e); }
+    }
     try {
-        if (String(System.getProperty(SENTINEL, "")) === "installed") {
+        if (healthy() && String(System.getProperty(SENTINEL, "")) === "installed") {
             log(READY + " already_installed");
             return;
         }
@@ -34,6 +57,8 @@ Java.perform(function () {
         var query = Java.use("android.content.ContentResolver").query.overload(
             "android.net.Uri", "[Ljava.lang.String;", "java.lang.String",
             "[Ljava.lang.String;", "java.lang.String");
+        var uiScope = Java.use("java.lang.ThreadLocal").$new();
+        var Fragment = Java.use("com.qinggan.app.vehiclesetting.fragments.drivepreference.DrivePreferenceFragment");
         var setter = CanBus.setVehicleAndAirConditionBundleState.overload(
             "android.os.Bundle", "android.os.Bundle");
 
@@ -74,7 +99,7 @@ Java.perform(function () {
             var targets = {drive: null, energy: null, maintenance: maintenance};
             if (forcedEv) targets.energy = 5;
             else if (energyEnabled) {
-                var energies = {SMART: 1, Smart: 1, EV: 2, REV: 3, SREV: 4};
+                var energies = {SMART: 1, Smart: 1, EV: 2, REV: 3, SREV: 4, FORCE_EV: 5};
                 if (!Object.prototype.hasOwnProperty.call(energies, energy)) return null;
                 targets.energy = energies[energy];
             }
@@ -99,7 +124,13 @@ Java.perform(function () {
 
         install(setter, function (air, vehicle) {
             var outgoing = vehicle;
+            if (uiScope.get() !== null && vehicle !== null) {
+                outgoing = Bundle.$new(vehicle); outgoing.putBoolean("__vt_user", true);
+                log("screen request drive=" + vehicle.getInt("DRIVING_MODE_SET", -1)
+                    + " energy=" + vehicle.getInt("IVI_SOC_MODESET", -1));
+            }
             if (scope.get() !== null && vehicle !== null) {
+                outgoing = Bundle.$new(vehicle); outgoing.putBoolean("__vt_auto", true);
                 // Catch preparation errors only: never replay a setter whose Binder call failed.
                 try {
                     var targets = selectedTargets();
@@ -140,12 +171,44 @@ Java.perform(function () {
                 }
             });
         });
+        ["setDriveMode", "setPowerMode"].forEach(function (name) {
+            var method = Fragment[name].overload("int");
+            install(method, function (value) {
+                if (!Platform.is97X()) return method.call(this, value);
+                var previous = uiScope.get(); uiScope.set(JString.$new(name));
+                try { return method.call(this, value); }
+                finally { if (previous === null) uiScope.remove(); else uiScope.set(previous); }
+            });
+        });
+        var hint = Fragment.onHintSwitchClick.overload("com.qinggan.canbus.VehicleState", "int");
+        install(hint, function (state, value) {
+            var previous = uiScope.get();
+            if (Platform.is97X() && String(state) === "IVI_SOC_MODESET") uiScope.set(JString.$new("energy switch"));
+            try { return hint.call(this, state, value); }
+            finally { if (previous === null) uiScope.remove(); else uiScope.set(previous); }
+        });
+        var single = CanBus.setVehicleState.overload("com.qinggan.canbus.VehicleState", "int");
+        var providerCall = Java.use("android.content.ContentResolver").call.overload(
+            "android.net.Uri", "java.lang.String", "java.lang.String", "android.os.Bundle");
+        install(single, function (state, value) {
+            if (uiScope.get() !== null && String(state) === "IVI_SOC_MODESET" && value >= 1 && value <= 5) {
+                try {
+                    var args = Bundle.$new(); args.putString("energy", ["", "SMART", "EV", "REV", "SREV", "FORCE_EV"][value]);
+                    providerCall.call(ActivityThread.currentApplication().getContentResolver(),
+                        Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/"), "driveHookV2", "user", args);
+                    log("screen single energy=" + value);
+                } catch (e) { log("screen energy persistence unavailable: " + e); }
+            }
+            return single.call(this, state, value);
+        });
         System.setProperty(SENTINEL, "installed");
+        pulse();
+        pulseTimer = setInterval(function () { Java.perform(pulse); }, 2000);
         log(READY);
     } catch (e) {
         for (var i = installed.length - 1; i >= 0; i--) {
             try { installed[i].implementation = null; } catch (_) {}
         }
-        log("[drive-reset] hook failed stage=install");
+        log("[drive-reset] hook failed stage=install reason=" + e);
     }
 });

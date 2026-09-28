@@ -3,8 +3,8 @@
 Java.perform(function () {
     "use strict";
     var TAG = "VoyahAccRestore";
-    var READY = "[acc-restore] hook ready v1";
-    var SENTINEL = "open_voyah.acc_restore.v1";
+    var READY = "[acc-restore] hook ready v2";
+    var SENTINEL = "open_voyah.acc_restore.v2";
     var installed = [];
     var Log = Java.use("android.util.Log");
     var System = Java.use("java.lang.System");
@@ -16,8 +16,31 @@ Java.perform(function () {
         method.implementation = implementation;
         installed.push(method);
     }
+    var HEALTH_PATH = "/data/local/open_voyah/drive_hooks/voyahtune_acc_restore.health";
+    var Clock = Java.use("android.os.SystemClock");
+    var Process = Java.use("android.os.Process");
+    var FileWriter = Java.use("java.io.FileWriter");
+    var pulseTimer = null;
+    function healthy() {
+        var last = Number(System.getProperty(SENTINEL + ".pulse", "0"));
+        return last > 0 && Number(Clock.elapsedRealtime()) - last < 15000;
+    }
+    function pulse() {
+        if (installed.some(function (m) { return m.implementation === null; })) {
+            log("agent unhealthy: hook removed");
+            if (pulseTimer !== null) clearInterval(pulseTimer);
+            return;
+        }
+        var now = Number(Clock.elapsedRealtime());
+        System.setProperty(SENTINEL + ".pulse", String(now));
+        try {
+            var out = FileWriter.$new(HEALTH_PATH, false);
+            try { out.write(String(Process.myPid()) + "|" + Math.floor(now / 1000) + "|v2\n"); }
+            finally { out.close(); }
+        } catch (e) { log("health write unavailable: " + e); }
+    }
     try {
-        if (String(System.getProperty(SENTINEL, "")) === "installed") {
+        if (healthy() && String(System.getProperty(SENTINEL, "")) === "installed") {
             log(READY + " already_installed");
             return;
         }
@@ -36,6 +59,82 @@ Java.perform(function () {
             "android.os.Bundle", "android.os.Bundle");
         var feedback = Base.onVehicleStateChanged.overload("com.qinggan.canbus.VehicleState", "int");
         var single = Component.setVehicleState.overload("com.qinggan.canbus.VehicleState", "int");
+        var Binder = Java.use("android.os.Binder");
+        var ActivityThread = Java.use("android.app.ActivityThread");
+        var State = Java.use("com.qinggan.canbus.VehicleState");
+        var Task = Java.use("com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl$ModeSettingTask");
+        var taskInit = Task.$init.overload("com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl", "com.qinggan.canbus.service.BaseCanBusComponent");
+        var taskSend = Task.setVehicleMode.overload("java.util.HashMap");
+        var taskMeta = Java.use("java.util.WeakHashMap").$new();
+        var sending = Java.use("java.lang.ThreadLocal").$new();
+        var lock = Java.use("java.util.concurrent.locks.ReentrantLock").$new();
+        var call = Java.use("android.content.ContentResolver").call.overload(
+            "android.net.Uri", "java.lang.String", "java.lang.String", "android.os.Bundle");
+        var selectedComponent = null;
+        var bootstrapDone = false;
+        function hook(resolver, action, args) {
+            // Provider authorization must see the CAN service, not its original Binder client.
+            var identity = Binder.clearCallingIdentity();
+            try {
+                var result = call.call(resolver, Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                    "driveHookV2", action, args || Bundle.$new());
+                if (result === null || result.getInt("protocol") !== 2) throw new Error("driveHookV2 unavailable");
+                return result;
+            } finally { Binder.restoreCallingIdentity(identity); }
+        }
+        function observeAcc(component, value) {
+            var args = Bundle.$new(); args.putInt("acc", value);
+            return hook(component.contentResolver.value, "acc", args);
+        }
+        function trusted(packageName) {
+            try { return Binder.getCallingUid() === ActivityThread.currentApplication()
+                .getPackageManager().getApplicationInfo(packageName, 0).uid.value; }
+            catch (_) { return false; }
+        }
+        function user(component, vehicle) {
+            var args = Bundle.$new();
+            var drive = vehicle.getInt("DRIVING_MODE_SET", -1);
+            var energy = vehicle.getInt("IVI_SOC_MODESET", -1);
+            if (drive > 0 && drive <= 6) args.putString("mode", ["", "ECO", "COMFORT", "SPORT", "OUTING", "INDIVIDUAL", "SNOW"][drive]);
+            if (energy > 0 && energy <= 5) args.putString("energy", ["", "SMART", "EV", "REV", "SREV", "FORCE_EV"][energy]);
+            var result = hook(component.contentResolver.value, "user", args);
+            log("user request drive=" + drive + " energy=" + energy + " revision=" + result.getLong("revision"));
+            return result;
+        }
+        function metadata(component, automatic) {
+            var snap = hook(component.contentResolver.value, "snapshot");
+            var meta = Bundle.$new(); meta.putBoolean("automatic", automatic);
+            meta.putLong("revision", snap.getLong("revision"));
+            return meta;
+        }
+        function applyTargets(outgoing, targets) {
+            if (targets.drive !== null) {
+                outgoing.putInt("DRIVING_MODE_SET", targets.drive[0]);
+                outgoing.putInt("EPS_MODE_SET", targets.drive[1]);
+                outgoing.putInt("PROP_MODE_SET", targets.drive[2]);
+                if (targets.drive[0] === 6) outgoing.remove("HUM_ENERGY_PTREGEN_LEVL");
+            }
+            if (targets.energy !== null) outgoing.putInt("IVI_SOC_MODESET", targets.energy);
+        }
+        install(taskInit, function (outer, component) {
+            var result = taskInit.call(this, outer, component);
+            var meta = sending.get();
+            if (meta !== null) taskMeta.put(this, Bundle.$new(Java.cast(meta, Bundle)));
+            return result;
+        });
+        install(taskSend, function (values) {
+            lock.lock();
+            try {
+                var raw = taskMeta.remove(this);
+                if (raw !== null) {
+                    var meta = Java.cast(raw, Bundle);
+                    log("mode task origin=" + (meta.getBoolean("automatic") ? "automatic" : "user"));
+                }
+                var result = taskSend.call(this, values);
+                if (raw !== null) log("mode task send result=" + result + " (not physical confirmation)");
+                return result;
+            } finally { lock.unlock(); }
+        });
         function invocation(receiver) {
             var value = scope.get();
             if (value === null) return null;
@@ -76,7 +175,7 @@ Java.perform(function () {
             var targets = {drive: null, energy: null, maintenance: maintenance};
             if (forcedEv) targets.energy = 5;
             else if (energyEnabled) {
-                var energies = {SMART: 1, Smart: 1, EV: 2, REV: 3, SREV: 4};
+                var energies = {SMART: 1, Smart: 1, EV: 2, REV: 3, SREV: 4, FORCE_EV: 5};
                 if (!Object.prototype.hasOwnProperty.call(energies, energy)) return null;
                 targets.energy = energies[energy];
             }
@@ -103,44 +202,58 @@ Java.perform(function () {
         }
 
         install(setter, function (air, vehicle) {
-            var state = invocation(this);
-            var outgoing = vehicle;
-            var targetDrive = 0;
-            if (state !== null && state.getInt("submitted") === 0 && air === null && vehicle !== null) {
-                try {
-                    // Match the actual guest branch, not ordinary bundles or the logged-in restore.
-                    if (systemInt.call(null, this.contentResolver.value, "VehicleAccountInfo", 1) === 1
-                            && vehicle.getInt("DRIVING_MODE_SET", -1) === 1
-                            && vehicle.getInt("EPS_MODE_SET", -1) === 2
-                            && vehicle.getInt("PROP_MODE_SET", -1) === 1) {
-                        var targets = selectedTargets(this.contentResolver.value);
-                        if (targets !== null) {
-                            outgoing = Bundle.$new(vehicle);
-                            if (targets.drive !== null) {
-                                targetDrive = targets.drive[0];
-                                outgoing.putInt("DRIVING_MODE_SET", targetDrive);
-                                outgoing.putInt("EPS_MODE_SET", targets.drive[1]);
-                                outgoing.putInt("PROP_MODE_SET", targets.drive[2]);
-                                if (targetDrive === 6) outgoing.remove("HUM_ENERGY_PTREGEN_LEVL");
+            lock.lock();
+            var oldSending = sending.get();
+            try {
+                var state = invocation(this);
+                var outgoing = vehicle;
+                var automatic = false, targetDrive = 0;
+                var nativeCaller = trusted("ru.big.town.anative");
+                var stockCaller = trusted("com.qinggan.app.vehiclesetting");
+                if (vehicle !== null) {
+                    var taggedAuto = stockCaller && vehicle.getBoolean("__vt_auto", false);
+                    var taggedUser = stockCaller && vehicle.getBoolean("__vt_user", false);
+                    var startup = sending.get() !== null;
+                    var guest = state !== null && state.getInt("submitted") === 0 && air === null
+                        && systemInt.call(null, this.contentResolver.value, "VehicleAccountInfo", 1) === 1
+                        && vehicle.getInt("DRIVING_MODE_SET", -1) === 1
+                        && vehicle.getInt("EPS_MODE_SET", -1) === 2 && vehicle.getInt("PROP_MODE_SET", -1) === 1;
+                    automatic = guest || taggedAuto || startup;
+                    outgoing = Bundle.$new(vehicle);
+                    outgoing.remove("__vt_auto"); outgoing.remove("__vt_user");
+                    if (automatic) {
+                        try {
+                            var meta = metadata(this, true);
+                            var targets = selectedTargets(this.contentResolver.value);
+                            if (targets !== null) {
+                                applyTargets(outgoing, targets);
+                                if (guest) outgoing.putInt("ASC_MAINTAIN_SWITCH", targets.maintenance);
+                                targetDrive = targets.drive === null ? 0 : targets.drive[0];
                             }
-                            if (targets.energy !== null) outgoing.putInt("IVI_SOC_MODESET", targets.energy);
-                            outgoing.putInt("ASC_MAINTAIN_SWITCH", targets.maintenance);
+                            sending.set(meta);
+                        } catch (e) {
+                            // Never claim success or remember an automatic event if settings are unavailable.
+                            sending.remove(); log("automatic target unavailable: " + e);
                         }
+                    } else if ((taggedUser || nativeCaller) && (vehicle.containsKey("DRIVING_MODE_SET") || vehicle.containsKey("IVI_SOC_MODESET"))) {
+                        try { user(this, vehicle); } catch (e) { log("user intent persistence failed: " + e); }
+                        sending.remove();
+                    } else {
+                        sending.remove();
+                        if (vehicle.containsKey("DRIVING_MODE_SET") || vehicle.containsKey("IVI_SOC_MODESET")) log("unknown mode request; passthrough");
                     }
-                } catch (e) {
-                    outgoing = vehicle;
-                    targetDrive = 0;
-                    log("stock fallback: saved targets unavailable");
                 }
+                var result = setter.call(this, air, outgoing);
+                if (state !== null && automatic) {
+                    state.putInt("submitted", 1);
+                    if (result === 0) state.putInt("drive", targetDrive);
+                    log("guest ACC bundle queued=" + (result === 0) + " drive=" + targetDrive);
+                }
+                return result;
+            } finally {
+                if (oldSending === null) sending.remove(); else sending.set(oldSending);
+                lock.unlock();
             }
-            // Never catch/replay this call: success means queued, not CAN-confirmed.
-            var result = setter.call(this, air, outgoing);
-            if (state !== null && outgoing !== vehicle) {
-                state.putInt("submitted", 1);
-                if (result === 0) state.putInt("drive", targetDrive);
-                log("guest ACC bundle queued=" + (result === 0) + " drive=" + targetDrive);
-            }
-            return result;
         });
         install(feedback, function (vehicle, value) {
             var state = invocation(this);
@@ -158,7 +271,15 @@ Java.perform(function () {
             if (drive > 0 && value === 19 && String(vehicle) === "VEHICLE_AMBIENT_LIGHT_COLOR") {
                 value = colors[drive];
             }
-            return single.call(this, vehicle, value);
+            lock.lock();
+            try {
+                if (state === null && trusted("ru.big.town.anative")
+                        && (String(vehicle) === "DRIVING_MODE_SET" || String(vehicle) === "IVI_SOC_MODESET")) {
+                    var request = Bundle.$new(); request.putInt(String(vehicle), value);
+                    try { user(this, request); } catch (e) { log("single intent failed: " + e); }
+                }
+                return single.call(this, vehicle, value);
+            } finally { lock.unlock(); }
         });
         // Install the entry point last. No resolver query, service start or prefetch delays hook readiness.
         install(parser, function (data, notify) {
@@ -167,6 +288,13 @@ Java.perform(function () {
                 entering = data !== null && data.length > 0 && (data[0] & 7) === 2
                     && this.getAccStatus() !== 2 && this.isH97X();
             } catch (_) {} // Unknown firmware state: preserve the complete stock parser.
+            try {
+                var acc = data !== null && data.length > 0 ? data[0] & 7 : -1;
+                if (this.isH97X() && (entering || (acc === 0 && this.getAccStatus() !== 0))) {
+                    observeAcc(this, acc);
+                    if (entering) bootstrapDone = false;
+                }
+            } catch (e) { log("ACC state unavailable: " + e); }
             var previous = scope.get();
             // Clear an outer scope even for nested non-ACC frames, then restore it in finally.
             if (entering) {
@@ -180,12 +308,57 @@ Java.perform(function () {
                 else scope.set(previous);
             }
         });
+        function bootstrap(component) {
+            if (bootstrapDone || component === null || !component.isH97X()) return;
+            lock.lock();
+            try {
+                var snap = observeAcc(component, component.getAccStatus());
+                if (snap.getInt("acc") !== 2) return;
+                var startupState = String(snap.getString("startup"));
+                if (startupState !== "pending") { bootstrapDone = true; return; }
+                var targets = selectedTargets(component.contentResolver.value);
+                if (targets === null || (targets.drive === null && targets.energy === null)) return;
+                var b = Bundle.$new(); applyTargets(b, targets);
+                var claim = Bundle.$new(); claim.putLong("revision", snap.getLong("revision"));
+                var claimed = hook(component.contentResolver.value, "claim", claim);
+                if (!claimed.getBoolean("claimed")) return;
+                bootstrapDone = true; // Uncertain Binder results must not cause blind replay.
+                var meta = Bundle.$new(); meta.putBoolean("automatic", true);
+                meta.putLong("revision", snap.getLong("revision"));
+                var previous = sending.get(); sending.set(meta);
+                var accepted = false;
+                try { accepted = component.setVehicleAndAirConditionBundleState(null, b) === 0; }
+                finally {
+                    if (previous === null) sending.remove(); else sending.set(previous);
+                    claim.putBoolean("accepted", accepted);
+                    hook(component.contentResolver.value, "complete", claim);
+                    log("startup modes queued=" + accepted + " drive=" + targets.drive + " energy=" + targets.energy);
+                }
+            } finally { lock.unlock(); }
+        }
+        function discoverAndBootstrap() {
+            if (bootstrapDone) return;
+            if (selectedComponent !== null) { bootstrap(selectedComponent); return; }
+            Java.choose("com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl", {
+                onMatch: function (instance) { selectedComponent = Java.retain(instance); return "stop"; },
+                onComplete: function () { if (selectedComponent !== null) bootstrap(selectedComponent); }
+            });
+        }
+        setTimeout(function retryReadiness() {
+            Java.perform(function () {
+                try { discoverAndBootstrap(); } catch (e) { log("startup waiting: " + e); }
+            });
+            // A new ACC edge clears bootstrapDone. This timer checks readiness only, not current modes.
+            setTimeout(retryReadiness, 5000);
+        }, 0);
         System.setProperty(SENTINEL, "installed");
+        pulse();
+        pulseTimer = setInterval(function () { Java.perform(pulse); }, 2000);
         log(READY);
     } catch (e) {
         for (var i = installed.length - 1; i >= 0; i--) {
             try { installed[i].implementation = null; } catch (_) {}
         }
-        log("[acc-restore] hook failed stage=install");
+        log("[acc-restore] hook failed stage=install reason=" + e);
     }
 });

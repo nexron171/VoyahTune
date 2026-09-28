@@ -12,12 +12,8 @@ import ru.big.town.common.DriveSelectionPolicy;
 final class DriveSelectionStore {
     private static final Uri URI = Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
     static void applyConfigured(Context context) {
-        try (Cursor c = context.getContentResolver().query(URI, null, null, null, null)) {
-            if (c != null && c.moveToFirst() && c.getInt(6) == 1
-                    && c.getColumnIndex(DriveSelectionPolicy.CONFIGURED) >= 0) {
-                record(context, c.getString(c.getColumnIndex(DriveSelectionPolicy.CONFIGURED)),
-                        DriveSelectionPolicy.SETTINGS);
-            }
+        try {
+            context.getContentResolver().call(URI, "driveHookV2", "manual", null);
         } catch (RuntimeException e) { Log.w("DriveSelection", "Configured selection unavailable", e); }
     }
     static DriveSelectionPolicy read(Context context) {

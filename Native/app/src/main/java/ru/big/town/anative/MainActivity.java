@@ -401,26 +401,6 @@ public class MainActivity extends AppCompatActivity {
         return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
-    /** Narrow read for early polling: never starts services or mutates the full restore snapshot. */
-    static EarlyDriveModeRestore.Settings readEarlyDriveRestoreSettings(Context context) {
-        try (Cursor cursor = context.getContentResolver().query(Uri.parse(
-                "content://ru.big.town.restoremode.restoremodecontentprovider/"),
-                null, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst() && cursor.getColumnCount() > 6) {
-                return new EarlyDriveModeRestore.Settings(cursor.getString(0),
-                        cursor.getInt(6) == 1,
-                        cursor.getColumnCount() > 12 && cursor.getInt(12) == 1);
-            }
-        } catch (RuntimeException e) {
-            Log.w(MODES_LOG, "Early drive settings unavailable; using saved cache");
-        }
-        SharedPreferences cache = nativePrefs(context);
-        if (!cache.getBoolean("cacheValid", false)) return null;
-        return new EarlyDriveModeRestore.Settings(cache.getString("cacheDriveMode", null),
-                cache.getBoolean("cacheDriveEnabled", false),
-                cache.getBoolean("cacheDebugMode", false));
-    }
-
     /** Missing or NULL opt-out fields are enabled; only an explicit numeric zero disables them. */
     private static boolean cursorBooleanDefaultTrue(Cursor cursor, int column) {
         return cursor.getColumnCount() <= column || cursor.isNull(column) || cursor.getInt(column) != 0;
@@ -589,7 +569,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Builds one validated pass before the first OEM request is submitted. */
-    static CanRestorePlan createCanRestorePlan() {
+    static CanRestorePlan createCanRestorePlan() { return createCanRestorePlan(true); }
+
+    static CanRestorePlan createCanRestorePlan(boolean includeModes) {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound
@@ -616,14 +598,14 @@ public class MainActivity extends AppCompatActivity {
         });
 
 
-        if (driveEnabled) {
+        if (includeModes && driveEnabled) {
             if (!DriveModeCanTransport.appendStates(
                     context, driveMode, primaryValues, stableIds)) {
                 throw new IllegalArgumentException("Unsupported drive mode: " + driveMode);
             }
         }
         VehicleRestorePolicy.appendPrimaryTo(
-                primaryValues, energyEnabled, energy, forcedEv);
+                primaryValues, includeModes && energyEnabled, energy, includeModes && forcedEv);
         VehicleRestorePolicy.appendRecuperationTo(
                 trailingValues, recycleEnabled, recycle, driveMode);
         stableIds.putAll(VehicleRestorePolicy.stableIds());
@@ -650,8 +632,8 @@ public class MainActivity extends AppCompatActivity {
 
         if (!primaryValues.isEmpty() || !trailingValues.isEmpty()) {
             final OemVehicleStateTransport.StateValue firstState = fragranceDurationState;
-            final String appliedDrive = driveEnabled ? driveMode : null;
-            final String appliedEnergy = forcedEv ? "FORCE_EV" : energyEnabled ? energy : null;
+            final String appliedDrive = includeModes && driveEnabled ? driveMode : null;
+            final String appliedEnergy = !includeModes ? null : forcedEv ? "FORCE_EV" : energyEnabled ? energy : null;
             final String appliedRecycle = recycleEnabled
                     && VehicleRestorePolicy.allowsRecuperationRestore(driveMode) ? recycle : null;
             plan.addOnce("OEM vehicle restore snapshot", () -> {
@@ -808,6 +790,18 @@ public class MainActivity extends AppCompatActivity {
         if (context == null || mode == null || mode.isEmpty()) return;
         if ("driveMode".equals(modeKey)) {
             DriveSelectionStore.record(context, mode, ru.big.town.common.DriveSelectionPolicy.EXPLICIT);
+            return;
+        }
+        if ("energy".equals(modeKey)) {
+            try {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put("energySelection", mode);
+                if (context.getContentResolver().update(MODES_PROVIDER_URI, values, null, null) > 0) {
+                    energy = mode;
+                    ApplyEngine.noteSavedMode("energy", mode);
+                    ApplyEngine.driveSelectionSaved();
+                }
+            } catch (RuntimeException e) { Log.w(MODES_LOG, "Energy selection unavailable", e); }
             return;
         }
         if (modeColumn(modeKey) < 0 || !remembersMode(context, modeKey)) return;

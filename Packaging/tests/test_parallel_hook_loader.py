@@ -50,10 +50,10 @@ case "$script" in
     apollo_tech.js) echo '[apollo] hook ready'; gate=none ;;
     voyahtune_acc_restore.js)
         while [ -f "$root/hold_acc_ready" ]; do sleep 0.05; done
-        if [ ! -f "$root/missing_acc_ready" ]; then echo '[acc-restore] hook ready v1'; fi
+        if [ ! -f "$root/missing_acc_ready" ]; then echo '[acc-restore] hook ready v2'; fi
         if [ -f "$root/block_acc" ]; then gate=acc; else gate=none; fi ;;
     voyahtune_drive_reset.js)
-        if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v1'; fi
+        if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v2'; fi
         gate=none ;;
     *) gate=none ;;
 esac
@@ -97,6 +97,7 @@ pidof() {
             ;;
     esac
 }
+prepare_drive_health() { mkdir -p "${1%/*}"; [ -e "$1" ] || : > "$1"; }
 logi() { printf '%s\n' "$*" >> "$FIXTURE/log"; }
 loge() { logi "$*"; }
 log() { :; }
@@ -113,7 +114,7 @@ discover_app_client() {
 }
 if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
 '''.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root)))
-        source = SOURCE.replace("/data/local/tmp", str(self.root))
+        source = SOURCE.replace("/data/local/tmp", str(self.root)).replace("/data/local/open_voyah", str(self.root / "runtime"))
         source = source.replace("/proc/", str(self.root / "proc") + "/")
         entry = 'if [ "${1:-}" = --worker ]; then'
         source = source.replace(entry, overrides + "\n" + entry)
@@ -136,7 +137,15 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
             except ProcessLookupError:
                 pass
             proc.wait(timeout=5)
-        self.temp.cleanup()
+        # A just-killed grandchild can finish its EXIT cleanup after the direct shell exited.
+        for attempt in range(5):
+            try:
+                self.temp.cleanup()
+                break
+            except OSError as error:
+                if error.errno != 66 or attempt == 4:
+                    raise
+                time.sleep(0.05)
 
     def until(self, predicate, message, seconds=12):
         deadline = time.monotonic() + seconds
@@ -201,7 +210,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.until(lambda: self.state("acc") == "active", "CanBus discovery stopped after deadline")
         self.assertNotIn("end vd_bypass.js", self.events())
 
-    def test_failed_acc_releases_workers_and_only_new_identity_retries(self):
+    def test_failed_acc_retries_after_backoff_in_same_process(self):
         (self.root / "missing_acc_ready").touch()
         self.start()
         self.until(lambda: "start vd_bypass.js" in self.events(), "Failed ACC blocked workers")
@@ -211,9 +220,25 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / "missing_acc_ready").unlink()
         time.sleep(0.2)
         self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
-        (self.root / "generation.107").write_text("2\n")
-        self.until(lambda: self.state("acc") == "active", "New CanBus identity missed hook")
+        (self.root / "proc/uptime").write_text("102.00 0\n")
+        self.until(lambda: self.state("acc") == "active", "Same-process retry did not recover hook")
         self.assertEqual(2, self.events().count("start voyahtune_acc_restore.js"))
+
+    def test_expired_acc_pulse_reinstalls_without_process_restart(self):
+        self.start()
+        self.until(lambda: self.state("acc") == "active", "ACC not ready")
+        self.until(lambda: (self.root / "runtime/drive_hooks/voyahtune_acc_restore.attempt.retry").exists(), "No retry record")
+        (self.root / "proc/uptime").write_text("116.00 0\n")
+        self.until(lambda: self.events().count("start voyahtune_acc_restore.js") == 2, "Expired pulse not repaired")
+
+    def test_fresh_acc_pulse_keeps_existing_agent(self):
+        self.start()
+        self.until(lambda: self.state("acc") == "active", "ACC not ready")
+        (self.root / "runtime/drive_hooks/voyahtune_acc_restore.health").write_text("107|119|v2\n")
+        (self.root / "proc/uptime").write_text("120.00 0\n")
+        time.sleep(0.3)
+        self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
+        self.assertEqual("active", self.state("acc"))
 
     def test_all_core_hooks_start_while_vd_status_and_apps_are_blocked(self):
         self.start()

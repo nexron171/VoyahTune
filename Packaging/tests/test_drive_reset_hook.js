@@ -21,8 +21,15 @@ function fixture(options = {}) {
     }
     class Bundle {
         constructor(other) { this.values = {...(other ? other.values : {})}; }
+        getInt(key, fallback = 0) { return this.values[key] ?? fallback; }
         containsKey(key) { return Object.hasOwn(this.values, key); }
         putInt(key, value) { this.values[key] = value; }
+        getBoolean(key, fallback = false) { return this.values[key] ?? fallback; }
+        putBoolean(key, v) { this.values[key] = v; }
+        getLong(key, fallback = 0) { return this.values[key] ?? fallback; }
+        putLong(key, v) { this.values[key] = v; }
+        getString(key) { return this.values[key] ?? null; }
+        putString(key, v) { this.values[key] = v; }
         remove(key) { delete this.values[key]; }
     }
     const setter = method(function (air, vehicle) {
@@ -65,7 +72,11 @@ function fixture(options = {}) {
         if (f.queryError) throw new Error("VoyahTune provider failure");
         return f.nullCursor ? null : cursor();
     });
+    const timers = [];
     const classes = {
+        "android.os.SystemClock": {elapsedRealtime() { return 100000; }},
+        "android.os.Process": {myPid() { return 1; }},
+        "java.io.FileWriter": {$new() { return {write() {}, close() {}}; }},
         "android.util.Log": {i() {}},
         "java.lang.System": {getProperty(k, fallback) { return properties.get(k) ?? fallback; },
             setProperty(k, v) { properties.set(k, v); }},
@@ -77,7 +88,11 @@ function fixture(options = {}) {
         }},
         "com.qinggan.app.vehiclesetting.accountdata.VehicleMemoryManager":
             {resetSettings: reset, resetOverseaDriveMode: f.missingMethod ? undefined : overseas},
-        "com.qinggan.canbus.CanBusManager": {setVehicleAndAirConditionBundleState: setter},
+        "com.qinggan.app.vehiclesetting.fragments.drivepreference.DrivePreferenceFragment": {
+            onHintSwitchClick: method(function () {}),
+            setDriveMode: method(function (v) { const b = new Bundle(); b.putInt("DRIVING_MODE_SET", v); setter.invoke({}, null, b); }),
+            setPowerMode: method(function (v) { const b = new Bundle(); b.putInt("IVI_SOC_MODESET", v); setter.invoke({}, null, b); })},
+        "com.qinggan.canbus.CanBusManager": {setVehicleAndAirConditionBundleState: setter, setVehicleState: method(function () {})},
         "com.qinggan.utils.AppCommonUtils": {is97X() { return f.platform; }},
         "com.qinggan.app.vehiclesetting.utils.Utils": {getAccountId() { return "guest"; }},
         "android.app.ActivityThread": {currentApplication() {
@@ -85,9 +100,9 @@ function fixture(options = {}) {
         }},
         "android.net.Uri": {parse(s) { return s; }},
         "android.os.Bundle": {$new(b) { return new Bundle(b); }},
-        "android.content.ContentResolver": {query}
+        "android.content.ContentResolver": {query, call: method(function () { return new Bundle(); })}
     };
-    const context = vm.createContext({Java: {perform(fn) { fn(); }, use(name) {
+    const context = vm.createContext({setInterval(fn) { return 1; }, clearInterval() {}, setTimeout(fn) { timers.push(fn); }, Java: {perform(fn) { fn(); }, use(name) {
         assert.ok(classes[name], name); return classes[name];
     }, array(type, values) { return values; }}, console: {log(s) { f.logs.push(s); }}});
     f.install = () => vm.runInContext(source, context);
@@ -95,6 +110,8 @@ function fixture(options = {}) {
     f.overseas = () => overseas.invoke({});
     f.plain = () => { const b = new Bundle(); b.values = {DRIVING_MODE_SET: 1};
         return setter.invoke({}, null, b); };
+    f.screen = (value, energy = false) => classes["com.qinggan.app.vehiclesetting.fragments.drivepreference.DrivePreferenceFragment"]
+        [energy ? "setPowerMode" : "setDriveMode"].invoke({}, value);
     f.install();
     f.methods = methods;
     return f;
@@ -124,7 +141,8 @@ for (const options of [{debug: 1}, {mode: "bad"}, {mode: "__proto__"},
     {mode: "INDIVIDUAL", individual: {drive_mode_steeringWheelAssistguest: "bad"}}]) {
     const f = fixture(options); f.reset();
     assert.equal(f.sends.length, 1);
-    assert.equal(f.sends[0].vehicle, f.originalBundle, JSON.stringify(options));
+    const sent = {...f.sends[0].vehicle.values}; delete sent.__vt_auto;
+    assert.deepEqual(sent, f.originalBundle.values, JSON.stringify(options));
 }
 {
     const f = fixture({mode: "INDIVIDUAL", individual: {
@@ -153,12 +171,12 @@ for (const options of [{debug: 1}, {mode: "bad"}, {mode: "__proto__"},
     assert.equal(f.sends[1].vehicle.values.DRIVING_MODE_SET, 3);
     f.install(); f.beforeSend = null; f.reset();
     assert.equal(f.originals, 2); // Re-injection does not wrap the wrapper.
-    assert.ok(f.logs.includes("[drive-reset] hook ready v1 already_installed"));
+    assert.ok(f.logs.includes("[drive-reset] hook ready v2 already_installed"));
 }
 {
     const f = fixture({missingMethod: true});
     assert.ok(f.methods.every(m => m.implementation === null));
-    assert.ok(f.logs.includes("[drive-reset] hook failed stage=install"));
+    assert.ok(f.logs.some(l => l.startsWith("[drive-reset] hook failed stage=install")));
     f.reset(); assert.equal(f.sends[0].vehicle.values.DRIVING_MODE_SET, 1);
 }
 for (const [energy, expected] of Object.entries({SMART: 1, EV: 2, REV: 3, SREV: 4})) {
@@ -177,7 +195,8 @@ for (const energyEnabled of [0, 1]) {
 }
 {
     const f = fixture({energyEnabled: 1, energy: "bad"});
-    f.reset(); assert.equal(f.sends[0].vehicle, f.originalBundle);
+    f.reset(); assert.equal(f.sends[0].vehicle.values.DRIVING_MODE_SET, 1);
+    assert.equal(f.sends[0].vehicle.values.__vt_auto, true);
 }
 for (const maintenance of [0, 1]) {
     const f = fixture({enabled: 0, energyEnabled: 0, maintenance});
@@ -189,3 +208,12 @@ for (const maintenance of [0, 1]) {
     }
 }
 console.log("PASS: drive/energy/suspension targets, stock fields, fallback, thread scope, rollback and no replay");
+
+{
+    const f = fixture(); f.screen(1); f.screen(4, true);
+    assert.equal(f.sends[0].vehicle.values.DRIVING_MODE_SET, 1);
+    assert.equal(f.sends[0].vehicle.values.__vt_user, true);
+    assert.equal(f.sends[1].vehicle.values.IVI_SOC_MODESET, 4);
+    assert.equal(f.sends[1].vehicle.values.__vt_user, true);
+    f.plain(); assert.equal(f.sends[2].vehicle.values.__vt_user, undefined);
+}

@@ -131,7 +131,7 @@ ACC_TARGET=com.qinggan.canbus.service
 ACC_MARK=/data/local/tmp/voyahtune_acc_restore.pid
 ACC_ATTEMPT=/data/local/tmp/voyahtune_acc_restore.attempt
 ACC_LOG=/data/local/tmp/voyahtune_acc_restore.txt
-ACC_READY_MARKER='[acc-restore] hook ready v1'
+ACC_READY_MARKER='[acc-restore] hook ready v2'
 ACC_POLL_SECONDS=0.1
 ACC_PRIORITY_MAX_SECONDS=45
 DRIVE_RESET=/data/local/bin/voyahtune_drive_reset.js
@@ -139,7 +139,7 @@ DRIVE_RESET_MARK=/data/local/tmp/voyahtune_drive_reset.pid
 DRIVE_RESET_ATTEMPT=/data/local/tmp/voyahtune_drive_reset.attempt
 DRIVE_RESET_LOG=/data/local/tmp/voyahtune_drive_reset.txt
 DRIVE_RESET_TARGET=com.qinggan.app.vehiclesetting
-DRIVE_RESET_READY_MARKER='[drive-reset] hook ready v1'
+DRIVE_RESET_READY_MARKER='[drive-reset] hook ready v2'
 KEYBOARD_EN=/data/local/bin/keyboard_lock_en.js
 KEYBOARD_RU=/data/local/bin/keyboard_ru.js
 VDMARK=/data/local/tmp/voyahtune_vd.pid          # exact identity system_server с vd_bypass
@@ -1237,15 +1237,79 @@ inject_acc_restore() {
     return 1
 }
 
+# Drive agents alone are recoverable in the same target process. A pulse verifies the
+# living JS agent, not merely a historical ready marker. Retries never send mode commands.
+prepare_drive_health() {
+    mkdir -p /data/local/open_voyah/drive_hooks
+    [ -e "$1" ] || : > "$1"
+    chown 1000:1000 "$1" 2>/dev/null || :
+    chmod 600 "$1" 2>/dev/null || :
+}
+
+drive_agent_state() {
+    DA_ID=$1; DA_PID=$2; DA_MARK=$3; DA_ATTEMPT=$4; DA_HEALTH=$5; DA_LOG=$6
+    load_runtime_hook_state "$DA_ID" "$DA_MARK" "$DA_ATTEMPT"
+    [ -n "$DA_ID" ] || return 0
+    [ -d /data/local/open_voyah/drive_hooks ] || mkdir -p /data/local/open_voyah/drive_hooks
+    DA_RETRY="/data/local/open_voyah/drive_hooks/${DA_ATTEMPT##*/}.retry"
+    DA_NOW=$(uptime_seconds)
+    DA_OLD=; DA_COUNT=0; DA_NEXT=0; DA_SINCE=0
+    if [ -r "$DA_RETRY" ]; then
+        IFS='|' read -r DA_OLD DA_COUNT DA_NEXT DA_SINCE < "$DA_RETRY" || :
+    fi
+    if [ "$DA_OLD" != "$DA_ID" ]; then DA_COUNT=0; DA_NEXT=0; DA_SINCE=$DA_NOW; fi
+    case "$DA_COUNT:$DA_NEXT:$DA_SINCE" in *[!0-9:]*|::*|*::*) DA_COUNT=0; DA_NEXT=0; DA_SINCE=$DA_NOW ;; esac
+    if [ "$RUNTIME_STATE" = active ]; then
+        DA_HP=; DA_HT=; DA_HV=
+        if [ -r "$DA_HEALTH" ]; then IFS='|' read -r DA_HP DA_HT DA_HV < "$DA_HEALTH" || :; fi
+        case "$DA_HT" in ''|*[!0-9]*) DA_HT=0 ;; esac
+        if [ "$DA_HP" = "$DA_PID" ] && [ "$DA_HV" = v2 ] && [ "$DA_HT" -le "$DA_NOW" ] \
+                && [ $((DA_NOW - DA_HT)) -lt 15 ]; then
+            # Healthy sessions reset backoff. Reusing an old PID still requires the new identity marker.
+            printf '%s|0|0|%s\n' "$DA_ID" "$DA_NOW" > "$DA_RETRY"
+            return 0
+        fi
+        [ $((DA_NOW - DA_SINCE)) -ge 15 ] || return 0
+        loge "drive agent pulse expired pid=$DA_PID; reinstall without target restart"
+        rm -f "$DA_MARK"
+        RUNTIME_STATE=failed
+    fi
+    if [ "$RUNTIME_STATE" = failed ]; then
+        if [ "$DA_COUNT" -ge 4 ] && grep -Eq 'hook failed.*(ClassNotFoundException|TypeError|specified argument types)' "$DA_LOG.try"; then
+            return 0
+        fi
+        [ "$DA_NOW" -ge "$DA_NEXT" ] || return 0
+        rm -f "$DA_ATTEMPT"
+        RUNTIME_STATE=waiting
+    fi
+    if [ "$RUNTIME_STATE" = waiting ]; then
+        DA_COUNT=$((DA_COUNT + 1))
+        case "$DA_COUNT" in 1) DA_DELAY=1 ;; 2) DA_DELAY=2 ;; 3) DA_DELAY=5 ;; *) DA_DELAY=30 ;; esac
+        # The completed attempt sets the next deadline again: backoff starts after the injector exits.
+        printf '%s|%s|%s|%s\n' "$DA_ID" "$DA_COUNT" "$((DA_NOW + DA_DELAY))" "$DA_NOW" > "$DA_RETRY"
+        prepare_drive_health "$DA_HEALTH"
+    fi
+}
+
+drive_agent_attempt_finished() {
+    DF_RETRY="/data/local/open_voyah/drive_hooks/${1##*/}.retry"
+    DF_ID=; DF_COUNT=0; DF_NEXT=0; DF_SINCE=0
+    IFS='|' read -r DF_ID DF_COUNT DF_NEXT DF_SINCE < "$DF_RETRY" || return 0
+    DF_NOW=$(uptime_seconds)
+    case "$DF_COUNT" in 1) DF_DELAY=1 ;; 2) DF_DELAY=2 ;; 3) DF_DELAY=5 ;; *) DF_DELAY=30 ;; esac
+    printf '%s|%s|%s|%s\n' "$DF_ID" "$DF_COUNT" "$((DF_NOW + DF_DELAY))" "$DF_NOW" > "$DF_RETRY"
+}
+
 acc_cycle() {
     ACC_PID=$(pidof "$ACC_TARGET" 2>/dev/null)
     ACC_PID=${ACC_PID%% *}
     ACC_ID=$(process_identity "$ACC_PID" "$ACC_TARGET" 2>/dev/null) || ACC_ID=
-    load_runtime_hook_state "$ACC_ID" "$ACC_MARK" "$ACC_ATTEMPT"
+    drive_agent_state "$ACC_ID" "$ACC_PID" "$ACC_MARK" "$ACC_ATTEMPT" /data/local/open_voyah/drive_hooks/voyahtune_acc_restore.health "$ACC_LOG"
     ACC_STATE=$RUNTIME_STATE
     if [ -n "$ACC_ID" ] && [ "$ACC_STATE" = waiting ]; then
         write_worker_state injecting "$ACC_PID" "$ACC_ID"
         if inject_acc_restore "$ACC_PID" "$ACC_ID"; then ACC_STATE=active; else ACC_STATE=failed; fi
+        drive_agent_attempt_finished "$ACC_ATTEMPT"
     fi
     write_worker_state "$ACC_STATE" "$ACC_PID" "$ACC_ID"
     # Fine-grained discovery until the process appears; quiet once its one attempt is consumed.
@@ -1259,9 +1323,10 @@ drive_reset_cycle() {
     DRIVE_RESET_PID=$(pidof "$DRIVE_RESET_TARGET" 2>/dev/null)
     DRIVE_RESET_PID=${DRIVE_RESET_PID%% *}
     DRIVE_RESET_ID=$(process_identity "$DRIVE_RESET_PID" "$DRIVE_RESET_TARGET" 2>/dev/null) || DRIVE_RESET_ID=
-    load_runtime_hook_state "$DRIVE_RESET_ID" "$DRIVE_RESET_MARK" "$DRIVE_RESET_ATTEMPT"
+    drive_agent_state "$DRIVE_RESET_ID" "$DRIVE_RESET_PID" "$DRIVE_RESET_MARK" "$DRIVE_RESET_ATTEMPT" /data/local/open_voyah/drive_hooks/voyahtune_drive_reset.health "$DRIVE_RESET_LOG"
     if [ -n "$DRIVE_RESET_ID" ] && [ "$RUNTIME_STATE" = waiting ]; then
         inject_drive_reset "$DRIVE_RESET_PID" "$DRIVE_RESET_ID" || :
+        drive_agent_attempt_finished "$DRIVE_RESET_ATTEMPT"
     fi
 }
 

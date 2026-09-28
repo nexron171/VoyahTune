@@ -88,6 +88,7 @@ final class VehicleRestorePolicy {
         if ("EV".equals(mode)) return SOC_EV;
         if ("REV".equals(mode)) return SOC_REV;
         if ("SREV".equals(mode)) return SOC_SREV;
+        if ("FORCE_EV".equals(mode)) return SOC_FORCE_EV;
         throw new IllegalArgumentException("Unsupported energy mode: " + mode);
     }
 
