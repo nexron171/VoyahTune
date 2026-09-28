@@ -195,6 +195,13 @@ public class MainActivity extends AppCompatActivity {
         int target = VehicleRestorePolicy.SOC_FORCE_EV;
         if (!on) {
             String savedEnergy = currentSavedMode(context, "energy");
+            if ("FORCE_EV".equals(savedEnergy)) {
+                try {
+                    android.os.Bundle snapshot = context.getContentResolver().call(
+                            MODES_PROVIDER_URI, "driveHookV2", "snapshot", null);
+                    savedEnergy = snapshot == null ? "EV" : snapshot.getString("configuredEnergy", "EV");
+                } catch (RuntimeException e) { savedEnergy = "EV"; }
+            }
             try {
                 target = VehicleRestorePolicy.requireEnergy(savedEnergy);
             } catch (IllegalArgumentException e) {

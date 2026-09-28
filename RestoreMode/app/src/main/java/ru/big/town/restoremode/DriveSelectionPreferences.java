@@ -97,6 +97,7 @@ final class DriveSelectionPreferences {
         result.putInt("protocol", 2);
         result.putString("mode", read(prefs).effective());
         result.putString("energy", energy(prefs));
+        result.putString("configuredEnergy", prefs.getString("energy", "SREV"));
         result.putLong("revision", prefs.getLong(REV, 0));
         result.putLong("cycle", prefs.getLong(CYCLE, 0));
         result.putInt("acc", prefs.getInt(ACC, -1));
