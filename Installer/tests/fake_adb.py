@@ -35,6 +35,7 @@ def main():
    print('Success');return 1 if s.get('failPrepareCommand') else 0
   elif args[0]=='reboot':
    if s.get('failReboot'):print('injected reboot failure',file=sys.stderr);return 1
+   s.setdefault('locksAtReboot',[]).append(remote('/data/local/voyahtune-install.lock').exists())
    s['reboots']=s.get('reboots',0)+1;s['boot']=str(s['reboots']);s['root']=False
    put('/proc/sys/kernel/random/boot_id',s['boot']+'\n')
    package='ru.big.town.anative';path='/system/priv-app/Native/Native.apk'
@@ -75,6 +76,7 @@ def main():
    if s.get('failShell') and s['failShell'] in script:print('injected shell failure',file=sys.stderr);return 1
    if script.strip()=='/data/local/bin/voyahtune-updater --version':
     print(json.dumps({'version':'0.1.0','ipcSchema':1}));return 0
+   script=script.replace('/data/local/bin/voyahtune-updater --version', "printf '%s\\n' '{\"version\":\"0.1.0\",\"ipcSchema\":1}'")
    if 'sh /data/local/tmp/open_voyah_dns_overlay.sh' in script:
     # The DNS helper has separate repository tests; emulate only its host protocol here.
     if 'restore' in script:shutil.rmtree(remote('/data/local/open_voyah/qgdns'),ignore_errors=True)
@@ -119,6 +121,10 @@ def main():
  elif name=='cmd':
   if args[:2]!=['package','install-existing']:raise RuntimeError(args)
   package=args[-1];s['packages'][package]='/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk' if package=='ru.big.town.updater' else '/system/priv-app/Native/Native.apk';save(s);package_data(package);print('Package installed for user: 0')
+ elif name=='timeout':
+  if s.get('postflightTimeout'):return 124
+  try:return subprocess.run(args[1:],timeout=float(args[0])).returncode
+  except subprocess.TimeoutExpired:return 124
  elif name=='dumpsys':
   print('Permissions:')
   if 'canbusOwner' in s:

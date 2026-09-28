@@ -20,6 +20,7 @@ class InstallerTests(unittest.TestCase):
   self.device=self.base/'device'
   for path in ['system/etc/init','system/etc/permissions','system/bin','system/priv-app','data/local/tmp','data/local/bin','proc/sys/kernel/random','sdcard/tmp']:(self.device/path).mkdir(parents=True,exist_ok=True)
   (self.device/'system/bin/sh').symlink_to('/bin/sh');(self.device/'proc/sys/kernel/random/boot_id').write_text('0\n')
+  (self.device/'system/bin/timeout').symlink_to(self.bundle/'adb/fake-adb')
   self.state={'root':False,'packages':{'android':'/system/framework/framework-res.apk','com.qinggan.canbus.service':'/system/canbus.apk','com.qinggan.keymanager.service':'/system/keys.apk'},'settings':{}}
   self.write_state();self.env={**os.environ,'VOYAH_FAKE_ROOT':str(self.base)}
  def tearDown(self):self.tmp.cleanup()
@@ -78,6 +79,29 @@ class InstallerTests(unittest.TestCase):
   self.assertNotEqual(result.returncode,0)
   self.assertEqual((lock/'owner').read_text(),'ota')
   self.assertFalse((self.device/'system/priv-app/Native/Native.apk').exists())
+ def test_final_reboot_happens_after_unlock_for_install_and_remove(self):
+  self.seed_apps()
+  self.apply(self.plan())
+  self.assertFalse(self.read_state()['locksAtReboot'][-1])
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+  self.apply(self.plan('remove'))
+  self.assertFalse(self.read_state()['locksAtReboot'][-1])
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+ def test_failed_unlock_blocks_final_reboot_and_success(self):
+  self.seed_apps();self.state['failShell']='# release desktop installation lock';self.write_state()
+  result=self.apply(self.plan(),okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertEqual(self.read_state().get('reboots',0),0)
+  self.assertTrue((self.device/'data/local/voyahtune-install.lock/owner').exists())
+ def test_postflight_timeout_releases_its_lock_and_reports_failure(self):
+  self.seed_apps();self.state['postflightTimeout']=True;self.write_state()
+  result=self.apply(self.plan(),okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertFalse(self.read_state()['locksAtReboot'][-1])
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+  reports=list((self.base/'logs').rglob('report.json'))
+  self.assertEqual(len(reports),1)
+  self.assertFalse(json.loads(reports[0].read_text())['success'])
  def test_remove_does_not_verify_old_or_broken_signatures(self):
   self.seed_apps(old_key=True,broken=True)
   p=self.plan('remove');self.assertTrue(all(not app['signers'] for app in p['inventory']['packages'].values()))

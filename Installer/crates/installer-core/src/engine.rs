@@ -28,6 +28,31 @@ use std::{
 const STOP_LOADER: &str = "pkill -f /data/local/bin/load.bin; stop_status=$?; if [ $stop_status -gt 1 ]; then exit $stop_status; fi\n";
 const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
 const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
+// Postflight commands may repair package registration. Keep each command exclusive,
+// but let the device release its lock even if the desktop disconnects.
+fn postflight_script(script: &str, owner: &str) -> String {
+    let owner = quote(owner);
+    format!(
+        r#"lock=/data/local/voyahtune-install.lock
+[ ! -L "$lock" ] || exit 1
+mkdir "$lock" 2>/dev/null || {{ echo 'OTA или другой установщик уже использует ГУ'; exit 1; }}
+release_postflight_lock() {{
+    [ "$(cat "$lock/owner" 2>/dev/null)" = {owner} ] || return 1
+    rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" && sync
+}}
+printf '%s' {owner} > "$lock/owner" || {{ rmdir "$lock"; exit 1; }}
+trap 'release_postflight_lock' EXIT
+trap 'exit 1' HUP INT TERM
+cat /proc/sys/kernel/random/boot_id > "$lock/boot" && chmod 700 "$lock" || exit 1
+/system/bin/timeout 60 /system/bin/sh -c {command}
+command_status=$?
+release_postflight_lock || exit 1
+trap - EXIT
+exit "$command_status"
+"#,
+        command = quote(script)
+    )
+}
 pub struct Engine {
     pub adb: Adb,
     pub payload: Payload,
@@ -72,8 +97,14 @@ impl Engine {
                 "Подтвердите найденный автомобиль и план операции",
             ));
         }
-        let result = self.execute(request);
-        self.ota_unlock();
+        let mut result = self.execute(request);
+        if let Err(error) = self.ota_unlock() {
+            if result.is_ok() {
+                result = Err(error);
+            } else {
+                self.warning(&error);
+            }
+        }
         if result.is_err() {
             self.ignore("if [ -x /data/local/bin/voyahtune-updater ]; then setprop ctl.start voyahtune_updater; fi\n");
         }
@@ -151,10 +182,25 @@ impl Engine {
         }
     }
     fn raw(&self, args: &[&str]) -> Result<crate::adb::Output> {
-        self.adb.run(args, None, Duration::MAX)
+        let timeout = if self.adb.step.as_deref() == Some("verify") {
+            Duration::from_secs(if args == ["wait-for-device"] { 180 } else { 30 })
+        } else {
+            Duration::MAX
+        };
+        self.adb.run(args, None, timeout)
     }
     fn shell(&self, script: &str) -> Result<String> {
-        self.adb.shell(script, Duration::MAX)
+        if self.adb.step.as_deref() == Some("verify") {
+            self.adb.shell(script, Duration::from_secs(30))
+        } else {
+            self.adb.shell(script, Duration::MAX)
+        }
+    }
+    fn postflight_shell(&self, script: &str) -> Result<String> {
+        self.adb.shell(
+            &postflight_script(script, &format!("desktop:{}:postflight", self.operation.id)),
+            Duration::from_secs(90),
+        )
     }
     fn ignore(&self, script: &str) {
         if let Err(e) = self.shell(script) {
@@ -266,27 +312,32 @@ impl Engine {
                 "Перезагрузка автомобиля",
                 |e| {
                     e.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
+                    e.ota_unlock()?;
                     e.raw(&["reboot"])?.checked("ADB не принял перезагрузку")?;
                     e.restart_loader = false;
                     Ok(())
                 },
             )?;
-            self.step("verify", "Проверка Native и готовности OTA", |e| {
-                e.wait_boot(true)?;
-                e.native_ready()?;
-                e.updater_ready()?;
-                let service = e.shell("getprop init.svc.voyahtune_updater\n")?;
-                if service != "running" {
-                    return Err(e.fail("Root-служба OTA не запустилась", service));
-                }
-                let version: serde_json::Value = serde_json::from_str(
-                    &e.shell("/data/local/bin/voyahtune-updater --version\n")?,
-                )?;
-                if version["ipcSchema"] != 1 {
-                    return Err(e.fail("Несовместимый IPC updater", version));
-                }
-                Ok(())
-            })?;
+            self.step(
+                "verify",
+                "Проверка Native и готовности OTA",
+                |e| {
+                    e.wait_boot(true)?;
+                    e.native_ready()?;
+                    e.updater_ready()?;
+                    let service = e.shell("getprop init.svc.voyahtune_updater\n")?;
+                    if service != "running" {
+                        return Err(e.fail("Root-служба OTA не запустилась", service));
+                    }
+                    let version: serde_json::Value = serde_json::from_str(
+                        &e.shell("/data/local/bin/voyahtune-updater --version\n")?,
+                    )?;
+                    if version["ipcSchema"] != 1 {
+                        return Err(e.fail("Несовместимый IPC updater", version));
+                    }
+                    Ok(())
+                },
+            )?;
         } else {
             self.step("deactivate", "Отключение Apollo", |e| {
                 e.apollo_safe(false)?;
@@ -328,6 +379,7 @@ impl Engine {
                 "reboot",
                 "Перезагрузка автомобиля",
                 |e| {
+                    e.ota_unlock()?;
                     e.raw(&["reboot"])?.checked("ADB не принял перезагрузку")?;
                     Ok(())
                 },
@@ -353,13 +405,22 @@ printf '%s' {owner} > "$lock/owner" && printf '%s' "$boot" > "$lock/boot" && chm
         self.ota_locked = true;
         Ok(())
     }
-    fn ota_unlock(&mut self) {
+    fn ota_unlock(&mut self) -> Result<()> {
         if !self.ota_locked {
-            return;
+            return Ok(());
         }
         let owner = quote(&format!("desktop:{}", self.operation.id));
-        self.ignore(&format!("if [ \"$(cat /data/local/voyahtune-install.lock/owner 2>/dev/null)\" = {owner} ]; then rm -f /data/local/voyahtune-install.lock/owner /data/local/voyahtune-install.lock/boot; rmdir /data/local/voyahtune-install.lock; fi\n"));
+        self.adb.shell(&format!(r#"# release desktop installation lock
+lock=/data/local/voyahtune-install.lock
+[ ! -L "$lock" ] || exit 1
+if [ -d "$lock" ]; then
+    [ "$(cat "$lock/owner" 2>/dev/null)" = {owner} ] || {{ echo 'Владелец блокировки изменился'; exit 1; }}
+    rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" || exit 1
+fi
+[ ! -e "$lock" ] && sync
+"#), Duration::from_secs(30))?;
         self.ota_locked = false;
+        Ok(())
     }
     fn ota_prepare(&mut self) -> Result<()> {
         self.ota_lock()?;
@@ -847,10 +908,14 @@ printf '%s' {owner} > "$lock/owner" && printf '%s' "$boot" > "$lock/boot" && chm
                 echo BROKEN
             fi
         "#;
-        self.shell("cmd package install-existing --user 0 --wait ru.big.town.updater\n")?;
+        self.postflight_shell(
+            "cmd package install-existing --user 0 --wait ru.big.town.updater\n",
+        )?;
         if self.shell(READY)? != "READY" {
-            self.shell("am force-stop ru.big.town.updater && pm uninstall -k --user 0 ru.big.town.updater\n")?;
-            self.shell("cmd package install-existing --user 0 --wait ru.big.town.updater\n")?;
+            self.postflight_shell("am force-stop ru.big.town.updater && pm uninstall -k --user 0 ru.big.town.updater\n")?;
+            self.postflight_shell(
+                "cmd package install-existing --user 0 --wait ru.big.town.updater\n",
+            )?;
         }
         if self.shell(READY)? != "READY" {
             return Err(self.fail(
@@ -862,13 +927,17 @@ printf '%s' {owner} > "$lock/owner" && printf '%s' "$boot" > "$lock/boot" && chm
     }
     fn native_ready(&self) -> Result<()> {
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
-            self.shell("pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true\n")?;
-            self.shell("cmd package install-existing --user 0 --wait ru.big.town.anative\n")?;
+            self.postflight_shell(
+                "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true\n",
+            )?;
+            self.postflight_shell(
+                "cmd package install-existing --user 0 --wait ru.big.town.anative\n",
+            )?;
         }
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
             return Err(self.fail("PackageManager не создал CE/DE Native", NATIVE));
         }
-        self.shell(c::NATIVE_BROADCAST)?;
+        self.postflight_shell(c::NATIVE_BROADCAST)?;
         for _ in 0..20 {
             if !self
                 .shell("pidof ru.big.town.anative\n")
