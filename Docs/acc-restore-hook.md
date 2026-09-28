@@ -103,3 +103,10 @@ JS-agent проверяет наличие собственных перехва
 `/data/local/open_voyah` очищает их вместе с heartbeat. Схема payload и команды
 установщика не меняются. Публичный hook-status v1 не расширен; подробное состояние
 проверяется по файлам, логам `VoyahAccRestore`/`VoyahDriveReset` и provider `driveHookV2`.
+
+На проверенном ГУ поиск объекта через Frida `Java.choose` несовместим с 32-битным ART
+(`Heap::GetInstances`, SIGSEGV). Агент получает CAN-компонент через существующую
+ссылку `ActivityThread.mServices` и не перечисляет heap. Loader блокирует повторные
+инъекции после трёх быстрых смен identity CAN-службы (интервал менее 60 секунд);
+блокировка снимается новым скриптом или новой загрузкой Android. Каталоги служебного
+состояния имеют 0711 для прохода OEM UID, heartbeat — 0600 system:system.

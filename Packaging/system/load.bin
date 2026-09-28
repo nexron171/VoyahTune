@@ -1241,6 +1241,8 @@ inject_acc_restore() {
 # living JS agent, not merely a historical ready marker. Retries never send mode commands.
 prepare_drive_health() {
     mkdir -p /data/local/open_voyah/drive_hooks
+    # OEM UID can traverse these directories; contents remain unlistable and files private.
+    chmod 711 /data/local/open_voyah /data/local/open_voyah/drive_hooks
     [ -e "$1" ] || : > "$1"
     chown 1000:1000 "$1" 2>/dev/null || :
     chmod 600 "$1" 2>/dev/null || :
@@ -1253,6 +1255,33 @@ drive_agent_state() {
     [ -d /data/local/open_voyah/drive_hooks ] || mkdir -p /data/local/open_voyah/drive_hooks
     DA_RETRY="/data/local/open_voyah/drive_hooks/${DA_ATTEMPT##*/}.retry"
     DA_NOW=$(uptime_seconds)
+    # Do not turn an injected-agent crash into an OEM service restart loop.
+    DA_CRASH="${DA_RETRY%.retry}.crash"
+    DA_AGENT=${DA_LOG##*/}; DA_AGENT=${DA_AGENT%.txt}
+    DA_IMAGE=$(cksum "/data/local/bin/$DA_AGENT.js" 2>/dev/null | awk '{print $1}')
+    DA_BOOT=${DA_ID%:*}; DA_BOOT=${DA_BOOT%:*}
+    DC_IMAGE=; DC_BOOT=; DC_ID=; DC_AT=0; DC_COUNT=0
+    if [ -r "$DA_CRASH" ]; then
+        IFS='|' read -r DC_IMAGE DC_BOOT DC_ID DC_AT DC_COUNT < "$DA_CRASH" || :
+    fi
+    case "$DC_AT:$DC_COUNT" in *[!0-9:]*|:|:*) DC_AT=0; DC_COUNT=0 ;; esac
+    if [ "$DC_IMAGE" != "$DA_IMAGE" ] || [ "$DC_BOOT" != "$DA_BOOT" ]; then
+        DC_ID=; DC_AT=0; DC_COUNT=0
+    fi
+    if [ "$DC_COUNT" -ge 3 ]; then RUNTIME_STATE=failed; return 0; fi
+    if [ -n "$DC_ID" ] && [ "$DC_ID" != "$DA_ID" ]; then
+        if [ $((DA_NOW - DC_AT)) -lt 60 ]; then DC_COUNT=$((DC_COUNT + 1)); else DC_COUNT=0; fi
+        if [ "$DC_COUNT" -ge 3 ]; then
+            printf '%s|%s|%s|%s|%s\n' "$DA_IMAGE" "$DA_BOOT" "$DA_ID" "$DA_NOW" "$DC_COUNT" > "$DA_CRASH"
+            loge "drive agent blocked after rapid target restarts: $DA_AGENT; needs new script or boot"
+            RUNTIME_STATE=failed
+            return 0
+        fi
+    fi
+    if [ "$DC_ID" != "$DA_ID" ]; then
+        printf '%s|%s|%s|%s|%s\n' "$DA_IMAGE" "$DA_BOOT" "$DA_ID" "$DA_NOW" "$DC_COUNT" > "$DA_CRASH"
+    fi
+
     DA_OLD=; DA_COUNT=0; DA_NEXT=0; DA_SINCE=0
     if [ -r "$DA_RETRY" ]; then
         IFS='|' read -r DA_OLD DA_COUNT DA_NEXT DA_SINCE < "$DA_RETRY" || :

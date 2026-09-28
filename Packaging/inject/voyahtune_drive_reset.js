@@ -36,7 +36,10 @@ Java.perform(function () {
         System.setProperty(SENTINEL + ".pulse", String(now));
         try {
             var out = FileWriter.$new(HEALTH_PATH, false);
-            try { out.write(String(Process.myPid()) + "|" + Math.floor(now / 1000) + "|v2\n"); }
+            try {
+                var line = String(Process.myPid()) + "|" + Math.floor(now / 1000) + "|v2\n";
+                out.write.overload("java.lang.String", "int", "int").call(out, line, 0, line.length);
+            }
             finally { out.close(); }
         } catch (e) { log("health write unavailable: " + e); }
     }

@@ -108,9 +108,17 @@ function fixture(options = {}) {
     const classes = {
         "android.os.SystemClock": {elapsedRealtime() { return 100000; }},
         "android.os.Process": {myPid() { return 1; }},
-        "java.io.FileWriter": {$new() { return {write() {}, close() {}}; }},
+        "java.io.FileWriter": {$new() { return {write: {overload() { return {call(out, line) { f.health = line; }}; }}, close() {}}; }},
         "android.os.Binder": {getCallingUid() { return f.caller ?? -1; }, clearCallingIdentity() { return 0; }, restoreCallingIdentity() {}},
-        "android.app.ActivityThread": {currentApplication() { return {getContentResolver() { return {}; },
+        "com.qinggan.canbus.service.CanBusService": {},
+        "android.app.ActivityThread": {currentActivityThread() {
+            let seen = false;
+            return {mServices: {value: {values() { return {iterator() { return {
+                hasNext() { return !seen; }, next() { seen = true; return {
+                    getClass() { return {getName() { return "com.qinggan.canbus.service.CanBusService"; }}; },
+                    mCanBusComponent: {value: receiver}}; }
+            }; }}; }}}};
+        }, currentApplication() { return {getContentResolver() { return {}; },
             getPackageManager() { return {getApplicationInfo(name) { return {uid: {value: name === "ru.big.town.anative" ? 10 : 20}}; }}; }}; }},
         "com.qinggan.canbus.VehicleState": {valueOf(s) { return s; }},
         "com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl$ModeSettingTask": {$init: taskInit, setVehicleMode: taskSend},
@@ -152,6 +160,7 @@ function fixture(options = {}) {
     f.request = (values, caller = -1) => { f.caller = caller; const b = new Bundle(); b.values = values;
         try { return setter.invoke(receiver, null, b); } finally { f.caller = -1; }};
     f.install();
+    if (!f.missingMethod) assert.equal(f.health, "1|100|v2\n");
     assert.equal(f.queries, 0, "Installation must not wait for a settings provider");
     if (!f.missingMethod) assert.ok(f.logs.includes("[acc-restore] hook ready v2"));
     f.methods = methods;
@@ -270,3 +279,5 @@ console.log("PASS: guest ACC edge, modes, feedback/color, stock parser, isolatio
     assert.equal(f.sends[1].vehicle.values.IVI_SOC_MODESET, 4);
     assert.equal(f.sends[1].vehicle.values.__vt_auto, undefined);
 }
+
+assert.ok(!source.includes("Java.choose("), "Never enumerate the heap of the 32-bit OEM service");

@@ -76,7 +76,7 @@ function fixture(options = {}) {
     const classes = {
         "android.os.SystemClock": {elapsedRealtime() { return 100000; }},
         "android.os.Process": {myPid() { return 1; }},
-        "java.io.FileWriter": {$new() { return {write() {}, close() {}}; }},
+        "java.io.FileWriter": {$new() { return {write: {overload() { return {call(out, line) { f.health = line; }}; }}, close() {}}; }},
         "android.util.Log": {i() {}},
         "java.lang.System": {getProperty(k, fallback) { return properties.get(k) ?? fallback; },
             setProperty(k, v) { properties.set(k, v); }},
@@ -113,6 +113,7 @@ function fixture(options = {}) {
     f.screen = (value, energy = false) => classes["com.qinggan.app.vehiclesetting.fragments.drivepreference.DrivePreferenceFragment"]
         [energy ? "setPowerMode" : "setDriveMode"].invoke({}, value);
     f.install();
+    if (!f.missingMethod) assert.equal(f.health, "1|100|v2\n");
     f.methods = methods;
     return f;
 }

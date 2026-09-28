@@ -231,6 +231,17 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / "proc/uptime").write_text("116.00 0\n")
         self.until(lambda: self.events().count("start voyahtune_acc_restore.js") == 2, "Expired pulse not repaired")
 
+    def test_rapid_canbus_restarts_stop_injection(self):
+        self.start()
+        self.until(lambda: self.state("acc") == "active", "ACC not ready")
+        for generation in [2, 3]:
+            (self.root / "generation.107").write_text(str(generation) + "\n")
+            self.until(lambda: self.events().count("start voyahtune_acc_restore.js") == generation, "Restart not injected")
+            self.until(lambda: self.state("acc") == "active", "Restart not ready")
+        (self.root / "generation.107").write_text("4\n")
+        self.until(lambda: self.state("acc") == "failed", "Rapid restarts not blocked")
+        self.assertEqual(3, self.events().count("start voyahtune_acc_restore.js"))
+
     def test_fresh_acc_pulse_keeps_existing_agent(self):
         self.start()
         self.until(lambda: self.state("acc") == "active", "ACC not ready")

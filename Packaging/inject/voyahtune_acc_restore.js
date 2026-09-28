@@ -35,7 +35,10 @@ Java.perform(function () {
         System.setProperty(SENTINEL + ".pulse", String(now));
         try {
             var out = FileWriter.$new(HEALTH_PATH, false);
-            try { out.write(String(Process.myPid()) + "|" + Math.floor(now / 1000) + "|v2\n"); }
+            try {
+                var line = String(Process.myPid()) + "|" + Math.floor(now / 1000) + "|v2\n";
+                out.write.overload("java.lang.String", "int", "int").call(out, line, 0, line.length);
+            }
             finally { out.close(); }
         } catch (e) { log("health write unavailable: " + e); }
     }
@@ -339,10 +342,20 @@ Java.perform(function () {
         function discoverAndBootstrap() {
             if (bootstrapDone) return;
             if (selectedComponent !== null) { bootstrap(selectedComponent); return; }
-            Java.choose("com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl", {
-                onMatch: function (instance) { selectedComponent = Java.retain(instance); return "stop"; },
-                onComplete: function () { if (selectedComponent !== null) bootstrap(selectedComponent); }
-            });
+            // H97X uses 32-bit ART: heap enumeration (Java.choose/GetInstances) crashes it.
+            // ActivityThread already owns the live service; follow that reference instead.
+            var thread = ActivityThread.currentActivityThread();
+            if (thread === null) return;
+            var services = thread.mServices.value.values().iterator();
+            while (services.hasNext()) {
+                var service = services.next();
+                if (String(service.getClass().getName()) !== "com.qinggan.canbus.service.CanBusService") continue;
+                var owner = Java.cast(service, Java.use("com.qinggan.canbus.service.CanBusService"));
+                var component = owner.mCanBusComponent.value;
+                if (component !== null) selectedComponent = Java.retain(Java.cast(component, Component));
+                break;
+            }
+            if (selectedComponent !== null) bootstrap(selectedComponent);
         }
         setTimeout(function retryReadiness() {
             Java.perform(function () {
