@@ -19,6 +19,11 @@ public class DriveSelectionPolicyTest {
         assertEquals("OUTING", state.effective());
         assertSame(state, state.select("OUTING", FEEDBACK, false));
     }
+    @Test public void originFreeFeedbackCannotChangeAnySelection() {
+        DriveSelectionPolicy state = initial().select("OUTING", WIDGET, true);
+        assertSame(state, state.select("ECO", FEEDBACK, true));
+        assertEquals("OUTING", state.nextTrip().effective());
+    }
     @Test public void widgetAlsoSavesLastModeWhenRememberOnBeforeFirstDrive() {
         DriveSelectionPolicy state = initial().select("OUTING", WIDGET, true);
         assertEquals("OUTING", state.configured);
@@ -27,11 +32,12 @@ public class DriveSelectionPolicyTest {
     }
     @Test public void everyOtherSelectionReleasesOverrideWithOrWithoutRemembering() {
         for (boolean remember : new boolean[]{false, true}) {
-            for (String source : new String[]{EXPLICIT, FEEDBACK}) {
+            for (String source : new String[]{EXPLICIT}) {
                 DriveSelectionPolicy state = initial().select("OUTING", WIDGET, remember)
                         .select("SNOW", source, remember);
                 assertEquals("", state.override);
-                assertEquals(remember ? "SNOW" : "INDIVIDUAL", state.effective());
+                assertEquals("SNOW", state.effective());
+                assertEquals(remember ? "SNOW" : "INDIVIDUAL", state.nextTrip().effective());
                 assertEquals("SNOW", state.medium);
             }
         }
@@ -39,7 +45,8 @@ public class DriveSelectionPolicyTest {
     @Test public void explicitSelectionOfSameModeAlsoReleasesWidgetOverride() {
         DriveSelectionPolicy state = initial().select("SPORT", WIDGET, false)
                 .select("SPORT", EXPLICIT, false);
-        assertEquals("INDIVIDUAL", state.effective());
+        assertEquals("SPORT", state.effective());
+        assertEquals("INDIVIDUAL", state.nextTrip().effective());
         assertEquals("", state.override);
     }
     @Test public void historySurvivesSportAndOutingAndDoesNotDependOnRememberFlag() {

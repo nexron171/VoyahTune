@@ -25,7 +25,9 @@ final class DriveSelectionStore {
             if (c != null && c.moveToFirst() && c.getColumnIndex(DriveSelectionPolicy.CONFIGURED) >= 0) {
                 return new DriveSelectionPolicy(c.getString(c.getColumnIndex(DriveSelectionPolicy.CONFIGURED)),
                         c.getString(c.getColumnIndex(DriveSelectionPolicy.OVERRIDE)),
-                        c.getString(c.getColumnIndex(DriveSelectionPolicy.MEDIUM)));
+                        c.getString(c.getColumnIndex(DriveSelectionPolicy.MEDIUM)),
+                        c.getColumnIndex(DriveSelectionPolicy.CURRENT) < 0 ? ""
+                                : c.getString(c.getColumnIndex(DriveSelectionPolicy.CURRENT)));
             }
         } catch (RuntimeException e) { Log.w("DriveSelection", "Read failed", e); }
         return null;

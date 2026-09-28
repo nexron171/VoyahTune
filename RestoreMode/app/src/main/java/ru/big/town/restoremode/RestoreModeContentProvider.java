@@ -80,6 +80,15 @@ public class RestoreModeContentProvider extends ContentProvider {
      */
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
+        if ("driveHookV2".equals(method)) {
+            int uid = Binder.getCallingUid();
+            if (uid != 0 && uid != android.os.Process.SYSTEM_UID && uid != android.os.Process.myUid()) {
+                getContext().enforceCallingOrSelfPermission(
+                        "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Drive hook state");
+            }
+            int boot = android.provider.Settings.Global.getInt(getContext().getContentResolver(), "boot_count", -1);
+            return DriveSelectionPreferences.hook(sharedPreferences, arg, extras, boot);
+        }
         if ("otaHealth".equals(method)) {
             int caller = Binder.getCallingUid();
             try {
@@ -199,6 +208,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 DriveSelectionPolicy.OVERRIDE, // 33
                 DriveSelectionPolicy.MEDIUM,   // 34
                 DriveSelectionPolicy.CONFIGURED, // 35
+                DriveSelectionPolicy.CURRENT, // 36
         });
 
         cursor.addRow(new Object[]{
@@ -231,7 +241,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 energyRememberLast ? 1 : 0,
                 recycleRememberLast ? 1 : 0,
                 suspensionMaintenance ? 1 : 0,
-                driveSelection.override, driveSelection.medium, driveSelection.configured,
+                driveSelection.override, driveSelection.medium, driveSelection.configured, driveSelection.current,
         });
        return cursor;
 

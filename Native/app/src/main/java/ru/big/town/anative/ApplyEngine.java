@@ -142,15 +142,8 @@ public final class ApplyEngine {
     static void persistModeFeedbackIfAllowed(
             Context context, String modeKey, String observedMode) {
         if ("driveMode".equals(modeKey)) {
-            boolean accept;
-            synchronized (RESTORE_LOCK) {
-                MODE_SYNC_POLICY.observe(modeKey, observedMode);
-                accept = MODE_SYNC_POLICY.canAcceptDriveSelection();
-            }
-            // This also releases a widget override when remember-last is disabled.
-            // It never requests a restore; the next normal trigger reads the effective target.
-            if (accept) DriveSelectionStore.record(context, observedMode,
-                    ru.big.town.common.DriveSelectionPolicy.FEEDBACK);
+            MODE_SYNC_POLICY.observe(modeKey, observedMode);
+            // Origin-free callbacks are observations, never user intent.
             return;
         }
         final long gateGeneration;
