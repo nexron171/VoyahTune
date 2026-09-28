@@ -1,4 +1,5 @@
 //! Release catalog, verified downloads and offline cache. No vehicle commands here.
+mod download;
 use crate::{
     compatibility::INSTALLER_VERSION,
     payload::{self, Payload},
@@ -90,7 +91,7 @@ fn agent(seconds: u64) -> ureq::Agent {
         .max_redirects(5)
         .timeout_global(Some(Duration::from_secs(seconds)))
         .timeout_connect(Some(Duration::from_secs(10)))
-        .timeout_recv_body(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
         .tls_config(
             ureq::tls::TlsConfig::builder()
                 .root_certs(ureq::tls::RootCerts::PlatformVerifier)
@@ -264,30 +265,13 @@ impl Cache {
                 return Ok(payload);
             }
         }
-        let mut archive = tempfile::NamedTempFile::new_in(&self.root)?;
-        cancelled(cancel)?;
-        let mut response = agent(1800)
-            .get(&release.payload.url)
-            .call()
-            .map_err(network)?;
-        let mut reader = response.body_mut().as_reader();
-        transfer(
-            &mut reader,
-            archive.as_file_mut(),
-            release.payload.size,
-            cancel,
-            progress,
-            "download",
-        )?;
-        if archive.as_file().metadata()?.len() != release.payload.size
-            || payload::sha256(archive.path())? != release.payload.sha256
-        {
-            return Err(Error::new(
-                "DOWNLOAD_HASH",
-                "Размер или SHA-256 загруженного архива не совпадает с каталогом",
-            ));
-        }
-        self.accept(archive.path(), Some(release), cancel, progress)
+        let partials = self.root.join("partial");
+        fs::create_dir_all(&partials)?;
+        let archive = partials.join(format!("{}.part", release.payload.sha256));
+        download::fetch(&agent(120), &release.payload, &archive, cancel, progress)?;
+        let payload = self.accept(&archive, Some(release), cancel, progress)?;
+        fs::remove_file(archive)?;
+        Ok(payload)
     }
     pub fn import(
         &self,

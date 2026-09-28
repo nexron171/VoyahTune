@@ -22,8 +22,8 @@
     return rows.sort((a,b)=>b.version.localeCompare(a.version,undefined,{numeric:true}));
   });
   const nextBlocked = $derived(busy ? (downloadBusy?'Дождитесь загрузки релиза':'Дождитесь завершения проверки') : !action ? 'Не выбрано действие' : action!=='remove'&&!releaseVersion ? 'Не выбран релиз' : !eventsReady ? 'Журнал установки недоступен' : '');
-  const downloadPercent = $derived(downloadProgress?.stage==='download'&&downloadProgress.total>0 ? Math.min(100,Math.round(100*downloadProgress.bytes/downloadProgress.total)) : undefined);
-  const progressText = $derived(downloadProgress?.stage==='verify'?'Проверяем релиз…':downloadProgress?.stage==='extract'?'Распаковываем…':'Скачиваем…');
+  const downloadPercent = $derived((downloadProgress?.stage==='download'||downloadProgress?.stage==='retry')&&downloadProgress.total>0 ? Math.min(100,Math.round(100*downloadProgress.bytes/downloadProgress.total)) : undefined);
+  const progressText = $derived(downloadProgress?.stage==='retry'?'Связь прервана. Продолжаем загрузку…':downloadProgress?.stage==='verify'?'Проверяем релиз…':downloadProgress?.stage==='extract'?'Распаковываем…':'Скачиваем…');
   function showLog(node: HTMLDialogElement) { node.showModal(); return {destroy(){node.close();}}; }
   const stages = ['Выбор действия','Подключение','Проверка','Выполнение','Результат'];
   const operations:{id:Action;name:string;subtitle:string;features:string[];details:string}[] = [
@@ -131,7 +131,7 @@
               </table>
             </div>
           {:else}<p>В каталоге пока нет релизов. Откройте локальный ZIP или папку релиза.</p>{/if}
-          {#if downloadBusy}<div class="download-progress"><div class="download-meter"><div class="download-label" role="status"><span>{progressText}</span><span>{downloadPercent===undefined?'':`${downloadPercent}%`}</span></div><progress aria-label={progressText} max="100" value={downloadPercent}></progress>{#if downloadProgress?.stage==='download'&&downloadProgress.total>0}<small>{(downloadProgress.bytes/1048576).toFixed(1)} из {(downloadProgress.total/1048576).toFixed(1)} МБ</small>{/if}</div><button class="button secondary" onclick={cancelDownload}>Отменить загрузку</button></div>{/if}
+          {#if downloadBusy}<div class="download-progress"><div class="download-meter"><div class="download-label" role="status"><span>{progressText}</span><span>{downloadPercent===undefined?'':`${downloadPercent}%`}</span></div><progress aria-label={progressText} max="100" value={downloadPercent}></progress>{#if (downloadProgress?.stage==='download'||downloadProgress?.stage==='retry')&&downloadProgress.total>0}<small>{(downloadProgress.bytes/1048576).toFixed(1)} из {(downloadProgress.total/1048576).toFixed(1)} МБ</small>{/if}</div><button class="button secondary" onclick={cancelDownload}>Отменить загрузку</button></div>{/if}
           <details><summary>Открыть локальный ZIP или папку</summary><label>Путь к ZIP или релизу<input aria-label="Путь к релизу" type="text" bind:value={localPath} disabled={busy} placeholder="/путь/payload_3.13.0.zip"></label><button class="button secondary" onclick={()=>loadRelease()} disabled={busy||!localPath}>Открыть релиз</button></details>
 
         </section>
