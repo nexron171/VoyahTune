@@ -2,265 +2,262 @@ package ru.big.town.updater;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Intent;
-import android.graphics.Color;
-import android.os.Bundle;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.View;
 import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import org.json.JSONArray;
 import org.json.JSONObject;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** The sole external entry always opens this menu and ignores all Intent data/extras. */
+/** External intents only open this menu; root owns all downloads and installation. */
 public final class MainActivity extends Activity {
-    private static final int EXPORT_LOGS = 1;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final RootClient client = new RootClient();
-    private TextView status;
-    private TextView logs;
-    private EditText catalogUrl;
-    private Button refresh, check, download, install, test;
-    private TextView releaseInfo;
-    private boolean operationBusy, hasRelease, verified, repair;
-    private String noticeShowing;
     private final Handler poll = new Handler(Looper.getMainLooper());
-    private final Runnable tick = new Runnable() { public void run() { if (!busy) refresh(); poll.postDelayed(this, 2000); } };
-    private Button save;
-    private Button showLogs;
-    private Button exportLogs;
-    private boolean busy;
-    private boolean loadedSettings;
-    private String logText = "";
+    private boolean polling, actionBusy, resumed, connected, dnsSupported;
+    private String connectionError = "", commandError = "", noticeShowing;
+    private JSONObject state = new JSONObject(), settings = new JSONObject();
+    private UpdatePresentation presentation;
+    private ProgressBar progress;
+    private Button primary, secondary;
+    private AlertDialog settingsDialog, noticeDialog;
+    private Button settingsSave, settingsRepeat;
+    private TextView settingsMessage;
+    private final Runnable tick = new Runnable() {
+        @Override public void run() {
+            if (!resumed) return;
+            if (!polling && !actionBusy) refresh();
+            poll.postDelayed(this, 2000);
+        }
+    };
 
-    @Override public void onCreate(Bundle state) {
-        super.onCreate(state);
-        // Never read Intent extras, data, URI grants or caller-supplied operation names.
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        int padding = dp(28);
-        content.setPadding(padding, padding, padding, padding);
-        scroll.addView(content);
-        applyWindowInsets(scroll);
-        setContentView(scroll);
-        scroll.requestApplyInsets();
-        text(content, "Обновления VoyahTune", 28);
-        status = text(content, "Подключение к службе…", 19);
-        refresh = button(content, "Обновить состояние", v -> refresh());
-        releaseInfo = text(content, "", 18);
-        check = button(content, "Проверить обновления", v -> action("check", false));
-        download = button(content, "Скачать", v -> action("download", false));
-        install = button(content, "Установить", v -> new AlertDialog.Builder(this)
-            .setTitle("Установить обновление?")
-            .setMessage("Автомобиль должен стоять в P с включённым питанием. Сохраняйте питание до завершения. Головное устройство перезагрузится. При сбое потребуется установка через USB с компьютера.")
-            .setNegativeButton("Отмена", null)
-            .setPositiveButton("Установить и перезагрузить", (dialog, which) -> action("apply", false)).show());
-        test = button(content, "Проверить релиз для повторной установки", v -> action("check", true));
-        text(content, "Повторная установка позволяет проверить обновление на текущей версии.", 15);
-        text(content, "Адрес каталога релизов", 22);
-        catalogUrl = new EditText(this);
-        catalogUrl.setSingleLine(true);
-        catalogUrl.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        catalogUrl.setHint("https://…/index.json");
-        content.addView(catalogUrl);
-        save = button(content, "Сохранить адрес", v -> saveUrl());
-        text(content, "Смена адреса не запускает скачивание или установку.", 16);
-        showLogs = button(content, "Посмотреть логи", v -> loadLogs(false));
-        exportLogs = button(content, "Выгрузить логи", v -> loadLogs(true));
-        button(content, "Скопировать логи", v -> {
-            if (logText.isEmpty()) return;
-            ClipboardManager clipboard = getSystemService(ClipboardManager.class);
-            clipboard.setPrimaryClip(ClipData.newPlainText("VoyahTune updater", logText));
-            Toast.makeText(this, "Логи скопированы", Toast.LENGTH_SHORT).show();
-        });
-        logs = text(content, "", 15);
-        logs.setTextIsSelectable(true);
-        button(content, "Закрыть", v -> finish());
-        refresh();
+    @Override public void onCreate(Bundle saved) {
+        super.onCreate(saved);
+        setContentView(R.layout.activity_updater);
+        applyWindowInsets(findViewById(R.id.root));
+        progress = findViewById(R.id.progress);
+        primary = findViewById(R.id.primary);
+        secondary = findViewById(R.id.secondary);
+        primary.setOnClickListener(v -> primaryAction());
+        secondary.setOnClickListener(v -> perform("check", false));
+        findViewById(R.id.back).setOnClickListener(v -> finish());
+        findViewById(R.id.settings).setOnClickListener(v -> openSettings());
+        render();
     }
-
     private void applyWindowInsets(View root) {
-        // Qinggan's dock overlays the window without reporting an inset.
-        // Match the spacing used by the RestoreMode settings screen.
-        final int nativeDock = dp(145);
-        int statusBarId = getResources().getIdentifier("status_bar_height", "dimen", "android");
-        final int statusBarHeight = statusBarId > 0
-                ? getResources().getDimensionPixelSize(statusBarId) : 0;
-        root.setPadding(nativeDock, statusBarHeight, 0, 0);
+        // Qinggan's dock overlays the app without a reported inset. Keep the
+        // already verified inset contract; layout content never covers the dock.
+        final int dock = dp(145);
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        final int statusBar = id > 0 ? getResources().getDimensionPixelSize(id) : 0;
+        root.setPadding(dock, statusBar, 0, 0);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-            int top = bars.top > 0 ? bars.top : statusBarHeight;
-            view.setPadding(nativeDock + bars.left, top, bars.right, bars.bottom);
+            int left = dock + bars.left, top = bars.top > 0 ? bars.top : statusBar;
+            if (view.getPaddingLeft()!=left || view.getPaddingTop()!=top || view.getPaddingRight()!=bars.right || view.getPaddingBottom()!=bars.bottom)
+                view.setPadding(left, top, bars.right, bars.bottom);
             return insets;
         });
+        root.requestApplyInsets();
     }
-
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        // Opening an existing window also does not dispatch actions from the Intent.
-        refresh();
+        // No extras, URIs or caller-provided commands are accepted.
+        if (!polling && !actionBusy) refresh();
     }
-
-    @Override protected void onResume() { super.onResume(); poll.post(tick); }
-    @Override protected void onPause() { poll.removeCallbacks(tick); super.onPause(); }
-    private void action(String command, boolean sameVersion) {
-        request(command, sameVersion ? "same" : null, result -> refresh());
+    @Override protected void onResume() { super.onResume(); resumed=true; poll.removeCallbacks(tick); poll.post(tick); }
+    @Override protected void onPause() { resumed=false; poll.removeCallbacks(tick); super.onPause(); }
+    @Override protected void onDestroy() {
+        poll.removeCallbacks(tick);
+        if (settingsDialog!=null) settingsDialog.dismiss();
+        if (noticeDialog!=null) noticeDialog.dismiss();
+        worker.shutdown(); super.onDestroy();
+    }
+    private boolean alive() { return !isDestroyed() && !isFinishing(); }
+    private JSONObject request(String command) throws Exception { return new JSONObject().put("command",command); }
+    private void accept(JSONObject response) throws Exception {
+        state=response.getJSONObject("state");
+        JSONObject config=response.optJSONObject("settings");
+        if(config!=null) settings=config;
+        JSONArray capabilities=response.optJSONArray("capabilities");
+        dnsSupported=false;
+        if(capabilities!=null) for(int i=0;i<capabilities.length();i++) if("dns-settings".equals(capabilities.optString(i))) dnsSupported=true;
+        connected=true; connectionError="";
+        if(!response.isNull("settingsError")) commandError=response.optString("settingsError");
+        render();
+        if(resumed && settingsDialog==null && !actionBusy) showNotice();
     }
     private void refresh() {
-        request("status", null, result -> {
-            JSONObject settings = result.optJSONObject("settings");
-            if (settings != null && !loadedSettings) {
-                catalogUrl.setText(settings.optString("catalogUrl")); loadedSettings = true;
-            }
-            JSONObject state = result.getJSONObject("state");
-            String phase = state.getString("phase");
-            operationBusy = java.util.Arrays.asList("checking", "downloading", "verifying", "preparing", "applying", "reboot-pending", "validating").contains(phase);
-            repair = "repair-required".equals(phase);
-            verified = "verified".equals(phase);
-            JSONObject selected = state.optJSONObject("selected"); hasRelease = selected != null;
-            String details = "Установлено: " + state.optString("installedVersion");
-            if (selected != null) {
-                JSONObject archive = selected.getJSONObject("payload");
-                details += "\nДоступно: " + selected.getString("version") + " · " + (archive.getLong("size") / (1024 * 1024)) + " МБ";
-            }
-            releaseInfo.setText(details);
-            String stage = state.optString("step");
-            long total = state.optLong("total"), bytes = state.optLong("bytes");
-            if (total > 0) stage += "\n" + (100 * bytes / total) + "% · " + bytes + " / " + total;
-            status.setText(stage);
-            if (!state.isNull("error")) showError(state.optString("error"), verified);
-            if (!result.isNull("settingsError")) showError(result.optString("settingsError"));
-            setBusy(false);
-            if (!state.isNull("notice")) showNotice(state.getString("notice"), state.optString("error"));
-            else noticeShowing = null;
-        });
-    }
-    private void showNotice(String notice, String error) {
-        if (notice.equals(noticeShowing)) return;
-        noticeShowing = notice;
-        String title = "error".equals(notice) ? "Ошибка обновления VoyahTune"
-            : "success".equals(notice) ? "VoyahTune обновлён" : "Доступна новая версия VoyahTune";
-        String message = "error".equals(notice) ? error + "\nПосмотрите или выгрузите логи. Установите релиз через USB с компьютера."
-            : "success".equals(notice) ? "Проверка запуска служб завершена успешно." : "Версия " + notice + ". Скачать её можно в меню обновления.";
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setMessage(message)
-            .setPositiveButton("Открыть меню", (d,w) -> {})
-            .setNegativeButton("Скрыть", (d,w) -> finish()).create();
-        dialog.setOnDismissListener(d -> {
-            // Dismissing only acknowledges the notice. It never downloads or installs.
-            if (!worker.isShutdown()) worker.execute(() -> { try { client.call(new JSONObject().put("command", "dismiss")); } catch (Exception ignored) {} });
-        });
-        dialog.setOnCancelListener(d -> finish());
-        dialog.show();
-    }
-
-    private void saveUrl() {
-        String value = catalogUrl.getText().toString().trim();
-        request("set_catalog_url", value, result -> {
-            catalogUrl.setText(result.getJSONObject("settings").getString("catalogUrl"));
-            loadedSettings = true;
-            status.setText("Адрес каталога сохранён");
-        });
-    }
-
-    private void loadLogs(boolean export) {
-        request("logs", null, result -> {
-            logText = result.optString("logs");
-            logs.setText(logText);
-            if (export) {
-                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                    .addCategory(Intent.CATEGORY_OPENABLE).setType("text/plain")
-                    .putExtra(Intent.EXTRA_TITLE, "voyahtune-updater.log");
-                try { startActivityForResult(intent, EXPORT_LOGS); }
-                catch (android.content.ActivityNotFoundException unavailable) {
-                    status.setText("Выбор файла недоступен. Можно скопировать логи или получить их через USB.");
-                }
-            }
-        });
-    }
-
-    private interface Response { void apply(JSONObject response) throws Exception; }
-    private void request(String command, String url, Response response) {
-        if (busy) return;
-        setBusy(true);
+        if(polling || worker.isShutdown()) return;
+        polling=true; // Transport bookkeeping never changes button styling.
         worker.execute(() -> {
             try {
-                JSONObject request = new JSONObject().put("command", command);
-                if (url != null && "set_catalog_url".equals(command)) request.put("url", url);
-                if ("check".equals(command)) request.put("same_version", "same".equals(url));
-                JSONObject result = client.call(request);
+                JSONObject result=client.call(request("status"));
+                runOnUiThread(() -> { polling=false; if(!alive())return; try{accept(result);}catch(Exception e){disconnected(e);} });
+            } catch(Exception e) { runOnUiThread(() -> {polling=false;if(alive())disconnected(e);}); }
+        });
+    }
+    private void disconnected(Exception e) { connected=false; connectionError=reason(e); render(); }
+    private interface Result { void apply(JSONObject result) throws Exception; }
+    private void command(JSONObject input, Result result) {
+        if(actionBusy || worker.isShutdown())return;
+        actionBusy=true; commandError=""; render();
+        worker.execute(() -> {
+            try {
+                JSONObject response=client.call(input);
+                JSONObject fresh=client.call(request("status"));
                 runOnUiThread(() -> {
-                    if (isDestroyed()) return;
-                    setBusy(false);
-                    try { response.apply(result); } catch (Exception e) { showError(e.getMessage()); }
+                    actionBusy=false; if(!alive())return;
+                    try{accept(fresh);result.apply(response);}catch(Exception e){commandError=reason(e);}
+                    render(); if(!polling)refresh();
                 });
-            } catch (Exception error) {
-                runOnUiThread(() -> {
-                    if (isDestroyed()) return;
-                    setBusy(false);
-                    showError(error.getMessage());
-                });
+            } catch(Exception e) {
+                runOnUiThread(() -> {actionBusy=false;if(!alive())return;commandError=reason(e);if(settingsDialog!=null&&settingsMessage!=null)settingsMessage.setText(commandError);render();if(!polling)refresh();});
             }
         });
+    }
+    private void perform(String name, boolean same) {
+        try {
+            JSONObject input=request(name);
+            if("check".equals(name))input.put("same_version",same);
+            command(input,result -> {});
+        } catch(Exception e){commandError=reason(e);render();}
+    }
+    private void primaryAction() {
+        if(!connected){refresh();return;}
+        if(presentation==null)return;
+        switch(presentation.command){
+            case "close": finish(); break;
+            case "apply": confirmInstall(); break;
+            case "check": perform("check",false); break;
+            case "download": perform("download",false); break;
+            default: break;
+        }
+    }
+    private void confirmInstall() {
+        String dns="";
+        if(dnsSupported && !settings.isNull("dnsEnabled")) dns="\n\nDNS: "+(settings.optBoolean("dnsEnabled")?"Яндекс":"стандартный")+".";
+        new AlertDialog.Builder(this).setTitle("Установить обновление?")
+            .setMessage("Автомобиль должен стоять в P с включённым питанием. Головное устройство перезагрузится. Сохраняйте питание до завершения проверки запуска.\n\nНастройки VoyahTune сохранятся. При ошибке установите релиз через USB с компьютера."+dns)
+            .setNegativeButton("Отмена",null).setPositiveButton("Установить и перезагрузить",(d,w)->perform("apply",false)).show();
+    }
+    private void render() {
+        String phase=state.optString("phase","idle"), step=state.optString("step");
+        JSONObject selected=state.optJSONObject("selected");
+        JSONObject archive=selected==null?null:selected.optJSONObject("payload");
+        presentation=UpdatePresentation.from(phase,selected!=null,step,state.optLong("bytes"),state.optLong("total"),state.optLong("completedSteps"),state.optLong("totalSteps"));
+        UpdatePresentation p=presentation;
+        String installed=state.optString("installedVersion","—");
+        boolean failed="repair-required".equals(phase)||"failed".equals(phase);
+        String error=!state.isNull("error")?state.optString("error"):commandError;
+        if(!connected)error=connectionError;
+        text(R.id.service,connected?"●  Служба доступна":connectionError.isEmpty()?"Подключение…":"●  Нет связи со службой");
+        text(R.id.installed,"Установлено: "+installed);
+        text(R.id.eyebrow,!connected?"СЛУЖБА ОБНОВЛЕНИЙ":p.eyebrow);
+        text(R.id.title,!connected?(connectionError.isEmpty()?"Подключаемся к службе":"Служба обновления недоступна"):p.title);
+        text(R.id.subtitle,!connected?"Если установка уже шла, её результат пока неизвестен.":p.subtitle);
+        text(R.id.release,"VoyahTune "+(selected==null?installed:selected.optString("version")));
+        text(R.id.meta,selected==null?"Установленная версия": "Релиз "+selected.optString("version")+(archive==null?"":" · "+archive.optLong("size")/(1024*1024)+" МБ")+(state.optBoolean("sameVersion")?" · Повторная установка":""));
+        text(R.id.badge,!connected?"Нет связи":p.badge);
+        text(R.id.detail,error);visible(R.id.detail,!error.isEmpty());
+        ((TextView)findViewById(R.id.detail)).setTextColor(getColor(R.color.error));
+        visible(R.id.meter,connected&&p.meter);
+        if(progress.isIndeterminate()!=p.indeterminate)progress.setIndeterminate(p.indeterminate);
+        if(!p.indeterminate&&progress.getProgress()!=p.percent)progress.setProgress(p.percent,true);
+        text(R.id.progress_label,p.progressLabel);text(R.id.progress_note,p.progressNote);
+        text(R.id.percent,p.percent+"%");visible(R.id.percent,!p.indeterminate);
+        String[] labels={"Новый релиз","Скачивание","Установка","Готово"};int[] ids={R.id.nav0,R.id.nav1,R.id.nav2,R.id.nav3};
+        for(int i=0;i<ids.length;i++){
+            boolean done=connected&&(i<p.nav||p.success);
+            text(ids[i],(done?"✓":new String[]{"①","②","③","④"}[i])+"  "+labels[i]);
+            TextView view=findViewById(ids[i]);int color=getColor(connected&&(done||i==p.nav)?R.color.teal:R.color.muted);
+            if(view.getCurrentTextColor()!=color)view.setTextColor(color);
+        }
+        boolean installing=p.busy&&p.nav==2;
+        text(R.id.aside_title,failed||!error.isEmpty()?"Установите через USB":installing?"Сохраняйте питание":p.success?"Всё на месте":"Настройки останутся с вами");
+        text(R.id.aside_text,failed||!error.isEmpty()?"Установите релиз через USB с компьютера. Причина ошибки показана на экране.":installing?"Оставьте автомобиль в P. Не выключайте головное устройство до завершения установки и проверки запуска.":p.success?"Настройки VoyahTune сохранены. Можно вернуться к привычным функциям приложения.":"Обновление сохраняет настройки VoyahTune.\nПеред установкой переведите автомобиль в P и сохраняйте питание до завершения.");
+        text(R.id.footer_note,failed?"Для восстановления потребуется USB и компьютер.":installing?"Обновление выполняется автономно. Не отключайте питание.":p.success?"Установка и проверка запуска завершены.":"Проверка новых версий — автоматически, не чаще одного раза в 24 часа.");
+        text(R.id.primary,!connected?"Обновить состояние":p.primary+("download".equals(p.command)&&archive!=null?" · "+archive.optLong("size")/(1024*1024)+" МБ":""));
+        enabled(primary,!actionBusy&&(!connected||!p.busy));
+        visible(R.id.secondary,connected&&p.secondary);enabled(secondary,!actionBusy&&!p.busy);
+        if(settingsDialog!=null){
+            if(settingsSave!=null)enabled(settingsSave,!actionBusy&&!p.busy);
+            if(settingsRepeat!=null)enabled(settingsRepeat,!actionBusy&&!p.busy);
+        }
+        enabled(findViewById(R.id.settings),connected&&!p.busy&&!actionBusy&&!"repair-required".equals(phase));
     }
 
-    private void setBusy(boolean value) {
-        busy = value;
-        refresh.setEnabled(!value);
-        save.setEnabled(!value && !operationBusy);
-        check.setEnabled(!value && !operationBusy && !repair);
-        test.setEnabled(!value && !operationBusy && !repair);
-        download.setEnabled(!value && !operationBusy && !repair && hasRelease);
-        install.setEnabled(!value && !operationBusy && !repair && verified);
-        showLogs.setEnabled(!value);
-        exportLogs.setEnabled(!value);
-        catalogUrl.setEnabled(!value && !operationBusy);
-    }
-    private void showError(String reason) {
-        showError(reason, false);
-    }
-    private void showError(String reason, boolean retryInstall) {
-        status.setText("Ошибка: " + (reason == null ? "служба недоступна" : reason)
-            + (retryInstall
-                ? "\nУстраните причину и повторите установку. Можно посмотреть или выгрузить логи."
-                : "\nПосмотрите или выгрузите логи. Установите релиз через USB с компьютера."));
-    }
-    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != EXPORT_LOGS || resultCode != RESULT_OK || data == null || data.getData() == null) return;
-        android.net.Uri destination = data.getData();
-        byte[] snapshot = logText.getBytes(StandardCharsets.UTF_8);
-        worker.execute(() -> {
-            try (OutputStream out = getContentResolver().openOutputStream(destination, "wt")) {
-                if (out == null) throw new java.io.IOException("Не удалось открыть файл");
-                out.write(snapshot);
-                runOnUiThread(() -> { if (!isDestroyed()) status.setText("Логи сохранены"); });
-            } catch (Exception e) {
-                runOnUiThread(() -> { if (!isDestroyed()) showError(e.getMessage()); });
-            }
+    private void openSettings() {
+        if(settingsDialog!=null)return;
+        LinearLayout content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(dp(24),dp(12),dp(24),0);
+        label(content,"Адрес каталога релизов",18);
+        EditText url=new EditText(this);url.setSingleLine(true);url.setText(settings.optString("catalogUrl"));url.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);content.addView(url);
+        label(content,"Смена адреса не запускает скачивание или установку.",15);
+        Switch dns=new Switch(this);dns.setText("Яндекс DNS");dns.setTextSize(20);dns.setPadding(0,dp(18),0,dp(18));dns.setMinHeight(dp(60));content.addView(dns);dns.setEnabled(false);
+        TextView dnsInfo=label(content,dnsSupported?"Определяем текущий DNS…":"Настройка DNS доступна после обновления root-службы через USB.",16);
+        final boolean[] known={false};
+        dns.setOnCheckedChangeListener((button,on)->{if(known[0])dnsInfo.setText(on?"При установке релиза будет включён Яндекс DNS.":"При установке релиза будет использован стандартный DNS.");});
+        Button repeat=new Button(this);repeat.setAllCaps(false);repeat.setText("Проверить релиз для повторной установки");content.addView(repeat);
+        label(content,"Позволяет скачать и установить ту же версию VoyahTune.",15);
+        ScrollView scroll=new ScrollView(this);scroll.addView(content);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Настройки обновлений").setView(scroll).setNegativeButton("Отмена",null).setPositiveButton("Сохранить",null).create();
+        settingsDialog=dialog;settingsRepeat=repeat;settingsMessage=dnsInfo;
+        dialog.setOnDismissListener(d->{if(settingsDialog==dialog){settingsDialog=null;settingsSave=null;settingsRepeat=null;settingsMessage=null;}});
+        dialog.show();settingsSave=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        repeat.setOnClickListener(v->{dialog.dismiss();perform("check",true);});
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            if(actionBusy)return;
+            try{
+                JSONObject input=request(dnsSupported?"set_settings":"set_catalog_url").put("url",url.getText().toString().trim());
+                if(dnsSupported)input.put("dns_enabled",known[0]?dns.isChecked():JSONObject.NULL);
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+                command(input,result->{settings=result.getJSONObject("settings");dialog.dismiss();Toast.makeText(this,"Настройки сохранены",Toast.LENGTH_SHORT).show();});
+                // Errors remain visible inside the dialog rather than hidden behind it.
+            }catch(Exception e){dnsInfo.setText(reason(e));}
         });
+        if(dnsSupported){
+            try{
+                command(request("get_settings"),result->{
+                    if(!dialog.isShowing())return;
+                    JSONObject config=result.optJSONObject("settings");if(config!=null)settings=config;
+                    String current=result.optString("dnsStatus");known[0]="on".equals(current)||"off".equals(current);
+                    dns.setChecked(known[0]&&(!settings.isNull("dnsEnabled")?settings.optBoolean("dnsEnabled"):"on".equals(current)));
+                    dns.setEnabled(known[0]);
+                    dnsInfo.setText(known[0]?"Сейчас на ГУ: "+("on".equals(current)?"Яндекс DNS":"стандартный DNS")+". Выбор применяется при установке релиза.":"DNS не определён или изменён извне. Оставляем без изменений."+(!result.isNull("dnsError")?"\n"+result.optString("dnsError"):""));
+                });
+            }catch(Exception e){dnsInfo.setText(reason(e));}
+        }
     }
-    @Override protected void onDestroy() { poll.removeCallbacks(tick); worker.shutdown(); super.onDestroy(); }
-    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
-    private TextView text(LinearLayout content, String value, int size) {
-        TextView view = new TextView(this);
-        view.setText(value); view.setTextSize(size); view.setTextColor(Color.WHITE);
-        view.setPadding(0, dp(8), 0, dp(8)); content.addView(view); return view;
+    private void showNotice() {
+        if(state.isNull("notice")){noticeShowing=null;return;}
+        String notice=state.optString("notice");
+        if(notice.equals(noticeShowing)||noticeDialog!=null)return;
+        noticeShowing=notice;
+        String title="error".equals(notice)?"Ошибка обновления VoyahTune":"success".equals(notice)?"VoyahTune обновлён":"Доступна новая версия VoyahTune";
+        String message="error".equals(notice)?state.optString("error")+"\nУстановите релиз через USB с компьютера.":"success".equals(notice)?"Проверка запуска служб завершена успешно.":"Версия "+notice+". Скачать её можно в меню обновления.";
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("Открыть меню",(d,w)->{}).setNegativeButton("Скрыть",(d,w)->finish()).create();
+        noticeDialog=dialog;
+        dialog.setOnDismissListener(d->{noticeDialog=null;if(!worker.isShutdown())worker.execute(()->{try{client.call(request("dismiss"));}catch(Exception ignored){}});});
+        dialog.setOnCancelListener(d->finish());dialog.show();
     }
-    private Button button(LinearLayout content, String label, View.OnClickListener listener) {
-        Button button = new Button(this); button.setText(label); button.setOnClickListener(listener);
-        content.addView(button, new LinearLayout.LayoutParams(-1, dp(58))); return button;
-    }
+    private TextView label(LinearLayout parent,String text,int size){TextView view=new TextView(this);view.setText(text);view.setTextColor(getColor(R.color.muted));view.setTextSize(size);view.setPadding(0,dp(8),0,dp(8));parent.addView(view);return view;}
+    private void text(int id,String value){TextView view=findViewById(id);if(!TextUtils.equals(view.getText(),value))view.setText(value);}
+    private void visible(int id,boolean visible){View v=findViewById(id);int target=visible?View.VISIBLE:View.GONE;if(v.getVisibility()!=target)v.setVisibility(target);}
+    private void enabled(View v,boolean enabled){if(v.isEnabled()!=enabled)v.setEnabled(enabled);}
+    private String reason(Exception e){return e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();}
+    private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
 }

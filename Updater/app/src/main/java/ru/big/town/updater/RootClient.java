@@ -15,7 +15,8 @@ final class RootClient {
         try (LocalSocket socket = new LocalSocket()) {
             socket.connect(new LocalSocketAddress("voyahtune_updater", LocalSocketAddress.Namespace.RESERVED));
             // connect() creates the underlying Android socket before options can be set.
-            socket.setSoTimeout(5000);
+            String command = request.optString("command");
+            socket.setSoTimeout("get_settings".equals(command) || "set_settings".equals(command) ? 45000 : 5000);
             if (socket.getPeerCredentials().getUid() != 0) {
                 throw new IOException("Ответ получен не от root-службы");
             }
