@@ -22,6 +22,18 @@ def verify_remote(entry):
  if size!=asset['size'] or digest.hexdigest()!=asset['sha256']:
   raise ValueError('Published asset differs from the locally verified payload')
 
+def verify_remote_head(entry):
+ """Check public access and upload metadata, without rehashing remote bytes."""
+ if urlparse(entry['url']).scheme!='https':raise ValueError('Asset must use HTTPS')
+ request=urllib.request.Request(entry['url'],method='HEAD')
+ # Reject redirects: preserve HEAD and never follow a redirect into a GET.
+ class NoRedirect(urllib.request.HTTPRedirectHandler):
+  def redirect_request(self,*args,**kwargs):return None
+ with urllib.request.build_opener(NoRedirect()).open(request,timeout=30) as response:
+  if (int(response.headers.get('Content-Length','-1'))!=entry['size']
+      or response.headers.get('x-amz-meta-sha256')!=entry['sha256']):
+   raise ValueError('Published asset size/SHA-256 upload metadata differs from local entry')
+
 def merge(index,entry):
  if set(entry) != {'version','url','size','sha256'}:
   raise ValueError('Release must contain only version, url, size and sha256')
@@ -35,7 +47,8 @@ def merge(index,entry):
  index['releases'].append(entry)
  return True
 
-def update(index_path,entry_path,builder,verify):
+def update(index_path,entry_path,builder,verify,verify_head=False):
+ if verify and verify_head:raise ValueError('Choose either full download or HEAD verification')
  index=json.loads(index_path.read_text())
  if entry_path is not None:
   entry=json.loads(entry_path.read_text());changed=merge(index,entry)
@@ -45,8 +58,9 @@ def update(index_path,entry_path,builder,verify):
   staging=Path(directory)/'index.json';staging.write_text(json.dumps(index,ensure_ascii=False))
   normalized=subprocess.check_output([str(builder),'verify-catalog',str(staging)],text=True)
   if entry_path is not None:
-   if not verify:raise ValueError('--verify-remote is required before updating the public catalog')
-   verify_remote(entry)
+   if verify:verify_remote(entry)
+   elif verify_head:verify_remote_head(entry)
+   else:raise ValueError('--verify-remote or --verify-head is required before updating the public catalog')
   if changed:
    staging.write_text(normalized);staging.replace(index_path)
  return changed
@@ -56,7 +70,9 @@ def main():
  p.add_argument('--index',type=Path,default=ROOT/'Releases/ota/index.json')
  p.add_argument('--entry',type=Path,help='Generated Releases/dist/payload_VERSION.json')
  p.add_argument('--builder',type=Path,default=ROOT/'Installer/target/release/installer-build')
- p.add_argument('--verify-remote',action='store_true')
- args=p.parse_args();changed=update(args.index,args.entry,args.builder,args.verify_remote)
+ verification=p.add_mutually_exclusive_group()
+ verification.add_argument('--verify-remote',action='store_true',help='Download the payload and verify its size/SHA-256')
+ verification.add_argument('--verify-head',action='store_true',help='Check public HEAD size/upload metadata only; does not verify remote bytes')
+ args=p.parse_args();changed=update(args.index,args.entry,args.builder,args.verify_remote,args.verify_head)
  print('Catalog updated' if changed else 'Catalog verified; unchanged')
 if __name__=='__main__':main()

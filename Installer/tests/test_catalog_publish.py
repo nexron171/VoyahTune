@@ -32,4 +32,32 @@ class CatalogPublishTests(unittest.TestCase):
    index=Path(d)/'index.json';index.write_text('{"releases":[]}')
    with patch.object(u.subprocess,'check_output',return_value='{}'),patch.object(u,'verify_remote') as remote:
     self.assertFalse(u.update(index,None,Path('builder'),False));remote.assert_not_called()
+ def test_head_mode_updates_without_payload_download(self):
+  with tempfile.TemporaryDirectory() as d:
+   index=Path(d)/'index.json';index.write_text('{"releases":[]}')
+   entry=Path(d)/'entry.json';entry.write_text(json.dumps(self.entry()))
+   normalized=json.dumps({'releases':[self.entry()]})
+   with patch.object(u.subprocess,'check_output',return_value=normalized),patch.object(u,'verify_remote') as remote,patch.object(u,'verify_remote_head') as head:
+    self.assertTrue(u.update(index,entry,Path('builder'),False,verify_head=True))
+    remote.assert_not_called();head.assert_called_once_with(self.entry())
+   self.assertEqual(json.loads(index.read_text())['releases'],[self.entry()])
+ def test_head_failure_preserves_index(self):
+  with tempfile.TemporaryDirectory() as d:
+   index=Path(d)/'index.json';index.write_text('{"releases":[]}');before=index.read_bytes()
+   entry=Path(d)/'entry.json';entry.write_text(json.dumps(self.entry()))
+   with patch.object(u.subprocess,'check_output',return_value='{}'),patch.object(u,'verify_remote_head',side_effect=ValueError('403')):
+    with self.assertRaises(ValueError):u.update(index,entry,Path('builder'),False,verify_head=True)
+   self.assertEqual(index.read_bytes(),before)
+ def test_head_uses_only_head_and_checks_both_headers(self):
+  from unittest.mock import MagicMock
+  response=MagicMock();response.__enter__.return_value=response
+  response.headers={'Content-Length':'10','x-amz-meta-sha256':'a'*64}
+  opener=MagicMock();opener.open.return_value=response
+  with patch.object(u.urllib.request,'build_opener',return_value=opener):
+   u.verify_remote_head(self.entry())
+   self.assertEqual(opener.open.call_args.args[0].get_method(),'HEAD')
+   response.read.assert_not_called()
+   for headers in ({'Content-Length':'11','x-amz-meta-sha256':'a'*64},{'Content-Length':'10'}):
+    response.headers=headers
+    with self.assertRaises(ValueError):u.verify_remote_head(self.entry())
 if __name__=='__main__':unittest.main()
