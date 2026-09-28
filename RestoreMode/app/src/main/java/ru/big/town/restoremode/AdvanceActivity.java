@@ -1277,7 +1277,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 icon.setImageDrawable(pm.getApplicationIcon(info));
             } catch (Exception ignored) {
             }
-            label.setText("Виджет: " + name);
+            label.setText("Виджет " + AppWidgetStore.designation(prefs, entry.id) + ": " + name);
             android.widget.ArrayAdapter<String> widthAdapter = new android.widget.ArrayAdapter<>(this,
                     R.layout.spinner_item, new String[]{"1 ячейка", "2 ячейки",
                     "3 ячейки", "4 ячейки", "5 ячеек",

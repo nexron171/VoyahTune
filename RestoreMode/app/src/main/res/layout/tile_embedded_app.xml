@@ -24,19 +24,55 @@
 
     </HorizontalScrollView>
 
-    <ImageButton
-        android:id="@+id/appWidgetDragHandleLauncher"
-        android:layout_width="64dp"
-        android:layout_height="64dp"
+    <TextView
+        android:id="@+id/appWidgetBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="8dp"
+        android:background="@drawable/widget_badge_bg"
+        android:minWidth="24dp"
+        android:gravity="center"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="2dp"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/appWidgetLauncherControls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_gravity="top|end"
         android:layout_margin="8dp"
-        android:background="@drawable/nav_back_circle_bg"
-        android:src="@drawable/ic_drag_handle"
-        android:padding="12dp"
-        android:scaleType="fitCenter"
-        android:alpha="0.85"
-        android:visibility="visible"
-        android:contentDescription="Перетащить" />
+        android:orientation="horizontal"
+        android:visibility="visible">
+
+        <ImageButton
+            android:id="@+id/appWidgetSwapLauncher"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/nav_back_circle_bg"
+            android:src="@drawable/ic_swap"
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:alpha="0.85"
+            android:contentDescription="Обмен приложениями" />
+
+        <ImageButton
+            android:id="@+id/appWidgetDragHandleLauncher"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:background="@drawable/nav_back_circle_bg"
+            android:src="@drawable/ic_drag_handle"
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:alpha="0.85"
+            android:contentDescription="Перетащить" />
+
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/appWidgetControls"
@@ -70,6 +106,18 @@
             android:scaleType="fitCenter"
             android:alpha="0.95"
             android:contentDescription="Развернуть" />
+
+        <ImageButton
+            android:id="@+id/appWidgetSwap"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/nav_back_circle_bg"
+            android:src="@drawable/ic_swap"
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:alpha="0.95"
+            android:contentDescription="Обмен приложениями" />
 
         <ImageButton
             android:id="@+id/appWidgetClose"
