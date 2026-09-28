@@ -5,7 +5,6 @@
 #
 #   ./make_release.sh 3.2.2              → Releases/build/VoyahTune-3.2.2{,-light} + Releases/dist/*.zip
 #   ./make_release.sh 3.2.2 --full-only  → только full
-#   ./make_release.sh 3.2.2 --light-only → только light
 #   ./make_release.sh 3.2.2 --no-build   → не пересобирать APK, только переразложить файлы
 #                                          (APK берутся из уже существующей папки сборки)
 #   ./make_release.sh 3.2.2 --no-zip     → не паковать архивы
@@ -34,19 +33,19 @@ DNS_OVERLAY_NAME="framework-res__config_ethernet_interfaces_yandexdns.apk"
 DNS_OVERLAY="$COMMON/vendor-overlay/$DNS_OVERLAY_NAME"
 DNS_OVERLAY_SHA256="c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d"
 COMMON_INSTALLER="$COMMON/installer/common"
-COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh"
+#COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh"
 RELEASE_README="$COMMON/README.txt"
 
 VERSION=""
 DO_FULL=1
-DO_LIGHT=1
+#DO_LIGHT=1
 DO_BUILD=1
 DO_ZIP=1
 
 for arg in "$@"; do
     case "$arg" in
         --full-only)  DO_LIGHT=0 ;;
-        --light-only) DO_FULL=0 ;;
+ #       --light-only) DO_FULL=0 ;;
         --no-build)   DO_BUILD=0 ;;
         --no-zip)     DO_ZIP=0 ;;
         -h|--help)    sed -n '2,16p' "$0"; exit 0 ;;
