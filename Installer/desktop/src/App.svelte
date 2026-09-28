@@ -118,7 +118,7 @@
                 <tbody>{#each releaseRows as row (row.cached?.path||row.version)}
                   {@const selected=!!row.cached&&releasePath===row.cached.path&&!!releaseVersion}
                   <tr class:selected>
-                    <td><div class="release-name"><strong>{row.version}</strong>{#if row.release}<button class="link-button release-notes" onclick={()=>openLink(row.release!.notesUrl)}>Что нового</button>{/if}</div><span class="release-meta">{row.release ? `${row.release.publishedAt} · ${(row.release.payload.size/1048576).toFixed(1)} МБ` : 'Локальный релиз'}</span>
+                    <td><div class="release-name"><strong>{row.version}</strong>{#if row.release?.notesUrl}<button class="link-button release-notes" onclick={()=>openLink(row.release!.notesUrl)}>Что нового</button>{/if}</div><span class="release-meta">{row.release ? `${row.release.publishedAt ? row.release.publishedAt + ' · ' : ''}${(row.release.payload.size/1048576).toFixed(1)} МБ` : 'Локальный релиз'}</span>
                       {#if row.release?.compatible===false}<span class="release-incompatible">{row.release.incompatibility||`Нужен установщик ${row.release.requirements.minInstallerVersion}`}</span>
                         {#each row.release.installerUpdates||[] as update}<button class="link-button" onclick={()=>openLink(update.url)}>Установщик {update.version} · {update.platform}</button>{/each}
                       {/if}

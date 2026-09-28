@@ -96,7 +96,9 @@ impl Catalog {
             semver::Version::parse(&r.requirements.min_installer_version)
                 .map_err(|e| invalid(e.to_string()))?;
             https_url(&r.payload.url)?;
-            https_url(&r.notes_url)?;
+            if !r.notes_url.is_empty() {
+                https_url(&r.notes_url)?;
+            }
         }
         for i in &self.installer_downloads {
             semver::Version::parse(&i.version).map_err(|e| invalid(e.to_string()))?;
@@ -157,7 +159,7 @@ impl UpdateRelease {
             } else {
                 "stable".into()
             },
-            notes_url: self.url.clone(),
+            notes_url: String::new(),
             payload: Archive {
                 url: self.url,
                 size: self.size,

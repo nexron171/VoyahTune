@@ -13,7 +13,7 @@ Payload schema 4, recipe schema 3 / `qinggan-v3`, APK metadata schema 3.
 Минимум Installer 1.2.0, capabilities `qinggan-v3`, `single-package-v1`, `files-v1`,
 `ota-bootstrap-v1`. Сборщик сначала собирает ARM64 updater и его APK, затем передаёт
 их хеши вместе с recipe в metadata Native и RestoreMode.
-Требования внутри payload и записи каталога совпадают. Старые архивы не преобразуются
+Требования проверяются внутри payload; каталог содержит только version/url/size/sha256. Старые архивы не преобразуются
 новым установщиком; для установки используйте новый релиз. Опубликованные
 записи старых релизов не переписываются.
 
