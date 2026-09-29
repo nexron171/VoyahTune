@@ -179,6 +179,12 @@
             />
 
         <service
+            android:name=".LightDiagnosticsService"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+
+        <service
             android:name=".WiperColdService"
             android:enabled="true"
             android:exported="false"
