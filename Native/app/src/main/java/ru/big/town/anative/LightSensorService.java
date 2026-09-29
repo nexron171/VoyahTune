@@ -83,6 +83,7 @@ public class LightSensorService extends Service {
 
     // Broadcast для передачи уровня датчика в RestoreMode UI
     public static final String ACTION_LUX_UPDATE  = "ru.big.town.anative.LUX_UPDATE";
+    public static final String EXTRA_SW_REASON = "swReason"; // -1: нет данных OEM
     public static final String EXTRA_SENSOR_LEVEL = "sensorLevel"; // int, -1 если датчик недоступен
 
     // Период страховочного опроса: ловит пропущенный колбэк, CAN шлёт только при
@@ -288,6 +289,8 @@ public class LightSensorService extends Service {
                 CanBusEventHub.get(this).requestVehicleStateSnapshot();
                 break;
             case CONNECTION_LOST:
+                lastReason = -1;
+                broadcastUpdate(lastSensorLevel);
                 lightCanEpoch = 0L;
                 ihbcRevision++;
                 ihbcFunction = -1;
@@ -1154,6 +1157,8 @@ public class LightSensorService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy() — target=" + headlightTarget);
         destroyed = true;
+        lastReason = -1;
+        broadcastUpdate(-1);
         if (lightPreferences != null) {
             lightPreferences.unregisterOnSharedPreferenceChangeListener(lightPreferenceListener);
         }
@@ -1409,6 +1414,7 @@ public class LightSensorService extends Service {
 
     private void onLightSwReason(int reason) {
         lastReason = reason;
+        broadcastUpdate(lastSensorLevel);
         reconsiderOutdoorTarget("ext-sensor reason=" + reason);
     }
 
@@ -1583,6 +1589,7 @@ public class LightSensorService extends Service {
     private void broadcastUpdate(int sensorLevel) {
         Intent intent = new Intent(ACTION_LUX_UPDATE);
         intent.putExtra(EXTRA_SENSOR_LEVEL, sensorLevel);
+        intent.putExtra(EXTRA_SW_REASON, lastReason);
         sendBroadcast(intent);
     }
 
@@ -1590,6 +1597,7 @@ public class LightSensorService extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
             broadcastUpdate(lastSensorLevel);
+            CanBusEventHub.get(LightSensorService.this).requestVehicleStateSnapshot();
         }
     };
 

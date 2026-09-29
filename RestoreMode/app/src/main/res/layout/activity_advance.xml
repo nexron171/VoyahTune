@@ -1914,17 +1914,33 @@
 
                 </LinearLayout>
 
-                <Switch
-                    android:id="@+id/extendedAutoLightSwitch"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:minHeight="56dp"
                     android:layout_marginHorizontal="6dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+                <Switch
+                    android:id="@+id/extendedAutoLightSwitch"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:minHeight="56dp"
                     android:text="Расширенная логика автосвета"
                     android:textColor="#ffffff"
                     android:textSize="26px"
                     android:thumb="@drawable/switch_thumb"
                     android:track="@drawable/switch_track" />
+
+                    <TextView
+                        android:id="@+id/textSwReason"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="24dp"
+                        android:text="SWReason: —"
+                        android:textColor="#aaaaaa"
+                        android:textSize="22px" />
+                </LinearLayout>
 
                 <TextView
                     android:layout_width="match_parent"

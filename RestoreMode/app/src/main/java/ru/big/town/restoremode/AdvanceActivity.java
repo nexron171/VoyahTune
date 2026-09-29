@@ -108,6 +108,7 @@ public class AdvanceActivity extends AppCompatActivity {
     private RadioGroup autoLightGroup;
     private Switch extendedAutoLightSwitch;
     private TextView textSensorLevel;
+    private TextView textSwReason;
     private CheckBox checkBox34;
 
     // Сообщения в SetModesService (через GlobalVars.serviceMessenger, забинденный MainActivity)
@@ -160,6 +161,9 @@ public class AdvanceActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             int sensorLevel = intent.getIntExtra("sensorLevel", -1);
+            if (textSwReason != null) {
+                textSwReason.setText(AutoLightReasonLabel.format(intent.getIntExtra("swReason", -1)));
+            }
             if (textSensorLevel != null) {
                 textSensorLevel.setText(sensorLevel >= 0 ? "Датчик: " + sensorLevel : "Датчик: —");
             }
@@ -2559,6 +2563,7 @@ public class AdvanceActivity extends AppCompatActivity {
         autoLightGroup  = findViewById(R.id.autoLightGroup);
         extendedAutoLightSwitch = findViewById(R.id.extendedAutoLightSwitch);
         textSensorLevel = findViewById(R.id.textSensorLevel);
+        textSwReason = findViewById(R.id.textSwReason);
         if (autoLightGroup == null) return;
 
         extendedAutoLightSwitch.setChecked(prefs.getBoolean("extendedAutoLight", false));
@@ -2574,6 +2579,7 @@ public class AdvanceActivity extends AppCompatActivity {
             boolean enabled = (checkedId == R.id.autoLightOn);
             prefs.edit().putBoolean("autoLight", enabled).apply();
             sendAutoLightMessage(enabled);
+            if (!enabled && textSwReason != null) textSwReason.setText(AutoLightReasonLabel.format(-1));
             if (!enabled && textSensorLevel != null) textSensorLevel.setText("Датчик: —");
             Log.i("$$$ Advance autolight $$$", enabled ? "ON" : "OFF");
         });
@@ -2613,6 +2619,7 @@ public class AdvanceActivity extends AppCompatActivity {
             syncingSettingUi = false;
         }
         updateSystemMetricsPolling();
+        if (textSwReason != null) textSwReason.setText(AutoLightReasonLabel.format(-1));
         IntentFilter filter = new IntentFilter("ru.big.town.anative.LUX_UPDATE");
         registerReceiver(luxReceiver, filter, RECEIVER_EXPORTED);
         registerReceiver(modeSyncReceiver, new IntentFilter("ru.big.town.anative.MODE_SYNCED"), RECEIVER_EXPORTED);
