@@ -44,13 +44,40 @@ printf '%s' {owner} > "$lock/owner" || {{ rmdir "$lock"; exit 1; }}
 trap 'release_postflight_lock' EXIT
 trap 'exit 1' HUP INT TERM
 cat /proc/sys/kernel/random/boot_id > "$lock/boot" && chmod 700 "$lock" || exit 1
-/system/bin/timeout 60 /system/bin/sh -c {command}
+/system/bin/timeout 180 /system/bin/sh -c {command}
 command_status=$?
 release_postflight_lock || exit 1
 trap - EXIT
 exit "$command_status"
 "#,
         command = quote(script)
+    )
+}
+// PackageManager may retain an older /data/app update with the same versionCode.
+// Never uninstall it (that risks preferences); replace it and verify the active bytes.
+fn active_apk_script(package: &str, expected: &str, repair: Option<&str>) -> String {
+    let repair = repair.map(|path| format!(
+        "source_hash=$(sha256sum {} ) || exit 1\n[ \"${{source_hash%% *}}\" = {expected} ] || exit 1\nresult=$(pm install -r --user 0 {}) || exit 1\nprintf '%s\\n' \"$result\" | grep -qx Success || exit 1\n",
+        quote(path), quote(path)
+    )).unwrap_or_else(|| "exit 1\n".into());
+    format!(
+        r#"active_matches() {{
+    paths=$(pm path --user 0 {package}) || return 1
+    case "$paths" in package:*) ;; *) return 1 ;; esac
+    active=${{paths#package:}}
+    case "$active" in /*) ;; *) return 1 ;; esac
+    case "$active" in *'
+'*) return 1 ;; esac
+    digest=$(sha256sum "$active") || return 1
+    [ "${{digest%% *}}" = {expected} ]
+}}
+if ! active_matches; then
+    {repair}
+fi
+active_matches || {{ echo 'Активный APK {package} не совпадает с payload'; exit 1; }}
+"#,
+        package = quote(package),
+        expected = quote(expected)
     )
 }
 pub struct Engine {
@@ -199,7 +226,7 @@ impl Engine {
     fn postflight_shell(&self, script: &str) -> Result<String> {
         self.adb.shell(
             &postflight_script(script, &format!("desktop:{}:postflight", self.operation.id)),
-            Duration::from_secs(90),
+            Duration::from_secs(210),
         )
     }
     fn ignore(&self, script: &str) {
@@ -895,6 +922,11 @@ fi
 
         self.install_restore(&self.payload.file("restore_mode.apk")?)
     }
+    fn verify_active_apk(&self, package: &str, artifact: &str, repair: Option<&str>) -> Result<()> {
+        let expected = &self.payload.artifact(artifact)?.sha256;
+        self.postflight_shell(&active_apk_script(package, expected, repair))?;
+        Ok(())
+    }
     fn updater_ready(&self) -> Result<()> {
         // ROM 650 can register a new system APK without its DE directory.
         // PackageManager must create app data with the correct UID and context.
@@ -923,6 +955,11 @@ fi
                 "ru.big.town.updater",
             ));
         }
+        self.verify_active_apk(
+            "ru.big.town.updater",
+            "voyahtune-updater.apk",
+            Some("/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk"),
+        )?;
         Ok(())
     }
     fn native_ready(&self) -> Result<()> {
@@ -937,6 +974,8 @@ fi
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
             return Err(self.fail("PackageManager не создал CE/DE Native", NATIVE));
         }
+        self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
+        self.verify_active_apk(RESTORE, "restore_mode.apk", None)?;
         self.postflight_shell(c::NATIVE_BROADCAST)?;
         for _ in 0..20 {
             if !self
@@ -1342,6 +1381,91 @@ pub fn default_adb(bundle: &Path) -> PathBuf {
 mod runtime_stop_tests {
     use super::*;
     use std::{os::unix::fs::PermissionsExt, process::Command};
+
+    #[test]
+    fn active_apk_repair_preserves_data_and_rejects_false_success() {
+        // The fake PackageManager intentionally ignores versionName: both APKs have
+        // the same release number, as in the USB regression after an OTA update.
+        for (mode, repair, success, installs) in [
+            ("current", true, true, 0),
+            ("stale", true, true, 1),
+            ("false-success", true, false, 1),
+            ("failure", true, false, 1),
+            ("ambiguous", false, false, 0),
+            ("stale", false, false, 0),
+            ("bad-source", true, false, 0),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let source = dir.path().join("system.apk");
+            let active = dir.path().join("active.apk");
+            let calls = dir.path().join("calls");
+            fs::write(
+                &source,
+                if mode == "bad-source" {
+                    b"wrong"
+                } else {
+                    b"fresh"
+                },
+            )
+            .unwrap();
+            fs::write(
+                &active,
+                if mode == "current" {
+                    b"fresh"
+                } else {
+                    b"older"
+                },
+            )
+            .unwrap();
+            let expected_file = dir.path().join("expected.apk");
+            fs::write(&expected_file, b"fresh").unwrap();
+            let expected = payload::sha256(&expected_file).unwrap();
+            let mock = r#"
+sha256sum() { shasum -a 256 "$@"; }
+pm() {
+    case "$1" in
+        path)
+            printf 'package:%s\n' "$ACTIVE"
+            [ "$MODE" != ambiguous ] || printf 'package:/another.apk\n'
+            return 0 ;;
+        install)
+            [ "$*" = "install -r --user 0 $SOURCE" ] || exit 91
+            echo install >> "$CALLS"
+            [ "$MODE" != failure ] || return 1
+            [ "$MODE" = false-success ] || cp "$SOURCE" "$ACTIVE"
+            echo Success ;;
+        *) exit 92 ;;
+    esac
+}
+"#;
+            let script = active_apk_script(
+                NATIVE,
+                &expected,
+                if repair {
+                    Some(source.to_str().unwrap())
+                } else {
+                    None
+                },
+            );
+            let out = Command::new("sh")
+                .args(["-c", &format!("{mock}\n{script}")])
+                .env("MODE", mode)
+                .env("SOURCE", &source)
+                .env("ACTIVE", &active)
+                .env("CALLS", &calls)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.success(), success, "{mode}: {:?}", out);
+            assert_eq!(
+                fs::read_to_string(calls)
+                    .unwrap_or_default()
+                    .lines()
+                    .count(),
+                installs,
+                "{mode}"
+            );
+        }
+    }
 
     #[test]
     fn absent_loader_is_success_but_real_pkill_errors_are_preserved() {

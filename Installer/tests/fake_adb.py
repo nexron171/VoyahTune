@@ -42,7 +42,8 @@ def main():
    if remote(path).exists():
     if s.get('nativeOldHash') and hashlib.sha256(remote(path).read_bytes()).hexdigest()!=s['nativeOldHash']:
      s['packages'].pop(package,None)  # old registration rejects the changed system key
-    else:s['packages'][package]=path;package_data(package)
+    elif not s['packages'].get(package,'').startswith('/data/app/'):
+     s['packages'][package]=path;package_data(package)
    elif not s.get('retainNativeRegistration'):
     s['packages'].pop(package,None);s.pop('nativeOldHash',None)
    else:s['packages'][package]=path
@@ -109,6 +110,13 @@ def main():
    path=s['packages'].get(args[-1]);
    if path:print('package:'+path)
    else:return 1
+  elif args[0]=='install':
+   if s.get('nativeInstallFailure'):print('Failure [INSTALL_FAILED_TEST]');return 1
+   source=Path(args[-1]);package='ru.big.town.updater' if 'VoyahTuneUpdater' in source.name else 'ru.big.town.anative'
+   if not s.get('nativeInstallFalseSuccess'):
+    path='/data/app/'+package+'/base.apk';target=remote(path);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,target)
+    s['packages'][package]=path;package_data(package);save(s)
+   print('Success')
   elif args[0]=='uninstall':
    package=args[-1]
    if s.get('failUninstall')==package:print('Failure [DELETE_FAILED_INTERNAL_ERROR]');return 1
@@ -158,7 +166,9 @@ def main():
  elif name in ['restorecon','mount','pkill','ps']:pass
  elif name=='pidof':print('101')
  elif name=='sha256sum':
-  for path in args:print(hashlib.sha256(Path(path).read_bytes()).hexdigest()+'  '+path)
+  for path in args:
+   actual=remote(path) if path.startswith(('/system/','/data/')) else Path(path)
+   print(hashlib.sha256(actual.read_bytes()).hexdigest()+'  '+path)
  else:raise RuntimeError(f'Unknown device command {name}')
  return 0
 if __name__=='__main__':

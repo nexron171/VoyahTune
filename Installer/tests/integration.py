@@ -55,6 +55,17 @@ class InstallerTests(unittest.TestCase):
   for package in ['ru.big.town.anative','ru.big.town.restoremode']:
    for parent in ['data/user/0','data/user_de/0']:
     self.assertEqual((self.device/parent/package/'settings-marker').exists(),present)
+ def seed_native_overlay(self):
+  self.seed_apps()
+  path='/data/app/ru.big.town.anative/base.apk';apk=self.device/path.lstrip('/');apk.parent.mkdir(parents=True);apk.write_bytes(b'old same-version Native')
+  self.state['packages']['ru.big.town.anative']=path;self.write_state()
+ def test_native_overlay_replaced_with_payload_without_data_loss(self):
+  self.seed_native_overlay();self.apply(self.plan());self.assert_app_data(True)
+  active=self.device/self.read_state()['packages']['ru.big.town.anative'].lstrip('/')
+  self.assertEqual(active.read_bytes(),(self.device/'system/priv-app/Native/Native.apk').read_bytes())
+ def test_native_overlay_false_install_success_is_rejected(self):
+  self.seed_native_overlay();self.state['nativeInstallFalseSuccess']=True;self.write_state()
+  result=self.apply(self.plan(),okay=False);self.assertNotEqual(result.returncode,0);self.assert_app_data(True)
  def test_ota_bootstrap_install_repair_diagnostics_and_remove(self):
   self.seed_apps()
   lock=self.device/'data/local/voyahtune-install.lock';lock.mkdir()

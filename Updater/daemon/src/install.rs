@@ -75,6 +75,31 @@ mod tests {
     }
 
     #[test]
+    fn active_apk_hash_rejects_old_bytes_even_for_same_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = compatibility_fixture(dir.path());
+        let staged = dir.path().join("native.apk");
+        fs::write(&staged, b"new Native 3.16.0").unwrap();
+        p.manifest.artifacts.push(Artifact {
+            name: "native.apk".into(),
+            path: "native.apk".into(),
+            sha256: payload::sha256(&staged).unwrap(),
+            size: fs::metadata(&staged).unwrap().len(),
+        });
+        let active = dir.path().join("active.apk");
+        fs::write(&active, b"old Native 3.16.0").unwrap();
+        assert!(check_active_apk(&p, "native.apk", &active)
+            .unwrap_err()
+            .to_string()
+            .contains("не совпадает с payload"));
+        fs::copy(&staged, &active).unwrap();
+        check_active_apk(&p, "native.apk", &active).unwrap();
+        fs::remove_file(&active).unwrap();
+        assert!(check_active_apk(&p, "native.apk", &active).is_err());
+        assert!(check_active_apk(&p, "missing.apk", &staged).is_err());
+    }
+
+    #[test]
     fn different_updater_archive_does_not_block_release() {
         let dir = tempfile::tempdir().unwrap();
         let p = compatibility_fixture(dir.path());
@@ -175,7 +200,7 @@ pub fn compatible(p: &Payload) -> io::Result<()> {
     Ok(())
 }
 fn package_path(package: &str) -> io::Result<String> {
-    let result = command("/system/bin/pm", &["path", package], 20)?;
+    let result = command("/system/bin/pm", &["path", "--user", "0", package], 20)?;
     let paths: Vec<_> = result
         .lines()
         .filter_map(|l| l.strip_prefix("package:"))
@@ -187,6 +212,18 @@ fn package_path(package: &str) -> io::Result<String> {
     }
     Ok(paths[0].into())
 }
+fn check_active_apk(p: &Payload, artifact: &str, active: &Path) -> io::Result<()> {
+    let expected = &p.artifact(artifact).map_err(error)?.sha256;
+    let actual = payload::sha256(active).map_err(error)?;
+    if actual != *expected {
+        return Err(invalid(&format!(
+            "Активный {artifact} ({}) не совпадает с payload: {actual}, ожидался {expected}",
+            active.display()
+        )));
+    }
+    Ok(())
+}
+
 fn native_status(safety: bool) -> io::Result<String> {
     command(
         "/system/bin/content",
@@ -422,6 +459,12 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
         if !output.lines().any(|s| s.trim() == "Success") {
             return Err(invalid(&format!("PackageManager: {output}")));
         }
+        let (package, artifact) = if index == 0 {
+            (payload::NATIVE, "native.apk")
+        } else {
+            (payload::RESTORE, "restore_mode.apk")
+        };
+        check_active_apk(&p, artifact, Path::new(&package_path(package)?))?;
         workflow::update(shared, |s| s.completed_steps = 5 + index as u32)?;
     }
     fs::remove_file(restore)?;
@@ -588,24 +631,14 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
         ],
         30,
     )?;
-    let expected = shared
-        .lock()
-        .unwrap()
-        .state
-        .selected
-        .clone()
-        .ok_or_else(|| invalid("Нет релиза для проверки после загрузки"))?;
-    let claims = release_core::ota::verify(&expected).map_err(error)?;
-    // Query actual registered packages, not staging hashes. Android owns installed version/signature state.
-    for package in [payload::NATIVE, payload::RESTORE] {
-        package_path(package)?;
-        let dump = command("/system/bin/dumpsys", &["package", package], 30)?;
-        if !dump
-            .lines()
-            .any(|l| l.trim() == format!("versionName={}", claims.version))
-        {
-            return Err(invalid(&format!("Не запущена ожидаемая версия {package}")));
-        }
+    // Reopen the verified payload: versionName alone cannot distinguish rebuilt releases,
+    // and dumpsys also lists the inactive system package underneath a /data/app update.
+    let (p, claims) = workflow::verified(shared)?;
+    for (package, artifact) in [
+        (payload::NATIVE, "native.apk"),
+        (payload::RESTORE, "restore_mode.apk"),
+    ] {
+        check_active_apk(&p, artifact, Path::new(&package_path(package)?))?;
     }
     let mut ready_since = None;
     let deadline = Instant::now() + Duration::from_secs(180);

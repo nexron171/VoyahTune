@@ -116,7 +116,11 @@ class ClassicPortTests(unittest.TestCase):
   for action in ['install','remove']:
    old=self.classic(reference,action);new=port.apply(port.plan(action),okay=False)
    self.assertEqual(new.returncode,old.returncode,old.stdout[-1200:]+new.stdout[-2500:]);self.assertEqual(self.state(port),self.state(reference))
- def test_no_new_hash_gate_after_push(self):self.compare('install',{'corruptPush':True})
+ def test_gui_rejects_corrupted_active_apk_after_push(self):
+  # GUI postflight now verifies active bytes; legacy host scripts do not have this gate.
+  port=self.fixture({'corruptPush':True})
+  result=port.apply(port.plan('install'),okay=False)
+  self.assertNotEqual(result.returncode,0)
  def test_readonly_remove_has_no_extra_reboot_attempt(self):self.compare('remove',{'readOnly':True})
  def seed_legacy(self,f):
   p=f.device/'system/etc/init.logcat.sh';p.write_text('#!/system/bin/sh\n# init.logcat.sh Open Voyah:\n/system/bin/logcat -v threadtime\n')
