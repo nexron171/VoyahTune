@@ -585,9 +585,13 @@ public class AdvanceActivity extends AppCompatActivity {
 
         // Раздел «Другое»: тоггл «Режим отладки»
         Switch switchDebugMode = findViewById(R.id.switchDebugMode);
+        View debugInformationBlock = findViewById(R.id.debugInformationBlock);
         switchDebugMode.setChecked(prefs.getBoolean("debugMode", false));
-        switchDebugMode.setOnCheckedChangeListener((b, checked) ->
-                prefs.edit().putBoolean("debugMode", checked).apply());
+        debugInformationBlock.setVisibility(switchDebugMode.isChecked() ? View.VISIBLE : View.GONE);
+        switchDebugMode.setOnCheckedChangeListener((b, checked) -> {
+            prefs.edit().putBoolean("debugMode", checked).apply();
+            debugInformationBlock.setVisibility(checked ? View.VISIBLE : View.GONE);
+        });
 
         // Раздел «Другое»: тоггл «Полноэкранная сетка» главного экрана и число растянутых колонок
         Switch switchFullscreenGrid = findViewById(R.id.switchFullscreenGrid);

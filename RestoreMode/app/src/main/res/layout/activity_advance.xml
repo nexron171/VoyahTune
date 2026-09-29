@@ -2693,6 +2693,34 @@
 
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/debugInformationBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/layout_category_bg"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Отладочная информация"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Показатели пока не добавлены"
+                android:textColor="#AAAAAA"
+                android:textSize="20px" />
+
+        </LinearLayout>
+
         <!-- Опциональные модификации штатной Qinggan-клавиатуры. -->
         <LinearLayout
             android:layout_width="match_parent"
