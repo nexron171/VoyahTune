@@ -134,7 +134,12 @@ for (const [mode, values] of Object.entries({ECO: [1,2,1], COMFORT: [2,2,2],
     assert.equal(f.originalBundle.values.DRIVING_MODE_SET, 1); // Copy, not mutation.
     assert.equal(f.closes, mode === "INDIVIDUAL" ? 3 : 1);
 }
-for (const options of [{debug: 1}, {mode: "bad"}, {mode: "__proto__"},
+{
+    const f = fixture({debug: 1}); f.reset();
+    assert.equal(f.sends[0].vehicle.values.DRIVING_MODE_SET, 3,
+        "diagnostic visibility must not suppress drive restoration");
+}
+for (const options of [{mode: "bad"}, {mode: "__proto__"},
     {queryError: true}, {nullCursor: true}, {empty: true}, {columns: 6}, {noApp: true},
     {platform: false}, {maintenance: null}, {maintenance: 8},
     {mode: "INDIVIDUAL", individualError: true},

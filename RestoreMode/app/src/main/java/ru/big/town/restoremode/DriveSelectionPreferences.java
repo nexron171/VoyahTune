@@ -94,7 +94,7 @@ final class DriveSelectionPreferences {
             boolean claim = "pending".equals(state) && prefs.getInt(ACC, -1) == 2
                     && args.getLong("revision", -1) == prefs.getLong(REV, 0)
                     && (prefs.getBoolean("driveEnabled", false) || prefs.getBoolean("energyEnabled", false)
-                        || prefs.getBoolean("forcedEv", false)) && !prefs.getBoolean("debugMode", false);
+                        || prefs.getBoolean("forcedEv", false));
             if (claim && !prefs.edit().putString(START, "claimed").commit()) {
                 throw new IllegalStateException("Startup claim not persisted");
             }
@@ -125,7 +125,6 @@ final class DriveSelectionPreferences {
         result.putString("startup", prefs.getString(START, "pending"));
         result.putString("settingsStartup", prefs.getString(SETTINGS_START, "idle"));
         result.putBoolean("enabled", prefs.getBoolean("driveEnabled", false));
-        result.putBoolean("debug", prefs.getBoolean("debugMode", false));
         return result;
     }
 }

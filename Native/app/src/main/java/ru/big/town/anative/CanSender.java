@@ -7,13 +7,8 @@ import java.util.function.BooleanSupplier;
 /**
  * Централизованный слой отправки CAN-команд.
  *
- * <p>Если включён «Режим отладки» ({@link #setDebugMode(boolean)}), команды НЕ уходят в шину,
- * а логируются (эмуляция) — чтобы можно было отлаживать работу приложения без живого
- * автомобиля. В обычном режиме фреймы отправляются через нативный JNI-вызов.</p>
- *
- * <p>Значение флага отладки приходит из настроек RestoreMode (SharedPreferences
- * {@code debugMode}) через ContentProvider и обновляется в
- * {@link MainActivity#initValueModes(android.content.Context)}.</p>
+ * <p>Фреймы отправляются через нативный JNI-вызов. Настройка видимости отладочной
+ * информации в RestoreMode не меняет отправку команд.</p>
  */
 public final class CanSender {
     public static final String TAG = "$$$ CanSender $$$";
@@ -26,28 +21,15 @@ public final class CanSender {
     // native frame so sleep/reset can stop a multi-frame batch between two ioctl transactions.
     private static final ThreadLocal<BooleanSupplier> SEND_GUARD = new ThreadLocal<>();
     // A nested caller may need to distinguish a real frame attempt from a guard-suppressed batch.
-    // The callback runs only after the final per-frame guard, immediately before emulation/JNI.
+    // The callback runs only after the final per-frame guard, immediately before JNI.
     private static final ThreadLocal<Runnable> FRAME_ATTEMPT = new ThreadLocal<>();
-    private static volatile boolean debugMode = false;
 
     private CanSender() {}
-
-    /** Установить режим отладки. true — эмуляция (лог вместо шины). */
-    public static void setDebugMode(boolean enabled) {
-        if (debugMode != enabled) {
-            Log.i(TAG, "debugMode -> " + enabled + (enabled ? " (эмуляция CAN в логи)" : " (реальная отправка)"));
-        }
-        debugMode = enabled;
-    }
-
-    public static boolean isDebugMode() {
-        return debugMode;
-    }
 
     /**
      * Отправка одного 10-байтного фрейма с человекочитаемой меткой (что это за команда).
      *
-     * @return {@code true}, если фрейм отправлен (или сэмулирован в debug-режиме);
+     * @return {@code true}, если фрейм отправлен;
      *         {@code false}, если нативный слой вернул ошибку (напр. не загрузилась libqg_hal)
      *         или фрейм некорректен. Иначе restore мог бы считаться успешным без CAN.
      */
@@ -58,12 +40,6 @@ public final class CanSender {
             return false;
         }
         if (!sendAllowed()) return false;
-        if (debugMode) {
-            if (!beginFrameAttemptForCurrentGuard()) return false;
-            Log.i(TAG, "EMULATE CAN [" + (label == null || label.isEmpty() ? "?" : label) + "]"
-                    + " cmd=" + cmdNum + " frame=" + MainActivity.printHexBinary(frame));
-            return true;
-        }
         final int res;
         synchronized (NATIVE_SEND_LOCK) {
             // A batch may have waited for another caller's transaction while the car went to sleep.
@@ -164,7 +140,7 @@ public final class CanSender {
 
     /**
      * Rechecks the current per-frame guard and records an attempt at the final send boundary.
-     * Callers must invoke this immediately before emulation or the native CAN transaction.
+     * Callers must invoke this immediately before the native CAN transaction.
      */
     static boolean beginFrameAttemptForCurrentGuard() {
         if (!sendAllowed()) return false;

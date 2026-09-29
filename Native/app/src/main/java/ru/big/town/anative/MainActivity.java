@@ -219,10 +219,6 @@ public class MainActivity extends AppCompatActivity {
     public static boolean setHeadlights(Context context, boolean on){
         String command = on ? "LOW_BEAM" : "OUT_LAMP_OFF";
         Log.i("$$$ MainActivity setHeadlights $$$", "OEM CAN: " + command);
-        if (CanSender.isDebugMode()) {
-            Log.i("$$$ MainActivity setHeadlights $$$", "EMULATE OEM TX58: " + command + " state=1");
-            return true;
-        }
         return HeadlightCanTransport.send(context, on);
     }
 
@@ -230,10 +226,6 @@ public class MainActivity extends AppCompatActivity {
     public static boolean setHeadlightsAutoLow(Context context, boolean lowBeam){
         String command = lowBeam ? "LOW_BEAM" : "AUTO_LAMP_SWITCH";
         Log.i("$$$ MainActivity setHeadlights $$$", "OEM CAN: " + command);
-        if (CanSender.isDebugMode()) {
-            Log.i("$$$ MainActivity setHeadlights $$$", "EMULATE OEM TX58: " + command + " state=1");
-            return true;
-        }
         return HeadlightCanTransport.sendAutoPair(context, lowBeam);
     }
 
@@ -356,8 +348,6 @@ public class MainActivity extends AppCompatActivity {
                 driveRememberLast = cursorBooleanDefaultTrue(cursor, 29);
                 energyRememberLast = cursorBooleanDefaultTrue(cursor, 30);
                 recycleRememberLast = cursorBooleanDefaultTrue(cursor, 31);
-                // col 12 — «Режим отладки»: эмуляция CAN в логи вместо реальной отправки
-                boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
                 // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
                 boolean wiperColdMode = cursor.getColumnCount() > 13 && cursor.getInt(13) == 1;
                 // cols 14,15 — команды кнопок на руле (короткое/долгое нажатие)
@@ -365,8 +355,8 @@ public class MainActivity extends AppCompatActivity {
                 if (cursor.getColumnCount() > 15) customCommandStarButton2 = cursor.getString(15);
                 // col 18 — «Пауза музыки при открытии двери водителя»: второй потребитель сигнала двери
                 boolean pauseMediaOnDoor = cursor.getColumnCount() > 18 && cursor.getInt(18) == 1;
-                applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
-                saveModesCache(context, debugMode, wiperColdMode, pauseMediaOnDoor);
+                applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor);
+                saveModesCache(context, wiperColdMode, pauseMediaOnDoor);
                 ApplyEngine.noteLoadedModes(
                         driveMode, energy, recycle,
                         driveEnabled, energyEnabled, recycleEnabled,
@@ -382,7 +372,7 @@ public class MainActivity extends AppCompatActivity {
                         + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
                         + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
                         + " stockUi=" + apolloStockUiEnabled
-                        + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
+                        + " wiperColdMode=" + wiperColdMode
                         + " pauseMediaOnDoor=" + pauseMediaOnDoor);
                 return 2;
             } else {
@@ -414,7 +404,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Сохраняет успешно прочитанный снимок настроек в NativePrefs (кэш на случай «глухого» пробуждения). */
-    private static void saveModesCache(Context context, boolean debugMode, boolean wiperColdMode, boolean pauseMediaOnDoor) {
+    private static void saveModesCache(Context context, boolean wiperColdMode, boolean pauseMediaOnDoor) {
         nativePrefs(context).edit()
                 .putString("cacheDriveMode", driveMode)
                 .putString("cacheEnergy", energy)
@@ -439,7 +429,6 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheApolloGreenSoundEnabled", apolloGreenSoundEnabled)
                 .putBoolean("cacheApolloTrafficSignsEnabled", apolloTrafficSignsEnabled)
                 .putBoolean("cacheApolloStockUiEnabled", apolloStockUiEnabled)
-                .putBoolean("cacheDebugMode", debugMode)
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
                 .putBoolean("cacheValid", true)
@@ -480,10 +469,9 @@ public class MainActivity extends AppCompatActivity {
         apolloGreenSoundEnabled = p.getBoolean("cacheApolloGreenSoundEnabled", false);
         apolloTrafficSignsEnabled = p.getBoolean("cacheApolloTrafficSignsEnabled", false);
         apolloStockUiEnabled = p.getBoolean("cacheApolloStockUiEnabled", false);
-        boolean debugMode     = p.getBoolean("cacheDebugMode", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
-        applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
+        applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor);
         ApplyEngine.noteLoadedModes(
                 driveMode, energy, recycle,
                 driveEnabled, energyEnabled, recycleEnabled,
@@ -499,14 +487,13 @@ public class MainActivity extends AppCompatActivity {
                 + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
                 + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
                 + " stockUi=" + apolloStockUiEnabled
-                + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
+                + " wiperColdMode=" + wiperColdMode
                 + " pauseMediaOnDoor=" + pauseMediaOnDoor);
         return true;
     }
 
-    /** Побочные эффекты настроек, не зависящие от отправки CAN: режим отладки и сервис-реактор двери водителя. */
-    private static void applyModeSideEffects(Context context, boolean debugMode, boolean wiperColdMode, boolean pauseMediaOnDoor) {
-        CanSender.setDebugMode(debugMode);
+    /** Побочные эффекты настроек: сервисы, связанные с дверью водителя. */
+    private static void applyModeSideEffects(Context context, boolean wiperColdMode, boolean pauseMediaOnDoor) {
         applyDoorReactor(context, wiperColdMode, pauseMediaOnDoor);
     }
 

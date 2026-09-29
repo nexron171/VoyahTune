@@ -342,11 +342,6 @@ final class OemVehicleStateTransport {
         if (app == null || !resolveStates(app, java.util.Collections.singleton(state.key))) {
             return Result.TRANSIENT_FAILURE;
         }
-        if (CanSender.isDebugMode()) {
-            synchronized (transactionLock) {
-                return emulateSingle(state, label);
-            }
-        }
         IBinder binder = acquireBinder(app);
         if (binder == null) return Result.TRANSIENT_FAILURE;
         synchronized (transactionLock) {
@@ -359,47 +354,34 @@ final class OemVehicleStateTransport {
         Context app = applicationContext(context);
         if (app == null || !resolveStates(app, keys)) return null;
 
-        if (CanSender.isDebugMode()) {
-            synchronized (transactionLock) {
-                return operation.run(new BoundSession(null, true));
-            }
-        }
-
         IBinder binder = acquireBinder(app);
         if (binder == null) return null;
         synchronized (transactionLock) {
             if (!isCurrentBinder(binder)) return null;
-            return operation.run(new BoundSession(binder, false));
+            return operation.run(new BoundSession(binder));
         }
     }
 
     private final class BoundSession implements Session {
         private final IBinder binder;
-        private final boolean emulated;
 
-        BoundSession(IBinder binder, boolean emulated) {
+        BoundSession(IBinder binder) {
             this.binder = binder;
-            this.emulated = emulated;
         }
 
         @Override
         public GearStatus readGearStatus() {
-            if (emulated) {
-                Log.i(TAG, "EMULATE TX6 gear=Parking(0)");
-                return new GearStatus(0, 0);
-            }
             return transactGearStatus(binder);
         }
 
         @Override
         public FuelLevel readFuelLevel() {
-            // Debug emulation must not present invented fuel readings as vehicle data.
-            return emulated ? null : transactFuelLevel(binder);
+            return transactFuelLevel(binder);
         }
 
         @Override
         public Integer readVehicleSpeed() {
-            if (emulated || !isCurrentBinder(binder)) return null;
+            if (!isCurrentBinder(binder)) return null;
             Parcel data = Parcel.obtain(), reply = Parcel.obtain();
             try {
                 data.writeInterfaceToken(CANBUS_DESCRIPTOR);
@@ -415,24 +397,19 @@ final class OemVehicleStateTransport {
         @Override
         public Integer readVehicleState(StateKey key) {
             Objects.requireNonNull(key, "VehicleState key");
-            if (emulated) {
-                int value = "BMS_SOC_DISPLAY".equals(key.name) ? 100 : 0;
-                Log.i(TAG, "EMULATE TX57 " + key + "=" + value);
-                return value;
-            }
             return transactVehicleState(binder, key);
         }
 
         @Override
         public Result sendVehicleState(StateValue state, String label) {
             Objects.requireNonNull(state, "VehicleState value");
-            return emulated ? emulateSingle(state, label) : transactSingle(binder, state, label);
+            return transactSingle(binder, state, label);
         }
 
         @Override
         public Result sendBundle(Map<StateKey, Integer> values, String label) {
             LinkedHashMap<StateKey, Integer> copy = immutableCopy(values);
-            return emulated ? emulateBundle(copy, label) : transactBundle(binder, copy, label);
+            return transactBundle(binder, copy, label);
         }
     }
 
@@ -441,11 +418,6 @@ final class OemVehicleStateTransport {
         Context app = applicationContext(context);
         if (app == null || !resolveStates(app, values.keySet())) {
             return Result.TRANSIENT_FAILURE;
-        }
-        if (CanSender.isDebugMode()) {
-            synchronized (transactionLock) {
-                return emulateBundle(values, label);
-            }
         }
         IBinder binder = acquireBinder(app);
         if (binder == null) return Result.TRANSIENT_FAILURE;
@@ -474,35 +446,12 @@ final class OemVehicleStateTransport {
         }
         if (!resolveStates(app, all.keySet())) return Result.TRANSIENT_FAILURE;
 
-        if (CanSender.isDebugMode()) {
-            synchronized (transactionLock) {
-                return emulateRestoreSequence(
-                        first, primaryValues, trailingValues, label);
-            }
-        }
         IBinder binder = acquireBinder(app);
         if (binder == null) return Result.TRANSIENT_FAILURE;
         synchronized (transactionLock) {
             return transactRestoreSequence(
                     binder, first, primaryValues, trailingValues, label);
         }
-    }
-
-    private Result emulateRestoreSequence(
-            StateValue first, Map<StateKey, Integer> primaryValues,
-            Map<StateKey, Integer> trailingValues, String label) {
-        if (first != null) {
-            Result result = emulateSingle(first, label + " first");
-            if (!result.accepted()) return result;
-        }
-        if (!primaryValues.isEmpty()) {
-            Result result = emulateBundle(primaryValues, label + " primary");
-            if (!result.accepted()) return result;
-        }
-        if (!trailingValues.isEmpty()) {
-            return emulateBundle(trailingValues, label + " trailing");
-        }
-        return Result.ACCEPTED_UNCONFIRMED;
     }
 
     private Result transactRestoreSequence(
@@ -675,20 +624,6 @@ final class OemVehicleStateTransport {
         if (canBusBinder != null && canBusBinder.isBinderAlive()) return canBusBinder;
         canBusBinder = null;
         return null;
-    }
-
-    private Result emulateSingle(StateValue state, String label) {
-        if (!CanSender.beginFrameAttemptForCurrentGuard()) return Result.TRANSIENT_FAILURE;
-        Log.i(TAG, "EMULATE TX58 [" + safeLabel(label) + "] " + state.key
-                + "=" + state.value + " accepted-unconfirmed");
-        return Result.ACCEPTED_UNCONFIRMED;
-    }
-
-    private Result emulateBundle(Map<StateKey, Integer> values, String label) {
-        if (!CanSender.beginFrameAttemptForCurrentGuard()) return Result.TRANSIENT_FAILURE;
-        Log.i(TAG, "EMULATE TX77 [" + safeLabel(label) + "] states=" + values
-                + " accepted-unconfirmed");
-        return Result.ACCEPTED_UNCONFIRMED;
     }
 
     private Result transactSingle(IBinder binder, StateValue state, String label) {

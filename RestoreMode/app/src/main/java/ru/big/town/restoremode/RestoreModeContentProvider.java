@@ -31,7 +31,6 @@ public class RestoreModeContentProvider extends ContentProvider {
     private  boolean disablePedestrianSound=false;
     private  boolean forcedEv=false;
     private boolean suspensionMaintenance=false;
-    private  boolean debugMode=false;
     private  boolean wiperColdMode=false;
     private  String customCommandStarButton1="";
     private  String customCommandStarButton2="";
@@ -178,7 +177,6 @@ public class RestoreModeContentProvider extends ContentProvider {
         disablePedestrianSound  = sharedPreferences.getBoolean("disablePedestrianSound", false);
         forcedEv                = sharedPreferences.getBoolean("forcedEv", false);
         suspensionMaintenance = sharedPreferences.getBoolean("suspensionMaintenance", false);
-        debugMode               = sharedPreferences.getBoolean("debugMode",              false);
         wiperColdMode           = sharedPreferences.getBoolean("wiperColdMode",          false);
         customCommandStarButton1 = sharedPreferences.getString("customCommandStarButton1", "");
         customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
@@ -217,7 +215,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 "lightSensorThreshold",    // 9
                 "lightSensorThresholdOff", // 10
                 "disablePedestrianSound",  // 11
-                "debugMode",               // 12
+                "debugMode",               // 12, legacy column; diagnostic visibility is UI-only
                 "wiperColdMode",           // 13
                 "customCommandStarButton1",// 14
                 "customCommandStarButton2",// 15
@@ -253,7 +251,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 lightSensorThreshold,
                 lightSensorThresholdOff,
                 disablePedestrianSound ? 1 : 0,
-                debugMode ? 1 : 0,
+                0, // Legacy hooks may still read this column; never suppress vehicle commands.
                 wiperColdMode ? 1 : 0,
                 customCommandStarButton1,
                 customCommandStarButton2,

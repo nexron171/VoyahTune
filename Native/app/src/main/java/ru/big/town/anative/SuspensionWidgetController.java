@@ -83,7 +83,6 @@ final class SuspensionWidgetController {
         }
     }
     private void refresh() {
-        if (CanSender.isDebugMode()) { height = -1; message = "Данные автомобиля недоступны в эмуляции"; publish(); return; }
         Map<OemVehicleStateTransport.StateKey, Integer> values =
                 OemVehicleStateTransport.readVehicleStates(context, KEYS);
         height = value(values, HEIGHT); direction = value(values, DIRECTION);
@@ -104,7 +103,6 @@ final class SuspensionWidgetController {
     }
     private void select(int selection) {
         if (pending >= 0 || commandInFlight) { publish(); return; }
-        if (CanSender.isDebugMode()) { message = "Управление недоступно в эмуляции"; publish(); return; }
         commandInFlight = true; message = "Отправляем команду…"; publish();
         ApplyEngine.postUserCommand("suspension widget", () -> {
             String result = dispatch(selection);

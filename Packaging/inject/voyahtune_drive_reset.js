@@ -143,8 +143,8 @@ Java.perform(function () {
             if (c === null) return null;
             var mode, driveEnabled, energyEnabled, energy, forcedEv, maintenance;
             try {
-                if (!c.moveToFirst() || c.getColumnCount() <= 32 || c.isNull(32)
-                        || c.getInt(12) === 1) return null; // Missing settings or debug: stock behavior.
+                if (!c.moveToFirst() || c.getColumnCount() <= 32 || c.isNull(32))
+                    return null; // Missing settings: stock behavior.
                 mode = String(c.getString(0));
                 driveEnabled = c.getInt(6) === 1;
                 energyEnabled = c.getInt(8) === 1;

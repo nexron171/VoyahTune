@@ -229,8 +229,7 @@ public class WiperColdService extends Service {
         wiperTogglePending = true;
         ApplyEngine.postWakeAction(label, () -> {
             byte[] frame = MainActivity.parseHexBinary(WIPER_TOGGLE_FRAME);
-            Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME
-                    + " debugMode=" + CanSender.isDebugMode());
+            Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME);
             return CanSender.send(CAN_CMD_NUM, frame, label);
         }, result -> {
             if (!destroyed) {
