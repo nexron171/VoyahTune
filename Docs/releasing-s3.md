@@ -1,7 +1,8 @@
 # Выпуск в Yandex Object Storage
 
-Этот путь размещает payload и установщики в `s3://voyahtune/vVERSION/`,
-а каталог — в GitHub `master-od`. `3.17.0` ниже — пример нового номера;
+Этот путь размещает payload в `s3://voyahtune/vVERSION/`, самостоятельные
+установщики — в `s3://voyahtune/Installers/INSTALLER_VERSION/`, а каталог — в
+GitHub `master-od`. Версии VoyahTune и Installer независимы. `3.17.0` ниже — пример нового номера;
 не заменяйте байты уже опубликованной версии. Полная среда и проверки описаны
 в [релизном процессе](releasing.md) и [сборке Installer](../Installer/BUILDING.md).
 
@@ -63,11 +64,12 @@ Homebrew JDK: `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Conten
   `https://storage.yandexcloud.net/voyahtune/vVERSION/payload_VERSION.zip`;
 - `SHA256SUMS` — все остальные файлы папки, формат `sha256`, два пробела, имя файла.
 
-Добавьте выбранные установщики, описание релиза и сведения о сборке по необходимости.
+Добавьте описание релиза по необходимости. Установщики и сведения об их сборке
+публикуются отдельно в `Installers/INSTALLER_VERSION/`; в папке payload их быть не должно.
 Подпапки, симлинки и файлы вне SHA256SUMS отклоняются. Имена — латинские буквы,
 цифры, точка, подчёркивание и дефис. Папка должна содержать только публичные материалы.
 
-Пример подготовки после приведённых выше сборок всех трёх установщиков:
+Пример подготовки двух независимых папок после сборки всех трёх установщиков:
 
 ```sh
 python3 - "$RELEASE_VERSION" <<'PY'
@@ -83,22 +85,29 @@ entry_path = out / f'payload_{version}.json'
 entry = json.loads(entry_path.read_text())
 entry['url'] = f'https://storage.yandexcloud.net/voyahtune/v{version}/payload_{version}.zip'
 entry_path.write_text(json.dumps(entry, indent=2) + '\n')
+for path in out.iterdir():
+    if path.name.startswith('VoyahTune-Installer-'):
+        raise ValueError('Installer must be published under Installers/INSTALLER_VERSION')
+installers = Path('Releases/dist') / f'installers-{installer}'
+installers.mkdir()
 app = Path('Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app')
 subprocess.run(['ditto', '-c', '-k', '--keepParent', str(app),
-                str(out / f'VoyahTune-Installer-{installer}-macos.zip')], check=True)
+                str(installers / f'VoyahTune-Installer-{installer}-macos.zip')], check=True)
 for arch, folder in [('x64', f'release-{version}-installers'), ('x86', f'release-{version}-windows-x86')]:
     source = Path('Releases/build') / folder
     record = json.loads((source / 'build-info.json').read_text())
     if record['installerVersion'] != installer or record['embeddedPayload']:
         raise ValueError('Unexpected installer version or embedded payload')
-    shutil.copy2(source / f'windows-{arch}.exe', out / f'VoyahTune-Installer-{installer}-windows-{arch}.exe')
-    shutil.copy2(source / 'build-info.json', out / f'build-info-{arch}.json')
-# Добавьте публичные RELEASE-NOTES/BUILD-INFO до вычисления SHA256SUMS.
+    shutil.copy2(source / f'windows-{arch}.exe', installers / f'VoyahTune-Installer-{installer}-windows-{arch}.exe')
+# Добавьте публичные RELEASE-NOTES в папку payload и BUILD-INFO.json в папку
+# установщиков до вычисления SHA256SUMS.
 def sha(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
-(out / 'SHA256SUMS').write_text(''.join(f'{sha(p)}  {p.name}\n' for p in sorted(out.iterdir())))
-print(out)
+for folder in (out, installers):
+    (folder / 'SHA256SUMS').write_text(''.join(
+        f'{sha(p)}  {p.name}\n' for p in sorted(folder.iterdir()) if p.name != 'SHA256SUMS'))
+print(out, installers)
 PY
 ```
 
@@ -115,11 +124,17 @@ python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --dry-run
 # Загрузка и обновление локального OTA-каталога после всех успешных HEAD.
 python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --update-catalog
 
+# Независимая публикация macOS Universal и Windows x64/x86 GUI.
+INSTALLER_VERSION=1.3.0  # фактическая версия из Installer/Cargo.toml
+python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION" --dry-run
+python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION"
+python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION" --check-remote
+
 # Только проверка уже опубликованного комплекта, без изменений и скачивания.
 python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --check-remote
 ```
 
-Без `--update-catalog` выполняется только загрузка. `--directory` задаёт другую
+Без `--update-catalog` выполняется только загрузка payload. `--directory` задаёт другую
 плоскую папку; по умолчанию используется `Releases/dist/s3-vVERSION` относительно
 репозитория. `--profile` и `--bucket` переопределяют `voyahtune` (URL entry должен
 соответствовать выбранному бакету). Для каталога доступны `--index` и `--builder`.
@@ -179,7 +194,17 @@ git commit -m "Publish VoyahTune ${RELEASE_VERSION} in OTA catalog"
 git push github.com HEAD:master-od
 ```
 
-Установщики не хранятся в index: там только payload. Проверьте небольшой
+Установщики не хранятся в index: там только payload. Их ссылки имеют вид
+`https://storage.yandexcloud.net/voyahtune/Installers/INSTALLER_VERSION/имя-файла`.
+При исправлении GUI с новой версией публикуйте новый префикс, не перезаписывайте
+старые байты. Уже опубликованный payload и его запись каталога при этом не меняются.
+В папке установщиков нужны три файла (macOS Universal, Windows x64 и x86) и свой
+`SHA256SUMS`; `BUILD-INFO.json` можно добавить до подсчёта контрольных сумм.
+Удаление устаревших GUI из старой папки автомобильного релиза выполняйте только
+после проверки новых публичных URL. Если `SHA256SUMS` и другие метаданные старой
+папки перечисляют удалённые GUI, удалите эти устаревшие метаданные вместе с GUI;
+payload ZIP и его JSON entry должны остаться побайтово прежними.
+Проверьте небольшой
 [публичный каталог](https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json)
 после push и выдайте пользователю ссылки на файлы в S3. При задержке CDN не
 подменяйте проверку ответа ветки проверкой произвольного файла.
