@@ -8,6 +8,7 @@ import ru.big.town.common.DriveSelectionPolicy;
 final class DriveSelectionPreferences {
     private static final String REV = "driveRevision", CYCLE = "driveCycle", ACC = "driveAcc";
     private static final String BOOT = "driveBoot", START = "driveStartup";
+    private static final String SETTINGS_START = "settingsStartup";
     static synchronized DriveSelectionPolicy read(SharedPreferences prefs) {
         return new DriveSelectionPolicy(prefs.getString("driveMode", "INDIVIDUAL"),
                 prefs.getString(DriveSelectionPolicy.OVERRIDE, ""),
@@ -57,9 +58,27 @@ final class DriveSelectionPreferences {
                     boolean preserve = prefs.getInt(BOOT, -1) == -1 && previous == -1;
                     e.putLong(CYCLE, prefs.getLong(CYCLE, 0) + 1)
                             .putLong(REV, prefs.getLong(REV, 0) + 1);
+                    e.putString(SETTINGS_START, "pending");
                     if (!preserve) e.putString(DriveSelectionPolicy.CURRENT, "").putString("currentTripEnergy", "").putString(START, "pending");
                 }
                 if (!e.commit()) throw new IllegalStateException("ACC state not persisted");
+            }
+        } else if ("claimSettings".equals(action)) {
+            boolean claim = "pending".equals(prefs.getString(SETTINGS_START, "idle"))
+                    && prefs.getInt(ACC, -1) == 2;
+            if (claim && !prefs.edit().putString(SETTINGS_START, "claimed").commit()) {
+                throw new IllegalStateException("Settings claim not persisted");
+            }
+            Bundle result = snapshot(prefs);
+            result.putBoolean("claimed", claim);
+            return result;
+        } else if ("completeSettings".equals(action)) {
+            if (args.getLong("cycle", -1) == prefs.getLong(CYCLE, 0)
+                    && "claimed".equals(prefs.getString(SETTINGS_START, "idle"))) {
+                if (!prefs.edit().putString(SETTINGS_START,
+                        args.getBoolean("accepted") ? "submitted" : "uncertain").commit()) {
+                    throw new IllegalStateException("Settings result not persisted");
+                }
             }
         } else if ("manual".equals(action)) {
             if (prefs.getBoolean("driveEnabled", false)) select(prefs, prefs.getString("driveMode", "INDIVIDUAL"), DriveSelectionPolicy.SETTINGS);
@@ -104,6 +123,7 @@ final class DriveSelectionPreferences {
         result.putLong("cycle", prefs.getLong(CYCLE, 0));
         result.putInt("acc", prefs.getInt(ACC, -1));
         result.putString("startup", prefs.getString(START, "pending"));
+        result.putString("settingsStartup", prefs.getString(SETTINGS_START, "idle"));
         result.putBoolean("enabled", prefs.getBoolean("driveEnabled", false));
         result.putBoolean("debug", prefs.getBoolean("debugMode", false));
         return result;

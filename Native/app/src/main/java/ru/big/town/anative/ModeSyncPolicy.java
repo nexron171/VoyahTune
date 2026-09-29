@@ -10,9 +10,6 @@ final class ModeSyncPolicy {
     private long generation;
     private boolean wakeActive;
     private boolean feedbackOpen;
-    private boolean driveEntered;
-    private boolean waitingForDrive;
-    private int lastGear = -1;
     private String expectedDrive;
     private final Map<String, String> currentModes = new HashMap<>();
     private boolean driveRememberLast = true;
@@ -21,25 +18,8 @@ final class ModeSyncPolicy {
 
     synchronized void activateWake() { wakeActive = true; }
 
-    synchronized void onDriverDoorOpened() {
-        driveEntered = false;
-        waitingForDrive = true;
-        feedbackOpen = false;
-        // A completion or persistence check from the previous door cycle is no longer valid.
-        generation++;
-    }
-
-    synchronized void onGear(int gear) {
-        if (gear < 0) return;
-        if (wakeActive && waitingForDrive && gear == 3 && lastGear != 3) {
-            driveEntered = true;
-            waitingForDrive = false;
-        }
-        lastGear = gear;
-    }
-
-    /** Also guards steering selections, which are saved while their command is still running. */
-    synchronized boolean canRememberSelection() { return wakeActive && driveEntered; }
+    /** Guard feedback until this ACC cycle's Native restore or an explicit command completes. */
+    synchronized boolean canRememberSelection() { return wakeActive && feedbackOpen; }
 
     /** Drive choices can be made in Parking; automatic restore echoes remain gated. */
     synchronized boolean canAcceptDriveSelection() { return wakeActive && feedbackOpen; }
@@ -53,9 +33,6 @@ final class ModeSyncPolicy {
     synchronized long freeze() {
         wakeActive = false;
         feedbackOpen = false;
-        driveEntered = false;
-        waitingForDrive = false;
-        lastGear = -1;
         currentModes.clear();
         return ++generation;
     }
@@ -85,7 +62,7 @@ final class ModeSyncPolicy {
 
     synchronized boolean canPersist(long candidate, String modeKey) {
         return candidate == generation && canRememberSelection()
-                && feedbackOpen && acceptsExternalFeedback(modeKey);
+                && acceptsExternalFeedback(modeKey);
     }
 
     synchronized void updateExpected(String drive, String energy, String recycle,
@@ -120,7 +97,7 @@ final class ModeSyncPolicy {
         if (!knownModeKey(modeKey) || !valid(observedMode)) return Decision.IGNORE;
         // Even opted-out feedback is needed for steering cycles and Snow recuperation handling.
         observe(modeKey, observedMode);
-        return canRememberSelection() && feedbackOpen && acceptsExternalFeedback(modeKey)
+        return canRememberSelection() && acceptsExternalFeedback(modeKey)
                 ? Decision.ACCEPT : Decision.IGNORE;
     }
 

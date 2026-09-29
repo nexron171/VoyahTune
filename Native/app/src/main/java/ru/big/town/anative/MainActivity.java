@@ -792,7 +792,7 @@ public class MainActivity extends AppCompatActivity {
         persistSavedMode(context, isEnergy ? "energy" : "driveMode", mode);
     }
 
-    /** Explicit drive choices work in Parking; energy/recuperation retain the first-Drive gate. */
+    /** Explicit choices work in Parking; automatic recuperation feedback waits for the ACC pass. */
     public static void persistSavedMode(Context context, String modeKey, String mode) {
         if (context == null || mode == null || mode.isEmpty()) return;
         if ("driveMode".equals(modeKey)) {

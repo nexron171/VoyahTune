@@ -160,7 +160,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         // Fallback-триггер пробуждения через броадкасты. Держим его активным всегда (даже если
         // power-listener работает): при рестарте CarService слушатель может «протухнуть», а этот
-        // путь остаётся. Режимы восстанавливаются отдельно по двери и Drive.
+        // путь остаётся. Настройки восстанавливаются по сохранённому ACC-циклу.
         if (!explicitComponent && (Intent.ACTION_SCREEN_ON.equals(receivedIntent) ||
                 "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent))) {
             Log.i(TAG, "onReceive ACTION_SCREEN_ON or GARAGE_MODE_OFF");

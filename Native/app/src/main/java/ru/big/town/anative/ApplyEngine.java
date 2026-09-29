@@ -1,6 +1,8 @@
 package ru.big.town.anative;
 
 import android.content.Context;
+import android.net.Uri;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
@@ -8,7 +10,7 @@ import android.util.Log;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-/** Applies one saved snapshot per eligible door/first-Drive trigger, or explicit Apply request. */
+/** Applies one saved snapshot per ACC cycle, or an explicit Apply request. */
 public final class ApplyEngine {
     static final String TAG = "$$$ ApplyEngine $$$";
 
@@ -26,6 +28,8 @@ public final class ApplyEngine {
     private static final Object RESTORE_LOCK = new Object();
     private static final RestoreRunState RESTORE_RUN_STATE = new RestoreRunState();
     private static final ModeSyncPolicy MODE_SYNC_POLICY = new ModeSyncPolicy();
+    private static final String MODES_URI =
+            "content://ru.big.town.restoremode.restoremodecontentprovider/";
 
     private static long beginRestoreGate(String reason) {
         long generation = MODE_SYNC_POLICY.beginRestore();
@@ -89,18 +93,6 @@ public final class ApplyEngine {
         MODE_SYNC_POLICY.updateRememberLast(modeKey, rememberLast);
     }
 
-    static void noteDriverDoorOpened() {
-        synchronized (RESTORE_LOCK) {
-            MODE_SYNC_POLICY.onDriverDoorOpened();
-        }
-    }
-
-    static void noteGear(int gear) {
-        synchronized (RESTORE_LOCK) {
-            MODE_SYNC_POLICY.onGear(gear);
-        }
-    }
-
     static boolean canRememberModeSelection() {
         synchronized (RESTORE_LOCK) {
             return MODE_SYNC_POLICY.canRememberSelection();
@@ -122,7 +114,7 @@ public final class ApplyEngine {
         MODE_SYNC_POLICY.observe(modeKey, mode);
     }
 
-    /** Invalidate a D restore queued while a user drive command was being dispatched/saved. */
+    /** Invalidate a queued ACC restore while a user drive command is being dispatched/saved. */
     static void driveSelectionSaved() {
         synchronized (RESTORE_LOCK) {
             RESTORE_RUN_STATE.cancelRestoreAndAdvance();
@@ -192,9 +184,41 @@ public final class ApplyEngine {
         Log.i(TAG, "wake active: " + reason);
     }
 
-    /** Each event queues its own immediate pass, including events arriving during another pass. */
-    public static void scheduleApply(String reason) {
-        enqueueApply(reason, false, null);
+    /** Provider owns the durable ACC-cycle claim; Native executes its remaining settings once. */
+    public static void scheduleAccApply(Context context) {
+        final Context app = context.getApplicationContext();
+        bg().post(() -> {
+            long cycle;
+            try {
+                Bundle claim = app.getContentResolver().call(Uri.parse(MODES_URI),
+                        "driveHookV2", "claimSettings", null);
+                if (claim == null || !claim.getBoolean("claimed")) return;
+                cycle = claim.getLong("cycle", -1);
+            } catch (RuntimeException e) {
+                Log.w(TAG, "ACC settings claim unavailable", e);
+                return;
+            }
+            final long wakeGeneration;
+            final long restoreEpoch;
+            final long gateGeneration;
+            synchronized (RESTORE_LOCK) {
+                wakeGeneration = RESTORE_RUN_STATE.currentGeneration();
+                RESTORE_RUN_STATE.activate(wakeGeneration);
+                restoreEpoch = RESTORE_RUN_STATE.currentRestoreEpoch();
+                gateGeneration = beginRestoreGate("ACC cycle " + cycle);
+            }
+            CycleResult result = applyInternal(null, gateGeneration, wakeGeneration,
+                    restoreEpoch, false);
+            Bundle completion = new Bundle();
+            completion.putLong("cycle", cycle);
+            completion.putBoolean("accepted", result.completesRestore());
+            try {
+                app.getContentResolver().call(Uri.parse(MODES_URI),
+                        "driveHookV2", "completeSettings", completion);
+            } catch (RuntimeException e) {
+                Log.w(TAG, "ACC settings completion unavailable", e);
+            }
+        });
     }
 
     /** Explicit Apply supersedes older queued restores and always notifies the client. */
@@ -384,7 +408,7 @@ public final class ApplyEngine {
         }
     }
 
-    private static void applyInternal(Runnable onDone, long gateGeneration,
+    private static CycleResult applyInternal(Runnable onDone, long gateGeneration,
                                       long wakeGeneration, long restoreEpoch, boolean manual) {
         CycleResult result = CycleResult.FAILED;
         try {
@@ -401,6 +425,7 @@ public final class ApplyEngine {
             Log.i(TAG, "restore result=" + result + " gen=" + gateGeneration);
             if (onDone != null) onDone.run();
         }
+        return result;
     }
 
     private static CycleResult runCycle(long wakeGeneration, long restoreEpoch, boolean manual) {
@@ -480,7 +505,7 @@ public final class ApplyEngine {
         }
     }
 
-    /** Cancellation only: door and Drive requests never cover or deduplicate one another. */
+    /** Cancellation of a queued restore on sleep or an explicit user command. */
     static final class RestoreRunState {
         private long generation;
         private long restoreEpoch;

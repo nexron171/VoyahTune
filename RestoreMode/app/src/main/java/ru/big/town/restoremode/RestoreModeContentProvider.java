@@ -99,7 +99,19 @@ public class RestoreModeContentProvider extends ContentProvider {
                         "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Drive hook state");
             }
             int boot = android.provider.Settings.Global.getInt(getContext().getContentResolver(), "boot_count", -1);
-            Bundle result = DriveSelectionPreferences.hook(sharedPreferences, arg, extras, boot);
+            Bundle result = DriveSelectionPreferences.hook(sharedPreferences,
+                    "dispatchSettings".equals(arg) ? "snapshot" : arg, extras, boot);
+            if ("dispatchSettings".equals(arg) && result.getInt("acc", -1) == 2
+                    && "pending".equals(result.getString("settingsStartup"))) {
+                try {
+                    getContext().startForegroundService(new Intent()
+                            .setClassName("ru.big.town.anative",
+                                    "ru.big.town.anative.SetModesService")
+                            .setAction("ru.big.town.anative.ACC_RESTORE"));
+                } catch (RuntimeException e) {
+                    Log.w("DriveSelection", "ACC settings dispatch unavailable", e);
+                }
+            }
             if ("user".equals(arg) && extras != null) {
                 if (extras.containsKey("mode")) notifySavedMode("driveMode",
                         DriveSelectionPreferences.read(sharedPreferences).configured);

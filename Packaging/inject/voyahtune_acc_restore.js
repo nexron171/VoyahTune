@@ -309,6 +309,11 @@ Java.perform(function () {
             finally {
                 if (previous === null) scope.remove();
                 else scope.set(previous);
+                // Start Native's remaining settings only after the OEM ACC handler has returned.
+                if (entering) {
+                    try { hook(this.contentResolver.value, "dispatchSettings"); }
+                    catch (e) { log("ACC settings dispatch unavailable: " + e); }
+                }
             }
         });
         function bootstrap(component) {
@@ -317,6 +322,9 @@ Java.perform(function () {
             try {
                 var snap = observeAcc(component, component.getAccStatus());
                 if (snap.getInt("acc") !== 2) return;
+                // Also covers a late attach after the ACC parser already ran.
+                try { hook(component.contentResolver.value, "dispatchSettings"); }
+                catch (e) { log("startup settings dispatch unavailable: " + e); }
                 var startupState = String(snap.getString("startup"));
                 if (startupState !== "pending") { bootstrapDone = true; return; }
                 var targets = selectedTargets(component.contentResolver.value);

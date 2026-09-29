@@ -94,14 +94,13 @@ public class DriveSelectionPolicyTest {
         assertEquals("INDIVIDUAL", new DriveSelectionPolicy("INDIVIDUAL", "", null).medium);
         assertEquals("ECO", new DriveSelectionPolicy("SPORT", "", null).medium);
     }
-    @Test public void driveFeedbackIsGatedDuringRestoreButAvailableBeforeDriveAndWithOptOut() {
+    @Test public void driveFeedbackIsGatedDuringAccRestoreAndAvailableAfterUserCommand() {
         ModeSyncPolicy policy = new ModeSyncPolicy();
         policy.updateRememberLast("driveMode", false);
-        policy.onDriverDoorOpened();
         long restore = policy.beginRestore();
         assertFalse(policy.canAcceptDriveSelection());
         policy.completeRestore(restore);
-        assertFalse(policy.canRememberSelection());
+        assertTrue(policy.canRememberSelection());
         assertTrue(policy.canAcceptDriveSelection());
         long command = policy.cancelRestore();
         assertFalse(policy.canAcceptDriveSelection());

@@ -10,7 +10,7 @@ function fixture(options = {}) {
     const f = Object.assign({mode: "SPORT", enabled: 1, energyEnabled: 0, energy: "EV",
         forcedEv: 0, maintenance: 0, debug: 0, platform: true, guest: 1, acc: 0,
         events: [], singles: [], calls: [],
-        thread: 1, queries: 0, closes: 0, originals: 0, sends: [], logs: [], individual: {}}, options);
+        thread: 1, queries: 0, closes: 0, originals: 0, sends: [], logs: [], individual: {}, dispatches: 0}, options);
     const properties = new Map();
     const methods = [];
     function method(original) {
@@ -90,6 +90,7 @@ function fixture(options = {}) {
     f.revision = 0; f.startup = "pending";
     const provider = method(function (uri, name, action, args) {
         if (f.queryError) throw new Error("provider unavailable");
+        if (action === "dispatchSettings") f.dispatches++;
         if (action === "user") {
             if (args.containsKey("mode")) f.mode = args.getString("mode");
             if (args.containsKey("energy")) f.energy = args.getString("energy");
@@ -184,9 +185,11 @@ for (const [mode, values] of Object.entries({ECO: [1,2,1], COMFORT: [2,2,2],
     assert.equal(f.singles[1][1], {1:19,2:5,3:64,4:54,5:10,6:9}[values[0]]);
     assert.equal(f.acc, 2);
     assert.equal(f.otherBcMWork, true);
+    assert.equal(f.dispatches, 1, "remaining settings are dispatched after the ACC parser");
     f.frame(); // Repeated ON frame is not another ACC edge.
     assert.equal(f.sends.length, 1);
     assert.equal(f.originals, 2);
+    assert.equal(f.dispatches, 1);
 }
 for (const options of [{debug: 1}, {mode: "bad"}, {mode: "__proto__"},
     {queryError: true}, {nullCursor: true}, {empty: true}, {columns: 6},
@@ -257,6 +260,7 @@ console.log("PASS: guest ACC edge, modes, feedback/color, stock parser, isolatio
 
 {
     const f = fixture({acc: 2, energyEnabled: 1, energy: "SREV"}); f.bootstrap();
+    assert.equal(f.dispatches, 1, "late attach also dispatches the ACC settings pass");
     assert.equal(f.sends.length, 1); assert.equal(f.startup, "submitted");
     assert.equal(f.sends[0].vehicle.values.DRIVING_MODE_SET, 3);
     assert.equal(f.sends[0].vehicle.values.IVI_SOC_MODESET, 4);

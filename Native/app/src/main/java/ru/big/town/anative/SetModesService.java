@@ -1545,7 +1545,7 @@ public class SetModesService extends Service {
         // Fallback-подписку на пробуждение через броадкасты держим ВСЕГДА (belt-and-suspenders),
         // а не только когда mCarPowerManager==null: слушатель питания может «протухнуть» при
         // рестарте CarService, и тогда единственным триггером остаётся SCREEN_ON/GARAGE_MODE_OFF.
-        // Режимы восстанавливаются отдельно по двери и Drive.
+        // Восстановление настроек запускается отдельно из сохранённого ACC-цикла.
         if (!receiverRegistered) {
             IntentFilter filter = new IntentFilter();
             filter.addAction("android.intent.action.KEYCODE_SWC_USER_DEFINE");
@@ -1572,6 +1572,8 @@ public class SetModesService extends Service {
         } else {
             Log.i(TAG, "onStartCommand(): already initialized");
         }
+        // Both an ACC notification and a normal service restart reconcile the same durable claim.
+        ApplyEngine.scheduleAccApply(this);
         //if(action.equals("ru.big.town.anative.APPLY_DRIVE_MODES")){
         //  Log.i(TAG, "onStartCommand() Intent is ru.big.town.anative.APPLY_DRIVE_MODES!");
         //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
