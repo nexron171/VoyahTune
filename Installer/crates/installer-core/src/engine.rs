@@ -940,14 +940,12 @@ fi
                 echo BROKEN
             fi
         "#;
-        self.postflight_shell(
-            "cmd package install-existing --user 0 --wait ru.big.town.updater\n",
-        )?;
+        if self.shell(READY)? != "READY" {
+            self.postflight_shell("cmd package install-existing --user 0 ru.big.town.updater\n")?;
+        }
         if self.shell(READY)? != "READY" {
             self.postflight_shell("am force-stop ru.big.town.updater && pm uninstall -k --user 0 ru.big.town.updater\n")?;
-            self.postflight_shell(
-                "cmd package install-existing --user 0 --wait ru.big.town.updater\n",
-            )?;
+            self.postflight_shell("cmd package install-existing --user 0 ru.big.town.updater\n")?;
         }
         if self.shell(READY)? != "READY" {
             return Err(self.fail(
@@ -968,7 +966,7 @@ fi
                 "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true\n",
             )?;
             self.postflight_shell(
-                "cmd package install-existing --user 0 --wait ru.big.town.anative\n",
+                "cmd package install-existing --user 0 ru.big.town.anative\n",
             )?;
         }
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {

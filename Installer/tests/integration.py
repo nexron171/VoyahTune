@@ -98,6 +98,14 @@ class InstallerTests(unittest.TestCase):
   self.apply(self.plan('remove'))
   self.assertFalse(self.read_state()['locksAtReboot'][-1])
   self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+ def test_ready_updater_does_not_wait_for_install_existing(self):
+  self.seed_apps()
+  self.apply(self.plan())
+  calls=self.calls()
+  self.assertFalse(any('cmd package install-existing' in (call['script'] or '')
+                       and 'ru.big.town.updater' in call['script'] for call in calls))
+  self.assertFalse(any('cmd package install-existing --user 0 --wait' in (call['script'] or '')
+                       for call in calls))
  def test_failed_unlock_blocks_final_reboot_and_success(self):
   self.seed_apps();self.state['failShell']='# release desktop installation lock';self.write_state()
   result=self.apply(self.plan(),okay=False)
