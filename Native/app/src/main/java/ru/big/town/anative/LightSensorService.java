@@ -1142,8 +1142,7 @@ public class LightSensorService extends Service {
 
         requestCarSignalMaintenance();
         canBusSubscription = CanBusEventHub.get(this).subscribe(
-                CanBusEventRouter.INTEREST_LIGHT_STATUS
-                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                AutoLightPolicy.CAN_INTERESTS,
                 new int[]{RSM_LIGHT_SW_REASON, AutoLightPolicy.IHBC_FUNCTION}, timerHandler, this::onCanBusEvent);
         gearStateSubscription = VehicleStateControllers.get(this).gear().subscribe(
                 timerHandler, this::onGear);

@@ -6,6 +6,9 @@ import static ru.big.town.anative.HeadlightCanPolicy.Command.*;
 final class AutoLightPolicy {
     static final String EXTENDED_KEY = "extendedAutoLight";
     static final int IHBC_FUNCTION = 141;
+    static final int CAN_INTERESTS = CanBusEventRouter.INTEREST_CONNECTION
+            | CanBusEventRouter.INTEREST_LIGHT_STATUS
+            | CanBusEventRouter.INTEREST_VEHICLE_STATE;
 
     private AutoLightPolicy() {}
 

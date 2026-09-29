@@ -6,6 +6,16 @@ import static org.junit.Assert.*;
 import static ru.big.town.anative.HeadlightCanPolicy.Command.*;
 
 public class AutoLightPolicyTest {
+    @Test public void autoLightReceivesConnectionBarrierForInitialReasonRead() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        java.util.List<Long> epochs = new java.util.ArrayList<>();
+        router.subscribe(AutoLightPolicy.CAN_INTERESTS, new int[]{1072, 141},
+                Runnable::run, event -> epochs.add(event.connectionEpoch));
+        router.dispatch(CanBusEvent.connection(1, 1, 1));
+        router.dispatch(CanBusEvent.connection(2, 2, 2));
+        assertEquals(java.util.Arrays.asList(1L, 2L), epochs);
+    }
+
     @Test public void extendedTableWithHighBeamEnabled() {
         HeadlightCanPolicy.Command[] expected = {
                 OUT_LAMP_OFF, OUT_LAMP_OFF, AUTO_LAMP_SWITCH, LOW_BEAM,
