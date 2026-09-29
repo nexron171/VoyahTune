@@ -64,11 +64,6 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             Log.i(TAG, "APP_DPI_CONFIG зеркалирован + reload");
         } else if ("ru.big.town.anative.KEYBOARD_CONFIG".equals(action)) {
             applyKeyboardMode(context, intent.getStringExtra("keyboardMode"));
-        } else if ("ru.big.town.anative.AUTO_LIGHT_CONFIG".equals(action)) {
-            context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
-                    .putBoolean(AutoLightPolicy.EXTENDED_KEY,
-                            intent.getBooleanExtra(AutoLightPolicy.EXTENDED_KEY, false))
-                    .apply();
         }
     }
 

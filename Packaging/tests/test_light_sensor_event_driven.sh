@@ -43,7 +43,7 @@ require_fixed "$SERVICE" 'timerHandler.postDelayed(driveFallbackRunnable, DRIVE_
 require_fixed "$SERVICE" 'timerHandler.postDelayed(canbusReassertRunnable, CANBUS_REASSERT_DELAY_MS);'
 require_fixed "$SERVICE" 'if (autoLamp == lastAutoLamp && dippedBeam == lastDippedBeam && headLight == lastHeadLight)'
 require_fixed "$SERVICE" 'if (since < HEADLIGHT_GUARD_MS)'
-require_fixed "$SERVICE" 'if (desired != null && (!everSent || commandPending || desired != headlightTarget)) {'
+require_fixed "$SERVICE" 'if (!everSent || desired != headlightsOn) commit(desired, "ext-sensor reason=" + reason);'
 require_fixed "$SERVICE" 'if (MANUAL_AUTO_GATE.blocksAntiAuto())'
 require_fixed "$SERVICE" 'force-init'
 

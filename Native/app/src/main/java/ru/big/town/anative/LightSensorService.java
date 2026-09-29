@@ -11,7 +11,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
-import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Binder;
@@ -27,7 +26,6 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 
 import java.lang.ref.WeakReference;
-import java.util.Collections;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -36,10 +34,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Автосвет по готовому решению наружного RSM; салонный датчик — резерв при старте/Drive.
+ * Сервис автоматического управления фарами по датчику освещённости.
  *
  * Архитектура (event-driven + safety-poll), проверена декомпиляцией CarSignalService:
  *  - Подписка: регистрируем колбэк через TX=46 (writeStrongBinder). Сервис ONEWAY-ом
@@ -51,7 +48,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *    single-flight очереди, не блокируя main и bind/reconnect.
  *  - Safety-poll каждые SAFETY_POLL_MS: фоновая страховка от пропущенного события.
  *    CAN шлёт только при реальной смене цели — холостого трафика не создаёт.
- *  - Общая process-wide подписка CanBusEventHub фильтрует LightStatus, RSM 1072 и IHBCFunction 141,
+ *  - Общая process-wide подписка CanBusEventHub фильтрует LightStatus и только VehicleState 1072,
  *    а КПП приходит через GearStateController. Когда BCM сам уходит в «авто» (перевод КПП
  *    в Drive сбрасывает фары в auto) при нашем таргете «ближний» — возвращаем ближний.
  *    Ручное «выкл» (autoLamp=0, headLight=0) под правило не попадает — уважается.
@@ -63,16 +60,14 @@ import java.util.concurrent.atomic.AtomicReference;
  *  - force-init через FORCE_INIT_MS после коннекта — гарантия установки режима
  *    на холодном старте (колбэки дельта-only).
  *
- * Наружное решение преобразуется в OFF/LOW/AUTO через AutoLightPolicy. Расширенная
- * логика выключена по умолчанию; её настройка зеркалируется из RestoreMode событиями.
- * Смена IHBC пересчитывает цель даже без нового события RSM. AUTO не запускает анти-Auto.
- * Резервное решение по салонному уровню (с гистерезисом):
+ * Решение по уровню → режим (с гистерезисом):
  *  - level ≤ threshOn  → ближний свет (setHeadlights(true))
  *  - level > threshOff → наружный свет выключен (setHeadlights(false))
  *  - между порогами    → не менять
  *
- * Обычные события отправляют CAN при смене цели; старт, Drive и анти-Auto могут
- * повторно выставлять её. Явный ручной Auto защищён ManualAutoGate до нового решения.
+ * CAN отправляется ТОЛЬКО при изменении целевого режима по датчику (heartbeat убран).
+ * Следствие: если пользователь ночью вручную переключил фары в иной режим, он
+ * сохранится до фактического изменения освещённости — это намеренно.
  * Ограничение железа: при подрулевом в AUTO VehicleCanBusTool может отменять
  * команду ближнего света.
  */
@@ -83,7 +78,6 @@ public class LightSensorService extends Service {
 
     // Broadcast для передачи уровня датчика в RestoreMode UI
     public static final String ACTION_LUX_UPDATE  = "ru.big.town.anative.LUX_UPDATE";
-    public static final String EXTRA_SW_REASON = "swReason"; // -1: нет данных OEM
     public static final String EXTRA_SENSOR_LEVEL = "sensorLevel"; // int, -1 если датчик недоступен
 
     // Период страховочного опроса: ловит пропущенный колбэк, CAN шлёт только при
@@ -119,8 +113,6 @@ public class LightSensorService extends Service {
             newBoundedBinderExecutor("CarSignalRegistration");
     private static final ThreadPoolExecutor CAR_SIGNAL_CLEANUP_EXECUTOR =
             newBoundedBinderExecutor("CarSignalCleanup");
-    private static final ThreadPoolExecutor LIGHT_REASON_EXECUTOR =
-            newBoundedBinderExecutor("LightReason");
     private static final ThreadPoolExecutor LIGHT_SETTINGS_EXECUTOR =
             newBoundedBinderExecutor("LightSettings");
 
@@ -186,26 +178,8 @@ public class LightSensorService extends Service {
     private long nextCarSignalBindingGeneration;
     private long activeCarSignalBindingGeneration;
 
-    // Requested mode, not a confirmation of the physical lamps.
-    private HeadlightCanPolicy.Command headlightTarget = HeadlightCanPolicy.Command.OUT_LAMP_OFF;
-    private volatile boolean extendedAutoLight;
-    private volatile int ihbcFunction = -1;
-    private long ihbcRevision;
-    private volatile long lightCanEpoch;
-    private boolean commandPending;
-    private boolean reasonQueryRunning;
-    private long reasonRevision;
-    private static final OemVehicleStateTransport.StateKey REASON_KEY =
-            new OemVehicleStateTransport.StateKey("BCM_RSM_lightSWReason", RSM_LIGHT_SW_REASON);
-    private static final OemVehicleStateTransport.StateKey IHBC_KEY =
-            new OemVehicleStateTransport.StateKey("IHBCFunction", AutoLightPolicy.IHBC_FUNCTION);
-    private SharedPreferences lightPreferences;
-    private final SharedPreferences.OnSharedPreferenceChangeListener lightPreferenceListener =
-            (prefs, key) -> {
-                if (AutoLightPolicy.EXTENDED_KEY.equals(key)) {
-                    timerHandler.post(this::reloadLightPolicy);
-                }
-            };
+    // Текущая зафиксированная цель: true = ближний свет, false = наружный свет выключен
+    private boolean headlightsOn = false;
     private volatile boolean everSent = false;
     private boolean forceInitCompleted = false;
     private long    readyCarSignalEpoch = 0L;
@@ -288,30 +262,8 @@ public class LightSensorService extends Service {
             case LIGHT_STATUS:
                 onLightStatusChanged(event.first, event.second, event.third);
                 break;
-            case CONNECTION:
-                lightCanEpoch = event.connectionEpoch;
-                ihbcRevision++;
-                ihbcFunction = -1;
-                CanBusEventHub.get(this).requestVehicleStateSnapshot();
-                requestCurrentReason();
-                break;
-            case CONNECTION_LOST:
-                reasonRevision++;
-                lastReason = -1;
-                broadcastUpdate(lastSensorLevel);
-                lightCanEpoch = 0L;
-                ihbcRevision++;
-                ihbcFunction = -1;
-                break;
             case VEHICLE_STATE:
                 if (event.first == RSM_LIGHT_SW_REASON) onLightSwReason(event.second);
-                else if (event.first == AutoLightPolicy.IHBC_FUNCTION) {
-                    ihbcRevision++;
-                    if (ihbcFunction != event.second) {
-                        ihbcFunction = event.second;
-                        if (extendedAutoLight) reconsiderOutdoorTarget("IHBC=" + ihbcFunction);
-                    }
-                }
                 break;
             default:
                 break;
@@ -1110,9 +1062,6 @@ public class LightSensorService extends Service {
         Log.i(TAG, "onCreate() — LightSensorService (event-driven + safety-poll)");
         Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         timerHandler = new Handler(Looper.getMainLooper());
-        lightPreferences = getSharedPreferences("NativePrefs", MODE_PRIVATE);
-        extendedAutoLight = lightPreferences.getBoolean(AutoLightPolicy.EXTENDED_KEY, false);
-        lightPreferences.registerOnSharedPreferenceChangeListener(lightPreferenceListener);
         carSignalIoThread = new HandlerThread("CarSignalIo");
         carSignalIoThread.start();
         carSignalIoHandler = new Handler(carSignalIoThread.getLooper());
@@ -1142,8 +1091,9 @@ public class LightSensorService extends Service {
 
         requestCarSignalMaintenance();
         canBusSubscription = CanBusEventHub.get(this).subscribe(
-                AutoLightPolicy.CAN_INTERESTS,
-                new int[]{RSM_LIGHT_SW_REASON, AutoLightPolicy.IHBC_FUNCTION}, timerHandler, this::onCanBusEvent);
+                CanBusEventRouter.INTEREST_LIGHT_STATUS
+                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                new int[]{RSM_LIGHT_SW_REASON}, timerHandler, this::onCanBusEvent);
         gearStateSubscription = VehicleStateControllers.get(this).gear().subscribe(
                 timerHandler, this::onGear);
         timerHandler.postDelayed(safetyRunnable, 2_000L);
@@ -1162,13 +1112,8 @@ public class LightSensorService extends Service {
 
     @Override
     public void onDestroy() {
-        Log.i(TAG, "onDestroy() — target=" + headlightTarget);
+        Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn);
         destroyed = true;
-        lastReason = -1;
-        broadcastUpdate(-1);
-        if (lightPreferences != null) {
-            lightPreferences.unregisterOnSharedPreferenceChangeListener(lightPreferenceListener);
-        }
         settingsRequestGate.close();
         LatestIntDelivery sensorDelivery = sensorCallbackDelivery;
         sensorCallbackDelivery = null;
@@ -1259,10 +1204,9 @@ public class LightSensorService extends Service {
     private final Runnable safetyRunnable = new Runnable() {
         @Override
         public void run() {
-            if (lastReason < 0) requestCurrentReason();
             requestCarSignalMaintenance();
             long epoch = readyCarSignalEpoch;
-            HeadlightCanPolicy.Command outdoor = reasonToDesired(lastReason);
+            Boolean outdoor = reasonToDesired(lastReason);
             if (!everSent && outdoor != null) {
                 applyTargetWithSensorLevel("poll-retry", -1);
             }
@@ -1338,143 +1282,87 @@ public class LightSensorService extends Service {
     private boolean applyTargetWithSensorLevel(String src, int sensorLevel,
                                                boolean retainCurrentTarget,
                                                LightThresholds thresholds) {
-        HeadlightCanPolicy.Command desired = reasonToDesired(lastReason);
+        Boolean desired = reasonToDesired(lastReason);
         String s2 = src + " ext reason=" + lastReason;
         if (desired == null) {
             if (thresholds == null) {
                 Log.i(TAG, src + ": thresholds pending — decision deferred");
                 return false;
             }
-            Boolean cabinOn = thresholds.desiredFor(sensorLevel);
-            desired = cabinOn == null ? null : HeadlightCanPolicy.commandFor(cabinOn);
+            desired = thresholds.desiredFor(sensorLevel);
             s2 = src + " cabin level=" + sensorLevel;
         }
         if (desired == null && retainCurrentTarget && everSent) {
-            desired = headlightTarget;
-            s2 = src + " retain=" + headlightTarget;
+            desired = headlightsOn;
+            s2 = src + " retain=" + (headlightsOn ? "low" : "off");
         }
         if (desired == null) {
             Log.i(TAG, src + ": нет данных (reason=" + lastReason + ") — не трогаем");
             return false;
         }
-        Log.i(TAG, s2 + " → " + desired);
+        Log.i(TAG, s2 + " → " + (desired ? "ближний" : "выкл"));
         return commit(desired, s2);
     }
 
-    private boolean commit(HeadlightCanPolicy.Command target, String reason) {
-        Log.i(TAG, "★ commit(" + target + ") — " + reason);
+    private boolean commit(boolean targetOn, String reason) {
+        Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "выкл") + ") — " + reason);
         final long automaticToken = MANUAL_AUTO_GATE.beginAutomaticDecision();
         if (automaticToken == ManualAutoGate.INVALID_AUTOMATIC_TOKEN) {
             Log.i(TAG, "auto-light decision suppressed by queued manual command");
             return false;
         }
         final long sequence = ++commitSequence;
-        final boolean extended = extendedAutoLight;
-        final int observedReason = lastReason;
-        final long switchRevision = ihbcRevision;
-        final long canEpoch = lightCanEpoch;
-        final AtomicReference<Integer> readSwitch = new AtomicReference<>();
-        final AtomicReference<HeadlightCanPolicy.Command> sentTarget = new AtomicReference<>();
-        headlightTarget   = target;
+        headlightsOn      = targetOn;
         everSent          = true;
-        commandPending    = true;
         lastCommitElapsed = SystemClock.elapsedRealtime();
-        ApplyEngine.postWakeAction("auto light " + target,
+        ApplyEngine.postWakeAction("auto light " + (targetOn ? "low" : "off"),
                 () -> {
-                    HeadlightCanPolicy.Command sent = AutoLightCommand.send(
-                            observedReason, extended, target,
-                            () -> {
-                                Integer value = OemVehicleStateTransport.withSession(this,
-                                        Collections.singleton(IHBC_KEY),
-                                        session -> session.readVehicleState(IHBC_KEY));
-                                readSwitch.set(value);
-                                return value;
-                            },
-                            () -> !destroyed && extendedAutoLight == extended
-                                    && (!extended || lightCanEpoch == canEpoch)
-                                    && MANUAL_AUTO_GATE.isAutomaticActionCurrent(automaticToken),
-                            command -> command == HeadlightCanPolicy.Command.AUTO_LAMP_SWITCH
-                                    ? MainActivity.setHeadlightsAutoLow(this, false)
-                                    : MainActivity.setHeadlights(this,
-                                            command == HeadlightCanPolicy.Command.LOW_BEAM));
-                    sentTarget.set(sent);
-                    return sent != null;
-                },
-                result -> timerHandler.post(() -> {
-                    if (destroyed || commitSequence != sequence) return;
-                    commandPending = false;
-                    if (result == ApplyEngine.WakeActionResult.SUCCESS) {
-                        headlightTarget = sentTarget.get();
-                        lastCommitElapsed = SystemClock.elapsedRealtime();
-                        // A callback received during TX57 is newer than this read.
-                        if (extended && ihbcRevision == switchRevision) {
-                            Integer value = readSwitch.get();
-                            ihbcFunction = value == null ? -1 : value;
-                        }
-                        Log.i(TAG, "auto-light sent=" + headlightTarget + " IHBC read=" + readSwitch.get());
-                    } else {
-                        everSent = false;
-                        Log.w(TAG, "auto-light command cancelled/failed; safety poll will retry");
+                    if (!MANUAL_AUTO_GATE.isAutomaticActionCurrent(automaticToken)) {
+                        Log.i(TAG, "auto-light action superseded by newer manual intent");
+                        // The manual command may still fail. Keep this commit retryable instead of
+                        // recording a send which never happened.
+                        return false;
                     }
-                }));
+                    return MainActivity.setHeadlights(this, targetOn);
+                },
+                result -> {
+                    if (result != ApplyEngine.WakeActionResult.SUCCESS) {
+                        invalidateCommit(sequence);
+                    }
+                });
         return true;
     }
 
-    // TX20 does not replay every field on this OEM ROM. Seed RSM via TX57 off the UI
-    // thread, rejecting results superseded by live CAN or a connection replacement.
-    private void requestCurrentReason() {
-        if (destroyed || reasonQueryRunning || lightCanEpoch == 0L) return;
-        final long epoch = lightCanEpoch;
-        final long revision = reasonRevision;
-        reasonQueryRunning = true;
-        try {
-            LIGHT_REASON_EXECUTOR.execute(() -> {
-                Integer value = null;
-                try {
-                    value = OemVehicleStateTransport.withSession(this,
-                            Collections.singleton(REASON_KEY),
-                            session -> session.readVehicleState(REASON_KEY));
-                } catch (RuntimeException e) {
-                    Log.w(TAG, "read SWReason: " + e.getMessage());
-                }
-                final Integer result = value;
-                timerHandler.post(() -> {
-                    reasonQueryRunning = false;
-                    if (destroyed || lightCanEpoch != epoch || reasonRevision != revision) return;
-                    if (result != null && result >= 0) onLightSwReason(result);
-                });
-            });
-        } catch (java.util.concurrent.RejectedExecutionException e) {
-            reasonQueryRunning = false;
-        }
-    }
-
-    private void onLightSwReason(int reason) {
-        reasonRevision++;
-        lastReason = reason;
-        broadcastUpdate(lastSensorLevel);
-        reconsiderOutdoorTarget("ext-sensor reason=" + reason);
-    }
-
-    private void reloadLightPolicy() {
+    private void invalidateCommit(long sequence) {
         if (destroyed) return;
-        boolean extended = lightPreferences.getBoolean(AutoLightPolicy.EXTENDED_KEY, false);
-        if (extended == extendedAutoLight) return;
-        extendedAutoLight = extended;
-        timerHandler.removeCallbacks(canbusReassertRunnable);
-        reconsiderOutdoorTarget("extended=" + extended);
+        timerHandler.post(() -> {
+            if (!destroyed && commitSequence == sequence) {
+                everSent = false;
+                Log.w(TAG, "auto-light commit was cancelled/failed; safety poll will retry");
+            }
+        });
     }
 
-    private void reconsiderOutdoorTarget(String source) {
-        HeadlightCanPolicy.Command desired = reasonToDesired(lastReason);
-        Log.i(TAG, source + " → " + desired);
-        if (desired != null && (!everSent || commandPending || desired != headlightTarget)) {
-            commit(desired, source);
+    /**
+     * Уличный датчик (BCM_RSM_lightSWReason, лобовой RSM) — основной источник автосвета.
+     * 0 Day → выкл; 2 Dark / 3 Tunnel / 4 Darkstart → ближний; 1 Others — не меняем.
+     */
+    private void onLightSwReason(int reason) {
+        lastReason = reason; // запоминаем последнее известное состояние улицы (для анти-Auto по Drive)
+        Boolean desired = reasonToDesired(reason);
+        Log.i(TAG, "RSM lightSWReason=" + reason + " → "
+                + (desired == null ? "без изменений" : (desired ? "ближний" : "выкл")));
+        if (desired == null) return;
+        if (!everSent || desired != headlightsOn) commit(desired, "ext-sensor reason=" + reason);
+    }
+
+    /** RSM lightSWReason → цель: 0 Day→выкл, 2/3/4 Dark/Tunnel/Darkstart→ближний, иначе null. */
+    private Boolean reasonToDesired(int reason) {
+        switch (reason) {
+            case 0: return Boolean.FALSE;                     // день → выкл
+            case 2: case 3: case 4: return Boolean.TRUE;      // темно/тоннель → ближний
+            default: return null;                             // 1 Others / неизвестно
         }
-    }
-
-    private HeadlightCanPolicy.Command reasonToDesired(int reason) {
-        return AutoLightPolicy.target(reason, extendedAutoLight, ihbcFunction);
     }
 
     /**
@@ -1530,7 +1418,7 @@ public class LightSensorService extends Service {
         long since = SystemClock.elapsedRealtime() - lastCommitElapsed;
         Log.i(TAG, "lightstatus: autoLamp=" + autoLamp + " dippedBeam=" + dippedBeam
                 + " headLight=" + headLight
-                + " ourTarget=" + headlightTarget
+                + " ourTarget=" + (headlightsOn ? "ближний" : "выкл")
                 + " sinceCommit=" + since + "ms");
 
         // Любое значимое изменение статуса отменяет отложенную переустановку —
@@ -1542,7 +1430,7 @@ public class LightSensorService extends Service {
             return;
         }
         if (!everSent) return;                 // режим ещё не выставляли — ждём force-init
-        if (!AutoLightPolicy.shouldRestoreLowBeam(headlightTarget)) return; // OFF/AUTO — не вмешиваемся
+        if (!headlightsOn) return;             // таргет «выкл» (светло) — не вмешиваемся
         if (since < HEADLIGHT_GUARD_MS) {      // эхо нашей же команды
             Log.i(TAG, "lightstatus: игнор — эхо нашей команды (" + since + "ms назад)");
             return;
@@ -1566,13 +1454,13 @@ public class LightSensorService extends Service {
                 Log.i(TAG, "canbus-reset: OEM Auto выбран с руля — отмена");
                 return;
             }
-            if (!everSent || !AutoLightPolicy.shouldRestoreLowBeam(headlightTarget)) return;
+            if (!everSent || !headlightsOn) return;
             if (lastAutoLamp != 1) {           // за время выдержки ушли из «авто» — отменяем
                 Log.i(TAG, "canbus-reset: за выдержку состояние ушло из авто — отмена");
                 return;
             }
             Log.i(TAG, "canbus-reset: выдержка прошла, BCM всё ещё в авто → возвращаем ближний");
-            commit(HeadlightCanPolicy.Command.LOW_BEAM, "canbus-reset");
+            commit(true, "canbus-reset");
         }
     };
 
@@ -1627,7 +1515,6 @@ public class LightSensorService extends Service {
     private void broadcastUpdate(int sensorLevel) {
         Intent intent = new Intent(ACTION_LUX_UPDATE);
         intent.putExtra(EXTRA_SENSOR_LEVEL, sensorLevel);
-        intent.putExtra(EXTRA_SW_REASON, lastReason);
         sendBroadcast(intent);
     }
 
@@ -1635,7 +1522,6 @@ public class LightSensorService extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
             broadcastUpdate(lastSensorLevel);
-            requestCurrentReason();
         }
     };
 
