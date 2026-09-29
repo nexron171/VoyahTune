@@ -91,12 +91,16 @@ ACC ON. Если Android/CanBus запущен заново, его первый
 
 ## Контроль здоровья
 
-Оба агента публикуют heartbeat каждые 2 секунды в
+Агенты публикуют heartbeat каждые 2 секунды в
 `/data/local/open_voyah/drive_hooks/voyahtune_acc_restore.health` и
-`voyahtune_drive_reset.health`: PID, секунды elapsed realtime, версия v2. Loader
+`voyahtune_drive_reset.health`; ветка VehicleAir того же drive-reset скрипта — в
+`vehicle.health`. Формат: PID, секунды elapsed realtime, версия v2. Loader
 сопоставляет их с identity процесса. При отсутствии свежего heartbeat в течение
 15 секунд повторяет инъекцию без перезапуска OEM-процесса. ACC worker проверяет
-состояние каждую секунду, account-reset worker — в своём 5-секундном цикле.
+состояние каждую секунду, account-reset и VehicleAir — в 5-секундном цикле Apollo lane.
+VehicleAir имеет отдельные `vehicle.pid`, `vehicle.attempt`, `vehicle.txt` в каталоге
+`drive_hooks`; сбой одной цели не меняет маркеры другой. Он исключён из generic app-client,
+чтобы не выполнять два attach к одному процессу одновременно.
 Это интервалы обнаружения; attach имеет отдельный предел 30+5 секунд.
 
 JS-agent проверяет наличие собственных перехватов перед heartbeat; исторического
