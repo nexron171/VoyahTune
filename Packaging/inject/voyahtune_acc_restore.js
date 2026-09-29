@@ -75,6 +75,7 @@ Java.perform(function () {
             "android.net.Uri", "java.lang.String", "java.lang.String", "android.os.Bundle");
         var selectedComponent = null;
         var bootstrapDone = false;
+        var settingsDispatchDone = false;
         function hook(resolver, action, args) {
             // Provider authorization must see the CAN service, not its original Binder client.
             var identity = Binder.clearCallingIdentity();
@@ -88,6 +89,12 @@ Java.perform(function () {
         function observeAcc(component, value) {
             var args = Bundle.$new(); args.putInt("acc", value);
             return hook(component.contentResolver.value, "acc", args);
+        }
+        function dispatchSettings(component) {
+            if (settingsDispatchDone) return;
+            var result = hook(component.contentResolver.value, "dispatchSettings");
+            settingsDispatchDone = result.getBoolean("settingsDispatched")
+                || String(result.getString("settingsStartup")) !== "pending";
         }
         function trusted(packageName) {
             try { return Binder.getCallingUid() === ActivityThread.currentApplication()
@@ -295,7 +302,7 @@ Java.perform(function () {
                 var acc = data !== null && data.length > 0 ? data[0] & 7 : -1;
                 if (this.isH97X() && (entering || (acc === 0 && this.getAccStatus() !== 0))) {
                     observeAcc(this, acc);
-                    if (entering) bootstrapDone = false;
+                    if (entering) { bootstrapDone = false; settingsDispatchDone = false; }
                 }
             } catch (e) { log("ACC state unavailable: " + e); }
             var previous = scope.get();
@@ -311,7 +318,7 @@ Java.perform(function () {
                 else scope.set(previous);
                 // Start Native's remaining settings only after the OEM ACC handler has returned.
                 if (entering) {
-                    try { hook(this.contentResolver.value, "dispatchSettings"); }
+                    try { dispatchSettings(this); }
                     catch (e) { log("ACC settings dispatch unavailable: " + e); }
                 }
             }
@@ -323,7 +330,7 @@ Java.perform(function () {
                 var snap = observeAcc(component, component.getAccStatus());
                 if (snap.getInt("acc") !== 2) return;
                 // Also covers a late attach after the ACC parser already ran.
-                try { hook(component.contentResolver.value, "dispatchSettings"); }
+                try { dispatchSettings(component); }
                 catch (e) { log("startup settings dispatch unavailable: " + e); }
                 var startupState = String(snap.getString("startup"));
                 if (startupState !== "pending") { bootstrapDone = true; return; }
@@ -368,6 +375,10 @@ Java.perform(function () {
         setTimeout(function retryReadiness() {
             Java.perform(function () {
                 try { discoverAndBootstrap(); } catch (e) { log("startup waiting: " + e); }
+                if (!settingsDispatchDone && selectedComponent !== null) {
+                    try { dispatchSettings(selectedComponent); }
+                    catch (e) { log("settings dispatch waiting: " + e); }
+                }
             });
             // A new ACC edge clears bootstrapDone. This timer checks readiness only, not current modes.
             setTimeout(retryReadiness, 5000);

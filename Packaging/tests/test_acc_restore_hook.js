@@ -99,6 +99,10 @@ function fixture(options = {}) {
         const result = new Bundle();
         result.putInt("protocol", 2); result.putInt("acc", f.acc);
         result.putLong("revision", f.revision); result.putString("startup", f.startup);
+        if (action === "dispatchSettings") {
+            result.putString("settingsStartup", "pending");
+            result.putBoolean("settingsDispatched", !f.dispatchRejected);
+        }
         if (action === "claim") {
             const claimed = f.startup === "pending" && args.getLong("revision") === f.revision;
             result.putBoolean("claimed", claimed); if (claimed) f.startup = "claimed";
@@ -265,6 +269,16 @@ console.log("PASS: guest ACC edge, modes, feedback/color, stock parser, isolatio
     assert.equal(f.sends[0].vehicle.values.DRIVING_MODE_SET, 3);
     assert.equal(f.sends[0].vehicle.values.IVI_SOC_MODESET, 4);
     f.bootstrap(); assert.equal(f.sends.length, 1, "readiness timer cannot resend a submitted startup");
+}
+{
+    const f = fixture({acc: 2, dispatchRejected: true});
+    f.bootstrap();
+    assert.equal(f.dispatches, 2, "failed settings start is retried by readiness check");
+    f.dispatchRejected = false;
+    f.bootstrap();
+    assert.equal(f.dispatches, 3);
+    f.bootstrap();
+    assert.equal(f.dispatches, 3, "successful settings dispatch is not repeated");
 }
 {
     const f = fixture(); f.frame();
