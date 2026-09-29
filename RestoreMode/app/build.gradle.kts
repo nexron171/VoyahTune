@@ -23,11 +23,11 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     buildTypes {
         release {
+            ndk { abiFilters += "arm64-v8a" }
             // Enables code-related app optimization.
             isMinifyEnabled = false
 
@@ -42,6 +42,7 @@ android {
 
         }
         debug {
+            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
             // Android instrumentation needs library classes removed from the normal debug APK.
             val minifyDebug = providers.gradleProperty("voyahMinifyDebug").orElse("true").get().toBoolean()
             // Enables code-related app optimization.

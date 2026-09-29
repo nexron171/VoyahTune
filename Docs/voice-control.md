@@ -443,7 +443,8 @@ rustup target add --toolchain 1.98.1 aarch64-linux-android x86_64-linux-android
 ./gradlew :app:assembleDebug
 ```
 
-Поддерживаемые ABI этой сборки: `arm64-v8a` (ГУ) и `x86_64` (эмуляторы).
+Релизный APK содержит только `arm64-v8a` для ГУ. Debug APK также содержит
+`x86_64` для эмуляторов.
 NDK 27.0.12077973; Rust-зависимости закреплены в `voice-native/Cargo.lock`.
 DeepFilterNet3 встроен в native-библиотеку, Python/PyTorch на ГУ не используются.
 Новые библиотеки собираются с выравниванием ELF-сегментов 16 КБ.
