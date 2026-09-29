@@ -2,16 +2,23 @@ package ru.big.town.restoremode;
 
 
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.ServiceConnection;
 import android.app.ActivityManager;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
@@ -123,6 +130,52 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_APPLY_SUSPENSION_MAINTENANCE = 37;
     static final int MSG_APPLY_FORCED_EV    = 35;
     private static final String NATIVE_PACKAGE = "ru.big.town.anative";
+    private static final int LIGHT_DIAGNOSTICS_WATCH = 1;
+    private static final int LIGHT_DIAGNOSTICS_UPDATE = 2;
+    private static final int LIGHT_DIAGNOSTICS_UNKNOWN = Integer.MIN_VALUE;
+    private static final String[] LIGHT_DIAGNOSTICS_LABELS = {
+            "SWReason", "RSM · внешняя освещённость", "RSM · освещённость впереди",
+            "RSM · ИК-освещённость", "CarSignal · уровень света", "CarSignal · PAS уровень света",
+            "Android · освещённость (лк)"
+    };
+    private final TextView[] lightDiagnosticsRows = new TextView[7];
+    private boolean lightDiagnosticsActive;
+    private boolean lightDiagnosticsBound;
+    private int lightDiagnosticsSession;
+    private SensorManager lightSensorManager;
+    private final SensorEventListener androidLightListener = new SensorEventListener() {
+        @Override public void onSensorChanged(SensorEvent event) {
+            if (lightDiagnosticsActive && event.values.length > 0 && lightDiagnosticsRows[6] != null) {
+                lightDiagnosticsRows[6].setText(LIGHT_DIAGNOSTICS_LABELS[6] + ": "
+                        + String.format(Locale.getDefault(), "%.1f", event.values[0]));
+            }
+        }
+        @Override public void onAccuracyChanged(Sensor sensor, int accuracy) { }
+    };
+    private final Messenger lightDiagnosticsClient = new Messenger(new Handler(Looper.getMainLooper()) {
+        @Override public void handleMessage(Message msg) {
+            if (msg.what == LIGHT_DIAGNOSTICS_UPDATE) {
+                int[] values = msg.getData().getIntArray("values");
+                if (values != null && values.length == 6 && msg.arg1 == lightDiagnosticsSession
+                        && lightDiagnosticsActive) showLightDiagnostics(values);
+            } else super.handleMessage(msg);
+        }
+    });
+    private final ServiceConnection lightDiagnosticsConnection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            if (!lightDiagnosticsActive || !lightDiagnosticsBound) return;
+            Message watch = Message.obtain(null, LIGHT_DIAGNOSTICS_WATCH);
+            watch.arg1 = lightDiagnosticsSession;
+            watch.replyTo = lightDiagnosticsClient;
+            try { new Messenger(binder).send(watch); }
+            catch (RemoteException e) { Log.w("LightDiagnostics", "Watch failed", e); }
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            int[] unknown = new int[6];
+            java.util.Arrays.fill(unknown, LIGHT_DIAGNOSTICS_UNKNOWN);
+            showLightDiagnostics(unknown);
+        }
+    };
 
     private static final String ACTION_BATTERY_HEAT_AUTO_CHANGED =
             "ru.big.town.anative.BATTERY_HEAT_AUTO_CHANGED";
@@ -586,11 +639,22 @@ public class AdvanceActivity extends AppCompatActivity {
         // Раздел «Другое»: тоггл «Режим отладки»
         Switch switchDebugMode = findViewById(R.id.switchDebugMode);
         View debugInformationBlock = findViewById(R.id.debugInformationBlock);
+        LinearLayout lightRows = findViewById(R.id.debugLightSensorRows);
+        for (int i = 0; i < lightDiagnosticsRows.length; i++) {
+            TextView row = new TextView(this);
+            row.setTextColor(Color.WHITE);
+            row.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 20);
+            row.setPadding(0, 4, 0, 4);
+            lightRows.addView(row);
+            lightDiagnosticsRows[i] = row;
+        }
+        resetLightDiagnostics();
         switchDebugMode.setChecked(prefs.getBoolean("debugMode", false));
         debugInformationBlock.setVisibility(switchDebugMode.isChecked() ? View.VISIBLE : View.GONE);
         switchDebugMode.setOnCheckedChangeListener((b, checked) -> {
             prefs.edit().putBoolean("debugMode", checked).apply();
             debugInformationBlock.setVisibility(checked ? View.VISIBLE : View.GONE);
+            updateLightDiagnosticsBinding();
         });
 
         // Раздел «Другое»: тоггл «Полноэкранная сетка» главного экрана и число растянутых колонок
@@ -1738,6 +1802,66 @@ public class AdvanceActivity extends AppCompatActivity {
             applyProgressAdvance.setVisibility(applying && index != SECTION_VOICE ? View.VISIBLE : View.GONE);
         }
         updateSystemMetricsPolling();
+        updateLightDiagnosticsBinding();
+    }
+
+    private void updateLightDiagnosticsBinding() {
+        boolean shouldBind = activityResumed && currentSection == 6
+                && prefs.getBoolean("debugMode", false) && !isFinishing();
+        if (shouldBind == lightDiagnosticsActive) return;
+        lightDiagnosticsActive = shouldBind;
+        if (shouldBind) {
+            ++lightDiagnosticsSession;
+            resetLightDiagnostics();
+            lightSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+            if (lightSensorManager != null) {
+                Sensor light = lightSensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
+                if (light != null) lightSensorManager.registerListener(
+                        androidLightListener, light, SensorManager.SENSOR_DELAY_NORMAL);
+            }
+            Intent intent = new Intent().setClassName(NATIVE_PACKAGE,
+                    "ru.big.town.anative.LightDiagnosticsService");
+            try { lightDiagnosticsBound = bindService(intent, lightDiagnosticsConnection, BIND_AUTO_CREATE); }
+            catch (SecurityException | IllegalArgumentException e) {
+                Log.w("LightDiagnostics", "Native diagnostics unavailable", e);
+            }
+        } else {
+            boolean wasBound = lightDiagnosticsBound;
+            lightDiagnosticsBound = false;
+            if (lightSensorManager != null) lightSensorManager.unregisterListener(androidLightListener);
+            lightSensorManager = null;
+            if (wasBound) {
+                try { unbindService(lightDiagnosticsConnection); } catch (IllegalArgumentException ignored) { }
+            }
+            resetLightDiagnostics();
+        }
+    }
+
+    private void resetLightDiagnostics() {
+        int[] unknown = new int[lightDiagnosticsRows.length];
+        java.util.Arrays.fill(unknown, LIGHT_DIAGNOSTICS_UNKNOWN);
+        showLightDiagnostics(unknown);
+    }
+
+    private void showLightDiagnostics(int[] values) {
+        for (int i = 0; i < values.length; i++) {
+            if (lightDiagnosticsRows[i] == null) continue;
+            String value = values[i] == LIGHT_DIAGNOSTICS_UNKNOWN ? "—"
+                    : i == 0 ? values[i] + " — " + swReasonDescription(values[i])
+                    : Integer.toString(values[i]);
+            lightDiagnosticsRows[i].setText(LIGHT_DIAGNOSTICS_LABELS[i] + ": " + value);
+        }
+    }
+
+    private static String swReasonDescription(int value) {
+        switch (value) {
+            case 0: return "день";
+            case 1: return "другое";
+            case 2: return "темно";
+            case 3: return "тоннель";
+            case 4: return "начало темноты";
+            default: return "неизвестно";
+        }
     }
 
     /** Старт/стоп строго следует видимости раздела; вне «Другого» callbacks полностью отсутствуют. */
@@ -2608,6 +2732,7 @@ public class AdvanceActivity extends AppCompatActivity {
             syncingSettingUi = false;
         }
         updateSystemMetricsPolling();
+        updateLightDiagnosticsBinding();
         IntentFilter filter = new IntentFilter("ru.big.town.anative.LUX_UPDATE");
         registerReceiver(luxReceiver, filter, RECEIVER_EXPORTED);
         registerReceiver(modeSyncReceiver, new IntentFilter("ru.big.town.anative.MODE_SYNCED"), RECEIVER_EXPORTED);
@@ -2622,6 +2747,7 @@ public class AdvanceActivity extends AppCompatActivity {
     protected void onPause() {
         activityResumed = false;
         updateSystemMetricsPolling();
+        updateLightDiagnosticsBinding();
         super.onPause();
         try { unregisterReceiver(luxReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(modeSyncReceiver); } catch (Exception ignored) {}
