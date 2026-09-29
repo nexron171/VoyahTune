@@ -93,7 +93,7 @@ function fixture(options = {}) {
         if (action === "user") {
             if (args.containsKey("mode")) f.mode = args.getString("mode");
             if (args.containsKey("energy")) f.energy = args.getString("energy");
-            f.revision++;
+            f.revision++; f.startup = "selected";
         }
         const result = new Bundle();
         result.putInt("protocol", 2); result.putInt("acc", f.acc);
@@ -281,3 +281,17 @@ console.log("PASS: guest ACC edge, modes, feedback/color, stock parser, isolatio
 }
 
 assert.ok(!source.includes("Java.choose("), "Never enumerate the heap of the 32-bit OEM service");
+
+{
+    const f = fixture({acc: 2});
+    f.startup = "selected"; // durable provider state from VehicleAir or widget, including reattach
+    f.bootstrap();
+    assert.equal(f.sends.length, 0, "recorded user selection suppresses startup restore");
+}
+{
+    const f = fixture({acc: 2});
+    f.request({DRIVING_MODE_SET: 2, __vt_user: true}, 20);
+    f.bootstrap();
+    assert.equal(f.sends.length, 1, "screen selection before readiness cancels startup restore");
+    assert.equal(f.mode, "COMFORT");
+}

@@ -33,11 +33,32 @@ public class DriveSelectionPreferencesTest {
         assertFalse(DriveSelectionPreferences.select(prefs(data), "SPORT", DriveSelectionPolicy.FEEDBACK));
         assertEquals("ECO", DriveSelectionPreferences.read(prefs(data)).effective());
     }
+    @Test public void userSelectionSupersedesStartupAndPersistsMediumAcrossProviderReads() {
+        for (String startup : new String[]{"pending", "claimed", "submitted", "uncertain"}) {
+            for (boolean remember : new boolean[]{false, true}) {
+                Map<String, Object> data = new HashMap<>();
+                data.put("driveMode", "ECO"); data.put("driveRememberLast", remember);
+                data.put("driveStartup", startup); data.put("driveRevision", 8L);
+                data.put(DriveSelectionPolicy.OVERRIDE, "SPORT");
+                assertTrue(DriveSelectionPreferences.select(prefs(data), "COMFORT", DriveSelectionPolicy.EXPLICIT));
+                assertEquals("selected", data.get("driveStartup"));
+                assertEquals(9L, data.get("driveRevision"));
+                DriveSelectionPolicy state = DriveSelectionPreferences.read(prefs(data));
+                assertEquals("COMFORT", state.effective()); assertEquals("", state.override);
+                assertEquals(remember ? "COMFORT" : "ECO", state.configured);
+                assertTrue(DriveSelectionPreferences.select(prefs(data), "SPORT", DriveSelectionPolicy.WIDGET));
+                assertEquals("COMFORT", DriveSelectionPreferences.read(prefs(data)).medium);
+                assertFalse(DriveSelectionPreferences.select(prefs(data), "ECO", DriveSelectionPolicy.FEEDBACK));
+                assertEquals("COMFORT", DriveSelectionPreferences.read(prefs(data)).medium);
+            }
+        }
+    }
     @Test public void energyOptOutPreservesPinnedSettingButRemembersCurrentTrip() {
         Map<String, Object> data = new HashMap<>(); data.put("energy", "SREV"); data.put("energyRememberLast", false);
         assertTrue(DriveSelectionPreferences.selectEnergy(prefs(data), "EV", false));
         assertEquals("SREV", data.get("energy"));
         assertEquals("EV", DriveSelectionPreferences.energy(prefs(data)));
+        assertEquals("selected", data.get("driveStartup"));
         assertTrue(DriveSelectionPreferences.selectEnergy(prefs(data), "REV", true));
         assertEquals("REV", data.get("energy"));
     }

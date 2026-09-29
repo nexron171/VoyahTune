@@ -447,7 +447,7 @@ inject_drive_reset() {
         return 1
     fi
     rm -f "$DRIVE_RESET_TRY"
-    logi "drive-reset VehicleSetting hook OK pid=$DRIVE_RESET_PID profile=saved-drive-energy-suspension"
+    logi "drive-reset hook OK target=$DRIVE_RESET_TARGET pid=$DRIVE_RESET_PID profile=saved-drive-energy-suspension"
     return 0
 }
 
@@ -1046,7 +1046,7 @@ discover_app_client() {
         # agent to them concurrently (the supported client scope is third-party applications).
         case "$FC_PACKAGE" in
             com.qinggan.keymanager.service|com.qinggan.systemservice|com.qinggan.app.launcher|\
-            com.qinggan.canbus.service|com.qinggan.app.vehiclesetting|com.qinggan.app.qgime)
+            com.qinggan.canbus.service|com.qinggan.app.vehiclesetting|com.qinggan.app.vehicle|com.qinggan.app.qgime)
                 IFS=,
                 continue
                 ;;
@@ -1258,7 +1258,7 @@ drive_agent_state() {
     # Do not turn an injected-agent crash into an OEM service restart loop.
     DA_CRASH="${DA_RETRY%.retry}.crash"
     DA_AGENT=${DA_LOG##*/}; DA_AGENT=${DA_AGENT%.txt}
-    DA_IMAGE=$(cksum "/data/local/bin/$DA_AGENT.js" 2>/dev/null | awk '{print $1}')
+    DA_IMAGE=$(cksum "${7:-/data/local/bin/$DA_AGENT.js}" 2>/dev/null | awk '{print $1}')
     DA_BOOT=${DA_ID%:*}; DA_BOOT=${DA_BOOT%:*}
     DC_IMAGE=; DC_BOOT=; DC_ID=; DC_AT=0; DC_COUNT=0
     if [ -r "$DA_CRASH" ]; then
@@ -1352,16 +1352,27 @@ drive_reset_cycle() {
     DRIVE_RESET_PID=$(pidof "$DRIVE_RESET_TARGET" 2>/dev/null)
     DRIVE_RESET_PID=${DRIVE_RESET_PID%% *}
     DRIVE_RESET_ID=$(process_identity "$DRIVE_RESET_PID" "$DRIVE_RESET_TARGET" 2>/dev/null) || DRIVE_RESET_ID=
-    drive_agent_state "$DRIVE_RESET_ID" "$DRIVE_RESET_PID" "$DRIVE_RESET_MARK" "$DRIVE_RESET_ATTEMPT" /data/local/open_voyah/drive_hooks/voyahtune_drive_reset.health "$DRIVE_RESET_LOG"
+    drive_agent_state "$DRIVE_RESET_ID" "$DRIVE_RESET_PID" "$DRIVE_RESET_MARK" "$DRIVE_RESET_ATTEMPT" "${DRIVE_RESET_HEALTH:-/data/local/open_voyah/drive_hooks/voyahtune_drive_reset.health}" "$DRIVE_RESET_LOG" "$DRIVE_RESET"
     if [ -n "$DRIVE_RESET_ID" ] && [ "$RUNTIME_STATE" = waiting ]; then
         inject_drive_reset "$DRIVE_RESET_PID" "$DRIVE_RESET_ID" || :
         drive_agent_attempt_finished "$DRIVE_RESET_ATTEMPT"
     fi
 }
 
+vehicle_drive_cycle() (
+    # Isolated shell variables and persistent state; reuse the already packaged agent.
+    DRIVE_RESET_TARGET=com.qinggan.app.vehicle
+    DRIVE_RESET_MARK=/data/local/open_voyah/drive_hooks/vehicle.pid
+    DRIVE_RESET_ATTEMPT=/data/local/open_voyah/drive_hooks/vehicle.attempt
+    DRIVE_RESET_LOG=/data/local/open_voyah/drive_hooks/vehicle.txt
+    DRIVE_RESET_HEALTH=/data/local/open_voyah/drive_hooks/vehicle.health
+    drive_reset_cycle
+)
+
 apollo_cycle() {
     # Account-reset protection is independent of the optional Apollo subscription override.
     drive_reset_cycle
+    vehicle_drive_cycle
     if apollo_runtime_flag_enabled; then
         APOLLO_PID=$(pidof "$APOLLO_TARGET" 2>/dev/null)
         APOLLO_PID=${APOLLO_PID%% *}

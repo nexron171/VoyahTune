@@ -22,13 +22,15 @@ final class DriveSelectionPreferences {
                 .putString(DriveSelectionPolicy.OVERRIDE, after.override)
                 .putString(DriveSelectionPolicy.MEDIUM, after.medium)
                 .putString(DriveSelectionPolicy.CURRENT, after.current)
+                // A recorded user choice supersedes pending/claimed startup restore in this trip.
+                .putString(START, "selected")
                 .putLong(REV, prefs.getLong(REV, 0) + 1)
                 .commit();
     }
     static synchronized boolean selectEnergy(SharedPreferences prefs, String mode, boolean settings) {
         if (!validEnergy(mode)) return false;
         SharedPreferences.Editor e = prefs.edit().putString("currentTripEnergy", mode).putBoolean("forcedEv", "FORCE_EV".equals(mode))
-                .putLong(REV, prefs.getLong(REV, 0) + 1);
+                .putString(START, "selected").putLong(REV, prefs.getLong(REV, 0) + 1);
         if (!"FORCE_EV".equals(mode) && (settings || prefs.getBoolean("energyRememberLast", true))) e.putString("energy", mode);
         return e.commit();
     }

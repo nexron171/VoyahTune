@@ -96,7 +96,7 @@ function fixture(options = {}) {
         "com.qinggan.utils.AppCommonUtils": {is97X() { return f.platform; }},
         "com.qinggan.app.vehiclesetting.utils.Utils": {getAccountId() { return "guest"; }},
         "android.app.ActivityThread": {currentApplication() {
-            return f.noApp ? null : {getContentResolver() { return {}; }};
+            return f.noApp ? null : {getPackageName() { return "com.qinggan.app.vehiclesetting"; }, getContentResolver() { return {}; }};
         }},
         "android.net.Uri": {parse(s) { return s; }},
         "android.os.Bundle": {$new(b) { return new Bundle(b); }},

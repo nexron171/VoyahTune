@@ -26,7 +26,7 @@ class ParallelLoaderTest(unittest.TestCase):
         settings.write_text("#!/bin/sh\nexit 1\n")
         settings.chmod(0o755)
         self.env={**os.environ,"PATH":str(self.root)+os.pathsep+os.environ["PATH"]}
-        for pid in range(101, 108):
+        for pid in range(101, 109):
             (self.root / f"generation.{pid}").write_text("1\n")
         (self.root / "proc").mkdir()
         (self.root / "proc/uptime").write_text("100.00 0\n")
@@ -87,6 +87,7 @@ pidof() {
         system_server) echo 104 ;;
         com.qinggan.app.vehiclesetting) echo 105 ;;
         com.qinggan.app.qgime) echo 106 ;;
+        com.qinggan.app.vehicle) [ ! -e "$FIXTURE/enable_vehicle" ] || echo 108 ;;
         com.qinggan.canbus.service) [ -e "$FIXTURE/missing_acc" ] || echo 107 ;;
         frida-inject)
             for f in "$FIXTURE"/proc/*/cmdline; do
@@ -294,6 +295,27 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / "generation.105").write_text("2\n")
         self.until(lambda: marker.read_text().strip().endswith(":2"), "New VehicleSettings missed hook")
         self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js"))
+
+    def test_vehicle_hook_has_independent_lifecycle_and_health(self):
+        (self.root / "enable_vehicle").touch()
+        (self.root / "disable_apollo").touch()
+        self.start()
+        vehicle = self.root / "runtime/drive_hooks/vehicle.pid"
+        settings = self.root / "voyahtune_drive_reset.pid"
+        self.until(lambda: vehicle.exists() and settings.exists(), "Both drive hooks must start")
+        self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 108"))
+        self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 105"))
+        health = self.root / "runtime/drive_hooks"
+        (health / "vehicle.health").write_text("108|120|v2\n")
+        (health / "voyahtune_drive_reset.health").write_text("105|120|v2\n")
+        (self.root / "proc/uptime").write_text("120.00 0\n")
+        time.sleep(0.5)
+        self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js"))
+        (self.root / "generation.108").write_text("2\n")
+        self.until(lambda: vehicle.read_text().strip().endswith(":2"), "New VehicleAir missed hook")
+        self.assertTrue(settings.read_text().strip().endswith(":1"))
+        self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js 108"))
+        self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 105"))
 
     def test_failed_drive_reset_attach_does_not_loop_or_block_apollo(self):
         (self.root / "missing_drive_ready").touch()

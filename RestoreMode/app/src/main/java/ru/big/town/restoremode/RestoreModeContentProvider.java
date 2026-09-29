@@ -3,6 +3,7 @@ package ru.big.town.restoremode;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.MatrixCursor;
@@ -72,6 +73,17 @@ public class RestoreModeContentProvider extends ContentProvider {
         return true;
     }
 
+    private void notifySavedMode(String key, String mode) {
+        // Hooks write directly to this provider, bypassing Native's MODE_SYNCED notification.
+        try {
+            getContext().sendBroadcast(new Intent("ru.big.town.anative.MODE_SYNCED")
+                    .setPackage(getContext().getPackageName())
+                    .putExtra("modeKey", key).putExtra("mode", mode));
+        } catch (RuntimeException e) {
+            Log.w("DriveSelection", "Selection saved, UI notification unavailable", e);
+        }
+    }
+
     /**
      * Root-only, state-change delivery from {@code /data/local/bin/load.bin}. The CLI never runs on
      * a permanent cadence: load.bin calls it after its bounded status record changes and allows at
@@ -87,7 +99,14 @@ public class RestoreModeContentProvider extends ContentProvider {
                         "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Drive hook state");
             }
             int boot = android.provider.Settings.Global.getInt(getContext().getContentResolver(), "boot_count", -1);
-            return DriveSelectionPreferences.hook(sharedPreferences, arg, extras, boot);
+            Bundle result = DriveSelectionPreferences.hook(sharedPreferences, arg, extras, boot);
+            if ("user".equals(arg) && extras != null) {
+                if (extras.containsKey("mode")) notifySavedMode("driveMode",
+                        DriveSelectionPreferences.read(sharedPreferences).configured);
+                if (extras.containsKey("energy")) notifySavedMode("energy",
+                        sharedPreferences.getString("energy", "SREV"));
+            }
+            return result;
         }
         if ("otaHealth".equals(method)) {
             int caller = Binder.getCallingUid();

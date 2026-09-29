@@ -60,6 +60,23 @@ public class DriveSelectionPolicyTest {
             }
         }
     }
+    @Test public void cabinChoiceThenLowAndMediumRestoresEveryMediumProfile() {
+        for (boolean remember : new boolean[]{false, true}) {
+            for (String mode : new String[]{"ECO", "COMFORT", "INDIVIDUAL", "SNOW"}) {
+                DriveSelectionPolicy state = new DriveSelectionPolicy("ECO", "SPORT", "ECO")
+                        .select(mode, EXPLICIT, remember);
+                assertEquals("", state.override);
+                state = state.select(SuspensionWidgetPolicy.driveMode(1, value(state.medium)), WIDGET, remember);
+                assertEquals("SPORT", state.effective());
+                state = new DriveSelectionPolicy(state.configured, state.override, state.medium, state.current);
+                String target = SuspensionWidgetPolicy.driveMode(2, value(state.medium));
+                assertEquals(mode, target);
+                state = state.select(target, WIDGET, remember);
+                assertEquals(mode, state.nextTrip().effective());
+                assertSame(state, state.select("ECO", FEEDBACK, remember));
+            }
+        }
+    }
     @Test public void entryKeepsCurrentModeAndSettingsAlwaysReleaseOverride() {
         DriveSelectionPolicy state = initial().select("SPORT", WIDGET, false);
         state = state.select("SPORT", WIDGET, false); // entry preserves the freshly read mode

@@ -1,4 +1,4 @@
-// Sport+ H97X: apply saved drive/energy/suspension settings in the two account-reset requests.
+// H97X VehicleSettings account resets and VehicleAir user drive selections.
 // The original reset methods retain their ambient/retain behavior. Ordinary
 // setters, account sync and the separate CanBusService ACC path are outside this hook.
 Java.perform(function () {
@@ -43,9 +43,64 @@ Java.perform(function () {
             finally { out.close(); }
         } catch (e) { log("health write unavailable: " + e); }
     }
+    // VehicleAir has a separate process and heartbeat, but uses the same packaged agent.
+    var app = Java.use("android.app.ActivityThread").currentApplication();
+    var vehicleAir = app !== null && String(app.getPackageName()) === "com.qinggan.app.vehicle";
+    if (vehicleAir) HEALTH_PATH = "/data/local/open_voyah/drive_hooks/vehicle.health";
+    function installVehicleAir() {
+        var scope = Java.use("java.lang.ThreadLocal").$new();
+        var JString = Java.use("java.lang.String");
+        var Bundle = Java.use("android.os.Bundle");
+        var Uri = Java.use("android.net.Uri");
+        var call = Java.use("android.content.ContentResolver").call.overload(
+            "android.net.Uri", "java.lang.String", "java.lang.String", "android.os.Bundle");
+        var setter = Java.use("com.qinggan.canbus.CanBusManager")
+            .setVehicleAndAirConditionBundleState.overload("android.os.Bundle", "android.os.Bundle");
+        // Resolve every required method before installation; other firmware stays untouched.
+        var handler = Java.use("com.qinggan.app.vehiclebase.ui97.DriveModeViewManager$1")
+            .handleMessage.overload("android.os.Message");
+        var confirm = Java.use("com.qinggan.app.vehiclebase.ui97.DriveModeViewManager$2")
+            .onClick.overload("android.view.View");
+        function inUserScope(original, receiver, argument, user) {
+            var previous = scope.get();
+            if (user) scope.set(JString.$new("vehicle menu"));
+            else scope.remove();
+            try { return original.call(receiver, argument); }
+            finally { if (previous === null) scope.remove(); else scope.set(previous); }
+        }
+        install(handler, function (message) {
+            return inUserScope(handler, this, message, message.what.value === 3);
+        });
+        install(confirm, function (view) { return inUserScope(confirm, this, view, true); });
+        install(setter, function (air, vehicle) {
+            var mode = vehicle === null ? -1 : vehicle.getInt("DRIVING_MODE_SET", -1);
+            var user = scope.get() !== null && mode >= 1 && mode <= 6;
+            // OEM returns 0 after IPC acceptance, -1 on disconnect/error. Never replay a send.
+            var result = setter.call(this, air, vehicle);
+            if (user && result === 0) {
+                try {
+                    var args = Bundle.$new();
+                    args.putString("mode", ["", "ECO", "COMFORT", "SPORT", "OUTING", "INDIVIDUAL", "SNOW"][mode]);
+                    var saved = call.call(app.getContentResolver(),
+                        Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/"), "driveHookV2", "user", args);
+                    if (saved === null || saved.getInt("protocol", -1) !== 2) throw new Error("provider protocol unavailable");
+                    log("vehicle user drive=" + mode + " saved");
+                } catch (e) { log("vehicle user drive=" + mode + " persistence failed: " + e); }
+            }
+            return result;
+        });
+    }
     try {
         if (healthy() && String(System.getProperty(SENTINEL, "")) === "installed") {
             log(READY + " already_installed");
+            return;
+        }
+        if (vehicleAir) {
+            installVehicleAir();
+            System.setProperty(SENTINEL, "installed");
+            pulse();
+            pulseTimer = setInterval(function () { Java.perform(pulse); }, 2000);
+            log(READY + " vehicleair");
             return;
         }
         var Memory = Java.use("com.qinggan.app.vehiclesetting.accountdata.VehicleMemoryManager");
