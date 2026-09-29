@@ -220,6 +220,34 @@ final class HeadlightCanTransport {
             return false;
         }
 
+        if (command == HeadlightCanPolicy.Command.AUTO_LAMP_SWITCH) {
+            return HeadlightAutoCommand.send(() -> readAutoLamp(binder),
+                    () -> transactCommand(binder, ordinal, command));
+        }
+        return transactCommand(binder, ordinal, command);
+    }
+
+    /** TX5 LightStatus on the investigated Android 11 OEM: 17 ints, autoLamp last. */
+    private Integer readAutoLamp(IBinder binder) {
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+            if (!binder.transact(5, data, reply, 0)) return null;
+            reply.readException();
+            if (reply.readInt() == 0 || reply.dataAvail() < 17 * Integer.BYTES) return null;
+            for (int index = 0; index < 16; index++) reply.readInt();
+            return reply.readInt();
+        } catch (RemoteException | RuntimeException e) {
+            Log.w(TAG, "TX5 getLightStatus failed; AUTO toggle deferred", e);
+            return null;
+        } finally {
+            reply.recycle();
+            data.recycle();
+        }
+    }
+
+    private boolean transactCommand(IBinder binder, Integer ordinal,
+                                    HeadlightCanPolicy.Command command) {
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
