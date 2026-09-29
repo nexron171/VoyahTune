@@ -106,6 +106,25 @@ class InstallerTests(unittest.TestCase):
                        and 'ru.big.town.updater' in call['script'] for call in calls))
   self.assertFalse(any('cmd package install-existing --user 0 --wait' in (call['script'] or '')
                        for call in calls))
+ def test_system_server_restart_during_native_broadcast_recovers(self):
+  self.seed_apps();self.state['restartSystemServerOnBroadcast']=True;self.write_state()
+  self.apply(self.plan())
+  self.assertEqual(self.read_state()['systemServerPid'],'202')
+  reports=list((self.base/'logs').rglob('report.json'))
+  self.assertEqual(len(reports),1)
+  self.assertTrue(json.loads(reports[0].read_text())['success'])
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+ def test_native_broadcast_failure_without_system_restart_stays_failed(self):
+  self.seed_apps()
+  plan=self.plan()
+  self.state['failShell']='am broadcast -a com.qinggan.intent.QINGGAN_BOOT_COMPLETE'
+  self.write_state()
+  result=self.apply(plan,okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertEqual(self.read_state().get('systemServerPid','101'),'101')
+  reports=list((self.base/'logs').rglob('report.json'))
+  self.assertEqual(len(reports),1)
+  self.assertFalse(json.loads(reports[0].read_text())['success'])
  def test_failed_unlock_blocks_final_reboot_and_success(self):
   self.seed_apps();self.state['failShell']='# release desktop installation lock';self.write_state()
   result=self.apply(self.plan(),okay=False)

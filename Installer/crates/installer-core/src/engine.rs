@@ -30,7 +30,7 @@ const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
 const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
 // Postflight commands may repair package registration. Keep each command exclusive,
 // but let the device release its lock even if the desktop disconnects.
-fn postflight_script(script: &str, owner: &str) -> String {
+fn postflight_script(script: &str, owner: &str, timeout_seconds: u32) -> String {
     let owner = quote(owner);
     format!(
         r#"lock=/data/local/voyahtune-install.lock
@@ -44,7 +44,7 @@ printf '%s' {owner} > "$lock/owner" || {{ rmdir "$lock"; exit 1; }}
 trap 'release_postflight_lock' EXIT
 trap 'exit 1' HUP INT TERM
 cat /proc/sys/kernel/random/boot_id > "$lock/boot" && chmod 700 "$lock" || exit 1
-/system/bin/timeout 180 /system/bin/sh -c {command}
+/system/bin/timeout {timeout_seconds} /system/bin/sh -c {command}
 command_status=$?
 release_postflight_lock || exit 1
 trap - EXIT
@@ -225,9 +225,46 @@ impl Engine {
     }
     fn postflight_shell(&self, script: &str) -> Result<String> {
         self.adb.shell(
-            &postflight_script(script, &format!("desktop:{}:postflight", self.operation.id)),
+            &postflight_script(script, &format!("desktop:{}:postflight", self.operation.id), 180),
             Duration::from_secs(210),
         )
+    }
+    fn native_broadcast(&self) -> Result<()> {
+        let before = self.shell("pidof system_server\n")?;
+        let owner = format!("desktop:{}:postflight", self.operation.id);
+        let command = postflight_script(c::NATIVE_BROADCAST, &owner, 15);
+        let first = self.adb.shell(&command, Duration::from_secs(25));
+        if let Err(error) = first {
+            let after = self.shell("pidof system_server\n").unwrap_or_default();
+            if before.is_empty() || after.is_empty() || before == after {
+                return Err(error);
+            }
+            if self
+                .shell("[ ! -e /data/local/voyahtune-install.lock ] && echo CLEAR\n")
+                .unwrap_or_default()
+                != "CLEAR"
+            {
+                return Err(error);
+            }
+            self.warning(&error);
+            let mut ready = false;
+            for _ in 0..15 {
+                if self.shell("getprop sys.boot_completed\n").unwrap_or_default() == "1"
+                    && self.shell("pidof system_server\n").unwrap_or_default() == after
+                {
+                    ready = true;
+                    break;
+                }
+                thread::sleep(Duration::from_secs(3));
+            }
+            if !ready {
+                return Err(self.fail("Android не восстановился после рестарта system_server", error));
+            }
+            if self.shell("pidof ru.big.town.anative\n").unwrap_or_default().is_empty() {
+                self.adb.shell(&command, Duration::from_secs(25))?;
+            }
+        }
+        Ok(())
     }
     fn ignore(&self, script: &str) {
         if let Err(e) = self.shell(script) {
@@ -974,7 +1011,7 @@ fi
         }
         self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
         self.verify_active_apk(RESTORE, "restore_mode.apk", None)?;
-        self.postflight_shell(c::NATIVE_BROADCAST)?;
+        self.native_broadcast()?;
         for _ in 0..20 {
             if !self
                 .shell("pidof ru.big.town.anative\n")

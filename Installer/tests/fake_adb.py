@@ -163,8 +163,10 @@ def main():
   print(f'{p.stat().st_mode & 0o7777:o}:{owner}')
  elif name=='am':
   if args[:2]==['force-stop',s.get('failForceStop')]:return 1
+  if args[:1]==['broadcast'] and s.pop('restartSystemServerOnBroadcast',False):
+   s['systemServerPid']='202';save(s);return 224
  elif name in ['restorecon','mount','pkill','ps']:pass
- elif name=='pidof':print('101')
+ elif name=='pidof':print(s.get('systemServerPid','101') if args[0]=='system_server' else '101')
  elif name=='sha256sum':
   for path in args:
    actual=remote(path) if path.startswith(('/system/','/data/')) else Path(path)
