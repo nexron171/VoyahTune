@@ -16,6 +16,10 @@ public final class VoyahApplication extends Application {
 
     @Override public void onCreate() {
         super.onCreate();
+        // Voice settings edits (dial entries, steering actions, splits, custom CAN) invalidate
+        // the shared command catalog; the next load rebuilds it.
+        getSharedPreferences("DrivePreferences", MODE_PRIVATE)
+                .registerOnSharedPreferenceChangeListener((store, key) -> VoiceCommands.invalidate());
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
             @Override public void onActivityStarted(Activity activity) {
                 if (activity instanceof VoiceActivity && ((VoiceActivity) activity).isAnimationPreview()) return;
