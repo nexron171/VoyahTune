@@ -119,6 +119,8 @@ public class LightSensorService extends Service {
             newBoundedBinderExecutor("CarSignalRegistration");
     private static final ThreadPoolExecutor CAR_SIGNAL_CLEANUP_EXECUTOR =
             newBoundedBinderExecutor("CarSignalCleanup");
+    private static final ThreadPoolExecutor LIGHT_REASON_EXECUTOR =
+            newBoundedBinderExecutor("LightReason");
     private static final ThreadPoolExecutor LIGHT_SETTINGS_EXECUTOR =
             newBoundedBinderExecutor("LightSettings");
 
@@ -191,6 +193,10 @@ public class LightSensorService extends Service {
     private long ihbcRevision;
     private volatile long lightCanEpoch;
     private boolean commandPending;
+    private boolean reasonQueryRunning;
+    private long reasonRevision;
+    private static final OemVehicleStateTransport.StateKey REASON_KEY =
+            new OemVehicleStateTransport.StateKey("BCM_RSM_lightSWReason", RSM_LIGHT_SW_REASON);
     private static final OemVehicleStateTransport.StateKey IHBC_KEY =
             new OemVehicleStateTransport.StateKey("IHBCFunction", AutoLightPolicy.IHBC_FUNCTION);
     private SharedPreferences lightPreferences;
@@ -287,8 +293,10 @@ public class LightSensorService extends Service {
                 ihbcRevision++;
                 ihbcFunction = -1;
                 CanBusEventHub.get(this).requestVehicleStateSnapshot();
+                requestCurrentReason();
                 break;
             case CONNECTION_LOST:
+                reasonRevision++;
                 lastReason = -1;
                 broadcastUpdate(lastSensorLevel);
                 lightCanEpoch = 0L;
@@ -1252,6 +1260,7 @@ public class LightSensorService extends Service {
     private final Runnable safetyRunnable = new Runnable() {
         @Override
         public void run() {
+            if (lastReason < 0) requestCurrentReason();
             requestCarSignalMaintenance();
             long epoch = readyCarSignalEpoch;
             HeadlightCanPolicy.Command outdoor = reasonToDesired(lastReason);
@@ -1412,7 +1421,37 @@ public class LightSensorService extends Service {
         return true;
     }
 
+    // TX20 does not replay every field on this OEM ROM. Seed RSM via TX57 off the UI
+    // thread, rejecting results superseded by live CAN or a connection replacement.
+    private void requestCurrentReason() {
+        if (destroyed || reasonQueryRunning || lightCanEpoch == 0L) return;
+        final long epoch = lightCanEpoch;
+        final long revision = reasonRevision;
+        reasonQueryRunning = true;
+        try {
+            LIGHT_REASON_EXECUTOR.execute(() -> {
+                Integer value = null;
+                try {
+                    value = OemVehicleStateTransport.withSession(this,
+                            Collections.singleton(REASON_KEY),
+                            session -> session.readVehicleState(REASON_KEY));
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "read SWReason: " + e.getMessage());
+                }
+                final Integer result = value;
+                timerHandler.post(() -> {
+                    reasonQueryRunning = false;
+                    if (destroyed || lightCanEpoch != epoch || reasonRevision != revision) return;
+                    if (result != null && result >= 0) onLightSwReason(result);
+                });
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            reasonQueryRunning = false;
+        }
+    }
+
     private void onLightSwReason(int reason) {
+        reasonRevision++;
         lastReason = reason;
         broadcastUpdate(lastSensorLevel);
         reconsiderOutdoorTarget("ext-sensor reason=" + reason);
@@ -1597,7 +1636,7 @@ public class LightSensorService extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
             broadcastUpdate(lastSensorLevel);
-            CanBusEventHub.get(LightSensorService.this).requestVehicleStateSnapshot();
+            requestCurrentReason();
         }
     };
 
