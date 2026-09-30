@@ -45,7 +45,6 @@ public class RestoreModeContentProvider extends ContentProvider {
     private boolean apolloTrafficLightsEnabled=ApolloSettings.DEFAULT_ENABLED;
     private boolean apolloGreenSoundEnabled=ApolloSettings.DEFAULT_ENABLED;
     private boolean apolloTrafficSignsEnabled=ApolloSettings.DEFAULT_ENABLED;
-    private boolean apolloStockUiEnabled=ApolloSettings.DEFAULT_ENABLED;
     public RestoreModeContentProvider() {
     }
 
@@ -69,6 +68,11 @@ public class RestoreModeContentProvider extends ContentProvider {
     @Override
     public boolean onCreate() {
         sharedPreferences = getContext().getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
+        // Retired option: keep older installations from republishing the Apollo UI hook.
+        if (sharedPreferences.contains(ApolloSettings.STOCK_UI)
+                && !sharedPreferences.edit().remove(ApolloSettings.STOCK_UI).commit()) {
+            Log.e("ApolloSettings", "Unable to clear retired stock UI target");
+        }
         return true;
     }
 
@@ -199,8 +203,6 @@ public class RestoreModeContentProvider extends ContentProvider {
                 ApolloSettings.GREEN_SOUND, ApolloSettings.DEFAULT_ENABLED);
         apolloTrafficSignsEnabled = sharedPreferences.getBoolean(
                 ApolloSettings.TRAFFIC_SIGNS, ApolloSettings.DEFAULT_ENABLED);
-        apolloStockUiEnabled = sharedPreferences.getBoolean(
-                ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED);
 
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
@@ -231,7 +233,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 ApolloSettings.TRAFFIC_LIGHTS, // 25 — распознавание светофоров
                 ApolloSettings.GREEN_SOUND, // 26 — звук зелёного сигнала
                 ApolloSettings.TRAFFIC_SIGNS,// 27 — распознавание дорожных знаков
-                ApolloSettings.STOCK_UI,      // 28 — эмуляция подписки/экзамена для штатного UI
+                ApolloSettings.STOCK_UI,      // 28 — прежний ключ, колонка совместимости
                 "driveRememberLast",        // 29 — null/нет колонки трактуется Native как true
                 "energyRememberLast",       // 30 — null/нет колонки трактуется Native как true
                 "recycleRememberLast",      // 31 — null/нет колонки трактуется Native как true
@@ -267,7 +269,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 apolloTrafficLightsEnabled ? 1 : 0,
                 apolloGreenSoundEnabled ? 1 : 0,
                 apolloTrafficSignsEnabled ? 1 : 0,
-                apolloStockUiEnabled ? 1 : 0,
+                0, // 28: retired stock UI target; preserve provider column positions.
                 driveRememberLast ? 1 : 0,
                 energyRememberLast ? 1 : 0,
                 recycleRememberLast ? 1 : 0,

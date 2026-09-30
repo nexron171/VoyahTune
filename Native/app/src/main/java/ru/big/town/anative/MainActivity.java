@@ -47,7 +47,6 @@ public class MainActivity extends AppCompatActivity {
     private static boolean apolloTrafficLightsEnabled = false;
     private static boolean apolloGreenSoundEnabled = false;
     private static boolean apolloTrafficSignsEnabled = false;
-    private static boolean apolloStockUiEnabled = false;
 
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
@@ -341,8 +340,6 @@ public class MainActivity extends AppCompatActivity {
                         && cursor.getInt(26) == 1;
                 apolloTrafficSignsEnabled = cursor.getColumnCount() > 27
                         && cursor.getInt(27) == 1;
-                apolloStockUiEnabled = cursor.getColumnCount() > 28
-                        && cursor.getInt(28) == 1;
                 // cols 29..31 — opt-out remember-last flags. Older providers and SQL-style NULL
                 // both mean true, so an update never silently changes historical behaviour.
                 driveRememberLast = cursorBooleanDefaultTrue(cursor, 29);
@@ -371,7 +368,6 @@ public class MainActivity extends AppCompatActivity {
                         + "/" + fragranceIntensity
                         + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
                         + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
-                        + " stockUi=" + apolloStockUiEnabled
                         + " wiperColdMode=" + wiperColdMode
                         + " pauseMediaOnDoor=" + pauseMediaOnDoor);
                 return 2;
@@ -428,7 +424,7 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheApolloTrafficLightsEnabled", apolloTrafficLightsEnabled)
                 .putBoolean("cacheApolloGreenSoundEnabled", apolloGreenSoundEnabled)
                 .putBoolean("cacheApolloTrafficSignsEnabled", apolloTrafficSignsEnabled)
-                .putBoolean("cacheApolloStockUiEnabled", apolloStockUiEnabled)
+                .remove("cacheApolloStockUiEnabled")
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
                 .putBoolean("cacheValid", true)
@@ -468,7 +464,6 @@ public class MainActivity extends AppCompatActivity {
         apolloTrafficLightsEnabled = p.getBoolean("cacheApolloTrafficLightsEnabled", false);
         apolloGreenSoundEnabled = p.getBoolean("cacheApolloGreenSoundEnabled", false);
         apolloTrafficSignsEnabled = p.getBoolean("cacheApolloTrafficSignsEnabled", false);
-        apolloStockUiEnabled = p.getBoolean("cacheApolloStockUiEnabled", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
         applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor);
@@ -486,7 +481,6 @@ public class MainActivity extends AppCompatActivity {
                 + "/" + fragranceIntensity
                 + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
                 + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
-                + " stockUi=" + apolloStockUiEnabled
                 + " wiperColdMode=" + wiperColdMode
                 + " pauseMediaOnDoor=" + pauseMediaOnDoor);
         return true;
@@ -578,10 +572,9 @@ public class MainActivity extends AppCompatActivity {
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
-        final boolean stockUiTarget = apolloStockUiEnabled;
         plan.addOnce("Apollo stock subscription/exam UI", () -> {
             ApolloSettingsRuntimeState.TargetApplyResult result =
-                    ApolloSettingsRuntimeState.applyTarget(context, stockUiTarget);
+                    ApolloSettingsRuntimeState.applyTarget(context, false);
             if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
                 return CanRestorePlan.OperationResult.CONFIRMED;
             }

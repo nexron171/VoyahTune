@@ -185,9 +185,8 @@ public class AdvanceActivity extends AppCompatActivity {
     private static final String EXTRA_MODE_KEY = "modeKey";
     private static final String EXTRA_REMEMBER_LAST = "rememberLast";
 
-    // Apollo Tech owns persisted targets, including the stock subscription/exam UI.
-    private Switch switchApolloSettingsActivation, switchApolloTlc, switchApolloTrafficLights,
-            switchApolloTrafficSigns;
+    // Apollo Tech keeps only the individual feature targets.
+    private Switch switchApolloTlc, switchApolloTrafficLights, switchApolloTrafficSigns;
     private RadioGroup apolloGreenSoundGroup;
     private View apolloGreenSoundContainer;
 
@@ -2006,30 +2005,18 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     // -------------------------------------------------------------------------
-    // Apollo Tech — persisted subscription/exam reveal + persisted VoyahTune targets.
+    // Apollo Tech — persisted targets for individual vehicle features.
     // -------------------------------------------------------------------------
 
-    private TextView textApolloSettingsActivationStatus, textApolloStatus;
+    private TextView textApolloStatus;
 
     private void initApolloTech() {
-        switchApolloSettingsActivation = findViewById(R.id.switchApolloSettingsActivation);
         switchApolloTlc = findViewById(R.id.switchApolloTlc);
         switchApolloTrafficLights = findViewById(R.id.switchApolloTrafficLights);
         switchApolloTrafficSigns = findViewById(R.id.switchApolloTrafficSigns);
         apolloGreenSoundGroup = findViewById(R.id.apolloGreenSoundGroup);
         apolloGreenSoundContainer = findViewById(R.id.apolloGreenSoundContainer);
-        textApolloSettingsActivationStatus = findViewById(
-                R.id.textApolloSettingsActivationStatus);
         textApolloStatus = findViewById(R.id.textApolloStatus);
-
-        if (switchApolloSettingsActivation != null) {
-            switchApolloSettingsActivation.setChecked(prefs.getBoolean(
-                    ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED));
-            switchApolloSettingsActivation.setOnCheckedChangeListener((button, checked) -> {
-                prefs.edit().putBoolean(ApolloSettings.STOCK_UI, checked).apply();
-                updateApolloUi();
-            });
-        }
         bindApolloSwitch(switchApolloTlc, ApolloSettings.TLC);
         bindApolloSwitch(switchApolloTrafficSigns, ApolloSettings.TRAFFIC_SIGNS);
         bindApolloSwitch(switchApolloTrafficLights, ApolloSettings.TRAFFIC_LIGHTS);
@@ -2060,17 +2047,6 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void updateApolloUi() {
-        if (textApolloSettingsActivationStatus != null) {
-            if (switchApolloSettingsActivation != null
-                    && switchApolloSettingsActivation.isChecked()) {
-                textApolloSettingsActivationStatus.setText(
-                        "Включено. Применяется вместе с остальными настройками.");
-            } else {
-                textApolloSettingsActivationStatus.setText(
-                        "Выключено. Применяется вместе с остальными настройками.");
-            }
-        }
-
         boolean trafficLightsEnabled = switchApolloTrafficLights != null
                 && switchApolloTrafficLights.isChecked();
         if (apolloGreenSoundGroup != null) apolloGreenSoundGroup.setEnabled(trafficLightsEnabled);

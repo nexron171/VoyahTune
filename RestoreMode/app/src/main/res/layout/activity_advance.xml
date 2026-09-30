@@ -2259,52 +2259,6 @@
                 android:textSize="24px" />
 
             <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
-                android:background="@drawable/layout_category_bg"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Активация функций Apollo"
-                        android:textColor="#FFFFFF"
-                        android:textSize="27px" />
-
-                    <TextView
-                        android:id="@+id/textApolloSettingsActivationStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Выключено. Применяется вместе с остальными настройками."
-                        android:textColor="#aaaaaa"
-                        android:textSize="20px" />
-
-                </LinearLayout>
-
-                <Switch
-                    android:id="@+id/switchApolloSettingsActivation"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
-                    android:checked="false"
-                    android:enabled="false"
-                    android:thumb="@drawable/switch_thumb"
-                    android:track="@drawable/switch_track" />
-
-            </LinearLayout>
-
-            <LinearLayout
                 android:id="@+id/apolloControls"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
