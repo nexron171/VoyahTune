@@ -140,6 +140,10 @@ function adapterFixture(options = {}) {
         const m = {implementation: null, overload() { return m; },
             call(self, ...args) { return fn.apply(self, args); },
             invoke(self, ...args) { return (m.implementation || fn).apply(self, args); }};
+        if (options.failInstall === name) {
+            Object.defineProperty(m, "implementation", {get: () => null,
+                set: value => { if (value !== null) throw Error("replacement rejected"); }});
+        }
         f.methods.push(m); f.fields[name] = m; return m;
     }
     function station(s) {
@@ -168,7 +172,7 @@ function adapterFixture(options = {}) {
             mgr.delayPlayStation.value = s;
             mgr.tempPlayStation.value = s; mgr.actionCode.value = 1002;
         }),
-        play: method("play", () => f.calls.push(["play"])),
+        play: method("play", () => { f.calls.push(["play"]); if (options.playThrows) throw Error("OEM failure"); }),
         resumePlay: method("resume", () => f.calls.push(["resume"])),
         pause: method("pause", () => f.calls.push(["pause"])),
         pauseNoAbandon: method("pauseNoAbandon", () => f.calls.push(["pauseNoAbandon"])),
@@ -296,5 +300,36 @@ test("OEM source other than radio never triggers automatic restore", () => {
 test("matching automatic playback does not send a redundant play command", () => {
     const f = adapterFixture({current: original}); f.invoke("audioStatus", false);
     assert.equal(f.calls.length, 0);
+});
+test("pausing immediately after confirmed manual tune still saves the station", () => {
+    const f = fixture(); f.controller.select(fm(9900)); f.observe(fm(9900));
+    f.controller.pause(); f.tick(750); assert.deepEqual(f.writes, [fm(9900)]);
+});
+test("scan with no callback cannot disable restoration forever", () => {
+    const f = fixture(); f.controller.scan(); f.controller.pause(); f.tick(60000); f.resume();
+    assert.deepEqual(f.tunes, [original]);
+});
+test("transient OEM pause during source switch does not discard the queued tune", () => {
+    const f = adapterFixture(); f.invoke("resume");
+    const owned = f.manager.delayPlayStation.value; f.invoke("audioStatus", true);
+    assert.equal(f.manager.delayPlayStation.value, owned);
+    f.update(original); f.tick(750);
+    assert.ok(f.logs.some(s => s.includes("restore confirmed")));
+});
+test("unknown future schema is preserved without installing hooks or overwriting data", () => {
+    const raw = JSON.stringify({schema: 2, station: original});
+    const f = adapterFixture({raw}); f.tick(2000);
+    assert.equal(f.prefs, raw); assert.equal(f.writes.length, 0);
+    assert.ok(f.methods.every(m => m.implementation === null));
+});
+test("failed replacement rolls back earlier hooks and reports no readiness", () => {
+    const f = adapterFixture({failInstall: "audioStatus"});
+    assert.ok(f.methods.every(m => m.implementation === null));
+    assert.ok(!f.logs.some(s => s.includes("hook ready")));
+});
+test("OEM play exception is propagated without a duplicate original call", () => {
+    const f = adapterFixture({current: original, playThrows: true});
+    assert.throws(() => f.invoke("play"), /OEM failure/);
+    assert.deepEqual(f.calls, [["play"]]);
 });
 console.log("RDS restore: " + count + " tests passed");

@@ -177,6 +177,7 @@ APP_CLIENT=/data/local/bin/app_client.js
 APP_CLIENT_FULLSCREEN_SETTING=voyahtune_fullscreen_apps
 APP_CLIENT_DPI_SETTING=voyahtune_dpi_packages
 APP_CLIENT_READY='[app-client] hook ready v1'
+RDS_CLIENT_READY='[rds-restore] hook ready v1'
 MAPKIT_DPI_CLIENT_READY='[mapkit-dpi] hook ready v1'
 APP_CLIENT_BUSY=/data/local/tmp/voyahtune_app_client.busy
 APP_CLIENT_BUSY_TTL=45
@@ -989,6 +990,10 @@ inject_app_client_bg() {
                 FC_READY_OK=1
             fi
         fi
+        if [ "$FC_TARGET_PACKAGE" = com.pateo.rdsapp ] \
+                && ! grep -qF "$RDS_CLIENT_READY" "$FC_TRY"; then
+            FC_READY_OK=0
+        fi
         if [ "$FC_READY_OK" -eq 1 ]; then
             FC_ID_AFTER=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE" 2>/dev/null) \
                 || FC_ID_AFTER=
@@ -1024,7 +1029,9 @@ discover_app_client() {
     case "$FC_FULLSCREEN_LIST" in null) FC_FULLSCREEN_LIST= ;; esac
     case "$FC_DPI_LIST" in null) FC_DPI_LIST= ;; esac
     FC_DPI_LIST=$(printf '%s' "$FC_DPI_LIST" | tr -d '[:space:]')
-    FC_LIST=$FC_FULLSCREEN_LIST
+    # RdsApp has a dedicated branch in app_client.js independent of geometry settings. Never
+    # launch the OEM app: only attach to an existing exact main process using the same circuit breaker.
+    FC_LIST="com.pateo.rdsapp${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
     FC_SAVED_IFS=$IFS
     IFS=,
     for FC_DPI_PACKAGE in $FC_DPI_LIST; do

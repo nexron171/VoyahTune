@@ -26,7 +26,7 @@ class ParallelLoaderTest(unittest.TestCase):
         settings.write_text("#!/bin/sh\nexit 1\n")
         settings.chmod(0o755)
         self.env={**os.environ,"PATH":str(self.root)+os.pathsep+os.environ["PATH"]}
-        for pid in range(101, 109):
+        for pid in range(101, 110):
             (self.root / f"generation.{pid}").write_text("1\n")
         (self.root / "proc").mkdir()
         (self.root / "proc/uptime").write_text("100.00 0\n")
@@ -52,6 +52,10 @@ case "$script" in
         while [ -f "$root/hold_acc_ready" ]; do sleep 0.05; done
         if [ ! -f "$root/missing_acc_ready" ]; then echo '[acc-restore] hook ready v2'; fi
         if [ -f "$root/block_acc" ]; then gate=acc; else gate=none; fi ;;
+    app_client.js)
+        echo '[app-client] hook ready v1'
+        if [ ! -f "$root/missing_rds_ready" ]; then echo '[rds-restore] hook ready v1'; fi
+        gate=none ;;
     voyahtune_drive_reset.js)
         if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v2'; fi
         gate=none ;;
@@ -88,6 +92,7 @@ pidof() {
         com.qinggan.app.vehiclesetting) echo 105 ;;
         com.qinggan.app.qgime) echo 106 ;;
         com.qinggan.app.vehicle) [ ! -e "$FIXTURE/enable_vehicle" ] || echo 108 ;;
+        com.pateo.rdsapp) [ ! -e "$FIXTURE/enable_rds" ] || echo 109 ;;
         com.qinggan.canbus.service) [ -e "$FIXTURE/missing_acc" ] || echo 107 ;;
         frida-inject)
             for f in "$FIXTURE"/proc/*/cmdline; do
@@ -121,11 +126,61 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
 '''.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root)))
         source = SOURCE.replace("/data/local/tmp", str(self.root)).replace("/data/local/open_voyah", str(self.root / "runtime"))
         source = source.replace("drive_agent_attempt_finished() {", "fixture_drive_agent_attempt_finished() {")
+        source = source.replace("discover_app_client() {", "fixture_discover_app_client() {")
         source = source.replace("/proc/", str(self.root / "proc") + "/")
         entry = 'if [ "${1:-}" = --worker ]; then'
         source = source.replace(entry, overrides + "\n" + entry)
         self.loader = self.root / "load.bin"
         self.loader.write_text(source)
+
+    def rds_probe(self, uid=10109, executable="/system/bin/app_process64", enabled=True):
+        if enabled:
+            (self.root / "enable_rds").touch()
+        (self.root / "proc/sys/kernel/random").mkdir(parents=True, exist_ok=True)
+        (self.root / "proc/sys/kernel/random/boot_id").write_text("test-boot\n")
+        (self.root / "proc/109").mkdir(exist_ok=True)
+        (self.root / "proc/109/status").write_text(f"Uid: {uid} {uid} {uid} {uid}\n")
+        exe = self.root / "proc/109/exe"
+        if not exe.is_symlink():
+            exe.symlink_to(executable)
+        (self.root / "app_client.js").touch()
+        subprocess.run(["sh", str(self.loader), "--probe",
+                        'APP_CLIENT="$FIXTURE/app_client.js"; settings() { echo null; }; '
+                        'fixture_discover_app_client; wait'],
+                       check=True, timeout=10, env=self.env, capture_output=True)
+
+    def test_rds_discovered_without_fullscreen_or_dpi_selection(self):
+        self.rds_probe()
+        marker = self.root / "voyahtune_app_client.com.pateo.rdsapp.pid"
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe()
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_rds_requires_specific_ready_marker(self):
+        (self.root / "missing_rds_ready").touch()
+        self.rds_probe()
+        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
+        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+
+    def test_rds_does_not_attach_without_a_running_process(self):
+        self.rds_probe(enabled=False)
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_rds_rejects_secondary_android_user(self):
+        self.rds_probe(uid=110109)
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_rds_rejects_unsupported_32_bit_process(self):
+        self.rds_probe(executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text(), "")
+        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+
+    def test_rds_rapid_restart_circuit_breaker(self):
+        for generation in range(1, 4):
+            (self.root / "generation.109").write_text(f"{generation}\n")
+            self.rds_probe()
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 2)
+        self.assertEqual((self.root / "voyahtune_app_client.com.pateo.rdsapp.blocked").read_text().strip(), "test-boot")
 
     def start(self):
         log = open(self.root / f"stderr.{len(self.processes)}", "w")

@@ -62,7 +62,9 @@ Java.perform(function () {
 
     var packageName = "" + application.getPackageName();
     if (packageName === "com.pateo.rdsapp") {
-        installRdsStationRestore(application);
+        // Finish Application.onCreate before resolving RdsManager's singleton. Initializing it
+        // from the attach thread too early can see BaseApplication.mContext == null.
+        Java.scheduleOnMainThread(function () { installRdsStationRestore(application); });
         return;
     }
     var enabled = false;
@@ -525,16 +527,16 @@ function createRdsRestoreController(io, initial) {
     var saved = valid(initial) && !initial.ta ? initial : null;
     var selection = null;
     var scanRequested = false;
+    var scanRevision = 0;
     var request = null;
     var revision = 0;
     var candidateRevision = 0;
     var candidateStation = null;
     var closed = false;
 
-    function cancel(reason) {
+    function cancel(reason, keepCandidate) {
         revision++;
-        candidateRevision++;
-        candidateStation = null;
+        if (!keepCandidate) { candidateRevision++; candidateStation = null; }
         request = null;
         io.cancelOwned();
         io.log(reason);
@@ -605,13 +607,22 @@ function createRdsRestoreController(io, initial) {
             selection = valid(station) ? {target: station, until: io.now() + 15000} : null;
         },
         pause: function () {
-            cancel("playback paused");
+            cancel("playback paused", true);
             // Keep an outstanding explicit choice so its late confirmation can still be saved.
         },
         scan: function () {
             cancel("explicit scan");
             selection = null;
             scanRequested = true;
+            var token = ++scanRevision;
+            // fullScan is void and may be denied by audio focus without any FINISH callback.
+            // A lost callback must not permanently disable later playback requests.
+            io.later(function () {
+                if (!closed && token === scanRevision && scanRequested) {
+                    scanRequested = false;
+                    io.log("scan observation expired; durable station retained");
+                }
+            }, 60000);
         },
         scanFinished: function () {
             if (scanRequested) {
@@ -648,6 +659,7 @@ function installRdsStationRestore(application) {
     var dispatching = null;
     var cancelAfterDispatch = false;
     var ownsResumeDelay = false;
+    var playbackCalls = 0;
     var stopped = false;
     var Log = Java.use("android.util.Log");
     function log(text) { Log.i(TAG, text); }
@@ -725,11 +737,14 @@ function installRdsStationRestore(application) {
         manager.handler.value;
         current(); ready();
         var record = null;
+        var unknownSchema = false;
         try {
             var raw = prefs.getString("station", null);
             var parsed = raw === null ? null : JSON.parse(String(raw));
             if (parsed && parsed.schema === 1) record = parsed.station;
+            else if (parsed !== null) unknownSchema = true;
         } catch (e) { log("saved station ignored: " + e); }
+        if (unknownSchema) throw new Error("unsupported saved station schema; keeping OEM behavior");
         controller = createRdsRestoreController({
             now: function () { return Number(Clock.elapsedRealtime()); },
             later: function (fn, ms) {
@@ -737,7 +752,10 @@ function installRdsStationRestore(application) {
                     if (!stopped) Java.perform(function () {
                         Java.scheduleOnMainThread(function () {
                             if (!stopped) {
-                                try { fn(); } catch (e) { log("deferred operation failed: " + e); }
+                                try { fn(); } catch (e) {
+                                    log("deferred operation failed: " + e);
+                                    try { controller.pause(); } catch (_) { /* request is already invalidated */ }
+                                }
                             }
                         });
                     });
@@ -758,7 +776,7 @@ function installRdsStationRestore(application) {
                 // writes occur only after a settled choice and never on every frequency callback.
                 return prefs.edit().putString("station", JSON.stringify({schema: 1, station: station})).commit();
             },
-            playCurrent: function () { play.call(manager); },
+            playCurrent: function () { playbackCalls++; play.call(manager); },
             tune: function (station) {
                 cancelOwned();
                 owned = Java.retain(Station.$new(station.freq));
@@ -766,7 +784,7 @@ function installRdsStationRestore(application) {
                 owned.setIsRDS(station.rds && station.pi > 0);
                 owned.setPICode(station.pi);
                 dispatching = station;
-                try { playStation.call(manager, owned); }
+                try { playbackCalls++; playStation.call(manager, owned); }
                 finally {
                     dispatching = null;
                     if (cancelAfterDispatch) { cancelAfterDispatch = false; cancelOwned(); }
@@ -783,12 +801,13 @@ function installRdsStationRestore(application) {
         }
         function requestResume(fallback, automatic) {
             var called = false;
+            var callsBefore = playbackCalls;
             // Never repeat an original call if the OEM implementation itself throws.
             try {
                 controller.resume(function () { called = true; fallback(); }, automatic);
             } catch (e) {
-                if (called) throw e;
                 safely(function () { controller.pause(); });
+                if (called || playbackCalls !== callsBefore) throw e;
                 log("restore skipped: " + e);
                 fallback();
             }
@@ -856,7 +875,12 @@ function installRdsStationRestore(application) {
             var result = audioStatus.call(this, paused);
             safely(function () {
                 if (!paused) resumeActiveRadio();
-                else { automaticPlaybackHandled = false; controller.pause(); }
+                else {
+                    automaticPlaybackHandled = false;
+                    // A band switch can report a transient pause while our tune is queued.
+                    // Explicit pauses are intercepted above; lost focus always cancels the tune.
+                    if (owned === null || !hasFocus()) controller.pause();
+                }
             });
             return result;
         });
