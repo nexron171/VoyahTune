@@ -19,4 +19,5 @@ grep -Fq 'MainActivity.createCanRestorePlan(manual)' "$ENGINE"
 grep -Fq 'if (includeModes && driveEnabled)' "$SRC/MainActivity.java"
 grep -Fq 'includeModes && energyEnabled, energy, includeModes && forcedEv' "$SRC/MainActivity.java"
 [ ! -e "$SRC/EarlyDriveModeRestore.java" ]
+python3 "$REPO_ROOT/Packaging/tests/test_acc_preferences.py"
 echo "PASS: one ACC-cycle Native settings pass; no door/Drive restore trigger"

@@ -568,6 +568,15 @@ public class MainActivity extends AppCompatActivity {
                 + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled);
         CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
         final Context context = GlobalVars.SAVE_CONTEXT;
+        plan.addOnce("auto light saved service switch", () -> {
+            try {
+                AutoLightSettings.restore(context);
+                return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+            } catch (RuntimeException e) {
+                Log.w(MODES_LOG, "Auto light service restore failed", e);
+                return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+            }
+        });
         final Map<String, Integer> primaryValues = new LinkedHashMap<>();
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
@@ -774,6 +783,16 @@ public class MainActivity extends AppCompatActivity {
 
     /** Explicit choices work in Parking; automatic recuperation feedback waits for the ACC pass. */
     public static void persistSavedMode(Context context, String modeKey, String mode) {
+        persistSavedMode(context, modeKey, mode, false);
+    }
+
+    /** A successful explicit command is intent even while its feedback gate is closed. */
+    static void persistExplicitMode(Context context, String modeKey, String mode) {
+        persistSavedMode(context, modeKey, mode, true);
+    }
+
+    private static void persistSavedMode(Context context, String modeKey, String mode,
+                                         boolean explicit) {
         if (context == null || mode == null || mode.isEmpty()) return;
         if ("driveMode".equals(modeKey)) {
             DriveSelectionStore.record(context, mode, ru.big.town.common.DriveSelectionPolicy.EXPLICIT);
@@ -792,7 +811,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (modeColumn(modeKey) < 0 || !remembersMode(context, modeKey)) return;
-        if (!ApplyEngine.canRememberModeSelection()) return;
+        if (!ApplyEngine.canRememberModeSelection(explicit)) return;
         boolean written = false;
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
@@ -872,7 +891,7 @@ public class MainActivity extends AppCompatActivity {
     /** Сохранить бинарное действие и синхронизировать открытый UI VoyahTune. */
     public static void persistSavedToggle(Context context, String key, boolean value) {
         if (context == null || (!"forcedEv".equals(key) && !"disablePedestrianSound".equals(key)
-                && !"suspensionMaintenance".equals(key))) return;
+                && !"suspensionMaintenance".equals(key) && !"autoLight".equals(key))) return;
         boolean written = false;
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
@@ -883,7 +902,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if ("forcedEv".equals(key)) forcedEv = value;
         else if ("suspensionMaintenance".equals(key)) suspensionMaintenance = value;
-        else disablePedestrianSound = value;
+        else if ("disablePedestrianSound".equals(key)) disablePedestrianSound = value;
         try {
             Intent bi = new Intent("ru.big.town.anative.SETTING_SYNCED");
             bi.setPackage("ru.big.town.restoremode");
@@ -896,6 +915,7 @@ public class MainActivity extends AppCompatActivity {
                 context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
                         .putBoolean("forcedEv".equals(key) ? "cacheForcedEv"
                                 : "suspensionMaintenance".equals(key) ? "cacheSuspensionMaintenance"
+                                : "autoLight".equals(key) ? "autoLight"
                                 : "cacheDisablePedestrianSound", value)
                         .apply();
             } catch (Exception ignored) {}

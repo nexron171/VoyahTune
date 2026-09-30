@@ -337,6 +337,7 @@ public class MainActivity extends AppCompatActivity {
             boolean value = intent.getBooleanExtra("value", false);
             editor.putBoolean(key, value).apply();
             if ("forcedEv".equals(key)) forcedEvOn = value;
+            else if ("autoLight".equals(key)) autoLightOn = value;
             else if ("suspensionMaintenance".equals(key)) suspensionMaintenanceOn = value;
             else if ("disablePedestrianSound".equals(key)) pedestrianOn = !value;
             else return;

@@ -142,14 +142,12 @@ public class SetModesService extends Service {
 
                 case MSG_AUTO_LIGHT_ENABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_ENABLE");
-                    saveAutoLightState(true);
-                    startLightSensorService();
+                    setAutoLightEnabled(true);
                     break;
 
                 case MSG_AUTO_LIGHT_DISABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_DISABLE");
-                    saveAutoLightState(false);
-                    stopLightSensorService();
+                    setAutoLightEnabled(false);
                     break;
 
                 case MSG_LEAVE_CAR:
@@ -350,8 +348,15 @@ public class SetModesService extends Service {
             else if (action.equals("reboot")) rebootSystem();
             else if (action.startsWith("auto_light:")) {
                 boolean enabled = action.endsWith(":on");
-                saveAutoLightState(enabled);
-                if (enabled) startLightSensorService(); else stopLightSensorService();
+                ApplyEngine.postIndependentUserCommand("voice auto light", () -> {
+                    try {
+                        AutoLightSettings.set(this, enabled);
+                        VoiceCommandController.respond(reply, true, null);
+                    } catch (RuntimeException e) {
+                        VoiceCommandController.respond(reply, false, "Не удалось выполнить команду");
+                    }
+                });
+                return;
             }
             VoiceCommandController.respond(reply, true, null);
         } catch (RuntimeException e) {
@@ -914,17 +919,17 @@ public class SetModesService extends Service {
         Log.i(TAG, "applyTheme mode=" + mode);
     }
 
-    private void saveAutoLightState(boolean enabled) {
-        prefs().edit().putBoolean("autoLight", enabled).apply();
-        Log.i(TAG, "saveAutoLightState: " + enabled);
+    private void restoreAutoLightState() {
+        ApplyEngine.postWakeAction("restore auto light service switch", () -> {
+            AutoLightSettings.restore(this);
+            return true;
+        }, null);
     }
 
-    private void restoreAutoLightState() {
-        boolean autoLight = prefs().getBoolean("autoLight", false);
-        Log.i(TAG, "restoreAutoLightState: autoLight=" + autoLight);
-        if (autoLight) {
-            startLightSensorService();
-        }
+    private void setAutoLightEnabled(boolean enabled) {
+        ApplyEngine.postIndependentUserCommand("auto light switch", () -> {
+            AutoLightSettings.set(this, enabled);
+        });
     }
 
     /**
@@ -982,18 +987,6 @@ public class SetModesService extends Service {
             Intent intent = new Intent(this, WiperColdService.class);
             startForegroundService(intent);
         }
-    }
-
-    private void startLightSensorService() {
-        Intent intent = new Intent(this, LightSensorService.class);
-        startForegroundService(intent);
-        Log.i(TAG, "LightSensorService started");
-    }
-
-    private void stopLightSensorService() {
-        Intent intent = new Intent(this, LightSensorService.class);
-        stopService(intent);
-        Log.i(TAG, "LightSensorService stopped");
     }
 
     //private boolean isWorking = false;
@@ -1123,6 +1116,7 @@ public class SetModesService extends Service {
         if (serviceDestroyed) return;
         if (beginWakeSession()) {
             requestSavedConfigSync("physical wake");
+            restoreAutoLightState();
             resetWiperColdOnPowerOn();
             forwardPowerOnToTripStats();
             BatteryHeatService.requestPhysicalWake(this);

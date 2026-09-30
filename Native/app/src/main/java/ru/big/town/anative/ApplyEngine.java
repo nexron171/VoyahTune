@@ -94,8 +94,12 @@ public final class ApplyEngine {
     }
 
     static boolean canRememberModeSelection() {
+        return canRememberModeSelection(false);
+    }
+
+    static boolean canRememberModeSelection(boolean explicit) {
         synchronized (RESTORE_LOCK) {
-            return MODE_SYNC_POLICY.canRememberSelection();
+            return MODE_SYNC_POLICY.canRememberSelection(explicit);
         }
     }
 
@@ -192,7 +196,20 @@ public final class ApplyEngine {
             try {
                 Bundle claim = app.getContentResolver().call(Uri.parse(MODES_URI),
                         "driveHookV2", "claimSettings", null);
-                if (claim == null || !claim.getBoolean("claimed")) return;
+                if (claim == null) return;
+                if (!claim.getBoolean("claimed")) {
+                    // The durable pass can outlive Native. Restore the feedback policy too, but
+                    // never reopen a gate already closed by sleep, a restore, or a user command.
+                    if (claim.getInt("acc", -1) == 2
+                            && "submitted".equals(claim.getString("settingsStartup"))) {
+                        MainActivity.loadModes(app, true);
+                        synchronized (RESTORE_LOCK) {
+                            MODE_SYNC_POLICY.reconcileCompletedAcc(
+                                    claim.getInt("acc", -1), claim.getString("settingsStartup"));
+                        }
+                    }
+                    return;
+                }
                 cycle = claim.getLong("cycle", -1);
             } catch (RuntimeException e) {
                 Log.w(TAG, "ACC settings claim unavailable", e);

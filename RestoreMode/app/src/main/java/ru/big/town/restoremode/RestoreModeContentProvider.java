@@ -313,7 +313,7 @@ public class RestoreModeContentProvider extends ContentProvider {
                 if (v != null && !v.isEmpty()) { e.putString(key, v); n++; Log.i("$$$", "provider UPDATE " + key + "=" + v); }
             }
         }
-        for (String key : new String[]{"forcedEv", "disablePedestrianSound", "suspensionMaintenance"}) {
+        for (String key : new String[]{"forcedEv", "disablePedestrianSound", "suspensionMaintenance", "autoLight"}) {
             if (values.containsKey(key)) {
                 Boolean v = values.getAsBoolean(key);
                 if (v != null) { e.putBoolean(key, v); n++; Log.i("$$$", "provider UPDATE " + key + "=" + v); }

@@ -257,6 +257,8 @@ public class AdvanceActivity extends AppCompatActivity {
                 if ("forcedEv".equals(key)) {
                     RadioGroup group = findViewById(R.id.forcedEvGroup);
                     if (group != null) group.check(value ? R.id.forcedEvOn : R.id.forcedEvOff);
+                } else if ("autoLight".equals(key)) {
+                    if (autoLightGroup != null) autoLightGroup.check(value ? R.id.autoLightOn : R.id.autoLightOff);
                 } else if ("suspensionMaintenance".equals(key)) {
                     Switch toggle = findViewById(R.id.switchSuspensionMaintenance);
                     if (toggle != null) toggle.setChecked(value);

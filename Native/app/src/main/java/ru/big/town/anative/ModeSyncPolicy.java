@@ -21,6 +21,20 @@ final class ModeSyncPolicy {
     /** Guard feedback until this ACC cycle's Native restore or an explicit command completes. */
     synchronized boolean canRememberSelection() { return wakeActive && feedbackOpen; }
 
+    /** Explicit commands can finish while feedback is frozen, including a selection in Snow. */
+    synchronized boolean canRememberSelection(boolean explicit) {
+        return explicit || canRememberSelection();
+    }
+
+    /** A fresh Native process may reuse the completed durable ACC pass without sending it again. */
+    synchronized boolean reconcileCompletedAcc(int acc, String settingsStartup) {
+        if (generation != 0 || !wakeActive || acc != 2 || !"submitted".equals(settingsStartup)) {
+            return false;
+        }
+        feedbackOpen = true;
+        return true;
+    }
+
     /** Drive choices can be made in Parking; automatic restore echoes remain gated. */
     synchronized boolean canAcceptDriveSelection() { return wakeActive && feedbackOpen; }
 

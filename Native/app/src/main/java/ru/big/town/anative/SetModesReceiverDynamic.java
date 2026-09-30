@@ -591,7 +591,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 return;
             }
             ApplyEngine.noteVehicleMode(modeKey, next);
-            MainActivity.persistSavedMode(app, modeKey, next);
+            MainActivity.persistExplicitMode(app, modeKey, next);
             Log.i(TAG, "STEER_ACTION " + modeKey + ": набор=" + csv
                     + " тек=" + cur + " → " + next);
         }, completion);
