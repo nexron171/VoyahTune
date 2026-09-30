@@ -166,6 +166,7 @@ fn classic_steps(action: Action) -> Vec<(&'static str, &'static str)> {
             ("backup", "Сохранение файлов перед заменой"),
             ("signing-reset", "Переустановка при смене подписи"),
             ("runtime", "Остановка старых hooks"),
+            ("apollo-migration", "Отключение старой активации Apollo"),
             ("files", "Установка файлов релиза"),
             ("migration", "Миграция старого init.logcat.sh"),
             ("boot-hooks", "Установка boot-hook"),

@@ -28,7 +28,7 @@ fi
 # Полный локальный preflight до первого ADB-вызова.
 for FULL_REQUIRED_ASSET in load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js \
         app_client.js \
-        apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js \
+        apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js apollo-safe-device.sh \
         voyahtune_keyboard_en_config.json \
         voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json \
         frida-inject-16.2.1-android-arm64 voyahtune.load.rc \
@@ -620,6 +620,15 @@ for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_ma
     adb shell settings delete global "$APOLLO_OLD_KEY" 2>/dev/null
 done
 echo "  Старый agent, маркеры и ключи удалены; новый Apollo hook будет выключен до явного opt-in."
+
+echo "=== Отключение прежней активации штатного меню Apollo ==="
+adb push apollo-safe-device.sh /data/local/tmp/voyahtune-apollo-safe.sh >/dev/null || exit 1
+if ! adb shell sh /data/local/tmp/voyahtune-apollo-safe.sh; then
+    adb shell rm -f /data/local/tmp/voyahtune-apollo-safe.sh >/dev/null 2>&1
+    echo "!!! Настройка Apollo не подтверждена — установка остановлена."
+    exit 1
+fi
+adb shell rm -f /data/local/tmp/voyahtune-apollo-safe.sh >/dev/null || exit 1
 
 # ВАЖНО: всё в /data/local/bin доступно загрузочному RC-сервису.
 # /sdcard монтируется позже, поэтому load.bin ТАМ держать нельзя (не запустится на буте).

@@ -378,6 +378,12 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             20,
         )?;
     }
+    workflow::phase(shared, "applying", "Отключение старой активации Apollo")?;
+    command(
+        "/system/bin/sh",
+        &["-c", include_str!("../../../Packaging/installer/common/apollo-safe-device.sh")],
+        60,
+    )?;
     // Injected agents are unloaded by the mandatory reboot. Stop in-flight injector workers.
     let _ = command(
         "/system/bin/pkill",

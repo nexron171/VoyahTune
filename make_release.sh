@@ -31,7 +31,7 @@ DNS_OVERLAY_NAME="framework-res__config_ethernet_interfaces_yandexdns.apk"
 DNS_OVERLAY="$COMMON/vendor-overlay/$DNS_OVERLAY_NAME"
 DNS_OVERLAY_SHA256="c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d"
 COMMON_INSTALLER="$COMMON/installer/common"
-COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh"
+COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh apollo-safe-device.sh"
 RELEASE_README="$COMMON/README.txt"
 
 VERSION=""
@@ -386,7 +386,7 @@ verify_windows_batch_files() {
 
 verify_release_payload() {
     out="$1"
-    required="README.txt native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
+    required="README.txt native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh apollo-safe-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
     required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
     for payload in $required; do
         if [ ! -s "$out/$payload" ]; then

@@ -11,7 +11,7 @@ exit /b %FULL_INSTALL_RESULT%
 
 :install_main
 cd /d "%~dp0" || exit /b 1
-for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
+for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 apollo-safe-device.sh voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
     exit /b 1
 )
@@ -122,6 +122,18 @@ adb.exe shell am force-stop com.qinggan.app.vehiclesetting 1>nul 2>nul
 adb.exe shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 1>nul 2>nul
 for %%K in (open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported open_voyah_apollo_profile_heartbeat) do adb.exe shell settings delete global %%K 1>nul 2>nul
 echo   Old agent, markers, and keys removed. The new Apollo hook stays off until explicit opt-in.
+
+echo === Disabling retired Apollo stock menu activation ===
+adb.exe push apollo-safe-device.sh /data/local/tmp/voyahtune-apollo-safe.sh >nul
+if errorlevel 1 exit /b 1
+adb.exe shell sh /data/local/tmp/voyahtune-apollo-safe.sh
+if errorlevel 1 (
+    adb.exe shell rm -f /data/local/tmp/voyahtune-apollo-safe.sh >nul 2>nul
+    echo !!! Apollo preference migration failed. Installation stopped.
+    exit /b 1
+)
+adb.exe shell rm -f /data/local/tmp/voyahtune-apollo-safe.sh >nul
+if errorlevel 1 exit /b 1
 
 echo === Frida infrastructure ^(steering wheel + VirtualDisplay + boot-scoped Apollo^) ===
 rem Agents run as the target UID; fix parent traversal and clear inherited special bits.
