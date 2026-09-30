@@ -1161,6 +1161,11 @@ Java.perform(function () {
                             if (rv !== null) rv.requestLayout();
                             refreshed++;
                         }
+                        // Лента пассажира держит тот же mSecondAllApps: достаточно notify.
+                        Java.choose("com.qinggan.secondlauncher.adapter.SecondAllAppAdapter", {
+                            onMatch: function (adapter) { adapter.notifyDataSetChanged(); refreshed++; },
+                            onComplete: function () {}
+                        });
                         clearBindCaches();
                         if (refreshed > 0) Log.i(TAG, "[allapps] grid refreshed views=" + refreshed);
                     } catch (e) {
@@ -1178,16 +1183,22 @@ Java.perform(function () {
                 });
             }
 
-            // reloadImpl() пересобирает оба списка через loadData(), и наши записи теряются. Дописываем
-            // сразу после штатной пересборки, до onAppReload() открытых адаптеров.
-            var loadData = Data.loadData.overload();
-            loadData.implementation = function () {
-                loadData.call(this);
-                injectAllScreens();
-            };
+            // reload() (наш package-refresh, старт LauncherApplication, вход в аккаунт) пересобирает оба
+            // списка в приватном loadData(), и наши записи теряются. Хук на loadData ненадёжен: AOT-код
+            // reloadImpl() зовёт его напрямую мимо Frida. Поэтому дописываем в onAppReload() слушателей —
+            // интерфейсный вызов идёт через хук, а списки к этому моменту уже пересобраны.
+            function hookAppReload(cls) {
+                var onAppReload = cls.onAppReload.overload();
+                onAppReload.implementation = function () {
+                    injectAllScreens();
+                    return onAppReload.call(this);
+                };
+            }
+            hookAppReload(AllAppBarView);
+            hookAppReload(SecondFragment);
 
             // Инвалидация сразу, штатный reload через 300 ms (REMOVE+ADD при APK update схлопываются в один).
-            // Data.reload() → loadData (хук выше дописывает synthetic entries) → onAppReload() адаптеров.
+            // Data.reload() → loadData → onAppReload() слушателей (хук выше дописывает synthetic entries).
             function schedulePackageRefresh(action, packageName) {
                 installedSnapshot = null;
                 dropCache(iconCache, packageName);
@@ -1198,7 +1209,10 @@ Java.perform(function () {
                     packageRefreshTimer = null;
                     Java.scheduleOnMainThread(function () {
                         try {
+                            // Вызов Java из самого скрипта не проходит через его же хуки: onAppReload-хук
+                            // здесь не сработает, поэтому дописываем записи в пересобранные списки явно.
                             Data.reload();
+                            injectAllScreens();
                             Log.i(TAG, "[allapps] package refresh action=" + action + " package=" + packageName);
                         } catch (e) { Log.e(TAG, "[allapps] package refresh failed: " + e); }
                     });
