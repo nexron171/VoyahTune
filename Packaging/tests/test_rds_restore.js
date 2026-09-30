@@ -332,4 +332,9 @@ test("OEM play exception is propagated without a duplicate original call", () =>
     assert.throws(() => f.invoke("play"), /OEM failure/);
     assert.deepEqual(f.calls, [["play"]]);
 });
+test("a new request after suspend does not wait for an overdue timer", () => {
+    const f = fixture(); f.ready = false; f.resume();
+    f.time = 20000; f.ready = true; f.resume();
+    assert.deepEqual(f.tunes, [original]);
+});
 console.log("RDS restore: " + count + " tests passed");

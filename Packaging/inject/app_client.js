@@ -1,4 +1,4 @@
-// Client-side per-application repairs for packages selected in VoyahTune.
+// Client-side repairs for selected applications and station persistence in the exact RdsApp process.
 //
 // The OEM launcher may start an application with WindowManager.LayoutParams.width fixed to the
 // old 1780 px work area. system_server can already give that window a 1920 px frame and Surface,
@@ -65,7 +65,7 @@ Java.perform(function () {
         // Finish Application.onCreate before resolving RdsManager's singleton. Initializing it
         // from the attach thread too early can see BaseApplication.mContext == null.
         Java.scheduleOnMainThread(function () { installRdsStationRestore(application); });
-        return;
+        // Continue the existing opt-in geometry handler, including future WIN_RELOAD changes.
     }
     var enabled = false;
     var mapkitPackage = packageName === "ru.yandex.yandexnavi"
@@ -637,7 +637,10 @@ function createRdsRestoreController(io, initial) {
                 fallback();
                 return;
             }
-            if (request) return; // Repeated OEM resume callbacks do not extend the deadline.
+            if (request) {
+                if (io.now() < request.until) return; // Repeated callbacks never extend a live deadline.
+                cancel("previous restore expired before new playback request");
+            }
             candidateRevision++;
             candidateStation = null;
             var token = ++revision;
@@ -889,7 +892,6 @@ function installRdsStationRestore(application) {
         });
         log("ready; restore on requested or confirmed active radio playback");
         console.log("[rds-restore] hook ready v1");
-        console.log("[app-client] hook ready v1");
     } catch (e) {
         stopped = true;
         if (controller !== null) {
