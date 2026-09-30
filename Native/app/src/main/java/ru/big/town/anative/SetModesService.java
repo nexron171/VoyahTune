@@ -298,7 +298,6 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_EMBEDDED_TRANSFER: {
-                    if (!InstallMode.isFull()) { Log.i(TAG, "MSG_EMBEDDED_TRANSFER игнор (light-сборка)"); break; }
                     android.os.Bundle t = msg.getData();
                     if (t == null) break;
                     if (t.getBoolean("embeddedMove", false)) {
