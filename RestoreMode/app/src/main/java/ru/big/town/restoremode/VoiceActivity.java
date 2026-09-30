@@ -145,7 +145,10 @@ public class VoiceActivity extends AppCompatActivity {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             fail("Разрешите микрофон в разделе «Голосовое управление»"); return;
         }
-        commands = VoiceCommands.load(this);
+        // The shared catalog is usually warm (warmup service / earlier session); a cold build
+        // runs on a background thread and is only read back in recognized().
+        commands = null;
+        VoiceCommands.preload(this);
         ui.postDelayed(() -> fail("Подготовка помощника занимает слишком много времени"), 90000);
     }
     /** Only the debug-source-set preview activity overrides this; release has no demo entry. */
@@ -225,6 +228,8 @@ public class VoiceActivity extends AppCompatActivity {
     private void recognized(String text) {
         recognizer.cancel(); releaseFocus(); ui.removeCallbacksAndMessages(null);
         orb.state(false, false); transcript.setText(text);
+        // The background preload has usually finished by now; a still-cold cache builds here.
+        if (commands == null) commands = VoiceCommands.load(this);
         List<VoiceCommandSequence.Segment> segments = VoiceCommandSequence.parse(commands, text);
         if (segments.size() > 1) { recognizedSequence(text, segments); return; }
         VoiceCommandCatalog.Command command = segments.isEmpty() ? null : segments.get(0).command;

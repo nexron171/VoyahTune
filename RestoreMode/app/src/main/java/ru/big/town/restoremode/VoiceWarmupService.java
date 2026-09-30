@@ -73,6 +73,8 @@ public final class VoiceWarmupService extends Service {
         requestedDb = db;
         retaining = true;
         getSystemService(NotificationManager.class).notify(NOTIFICATION, notification("Подготовка помощника…"));
+        // Warm the shared command catalog alongside the models on a background thread.
+        VoiceCommands.preload(this);
         VoiceRecognizer.keepWarm(this, ready -> {
             if (destroyed) return;
             if (!ready) requested = false; // A later visible invocation may retry.
