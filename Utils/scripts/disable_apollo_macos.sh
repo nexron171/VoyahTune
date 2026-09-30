@@ -6,6 +6,9 @@ set -euo pipefail
 adb_bin=${ADB_BIN:-adb}
 restore_prefs=/data/user/0/ru.big.town.restoremode/shared_prefs/DrivePreferences.xml
 native_prefs=/data/user/0/ru.big.town.anative/shared_prefs/NativePrefs.xml
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+device_script="$script_dir/../../Packaging/installer/common/apollo-safe-device.sh"
+[ -s "$device_script" ] || { echo "Не найден $device_script" >&2; exit 1; }
 
 command -v "$adb_bin" >/dev/null || { echo "ADB не найден: $adb_bin" >&2; exit 1; }
 
@@ -47,43 +50,8 @@ for f in "$restore_prefs" "$restore_prefs.bak" "$native_prefs" "$native_prefs.ba
     fi
 done
 
-adb shell sh -s <<'DEVICE_SCRIPT'
-set -eu
-restore_prefs=/data/user/0/ru.big.town.restoremode/shared_prefs/DrivePreferences.xml
-native_prefs=/data/user/0/ru.big.town.anative/shared_prefs/NativePrefs.xml
-for f in "$restore_prefs" "$restore_prefs.bak" "$native_prefs" "$native_prefs.bak"; do
-    [ -f "$f" ] || continue
-    tmp="${f}.apollo-edit-tmp"
-    sed \
-        -e 's/name="apolloStockUiEnabled" value="true"/name="apolloStockUiEnabled" value="false"/g' \
-        -e 's/name="apolloTlcEnabled" value="true"/name="apolloTlcEnabled" value="false"/g' \
-        -e 's/name="apolloTrafficLightsEnabled" value="true"/name="apolloTrafficLightsEnabled" value="false"/g' \
-        -e 's/name="apolloGreenSoundEnabled" value="true"/name="apolloGreenSoundEnabled" value="false"/g' \
-        -e 's/name="apolloTrafficSignsEnabled" value="true"/name="apolloTrafficSignsEnabled" value="false"/g' \
-        -e 's/name="cacheApolloStockUiEnabled" value="true"/name="cacheApolloStockUiEnabled" value="false"/g' \
-        -e 's/name="cacheApolloTlcEnabled" value="true"/name="cacheApolloTlcEnabled" value="false"/g' \
-        -e 's/name="cacheApolloTrafficLightsEnabled" value="true"/name="cacheApolloTrafficLightsEnabled" value="false"/g' \
-        -e 's/name="cacheApolloGreenSoundEnabled" value="true"/name="cacheApolloGreenSoundEnabled" value="false"/g' \
-        -e 's/name="cacheApolloTrafficSignsEnabled" value="true"/name="cacheApolloTrafficSignsEnabled" value="false"/g' \
-        "$f" > "$tmp"
-    [ -s "$tmp" ] || { rm -f "$tmp"; echo "Пустой результат для $f" >&2; exit 1; }
-    cat "$tmp" > "$f" # Keep PackageManager ownership and permissions of the original file.
-    rm -f "$tmp"
-    if grep -E 'name="(apollo|cacheApollo)[^"]*"[^>]*value="true"' "$f"; then
-        echo "Apollo остался включён в $f; перезагрузка отменена." >&2
-        exit 1
-    fi
-done
-
-rm -f /data/user_de/0/ru.big.town.anative/files/apollo_settings_runtime.v1
-settings put global open_voyah_apollo_master 0
-settings put global open_voyah_apollo_legacy_hook_enabled 0
-[ "$(settings get global open_voyah_apollo_master)" = 0 ]
-[ "$(settings get global open_voyah_apollo_legacy_hook_enabled)" = 0 ]
-[ ! -e /data/user_de/0/ru.big.town.anative/files/apollo_settings_runtime.v1 ]
-sync
-DEVICE_SCRIPT
+adb shell sh -s < "$device_script"
 
 echo "Apollo выключен в сохранённых настройках. Перезагрузка ГУ..."
 adb reboot
-echo "После загрузки проверьте первый переключатель Apollo и загрузку CPU."
+echo "После загрузки проверьте настройки автомобиля и загрузку CPU. Цели TLC, светофоров и знаков сохранены."
