@@ -150,6 +150,10 @@ fn run(args: Args) -> Result<()> {
                 "Не удалось собрать интерфейс обновления",
             ));
         }
+        // Gradle maps a canonical source path to one signed artifact name.
+        // Keep delivery and stable roles as separate files, even when bytes match.
+        fs::copy(root.join("Updater/app/build/outputs/apk/release/app-release.apk"),
+            root.join("Updater/build/ui-next.apk"))?;
         for project in ["Native", "RestoreMode"] {
             #[cfg(not(windows))]
             let mut cmd = Command::new(root.join(project).join("gradlew"));
@@ -316,6 +320,8 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         let name = &file.artifact;
         let source = match name.as_str() {
             "voyahtune-updater" => "Updater/build/daemon/arm64-v8a/voyahtune-updater".into(),
+            "voyahtune-ui-maintenance" => "Updater/build/daemon/arm64-v8a/voyahtune-ui-maintenance".into(),
+            "voyahtune-ui-next.apk" => "Updater/build/ui-next.apk".into(),
             "voyahtune-updater.apk" => {
                 "Updater/app/build/outputs/apk/release/app-release.apk".into()
             }
@@ -384,6 +390,18 @@ mod tests {
     fn checkout_payload_contains_every_required_runtime_file() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let (recipe, sources) = discover(&root).unwrap();
+        for (name, source) in [
+            ("voyahtune-ui-maintenance", "Updater/build/daemon/arm64-v8a/voyahtune-ui-maintenance"),
+            ("voyahtune-ui-next.apk", "Updater/build/ui-next.apk"),
+        ] {
+            assert!(recipe.files.iter().any(|f| f.artifact == name
+                && f.destination == format!("/data/local/bin/{name}")
+                && f.phase == installer_core::recipe::Phase::Files));
+            assert!(recipe.runtime().any(|f| f.artifact == name));
+            assert!(sources["artifacts"].as_array().unwrap().iter()
+                .any(|a| a["name"] == name && a["source"] == source));
+            assert!(recipe.cleanup_files().contains(&format!("/data/local/bin/{name}")));
+        }
         recipe.validate().unwrap();
         for name in payload::RUNTIME_NAMES {
             let entry = sources["artifacts"]

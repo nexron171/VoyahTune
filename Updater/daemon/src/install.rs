@@ -110,6 +110,23 @@ mod tests {
     }
 
     #[test]
+    fn ui_delivery_is_copied_by_the_existing_ota_file_executor() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = compatibility_fixture(dir.path());
+        for name in ["voyahtune-ui-maintenance", "voyahtune-ui-next.apk"] {
+            assert!(!STABLE.contains(&name));
+            let source = p.root.join(name);
+            fs::write(&source, b"new delivery").unwrap();
+            p.manifest.artifacts.push(Artifact { name: name.into(), path: name.into(),
+                sha256: payload::sha256(&source).unwrap(), size: 12 });
+            p.manifest.recipe.files.push(CopyFile { artifact: name.into(),
+                destination: p.root.join(format!("installed-{name}")).to_str().unwrap().into(),
+                mode: 0o644, phase: Phase::Files });
+        }
+        compatible(&p).unwrap();
+    }
+
+    #[test]
     fn changed_loader_init_still_requires_usb() {
         let dir = tempfile::tempdir().unwrap();
         let p = compatibility_fixture(dir.path());

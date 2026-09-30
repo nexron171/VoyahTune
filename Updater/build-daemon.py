@@ -41,6 +41,8 @@ def main():
     output = ROOT / 'build/daemon' / args.abi
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / 'build/rust' / target / 'release/voyahtune-updater', output / 'voyahtune-updater')
+    # Separate source paths are required by Gradle's signed runtimeAliases map.
+    shutil.copy2(output / 'voyahtune-updater', output / 'voyahtune-ui-maintenance')
     print(output / 'voyahtune-updater')
 
 if __name__ == '__main__': main()

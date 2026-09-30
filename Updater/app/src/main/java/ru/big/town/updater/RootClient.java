@@ -36,7 +36,12 @@ final class RootClient {
             if (!complete) throw new IOException("Служба вернула неполный или слишком большой ответ");
             JSONObject result = new JSONObject(bytes.toString(StandardCharsets.UTF_8.name()));
             if (result.optInt("schema", -1) != 1) throw new IOException("Несовместимая версия службы");
-            if (!result.optBoolean("ok")) throw new IOException(result.optString("error", "Ошибка службы"));
+            if (!result.optBoolean("ok")) {
+                String error = result.optString("error", "Ошибка службы");
+                if ("Неизвестная команда или формат запроса".equals(error))
+                    throw new UnsupportedOperationException(error);
+                throw new IOException(error);
+            }
             return result;
         }
     }

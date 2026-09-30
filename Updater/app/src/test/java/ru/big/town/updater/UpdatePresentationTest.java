@@ -2,6 +2,12 @@ package ru.big.town.updater;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public final class UpdatePresentationTest {
+    @Test public void legacyFinishHidesOnlyCompletedResult(){
+        assertEquals("idle",UpdatePresentation.menuPhase("committed",true));
+        assertEquals("committed",UpdatePresentation.menuPhase("committed",false));
+        for(String phase:new String[]{"verified","applying","validating","repair-required","failed"})
+            assertEquals(phase,UpdatePresentation.menuPhase(phase,true));
+    }
     private UpdatePresentation view(String phase,long done,long count){return UpdatePresentation.from(phase,true,"Установка Native",145,145,done,count);}
     @Test public void installationUsesCompletedStepsNotDownloadBytes(){
         UpdatePresentation p=view("applying",4,8);

@@ -39,9 +39,17 @@ fn hash(path: &Path) -> io::Result<String> {
 }
 
 fn trusted_file(path: &Path) -> io::Result<()> {
+    protected_file(path, false)
+}
+
+fn allowed_owner(uid: u32, mode: u32, installed_apk: bool) -> bool {
+    (uid == 0 || (installed_apk && uid == 1000)) && mode & 0o022 == 0
+}
+
+fn protected_file(path: &Path, installed_apk: bool) -> io::Result<()> {
     device::no_links(path)?;
     let m = fs::symlink_metadata(path)?;
-    if !m.is_file() || m.uid() != 0 || m.permissions().mode() & 0o022 != 0 {
+    if !m.is_file() || !allowed_owner(m.uid(), m.permissions().mode(), installed_apk) {
         return Err(invalid(
             "UI update: файл не принадлежит root или доступен для записи",
         ));
@@ -256,7 +264,8 @@ fn maintain(root: &Path, boot: &str) -> io::Result<()> {
     let native_path = package_path(payload::NATIVE)?;
     let restore_path = package_path(payload::RESTORE)?;
     for path in [&native_path, &restore_path] {
-        trusted_file(Path::new(path))?;
+        // PackageManager owns /data/app APKs as system, not root.
+        protected_file(Path::new(path), true)?;
     }
     let native = payload::apk_metadata(Path::new(&native_path))
         .map_err(error)?
@@ -426,6 +435,19 @@ pub fn run() -> io::Result<()> {
                     ));
                 }
                 if stable(&s) {
+                    // A USB install or a previous successful maintenance already has this UI.
+                    // Avoid stopping the healthy daemon just to rediscover an unchanged APK.
+                    if !root.join(JOURNAL).exists()
+                        && trusted_file(Path::new(NEXT)).is_ok()
+                        && trusted_file(Path::new(crate::UI_APK)).is_ok()
+                        && hash(Path::new(NEXT))? == hash(Path::new(crate::UI_APK))?
+                    {
+                        let (package, code, _) =
+                            apk_identity::read(Path::new(NEXT)).map_err(error)?;
+                        if package == UI && active_matches(code, &hash(Path::new(NEXT))?)? {
+                            return Ok(());
+                        }
+                    }
                     return maintain(root, &boot);
                 }
             }
@@ -505,6 +527,15 @@ mod tests {
             "package:ru.big.town.updater versionCode:2",
             3
         ));
+    }
+    #[test]
+    fn package_manager_owned_apks_are_accepted_but_delivery_stays_root_only() {
+        assert!(allowed_owner(1000, 0o644, true));
+        assert!(allowed_owner(0, 0o644, true));
+        assert!(!allowed_owner(1000, 0o644, false));
+        assert!(!allowed_owner(10000, 0o644, true));
+        assert!(!allowed_owner(1000, 0o664, true));
+        assert!(!allowed_owner(0, 0o666, false));
     }
     #[test]
     fn changed_release_or_inconsistent_signed_metadata_blocks_ui_replacement() {

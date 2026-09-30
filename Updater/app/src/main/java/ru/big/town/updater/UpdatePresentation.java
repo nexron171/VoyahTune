@@ -8,6 +8,10 @@ final class UpdatePresentation {
     int nav, percent;
     boolean busy, meter, indeterminate, secondary, success;
 
+    static String menuPhase(String phase, boolean hideCompletedResult) {
+        return hideCompletedResult && "committed".equals(phase) ? "idle" : phase;
+    }
+
     static UpdatePresentation from(String phase, boolean selected, String step,
             long bytes, long size, long completed, long steps) {
         UpdatePresentation p = new UpdatePresentation();

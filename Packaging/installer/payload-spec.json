@@ -39,6 +39,18 @@
       "phase": "files"
     },
     {
+      "artifact": "voyahtune-ui-maintenance",
+      "destination": "/data/local/bin/voyahtune-ui-maintenance",
+      "mode": 493,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-ui-next.apk",
+      "destination": "/data/local/bin/voyahtune-ui-next.apk",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
       "artifact": "voyahtune-updater",
       "destination": "/data/local/bin/voyahtune-updater",
       "mode": 493,

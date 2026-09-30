@@ -29,7 +29,7 @@ public final class MainActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final RootClient client = new RootClient();
     private final Handler poll = new Handler(Looper.getMainLooper());
-    private boolean polling, actionBusy, resumed, connected, dnsSupported, resetCompletedOnOpen;
+    private boolean polling, actionBusy, resumed, connected, dnsSupported, resetCompletedOnOpen, hideCompletedResult;
     private String connectionError = "", commandError = "", noticeShowing;
     private JSONObject state = new JSONObject(), settings = new JSONObject();
     private UpdatePresentation presentation;
@@ -79,6 +79,7 @@ public final class MainActivity extends Activity {
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         resetCompletedOnOpen = intent.getBooleanExtra(OPEN_INITIAL_SCREEN, false);
+        hideCompletedResult=false;
         if (!polling && !actionBusy) refresh();
     }
     @Override protected void onResume() { super.onResume(); resumed=true; poll.removeCallbacks(tick); poll.post(tick); }
@@ -93,6 +94,7 @@ public final class MainActivity extends Activity {
     private JSONObject request(String command) throws Exception { return new JSONObject().put("command",command); }
     private void accept(JSONObject response) throws Exception {
         state=response.getJSONObject("state");
+        if(!"committed".equals(state.optString("phase"))) hideCompletedResult=false;
         JSONObject config=response.optJSONObject("settings");
         if(config!=null) settings=config;
         JSONArray capabilities=response.optJSONArray("capabilities");
@@ -130,11 +132,22 @@ public final class MainActivity extends Activity {
         actionBusy=true; commandError=""; render();
         worker.execute(() -> {
             try {
-                JSONObject response=client.call(input);
+                JSONObject response;
+                boolean legacyFinish=false;
+                try { response=client.call(input); }
+                catch(UnsupportedOperationException unsupported) {
+                    if(!"finish".equals(input.optString("command"))) throw unsupported;
+                    // Older daemons keep the durable result. Only its UI presentation is reset;
+                    // the supported check command starts a new workflow when the owner asks.
+                    response=new JSONObject(); legacyFinish=true;
+                }
+                final JSONObject reply=response;
+                final boolean hideLegacyResult=legacyFinish;
                 JSONObject fresh=client.call(request("status"));
                 runOnUiThread(() -> {
                     actionBusy=false; if(!alive())return;
-                    try{accept(fresh);result.apply(response);}catch(Exception e){commandError=reason(e);}
+                    hideCompletedResult=hideCompletedResult||hideLegacyResult;
+                    try{accept(fresh);result.apply(reply);}catch(Exception e){commandError=reason(e);}
                     render(); if(!polling)refresh();
                 });
             } catch(Exception e) {
@@ -170,7 +183,10 @@ public final class MainActivity extends Activity {
     }
     private void render() {
         String phase=state.optString("phase","idle"), step=state.optString("step");
-        JSONObject selected=state.optJSONObject("selected");
+        String menuPhase=UpdatePresentation.menuPhase(phase,hideCompletedResult);
+        boolean completedHidden=!menuPhase.equals(phase);
+        if(completedHidden){phase=menuPhase;step="Готово к проверке обновлений";}
+        JSONObject selected=completedHidden?null:state.optJSONObject("selected");
         JSONObject archive=selected==null?null:selected.optJSONObject("payload");
         presentation=UpdatePresentation.from(phase,selected!=null,step,state.optLong("bytes"),state.optLong("total"),state.optLong("completedSteps"),state.optLong("totalSteps"));
         UpdatePresentation p=presentation;
@@ -258,6 +274,7 @@ public final class MainActivity extends Activity {
     private void showNotice() {
         if(state.isNull("notice")){noticeShowing=null;return;}
         String notice=state.optString("notice");
+        if(hideCompletedResult && "success".equals(notice))return;
         if(notice.equals(noticeShowing)||noticeDialog!=null)return;
         noticeShowing=notice;
         String title="error".equals(notice)?"Ошибка обновления VoyahTune":"success".equals(notice)?"VoyahTune обновлён":"Доступна новая версия VoyahTune";
