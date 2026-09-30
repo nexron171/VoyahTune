@@ -82,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
     static final int MSG_APPLY_PEDESTRIAN   = 21;
     static final int MSG_WASH_MODE          = 23;
     static final int MSG_SPLIT_LAUNCH_VD    = 34; // single → physical WM-clamped task; pair → VD split
+    static final int MSG_EMBEDDED_TRANSFER  = 38; // перенос/обмен запущенными экземплярами виджетов
     static final int MSG_APPLY_SUSPENSION_MAINTENANCE = 37;
     static final int MSG_APPLY_FORCED_EV    = 35; // форсированный электрорежим (arg1: 1=вкл)
     static final int REQUEST_CODE           = 1;
@@ -175,6 +176,12 @@ public class MainActivity extends AppCompatActivity {
     private int gridPaddingBottom;
     private final Map<String, TextureView> embeddedWidgetSurfaces = new HashMap<>();
     private final Map<String, Surface> embeddedWidgetOutputs = new HashMap<>();
+    // Пакет и DPI запущенного в виджете приложения. Хранятся отдельно от настроек виджета,
+    // потому что экземпляр можно перенести в другой виджет, а после обмена — обновляются.
+    private final Map<String, String> embeddedWidgetPackages = new HashMap<>();
+    private final Map<String, Integer> embeddedWidgetDpi = new HashMap<>();
+    // Виджеты, экран которых снимается для переноса: их дисплей освобождать не нужно.
+    private final Set<String> embeddedSuppressRelease = new HashSet<>();
     // View плиток app_widget по id записи: нужен, чтобы запустить приложение в первом виджете.
     private final Map<String, View> appWidgetTileViews = new HashMap<>();
 
@@ -254,9 +261,10 @@ public class MainActivity extends AppCompatActivity {
     private void releaseEmbeddedWidgetsOf(String pkg) {
         if (pkg == null) return;
         for (String widgetId : new ArrayList<>(embeddedWidgetSurfaces.keySet())) {
-            AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
             View tile = appWidgetTileViews.get(widgetId);
-            if (tile != null && entry != null && pkg.equals(entry.selected().packageName)) {
+            // Сравниваем с запущенным пакетом, а не с настройкой: после переноса или обмена
+            // экземпляров они могут различаться.
+            if (tile != null && pkg.equals(embeddedWidgetPackages.get(widgetId))) {
                 releaseEmbeddedWidget(widgetId, tile);
             }
         }
@@ -975,15 +983,19 @@ public class MainActivity extends AppCompatActivity {
         menu.show();
     }
 
-    /** Подпись виджета в меню: приложение, выбранное в этом виджете. */
+    /** Подпись виджета в меню: обозначение и приложение — запущенное или выбранное в настройках. */
     private String appWidgetTitle(AppWidgetStore.Entry entry) {
-        String configured = entry.selected().packageName;
+        String designation = AppWidgetStore.designation(sharedPreferences, entry.id);
+        String running = embeddedWidgetPackages.get(entry.id);
+        String configured = running != null ? running : entry.selected().packageName;
+        String label;
         try {
             android.content.pm.PackageManager pm = getPackageManager();
-            return pm.getApplicationLabel(pm.getApplicationInfo(configured, 0)).toString();
+            label = pm.getApplicationLabel(pm.getApplicationInfo(configured, 0)).toString();
         } catch (Exception e) {
-            return configured;
+            label = configured;
         }
+        return designation.isEmpty() ? label : designation + " · " + label;
     }
 
     /** Открыть приложение обычной задачей на выбранном дисплее: 0 — водитель, 1 — пассажир. */
@@ -1654,15 +1666,40 @@ public class MainActivity extends AppCompatActivity {
             scroll.setVisibility(View.VISIBLE);
             scroll.setOnLongClickListener(dragLauncher);
         }
-        
-        View closeBtn = widgetView.findViewById(R.id.appWidgetClose);
-        if (closeBtn != null) closeBtn.setVisibility(View.VISIBLE);
-        
+
+        View controls = widgetView.findViewById(R.id.appWidgetControls);
+        if (controls != null) controls.setVisibility(View.GONE);
+
         View dragHandleLauncher = widgetView.findViewById(R.id.appWidgetDragHandleLauncher);
         if (dragHandleLauncher != null) {
-            dragHandleLauncher.setVisibility(View.VISIBLE);
             dragHandleLauncher.setOnLongClickListener(dragLauncher);
-            dragHandleLauncher.bringToFront();
+        }
+        View launcherControls = widgetView.findViewById(R.id.appWidgetLauncherControls);
+        if (launcherControls != null) {
+            launcherControls.setVisibility(View.VISIBLE);
+            launcherControls.bringToFront();
+        }
+        View swapLauncher = widgetView.findViewById(R.id.appWidgetSwapLauncher);
+        if (swapLauncher != null) {
+            swapLauncher.setOnLongClickListener(dragLauncher);
+            final String widgetId = entry.id;
+            swapLauncher.setOnClickListener(v -> showSwapAppWidgetMenu(swapLauncher, widgetId));
+        }
+
+        refreshAppWidgetBadge(widgetView, entry.id);
+    }
+
+    /** Показать обозначение виджета (A, B, C…) в углу карточки. */
+    private void refreshAppWidgetBadge(View widgetView, String widgetId) {
+        if (widgetView == null) return;
+        TextView badge = widgetView.findViewById(R.id.appWidgetBadge);
+        if (badge == null) return;
+        String designation = AppWidgetStore.designation(sharedPreferences, widgetId);
+        if (designation.isEmpty()) {
+            badge.setVisibility(View.GONE);
+        } else {
+            badge.setText(designation);
+            badge.setVisibility(View.VISIBLE);
         }
     }
 
@@ -1675,6 +1712,15 @@ public class MainActivity extends AppCompatActivity {
     /** Переключить карточку в режим embedded VirtualDisplay для явно заданного пакета. */
     private void showEmbeddedAppWidget(View widgetView, AppWidgetStore.Entry entry,
                                        String packageName, int profileDpi) {
+        showEmbeddedAppWidget(widgetView, entry, packageName, profileDpi, null);
+    }
+
+    /**
+     * Встроить приложение в виджет. Если {@code moveFromWidgetId} задан, Native переносит в этот
+     * виджет уже работающий экземпляр с исходного виджета, сохраняя состояние приложения.
+     */
+    private void showEmbeddedAppWidget(View widgetView, AppWidgetStore.Entry entry,
+                                       String packageName, int profileDpi, String moveFromWidgetId) {
         if (!InstallMode.isFull()) {
             launchAppNormally(packageName);
             return;
@@ -1684,22 +1730,32 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        final String widgetId = entry.id;
+        // Запущенный пакет и DPI виджета: их читают и переподключение поверхности, и кнопки,
+        // поэтому после обмена экземплярами достаточно обновить эти карты.
+        embeddedWidgetPackages.put(widgetId, packageName);
+        embeddedWidgetDpi.put(widgetId, profileDpi);
+        embeddedSuppressRelease.remove(widgetId);
+
         View scroll = widgetView.findViewById(R.id.appWidgetLauncherScroll);
         if (scroll != null) scroll.setVisibility(View.GONE);
-        
-        View dragHandleLauncher = widgetView.findViewById(R.id.appWidgetDragHandleLauncher);
-        if (dragHandleLauncher != null) dragHandleLauncher.setVisibility(View.GONE);
+
+        View launcherControls = widgetView.findViewById(R.id.appWidgetLauncherControls);
+        if (launcherControls != null) launcherControls.setVisibility(View.GONE);
+
         View controls = widgetView.findViewById(R.id.appWidgetControls);
         if (controls != null) {
             controls.setVisibility(View.GONE);
             View closeBtn = widgetView.findViewById(R.id.appWidgetClose);
             if (closeBtn != null) {
-                closeBtn.setOnClickListener(v -> releaseEmbeddedWidget(entry.id, widgetView));
+                closeBtn.setVisibility(View.VISIBLE);
+                closeBtn.setOnClickListener(v -> releaseEmbeddedWidget(widgetId, widgetView));
             }
             View dragBtn = widgetView.findViewById(R.id.appWidgetDragHandle);
             if (dragBtn != null) {
+                dragBtn.setVisibility(View.VISIBLE);
                 dragBtn.setOnLongClickListener(v -> {
-                    startTileDrag(widgetView, TileOrderStore.Tile.TYPE_APP_WIDGET, entry.id);
+                    startTileDrag(widgetView, TileOrderStore.Tile.TYPE_APP_WIDGET, widgetId);
                     return true;
                 });
             }
@@ -1709,18 +1765,29 @@ public class MainActivity extends AppCompatActivity {
                 expandBtn.setVisibility(View.VISIBLE);
                 expandBtn.setOnClickListener(v -> {
                     // Развернуть текущее приложение на весь экран (simpleLaunch)
-                    releaseEmbeddedWidget(entry.id, widgetView);
+                    String running = embeddedWidgetPackages.get(widgetId);
+                    releaseEmbeddedWidget(widgetId, widgetView);
+                    if (running == null) return;
                     if (InstallMode.isFull()) {
-                        sendAppWindow(packageName);
+                        sendAppWindow(running);
                     } else {
-                        launchAppNormally(packageName);
+                        launchAppNormally(running);
                     }
                 });
+            }
+
+            View swapBtn = widgetView.findViewById(R.id.appWidgetSwap);
+            if (swapBtn != null) {
+                swapBtn.setVisibility(View.VISIBLE);
+                swapBtn.setOnClickListener(v -> showSwapAppWidgetMenu(swapBtn, widgetId));
             }
         }
         
         ViewGroup container = widgetView.findViewById(R.id.appWidgetRoot);
         if (container == null) container = (ViewGroup) widgetView;
+
+        // Перенос выполняется один раз — на первом же подключённом surface.
+        final String[] pendingMoveFrom = { moveFromWidgetId };
 
         TextureView textureView = new TextureView(this);
         textureView.setOpaque(true);
@@ -1735,7 +1802,10 @@ public class MainActivity extends AppCompatActivity {
         container.addView(textureView, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
-        embeddedWidgetSurfaces.put(entry.id, textureView);
+        embeddedWidgetSurfaces.put(widgetId, textureView);
+        // Обозначение виджета видно и поверх запущенного приложения.
+        View badge = widgetView.findViewById(R.id.appWidgetBadge);
+        if (badge != null) badge.bringToFront();
 
         final GestureDetector longClickDetector = new GestureDetector(this,
             new GestureDetector.SimpleOnGestureListener() {
@@ -1758,25 +1828,40 @@ public class MainActivity extends AppCompatActivity {
             public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
                 texture.setDefaultBufferSize(width, height);
                 Surface output = new Surface(texture);
-                embeddedWidgetOutputs.put(entry.id, output);
-                sendEmbeddedSurface(entry.id, packageName, profileDpi, output, width, height);
+                embeddedWidgetOutputs.put(widgetId, output);
+                String from = pendingMoveFrom[0];
+                if (from != null) {
+                    pendingMoveFrom[0] = null;
+                    sendEmbeddedMove(from, widgetId, embeddedWidgetPackages.get(widgetId),
+                            output, width, height);
+                } else {
+                    sendEmbeddedSurface(widgetId, embeddedWidgetPackages.get(widgetId),
+                            runningDpi(widgetId), output, width, height);
+                }
             }
 
             @Override
             public void onSurfaceTextureSizeChanged(SurfaceTexture texture,
                                                     int width, int height) {
                 texture.setDefaultBufferSize(width, height);
-                Surface output = embeddedWidgetOutputs.get(entry.id);
+                Surface output = embeddedWidgetOutputs.get(widgetId);
                 if (output != null) {
-                    sendEmbeddedSurface(entry.id, packageName, profileDpi, output, width, height);
+                    // Пакет берём из карты: после обмена экземплярами он мог смениться.
+                    sendEmbeddedSurface(widgetId, embeddedWidgetPackages.get(widgetId),
+                            runningDpi(widgetId), output, width, height);
                 }
             }
 
             @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
-                embeddedWidgetSurfaces.remove(entry.id);
-                Surface output = embeddedWidgetOutputs.remove(entry.id);
+                embeddedWidgetSurfaces.remove(widgetId);
+                Surface output = embeddedWidgetOutputs.remove(widgetId);
                 if (output != null) output.release();
-                sendEmbeddedRelease(entry.id);
+                embeddedWidgetPackages.remove(widgetId);
+                embeddedWidgetDpi.remove(widgetId);
+                // При переносе дисплей уже переехал в другой виджет — освобождать его не нужно.
+                if (!embeddedSuppressRelease.remove(widgetId)) {
+                    sendEmbeddedRelease(widgetId);
+                }
                 return true;
             }
 
@@ -1801,21 +1886,42 @@ public class MainActivity extends AppCompatActivity {
             boolean gestureFinished = event.getActionMasked() == MotionEvent.ACTION_UP
                     || event.getActionMasked() == MotionEvent.ACTION_CANCEL;
             v.getParent().requestDisallowInterceptTouchEvent(!gestureFinished);
-            sendEmbeddedTouch(entry.id, event);
+            sendEmbeddedTouch(widgetId, event);
             return true;
         });
         
         if (controls != null) controls.bringToFront();
     }
 
+    /** DPI запущенного в виджете приложения (0 — «Авто»). */
+    private int runningDpi(String widgetId) {
+        Integer dpi = embeddedWidgetDpi.get(widgetId);
+        return dpi == null ? 0 : dpi;
+    }
+
     private void releaseEmbeddedWidget(String widgetId, View widgetView) {
+        removeEmbeddedSurface(widgetId, widgetView);
+        sendEmbeddedRelease(widgetId);
+    }
+
+    /** Снять экран виджета, не освобождая дисплей в Native: экземпляр переносится в другой виджет. */
+    private void detachEmbeddedWidget(String widgetId, View widgetView) {
+        embeddedSuppressRelease.add(widgetId);
+        removeEmbeddedSurface(widgetId, widgetView);
+    }
+
+    /** Убрать TextureView виджета и вернуть его лончер; очистить карты запущенного состояния. */
+    private void removeEmbeddedSurface(String widgetId, View widgetView) {
         embeddedWidgetSurfaces.remove(widgetId);
         Surface output = embeddedWidgetOutputs.remove(widgetId);
         if (output != null) output.release();
-        
+        embeddedWidgetPackages.remove(widgetId);
+        embeddedWidgetDpi.remove(widgetId);
+
+        if (widgetView == null) return;
         ViewGroup container = widgetView.findViewById(R.id.appWidgetRoot);
         if (container == null) container = (ViewGroup) widgetView;
-        
+
         // Удалить TextureView (он обычно последний добавленный)
         for (int i = container.getChildCount() - 1; i >= 0; i--) {
             View child = container.getChildAt(i);
@@ -1823,7 +1929,7 @@ public class MainActivity extends AppCompatActivity {
                 container.removeViewAt(i);
             }
         }
-        
+
         View controls = widgetView.findViewById(R.id.appWidgetControls);
         if (controls != null) controls.setVisibility(View.GONE);
 
@@ -1832,9 +1938,7 @@ public class MainActivity extends AppCompatActivity {
 
         View closeBtn = widgetView.findViewById(R.id.appWidgetClose);
         if (closeBtn != null) closeBtn.setVisibility(View.GONE);
-        
-        sendEmbeddedRelease(widgetId);
-        
+
         // Возвращаем лончер
         AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
         if (entry != null) {
@@ -1842,9 +1946,115 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * Кнопка «Обмен»: при двух виджетах цель очевидна, при трёх и более — выбор во всплывающем
+     * меню. Обмен и перенос выполняются только для запущенных экземпляров приложений.
+     */
+    private void showSwapAppWidgetMenu(View anchor, String widgetId) {
+        List<AppWidgetStore.Entry> others = new ArrayList<>();
+        for (AppWidgetStore.Entry entry : AppWidgetStore.load(sharedPreferences)) {
+            if (!entry.id.equals(widgetId)) others.add(entry);
+        }
+        if (others.isEmpty()) {
+            showSnack("Нет другого виджета для обмена");
+            return;
+        }
+        if (others.size() == 1) {
+            onSwapAppWidgetChosen(widgetId, others.get(0).id);
+            return;
+        }
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+        for (int i = 0; i < others.size(); i++) {
+            menu.getMenu().add(0, i, i, "Обменять с " + appWidgetTitle(others.get(i)));
+        }
+        menu.setOnMenuItemClickListener(item -> {
+            int index = item.getItemId();
+            if (index >= 0 && index < others.size()) {
+                onSwapAppWidgetChosen(widgetId, others.get(index).id);
+                return true;
+            }
+            return false;
+        });
+        menu.show();
+    }
+
+    /**
+     * Обмен или перенос запущенных экземпляров:
+     *  - оба виджета работают → экземпляры меняются местами;
+     *  - работает только текущий → предлагаем отправить его в другой виджет;
+     *  - работает только другой → переносим его экземпляр в текущий виджет.
+     */
+    private void onSwapAppWidgetChosen(String currentId, String targetId) {
+        if (currentId == null || targetId == null || currentId.equals(targetId)) return;
+        boolean currentRunning = embeddedWidgetSurfaces.containsKey(currentId);
+        boolean targetRunning = embeddedWidgetSurfaces.containsKey(targetId);
+        if (currentRunning && targetRunning) {
+            swapAppWidgetInstances(currentId, targetId);
+        } else if (currentRunning) {
+            confirmSendAppWidgetInstance(currentId, targetId);
+        } else if (targetRunning) {
+            moveAppWidgetInstance(targetId, currentId);
+        } else {
+            showSnack("В этом виджете нет запущенного приложения");
+        }
+    }
+
+    /** Перед отправкой запущенного приложения в другой виджет спрашиваем подтверждение. */
+    private void confirmSendAppWidgetInstance(String fromWidgetId, String toWidgetId) {
+        String designation = AppWidgetStore.designation(sharedPreferences, toWidgetId);
+        String title = designation.isEmpty() ? "другой виджет" : "виджет " + designation;
+        new android.app.AlertDialog.Builder(this)
+                .setMessage("Отправить запущенное приложение в " + title + "?")
+                .setPositiveButton("Отправить", (dialog, which) ->
+                        moveAppWidgetInstance(fromWidgetId, toWidgetId))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /** Меняем дисплеи местами: приложения продолжают работать, состояние сохраняется. */
+    private void swapAppWidgetInstances(String idA, String idB) {
+        String packageA = embeddedWidgetPackages.get(idA);
+        String packageB = embeddedWidgetPackages.get(idB);
+        if (packageA == null || packageB == null
+                || !embeddedWidgetSurfaces.containsKey(idA)
+                || !embeddedWidgetSurfaces.containsKey(idB)) {
+            showSnack("Для обмена нужны запущенные приложения в обоих виджетах");
+            return;
+        }
+        sendEmbeddedSwap(idA, idB);
+        embeddedWidgetPackages.put(idA, packageB);
+        embeddedWidgetPackages.put(idB, packageA);
+        int dpiA = runningDpi(idA);
+        embeddedWidgetDpi.put(idA, runningDpi(idB));
+        embeddedWidgetDpi.put(idB, dpiA);
+        showSnack("Виджеты обменялись запущенными приложениями");
+    }
+
+    /** Перенести работающий экземпляр в другой виджет с сохранением состояния приложения. */
+    private void moveAppWidgetInstance(String fromWidgetId, String toWidgetId) {
+        String packageName = embeddedWidgetPackages.get(fromWidgetId);
+        View fromView = appWidgetTileViews.get(fromWidgetId);
+        View toView = appWidgetTileViews.get(toWidgetId);
+        AppWidgetStore.Entry toEntry = AppWidgetStore.find(sharedPreferences, toWidgetId);
+        if (packageName == null || fromView == null || toView == null || toEntry == null) {
+            showSnack("Не удалось перенести приложение");
+            return;
+        }
+        int dpi = runningDpi(fromWidgetId);
+        // Сначала встраиваем целевой виджет и просим Native перенести туда работающий дисплей,
+        // и только затем снимаем исходный — без освобождения, иначе Native закроет приложение.
+        showEmbeddedAppWidget(toView, toEntry, packageName, dpi, fromWidgetId);
+        if (!embeddedWidgetSurfaces.containsKey(toWidgetId)) return;
+        detachEmbeddedWidget(fromWidgetId, fromView);
+        String designation = AppWidgetStore.designation(sharedPreferences, toWidgetId);
+        showSnack(designation.isEmpty() ? "Приложение перенесено"
+                : "Приложение перенесено в виджет " + designation);
+    }
+
     private void sendEmbeddedSurface(String widgetId, String pkg, int dpi, Surface surface,
                                      int width, int height) {
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null || surface == null) return;
+        if (pkg == null || pkg.isEmpty()) return;
         try {
             Message message = Message.obtain(null, MSG_SPLIT_LAUNCH_VD, 1, 0);
             Bundle data = new Bundle();
@@ -1863,6 +2073,73 @@ public class MainActivity extends AppCompatActivity {
         } catch (RemoteException e) {
             Log.w(TAG, "sendEmbeddedSurface failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Перенести уже работающий экземпляр приложения из одного виджета в другой, сохранив
+     * состояние: Native переносит тот же VirtualDisplay на новый ключ и поверхность.
+     */
+    private void sendEmbeddedMove(String fromWidgetId, String toWidgetId, String pkg, Surface surface,
+                                  int width, int height) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null
+                || surface == null || pkg == null || pkg.isEmpty()) return;
+        try {
+            Message message = Message.obtain(null, MSG_EMBEDDED_TRANSFER, 1, 0);
+            Bundle data = new Bundle();
+            data.putBoolean("embeddedMove", true);
+            data.putString("fromWidgetId", fromWidgetId);
+            data.putString("widgetId", toWidgetId);
+            data.putString("package", pkg);
+            data.putParcelable("surface", surface);
+            data.putInt("width", width);
+            data.putInt("height", height);
+            data.putInt("dpi", AppWidgetStore.normalizeDpi(runningDpi(toWidgetId)));
+            message.setData(data);
+            message.replyTo = GlobalVars.clientMessenger;
+            GlobalVars.serviceMessenger.send(message);
+            Log.i(TAG, "sendEmbeddedMove " + fromWidgetId + " -> " + toWidgetId + " pkg=" + pkg);
+        } catch (RemoteException e) {
+            Log.w(TAG, "sendEmbeddedMove failed: " + e.getMessage());
+        }
+    }
+
+    /** Поменять местами работающие экземпляры двух виджетов; состояние приложений сохраняется. */
+    private void sendEmbeddedSwap(String idA, String idB) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) return;
+        Surface surfaceA = embeddedWidgetOutputs.get(idA);
+        Surface surfaceB = embeddedWidgetOutputs.get(idB);
+        if (surfaceA == null || surfaceB == null) return;
+        try {
+            Message message = Message.obtain(null, MSG_EMBEDDED_TRANSFER, 1, 0);
+            Bundle data = new Bundle();
+            data.putBoolean("embeddedSwap", true);
+            data.putString("widgetId", idA);
+            data.putString("widgetId2", idB);
+            data.putParcelable("surface", surfaceA);
+            data.putParcelable("surface2", surfaceB);
+            data.putInt("width", embeddedPixelWidth(idA));
+            data.putInt("height", embeddedPixelHeight(idA));
+            data.putInt("dpi", runningDpi(idA));
+            data.putInt("width2", embeddedPixelWidth(idB));
+            data.putInt("height2", embeddedPixelHeight(idB));
+            data.putInt("dpi2", runningDpi(idB));
+            message.setData(data);
+            message.replyTo = GlobalVars.clientMessenger;
+            GlobalVars.serviceMessenger.send(message);
+            Log.i(TAG, "sendEmbeddedSwap " + idA + " <-> " + idB);
+        } catch (RemoteException e) {
+            Log.w(TAG, "sendEmbeddedSwap failed: " + e.getMessage());
+        }
+    }
+
+    private int embeddedPixelWidth(String widgetId) {
+        TextureView view = embeddedWidgetSurfaces.get(widgetId);
+        return view == null ? 0 : view.getWidth();
+    }
+
+    private int embeddedPixelHeight(String widgetId) {
+        TextureView view = embeddedWidgetSurfaces.get(widgetId);
+        return view == null ? 0 : view.getHeight();
     }
 
     private void sendEmbeddedTouch(String widgetId, MotionEvent event) {
@@ -1986,6 +2263,9 @@ public class MainActivity extends AppCompatActivity {
         embeddedWidgetSurfaces.clear();
         for (Surface output : embeddedWidgetOutputs.values()) output.release();
         embeddedWidgetOutputs.clear();
+        embeddedWidgetPackages.clear();
+        embeddedWidgetDpi.clear();
+        embeddedSuppressRelease.clear();
         try { unregisterReceiver(tripReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(batteryHeatReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(settingSyncReceiver); } catch (Exception ignored) {}
