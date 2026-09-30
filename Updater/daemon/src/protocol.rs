@@ -24,6 +24,7 @@ pub enum Request {
     },
     Download {},
     Apply {},
+    Finish {},
     Dismiss {},
 }
 

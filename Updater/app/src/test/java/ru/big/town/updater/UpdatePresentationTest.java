@@ -19,6 +19,8 @@ public final class UpdatePresentationTest {
             UpdatePresentation p=view(phase,8,8);assertTrue(p.meter);assertTrue(p.indeterminate);assertFalse(p.success);assertTrue(p.busy);
         }
         assertTrue(view("committed",8,8).success);
+        assertEquals("Завершить",view("committed",8,8).primary);
+        assertEquals("finish",view("committed",8,8).command);
     }
     @Test public void preparationFailureCanRetryButRepairCannot(){
         assertEquals("apply",view("verified",0,8).command);

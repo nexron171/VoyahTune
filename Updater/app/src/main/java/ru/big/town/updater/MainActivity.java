@@ -141,6 +141,7 @@ public final class MainActivity extends Activity {
         if(!connected){refresh();return;}
         if(presentation==null)return;
         switch(presentation.command){
+            case "finish": perform("finish",false); break;
             case "close": finish(); break;
             case "apply": confirmInstall(); break;
             case "check": perform("check",false); break;

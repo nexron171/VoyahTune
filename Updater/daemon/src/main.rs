@@ -236,6 +236,14 @@ fn run() -> io::Result<()> {
                 workflow::queue(&shared, &jobs, workflow::Job::Apply)?;
                 Ok(json!({"schema":1,"ok":true}))
             }
+            protocol::Request::Finish {} => {
+                workflow::update(&shared, |s| {
+                    if s.phase == "committed" {
+                        s.finish_success();
+                    }
+                })?;
+                Ok(json!({"schema":1,"ok":true}))
+            }
             protocol::Request::Dismiss {} => {
                 workflow::update(&shared, |s| {
                     s.notice = None;

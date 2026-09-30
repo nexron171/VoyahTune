@@ -48,6 +48,22 @@ impl State {
     pub fn repair(&self) -> bool {
         self.phase == "repair-required"
     }
+    pub fn finish_success(&mut self) {
+        if self.phase != "committed" {
+            return;
+        }
+        self.phase = "idle".into();
+        self.step = "Готово к проверке обновлений".into();
+        self.selected = None;
+        self.same_version = false;
+        self.bytes = 0;
+        self.total = 0;
+        self.completed_steps = 0;
+        self.total_steps = 0;
+        self.error = None;
+        self.notice = None;
+        self.notice_opened = true;
+    }
     pub fn installation_started(&self) -> bool {
         matches!(
             self.phase.as_str(),
@@ -195,6 +211,23 @@ mod tests {
         assert_eq!(restored.selected.unwrap().payload.sha256, "a".repeat(64));
         assert!(restored.same_version);
         assert!(restored.notice.is_none());
+    }
+    #[test]
+    fn finishing_success_returns_to_check_without_forgetting_installed_release() {
+        let mut s = preparing();
+        s.phase = "committed".into();
+        s.installed_version = "3.19.0".into();
+        s.installed_archive_sha256 = "b".repeat(64);
+        s.notice = Some("success".into());
+        s.completed_steps = 8;
+        s.total_steps = 8;
+        s.finish_success();
+        assert_eq!(s.phase, "idle");
+        assert_eq!(s.step, "Готово к проверке обновлений");
+        assert!(s.selected.is_none() && s.notice.is_none());
+        assert_eq!((s.completed_steps, s.total_steps), (0, 0));
+        assert_eq!(s.installed_version, "3.19.0");
+        assert_eq!(s.installed_archive_sha256, "b".repeat(64));
     }
     #[test]
     fn interrupted_preflight_is_retryable_but_applying_requires_repair() {

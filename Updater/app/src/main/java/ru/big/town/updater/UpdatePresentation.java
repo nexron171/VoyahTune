@@ -49,7 +49,7 @@ final class UpdatePresentation {
                 p.waiting(2, "Проверка запуска VoyahTune", step); break;
             case "committed":
                 p.heading("ОБНОВЛЕНИЕ ЗАВЕРШЕНО", "VoyahTune готов к работе", "Новая версия установлена. Проверка запуска успешно завершена.", "Установлен");
-                p.nav = 3; p.primary = "В VoyahTune"; p.command = "close"; p.success = true; break;
+                p.nav = 3; p.primary = "Завершить"; p.command = "finish"; p.success = true; break;
             case "repair-required":
                 p.heading("ОШИБКА УСТАНОВКИ", "Не удалось завершить обновление", "Установите релиз через USB с компьютера.", "Нужен USB");
                 p.nav = 2; p.primary = "В VoyahTune"; p.command = "close"; break;
