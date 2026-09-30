@@ -125,7 +125,7 @@ python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --dry-run
 python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --update-catalog
 
 # Независимая публикация macOS Universal и Windows x64/x86 GUI.
-INSTALLER_VERSION=1.3.1  # фактическая версия из Installer/Cargo.toml
+INSTALLER_VERSION=1.4.0  # фактическая версия из Installer/Cargo.toml
 python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION" --dry-run
 python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION"
 python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION" --check-remote
