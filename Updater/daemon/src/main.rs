@@ -5,6 +5,7 @@ mod install;
 mod network;
 mod protocol;
 mod state;
+mod ui_update;
 mod workflow;
 
 use fs2::FileExt;
@@ -262,6 +263,13 @@ fn run() -> io::Result<()> {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--update-ui") {
+        if let Err(error) = ui_update::run() {
+            let _ = log(Path::new(ROOT), &format!("ui_update_error {error}"));
+            std::process::exit(1);
+        }
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!(
             "{}",
