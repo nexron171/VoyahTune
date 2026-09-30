@@ -25,10 +25,11 @@ import java.util.concurrent.Executors;
 
 /** External intents only open this menu; root owns all downloads and installation. */
 public final class MainActivity extends Activity {
+    private static final String OPEN_INITIAL_SCREEN = "ru.big.town.updater.OPEN_INITIAL_SCREEN";
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final RootClient client = new RootClient();
     private final Handler poll = new Handler(Looper.getMainLooper());
-    private boolean polling, actionBusy, resumed, connected, dnsSupported;
+    private boolean polling, actionBusy, resumed, connected, dnsSupported, resetCompletedOnOpen;
     private String connectionError = "", commandError = "", noticeShowing;
     private JSONObject state = new JSONObject(), settings = new JSONObject();
     private UpdatePresentation presentation;
@@ -47,6 +48,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        resetCompletedOnOpen = getIntent().getBooleanExtra(OPEN_INITIAL_SCREEN, false);
         setContentView(R.layout.activity_updater);
         applyWindowInsets(findViewById(R.id.root));
         progress = findViewById(R.id.progress);
@@ -76,7 +78,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        // No extras, URIs or caller-provided commands are accepted.
+        resetCompletedOnOpen = intent.getBooleanExtra(OPEN_INITIAL_SCREEN, false);
         if (!polling && !actionBusy) refresh();
     }
     @Override protected void onResume() { super.onResume(); resumed=true; poll.removeCallbacks(tick); poll.post(tick); }
@@ -103,6 +105,16 @@ public final class MainActivity extends Activity {
     }
     private void refresh() {
         if(polling || worker.isShutdown()) return;
+        // Finish only a completed update. The daemon keeps active work and repair errors intact.
+        if(resetCompletedOnOpen && !actionBusy) {
+            resetCompletedOnOpen=false;
+            connected=false;
+            connectionError="";
+            state=new JSONObject();
+            try { command(request("finish"), result -> {}); }
+            catch(Exception e) { commandError=reason(e); render(); }
+            return;
+        }
         polling=true; // Transport bookkeeping never changes button styling.
         worker.execute(() -> {
             try {

@@ -625,7 +625,9 @@ public class AdvanceActivity extends AppCompatActivity {
         findViewById(R.id.buttonOpenUpdates).setOnClickListener(v -> {
             Intent updates = new Intent(Intent.ACTION_MAIN)
                     .setComponent(new android.content.ComponentName(
-                            "ru.big.town.updater", "ru.big.town.updater.MainActivity"));
+                            "ru.big.town.updater", "ru.big.town.updater.MainActivity"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    .putExtra("ru.big.town.updater.OPEN_INITIAL_SCREEN", true);
             try {
                 startActivity(updates);
             } catch (android.content.ActivityNotFoundException | SecurityException unavailable) {

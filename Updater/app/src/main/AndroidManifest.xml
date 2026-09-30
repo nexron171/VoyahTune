@@ -3,7 +3,7 @@
     <!-- Networking and installation belong to the native root process, not this UI. -->
     <application android:allowBackup="false" android:label="Обновления VoyahTune"
         android:theme="@style/UpdaterTheme" android:supportsRtl="true">
-        <!-- The sole exported entry opens the menu. No extras/data are interpreted. -->
+        <!-- The sole exported entry opens the menu; only the initial-screen flag is used. -->
         <activity android:name=".MainActivity" android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>
