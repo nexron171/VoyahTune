@@ -51,29 +51,8 @@ func checkOrSetPid(pidPath string, pid int) bool {
 	return int(f_pid) == pid
 }
 
-func env(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
 func logf(f *os.File, format string, args ...any) {
 	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, args...))
-}
-
-func ProcessNameByPID(pid int) (string, error) {
-	path := "/proc/" + strconv.Itoa(pid) + "/cmdline"
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	name := string(data)
-	// comm обычно заканчивается на \n
-	if len(name) > 0 && name[len(name)-1] == '\n' {
-		name = name[:len(name)-1]
-	}
-	return name, nil
 }
 
 func GetPIDsByCmdlineSubstring(substring string) []int {
@@ -130,34 +109,6 @@ func setPidZero(pkg string) {
 	f.Close()
 }
 
-func runInjectTimeout(injector string, pid int, scripts []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmds := []string{"-e", "-p", strconv.Itoa(pid)}
-	for _, s := range scripts {
-		cmds = append(cmds, "-s")
-		cmds = append(cmds, filepath.Join(scriptsDir, s))
-	}
-
-	logf(MainLog, "runInject %v\n", cmds)
-
-	//out, err := exec.Command(filepath.Join(scriptsDir, injector), cmds...).Output()
-	cmd := exec.CommandContext(ctx, filepath.Join(scriptsDir, injector), cmds...)
-	err := cmd.Run()
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			logf(MainLog, "Процесс прерван по таймауту %v", scripts)
-		} else {
-			logf(MainLog, "Ошибка выполнения: %v %v\n", err, scripts)
-		}
-		return err
-	}
-
-	logf(MainLog, "Процесс успешно завершился %v", scripts)
-	//fmt.Println(cmds)
-	return err
-}
-
 func runInjectCancel(pkg, injector string, pid int, scripts []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -184,22 +135,6 @@ func runInjectCancel(pkg, injector string, pid int, scripts []string) error {
 	logf(MainLog, "Процесс успешно завершился %v %s\n", scripts, pkg)
 	//fmt.Println(cmds)
 	return err
-}
-
-func runInject(injector string, pid int, scripts []string) ([]byte, error) {
-
-	cmds := []string{"-R", "v8", "-p", strconv.Itoa(pid)}
-	for _, s := range scripts {
-		cmds = append(cmds, "-s")
-		cmds = append(cmds, filepath.Join(scriptsDir, s))
-	}
-
-	logf(MainLog, "runInject %v\n", cmds)
-
-	out, err := exec.Command(filepath.Join(scriptsDir, injector), cmds...).Output()
-
-	//fmt.Println(cmds)
-	return out, err
 }
 
 func checkZombi() {
@@ -246,7 +181,10 @@ func main() {
 		os.Exit(1)
 	}
 	var injects map[string][]string
-	json.Unmarshal(data, &injects)
+	if err := json.Unmarshal(data, &injects); err != nil {
+		fmt.Fprintf(os.Stderr, "parse injects: %v\n", err)
+		os.Exit(1)
+	}
 	var wg sync.WaitGroup
 
 	setPidsZero(&injects)

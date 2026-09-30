@@ -41,8 +41,7 @@ Java.perform(function () {
 
     // Лаунчер является home на обоих дисплеях; наши SplitHost живут на VirtualDisplay; SystemUI
     // не является переносимым приложением. Для них сохраняем явный deny.
-    var NEVER = ["com.qinggan.app.launcher", "com.qinggan.mainlauncher",
-                 "ru.big.town", "com.android.systemui"];
+    var NEVER = ["com.qinggan.app.launcher", "ru.big.town", "com.android.systemui"];
 
     function safeConsole(line) {
         try { console.log(line); } catch (ignored) {}
@@ -307,16 +306,10 @@ Java.perform(function () {
             }
             var IntentFilter = Java.use("android.content.IntentFilter");
             var context = ctx();
-            var sdk = Java.use("android.os.Build$VERSION").SDK_INT.value;
-            if (sdk >= 33) {
-                context.registerReceiver.overload("android.content.BroadcastReceiver",
-                    "android.content.IntentFilter", "int").call(context, Receiver.$new(),
-                    IntentFilter.$new(RELOAD_ACT), 0x2);
-            } else {
-                context.registerReceiver.overload("android.content.BroadcastReceiver",
-                    "android.content.IntentFilter").call(context, Receiver.$new(),
-                    IntentFilter.$new(RELOAD_ACT));
-            }
+            // Android 11 (API 30): обычная 2-аргументная форма registerReceiver.
+            context.registerReceiver.overload("android.content.BroadcastReceiver",
+                "android.content.IntentFilter").call(context, Receiver.$new(),
+                IntentFilter.$new(RELOAD_ACT));
             safeLog("i", "reload receiver registered: " + RELOAD_ACT);
             return true;
         } catch (e) {

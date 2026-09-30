@@ -1,5 +1,5 @@
 // launcherdock.js — переопределение водительского дока и стабилизация доков обоих экранов Open Voyah.
-// На ОД-прошивках это NavigationBarMain + NavigationBarSecond, на ПИ — общий NavigationBar с mScreenId.
+// ПИ-прошивка: общий класс com.qinggan.mainlauncher.navigation.NavigationBar, экраны различаются полем mScreenId.
 //
 // Механика: хук навигационного бара и списка приложений штатного лаунчера:
 //   • КОНФИГ — живьём из Settings.Global: voyahtune_dock1/2
@@ -30,11 +30,9 @@
 //     показать navigation bar нужного физического экрана. Во время OEM transfer короткий deadline-guard
 //     не даёт onMoveStart удалить оба бара до того, как foreground-кэш обновится на destination.
 Java.perform(function () {
-    // Слот → штатный pkg, который родной лаунчер умеет подсвечивать (oversea, главный экран).
-    // ВНИМАНИЕ: значения версионно-хрупкие, подтвердить на живой голове H97C.
+    // Слот → штатный pkg, который родной лаунчер умеет подсвечивать (PI, главный экран).
     var STOCK_SLOT_PKG = { 1: "com.qinggan.bluetoothphone", 2: "com.qinggan.app.music" };
-    var NAV_MAIN   = "com.qinggan.launcher.navigation.NavigationBarMain"; // класс навбара в ОД-прошивках
-    var NAV_SECOND = "com.qinggan.launcher.navigation.NavigationBarSecond";
+    var NAV_MAIN   = "com.qinggan.mainlauncher.navigation.NavigationBar"; // общий класс навбара в ПИ-прошивках
     var RELOAD_ACT = "ru.big.town.anative.DOCK_RELOAD";
     var LAUNCHER_PKG = "com.qinggan.app.launcher";    // сам штатный лаунчер (Home обоих экранов)
     var OUR_PKG    = "ru.big.town.anative";           // наш VD-хост (SplitHostActivity) для подсветки
@@ -87,32 +85,13 @@ Java.perform(function () {
     } catch (guardFailed) {
         Log.w(TAG, "[dock] injection guard unavailable: " + guardFailed);
     }
-    // Live OD source of truth for the foreground package. updateSelectedApp() is posted to the
+    // Live source of truth for the foreground package. updateSelectedApp() is posted to the
     // launcher UI queue and may still contain the previous app when a later show/dismiss arrives.
-    // Keep both classes optional so PI/other firmware can fall back to the event cache.
-    var LauncherAppUtils = null;
-    try { LauncherAppUtils = Java.use("com.qinggan.launcher.base.utils.AppUtils"); }
-    catch (e) { Log.w(TAG, "[dock] AppUtils unavailable; foreground cache fallback: " + e); }
-    var AccountConstantUtil = null;
-    try { AccountConstantUtil = Java.use("com.qinggan.account.AccountConstantUtil"); }
-    catch (e) { Log.w(TAG, "[dock] AccountConstantUtil unavailable; using | separator: " + e); }
+    var LauncherAppUtils = Java.use("com.qinggan.launcher.base.utils.AppUtils");
+    var AccountConstantUtil = Java.use("com.qinggan.account.AccountConstantUtil");
 
-    // На ОД классы экранов раздельные, на ПИ общий класс различается полем mScreenId.
-    var SHARED_NAV = false;
-    var NAV_CLASSES = [];
-    try {
-        Java.use(NAV_MAIN);
-        NAV_CLASSES.push({ name: NAV_MAIN, screen: 0 });
-        try { Java.use(NAV_SECOND); }
-        catch (e2) { Log.w(TAG, "OD пассажирский NavigationBarSecond недоступен: " + e2); }
-        Log.i(TAG, "OD прошивка");
-    } catch (e) {
-        NAV_MAIN   = "com.qinggan.mainlauncher.navigation.NavigationBar";  // класс навбара в ПИ-прошивках
-        NAV_SECOND = null;
-        SHARED_NAV = true;
-        NAV_CLASSES.push({ name: NAV_MAIN, screen: -1 });
-        Log.i(TAG, "ПИ прошивка");
-    }
+    // ПИ: один общий класс навбара на оба экрана, экран инстанса определяется полем mScreenId.
+    var NAV_CLASSES = [{ name: NAV_MAIN, screen: -1 }];
 
     function cleanJavaString(value) {
         if (value === null || value === undefined) return "";
@@ -120,8 +99,8 @@ Java.perform(function () {
         return (result === "null" || result === "undefined") ? "" : result;
     }
 
-    // Поля OEM private, а passenger OD имеет отдельную, не наследующую Main, модель. Доступ по имени
-    // намеренно fail-open: отсутствие optional view на другой прошивке не должно сорвать весь dock pass.
+    // Поля OEM private. Доступ по имени намеренно fail-open: отсутствие optional view
+    // не должно сорвать весь dock pass.
     function dockField(instance, name) {
         try {
             var field = instance[name];
@@ -129,9 +108,8 @@ Java.perform(function () {
                 return field.value;
             }
         } catch (direct) {}
-        // Some live OD private fields (notably NavigationBarController.mNavigationBar) are absent
-        // from Frida's direct wrapper even though sibling fields resolve. Reflection keeps the lift
-        // replay fail-open without assuming public/package visibility.
+        // Private OEM fields occasionally resolve through reflection even when the direct Frida
+        // wrapper misses them. Reflection keeps the dock pass fail-open without assuming visibility.
         try {
             var c = instance.getClass();
             while (c !== null) {
@@ -159,6 +137,7 @@ Java.perform(function () {
 
     // Driver app slots and passenger Air/Seat have different ABIs. Keep the generic driver resolver
     // free of passenger fields so icon/click/long-tap overrides can never leak to display 1.
+    // ПИ: все поля живут в одном общем классе NavigationBar.
     function dockViews(instance) {
         return {
             up: dockField(instance, "mScreenUpView"),
@@ -190,11 +169,6 @@ Java.perform(function () {
                 var d = anyView.getDisplay();
                 if (d) return d.getDisplayId();
             }
-        } catch (e) {}
-        try {
-            var className = "" + instance.getClass().getName();
-            if (className.indexOf("NavigationBarSecond") >= 0) return 1;
-            if (!SHARED_NAV && className.indexOf("NavigationBarMain") >= 0) return 0;
         } catch (e) {}
         return (fallbackScreen === 0 || fallbackScreen === 1) ? fallbackScreen : -1;
     }
@@ -411,8 +385,7 @@ Java.perform(function () {
             }
         } catch (ignored) {}
         var separatorAt = top.indexOf(separator);
-        // The inspected H97C launcher uses '|'. Preserve recovery if an optional account helper
-        // reports a different/invalid value on another firmware variant.
+        // PI launcher uses '|'. Preserve recovery if the account helper reports a different value.
         if (separatorAt < 0 && separator !== "|") separatorAt = top.indexOf("|");
         if (separatorAt < 0) return { pkg: top, act: "" };
         return {
@@ -659,7 +632,7 @@ Java.perform(function () {
         }
         var compact = type === 1;
         var views = dockViews(instance);
-        // На водительском OD temperature-content лежит поверх штатного slot3 (Air). В compact
+        // На водительском экране temperature-content лежит поверх штатного slot3 (Air). В compact
         // скрываем оба слоя вместе со всеми штатными кнопками, оставляя Home и пользовательские 1/2.
         var driverTemperature = dockField(instance, "mScreenUpTemperatureContentView");
         // Visibility follows the persisted assignment, not early PackageManager readiness. During
@@ -772,8 +745,7 @@ Java.perform(function () {
             } catch (e) { Log.e(TAG, "[dock] choose " + entry.name + " err: " + e); }
         });
         // If Launcher itself restarted while a third-party task remained top, OEM firstShow() can
-        // call INavigationBarController.show() without a new TOP_ACTIVITY_CHANGED broadcast. The
-        // concrete controller hook is not reliable for that invoke-interface path, so every bounded
+        // call the navigation bar show() without a new TOP_ACTIVITY_CHANGED broadcast. Every bounded
         // startup/lift/reload pass also reconciles the live LauncherModel after its UI queue settles.
         if (schedulePhysicalDockRecovery !== null) {
             try {
@@ -829,49 +801,17 @@ Java.perform(function () {
     // Никакого периодического PackageManager polling: снимок живёт до ближайшего package-broadcast.
     function installAllAppsHooks() {
         try {
-            // H97C OD keeps the whole model/adapter family in com.qinggan.launcher.allapp. Other
-            // launcher builds use the older launcher.base split. Resolve one complete family so
-            // overload signatures never mix classes from different ABIs.
-            var allAppsFamilies = [
-                {
-                    bean: "com.qinggan.launcher.allapp.AppBean",
-                    data: "com.qinggan.launcher.allapp.AllAppDataManager",
-                    adapter: "com.qinggan.launcher.allapp.AllAppAdapter",
-                    bar: "com.qinggan.launcher.allapp.AllAppBarView"
-                },
-                {
-                    bean: "com.qinggan.launcher.base.bean.AppBean",
-                    data: "com.qinggan.launcher.base.allapp.AllAppDataManager",
-                    adapter: "com.qinggan.launcher.base.adapter.AllAppAdapter",
-                    bar: "com.qinggan.launcher.base.allapp.AllAppBarView"
-                }
-            ];
-
-
-            var allAppsAbi = null;
-            var AppBean = null;
-            var Data = null;
-            var Adapter = null;
-            var AllAppBarView = null;
-            for (var familyIndex = 0; familyIndex < allAppsFamilies.length; familyIndex++) {
-                try {
-                    var family = allAppsFamilies[familyIndex];
-                    var familyBean = Java.use(family.bean);
-
-
-                    var familyData = Java.use(family.data);
-                    var familyAdapter = Java.use(family.adapter);
-                    var familyBar = Java.use(family.bar);
-                    allAppsAbi = family;
-                    AppBean = familyBean;
-                    Data = familyData;
-
-                    Adapter = familyAdapter;
-                    AllAppBarView = familyBar;
-                    break;
-                } catch (familyMissing) {}
-            }
-            if (allAppsAbi === null) throw new Error("no compatible All Apps class family");
+            // ПИ-лаунчер держит модель/адаптер All Apps в com.qinggan.launcher.base.*.
+            var allAppsAbi = {
+                bean: "com.qinggan.launcher.base.bean.AppBean",
+                data: "com.qinggan.launcher.base.allapp.AllAppDataManager",
+                adapter: "com.qinggan.launcher.base.adapter.AllAppAdapter",
+                bar: "com.qinggan.launcher.base.allapp.AllAppBarView"
+            };
+            var AppBean = Java.use(allAppsAbi.bean);
+            var Data = Java.use(allAppsAbi.data);
+            var Adapter = Java.use(allAppsAbi.adapter);
+            var AllAppBarView = Java.use(allAppsAbi.bar);
             Log.i(TAG, "[allapps] ABI=" + allAppsAbi.bean);
             var AppLauncher = Java.use("com.qinggan.launcher.base.utils.AppLauncher");
             var JavaString = Java.use("java.lang.String");
@@ -1281,7 +1221,7 @@ Java.perform(function () {
                 var icon = loadIcon(pkg);
                 if (entry.icon !== null && icon) {
                     // Плитка рисует иконку в BACKGROUND у SimpleDraweeView (проверено на живой
-                    // CN-голове: после штатного bind getBackground() = BitmapDrawable, а
+                    // ПИ-голове: после штатного bind getBackground() = BitmapDrawable, а
                     // getDrawable() — пустой drawee RootDrawable). setImageDrawable ушёл бы под
                     // иерархию drawee, и осталась бы placeholder-иконка шаблона.
                     if (entry.setBackground !== null) entry.setBackground.call(entry.icon, icon);
@@ -1371,17 +1311,11 @@ Java.perform(function () {
                 Log.i(TAG, "[allapps] bind hooked on two-argument overload");
             }
 
-            // На части OD launcher пассажирская home-лента читает тот же mSecondAllApps через отдельный
-            // SecondAllAppAdapter. Если класс присутствует, его тоже надо декорировать и перехватить
-            // owner-click; иначе глобально добавленные записи были бы placeholder-плитками без запуска.
-            var SecondAdapter = null;
-            try {
-                SecondAdapter = Java.use("com.qinggan.secondlauncher.adapter.SecondAllAppAdapter");
-            } catch (absent) {
-                Log.i(TAG, "[allapps] optional SecondAllAppAdapter is absent");
-            }
-
-            if (SecondAdapter !== null) {
+            // Пассажирская home-лента читает тот же mSecondAllApps через отдельный SecondAllAppAdapter.
+            // Его тоже надо декорировать и перехватить owner-click; иначе глобально добавленные
+            // записи были бы placeholder-плитками без запуска.
+            var SecondAdapter = Java.use("com.qinggan.secondlauncher.adapter.SecondAllAppAdapter");
+            {
                 try {
                     var SecondFragment = Java.use("com.qinggan.secondlauncher.fragment.SecondMainFragment");
                     var secondBind = SecondAdapter.onBindViewHolder.overload(
@@ -1438,7 +1372,7 @@ Java.perform(function () {
             // забирает список один раз и дальше держит ссылку, поэтому после буты getAllApps(int)
             // больше не зовётся. Дописываем synthetic entries прямо в mMainAllApps/mSecondAllApps —
             // это те же List-объекты, на которые смотрят AllAppBarView.mAppBeans и
-            // AllAppAdapter.mAppBeans (проверено на живой CN-голове: identityHashCode совпадает и
+            // AllAppAdapter.mAppBeans (проверено на живой ПИ-голове: identityHashCode совпадает и
             // не меняется даже после reload, списки чистятся и заполняются на месте).
             var dataSingleton = null;
 
@@ -1626,26 +1560,16 @@ Java.perform(function () {
                 packageFilter.addAction("android.intent.action.PACKAGE_CHANGED");
                 packageFilter.addDataScheme("package");
                 var packageReceiver = PackageReceiver.$new();
-                var packageSdk = Java.use("android.os.Build$VERSION").SDK_INT.value;
-                if (packageSdk >= 33) {
-                    ctx().registerReceiver.overload('android.content.BroadcastReceiver',
-                        'android.content.IntentFilter', 'int').call(ctx(), packageReceiver, packageFilter, 0x2);
-                } else {
-                    ctx().registerReceiver.overload('android.content.BroadcastReceiver',
-                        'android.content.IntentFilter').call(ctx(), packageReceiver, packageFilter);
-                }
+                // Android 11 (API 30): 2-аргументная форма registerReceiver, флаг RECEIVER_EXPORTED не нужен.
+                ctx().registerReceiver.overload('android.content.BroadcastReceiver',
+                    'android.content.IntentFilter').call(ctx(), packageReceiver, packageFilter);
                 // Отдельный фильтр: у пакетного стоит addDataScheme("package"), и LOCALE_CHANGED,
                 // который идёт без data, по нему не доставился бы вообще.
                 var localeFilter = Java.use("android.content.IntentFilter").$new();
                 localeFilter.addAction("android.intent.action.LOCALE_CHANGED");
-                if (packageSdk >= 33) {
-                    ctx().registerReceiver.overload('android.content.BroadcastReceiver',
-                        'android.content.IntentFilter', 'int').call(ctx(), packageReceiver, localeFilter, 0x2);
-                } else {
-                    ctx().registerReceiver.overload('android.content.BroadcastReceiver',
-                        'android.content.IntentFilter').call(ctx(), packageReceiver, localeFilter);
-                }
-                Log.i(TAG, "[allapps] package+locale receivers registered (sdk=" + packageSdk + ")");
+                ctx().registerReceiver.overload('android.content.BroadcastReceiver',
+                    'android.content.IntentFilter').call(ctx(), packageReceiver, localeFilter);
+                Log.i(TAG, "[allapps] package+locale receivers registered");
             } catch (e) {
                 // Старая/другая прошивка без reload не должна отключать базовое добавление
                 // synthetic apps: getAllApps/bind/click хуки уже установлены и остаются рабочими.
@@ -1663,12 +1587,13 @@ Java.perform(function () {
     }
 
     try {
-        var NavigationBarMain = Java.use(NAV_MAIN);
-        var mainFallbackScreen = SHARED_NAV ? -1 : 0;
+        var NavigationBar = Java.use(NAV_MAIN);
+        // ПИ: общий класс навбара, экран инстанса определяется полем mScreenId (fallback -1).
+        var mainFallbackScreen = -1;
 
         // 1) ИКОНКА: переустановка после каждой перекраски темы (иначе штатная тема затрёт наш фон).
-        var origUpdateTheme = NavigationBarMain.updateTheme;
-        NavigationBarMain.updateTheme.implementation = function () {
+        var origUpdateTheme = NavigationBar.updateTheme;
+        NavigationBar.updateTheme.implementation = function () {
             origUpdateTheme.call(this);
             try { updateIcons(this, mainFallbackScreen); } catch (e) {}
         };
@@ -1677,8 +1602,8 @@ Java.perform(function () {
         //     слоты существуют, применяем иконки. Страховка от гонки: если инъекция прошла ДО создания
         //     навбара (первичный Java.choose ничего не нашёл), иконка всё равно встанет здесь.
         try {
-            var origInitUp = NavigationBarMain.initScreenUpViews;
-            NavigationBarMain.initScreenUpViews.implementation = function () {
+            var origInitUp = NavigationBar.initScreenUpViews;
+            NavigationBar.initScreenUpViews.implementation = function () {
                 origInitUp.call(this);
                 try { updateIcons(this, mainFallbackScreen); } catch (e) {}
             };
@@ -1686,8 +1611,8 @@ Java.perform(function () {
 
         // 2) ПОДСВЕТКА (косметика): reverse-mapping нашего pkg слота → штатный pkg, чтобы родной код чекнул
         //    правильную кнопку. Для нашего VD-хоста (SplitHostActivity) чекаем слот 2 напрямую.
-        var origUpdateSelectedApp = NavigationBarMain.updateSelectedApp;
-        NavigationBarMain.updateSelectedApp.implementation = function (packageName, activityName) {
+        var origUpdateSelectedApp = NavigationBar.updateSelectedApp;
+        NavigationBar.updateSelectedApp.implementation = function (packageName, activityName) {
             // Запоминаем приложение переднего плана ДЛЯ СВОЕГО ЭКРАНА (см. dockKept/dismiss).
             try {
                 var sid = managedScreenId(this, mainFallbackScreen);
@@ -1715,7 +1640,7 @@ Java.perform(function () {
 
         // 3) КЛИК: слот определяем сравнением view.getId() с getId() закэшированных полей (НЕ по индексу).
         //    Совпал + pkg установлен → обычная задача на display этого дока; иначе штатный onClick.
-        var mainOnClick = NavigationBarMain.onClick.overload('android.view.View');
+        var mainOnClick = NavigationBar.onClick.overload('android.view.View');
         mainOnClick.implementation = function (view) {
             var sid = managedScreenId(this, mainFallbackScreen);
             if (sid !== 0) return mainOnClick.call(this, view);
@@ -1734,58 +1659,6 @@ Java.perform(function () {
             return mainOnClick.call(this, view);
         };
 
-        // На живом OD doScreenLift принадлежит единственному NavigationBarController, а не классам
-        // Main/Second. После OEM-переключения меняем layout только у driver controller; passenger
-        // остаётся на штатном one-button Home dock.
-        try {
-            var LiftController = Java.use("com.qinggan.launcher.navigation.NavigationBarController");
-            var controllerLift = LiftController.doScreenLift.overload('int');
-            controllerLift.implementation = function (type) {
-                var result = controllerLift.call(this, type);
-                try {
-                    var sid = managedScreenId(this, -1);
-                    if (sid === 0) {
-                        if (isUserFullscreen(topActivityForScreen(0, null).pkg)) {
-                            forceHideDockController(this, "screen-lift driver");
-                            return result;
-                        }
-                        var navigationBar = runtimeObject(dockField(this, "mNavigationBar"));
-                        if (navigationBar === null) return result;
-                        updateIcons(navigationBar, sid, true);
-                        applyScreenLiftDock(navigationBar, type, sid);
-                    }
-                } catch (e) { Log.e(TAG, "[dock] controller screen-lift layout err: " + e); }
-                return result;
-            };
-            Log.i(TAG, "[dock] NavigationBarController doScreenLift hooked");
-
-            // On a cold boot that starts already lowered, doScreenLift(1) may have run before the
-            // agent was attached. show() is the next authoritative point at which the root dock is
-            // attached/updated, so reconcile the current property there as well.
-            var controllerShow = LiftController.show.overload();
-            controllerShow.implementation = function () {
-                var sid = managedScreenId(this, -1);
-                if ((sid === 0 || sid === 1)
-                        && isUserFullscreen(topActivityForScreen(sid, null).pkg)) {
-                    forceHideDockController(this, "blocked show display=" + sid);
-                    return;
-                }
-                var result = controllerShow.call(this);
-                try {
-                    if (sid === 0) {
-                        var navigationBar = runtimeObject(dockField(this, "mNavigationBar"));
-                        if (navigationBar !== null) {
-                            updateIcons(navigationBar, sid, true);
-                            applyScreenLiftDock(navigationBar, currentScreenLiftType(), sid);
-                            Log.i(TAG, "[dock] controller show reconciled driver layout");
-                        }
-                    }
-                } catch (e) { Log.e(TAG, "[dock] controller show reconcile err: " + e); }
-                return result;
-            };
-            Log.i(TAG, "[dock] NavigationBarController show reconciliation hooked");
-        } catch (e) { Log.e(TAG, "[dock] controller doScreenLift hook skip: " + e); }
-
         // 4) ДОК НЕ ДОЛЖЕН САМ УЕЗЖАТЬ ИЗ-ПОД НАШЕГО FREEFORM-ОКНА/VD-СПЛИТА.
         //    При переносе приложения между экранами система вызывает dismiss() у навбара, и док
         //    анимированно скрывается. Для стороннего приложения это тупик: наш оконный режим оставляет
@@ -1796,7 +1669,7 @@ Java.perform(function () {
         //    оставляет под ним полосу дока независимо от источника запуска. Аварийно отключить pinning:
         //      settings put global voyahtune_dockpin 0
         //
-        //    Хукаем navigation class как PI-fallback и реальный общий OD controller.
+        //    ПИ: хукаем dismiss общего класса навбара (экран инстанса — по mScreenId).
         function pinDock(clsName, label, fallbackScreen) {
             try {
                 var C = Java.use(clsName);
@@ -1844,21 +1717,14 @@ Java.perform(function () {
         }
 
         try {
-            pinDock(NAV_MAIN, "main/shared bar", mainFallbackScreen);
+            pinDock(NAV_MAIN, "shared bar", mainFallbackScreen);
         } catch (e) {
-            Log.e(TAG, "pinDock main/shared bar error: " + e);
-        }
-
-        try {
-            pinDock(NAV_MAIN.replace(/\.[^.]+$/, ".NavigationBarController"), "main/shared controller", mainFallbackScreen);
-        } catch (e) {
-            Log.e(TAG, "pinDock main/shared controller error: " + e);
+            Log.e(TAG, "pinDock shared bar error: " + e);
         }
 
         // 4b) LauncherModel уже получает авторитетный TOP_ACTIVITY_CHANGED. Для обычного стороннего
         // viewport повторно показываем dock нужного display, а для пакета из пользовательского fullscreen-
-        // списка ЯВНО скрываем его. Одного разрешения пройти в штатный dismiss() недостаточно: на OD при
-        // обычном запуске third-party приложения dismiss вообще не вызывается.
+        // списка ЯВНО скрываем его.
         try {
             var TopLM = Java.use("com.qinggan.app.launcher.LauncherModel");
             var retainedLauncherModel = null;
@@ -1872,9 +1738,8 @@ Java.perform(function () {
             modelNavigationBar = modelDockController;
 
             // QGBus navigation visibility requests are queued independently of TOP_ACTIVITY_CHANGED.
-            // A late visible=true was the repeat-launch resurrection path, and the live launcher calls
-            // the controller through INavigationBarController (where a concrete show() hook alone is
-            // not reliable). Normalize every model request while the authoritative top is fullscreen.
+            // A late visible=true was the repeat-launch resurrection path. Normalize every model
+            // request while the authoritative top is fullscreen.
             function installFullscreenVisibilityGate(methodName, displayId) {
                 var original = TopLM[methodName].overload(
                         'java.lang.String', 'java.lang.String', 'boolean');
@@ -1891,9 +1756,8 @@ Java.perform(function () {
                     if (!foreground.live) fgByScreen[displayId].act = cleanJavaString(actArg);
                     // Calling OEM dismiss() again after x already reached -width makes the live
                     // controller removeView(root), reintroducing an async detach/show race. Keep the
-                    // Window detached; use OEM false only as a cross-firmware fallback
-                    // when the controller fields are unavailable. A later original(true) always
-                    // invokes show() and restores x=0 on the confirmed H97C LauncherModel ABI.
+                    // Window detached; use OEM false only as a fallback when the controller fields
+                    // are unavailable. A later original(true) always invokes show() and restores x=0.
                     var controller = modelDockController(this, displayId);
                     var label = "model gate " + methodName + " display=" + displayId;
                     if (forceHideDockController(controller, label)) {
@@ -2003,36 +1867,7 @@ Java.perform(function () {
             Log.i(TAG, "[dock] dual-display TOP_ACTIVITY_CHANGED recovery installed");
         } catch (e) { Log.e(TAG, "[dock] TOP_ACTIVITY_CHANGED recovery unavailable: " + e); }
 
-        // 5) ПЛАВАЮЩАЯ HOME — подавление ВОЗВРАЩЕНО.
-        //    Снимать его было ошибкой. Обоснование при снятии («во freeform-окне кнопка и так не
-        //    всплывает») оказалось ложным: наш оконный режим НЕ переводит окно в настоящий freeform —
-        //    vd_bypass.js настоящий freeform (windowing mode 5) наоборот пропускает, а обычному
-        //    полноэкранному окну лишь переписывает рамки уже ПОСЛЕ раскладки. Для лаунчера приложение
-        //    остаётся «сторонним на весь экран», поэтому предикат истинен всегда — и кнопка вылезала
-        //    постоянно, даже когда док на месте и она не нужна.
-        //
-        //    Аварийно вернуть штатное поведение: settings put global voyahtune_floathome 0
-        if (SHARED_NAV == false) { // на ПИ не надо даваить плавающую кнопку
-            try {
-                var floatHomeOff = function () { return cfg("floathome") !== "0"; };
-                var LM = Java.use("com.qinggan.app.launcher.LauncherModel");
-                var launcherFloatApp = LM.isThirdShowFloatApp.overload('java.lang.String');
-                launcherFloatApp.implementation = function (cn) {
-                    return floatHomeOff() ? false : launcherFloatApp.call(this, cn);
-                };
-                Log.i(TAG, "[dock] floating home suppressed (LauncherModel)");
-            } catch (e) { Log.e(TAG, "[dock] LauncherModel.isThirdShowFloatApp skip: " + e); }
-            try {
-                var TAU = Java.use("com.qinggan.launcher.base.drag.ThirdAppUtil");
-                var thirdFloatApp = TAU.isThirdShowFloatApp.overload('java.lang.String');
-                thirdFloatApp.implementation = function (cn) {
-                    return cfg("floathome") !== "0" ? false : thirdFloatApp.call(this, cn);
-                };
-                Log.i(TAG, "[dock] floating home suppressed (ThirdAppUtil)");
-            } catch (e) { Log.e(TAG, "[dock] ThirdAppUtil.isThirdShowFloatApp skip: " + e); }
-        }
-
-        // 6) OEM onMoveStart асинхронно гасит ОБА NavigationBarController. На destination foreground-кэш
+        // 6) OEM onMoveStart асинхронно гасит ОБА навбара. На destination foreground-кэш
         //    в этот момент ещё может содержать Launcher, поэтому обычный dockKept(fg) пропускает dismiss
         //    и пассажирский Window удаляется. Guard ставим до оригинала, только для стороннего viewport-
         //    приложения; оба dismiss видят его до matching onMoveStop/TTL. После stop дополнительно
@@ -2040,9 +1875,7 @@ Java.perform(function () {
         try {
             var LM2 = Java.use("com.qinggan.app.launcher.LauncherModel");
             var Log2 = Java.use("android.util.Log");
-            // Live H97C invokes NavigationBarController through its INavigationBarController field;
-            // that invoke-interface path is not reliably intercepted by the concrete-class hook.
-            // Replay the driver layout shortly after the authoritative LauncherModel event instead.
+            // Replay the driver layout shortly after the authoritative LauncherModel event.
             try {
                 var launcherScreenLift = LM2.doScreenLift.overload('int');
                 launcherScreenLift.implementation = function (type) {
@@ -2152,17 +1985,10 @@ Java.perform(function () {
             var IntentFilter = Java.use("android.content.IntentFilter");
             var recv = Receiver.$new();
             var filt = IntentFilter.$new(RELOAD_ACT);
-            // На API≥33 форма (receiver, filter) для чужого implicit-broadcast бросает SecurityException —
-            // нужен флаг RECEIVER_EXPORTED (0x2). На нашей голове Android 11 (API 30) — обычная 2-арг форма.
-            var sdk = Java.use("android.os.Build$VERSION").SDK_INT.value;
-            if (sdk >= 33) {
-                ctx().registerReceiver.overload('android.content.BroadcastReceiver',
-                    'android.content.IntentFilter', 'int').call(ctx(), recv, filt, 0x2);
-            } else {
-                ctx().registerReceiver.overload('android.content.BroadcastReceiver',
-                    'android.content.IntentFilter').call(ctx(), recv, filt);
-            }
-            Log.i(TAG, "[dock] reload receiver registered: " + RELOAD_ACT + " (sdk=" + sdk + ")");
+            // Android 11 (API 30): обычная 2-аргументная форма registerReceiver.
+            ctx().registerReceiver.overload('android.content.BroadcastReceiver',
+                'android.content.IntentFilter').call(ctx(), recv, filt);
+            Log.i(TAG, "[dock] reload receiver registered: " + RELOAD_ACT);
         } catch (e) { Log.e(TAG, "[dock] receiver reg err: " + e); }
 
         // Первичная загрузка конфига + отрисовка иконок на уже живых навбарах. Повторы — на случай,
@@ -2179,9 +2005,9 @@ Java.perform(function () {
         setTimeout(updateAllNavbars, 12000);
         setTimeout(updateAllNavbars, 15000);
 
-        Log.i(TAG, "[dock] NavigationBarMain hooks installed (updateTheme/updateSelectedApp/onClick)");
+        Log.i(TAG, "[dock] NavigationBar hooks installed (updateTheme/updateSelectedApp/onClick)");
     } catch (e) {
-        // Класс не найден (скрипт заинжектили не в лаунчер, либо CN/другая прошивка) — тихо выходим.
-        Log.e(TAG, "[dock] NavigationBarMain not found (not launcher/oversea?): " + e);
+        // Класс не найден (скрипт заинжектили не в лаунчер) — тихо выходим.
+        Log.e(TAG, "[dock] NavigationBar not found (not launcher?): " + e);
     }
 });

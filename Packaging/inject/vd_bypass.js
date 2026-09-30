@@ -17,7 +17,6 @@ Java.perform(function () {
     // The OEM Android 11 launcher expects ordinary physical-display tasks whose frames are clamped
     // by the two WindowManager hooks below. This is intentionally global for all non-stock apps:
     // launch source does not matter (Dock, VoyahTune, steering action or another intent).
-    var SYSTEM_SERVER_FREEFORM_HOT_HOOKS = true;
     var Log = Java.use("android.util.Log");
     var Binder = Java.use("android.os.Binder");
     var ourUid = -1;
@@ -251,20 +250,12 @@ Java.perform(function () {
     function resolveFreeformTraversalRequester() {
         try {
             var LocalServices = Java.use("com.android.server.LocalServices");
-            var names = [
-                "com.android.server.wm.WindowManagerInternal", // Android 10+
-                "android.view.WindowManagerInternal"           // older vendor branches
-            ];
-            for (var i = 0; i < names.length; i++) {
-                try {
-                    var Wmi = Java.use(names[i]);
-                    var service = LocalServices.getService(Wmi.class);
-                    if (service === null) continue;
-                    var method = Wmi.requestTraversalFromDisplayManager.overload();
-                    ffTraversalService = Java.retain(Java.cast(service, Wmi));
-                    ffTraversalMethod = method;
-                    return;
-                } catch (ignored) {}
+            var Wmi = Java.use("com.android.server.wm.WindowManagerInternal");
+            var service = LocalServices.getService(Wmi.class);
+            if (service !== null) {
+                var method = Wmi.requestTraversalFromDisplayManager.overload();
+                ffTraversalService = Java.retain(Java.cast(service, Wmi));
+                ffTraversalMethod = method;
             }
         } catch (e) {
             Log.w(TAG, "WindowManagerInternal lookup failed: " + e);
@@ -309,9 +300,7 @@ Java.perform(function () {
 
     refreshFreeformCfg();
     resolveFreeformTraversalRequester();
-    if (SYSTEM_SERVER_FREEFORM_HOT_HOOKS) {
-        installed.push("system_server freeform hot hooks enabled");
-    }
+    installed.push("system_server freeform hot hooks enabled");
 
     // reload-ресивер: Native шлёт WIN_RELOAD при смене флага/bounds/DPI → перечитать кэш.
     try {
@@ -543,7 +532,7 @@ Java.perform(function () {
     // latch prevents our configuration update from recursively re-applying itself. Keep this rare
     // hook isolated from the detachable config hook so a firmware ABI mismatch cannot disable DPI.
     try {
-        if (SYSTEM_SERVER_FREEFORM_HOT_HOOKS && ffTaskField !== null) {
+        if (ffTaskField !== null) {
             var ARd = Java.use("com.android.server.wm.ActivityRecord");
             ffDisplayChangedMethod = ARd.onDisplayChanged.overload(
                     'com.android.server.wm.DisplayContent');
@@ -600,7 +589,6 @@ Java.perform(function () {
     }
 
     function attachFreeformHotHooks(reason) {
-        if (!SYSTEM_SERVER_FREEFORM_HOT_HOOKS) return;
         if (!FF.on || !FF.screenOn) return;
         var changed = false;
         if (!ffLayoutAttached && ffLayoutMethod !== null && ffLayoutImplementation !== null) {
@@ -648,7 +636,7 @@ Java.perform(function () {
         ffHotAttachPending = true;
         // Даже если SCREEN_OFF был пропущен, SCREEN_ON сначала снимает replacements синхронно.
         detachFreeformHotHooks(reason + " stabilization");
-        if (!SYSTEM_SERVER_FREEFORM_HOT_HOOKS || !FF.on) {
+        if (!FF.on) {
             ffHotAttachPending = false;
             return;
         }
