@@ -1,15 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.RunYN" parent="android:Theme.Material.Light.NoActionBar" />
-
-    <!-- Прозрачная тема без окна: при нажатии на значок ничего не показывается,
-         активити только отправляет команду и закрывается. -->
-    <style name="Theme.RunYN.Invisible" parent="android:Theme.Translucent.NoTitleBar">
-        <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:windowIsTranslucent">true</item>
-        <item name="android:windowNoTitle">true</item>
-        <item name="android:windowAnimationStyle">@null</item>
-        <item name="android:backgroundDimEnabled">false</item>
+    <!-- Окно тоже тёмное: иначе до первой отрисовки Compose мигает белым -->
+    <style name="Theme.RunYN" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/dark_background</item>
+        <item name="android:statusBarColor">@color/dark_background</item>
+        <item name="android:navigationBarColor">@color/dark_background</item>
+        <item name="android:colorBackground">@color/dark_background</item>
     </style>
 </resources>

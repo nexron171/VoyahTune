@@ -10,6 +10,11 @@
          упадёт с ActivityNotFoundException -->
     <queries>
         <package android:name="ru.yandex.yandexnavi" />
+        <!-- Список выбираемых приложений: всё, у чего есть значок в лаунчере -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application
@@ -21,47 +26,17 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.RunYN">
-        <!-- Окна нет: активити только отправляет команду и закрывается. -->
         <activity
             android:name=".MainActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:label="@string/app_name"
-            android:taskAffinity=""
-            android:theme="@style/Theme.RunYN.Invisible" />
-
-        <!-- Значок в лаунчере с зелёной рамкой: навигатор остановлен.
-             Включён по умолчанию — это исходное состояние. -->
-        <activity-alias
-            android:name=".LauncherStopped"
-            android:enabled="true"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_green"
             android:label="@string/app_name"
-            android:roundIcon="@mipmap/ic_launcher_green_round"
-            android:targetActivity=".MainActivity">
+            android:theme="@style/Theme.RunYN">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity-alias>
-
-        <!-- Значок с красной рамкой: навигатор запущен. -->
-        <activity-alias
-            android:name=".LauncherRunning"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher_red"
-            android:label="@string/app_name"
-            android:roundIcon="@mipmap/ic_launcher_red_round"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
+        </activity>
     </application>
 
 </manifest>

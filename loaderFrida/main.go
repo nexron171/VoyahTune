@@ -55,7 +55,10 @@ func logf(f *os.File, format string, args ...any) {
 	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, args...))
 }
 
-func GetPIDsByCmdlineSubstring(substring string) []int {
+// GetPIDsByName ищет процессы с ТОЧНЫМ именем: argv[0] из /proc/<pid>/cmdline
+// (для приложений Android это имя процесса) или его basename (/data/local/bin/loaderFrida).
+// Подстрока не годится: "com.qinggan.app.qgime" совпадала и с "com.qinggan.app.qgime.second".
+func GetPIDsByName(name string) []int {
 	var pids []int
 
 	entries, err := os.ReadDir("/proc")
@@ -64,25 +67,21 @@ func GetPIDsByCmdlineSubstring(substring string) []int {
 	}
 
 	for _, e := range entries {
-		name := e.Name()
-		pid, err := strconv.Atoi(name)
+		pid, err := strconv.Atoi(e.Name())
 		if err != nil {
 			// Пропускаем всё, что не PID (например, "self", "thread-self")
 			continue
 		}
 
-		cmdlinePath := filepath.Join("/proc", name, "cmdline")
-		data, err := os.ReadFile(cmdlinePath)
-		if err != nil {
-			// Часто нет прав на чтение cmdline чужого процесса — просто пропускаем
+		data, err := os.ReadFile(filepath.Join("/proc", e.Name(), "cmdline"))
+		if err != nil || len(data) == 0 {
+			// Нет прав или kernel thread без cmdline — пропускаем
 			continue
 		}
 
 		// В cmdline аргументы разделены NUL (\x00)
-		args := strings.Split(string(data), "\x00")
-		full := strings.Join(args, " ")
-		//fmt.Println("&&&&&", full, substring)
-		if strings.Contains(full, substring) {
+		argv0, _, _ := strings.Cut(string(data), "\x00")
+		if argv0 == name || filepath.Base(argv0) == name {
 			pids = append(pids, pid)
 		}
 	}
@@ -147,9 +146,9 @@ func checkZombi() {
 				continue
 			}
 
-			if p != GetPIDsByCmdlineSubstring(pkg)[0] {
+			if sysPid := GetPIDsByName(pkg)[0]; p != sysPid {
 				cancel()
-				logf(MainLog, "checkZombi p=%d pkg=%s sys pid=%d", p, pkg, GetPIDsByCmdlineSubstring(pkg)[0])
+				logf(MainLog, "checkZombi p=%d pkg=%s sys pid=%d", p, pkg, sysPid)
 
 			}
 		}
@@ -166,7 +165,7 @@ func main() {
 	MainLog, _ = os.OpenFile("/data/local/tmp/loaderFrida.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	defer MainLog.Close()
 
-	myPids := GetPIDsByCmdlineSubstring("loaderFrida")
+	myPids := GetPIDsByName("loaderFrida")
 
 	logf(MainLog, "My pids %v", myPids)
 	if len(myPids) > 1 {
@@ -204,7 +203,7 @@ func main() {
 			for {
 				time.Sleep(RetryPause)
 
-				pid := GetPIDsByCmdlineSubstring(pkg)[0]
+				pid := GetPIDsByName(pkg)[0]
 				if pid == 0 {
 					repl--
 					continue

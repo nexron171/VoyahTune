@@ -19,5 +19,8 @@
   ],
   "com.qinggan.cluster": [
     "clusternavi.js"
+  ],
+  "com.qinggan.bluetoothphone": [
+    "phone-num.js"
   ]
 }

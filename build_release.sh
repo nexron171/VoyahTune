@@ -1,5 +1,5 @@
 #!/bin/bash
-VER=v3.13
+VER=v3.14
 DIR=./Releases/build/$VER
 echo "Release dir: $DIR"
 mkdir -p $DIR
