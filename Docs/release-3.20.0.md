@@ -34,3 +34,32 @@ Windows x64/x86: его recipe теперь содержит два новых �
 Приёмка на официальных SE и Sport+ 2025–2026 с Android 11 выполняется отдельно:
 системная регистрация APK, сохранение UID/данных, дополнительные перезагрузки,
 восстановление после прерывания и поведение при движении ещё требуют проверки на ГУ.
+
+## Сборка и публикация
+
+Payload собран из чистого коммита `3d5224c699b3c91440fb8276eda31f2686fc89ae`:
+Native/RestoreMode 3.20.0 (versionCode 3020000), Updater 0.3.0 (versionCode 3).
+Подписи APK совпадают с 3.19.0; подписанные runtime hashes подтверждают оба новых
+артефакта. Финальный payload содержит 29 файлов и принят проверяющим кодом
+Installer из коммита `36f1d55`, предшествующего механизму доставки UI.
+
+Выполнены 31 Rust-тест Updater, 40 Rust-тестов Installer workspace,
+JVM-тесты и assembleDebug Updater, release-сборка Android APK/ARM64,
+проверки синтаксиса loader и фонового запуска обслуживания UI,
+тесты раздельного префикса публикации установщиков.
+Для Installer проверены macOS arm64+x86_64, архивы NSIS, архитектуры Windows
+x64/x86 и ADB x86, а также `verify-host` для всех трёх комплектов ресурсов.
+
+Опубликованы и проверены публичными HEAD-запросами размеры и метаданные хешей:
+
+- [Payload 3.20.0](https://storage.yandexcloud.net/voyahtune/v3.20.0/payload_3.20.0.zip)
+  — 124679976 байт, SHA-256
+  `29f12d2c372c0a13e0720216c672c825e8c71e3844283327c4de7873181ff0df`.
+- Installer 1.4.0 для этого релиза:
+  [macOS Universal](https://storage.yandexcloud.net/voyahtune/Installers/1.4.0/builds/3.20.0/VoyahTune-Installer-1.4.0-macos.zip),
+  [Windows x64](https://storage.yandexcloud.net/voyahtune/Installers/1.4.0/builds/3.20.0/VoyahTune-Installer-1.4.0-windows-x64.exe),
+  [Windows x86](https://storage.yandexcloud.net/voyahtune/Installers/1.4.0/builds/3.20.0/VoyahTune-Installer-1.4.0-windows-x86.exe).
+
+Каталог [Releases/ota/index.json](../Releases/ota/index.json) дополнен записью
+3.20.0 с URL S3, размером и SHA-256 исходного архива. Прежние записи сохранены.
+Запуск GUI на Windows и установка на автомобиль в эту проверку не входили.
