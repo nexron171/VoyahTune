@@ -22,10 +22,8 @@ Java.perform(function () {
 
   function normalizeNumber(number) {
     if (number === null) return "";
-    const trimmed = ("" + number).trim();
-    if (trimmed === "+") return "+";
-    // Keep dial symbols (* # , ; p w), remove only visual formatting.
-    const compact = trimmed.replace(/[\s\-()]/g, "");
+    // Keep dial symbols (+ * # , ; p w), remove only visual formatting.
+    const compact = ("" + number).replace(/[\s\-()]/g, "");
     return LOST_PLUS_7.test(compact) ? "+" + compact : compact;
   }
 

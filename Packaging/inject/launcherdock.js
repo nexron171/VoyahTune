@@ -29,6 +29,9 @@
 //     package-broadcast через штатный AllAppDataManager.reload() пересобирает оба списка и обновляет открытые UI
 //     без polling. Клик идёт через OEM AppLauncher с mScreenId владельца All Apps,
 //     поэтому top activity остаётся целевым package на соответствующем физическом display.
+//   • ДОМ ПАССАЖИРА — на display 1 вместо SecondMainActivity всегда открывается AllAppActivity:
+//     запуски лаунчера через AppLauncher.startApp перенаправляются, а если SecondMainActivity всё же
+//     поднялась (системный HOME, закрытие приложения поверх неё), сразу открываем AllAppActivity.
 //   • ВОЗВРАТ ИЗ FULLSCREEN/ПЕРЕНОСА — TOP_ACTIVITY_CHANGED повторно просит штатный LauncherModel
 //     показать navigation bar нужного физического экрана. Во время OEM transfer короткий deadline-guard
 //     не даёт onMoveStart удалить оба бара до того, как foreground-кэш обновится на destination.
@@ -41,6 +44,8 @@ Java.perform(function () {
     var LAUNCHER_PKG = "com.qinggan.app.launcher";    // сам штатный лаунчер (Home обоих экранов)
     var OUR_PKG      = "ru.big.town.anative";         // наш VD-хост (SplitHostActivity) для подсветки
     var RESTORE_PKG  = "ru.big.town.restoremode";     // VoyahTune (UI) — открывается долгим тапом по «меню»
+    var SECOND_HOME  = "com.qinggan.secondlauncher.activity.SecondMainActivity";
+    var SECOND_ALL_APPS = "com.qinggan.secondlauncher.activity.AllAppActivity";
     // AccountConstantUtil.SEPARATOR на ПИ = "/": LauncherModel так же делит ответ AppUtils.getTopAppInfo.
     var TOP_SEPARATOR = "/";
 
@@ -122,10 +127,9 @@ Java.perform(function () {
     // onMoveStart ставит UI-runnable асинхронно и последовательно вызывает dismiss обоих баров.
     // Поэтому guard хранится по source display и не consume-ится первым dismiss.
     var moveDockGuards = {
-        0: { deadline: 0, generation: 0, pkg: "" },
-        1: { deadline: 0, generation: 0, pkg: "" }
+        0: { deadline: 0, pkg: "" },
+        1: { deadline: 0, pkg: "" }
     };
-    var moveDockGeneration = 0;
     // Состояние баров НА МОМЕНТ НАЧАЛА переноса. Штатный лаунчер восстанавливает бар по
     // mMain/SecondNavigationBarLastShow только при ОТМЕНЕ переноса (posX == 0), поэтому снимок
     // держим сами и доигрываем его после onMoveStop.
@@ -152,8 +156,13 @@ Java.perform(function () {
         return field(model, sid === 0 ? "mMainScreenNavigationBar" : "mSecondScreenNavigationBar");
     }
 
+    // Аварийный выключатель: settings put global voyahtune_dockpin 0 (или voyahtune_freeform 0).
+    function dockPinDisabled() {
+        return cfg("dockpin") === "0" || cfg("freeform") === "0";
+    }
+
     function activeMoveDockGuard() {
-        if (cfg("dockpin") === "0" || cfg("freeform") === "0") return null;
+        if (dockPinDisabled()) return null;
         var now = Number(SystemClock.elapsedRealtime());
         for (var sid = 0; sid <= 1; sid++) {
             var guard = moveDockGuards[sid];
@@ -231,7 +240,7 @@ Java.perform(function () {
     function dockKept(pkg, act) {
         pkg = cleanJavaString(pkg);
         act = cleanJavaString(act);
-        if (cfg("dockpin") === "0" || cfg("freeform") === "0") return false;
+        if (dockPinDisabled()) return false;
         if (!pkg) return false;                                  // неизвестно → не мешаем штатному
         if (isUserFullscreen(pkg)) return false;                  // пользователь явно выбрал полный экран
         if (pkg.indexOf("ru.big.town") === 0) return ourInsetActivity(act);
@@ -260,7 +269,7 @@ Java.perform(function () {
     // Native публикует guard одной строкой "elapsedDeadline|package" непосредственно перед
     // startActivity. Это закрывает окно гонки dismiss → updateSelectedApp при запуске со звёздочки.
     function pendingDockLaunch(screenId) {
-        if (cfg("dockpin") === "0" || cfg("freeform") === "0") return null;
+        if (dockPinDisabled()) return null;
         var raw = cfg("dockLaunchGuard" + screenId);
         if (raw === "none") return null;
         var sep = raw.indexOf("|");
@@ -425,6 +434,28 @@ Java.perform(function () {
             Log.e(TAG, "[dock] launchFullscreen err: " + e);
             return false;
         }
+    }
+
+    // Домашний экран пассажира: запуск SecondMainActivity на display 1 превращаем в AllAppActivity.
+    function redirectPassengerHome(intent, screenId) {
+        if (screenId !== 1 || intent === null) return;
+        var component = intent.getComponent();
+        if (component === null || cleanJavaString(component.getClassName()) !== SECOND_HOME) return;
+        intent.setClassName(LAUNCHER_PKG, SECOND_ALL_APPS);
+        Log.i(DLOG, "passenger home -> AllAppActivity");
+    }
+
+    // Тот же путь, что у штатного NavigationBar.openAllApp() для экрана 1.
+    function openPassengerAllApps(reason) {
+        try {
+            var intent = Intent.$new();
+            intent.setClassName(LAUNCHER_PKG, SECOND_ALL_APPS);
+            intent.addFlags(0x10000000);   // FLAG_ACTIVITY_NEW_TASK
+            var AppLauncher = Java.use("com.qinggan.launcher.base.utils.AppLauncher");
+            AppLauncher.startApp.overload('android.content.Context', 'android.content.Intent', 'int')
+                .call(AppLauncher, ctx(), intent, 1);
+            Log.i(DLOG, "passenger AllAppActivity opened: " + reason);
+        } catch (e) { Log.e(TAG, "[dock] passenger AllAppActivity: " + e); }
     }
 
     // Долгий тап «меню» (mScreenUpAllAppView) → VoyahTune + return true (гасим штатное долгое).
@@ -745,6 +776,7 @@ Java.perform(function () {
             var startAppIntent = AppLauncher.startApp.overload(
                     'android.content.Context', 'android.content.Intent', 'int');
             startAppIntent.implementation = function (context, intent, screenIdArg) {
+                redirectPassengerHome(intent, Number(screenIdArg));
                 var pkg = packageFromIntent(intent);
                 if (isUserFullscreen(pkg) && launchFullscreen(pkg, Number(screenIdArg))) return;
                 return startAppIntent.call(this, context, intent, screenIdArg);
@@ -1208,6 +1240,18 @@ Java.perform(function () {
     var NavigationBar = Java.use(NAV_BAR);
     var LauncherModel = Java.use(MODEL);
 
+    // 0) ДОМ ПАССАЖИРА: SecondMainActivity поднялась на display 1 в обход AppLauncher
+    //    (системный HOME, закрытие приложения поверх неё) → сразу открываем AllAppActivity.
+    var secondResume = Java.use(SECOND_HOME).onResume.overload();
+    secondResume.implementation = function () {
+        secondResume.call(this);
+        try {
+            if (this.getWindowManager().getDefaultDisplay().getDisplayId() === 1) {
+                openPassengerAllApps("SecondMainActivity resumed");
+            }
+        } catch (e) { Log.e(TAG, "[dock] passenger home resume: " + e); }
+    };
+
     // 1) ИКОНКА: переустановка после каждой перекраски темы (иначе штатная тема затрёт наш фон).
     var origUpdateTheme = NavigationBar.updateTheme.overload();
     origUpdateTheme.implementation = function () {
@@ -1364,13 +1408,8 @@ Java.perform(function () {
                 var now = Number(SystemClock.elapsedRealtime());
                 // Снимок — только на первом onMoveStart переноса.
                 if (moveDockGuards[sourceDisplay].deadline <= now) snapshotMoveDockState(this);
-                var generation = ++moveDockGeneration;
-                moveDockGuards[sourceDisplay] = {
-                    deadline: now + 5000,
-                    generation: generation,
-                    pkg: cleanJavaString(pkg)
-                };
-                Log.i(DLOG, "move guard START source=" + sourceDisplay + " gen=" + generation + " pkg=" + pkg);
+                moveDockGuards[sourceDisplay] = { deadline: now + 5000, pkg: cleanJavaString(pkg) };
+                Log.i(DLOG, "move guard START source=" + sourceDisplay + " pkg=" + pkg);
             }
         } catch (e) {}
         return origMoveStart.call(this, pkg, act, type, sourceDisplay, posX, extra);
@@ -1388,7 +1427,7 @@ Java.perform(function () {
                 if (guard.pkg === stopPackage && guard.deadline > 0) {
                     // Короткий grace: OEM stop сам лишь ставит UI-runnable.
                     guard.deadline = Math.min(guard.deadline, Number(SystemClock.elapsedRealtime()) + 750);
-                    Log.i(DLOG, "move guard STOP source=" + sourceDisplay + " gen=" + guard.generation + " pkg=" + guard.pkg);
+                    Log.i(DLOG, "move guard STOP source=" + sourceDisplay + " pkg=" + guard.pkg);
                 }
                 // posX == 0 — перенос отменён, приложение осталось на своём экране.
                 scheduleMoveDockRecovery(this, stopPackage, sourceDisplay, posX === 0);
@@ -1411,6 +1450,7 @@ Java.perform(function () {
     // PackageManager и конструирование навбара на холодном буте завершаются в разные моменты.
     refreshCache();
     installAllAppsHooks();
+    if (topActivityForScreen(1).act.indexOf("SecondMainActivity") >= 0) openPassengerAllApps("inject");
     [0, 800, 2500, 5000, 8000, 12000, 15000].forEach(function (delay) {
         setTimeout(updateAllNavbars, delay);
     });

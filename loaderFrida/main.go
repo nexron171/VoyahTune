@@ -218,12 +218,12 @@ func main() {
 						logf(MainLog, "Стартуем! %s  %v pid=%d(%s) repl=%d\n", injector, scripts, pid, pkg, repl)
 
 						err := runInjectCancel(pkg, injector, pid, scripts)
-						//log.Write(out)
-
+						// frida-inject без -e живёт, пока держит скрипт: любой его выход (ошибка,
+						// сигнал или чистый exit 0) выгружает хуки. Сбрасываем pid, чтобы следующий
+						// проход внедрил скрипт заново; попытку тратим только на ошибку.
+						setPidZero(pkg)
 						if err != nil {
 							log.Write([]byte(err.Error()))
-							setPidZero(pkg)
-							//logf(MainLog, "Ошибка при запуске %s %s\n", string(out), err)
 							repl--
 						}
 

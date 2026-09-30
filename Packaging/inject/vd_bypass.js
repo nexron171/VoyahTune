@@ -19,6 +19,7 @@ Java.perform(function () {
     // launch source does not matter (Dock, VoyahTune, steering action or another intent).
     var Log = Java.use("android.util.Log");
     var Binder = Java.use("android.os.Binder");
+    var ActivityRecord = Java.use("com.android.server.wm.ActivityRecord");
     var ourUid = -1;
     try {
         ourUid = Java.use("android.app.ActivityThread").currentActivityThread()
@@ -100,8 +101,7 @@ Java.perform(function () {
     //    активити, которые сами не заявляют resizeable/мультидисплей. Только displayId != 0 —
     //    первичный дисплей не трогаем (там оставляем штатную логику). Редко (при запуске активити).
     try {
-        var AR = Java.use("com.android.server.wm.ActivityRecord");
-        AR.canBeLaunchedOnDisplay.implementation = function (displayId) {
+        ActivityRecord.canBeLaunchedOnDisplay.implementation = function (displayId) {
             if (displayId !== 0) return true;
             return this.canBeLaunchedOnDisplay(displayId);
         };
@@ -155,6 +155,8 @@ Java.perform(function () {
                liftType: 2, dpi: {}, fullscreen: {} };
     var SettingsGlobal = Java.use('android.provider.Settings$Global');
     var ATh = Java.use('android.app.ActivityThread');
+    var IntentFilter = Java.use("android.content.IntentFilter");
+    var BroadcastReceiver = Java.use("android.content.BroadcastReceiver");
     var ffLayoutMethod = null, ffLayoutImplementation = null, ffLayoutAttached = false;
     var ffConfigMethod = null, ffConfigImplementation = null, ffConfigAttached = false;
     var ffHotAttachPending = false, ffConfigReplayTimer = null;
@@ -285,59 +287,56 @@ Java.perform(function () {
         }
     }
 
-    // Разовая заметка о ПРОПУЩЕННОМ окне (диагностика). layoutWindowLw — горячий путь, поэтому пишем
-    // не чаще одного раза на комбинацию pkg+экран+режим и не больше 20 записей за жизнь процесса.
-    // Нужна, чтобы понять, в каком windowing mode оказывается приложение после переноса между экранами
-    // системным жестом: если наш кламп его пропускает, окно занимает весь экран и закрывает док.
-    var ffSeen = {}, ffSeenN = 0;
-    function ffNote(why, pkg, displayId, mode) {
-        if (ffSeenN >= 20) return;
-        var k = why + "|" + pkg + "|" + displayId + "|" + mode;
-        if (ffSeen[k]) return;
-        ffSeen[k] = 1; ffSeenN++;
-        Log.i(TAG, "ff " + why + " pkg=" + pkg + " display=" + displayId + " mode=" + mode);
-    }
-
-    refreshFreeformCfg();
-    resolveFreeformTraversalRequester();
-    installed.push("system_server freeform hot hooks enabled");
-
-    // reload-ресивер: Native шлёт WIN_RELOAD при смене флага/bounds/DPI → перечитать кэш.
-    try {
-        // ВАЖНО: BroadcastReceiver.onReceive — АБСТРАКТНЫЙ метод. Shorthand-форма
-        // (methods:{onReceive:function(){}}) на этой прошивке НЕ переопределяет абстрактный слот vtable →
-        // AbstractMethodError при доставке брэдкаста → КРЭШ system_server (soft-reboot всей системы!).
-        // Объявляем метод с ЯВНОЙ сигнатурой (returnType/argumentTypes) — гарантирует конкретный override.
-        var WinReceiver = Java.registerClass({
-            name: "ru.big.town.vd.WinReloadReceiver",
-            superClass: Java.use("android.content.BroadcastReceiver"),
+    // Receiver'ы в system_server. Имя класса уникально: после выгрузки скрипта (frida-inject умер)
+    // следующая инъекция регистрирует новый класс; старые экземпляры снимает rpc.exports.dispose.
+    // ВАЖНО: BroadcastReceiver.onReceive — АБСТРАКТНЫЙ метод. Shorthand-форма
+    // (methods:{onReceive:function(){}}) на этой прошивке НЕ переопределяет абстрактный слот vtable →
+    // AbstractMethodError при доставке брэдкаста → КРЭШ system_server (soft-reboot всей системы!).
+    // Объявляем метод с ЯВНОЙ сигнатурой (returnType/argumentTypes) — гарантирует конкретный override.
+    var receivers = [];
+    function registerSystemReceiver(name, actions, permission, onReceive) {
+        var cls = Java.registerClass({
+            name: name + "_" + Date.now(),
+            superClass: BroadcastReceiver,
             methods: {
                 onReceive: {
                     returnType: "void",
                     argumentTypes: ["android.content.Context", "android.content.Intent"],
-                    implementation: function (c, i) {
-                        refreshFreeformCfg();
-                        if (!FF.on) {
-                            ++FF.hookEpoch;
-                            ffHotAttachPending = false;
-                            if (ffConfigReplayTimer !== null) {
-                                clearTimeout(ffConfigReplayTimer);
-                                ffConfigReplayTimer = null;
-                            }
-                            detachFreeformHotHooks("config off");
-                        } else if (FF.screenOn) {
-                            scheduleFreeformConfigReplay("config reload");
-                        }
-                    }
+                    implementation: onReceive
                 }
             }
         });
-        var IF = Java.use("android.content.IntentFilter");
+        var filter = IntentFilter.$new();
+        for (var i = 0; i < actions.length; i++) filter.addAction(actions[i]);
+        var receiver = Java.retain(cls.$new());
         var sctx = ATh.currentActivityThread().getSystemContext();
-        // Пермишен-гейт: WIN_RELOAD примем ТОЛЬКО от держателя WRITE_SECURE_SETTINGS (наш Native), чтобы
-        // любое приложение не могло спамить перечитку конфига в system_server.
-        sctx.registerReceiver.overload('android.content.BroadcastReceiver', 'android.content.IntentFilter', 'java.lang.String', 'android.os.Handler')
-            .call(sctx, WinReceiver.$new(), IF.$new("ru.big.town.anative.WIN_RELOAD"), "android.permission.WRITE_SECURE_SETTINGS", null);
+        sctx.registerReceiver.overload('android.content.BroadcastReceiver', 'android.content.IntentFilter',
+                'java.lang.String', 'android.os.Handler').call(sctx, receiver, filter, permission, null);
+        receivers.push(receiver);
+    }
+
+    refreshFreeformCfg();
+    resolveFreeformTraversalRequester();
+
+    // reload-ресивер: Native шлёт WIN_RELOAD при смене флага/bounds/DPI → перечитать кэш.
+    // Пермишен-гейт: WIN_RELOAD примем ТОЛЬКО от держателя WRITE_SECURE_SETTINGS (наш Native), чтобы
+    // любое приложение не могло спамить перечитку конфига в system_server.
+    try {
+        registerSystemReceiver("ru.big.town.vd.WinReloadReceiver", ["ru.big.town.anative.WIN_RELOAD"],
+                "android.permission.WRITE_SECURE_SETTINGS", function (c, i) {
+            refreshFreeformCfg();
+            if (!FF.on) {
+                ++FF.hookEpoch;
+                ffHotAttachPending = false;
+                if (ffConfigReplayTimer !== null) {
+                    clearTimeout(ffConfigReplayTimer);
+                    ffConfigReplayTimer = null;
+                }
+                detachFreeformHotHooks("config off");
+            } else if (FF.screenOn) {
+                scheduleFreeformConfigReplay("config reload");
+            }
+        });
         installed.push("WIN_RELOAD receiver");
     } catch (e) { Log.e(TAG, "WIN_RELOAD receiver fail: " + e); }
 
@@ -345,35 +344,20 @@ Java.perform(function () {
     // 560px viewport immediately on the OEM completion broadcast and replay WM traversal so every
     // already visible third-party task receives new frames without being relaunched.
     try {
-        var LiftReceiver = Java.registerClass({
-            name: "ru.big.town.vd.ScreenLiftReceiver",
-            superClass: Java.use("android.content.BroadcastReceiver"),
-            methods: {
-                onReceive: {
-                    returnType: "void",
-                    argumentTypes: ["android.content.Context", "android.content.Intent"],
-                    implementation: function (c, i) {
-                        try {
-                            var type = i.getIntExtra("type", 2);
-                            var actualType = readScreenLiftType();
-                            if (type !== actualType) {
-                                Log.w(TAG, "screen lift broadcast ignored: type=" + type
-                                        + " property=" + actualType);
-                                return;
-                            }
-                            FF.liftType = type === 1 ? 1 : 2;
-                            Log.i(TAG, "screen lift changed type=" + FF.liftType
-                                    + " effectiveBottom=" + ffBottom());
-                            requestFreeformTraversalOnce("screen lift type=" + FF.liftType);
-                        } catch (e) { Log.e(TAG, "screen lift receiver: " + e); }
-                    }
+        registerSystemReceiver("ru.big.town.vd.ScreenLiftReceiver", ["action.qg.layout.changed"], null,
+                function (c, i) {
+            try {
+                var type = i.getIntExtra("type", 2);
+                var actualType = readScreenLiftType();
+                if (type !== actualType) {
+                    Log.w(TAG, "screen lift broadcast ignored: type=" + type + " property=" + actualType);
+                    return;
                 }
-            }
+                FF.liftType = type === 1 ? 1 : 2;
+                Log.i(TAG, "screen lift changed type=" + FF.liftType + " effectiveBottom=" + ffBottom());
+                requestFreeformTraversalOnce("screen lift type=" + FF.liftType);
+            } catch (e) { Log.e(TAG, "screen lift receiver: " + e); }
         });
-        var liftFilter = Java.use("android.content.IntentFilter").$new("action.qg.layout.changed");
-        var liftCtx = ATh.currentActivityThread().getSystemContext();
-        liftCtx.registerReceiver.overload('android.content.BroadcastReceiver', 'android.content.IntentFilter')
-            .call(liftCtx, LiftReceiver.$new(), liftFilter);
         installed.push("screen-lift bounds receiver");
     } catch (e) { Log.e(TAG, "screen-lift receiver fail: " + e); }
 
@@ -412,7 +396,7 @@ Java.perform(function () {
                 // freeform, its Task bounds still constrain computeFrame. Mutating those bounds
                 // from DisplayPolicy.layoutWindowLw would re-enter configuration/layout while the
                 // global WM lock is held, so leave mode 5 untouched and retry on the next launch.
-                if (wmode == 5) { ffNote("skip-freeform", pkg, displayId, wmode); return; }
+                if (wmode == 5) return;
                 var df = win.getDisplayFrames(displayFrames);
                 var wf = win.getWindowFrames();
                 if (!df || !wf) return;                           // нечего мутировать — чистый пропуск (без порчи рамки)
@@ -430,7 +414,6 @@ Java.perform(function () {
                 // visible and consumes touches, so placing the app at y=0 would hide an unclickable
                 // strip of its UI underneath that bar. Reuse the configured status-bar top inset.
                 var targetTop = FF.top;
-                if (fullscreen) ffNote("user-fullscreen", pkg, displayId, wmode);
                 // Не создаём Rect на каждом layout: этот метод вызывается сотни раз на screen-on.
                 var savedLeft = stable.left.value, savedTop = stable.top.value;
                 var savedRight = stable.right.value, savedBottom = stable.bottom.value;
@@ -499,13 +482,12 @@ Java.perform(function () {
     // а Activity продолжала рисовать узкий прямоугольник. На физических дисплеях также меняем только
     // одно действительно запрошенное поле — densityDpi; resolved Configuration копировать нельзя.
     try {
-        var ARc = Java.use("com.android.server.wm.ActivityRecord");
         ffTaskClass = Java.use("com.android.server.wm.Task");
         ffConfigurationClass = Java.use("android.content.res.Configuration");
         // Поле одно и то же для всех ActivityRecord: reflection lookup на каждом config-pass не нужен.
-        ffTaskField = ARc.class.getDeclaredField("task");
+        ffTaskField = ActivityRecord.class.getDeclaredField("task");
         ffTaskField.setAccessible(true);
-        ffConfigMethod = ARc.ensureActivityConfiguration.overload('int', 'boolean', 'boolean');
+        ffConfigMethod = ActivityRecord.ensureActivityConfiguration.overload('int', 'boolean', 'boolean');
         ffConfigImplementation = function (g, p, iv) {
             var result = ffConfigMethod.call(this, g, p, iv);
             if (!FF.on) return result;
@@ -533,8 +515,7 @@ Java.perform(function () {
     // hook isolated from the detachable config hook so a firmware ABI mismatch cannot disable DPI.
     try {
         if (ffTaskField !== null) {
-            var ARd = Java.use("com.android.server.wm.ActivityRecord");
-            ffDisplayChangedMethod = ARd.onDisplayChanged.overload(
+            ffDisplayChangedMethod = ActivityRecord.onDisplayChanged.overload(
                     'com.android.server.wm.DisplayContent');
             ffDisplayChangedMethod.implementation = function (displayContent) {
                 ffDisplayChangedMethod.call(this, displayContent);
@@ -676,38 +657,25 @@ Java.perform(function () {
     }
 
     try {
-        var ScreenReceiver = Java.registerClass({
-            name: "ru.big.town.vd.ScreenStateReceiver",
-            superClass: Java.use("android.content.BroadcastReceiver"),
-            methods: {
-                onReceive: {
-                    returnType: "void",
-                    argumentTypes: ["android.content.Context", "android.content.Intent"],
-                    implementation: function (c, i) {
-                        var action = i.getAction();
-                        if (action === "android.intent.action.SCREEN_OFF") {
-                            noteFreeformScreenTransition();
-                            FF.screenOn = false;
-                            ++FF.hookEpoch; // отменить pending attach от предыдущего SCREEN_ON
-                            ffHotAttachPending = false;
-                            if (ffConfigReplayTimer !== null) {
-                                clearTimeout(ffConfigReplayTimer);
-                                ffConfigReplayTimer = null;
-                            }
-                            detachFreeformHotHooks("SCREEN_OFF");
-                        } else if (action === "android.intent.action.SCREEN_ON") {
-                            var attachDelay = noteFreeformScreenTransition();
-                            scheduleFreeformHotAttach(attachDelay,
-                                    "SCREEN_ON +" + attachDelay + "ms");
-                        }
-                    }
+        registerSystemReceiver("ru.big.town.vd.ScreenStateReceiver",
+                ["android.intent.action.SCREEN_ON", "android.intent.action.SCREEN_OFF"], null,
+                function (c, i) {
+            var action = i.getAction();
+            if (action === "android.intent.action.SCREEN_OFF") {
+                noteFreeformScreenTransition();
+                FF.screenOn = false;
+                ++FF.hookEpoch; // отменить pending attach от предыдущего SCREEN_ON
+                ffHotAttachPending = false;
+                if (ffConfigReplayTimer !== null) {
+                    clearTimeout(ffConfigReplayTimer);
+                    ffConfigReplayTimer = null;
                 }
+                detachFreeformHotHooks("SCREEN_OFF");
+            } else if (action === "android.intent.action.SCREEN_ON") {
+                var attachDelay = noteFreeformScreenTransition();
+                scheduleFreeformHotAttach(attachDelay, "SCREEN_ON +" + attachDelay + "ms");
             }
         });
-        var ScreenFilter = Java.use("android.content.IntentFilter");
-        var sf = ScreenFilter.$new("android.intent.action.SCREEN_ON");
-        sf.addAction("android.intent.action.SCREEN_OFF");
-        ATh.currentActivityThread().getSystemContext().registerReceiver(ScreenReceiver.$new(), sf);
         installed.push("screen hot-hook attach/detach");
     } catch (e) { Log.e(TAG, "screen hot-hook controller fail: " + e); }
 
@@ -721,6 +689,15 @@ Java.perform(function () {
         detachFreeformHotHooks("initial screen off");
     }
 
-    // Маркер пишет load.bin (root), а не мы: система (uid system) не может писать в /data/local/tmp (EACCES).
+    // Выгрузка скрипта откатывает хуки, но receiver'ы с JS-телом остались бы в system_server.
+    rpc.exports.dispose = function () {
+        Java.performNow(function () {
+            var sctx = ATh.currentActivityThread().getSystemContext();
+            receivers.forEach(function (r) {
+                try { sctx.unregisterReceiver(r); } catch (e) {}
+            });
+        });
+    };
+
     Log.i(TAG, "hooks installed [" + installed.join(", ") + "] uid=" + ourUid);
 });

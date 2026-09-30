@@ -184,14 +184,13 @@ Java.perform(() => {
     // Хелперы
     // -----------------------------------------------------------------------
 
-    /** Клавиша с буквой: латиница основного ряда или русский псевдокод. */
-    function isLetterKeyCode(keyCode) {
-        return (keyCode >= LETTER_KEYCODE_MIN && keyCode <= LETTER_KEYCODE_MAX)
-            || (keyCode >= RU_KEYCODE_MIN && keyCode <= RU_KEYCODE_MAX);
-    }
-
     function isRussianKeyCode(keyCode) {
         return keyCode >= RU_KEYCODE_MIN && keyCode <= RU_KEYCODE_MAX;
+    }
+
+    /** Клавиша с буквой: латиница основного ряда или русский псевдокод. */
+    function isLetterKeyCode(keyCode) {
+        return (keyCode >= LETTER_KEYCODE_MIN && keyCode <= LETTER_KEYCODE_MAX) || isRussianKeyCode(keyCode);
     }
 
     /** Таблица keyCode -> символ по JSON-описанию раскладки. */

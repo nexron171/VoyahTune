@@ -201,7 +201,7 @@ Java.perform(function () {
                         }
                     }
                 });
-                mediaProxyReceiver = ReceiverClass.$new();
+                mediaProxyReceiver = Java.retain(ReceiverClass.$new());
             }
             var register = context.registerReceiver.overload(
                 "android.content.BroadcastReceiver", "android.content.IntentFilter",
@@ -231,21 +231,20 @@ Java.perform(function () {
                 longFired = false;
                 nativeLongFallback = false;
                 if (timer !== null) clearTimeout(timer);
-                var longA = action(longSlot);
+                var longAction = action(longSlot);
                 timer = setTimeout(function () {      // порог удержания
                     timer = null;
-                    if (longA === "none") {
+                    if (longAction === "none") {
                         // Пользователь оставил длинное нажатие штатным. DOWN до решения short/long
                         // был поглощён, поэтому на физическом UP вернём KeyManager полную пару.
                         nativeLongFallback = true;
                         return;
                     }
                     longFired = true;
-                    doAction(longA);                  // долгое — СРАЗУ по порогу, не дожидаясь UP
+                    doAction(longAction);             // долгое — СРАЗУ по порогу, не дожидаясь UP
                 }, LONG_MS);
                 // DOWN держим до решения short/long. Иначе short=none+long=custom отдавал бы OEM
                 // DOWN, но поглощал UP после long и оставлял KeyManager в pressed-state.
-                return true;
             },
             up: function () {
                 if (timer !== null) { clearTimeout(timer); timer = null; }
@@ -254,11 +253,9 @@ Java.perform(function () {
                     return false; // long="none": replay штатной пары DOWN+UP
                 }
                 if (!longFired) {
-                    if (action(shortSlot) === "none") {
-                        return false; // на UP нужно replay штатной пары DOWN+UP
-                    } else {
-                        doAction(action(shortSlot));   // короткое — на отпускании, если долгого не было}
-                    }
+                    var shortAction = action(shortSlot);
+                    if (shortAction === "none") return false; // replay штатной пары DOWN+UP
+                    doAction(shortAction);            // короткое — на отпускании, если долгого не было
                 }
                 return true;
             }
@@ -267,18 +264,12 @@ Java.perform(function () {
 
     try {
         var Reader = Java.use("com.qinggan.keymanager.service.engine.KeyManagerReader");
-        var BUTTON_MAP = {
-            3090 : "STAR",
-            173 : "DVR",
-            130 : "VOICE",
-            128 : "PHONE"
-        };
-
-        var HANDLER_MAP = {
-            "STAR" : pressHandler("steerStarShort", "steerStarLong"),
-            "DVR" : pressHandler("steerDvrShort",  "steerDvrLong"),
-            "VOICE" : pressHandler("steerVoiceShort",  "steerVoiceLong"),
-            "PHONE" : pressHandler("steerPhoneShort",  "steerPhoneLong")
+        // QG-код кнопки → таймерный обработчик её слотов short/long.
+        var BUTTONS = {
+            3090: pressHandler("steerStarShort", "steerStarLong"),     // STAR
+            173: pressHandler("steerDvrShort", "steerDvrLong"),        // DVR
+            130: pressHandler("steerVoiceShort", "steerVoiceLong"),    // VOICE
+            128: pressHandler("steerPhoneShort", "steerPhoneLong")     // PHONE
         };
 
         readerOnKeyEvent = Reader.onKeyEvent.overload("android.view.KeyEvent");
@@ -288,7 +279,6 @@ Java.perform(function () {
                 catch (e) { Log.e(TAG, "[swk] retain KeyManagerReader err: " + e); }
             }
             var code = ke.getKeyCode();
-            Log.i(TAG, "key press: " + code + " action: " + ke.getAction())
             // Решение вычисляем один раз на initial DOWN и держим до UP. direct/noop уже обработаны
             // Native; keymanager отправляет одну стандартную пару здесь; native получает настоящие
             // физические DOWN/repeat/UP через оригинальную реализацию.
@@ -308,16 +298,12 @@ Java.perform(function () {
                 if (state !== null && state.route !== "native") return true;
                 return readerOnKeyEvent.call(this, ke);
             }
-            if (BUTTON_MAP.hasOwnProperty(code)) {
-                var actionCode = BUTTON_MAP[code];
-                var h = HANDLER_MAP[actionCode];
-                // Кнопки-действия (STAR/DVR/VOICE/PHONE) — таймерное короткое/долгое.
-                if (h === null) return readerOnKeyEvent.call(this, ke);        // не наша кнопка → штатно
+            if (BUTTONS.hasOwnProperty(code)) {
+                var h = BUTTONS[code];
                 if (h.passthrough()) return readerOnKeyEvent.call(this, ke);   // не настроено → штатно
-                if (ke.getAction() == 0) {
+                if (ke.getAction() === 0) {
                     h.down(ke.getRepeatCount());
-                }
-                else if (ke.getAction() == 1) {
+                } else if (ke.getAction() === 1) {
                     if (h.up() === false) {
                         // Штатное действие было отложено до UP, чтобы custom short/long мог безопасно
                         // поглотить обе половины. Replay делаем полной парой через original overload.
@@ -339,6 +325,13 @@ Java.perform(function () {
             return readerOnKeyEvent.call(this, ke);     // штатное действие кнопки
         };
         installMediaProxyReceiver(0);
+        // При выгрузке хук откатывается сам; receiver с JS-телом отвязываем.
+        rpc.exports.dispose = function () {
+            Java.performNow(function () {
+                if (!mediaProxyInstalled) return;
+                try { applicationCtx().unregisterReceiver(mediaProxyReceiver); } catch (e) {}
+            });
+        };
         var ready = "[swk] keymanager hooks installed: STAR DVR VOICE PHONE media=3/4/6 (LONG_MS=" + LONG_MS + ")";
         Log.i(TAG, ready);
         console.log(ready); // Loader can observe readiness before frida-inject -e returns.

@@ -17,7 +17,7 @@ require_one() {
     [ "$(grep -Fc "$needle" "$VD")" -eq 1 ] || fail "$message"
 }
 
-require_one "ffDisplayChangedMethod = ARd.onDisplayChanged.overload(" \
+require_one "ffDisplayChangedMethod = ActivityRecord.onDisplayChanged.overload(" \
     "ActivityRecord.onDisplayChanged(DisplayContent) hook is missing or duplicated"
 require_one "ffDisplayChangedMethod.call(this, displayContent);" \
     "stock onDisplayChanged must be called exactly once"

@@ -64,14 +64,10 @@ done
 for REQUIRED in \
         'var READY_MARKER = "[multidisplay] hook ready v2";' \
         'var FAILURE_MARKER = "[multidisplay] hook failed v2";' \
-        'overload.call.apply(overload, [receiver].concat(args))' \
-        'if (installed < 1) throw new Error("no compatible isWhiteListApp overload installed")' \
-        'traceWhitelist(pkg, false, "never")' \
-        'traceWhitelist(pkg, true, "server-override")' \
-        'var QUERY_TRACE_MAX = 20;' \
-        'var method = MDI.showDelayDialog;' \
-        'var method = MDI.setEnableActivityAnimation;' \
-        'signalReady("core_overloads=" + coreCount'; do
+        'MDI.isWhiteListApp.overload("java.lang.String")' \
+        'return !isNever(packageName === null ? null : "" + packageName);' \
+        'marker(READY_MARKER + " receiver="' \
+        'marker(FAILURE_MARKER + " stage=core_install'; do
     require_fixed "$MULTIDISPLAY" "$REQUIRED"
 done
 

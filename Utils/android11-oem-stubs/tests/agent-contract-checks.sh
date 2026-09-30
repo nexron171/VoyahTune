@@ -189,8 +189,7 @@ require_fixture_text \
     'void onItemClick(AppBean appBean)'
 
 require_text "$AGENT_ROOT/multidisplay.js" 'com.qinggan.systemservice.multidisplay.MultiDisplayImpl'
-require_text "$AGENT_ROOT/multidisplay.js" 'var method = MDI.isWhiteListApp;'
-require_text "$AGENT_ROOT/multidisplay.js" 'method.overloads.length === 0'
+require_text "$AGENT_ROOT/multidisplay.js" 'MDI.isWhiteListApp.overload("java.lang.String")'
 require_fixture_text \
     'systemservice/java/com/qinggan/systemservice/multidisplay/MultiDisplayImpl.java' \
     'boolean isWhiteListApp(String packageName)'
