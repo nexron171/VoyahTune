@@ -24,6 +24,24 @@ class FakeS3:
 
 
 class InstallerUploadTests(unittest.TestCase):
+    def test_compatible_rebuild_preserves_existing_version_objects(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / 'installer.exe'
+            path.write_bytes(b'new build')
+            files = {path.name: upload.release.hashes(path)}
+            store = FakeS3()
+            old_key = 'Installers/1.4.0/installer.exe'
+            store.objects[old_key] = {'ContentLength': 3, 'Metadata': {'sha256': 'old'}}
+            with patch.object(upload.release.catalog, 'verify_remote_head'):
+                upload.publish(directory, '1.4.0', 'voyahtune', files, store, build_id='3.20.0')
+                upload.publish(directory, '1.4.0', 'voyahtune', files, store, build_id='3.20.0')
+            self.assertEqual(store.objects[old_key]['Metadata']['sha256'], 'old')
+            self.assertEqual(store.writes, ['Installers/1.4.0/builds/3.20.0/installer.exe'])
+        for bad in ['../other', '', '/absolute', '.', '..', 'a/b']:
+            with self.assertRaises(ValueError):
+                upload.destination_prefix('1.4.0', bad)
+
     def test_complete_directory_uploads_under_installer_version_and_resumes(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

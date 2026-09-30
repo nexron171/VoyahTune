@@ -42,8 +42,16 @@ def prepare(directory, version):
     return files
 
 
-def publish(directory, version, bucket, files, store, check_only=False):
-    prefix = f'Installers/{version}/'
+def destination_prefix(version, build_id=None):
+    if not release.VERSION.fullmatch(version):
+        raise ValueError('Invalid Installer version')
+    if build_id is not None and not release.SAFE_NAME.fullmatch(build_id):
+        raise ValueError('Build ID must be a single simple path component')
+    return f'Installers/{version}/' + (f'builds/{build_id}/' if build_id is not None else '')
+
+
+def publish(directory, version, bucket, files, store, check_only=False, build_id=None):
+    prefix = destination_prefix(version, build_id)
     missing = []
     for name, info in sorted(files.items()):
         key = prefix + name
@@ -81,16 +89,18 @@ def main(argv=None):
     parser.add_argument('--directory', type=Path)
     parser.add_argument('--profile', default='voyahtune')
     parser.add_argument('--bucket', default='voyahtune')
+    parser.add_argument('--build-id', help='Publish a compatible rebuild under Installers/VERSION/builds/ID; preserve the original build')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--dry-run', action='store_true')
     modes.add_argument('--check-remote', action='store_true')
     args = parser.parse_args(argv)
     directory = args.directory or release.ROOT / 'Releases/dist' / f'installers-{args.version}'
     files = prepare(directory, args.version)
+    prefix = destination_prefix(args.version, args.build_id)
     for name, info in sorted(files.items()):
-        print(f's3://{args.bucket}/Installers/{args.version}/{name}  {info["size"]} bytes  sha256={info["sha256"]}')
+        print(f's3://{args.bucket}/{prefix}{name}  {info["size"]} bytes  sha256={info["sha256"]}')
     if not args.dry_run:
-        publish(directory, args.version, args.bucket, files, release.S3(args.profile, args.bucket), args.check_remote)
+        publish(directory, args.version, args.bucket, files, release.S3(args.profile, args.bucket), args.check_remote, args.build_id)
 
 
 if __name__ == '__main__':

@@ -134,6 +134,13 @@ python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION" --check-r
 python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --check-remote
 ```
 
+Для совместимой пересборки с прежней версией Installer используйте отдельный build ID,
+например `--build-id 3.20.0 --directory Releases/dist/installers-1.4.0-3.20.0`.
+Файлы будут опубликованы в `Installers/1.4.0/builds/3.20.0/` с обычными именами
+`VoyahTune-Installer-1.4.0-*`. Исходный комплект `Installers/1.4.0/` сохраняется.
+Тот же build ID передавайте при `--dry-run` и `--check-remote`; повторная публикация
+по-прежнему запрещает замену отличающихся байтов.
+
 Без `--update-catalog` выполняется только загрузка payload. `--directory` задаёт другую
 плоскую папку; по умолчанию используется `Releases/dist/s3-vVERSION` относительно
 репозитория. `--profile` и `--bucket` переопределяют `voyahtune` (URL entry должен
