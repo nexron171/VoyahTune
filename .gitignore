@@ -85,13 +85,14 @@ CONTEXT.md
 # Local plans, audits, investigations and checklists.
 /Plans/
 
-# Сборочный вывод игнорируется; публичный каталог OTA хранится в Git.
+# Сборочный вывод игнорируется; основной и beta-каталоги OTA хранятся в Git.
 # Источник релиза (инжект-скрипты, установщики, boot-обвязка, tools) — в Packaging/.
 # Собрать: ./make_release.sh <версия>
 /Releases/*
 !/Releases/ota/
 /Releases/ota/*
 !/Releases/ota/index.json
+!/Releases/ota/index-beta.json
 
 # Compiled installers and validators must never be committed.
 /Packaging/installer-tools/*

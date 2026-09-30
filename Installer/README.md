@@ -33,7 +33,7 @@ GUI на Tauri/Svelte напрямую использует Rust-движок. �
   прежние пути импорта моделей экспортируют типы из `release-core`.
 - `crates/installer-build/`: утилита разработчика для payload/host verification и сборки.
 - `desktop/`: интерфейс, прямые Tauri commands и события библиотеки.
-- `../Releases/ota/index.json`: простой каталог новых релизов; `releases/index.json` остаётся для прежних установщиков.
+- `../Releases/ota/index.json`: основной простой каталог новых релизов; соседний `index-beta.json` пополняется только по явной просьбе, без изменения основного. `releases/index.json` остаётся для прежних установщиков.
 - `tests/fixture-driver.rs`: внутренний адаптер fake ADB, не включается в GUI и требует `VOYAH_FAKE_ROOT`.
 
 [Контракты](../Docs/installer-protocol.md) · [Архитектура](../Docs/installer-architecture.md) ·
@@ -58,7 +58,7 @@ python3 Installer/tests/test_catalog_publish.py
 python3 Installer/scripts/sync-classic-commands.py --check
 ```
 
-Готовые APK, payload и GUI хранятся в игнорируемом `Releases/`; исключение — публикуемый `Releases/ota/index.json`. Первая команда
+Готовые APK, payload и GUI хранятся в игнорируемом `Releases/`; исключения — основной `Releases/ota/index.json` и отдельный `Releases/ota/index-beta.json`. Первая команда
 не собирает GUI, вторая не собирает Android. Windows/Linux выбираются отдельными
 платформенными флагами. В текущей переработке проверяется только macOS;
 Windows проверяется отдельно; результаты текущих испытаний на автомобиле описаны

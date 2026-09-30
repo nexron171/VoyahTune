@@ -173,6 +173,40 @@ Content-MD5, который проверяет Yandex. Это поддержив
 После ручного обновления публичных файлов под тем же номером metadata может быть
 недостоверной; такой случай требует отдельного расследования, не обхода проверки.
 
+## Beta-каталог
+
+[Releases/ota/index-beta.json](../Releases/ota/index-beta.json) — отдельный каталог
+рядом с основным, с теми же полями version/url/size/sha256. Он пополняется только
+по явной просьбе пользователя. При работе с beta основной `index.json` не меняется,
+записи не копируются между каталогами автоматически. Сборка или суффикс версии
+не означают просьбу опубликовать beta. Загрузка в S3 и push требуют своего
+согласованного объёма; приведённые команды применяются после такого поручения.
+
+Для загрузки подготовленных артефактов и обновления только beta-каталога:
+
+```sh
+python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" \
+  --index Releases/ota/index-beta.json --dry-run
+python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" \
+  --index Releases/ota/index-beta.json --update-catalog
+```
+
+Если артефакты уже загружены, обновление только beta-каталога с HEAD-проверкой:
+
+```sh
+python3 Installer/scripts/update-catalog.py \
+  --index Releases/ota/index-beta.json \
+  --entry "Releases/dist/s3-v${RELEASE_VERSION}/payload_${RELEASE_VERSION}.json" \
+  --verify-head
+git diff -- Releases/ota/index-beta.json
+```
+
+В коммит beta-публикации включайте только выбранный каталог и относящиеся к
+поручению изменения. Для проверки после разрешённого push используйте точный
+путь `Releases/ota/index-beta.json` в опубликованной ветке. Создание файла само
+по себе не публикует его и не меняет встроенный основной URL GUI/OTA.
+Изменения только файла каталога и документации не требуют пересборки установщика.
+
 ## Каталог и Git
 
 Флаг `--update-catalog` использует существующий merge/валидатор и атомарную запись,
