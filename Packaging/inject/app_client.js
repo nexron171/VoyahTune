@@ -61,6 +61,10 @@ Java.perform(function () {
     }
 
     var packageName = "" + application.getPackageName();
+    if (packageName === "com.pateo.rdsapp") {
+        installRdsStationRestore(application);
+        return;
+    }
     var enabled = false;
     var mapkitPackage = packageName === "ru.yandex.yandexnavi"
         || packageName === "ru.yandex.yandexmaps"
@@ -501,3 +505,374 @@ Java.perform(function () {
     console.log(READY_MARKER + " package=" + packageName + " enabled=" + enabled
         + " mapkitDpi=" + mapkitDpi + " mapkitHooks=" + mapkitHooksInstalled);
 });
+
+// RDS persistence is intentionally in the RdsApp process: keep its OEM audio-focus and
+// asynchronous source-switch protocol instead of reimplementing them in another Binder client.
+// Pure controller below is also executed by test_rds_restore.js with a deterministic clock.
+function createRdsRestoreController(io, initial) {
+    function valid(s) {
+        return s && typeof s.fm === "boolean" && Number.isInteger(s.freq)
+            && (s.fm ? s.freq >= 6500 && s.freq <= 10800 : s.freq >= 150 && s.freq <= 30000)
+            && typeof s.rds === "boolean" && Number.isInteger(s.pi) && s.pi >= 0 && s.pi <= 65535;
+    }
+    function same(a, b) {
+        return valid(a) && valid(b) && a.fm === b.fm
+            && (a.freq === b.freq || (a.fm && a.rds && b.rds && a.pi > 0 && a.pi === b.pi));
+    }
+    function exact(a, b) {
+        return a && b && a.fm === b.fm && a.freq === b.freq && a.rds === b.rds && a.pi === b.pi;
+    }
+    var saved = valid(initial) && !initial.ta ? initial : null;
+    var selection = null;
+    var scanRequested = false;
+    var request = null;
+    var revision = 0;
+    var candidateRevision = 0;
+    var candidateStation = null;
+    var closed = false;
+
+    function cancel(reason) {
+        revision++;
+        candidateRevision++;
+        candidateStation = null;
+        request = null;
+        io.cancelOwned();
+        io.log(reason);
+    }
+    function observe(station) {
+        if (closed || !valid(station) || station.ta || !io.ready()) return;
+        if (request && same(station, request.target)) {
+            request = null;
+            revision++;
+            io.releaseOwned();
+            io.log("restore confirmed " + station.freq);
+        }
+        if (scanRequested) return;
+        if (selection && io.now() > selection.until) selection = null;
+        if (selection ? !same(station, selection.target) : saved && !same(station, saved)) return;
+        if (exact(candidateStation, station)) return;
+        candidateStation = station;
+        var candidate = ++candidateRevision;
+        // A transient scan/TA/seek observation must not replace the durable station.
+        io.later(function () {
+            if (closed || candidate !== candidateRevision) return;
+            candidateStation = null;
+            if (scanRequested || !io.ready()) return;
+            var current = io.current();
+            if (!valid(current) || current.ta || !same(current, station)) return;
+            if (selection && !same(current, selection.target)) return;
+            if (exact(saved, current)) return;
+            if (io.save(current)) {
+                saved = current;
+                selection = null;
+                io.log("station saved " + current.freq);
+            } else {
+                io.log("station save failed; previous durable record retained");
+            }
+        }, 750);
+    }
+    function step(token) {
+        if (closed || token !== revision || !request) return;
+        if (io.now() >= request.until) {
+            cancel("restore timed out without confirmation");
+            return;
+        }
+        if (!io.hasFocus()) { cancel("radio focus lost"); return; }
+        if (io.ready()) {
+            var current = io.current();
+            if (same(current, request.target) && !current.ta) {
+                // A matching snapshot proves station state, but a resume still needs audioPlay.
+                if (!request.submitted && !request.alreadyPlaying) io.playCurrent();
+                observe(current);
+                return;
+            }
+            if (!request.submitted) {
+                request.submitted = true;
+                io.log("restore submitted " + request.target.freq);
+                try { io.tune(request.target); }
+                catch (e) { cancel("restore dispatch failed: " + e); return; }
+                // playStation may synchronously cause a callback, pause or another selection.
+                if (!request || token !== revision) return;
+            }
+        }
+        io.later(function () { step(token); }, 250);
+    }
+    return {
+        observe: observe,
+        select: function (station) {
+            cancel("explicit station choice");
+            scanRequested = false;
+            selection = valid(station) ? {target: station, until: io.now() + 15000} : null;
+        },
+        pause: function () {
+            cancel("playback paused");
+            // Keep an outstanding explicit choice so its late confirmation can still be saved.
+        },
+        scan: function () {
+            cancel("explicit scan");
+            selection = null;
+            scanRequested = true;
+        },
+        scanFinished: function () {
+            if (scanRequested) {
+                scanRequested = false;
+                var station = io.current();
+                if (valid(station)) selection = {target: station, until: io.now() + 15000};
+            }
+            observe(io.current());
+        },
+        resume: function (fallback, alreadyPlaying) {
+            if (closed || scanRequested || (selection && io.now() <= selection.until) || !saved) {
+                fallback();
+                return;
+            }
+            if (request) return; // Repeated OEM resume callbacks do not extend the deadline.
+            candidateRevision++;
+            candidateStation = null;
+            var token = ++revision;
+            request = {target: saved, until: io.now() + 10000, submitted: false, alreadyPlaying: !!alreadyPlaying};
+            // Register the stock listener immediately: a switch to another media source while
+            // waiting for the tuner must cancel restoration instead of stealing focus later.
+            if (!io.acquireFocus()) { cancel("radio focus unavailable"); return; }
+            step(token);
+        },
+        close: function () { closed = true; cancel("hook closed"); }
+    };
+}
+
+function installRdsStationRestore(application) {
+    var TAG = "VoyahRdsRestore";
+    var hooks = [];
+    var controller = null;
+    var owned = null;
+    var dispatching = null;
+    var cancelAfterDispatch = false;
+    var ownsResumeDelay = false;
+    var stopped = false;
+    var Log = Java.use("android.util.Log");
+    function log(text) { Log.i(TAG, text); }
+    try {
+        var Rds = Java.use("com.pateo.overSideRadio.base.dab.RdsManager");
+        var Model = Java.use("com.pateo.rdsapp.main.model.RdsDataModel");
+        var Info = Java.use("com.pateo.overSideRadio.base.dab.RdsManager$3");
+        var SystemInfo = Java.use("com.pateo.overSideRadio.base.dab.RdsManager$4");
+        var Station = Java.use("com.adayo.proxy.dab.aidl.beans.RadioStation");
+        var Band = Java.use("com.adayo.proxy.dab.DABConstants$BAND_DEF");
+        var Clock = Java.use("android.os.SystemClock");
+        var AudioHelper = Java.use("com.qinggan.media.helper.AudioPolicyHelper");
+        var MediaEnum = Java.use("com.qinggan.media.helper.MediaEnum");
+        var prefs = application.getSharedPreferences("voyahtune_rds_restore", 0);
+        // Validate every required signature before replacing anything. Unknown OEM builds fail open.
+        var playStation = Rds.playStation.overload("com.adayo.proxy.dab.aidl.beans.RadioStation");
+        var focus = Rds.requestAudioFocus.overload();
+        var play = Rds.play.overload();
+        var resume = Rds.resumePlay.overload();
+        var modelPlay = Model.play.overload();
+        var pause = Rds.pause.overload();
+        var pauseNoAbandon = Rds.pauseNoAbandon.overload();
+        var scan = Rds.fullScan.overload();
+        var scanBand = Rds.fullScan.overload("com.adayo.proxy.dab.DABConstants$BAND_DEF");
+        var switchBand = Rds.switchRadioSource.overload("com.adayo.proxy.dab.DABConstants$BAND_DEF");
+        var update = Info.onCurrentStationUpdate.overload("com.adayo.proxy.dab.aidl.beans.RadioStation");
+        var scanState = Info.onFreqSeekStateChanged.overload("com.adayo.proxy.dab.DABConstants$ScanState");
+        var init = Rds.initData.overload();
+        var audioStatus = SystemInfo.onAudioPlayStatus.overload("boolean");
+        // Resolve only the existing singleton; never enumerate the ART heap (32-bit OEM crash).
+        var manager = Rds.getInstance();
+        function snapshot(station) {
+            if (station === null) return null;
+            return {fm: !!station.isFMStation(), freq: Number(station.getFreq()),
+                rds: !!station.isRDS(), pi: Number(station.getPICode()),
+                ta: !!station.isTAAssert()};
+        }
+        function current() { return snapshot(manager.getCurStation()); }
+        function ready() {
+            var s = current();
+            return manager.isInit() && String(manager.getScanState().name()) === "FINISH" && !(s && s.ta);
+        }
+        var audio = AudioHelper.getInstance(application);
+        function hasFocus() { return !audio.isCall() && audio.isCurMediaFocus(MediaEnum.RDS.value); }
+        function releaseResumeDelay() {
+            if (ownsResumeDelay) { manager.delayPlay.value = false; ownsResumeDelay = false; }
+        }
+        function releaseOwned() {
+            releaseResumeDelay();
+            if (owned !== null) { owned.$dispose(); owned = null; }
+        }
+        function cancelOwned() {
+            releaseResumeDelay();
+            if (owned === null) return;
+            if (dispatching !== null) { cancelAfterDispatch = true; return; }
+            // Only remove our own deferred tune; a later OEM/user command is never cleared.
+            var delayed = manager.delayPlayStation.value;
+            if (delayed !== null && delayed.equals(owned)) {
+                manager.delayPlayStation.value = null;
+                manager.delayPlay.value = false;
+            }
+            var pending = manager.tempPlayStation.value;
+            if (pending !== null && pending.equals(owned)) {
+                manager.tempPlayStation.value = null;
+                if (Number(manager.actionCode.value) === 1002) manager.actionCode.value = -1;
+                manager.handler.value.removeMessages(1002);
+            }
+            releaseOwned();
+        }
+        // Touch the cancellation fields up front, before installing any hooks.
+        manager.delayPlayStation.value;
+        manager.delayPlay.value;
+        manager.tempPlayStation.value;
+        manager.actionCode.value;
+        manager.handler.value;
+        current(); ready();
+        var record = null;
+        try {
+            var raw = prefs.getString("station", null);
+            var parsed = raw === null ? null : JSON.parse(String(raw));
+            if (parsed && parsed.schema === 1) record = parsed.station;
+        } catch (e) { log("saved station ignored: " + e); }
+        controller = createRdsRestoreController({
+            now: function () { return Number(Clock.elapsedRealtime()); },
+            later: function (fn, ms) {
+                setTimeout(function () {
+                    if (!stopped) Java.perform(function () {
+                        Java.scheduleOnMainThread(function () {
+                            if (!stopped) {
+                                try { fn(); } catch (e) { log("deferred operation failed: " + e); }
+                            }
+                        });
+                    });
+                }, ms);
+            },
+            current: current, ready: ready, log: log,
+            hasFocus: hasFocus,
+            acquireFocus: function () {
+                // requestAudioFocus also sets delayPlay if the radio is not initialized yet.
+                ownsResumeDelay = !manager.isInit()
+                    || String(manager.getScanState().name()) !== "FINISH";
+                focus.call(manager);
+                return hasFocus();
+            },
+            cancelOwned: cancelOwned, releaseOwned: releaseOwned,
+            save: function (station) {
+                // One atomic record, independent of SP_PLAY_DATA. commit acknowledges the disk write;
+                // writes occur only after a settled choice and never on every frequency callback.
+                return prefs.edit().putString("station", JSON.stringify({schema: 1, station: station})).commit();
+            },
+            playCurrent: function () { play.call(manager); },
+            tune: function (station) {
+                cancelOwned();
+                owned = Java.retain(Station.$new(station.freq));
+                owned.setIsFMStation(station.fm);
+                owned.setIsRDS(station.rds && station.pi > 0);
+                owned.setPICode(station.pi);
+                dispatching = station;
+                try { playStation.call(manager, owned); }
+                finally {
+                    dispatching = null;
+                    if (cancelAfterDispatch) { cancelAfterDispatch = false; cancelOwned(); }
+                }
+            }
+        }, record);
+        function hook(method, replacement) {
+            method.implementation = replacement;
+            hooks.push(method);
+        }
+        function safely(fn) {
+            try { fn(); return true; }
+            catch (e) { log("restore operation skipped: " + e); return false; }
+        }
+        function requestResume(fallback, automatic) {
+            var called = false;
+            // Never repeat an original call if the OEM implementation itself throws.
+            try {
+                controller.resume(function () { called = true; fallback(); }, automatic);
+            } catch (e) {
+                if (called) throw e;
+                safely(function () { controller.pause(); });
+                log("restore skipped: " + e);
+                fallback();
+            }
+        }
+        hook(playStation, function (station) {
+            // AudioPolicy.onResume can replay our delayed RadioStation through this public method.
+            if (owned !== null && station !== null && station.equals(owned)) {
+                dispatching = snapshot(station);
+                try { return playStation.call(this, station); }
+                finally {
+                    dispatching = null;
+                    if (cancelAfterDispatch) { cancelAfterDispatch = false; cancelOwned(); }
+                }
+            }
+            safely(function () { controller.select(snapshot(station)); });
+            var result = playStation.call(this, station);
+            safely(function () { controller.observe(current()); });
+            return result;
+        });
+        hook(play, function () { requestResume(function () { play.call(manager); }); });
+        hook(resume, function () { requestResume(function () { resume.call(manager); }); });
+        // The UI's play button calls Model.play -> playStation(current), not RdsManager.play.
+        // Intercept it as resume so a reset default is not mistaken for a new explicit choice.
+        hook(modelPlay, function () {
+            var self = this;
+            requestResume(function () { modelPlay.call(self); });
+        });
+        hook(pause, function () { safely(function () { controller.pause(); }); return pause.call(this); });
+        hook(pauseNoAbandon, function () { safely(function () { controller.pause(); }); return pauseNoAbandon.call(this); });
+        hook(scan, function () { safely(function () { controller.scan(); }); return scan.call(this); });
+        hook(scanBand, function (band) { safely(function () { controller.scan(); }); return scanBand.call(this, band); });
+        hook(switchBand, function (band) {
+            // RdsApp 1.0's AM branch mistakenly requests FM. Correct only our restore call.
+            return switchBand.call(this, dispatching ? (dispatching.fm ? Band.FM.value : Band.MW.value) : band);
+        });
+        hook(update, function (station) {
+            var result = update.call(this, station);
+            safely(function () { controller.observe(snapshot(station)); });
+            return result;
+        });
+        hook(scanState, function (state) {
+            var result = scanState.call(this, state);
+            if (String(state.name()) === "FINISH") safely(function () { controller.scanFinished(); });
+            return result;
+        });
+        var automaticPlaybackHandled = false;
+        function resumeActiveRadio() {
+            // Covers OEM automatic playback after wake/reconnection, without starting radio
+            // on attach, SCREEN_ON, another media source or a paused tuner.
+            if (!automaticPlaybackHandled && hasFocus() && manager.isRdsSource() && manager.isPlay()) {
+                automaticPlaybackHandled = true;
+                requestResume(function () {}, true);
+            }
+        }
+        hook(init, function () {
+            var result = init.call(this);
+            safely(function () {
+                controller.observe(current());
+                automaticPlaybackHandled = false;
+                resumeActiveRadio();
+            });
+            return result;
+        });
+        hook(audioStatus, function (paused) {
+            var result = audioStatus.call(this, paused);
+            safely(function () {
+                if (!paused) resumeActiveRadio();
+                else { automaticPlaybackHandled = false; controller.pause(); }
+            });
+            return result;
+        });
+        Java.scheduleOnMainThread(function () {
+            if (!stopped) safely(function () { controller.observe(current()); }); // Never tunes on attach.
+        });
+        log("ready; restore on requested or confirmed active radio playback");
+        console.log("[rds-restore] hook ready v1");
+        console.log("[app-client] hook ready v1");
+    } catch (e) {
+        stopped = true;
+        if (controller !== null) {
+            try { controller.close(); } catch (_) { /* Keep rolling back all installed replacements. */ }
+        }
+        for (var i = hooks.length - 1; i >= 0; i--) hooks[i].implementation = null;
+        log("hook failed: " + e);
+        console.log("[rds-restore] hook failed v1: " + e);
+    }
+}
