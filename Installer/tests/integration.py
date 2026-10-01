@@ -14,7 +14,7 @@ class InstallerTests(unittest.TestCase):
   self.fixture=self.bundle/'adb/adb';shutil.copyfile(ROOT/'Installer/tests/fake_adb.py',self.fixture);self.fixture.chmod(0o755)
   # Entry name selects the host protocol. The same fixture also implements Android commands.
   self.fixture.rename(self.bundle/'adb/fake-adb');self.fixture.symlink_to('fake-adb')
-  for name in ['getprop','setprop','id','pm','cmd','dumpsys','settings','restorecon','chown','stat','mount','am','pidof','sha256sum','pkill','ps','grep']:
+  for name in ['service','getprop','setprop','id','pm','cmd','dumpsys','settings','restorecon','chown','stat','mount','am','pidof','sha256sum','pkill','ps','grep']:
    p=self.base/'bin'/name;p.parent.mkdir(exist_ok=True);p.symlink_to(self.bundle/'adb/fake-adb')
   (self.bundle/'host-tools.json').write_text(json.dumps({'schema':1,'files':[{'path':'adb/adb','sha256':hashlib.sha256(self.fixture.read_bytes()).hexdigest()}]}))
   self.device=self.base/'device'
@@ -114,6 +114,58 @@ class InstallerTests(unittest.TestCase):
   self.assertEqual(len(reports),1)
   self.assertTrue(json.loads(reports[0].read_text())['success'])
   self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+ def updater_device_calls(self):
+  return [json.loads(line) for line in (self.base/'device-calls.jsonl').read_text().splitlines()
+          if 'ru.big.town.updater' in json.loads(line)['args']]
+ def assert_updater_not_reinstalled(self):
+  self.assertFalse(any(c['name']=='cmd' or c['args'][0] in ['uninstall','force-stop','install']
+                       for c in self.updater_device_calls()))
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+ def test_updater_transient_pm_failure_after_ready_recovers_without_uninstall(self):
+  self.seed_apps();self.state['updaterProbeFailure']='restart';self.write_state()
+  self.apply(self.plan());self.assert_app_data(True)
+  self.assertEqual(self.read_state()['systemServerPid'],'303')
+  self.assert_updater_not_reinstalled()
+ def test_updater_empty_package_list_does_not_trigger_repair(self):
+  self.seed_apps();self.state['updaterProbeFailure']='empty';self.write_state()
+  self.apply(self.plan());self.assert_updater_not_reinstalled()
+ def test_updater_missing_services_expires_without_uninstall(self):
+  self.seed_apps();self.state['updaterProbeFailure']='permanent';self.write_state()
+  result=self.apply(self.plan(),okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertIn('Android не восстановился для проверки Updater',result.stdout)
+  self.assert_updater_not_reinstalled()
+ def test_updater_missing_de_is_repaired_with_install_existing(self):
+  self.seed_apps();self.state['updaterMissingDe']=True;self.write_state()
+  self.apply(self.plan())
+  calls=self.updater_device_calls()
+  self.assertTrue(any(c['name']=='cmd' for c in calls))
+  self.assertFalse(any(c['args'][0]=='uninstall' for c in calls))
+  self.assertTrue((self.device/'data/user_de/0/ru.big.town.updater').is_dir())
+ def test_updater_persistent_missing_de_uses_preserving_repair(self):
+  self.seed_apps();self.state.update(updaterMissingDe=True,updaterFirstInstallNoData=True);self.write_state()
+  self.apply(self.plan())
+  calls=self.updater_device_calls()
+  self.assertTrue(any(c['args']==['uninstall','-k','--user','0','ru.big.town.updater'] for c in calls))
+ def test_updater_restart_before_locked_repair_rechecks_state(self):
+  self.seed_apps();self.state.update(updaterMissingDe=True,updaterProbeFailure='restart',updaterProbeFailureAt=3);self.write_state()
+  self.apply(self.plan())
+  self.assertEqual(self.read_state()['systemServerPid'],'303')
+  self.assertEqual(sum(c['name']=='cmd' for c in self.updater_device_calls()),1)
+  self.assertFalse(any(c['args'][0]=='uninstall' for c in self.updater_device_calls()))
+ def test_updater_restart_during_repair_recovers(self):
+  self.seed_apps();self.state.update(updaterMissingDe=True,updaterInstallRestart=True);self.write_state()
+  self.apply(self.plan())
+  self.assertEqual(self.read_state()['systemServerPid'],'404')
+  self.assertEqual(sum(c['name']=='cmd' for c in self.updater_device_calls()),2)
+  self.assertFalse(any(c['args'][0]=='uninstall' for c in self.updater_device_calls()))
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+ def test_updater_real_repair_error_stays_failed(self):
+  self.seed_apps();self.state.update(updaterMissingDe=True,updaterInstallFailure=True);self.write_state()
+  result=self.apply(self.plan(),okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertIn('injected install-existing failure',result.stdout)
+  self.assertFalse(any(c['args'][0]=='uninstall' for c in self.updater_device_calls()))
  def test_native_broadcast_failure_without_system_restart_stays_failed(self):
   self.seed_apps()
   plan=self.plan()
