@@ -35,6 +35,12 @@
       "url": "https://storage.yandexcloud.net/voyahtune/v3.20.0/payload_3.20.0.zip",
       "size": 124679976,
       "sha256": "29f12d2c372c0a13e0720216c672c825e8c71e3844283327c4de7873181ff0df"
+    },
+    {
+      "version": "3.21.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/v3.21.0/payload_3.21.0.zip",
+      "size": 124688239,
+      "sha256": "e7007f955cfe53f039ee749dbd4315fe20ec76a23dbb24565a5be652070e03e2"
     }
   ]
 }
