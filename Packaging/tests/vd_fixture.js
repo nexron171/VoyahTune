@@ -115,7 +115,7 @@ function fixture(options = {}) {
     // Export local functions only in this host evaluation; shipped source exposes nothing.
     source = source.replace('    } // installAgent', `
         globalThis.api = { refreshFreeformCfg, ffDpiFor, ffApplyTaskDpi,
-            get cfg() { return FF; }, scheduleFreeformHotAttach, scheduleFreeformConfigReplay };
+            get cfg() { return FF; }, get state() { return ffHookState; }, scheduleFreeformHotAttach, scheduleFreeformConfigReplay };
     } // installAgent`);
     vm.runInNewContext(source, sandbox, { timeout: 2000 });
     function advance(ms) {

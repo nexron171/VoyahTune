@@ -101,3 +101,50 @@ test('DPI recursion is per task and guard clears after failure', () => {
     other.getRequestedOverrideConfiguration = () => ({ densityDpi: { value: 240 } });
     assert.equal(f.api.ffApplyTaskDpi(other, 'org.app'), false);
 });
+function screen(f, on) { f.receive('ScreenStateReceiver', 'android.intent.action.SCREEN_' + (on ? 'ON' : 'OFF')); }
+test('duplicate ON and OFF do not repeat replacements or pending work', () => {
+    const f = fixture(); f.advance(1000); f.events.length = 0;
+    screen(f, true); screen(f, true); f.advance(1000);
+    assert.equal(f.events.filter(e => e[0] === 'replacement').length, 0);
+    assert.equal(f.api.state, 'active');
+    screen(f, false); const count = f.events.filter(e => e[0] === 'replacement').length;
+    screen(f, false); f.advance(6000);
+    assert.equal(count, 2);
+    assert.equal(f.events.filter(e => e[0] === 'replacement').length, 2);
+    assert.equal(f.api.state, 'sleeping'); assert.equal(f.timers.size, 0);
+});
+test('OFF ON OFF cancels wake timer and stale callbacks', () => {
+    const f = fixture(); f.advance(1000); screen(f, false); screen(f, true);
+    const stale = [...f.timers.values()].map(t => t.fn);
+    screen(f, false);
+    assert.equal(f.timers.size, 0);
+    for (const callback of stale) callback();
+    f.advance(7000);
+    assert.equal(f.api.state, 'sleeping');
+    assert.equal(f.methods.get('com.android.server.wm.DisplayPolicy.layoutWindowLw').implementation, null);
+});
+test('reload burst loads once and replays once without changing active hooks', () => {
+    const f = fixture(); f.advance(1000); f.events.length = 0;
+    for (let n = 0; n < 10; ++n) f.receive('WinReloadReceiver', 'ru.big.town.anative.WIN_RELOAD');
+    f.advance(200);
+    assert.equal(f.events.filter(e => e[0] === 'setting' && e[1] === 'voyahtune_freeform').length, 1);
+    assert.equal(f.events.filter(e => e[0] === 'traversal').length, 1);
+    assert.equal(f.events.filter(e => e[0] === 'replacement').length, 0);
+});
+test('disable during initial wait cancels every pending timer', () => {
+    const f = fixture();
+    f.options.settings = { voyahtune_freeform: '0' };
+    f.receive('WinReloadReceiver', 'ru.big.town.anative.WIN_RELOAD'); f.advance(50);
+    assert.equal(f.api.state, 'disabled'); assert.equal(f.timers.size, 0);
+    f.advance(6000);
+    assert.equal(f.methods.get('com.android.server.wm.DisplayPolicy.layoutWindowLw').implementation, null);
+});
+test('partial detach is failed and cannot schedule a later attach', () => {
+    const f = fixture(); f.advance(1000);
+    f.options.failRollback = 'com.android.server.wm.DisplayPolicy.layoutWindowLw';
+    screen(f, false);
+    assert.match(f.status(), /\|failed\|partial.hot.detach$/);
+    assert.equal(f.api.state, 'error'); assert.equal(f.timers.size, 0);
+    f.advance(10000);
+    assert.equal(f.registered.size, 0);
+});

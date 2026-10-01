@@ -27,7 +27,18 @@ Java.perform(function () {
     var agentFailed = false, agentIdentity = "", lastAgentStatus = "";
     var replacements = [], receivers = [];
     var installed = [];
-    var FF, ffConfigReplayTimer = null;
+    var FF, ffConfigReplayTimer = null, ffHotAttachTimer = null;
+    var ffReloadTimer = null, ffTraversalTimer = null;
+    var ffHotAttachPending = false, ffHookState = "preparing";
+
+    function cancelFreeformPending() {
+        [ffConfigReplayTimer, ffHotAttachTimer, ffReloadTimer, ffTraversalTimer].forEach(function (timer) {
+            if (timer !== null) clearTimeout(timer);
+        });
+        ffConfigReplayTimer = ffHotAttachTimer = ffReloadTimer = ffTraversalTimer = null;
+        ffHotAttachPending = false;
+        if (FF) ++FF.hookEpoch;
+    }
     var ATh = Java.use("android.app.ActivityThread");
     var SystemClock = Java.use("android.os.SystemClock");
     var preparationDeadline = Number(SystemClock.elapsedRealtime()) + 20000;
@@ -75,12 +86,12 @@ Java.perform(function () {
         }
     }
     function failAgent(reason) {
+        if (agentFailed) return;
         agentFailed = true;
+        ffHookState = "error";
         if (preparationTimer !== null) clearTimeout(preparationTimer);
-        if (typeof ffConfigReplayTimer !== "undefined" && ffConfigReplayTimer !== null) {
-            clearTimeout(ffConfigReplayTimer); ffConfigReplayTimer = null;
-        }
-        if (typeof FF !== "undefined") { FF.on = false; ++FF.hookEpoch; }
+        cancelFreeformPending();
+        if (FF) FF.on = false;
         var clean = true;
         for (var i = receivers.length - 1; i >= 0; --i) {
             try { receivers[i].context.unregisterReceiver(receivers[i].receiver); }
@@ -292,7 +303,6 @@ Java.perform(function () {
     var ATh = Java.use('android.app.ActivityThread');
     var ffLayoutMethod = null, ffLayoutImplementation = null, ffLayoutAttached = false;
     var ffConfigMethod = null, ffConfigImplementation = null, ffConfigAttached = false;
-    var ffHotAttachPending = false;
     var ffTraversalService = null, ffTraversalMethod = null, ffTraversalWarned = false;
     var ffTaskClass = null, ffConfigurationClass = null, ffTaskField = null;
     var ffDisplayChangedMethod = null, ffDisplayChangedApplying = false;
@@ -425,6 +435,17 @@ Java.perform(function () {
     }
 
     function requestFreeformTraversalOnce(reason) {
+        if (agentFailed || !FF.on || !FF.screenOn || ffTraversalTimer !== null) return;
+        var epoch = FF.hookEpoch;
+        ffTraversalTimer = setTimeout(function () {
+            if (agentFailed || epoch !== FF.hookEpoch) return;
+            ffTraversalTimer = null;
+            if (agentFailed || epoch !== FF.hookEpoch || !FF.on || !FF.screenOn) return;
+            Java.perform(function () { performFreeformTraversal(reason); });
+        }, 0);
+    }
+
+    function performFreeformTraversal(reason) {
         // Injection can happen before WMS publishes its LocalService; retry lazily at reattach.
         if (ffTraversalService === null || ffTraversalMethod === null) {
             resolveFreeformTraversalRequester();
@@ -480,18 +501,27 @@ Java.perform(function () {
                     returnType: "void",
                     argumentTypes: ["android.content.Context", "android.content.Intent"],
                     implementation: function (c, i) {
-                        refreshFreeformCfg();
-                        if (!FF.on) {
-                            ++FF.hookEpoch;
-                            ffHotAttachPending = false;
-                            if (ffConfigReplayTimer !== null) {
-                                clearTimeout(ffConfigReplayTimer);
-                                ffConfigReplayTimer = null;
-                            }
-                            detachFreeformHotHooks("config off");
-                        } else if (FF.screenOn) {
-                            scheduleFreeformConfigReplay("config reload");
-                        }
+                        if (agentFailed) return;
+                        if (ffReloadTimer !== null) clearTimeout(ffReloadTimer);
+                        var epoch = FF.hookEpoch;
+                        ffReloadTimer = setTimeout(function () {
+                            if (agentFailed || epoch !== FF.hookEpoch) return;
+                            ffReloadTimer = null;
+                            if (agentFailed || epoch !== FF.hookEpoch) return;
+                            Java.perform(function () {
+                                try {
+                                    if (!refreshFreeformCfg()) return;
+                                    if (!FF.on) {
+                                        cancelFreeformPending();
+                                        if (detachFreeformHotHooks("config off")) {
+                                            setFreeformHookState("disabled");
+                                        }
+                                    } else if (FF.screenOn) {
+                                        scheduleFreeformConfigReplay("config reload");
+                                    }
+                                } catch (e) { failAgent("reload." + e); }
+                            });
+                        }, 50);
                     }
                 }
             }
@@ -525,7 +555,8 @@ Java.perform(function () {
                                         + " property=" + actualType);
                                 return;
                             }
-                            FF.liftType = type === 1 ? 1 : 2;
+                            if (agentFailed || (type !== 1 && type !== 2) || type === FF.liftType) return;
+                            FF.liftType = type;
                             Log.i(TAG, "screen lift changed type=" + FF.liftType
                                     + " effectiveBottom=" + ffBottom());
                             requestFreeformTraversalOnce("screen lift type=" + FF.liftType);
@@ -736,22 +767,33 @@ Java.perform(function () {
     } catch (e) { throw e; }
 
     function detachFreeformHotHooks(reason) {
-        var changed = false;
+        var changed = false, complete = true;
         if (ffLayoutAttached && ffLayoutMethod !== null) {
             try {
                 ffLayoutMethod.implementation = null;
                 ffLayoutAttached = false;
                 changed = true;
-            } catch (e) { Log.e(TAG, "layout detach fail: " + e); }
+            } catch (e) { complete = false; Log.e(TAG, "layout detach fail: " + e); }
         }
         if (ffConfigAttached && ffConfigMethod !== null) {
             try {
                 ffConfigMethod.implementation = null;
                 ffConfigAttached = false;
                 changed = true;
-            } catch (e) { Log.e(TAG, "config detach fail: " + e); }
+            } catch (e) { complete = false; Log.e(TAG, "config detach fail: " + e); }
         }
         if (changed) Log.i(TAG, "freeform hot hooks DETACHED: " + reason);
+        if (!complete) failAgent("hot.detach");
+        return complete;
+    }
+
+    function setFreeformHookState(state) {
+        if (agentFailed) return;
+        ffHookState = state;
+        try {
+            publishAgentStatus(state === "pending" ? "preparing" : "active",
+                    state === "active" ? "geometry" : "geometry." + state);
+        } catch (e) { failAgent("status." + e); }
     }
 
     function attachFreeformHotHooks(reason) {
@@ -777,8 +819,7 @@ Java.perform(function () {
             requestFreeformTraversalOnce(reason);
         }
         if (ffLayoutAttached && ffConfigAttached && !agentFailed) {
-            try { publishAgentStatus("active", "geometry"); }
-            catch (e) { failAgent("status." + e); }
+            setFreeformHookState("active");
         }
     }
 
@@ -788,9 +829,12 @@ Java.perform(function () {
     // the initial/wake stabilization delay. One bounded traversal applies the last complete snapshot.
     function scheduleFreeformConfigReplay(reason) {
         if (ffConfigReplayTimer !== null) clearTimeout(ffConfigReplayTimer);
+        var epoch = FF.hookEpoch;
         ffConfigReplayTimer = setTimeout(function () {
+            if (agentFailed || epoch !== FF.hookEpoch) return;
             ffConfigReplayTimer = null;
-            if (!FF.on || !FF.screenOn) return;
+            if (agentFailed || epoch !== FF.hookEpoch || !FF.on || !FF.screenOn) return;
+            Java.perform(function () {
             if (ffLayoutAttached && ffConfigAttached) {
                 requestFreeformTraversalOnce(reason);
                 return;
@@ -798,24 +842,27 @@ Java.perform(function () {
             if (!ffHotAttachPending) {
                 scheduleFreeformHotAttach(1000, reason + " +1s stabilization");
             }
+            });
         }, 100);
     }
 
     function scheduleFreeformHotAttach(delayMs, reason) {
-        FF.screenOn = true;
+        if (agentFailed || !SYSTEM_SERVER_FREEFORM_HOT_HOOKS || !FF.on || !FF.screenOn) return;
+        if (ffLayoutAttached && ffConfigAttached) return;
+        if (ffHotAttachPending) return;
         var epoch = ++FF.hookEpoch;
         ffHotAttachPending = true;
-        // Даже если SCREEN_OFF был пропущен, SCREEN_ON сначала снимает replacements синхронно.
-        detachFreeformHotHooks(reason + " stabilization");
-        if (!SYSTEM_SERVER_FREEFORM_HOT_HOOKS || !FF.on) {
+        setFreeformHookState("pending");
+        if (agentFailed) return;
+        ffHotAttachTimer = setTimeout(function () {
+            if (agentFailed || epoch !== FF.hookEpoch) return;
+            ffHotAttachTimer = null;
+            if (agentFailed || FF.hookEpoch !== epoch || !FF.screenOn || !FF.on) return;
             ffHotAttachPending = false;
-            return;
-        }
-        setTimeout(function () {
-            if (FF.hookEpoch === epoch && FF.screenOn && FF.on) {
-                ffHotAttachPending = false;
-                attachFreeformHotHooks(reason);
-            }
+            Java.perform(function () {
+                try { attachFreeformHotHooks(reason); }
+                catch (e) { failAgent("hot.attach." + e); }
+            });
         }, delayMs);
     }
 
@@ -855,22 +902,27 @@ Java.perform(function () {
                     returnType: "void",
                     argumentTypes: ["android.content.Context", "android.content.Intent"],
                     implementation: function (c, i) {
-                        var action = i.getAction();
-                        if (action === "android.intent.action.SCREEN_OFF") {
-                            noteFreeformScreenTransition();
-                            FF.screenOn = false;
-                            ++FF.hookEpoch; // отменить pending attach от предыдущего SCREEN_ON
-                            ffHotAttachPending = false;
-                            if (ffConfigReplayTimer !== null) {
-                                clearTimeout(ffConfigReplayTimer);
-                                ffConfigReplayTimer = null;
+                        if (agentFailed) return;
+                        try {
+                            var action = i.getAction();
+                            if (action === "android.intent.action.SCREEN_OFF") {
+                                if (!FF.screenOn) return;
+                                noteFreeformScreenTransition();
+                                FF.screenOn = false;
+                                cancelFreeformPending();
+                                if (detachFreeformHotHooks("SCREEN_OFF")) {
+                                    setFreeformHookState(FF.on ? "sleeping" : "disabled");
+                                }
+                            } else if (action === "android.intent.action.SCREEN_ON") {
+                                if (FF.screenOn) return;
+                                var attachDelay = noteFreeformScreenTransition();
+                                FF.screenOn = true;
+                                refreshFreeformCfg();
+                                if (FF.on) scheduleFreeformHotAttach(attachDelay,
+                                        "SCREEN_ON +" + attachDelay + "ms");
+                                else setFreeformHookState("disabled");
                             }
-                            detachFreeformHotHooks("SCREEN_OFF");
-                        } else if (action === "android.intent.action.SCREEN_ON") {
-                            var attachDelay = noteFreeformScreenTransition();
-                            scheduleFreeformHotAttach(attachDelay,
-                                    "SCREEN_ON +" + attachDelay + "ms");
-                        }
+                        } catch (e) { failAgent("screen." + e); }
                     }
                 }
             }
@@ -883,19 +935,16 @@ Java.perform(function () {
     } catch (e) { throw e; }
 
     FF.screenOn = ffScreenIsInteractive();
-    if (FF.screenOn) {
+    if (FF.screenOn && FF.on) {
         // Инъекция часто совпадает с boot/wake: тот же короткий стабилизационный интервал.
         scheduleFreeformHotAttach(1000, "initial +1s");
     } else {
-        ++FF.hookEpoch;
-        ffHotAttachPending = false;
-        detachFreeformHotHooks("initial screen off");
+        setFreeformHookState(FF.on ? "sleeping" : "disabled");
     }
 
-    // Маркер пишет load.bin (root), а не мы: система (uid system) не может писать в /data/local/tmp (EACCES).
+    // Root loader converts this generation-specific result to the compatible v1 worker snapshot.
     Log.i(TAG, "hooks installed [" + installed.join(", ") + "] uid=" + ourUid);
-    publishAgentStatus(FF.on && FF.screenOn ? "preparing" : "active",
-            FF.on ? (FF.screenOn ? "geometry.pending" : "geometry.sleeping") : "geometry.disabled");
+
     } // installAgent
     preparationPass();
 });
