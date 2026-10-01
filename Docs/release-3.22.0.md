@@ -35,3 +35,20 @@
 Основной каталог не меняется. Общие APK, hooks и loader поставляются новым payload.
 GUI Installer пересобирать не требуется: его код, встроенные ресурсы удаления,
 порядок установки и контракт payload не изменены. Версия и минимум Installer сохранены.
+
+## Проверенный payload
+
+Сборка выполнена из чистого revision `62b74765a826375fe24b9bde207886011b7d1645`:
+29 артефактов, manifest schema 4, recipe schema 3, минимум Installer 1.2.0.
+Native и RestoreMode: versionName 3.22.0, versionCode 3022000; Updater: 0.4.0 / 4.
+Подписи всех трёх APK совпадают с локальным payload 3.20.0. Подписанные metadata
+Native/RestoreMode содержат revision сборки и 24 проверенных runtime-хеша.
+
+Проверены verify-payload, ZIP inventory и байты всех файлов, версии и подписи APK.
+Размер `payload_3.22.0.zip` — 124691762 байта. SHA-256:
+`f309156c836e8533f9770cf1555272e7383fe3b20fb289a364f0ccfd9056dcf1`.
+
+Путь публикации —
+[payload 3.22.0](https://storage.yandexcloud.net/voyahtune/v3.22.0/payload_3.22.0.zip).
+Каталог публикуется в GitHub `master-od`; исходники изменений остаются в отдельной
+ветке `codex/system-server-stability-3.22.0`. Установка на автомобиль не выполнялась.
