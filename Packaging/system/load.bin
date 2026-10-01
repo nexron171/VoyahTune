@@ -1183,22 +1183,77 @@ launcher_cycle() {
     write_worker_state "$LNCH_STATE" "$LP" "$LP_ID"
 }
 
+# system_server reports the result after eternalize, including delayed hot-hook attach.
+# The directory is private to UID system, and is already covered by runtime removal.
+VD_AGENT_VERSION=3.22.0-v1
+VD_STATUS=/data/local/open_voyah/vd_hooks/status.v1
+prepare_vd_status() {
+    mkdir -p /data/local/open_voyah/vd_hooks || return 1
+    chmod 711 /data/local/open_voyah || return 1
+    chown 1000:1000 /data/local/open_voyah/vd_hooks || return 1
+    chmod 700 /data/local/open_voyah/vd_hooks || return 1
+}
+
 vd_cycle() {
     SS=$(pidof system_server)
     SS=${SS%% *}
     SS_ID=$(process_identity "$SS" system_server 2>/dev/null) || SS_ID=
-    load_runtime_hook_state "$SS_ID" "$VDMARK" "$VD_ATTEMPT"
-    VD_STATE=$RUNTIME_STATE
-    if [ -n "$SS_ID" ] && [ "$VD_STATE" = waiting ]; then
-        write_worker_state injecting "$SS" "$SS_ID"
-        if inject_ret "$SS" "$VD" /data/local/tmp/voyahtune_vd_bypass.txt \
-                "$VDMARK" "$VD_ATTEMPT" "$SS_ID" system_server; then
-            VD_STATE=active
-        else
-            VD_STATE=failed
+    VD_STATE=waiting
+    if [ -n "$SS_ID" ]; then
+        VD_ATTEMPT_VALUE=$(cat "$VD_ATTEMPT" 2>/dev/null) || VD_ATTEMPT_VALUE=
+        if [ "$VD_ATTEMPT_VALUE" != "$SS_ID" ]; then
+            if reserve_injection_attempt "$SS_ID" "$VD_ATTEMPT" && prepare_vd_status; then
+                VD_DEADLINE=$(( $(uptime_seconds) + 25 ))
+                printf '%s|%s\n' "$SS_ID" "$VD_DEADLINE" > "$VD_STATUS.deadline"
+                write_worker_state injecting "$SS" "$SS_ID"
+                VD_TRY=/data/local/tmp/voyahtune_vd_bypass.txt.try
+                timeout -k 5 30 "$FI" -p "$SS" -s "$VD" -e > "$VD_TRY" 2>&1
+                VD_RC=$?
+                cat "$VD_TRY" >> /data/local/tmp/voyahtune_vd_bypass.txt
+                # A non-zero injector exit is latched even if an eternalized agent survived.
+                printf '%s|%s\n' "$SS_ID" "$VD_RC" > "$VD_STATUS.inject-result"
+                [ "$VD_RC" -eq 0 ] || loge "VD injector failed pid=$SS rc=$VD_RC (latched)"
+            else
+                VD_STATE=failed
+            fi
+        fi
+        VD_STATE=failed
+        VD_RECORD=$(cat "$VD_STATUS" 2>/dev/null) || VD_RECORD=
+        VD_RESULT=$(cat "$VD_STATUS.inject-result" 2>/dev/null) || VD_RESULT=
+        VD_FAILED=0
+        case "$VD_RESULT" in "$SS_ID|"*)
+            [ "${VD_RESULT#*\|}" = 0 ] || VD_FAILED=1 ;;
+        esac
+        VD_PREFIX="$SS_ID|$VD_AGENT_VERSION|"
+        case "$VD_RECORD" in "$VD_PREFIX"*)
+            VD_DETAILS=${VD_RECORD#"$VD_PREFIX"}
+            VD_AGENT_STATE=${VD_DETAILS%%\|*}
+            VD_REASON=${VD_DETAILS#*\|}
+            case "$VD_AGENT_STATE" in
+                active) [ "$VD_FAILED" -eq 1 ] || VD_STATE=active ;;
+                preparing)
+                    VD_LIMIT=$(cat "$VD_STATUS.deadline" 2>/dev/null) || VD_LIMIT=
+                    case "$VD_LIMIT" in "$SS_ID|"*)
+                        VD_UNTIL=${VD_LIMIT#*\|}
+                        case "$VD_UNTIL" in ''|*[!0-9]*) ;; *)
+                            if [ "$VD_FAILED" -eq 0 ] && [ "$(uptime_seconds)" -lt "$VD_UNTIL" ]; then
+                                VD_STATE=injecting
+                            fi ;;
+                        esac ;;
+                    esac ;;
+                failed) loge_once_vd="$SS_ID:$VD_REASON"
+                    if [ "${VD_LAST_FAILURE:-}" != "$loge_once_vd" ]; then
+                        VD_LAST_FAILURE=$loge_once_vd
+                        loge "VD agent failed pid=$SS reason=$VD_REASON (latched)"
+                    fi ;;
+            esac ;;
+        esac
+        if [ "$VD_STATE" = active ]; then
+            if [ "$(cat "$VDMARK" 2>/dev/null)" != "$SS_ID" ]; then
+                printf '%s\n' "$SS_ID" > "$VDMARK.$$.new" && mv -f "$VDMARK.$$.new" "$VDMARK"
+            fi
         fi
     fi
-
     write_worker_state "$VD_STATE" "$SS" "$SS_ID"
 }
 

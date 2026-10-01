@@ -21,17 +21,145 @@ Java.perform(function () {
     var Log = Java.use("android.util.Log");
     var Binder = Java.use("android.os.Binder");
     var ourUid = -1;
-    try {
-        ourUid = Java.use("android.app.ActivityThread").currentActivityThread()
-                 .getSystemContext().getPackageManager().getPackageUid(OUR_PKG, 0);
-    } catch (e) {
-        // Fail closed: фиксированный UID после переустановки может принадлежать совсем другому пакету.
-        // При -1 все UID-scoped bypass ниже штатно откажут, вместо выдачи системных прав постороннему app.
-        ourUid = -1;
-        Log.e(TAG, "package uid resolve failed; privileged UID hooks disabled: " + e);
-    }
+    var AGENT_VERSION = "3.22.0-v1";
+    var STATUS_PATH = "/data/local/open_voyah/vd_hooks/status.v1";
+    var preparationTimer = null, preparationAttempts = 0;
+    var agentFailed = false, agentIdentity = "", lastAgentStatus = "";
+    var replacements = [], receivers = [];
     var installed = [];
+    var FF, ffConfigReplayTimer = null;
+    var ATh = Java.use("android.app.ActivityThread");
+    var SystemClock = Java.use("android.os.SystemClock");
+    var preparationDeadline = Number(SystemClock.elapsedRealtime()) + 20000;
 
+    function readAgentFile(path) {
+        var reader = Java.use("java.io.BufferedReader").$new(
+                Java.use("java.io.FileReader").$new(path));
+        try { return String(reader.readLine()); } finally { reader.close(); }
+    }
+    function publishAgentStatus(state, reason) {
+        if (!agentIdentity) {
+            var stat = readAgentFile("/proc/self/stat");
+            var fields = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/);
+            agentIdentity = "v2:" + readAgentFile("/proc/sys/kernel/random/boot_id")
+                    + ":" + Java.use("android.os.Process").myPid() + ":" + fields[19];
+        }
+        var record = agentIdentity + "|" + AGENT_VERSION + "|" + state + "|"
+                + String(reason).replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 160);
+        if (record === lastAgentStatus) return;
+        var out = Java.use("java.io.FileWriter").$new(STATUS_PATH + ".new", false);
+        try {
+            var line = record + "\n";
+            out.write.overload("java.lang.String", "int", "int").call(out, line, 0, line.length);
+        } finally { out.close(); }
+        var File = Java.use("java.io.File");
+        if (!File.$new(STATUS_PATH + ".new").renameTo(File.$new(STATUS_PATH))) {
+            throw new Error("VD status atomic rename failed");
+        }
+        lastAgentStatus = record;
+        Log.i(TAG, "agent " + state + " reason=" + reason);
+    }
+    function trackReplacement(method) {
+        if (replacements.indexOf(method) < 0) replacements.push(method);
+    }
+    function registerAgentReceiver(context, receiver, filter, permission) {
+        // Record before registration: a throwing vendor implementation may have registered it.
+        receivers.push({ context: context, receiver: receiver });
+        if (permission) {
+            context.registerReceiver.overload('android.content.BroadcastReceiver',
+                    'android.content.IntentFilter', 'java.lang.String', 'android.os.Handler')
+                    .call(context, receiver, filter, permission, null);
+        } else {
+            context.registerReceiver.overload('android.content.BroadcastReceiver',
+                    'android.content.IntentFilter').call(context, receiver, filter);
+        }
+    }
+    function failAgent(reason) {
+        agentFailed = true;
+        if (preparationTimer !== null) clearTimeout(preparationTimer);
+        if (typeof ffConfigReplayTimer !== "undefined" && ffConfigReplayTimer !== null) {
+            clearTimeout(ffConfigReplayTimer); ffConfigReplayTimer = null;
+        }
+        if (typeof FF !== "undefined") { FF.on = false; ++FF.hookEpoch; }
+        var clean = true;
+        for (var i = receivers.length - 1; i >= 0; --i) {
+            try { receivers[i].context.unregisterReceiver(receivers[i].receiver); }
+            catch (e) {
+                if (String(e).indexOf("Receiver not registered") < 0) clean = false;
+            }
+        }
+        for (var j = replacements.length - 1; j >= 0; --j) {
+            try { replacements[j].implementation = null; } catch (e) { clean = false; }
+        }
+        try { publishAgentStatus("failed", (clean ? "clean." : "partial.") + reason); }
+        catch (e) { Log.e(TAG, "agent status unavailable: " + e); }
+        Log.e(TAG, "agent failed rollback=" + clean + " reason=" + reason);
+    }
+    function prepareAgent() {
+        var thread = ATh.currentActivityThread();
+        if (thread === null) throw new Error("ActivityThread pending");
+        var context = thread.getSystemContext();
+        if (context === null || context.getPackageManager() === null) {
+            throw new Error("system context/PackageManager pending");
+        }
+        // On a soft restart Frida may cache the boot loader before services.jar is available.
+        // Select the system server main thread's context loader before resolving private classes.
+        var threads = Java.use("java.lang.Thread").getAllStackTraces().keySet().iterator();
+        while (threads.hasNext()) {
+            var t = Java.cast(threads.next(), Java.use("java.lang.Thread"));
+            if (String(t.getName()) === "main" && t.getContextClassLoader() !== null) {
+                Java.classFactory.loader = t.getContextClassLoader();
+                break;
+            }
+        }
+        ourUid = context.getPackageManager().getPackageUid(OUR_PKG, 0);
+        if (!(ourUid >= 0)) throw new Error("Native UID unavailable");
+        var methods = [
+            ["com.android.server.wm.ActivityTaskManagerService", "removeTask", ["int"]],
+            ["com.android.server.input.InputManagerService", "checkInjectEventsPermission", ["int", "int"]],
+            ["com.android.server.display.DisplayManagerService$BinderService", "checkCallingPermission", ["java.lang.String", "java.lang.String"]],
+            ["com.android.server.wm.ActivityStackSupervisor", "isCallerAllowedToLaunchOnDisplay", ["int", "int", "int", "android.content.pm.ActivityInfo"]],
+            ["com.android.server.wm.ActivityRecord", "canBeLaunchedOnDisplay", ["int"]],
+            ["com.android.server.pm.PackageManagerService", "hasSystemFeature", ["java.lang.String", "int"]],
+            ["com.android.server.wm.DisplayPolicy", "layoutWindowLw", ["com.android.server.wm.WindowState", "com.android.server.wm.WindowState", "com.android.server.wm.DisplayFrames"]],
+            ["com.android.server.wm.ActivityRecord", "ensureActivityConfiguration", ["int", "boolean", "boolean"]],
+            ["com.android.server.wm.ActivityRecord", "onDisplayChanged", ["com.android.server.wm.DisplayContent"]]
+        ];
+        methods.forEach(function (entry) {
+            var method = Java.use(entry[0])[entry[1]];
+            if (!method) throw new Error("unsupported method " + entry[1]);
+            // An ABI mismatch is final; a missing services class may still be startup timing.
+            try { method.overload.apply(method, entry[2]); }
+            catch (e) { e.vdUnsupported = true; throw e; }
+        });
+        ["mRequestedWidth", "mRequestedHeight"].forEach(function (field) {
+            Java.use("com.android.server.wm.WindowState").class.getDeclaredField(field);
+        });
+        Java.use("com.android.server.wm.ActivityRecord").class.getDeclaredField("task");
+        Java.use("com.android.server.wm.Task");
+        Java.use("android.content.res.Configuration");
+    }
+    function preparationPass() {
+        if (agentFailed) return;
+        ++preparationAttempts;
+        try {
+            publishAgentStatus("preparing", "services");
+            prepareAgent();
+        } catch (e) {
+            if (e.vdUnsupported || preparationAttempts >= 41
+                    || Number(SystemClock.elapsedRealtime()) >= preparationDeadline) {
+                failAgent("prepare." + e); return;
+            }
+            preparationTimer = setTimeout(function () {
+                preparationTimer = null;
+                Java.perform(preparationPass);
+            }, 500);
+            return;
+        }
+        try { installAgent(); } catch (e) { failAgent("install." + e); }
+    }
+
+    function installAgent() {
     // BEGIN_NATIVE_TASK_REMOVAL
     // REMOVE_TASKS is signature|documenter on the OEM ROM, not signature|privileged.
     // Whitelisting Native cannot grant it. Only this rare operation, only Native's resolved UID:
@@ -40,6 +168,7 @@ Java.perform(function () {
     try {
         var ATMS = Java.use("com.android.server.wm.ActivityTaskManagerService");
         var nativeRemoveTask = ATMS.removeTask.overload('int');
+        trackReplacement(nativeRemoveTask);
         nativeRemoveTask.implementation = function (taskId) {
             if (ourUid < 0 || Binder.getCallingUid() !== ourUid) {
                 return nativeRemoveTask.call(this, taskId);
@@ -53,25 +182,27 @@ Java.perform(function () {
         };
         installed.push("ATMS.removeTask(native-uid)");
     } catch (e) {
-        Log.e(TAG, "ATMS.removeTask hook fail: " + e);
+        throw e;
     }
     // END_NATIVE_TASK_REMOVAL
 
     // 1) INJECT_EVENTS — редко (только при инъекции ввода из SplitHostActivity)
     try {
         var IMS = Java.use("com.android.server.input.InputManagerService");
+        trackReplacement(IMS.checkInjectEventsPermission);
         IMS.checkInjectEventsPermission.implementation = function (pid, uid) {
             if (ourUid >= 0 && uid === ourUid) return true;
             return this.checkInjectEventsPermission(pid, uid);
         };
         installed.push("IMS.checkInjectEventsPermission");
     } catch (e) {
-        Log.e(TAG, "IMS hook fail: " + e);
+        throw e;
     }
 
     // 2) ADD_TRUSTED_DISPLAY / INTERNAL_SYSTEM_WINDOW — редко (только при createVirtualDisplay и т.п.)
     try {
         var BS = Java.use("com.android.server.display.DisplayManagerService$BinderService");
+        trackReplacement(BS.checkCallingPermission.overload('java.lang.String', 'java.lang.String'));
         BS.checkCallingPermission.overload('java.lang.String', 'java.lang.String').implementation = function (permission, func) {
             if ((permission === "android.permission.ADD_TRUSTED_DISPLAY"
                  || permission === "android.permission.INTERNAL_SYSTEM_WINDOW")
@@ -82,19 +213,20 @@ Java.perform(function () {
         };
         installed.push("BinderService.checkCallingPermission");
     } catch (e) {
-        Log.e(TAG, "DMS hook fail: " + e);
+        throw e;
     }
 
     // 3) запуск активити на нашем VirtualDisplay — редко (только при старте активити на дисплей)
     try {
         var ASS = Java.use("com.android.server.wm.ActivityStackSupervisor");
+        trackReplacement(ASS.isCallerAllowedToLaunchOnDisplay);
         ASS.isCallerAllowedToLaunchOnDisplay.implementation = function (pid, uid, displayId, aInfo) {
             if (ourUid >= 0 && uid === ourUid) return true;
             return this.isCallerAllowedToLaunchOnDisplay(pid, uid, displayId, aInfo);
         };
         installed.push("ASS.isCallerAllowedToLaunchOnDisplay");
     } catch (e) {
-        Log.e(TAG, "ASS hook fail: " + e);
+        throw e;
     }
 
     // 4) Совместимость «капризных» приложений на вторичных дисплеях (наш VD): разрешаем запуск
@@ -102,13 +234,14 @@ Java.perform(function () {
     //    первичный дисплей не трогаем (там оставляем штатную логику). Редко (при запуске активити).
     try {
         var AR = Java.use("com.android.server.wm.ActivityRecord");
+        trackReplacement(AR.canBeLaunchedOnDisplay);
         AR.canBeLaunchedOnDisplay.implementation = function (displayId) {
             if (displayId !== 0) return true;
             return this.canBeLaunchedOnDisplay(displayId);
         };
         installed.push("ActivityRecord.canBeLaunchedOnDisplay");
     } catch (e) {
-        Log.e(TAG, "AR.canBeLaunchedOnDisplay hook fail: " + e);
+        throw e;
     }
 
     // 5) Системный фич-флаг «активити на вторичных дисплеях» — часть проверок мультиоконности
@@ -116,13 +249,14 @@ Java.perform(function () {
     //    (дешёвое сравнение строки, не горячий путь).
     try {
         var PMS = Java.use("com.android.server.pm.PackageManagerService");
+        trackReplacement(PMS.hasSystemFeature.overload('java.lang.String', 'int'));
         PMS.hasSystemFeature.overload('java.lang.String', 'int').implementation = function (name, version) {
             if (name === "android.software.activities_on_secondary_displays") return true;
             return this.hasSystemFeature(name, version);
         };
         installed.push("PMS.hasSystemFeature(secondary_displays)");
     } catch (e) {
-        Log.e(TAG, "PMS.hasSystemFeature hook fail: " + e);
+        throw e;
     }
 
     // ============================================================================================
@@ -150,7 +284,7 @@ Java.perform(function () {
     // ============================================================================================
     // На SCREEN_OFF полностью снимаем два hot replacements. Поэтому sleep/wake storm до отложенного
     // reattach вообще не пересекает Java<->Frida bridge, а не просто делает JS fast-path.
-    var FF = { on: true, screenOn: true, hookEpoch: 0,
+    FF = { on: true, screenOn: true, hookEpoch: 0,
                lastScreenTransitionAt: 0, rapidScreenTransitions: 0,
                left: 145, top: 45, right: 1920, bottom: 720, compactBottom: 560,
                liftType: 2, dpi: {}, fullscreen: {} };
@@ -158,7 +292,7 @@ Java.perform(function () {
     var ATh = Java.use('android.app.ActivityThread');
     var ffLayoutMethod = null, ffLayoutImplementation = null, ffLayoutAttached = false;
     var ffConfigMethod = null, ffConfigImplementation = null, ffConfigAttached = false;
-    var ffHotAttachPending = false, ffConfigReplayTimer = null;
+    var ffHotAttachPending = false;
     var ffTraversalService = null, ffTraversalMethod = null, ffTraversalWarned = false;
     var ffTaskClass = null, ffConfigurationClass = null, ffTaskField = null;
     var ffDisplayChangedMethod = null, ffDisplayChangedApplying = false;
@@ -347,10 +481,10 @@ Java.perform(function () {
         var sctx = ATh.currentActivityThread().getSystemContext();
         // Пермишен-гейт: WIN_RELOAD примем ТОЛЬКО от держателя WRITE_SECURE_SETTINGS (наш Native), чтобы
         // любое приложение не могло спамить перечитку конфига в system_server.
-        sctx.registerReceiver.overload('android.content.BroadcastReceiver', 'android.content.IntentFilter', 'java.lang.String', 'android.os.Handler')
-            .call(sctx, WinReceiver.$new(), IF.$new("ru.big.town.anative.WIN_RELOAD"), "android.permission.WRITE_SECURE_SETTINGS", null);
+        registerAgentReceiver(sctx, WinReceiver.$new(), IF.$new("ru.big.town.anative.WIN_RELOAD"),
+                "android.permission.WRITE_SECURE_SETTINGS");
         installed.push("WIN_RELOAD receiver");
-    } catch (e) { Log.e(TAG, "WIN_RELOAD receiver fail: " + e); }
+    } catch (e) { throw e; }
 
     // The logical displays stay 1920x720 while the dashboard is physically lowered. Apply the
     // 560px viewport immediately on the OEM completion broadcast and replay WM traversal so every
@@ -383,10 +517,9 @@ Java.perform(function () {
         });
         var liftFilter = Java.use("android.content.IntentFilter").$new("action.qg.layout.changed");
         var liftCtx = ATh.currentActivityThread().getSystemContext();
-        liftCtx.registerReceiver.overload('android.content.BroadcastReceiver', 'android.content.IntentFilter')
-            .call(liftCtx, LiftReceiver.$new(), liftFilter);
+        registerAgentReceiver(liftCtx, LiftReceiver.$new(), liftFilter);
         installed.push("screen-lift bounds receiver");
-    } catch (e) { Log.e(TAG, "screen-lift receiver fail: " + e); }
+    } catch (e) { throw e; }
 
     // 6) Ресайз не-системного окна на ФИЗИЧЕСКИХ экранах (display 0 = водитель, display 1 = пассажир) в Rect
     //    (фейк-freeform). Наш VD/прочие дисплеи не трогаем. Горячий путь → fast-path по флагу.
@@ -398,6 +531,7 @@ Java.perform(function () {
         ffRequestedWidthField.setAccessible(true);
         ffRequestedHeightField.setAccessible(true);
         ffLayoutMethod = DP.layoutWindowLw;
+        trackReplacement(ffLayoutMethod);
         ffLayoutImplementation = function (win, attached, displayFrames) {
             ffLayoutMethod.call(this, win, attached, displayFrames); // оригинал раскладывает окно
             if (!FF.on) return;
@@ -499,7 +633,7 @@ Java.perform(function () {
             }
         };
         installed.push("DisplayPolicy.layoutWindowLw(detachable-freeform)");
-    } catch (e) { Log.e(TAG, "layoutWindowLw hook fail: " + e); }
+    } catch (e) { throw e; }
 
     // 7) Кастомный DPI не-системному приложению на ФИЗИЧЕСКИХ дисплеях.
     //
@@ -517,6 +651,7 @@ Java.perform(function () {
         ffTaskField = ARc.class.getDeclaredField("task");
         ffTaskField.setAccessible(true);
         ffConfigMethod = ARc.ensureActivityConfiguration.overload('int', 'boolean', 'boolean');
+        trackReplacement(ffConfigMethod);
         ffConfigImplementation = function (g, p, iv) {
             var result = ffConfigMethod.call(this, g, p, iv);
             if (!FF.on) return result;
@@ -530,7 +665,7 @@ Java.perform(function () {
             return result;
         };
         installed.push("ActivityRecord.ensureActivityConfiguration(detachable-dpi)");
-    } catch (e) { Log.e(TAG, "ensureActivityConfiguration hook fail: " + e); }
+    } catch (e) { throw e; }
 
     // 8) A successful OEM swap reparents ActivityRecord to the other physical DisplayContent.
     // Run the stock move first, then request one ordinary WM traversal: layoutWindowLw will rebuild
@@ -547,6 +682,7 @@ Java.perform(function () {
             var ARd = Java.use("com.android.server.wm.ActivityRecord");
             ffDisplayChangedMethod = ARd.onDisplayChanged.overload(
                     'com.android.server.wm.DisplayContent');
+            trackReplacement(ffDisplayChangedMethod);
             ffDisplayChangedMethod.implementation = function (displayContent) {
                 ffDisplayChangedMethod.call(this, displayContent);
                 if (!FF.on || !FF.screenOn || ffDisplayChangedApplying) return;
@@ -578,7 +714,7 @@ Java.perform(function () {
             };
             installed.push("ActivityRecord.onDisplayChanged(physical-reparent-replay)");
         }
-    } catch (e) { Log.e(TAG, "ActivityRecord.onDisplayChanged hook fail: " + e); }
+    } catch (e) { throw e; }
 
     function detachFreeformHotHooks(reason) {
         var changed = false;
@@ -608,18 +744,22 @@ Java.perform(function () {
                 ffLayoutMethod.implementation = ffLayoutImplementation;
                 ffLayoutAttached = true;
                 changed = true;
-            } catch (e) { Log.e(TAG, "layout attach fail: " + e); }
+            } catch (e) { failAgent("layout.attach." + e); return; }
         }
         if (!ffConfigAttached && ffConfigMethod !== null && ffConfigImplementation !== null) {
             try {
                 ffConfigMethod.implementation = ffConfigImplementation;
                 ffConfigAttached = true;
                 changed = true;
-            } catch (e) { Log.e(TAG, "config attach fail: " + e); }
+            } catch (e) { failAgent("config.attach." + e); return; }
         }
         if (changed) {
             Log.i(TAG, "freeform hot hooks ATTACHED: " + reason);
             requestFreeformTraversalOnce(reason);
+        }
+        if (ffLayoutAttached && ffConfigAttached && !agentFailed) {
+            try { publishAgentStatus("active", "geometry"); }
+            catch (e) { failAgent("status." + e); }
         }
     }
 
@@ -719,9 +859,9 @@ Java.perform(function () {
         var ScreenFilter = Java.use("android.content.IntentFilter");
         var sf = ScreenFilter.$new("android.intent.action.SCREEN_ON");
         sf.addAction("android.intent.action.SCREEN_OFF");
-        ATh.currentActivityThread().getSystemContext().registerReceiver(ScreenReceiver.$new(), sf);
+        registerAgentReceiver(ATh.currentActivityThread().getSystemContext(), ScreenReceiver.$new(), sf);
         installed.push("screen hot-hook attach/detach");
-    } catch (e) { Log.e(TAG, "screen hot-hook controller fail: " + e); }
+    } catch (e) { throw e; }
 
     FF.screenOn = ffScreenIsInteractive();
     if (FF.screenOn) {
@@ -735,4 +875,8 @@ Java.perform(function () {
 
     // Маркер пишет load.bin (root), а не мы: система (uid system) не может писать в /data/local/tmp (EACCES).
     Log.i(TAG, "hooks installed [" + installed.join(", ") + "] uid=" + ourUid);
+    publishAgentStatus(FF.on && FF.screenOn ? "preparing" : "active",
+            FF.on ? (FF.screenOn ? "geometry.pending" : "geometry.sleeping") : "geometry.disabled");
+    } // installAgent
+    preparationPass();
 });
