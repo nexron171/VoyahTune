@@ -302,4 +302,6 @@ grep -Fq 'VD_FLAGS_TRUSTED  = 1 | 8 | 256 | 1024' "$HOST" \
 grep -Fq 'VD_FLAGS_FALLBACK = 1 | 8 | 256' "$HOST" \
     || fail "fallback VD must destroy content when removed"
 
+node "$ROOT/Packaging/tests/test_vd_stability.js"
+
 echo "vd/freeform hook contract test: OK"

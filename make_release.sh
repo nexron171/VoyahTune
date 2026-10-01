@@ -209,6 +209,18 @@ verify_common_release_assets() {
         echo "Startup/wake saved-config guard failed; release was not created." >&2
         exit 1
     fi
+    if ! sh "$COMMON/tests/test_vd_hot_hooks_disabled.sh"; then
+        echo "VD stability guard failed; release was not created." >&2
+        exit 1
+    fi
+    if ! sh "$COMMON/tests/test_vd_reparent_replay.sh"; then
+        echo "VD physical reparent guard failed; release was not created." >&2
+        exit 1
+    fi
+    if ! sh "$COMMON/tests/test_screen_lift_resize_restore.sh"; then
+        echo "Screen lift geometry guard failed; release was not created." >&2
+        exit 1
+    fi
     if ! sh "$COMMON/tests/test_keyboard_modes.sh"; then
         echo "Keyboard opt-in lifecycle guard failed; release was not created." >&2
         exit 1
@@ -231,6 +243,10 @@ verify_common_release_assets() {
     fi
     if ! sh "$COMMON/tests/test_drive_reset_hook.sh"; then
         echo "Account reset hook guard failed; release was not created." >&2
+        exit 1
+    fi
+    if ! sh "$COMMON/tests/test_apollo_safe_device.sh"; then
+        echo "Apollo opt-in guard failed; release was not created." >&2
         exit 1
     fi
     if ! bash "$ROOT/Utils/android11-oem-stubs/tests/static-checks.sh"; then
