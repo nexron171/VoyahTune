@@ -56,3 +56,48 @@ test('screen off and disabled geometry retain ready core permissions', () => {
         assert.ok(f.methods.get('com.android.server.wm.ActivityTaskManagerService.removeTask').implementation);
     }
 });
+test('complete DPI snapshot serves first launch with zero hot-path Settings reads', () => {
+    const f = fixture({ settings: { voyahtune_dpi_packages: 'org.first,org.second',
+        'voyahtune_dpi_org.first': '180', 'voyahtune_dpi_org.second': '240' } });
+    f.advance(1000); f.events.length = 0;
+    const task = { getRequestedOverrideConfiguration: () => ({ densityDpi: { value: 0 } }),
+        onRequestedOverrideConfigurationChanged: cfg => assert.equal(cfg.densityDpi.value, 240) };
+    const record = { getDisplayId: () => 1, packageName: { value: 'org.second' }, task };
+    f.methods.get('com.android.server.wm.ActivityRecord.ensureActivityConfiguration').implementation.call(record, 0, false, false);
+    assert.equal(f.api.ffDpiFor('org.first'), 180);
+    assert.equal(f.api.ffDpiFor('org.unconfigured'), 0);
+    assert.equal(f.events.filter(e => e[0] === 'setting').length, 0);
+});
+test('failed refresh retains the entire previous snapshot', () => {
+    const f = fixture({ settings: { voyahtune_win_left: '150', voyahtune_dpi_packages: 'org.app',
+        'voyahtune_dpi_org.app': '240' } });
+    const old = f.api.cfg;
+    f.options.settings.voyahtune_win_left = '170';
+    f.options.failSetting = 'voyahtune_dpi_org.app';
+    assert.equal(f.api.refreshFreeformCfg(), false);
+    assert.equal(f.api.cfg, old);
+    assert.equal(f.api.cfg.left, 150);
+    assert.equal(f.api.ffDpiFor('org.app'), 240);
+    delete f.options.failSetting;
+    assert.equal(f.api.refreshFreeformCfg(), true);
+    assert.notEqual(f.api.cfg, old);
+    assert.equal(f.api.cfg.left, 170);
+});
+test('DPI recursion is per task and guard clears after failure', () => {
+    const f = fixture({ settings: { voyahtune_dpi_packages: 'org.app', 'voyahtune_dpi_org.app': '240' } });
+    let count = 0, otherCount = 0;
+    const other = { getRequestedOverrideConfiguration: () => ({ densityDpi: { value: 0 } }),
+        onRequestedOverrideConfigurationChanged: () => ++otherCount };
+    const task = { getRequestedOverrideConfiguration: () => ({ densityDpi: { value: 0 } }),
+        onRequestedOverrideConfigurationChanged: () => {
+            ++count;
+            assert.equal(f.api.ffApplyTaskDpi(task, 'org.app'), false);
+            assert.equal(f.api.ffApplyTaskDpi(other, 'org.app'), true);
+            throw new Error('config rejected');
+        } };
+    assert.throws(() => f.api.ffApplyTaskDpi(task, 'org.app'), /config rejected/);
+    assert.throws(() => f.api.ffApplyTaskDpi(task, 'org.app'), /config rejected/);
+    assert.equal(count, 2); assert.equal(otherCount, 2);
+    other.getRequestedOverrideConfiguration = () => ({ densityDpi: { value: 240 } });
+    assert.equal(f.api.ffApplyTaskDpi(other, 'org.app'), false);
+});

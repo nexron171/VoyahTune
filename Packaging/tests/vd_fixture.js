@@ -53,6 +53,12 @@ function fixture(options = {}) {
     const specials = {
         'android.app.ActivityThread': { currentActivityThread: () => ({ getSystemContext: () => context }) },
         'android.os.SystemClock': { elapsedRealtime: () => now },
+        'java.lang.Boolean': { TRUE: { value: true } },
+        'java.util.WeakHashMap': { $new: () => {
+            const map = new Map();
+            return { containsKey: key => map.has(key), put: (key, value) => map.set(key, value),
+                remove: key => map.delete(key), get: key => map.get(key) ?? null, size: () => map.size };
+        } },
         'android.os.Process': { myPid: () => 104 },
         'java.lang.Thread': { getAllStackTraces: () => ({ keySet: () => ({ iterator: () => {
             let done = false;

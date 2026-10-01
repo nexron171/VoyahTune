@@ -299,13 +299,18 @@ Java.perform(function () {
     var ffDisplayChangedWarned = false;
     var ffRequestedWidthField = null, ffRequestedHeightField = null;
     var ffOriginalRequestedSize = {};
+    var ffDpiApplying = Java.use("java.util.WeakHashMap").$new();
+    var ffGuardValue = Java.use("java.lang.Boolean").TRUE.value;
 
     function ffCr() {
         try { return ATh.currentActivityThread().getSystemContext().getContentResolver(); } catch (e) { return null; }
     }
     function ffInt(cr, key, def) {
-        try { var v = SettingsGlobal.getString(cr, key); var n = parseInt(v, 10); return isNaN(n) ? def : n; }
-        catch (e) { return def; }
+        var v = SettingsGlobal.getString(cr, key);
+        if (v === null || String(v).trim() === "") return def;
+        var n = Number(v);
+        if (!isFinite(n) || Math.floor(n) !== n) throw new Error("invalid integer " + key);
+        return n;
     }
     function readScreenLiftType() {
         try {
@@ -323,28 +328,38 @@ Java.perform(function () {
     }
     function refreshFreeformCfg() {
         try {
-            var cr = ffCr(); if (cr === null) return;
-            FF.on     = ffInt(cr, "voyahtune_freeform", 1) === 1;   // деф 1: always-on, 0 = аварийно выкл через adb
-            FF.left   = ffInt(cr, "voyahtune_win_left", 145);
-            FF.top    = ffInt(cr, "voyahtune_win_top", 45);
-            FF.right  = ffInt(cr, "voyahtune_win_right", 1920);
-            FF.bottom = ffInt(cr, "voyahtune_win_bottom", 720);
-            FF.compactBottom = ffInt(cr, "voyahtune_win_compact_bottom", 560);
-            FF.liftType = readScreenLiftType();
-            FF.dpi = {};   // сбросить кэш per-app DPI
-            FF.fullscreen = {};
+            var cr = ffCr(); if (cr === null) throw new Error("ContentResolver unavailable");
+            // Build locally; no callback can observe a partly read policy or a cleared DPI cache.
+            var next = {};
+            Object.keys(FF).forEach(function (key) { next[key] = FF[key]; });
+            next.on = ffInt(cr, "voyahtune_freeform", 1) === 1;
+            next.left = ffInt(cr, "voyahtune_win_left", 145);
+            next.top = ffInt(cr, "voyahtune_win_top", 45);
+            next.right = ffInt(cr, "voyahtune_win_right", 1920);
+            next.bottom = ffInt(cr, "voyahtune_win_bottom", 720);
+            next.compactBottom = ffInt(cr, "voyahtune_win_compact_bottom", 560);
+            next.liftType = readScreenLiftType();
+            next.dpi = Object.create(null);
+            next.fullscreen = Object.create(null);
+            var dpiCsv = SettingsGlobal.getString(cr, "voyahtune_dpi_packages");
+            String(dpiCsv || "").split(",").forEach(function (raw) {
+                var pkg = raw.trim();
+                if (pkg) next.dpi[pkg] = ffInt(cr, "voyahtune_dpi_" + pkg, 0);
+            });
             var fullscreenCsv = SettingsGlobal.getString(cr, "voyahtune_fullscreen_apps");
-            if (fullscreenCsv !== null) {
-                var fullscreenPackages = ("" + fullscreenCsv).split(",");
-                for (var i = 0; i < fullscreenPackages.length; i++) {
-                    var fullscreenPkg = fullscreenPackages[i].trim();
-                    if (fullscreenPkg) FF.fullscreen[fullscreenPkg] = true;
-                }
-            }
+            String(fullscreenCsv || "").split(",").forEach(function (raw) {
+                var pkg = raw.trim();
+                if (pkg) next.fullscreen[pkg] = true;
+            });
+            FF = next;
             Log.i(TAG, "freeform cfg on=" + FF.on + " liftType=" + FF.liftType + " rect="
                     + FF.left + "," + FF.top + "," + FF.right + "," + ffBottom()
                     + " fullscreen=" + Object.keys(FF.fullscreen).join(","));
-        } catch (e) { Log.e(TAG, "refreshFreeformCfg: " + e); }
+            return true;
+        } catch (e) {
+            Log.e(TAG, "refreshFreeformCfg retained previous snapshot: " + e);
+            return false;
+        }
     }
     // Блэклист системных пакетов + наши ru.big.town.*. settings/documentsui — исключения.
     function ffBlacklisted(pkg) {
@@ -357,9 +372,7 @@ Java.perform(function () {
         return false;
     }
     function ffDpiFor(pkg) {
-        var d = FF.dpi[pkg];
-        if (typeof d !== "number") { d = ffInt(ffCr(), "voyahtune_dpi_" + pkg, 0); FF.dpi[pkg] = d; }
-        return d;
+        return FF.dpi[pkg] || 0;
     }
 
     // Keep the task requested override minimal. In particular, never copy the resolved bounds,
@@ -371,12 +384,18 @@ Java.perform(function () {
         var dpi = ffDpiFor(pkg);
         if (!(dpi > 0)) return false;
         var task = Java.cast(taskObject, ffTaskClass);
-        var current = task.getRequestedOverrideConfiguration();
-        if (current.densityDpi.value === dpi) return false;
-        var requested = ffConfigurationClass.$new(current);
-        requested.densityDpi.value = dpi;
-        task.onRequestedOverrideConfigurationChanged(requested);
-        return true;
+        if (ffDpiApplying.containsKey(task)) return false;
+        ffDpiApplying.put(task, ffGuardValue);
+        try {
+            var current = task.getRequestedOverrideConfiguration();
+            if (current.densityDpi.value === dpi) return false;
+            var requested = ffConfigurationClass.$new(current);
+            requested.densityDpi.value = dpi;
+            task.onRequestedOverrideConfigurationChanged(requested);
+            return true;
+        } finally {
+            ffDpiApplying.remove(task);
+        }
     }
 
     // One-shot replay after delayed reattach. WindowManagerInternal's implementation takes
@@ -441,7 +460,7 @@ Java.perform(function () {
         Log.i(TAG, "ff " + why + " pkg=" + pkg + " display=" + displayId + " mode=" + mode);
     }
 
-    refreshFreeformCfg();
+    if (!refreshFreeformCfg()) throw new Error("initial policy unavailable");
     resolveFreeformTraversalRequester();
     if (SYSTEM_SERVER_FREEFORM_HOT_HOOKS) {
         installed.push("system_server freeform hot hooks enabled");

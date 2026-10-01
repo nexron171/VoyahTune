@@ -210,7 +210,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             // Per-package DPI остаётся для VD split-панелей: 0 тоже обязательно зеркалируем. Иначе
             // после выбора «Авто» в Settings.Global навсегда оставалось старое ненулевое значение.
             if (!"none".equals(pkg)) {
+                dpi = sanitizeDpi(dpi);
                 android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
+                updateAppDpiIndex(cr, pkg, dpi);
             }
             // Сплит, открываемый долгим нажатием на слот дока. Флаг HasSplit читает launcherdock.js
             // (гейт долгого тапа), детали (L/R/Ratio/Dpi) — обработчик OPEN_DOCK_SPLIT ниже.
@@ -312,14 +314,34 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             String key = "voyahtune_dpi_" + pkg;
             String wanted = String.valueOf(dpi);
             String current = android.provider.Settings.Global.getString(cr, key);
-            if (wanted.equals(current)) return false;
-            android.provider.Settings.Global.putString(cr, key, wanted);
+            boolean valueChanged = !wanted.equals(current);
+            if (valueChanged) android.provider.Settings.Global.putString(cr, key, wanted);
+            boolean indexed = updateAppDpiIndex(cr, pkg, dpi);
+            if (!valueChanged && !indexed) return false;
             sendWinReload(ctx);
             return true;
         } catch (Exception e) {
             Log.w(TAG, "ensureAppDpi " + pkg + ": " + e.getMessage());
             return false;
         }
+    }
+
+    /** Keep launch/dock deltas visible in the full snapshot consumed outside WM callbacks. */
+    private static boolean updateAppDpiIndex(android.content.ContentResolver cr, String pkg, int dpi) {
+        if (!validPackageName(pkg)) return false;
+        String previous = android.provider.Settings.Global.getString(cr, "voyahtune_dpi_packages");
+        java.util.LinkedHashSet<String> packages = new java.util.LinkedHashSet<>();
+        if (previous != null) {
+            for (String entry : previous.split(",")) {
+                if (validPackageName(entry)) packages.add(entry);
+            }
+        }
+        boolean changed = dpi > 0 ? packages.add(pkg) : packages.remove(pkg);
+        if (changed) {
+            android.provider.Settings.Global.putString(cr, "voyahtune_dpi_packages",
+                    android.text.TextUtils.join(",", packages));
+        }
+        return changed;
     }
 
     private static boolean validPackageName(String pkg) {
