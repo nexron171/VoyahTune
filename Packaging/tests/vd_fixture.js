@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 function fixture(options = {}) {
-    let now = 0, seq = 0;
+    let now = 0, seq = 0, wmLocked = false;
     const timers = new Map(), classes = new Map(), methods = new Map(), files = new Map();
     const events = [], registered = new Set();
     const stat = Array(20).fill('0'); stat[0] = 'S'; stat[19] = '1';
@@ -57,10 +57,14 @@ function fixture(options = {}) {
         'java.util.WeakHashMap': { $new: () => {
             const map = new Map();
             return { containsKey: key => map.has(key), put: (key, value) => map.set(key, value),
-                remove: key => map.delete(key), get: key => map.get(key) ?? null, size: () => map.size };
+                remove: key => map.delete(key), get: key => map.get(key) ?? null, size: () => map.size,
+                keySet: () => ({ iterator: () => {
+                    const keys = [...map.keys()]; let index = 0;
+                    return { hasNext: () => index < keys.length, next: () => keys[index++] };
+                } }) };
         } },
         'android.os.Process': { myPid: () => 104 },
-        'java.lang.Thread': { getAllStackTraces: () => ({ keySet: () => ({ iterator: () => {
+        'java.lang.Thread': { holdsLock: () => wmLocked, getAllStackTraces: () => ({ keySet: () => ({ iterator: () => {
             let done = false;
             return { hasNext: () => !done, next: () => { done = true;
                 return { getName: () => 'main', getContextClassLoader: () => ({}) };
@@ -87,6 +91,7 @@ function fixture(options = {}) {
         } }) },
         'com.android.server.LocalServices': { getService: () => ({}) },
         'android.content.IntentFilter': { $new: () => ({ addAction() {} }) },
+        'android.graphics.Rect': { $new: (left, top, right, bottom) => rect(left, top, right, bottom) },
         'android.content.res.Configuration': { $new: current => ({ densityDpi: { value: current.densityDpi.value } }) }
     };
     function use(name) {
@@ -98,10 +103,55 @@ function fixture(options = {}) {
         }, { get(target, prop) {
             if (prop in target) return target[prop];
             const original = prop === 'requestTraversalFromDisplayManager'
-                ? () => events.push(['traversal']) : () => true;
+                ? () => {
+                    events.push(['traversal']);
+                    if (options.noWmCleanup) return;
+                    const wm = methods.get('com.android.server.wm.WindowManagerService.requestTraversal');
+                    wmLocked = true;
+                    try { if (wm?.implementation) wm.implementation.call({ mGlobalLock: {} }); }
+                    finally { wmLocked = false; }
+                } : () => true;
             return method(name + '.' + String(prop), original);
         } }));
         return classes.get(name);
+    }
+    function rect(left = 0, top = 0, right = 1920, bottom = 720) {
+        const r = Object.fromEntries(Object.entries({left, top, right, bottom}).map(([k,v]) => [k,{value:v}]));
+        r.set = (l,t,rgt,b) => { r.left.value=l; r.top.value=t; r.right.value=rgt; r.bottom.value=b; };
+        return r;
+    }
+    function windowModel(options = {}) {
+        let mutations = 0;
+        function settable(initial) {
+            let value = initial;
+            return Object.defineProperty({}, 'value', { get: () => value, set: next => {
+                if (++mutations === options.failMutation) throw new Error('window mutation failed');
+                value = next;
+            } });
+        }
+        const stable = rect(), frames = {};
+        const names = ['mStableFrame','mParentFrame','mDisplayFrame','mContentFrame','mVisibleFrame','mDecorFrame'];
+        for (const name of names) frames[name] = { value: rect() };
+        for (const frame of [stable, ...names.map(name => frames[name].value)]) {
+            const original = frame.set;
+            frame.set = (...args) => {
+                if (++mutations === options.failMutation) throw new Error('window mutation failed');
+                return original(...args);
+            };
+        }
+        if (options.missingFrame) delete frames[options.missingFrame];
+        const attrs = { width: settable(1780), height: settable(675), type: {value: options.type ?? 1}, getTitle: () => '' };
+        const win = { getOwningPackage: () => options.pkg || 'org.app',
+            getDisplayContent: () => ({ getDisplayId: () => options.display ?? 0 }),
+            getAttrs: () => attrs, getWindowingMode: () => options.mode ?? 1,
+            getDisplayFrames: () => ({ mStable: { value: stable } }), getWindowFrames: () => frames,
+            mRequestedWidth: settable(options.width ?? 1780), mRequestedHeight: settable(options.height ?? 675),
+            hashCode: () => 123,
+            computeFrame: () => { events.push(['compute']); if (options.failCompute) throw new Error('compute failed'); }
+        };
+        return { win, attrs, stable, frames, options, layout: () =>
+            methods.get('com.android.server.wm.DisplayPolicy.layoutWindowLw').implementation.call({}, win, null, {}),
+            remove: () => methods.get('com.android.server.wm.WindowState.removeImmediately').implementation.call(win) };
     }
     const sandbox = {
         console, Java: { use, classFactory: { loader: null }, cast: obj => obj, retain: obj => obj,
@@ -115,7 +165,7 @@ function fixture(options = {}) {
     // Export local functions only in this host evaluation; shipped source exposes nothing.
     source = source.replace('    } // installAgent', `
         globalThis.api = { refreshFreeformCfg, ffDpiFor, ffApplyTaskDpi,
-            get cfg() { return FF; }, get state() { return ffHookState; }, scheduleFreeformHotAttach, scheduleFreeformConfigReplay };
+            get cfg() { return FF; }, get windowCount() { return ffOriginalRequestedSize.size(); }, get state() { return ffHookState; }, scheduleFreeformHotAttach, scheduleFreeformConfigReplay };
     } // installAgent`);
     vm.runInNewContext(source, sandbox, { timeout: 2000 });
     function advance(ms) {
@@ -127,7 +177,7 @@ function fixture(options = {}) {
         }
         throw new Error('timer loop');
     }
-    return { options, events, methods, files, registered, timers, advance,
+    return { options, events, methods, files, registered, timers, advance, window: windowModel,
         get api() { return sandbox.api; },
         status: () => files.get('/data/local/open_voyah/vd_hooks/status.v1'),
         receive(name, action, extras = {}) {

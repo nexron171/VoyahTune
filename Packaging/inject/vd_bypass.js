@@ -30,6 +30,7 @@ Java.perform(function () {
     var FF, ffConfigReplayTimer = null, ffHotAttachTimer = null;
     var ffReloadTimer = null, ffTraversalTimer = null;
     var ffHotAttachPending = false, ffHookState = "preparing";
+    var restoreAgentWindows = null, agentWindowRollbackIncomplete = false;
 
     function cancelFreeformPending() {
         [ffConfigReplayTimer, ffHotAttachTimer, ffReloadTimer, ffTraversalTimer].forEach(function (timer) {
@@ -92,7 +93,11 @@ Java.perform(function () {
         if (preparationTimer !== null) clearTimeout(preparationTimer);
         cancelFreeformPending();
         if (FF) FF.on = false;
-        var clean = true;
+        var clean = !agentWindowRollbackIncomplete;
+        if (restoreAgentWindows !== null) {
+            try { if (!restoreAgentWindows()) clean = false; }
+            catch (e) { clean = false; Log.e(TAG, "window rollback failed: " + e); }
+        }
         for (var i = receivers.length - 1; i >= 0; --i) {
             try { receivers[i].context.unregisterReceiver(receivers[i].receiver); }
             catch (e) {
@@ -134,7 +139,9 @@ Java.perform(function () {
             ["com.android.server.pm.PackageManagerService", "hasSystemFeature", ["java.lang.String", "int"]],
             ["com.android.server.wm.DisplayPolicy", "layoutWindowLw", ["com.android.server.wm.WindowState", "com.android.server.wm.WindowState", "com.android.server.wm.DisplayFrames"]],
             ["com.android.server.wm.ActivityRecord", "ensureActivityConfiguration", ["int", "boolean", "boolean"]],
-            ["com.android.server.wm.ActivityRecord", "onDisplayChanged", ["com.android.server.wm.DisplayContent"]]
+            ["com.android.server.wm.ActivityRecord", "onDisplayChanged", ["com.android.server.wm.DisplayContent"]],
+            ["com.android.server.wm.WindowState", "removeImmediately", []],
+            ["com.android.server.wm.WindowManagerService", "requestTraversal", []]
         ];
         methods.forEach(function (entry) {
             var method = Java.use(entry[0])[entry[1]];
@@ -146,6 +153,7 @@ Java.perform(function () {
         ["mRequestedWidth", "mRequestedHeight"].forEach(function (field) {
             Java.use("com.android.server.wm.WindowState").class.getDeclaredField(field);
         });
+        Java.use("com.android.server.wm.WindowManagerService").class.getDeclaredField("mGlobalLock");
         Java.use("com.android.server.wm.ActivityRecord").class.getDeclaredField("task");
         Java.use("com.android.server.wm.Task");
         Java.use("android.content.res.Configuration");
@@ -156,6 +164,9 @@ Java.perform(function () {
         try {
             publishAgentStatus("preparing", "services");
             prepareAgent();
+            if (Number(SystemClock.elapsedRealtime()) >= preparationDeadline) {
+                var expired = new Error("preparation deadline"); expired.vdUnsupported = true; throw expired;
+            }
         } catch (e) {
             if (e.vdUnsupported || preparationAttempts >= 41
                     || Number(SystemClock.elapsedRealtime()) >= preparationDeadline) {
@@ -282,8 +293,8 @@ Java.perform(function () {
     //     voyahtune_freeform по умолчанию 1 остаётся аварийным выключателем через WIN_RELOAD.
     //   • Конфиг КЭШируется (в layoutWindowLw НЕТ чтений Settings.Global), обновляется по broadcast
     //     ru.big.town.anative.WIN_RELOAD.
-    //   • ВЕСЬ код хука в try/catch → при ЛЮБОЙ ошибке (в т.ч. неверные имена приватных полей WM на
-    //     другой прошивке) молча отдаём штатное поведение + латчим FF.on=false. WM НЕ падает.
+    //   • Проверяем поля до мутаций, shared поля восстанавливаем независимо в finally.
+    //     try/catch ограничивает Java/JS ошибки; нативный SIGSEGV ART/Frida он не перехватывает.
     //  Ключи: voyahtune_freeform(0/1, деф 1), voyahtune_win_left/top/right/bottom
     //  (int,145/45/1920/720), voyahtune_win_compact_bottom (int, деф 560),
     //  voyahtune_fullscreen_apps (CSV пакетов, которым нужна вся ширина без дока,
@@ -308,7 +319,10 @@ Java.perform(function () {
     var ffDisplayChangedMethod = null, ffDisplayChangedApplying = false;
     var ffDisplayChangedWarned = false;
     var ffRequestedWidthField = null, ffRequestedHeightField = null;
-    var ffOriginalRequestedSize = {};
+    var ffOriginalRequestedSize = Java.use("java.util.WeakHashMap").$new();
+    var ffSizeRecordClass = Java.use("android.graphics.Rect");
+    var FF_WINDOW_CACHE_LIMIT = 128;
+    var ffCleanupRequested = false, ffCleanupAll = false;
     var ffDpiApplying = Java.use("java.util.WeakHashMap").$new();
     var ffGuardValue = Java.use("java.lang.Boolean").TRUE.value;
 
@@ -342,7 +356,9 @@ Java.perform(function () {
             // Build locally; no callback can observe a partly read policy or a cleared DPI cache.
             var next = {};
             Object.keys(FF).forEach(function (key) { next[key] = FF[key]; });
-            next.on = ffInt(cr, "voyahtune_freeform", 1) === 1;
+            var enabled = ffInt(cr, "voyahtune_freeform", 1);
+            if (enabled !== 0 && enabled !== 1) throw new Error("invalid freeform flag");
+            next.on = enabled === 1;
             next.left = ffInt(cr, "voyahtune_win_left", 145);
             next.top = ffInt(cr, "voyahtune_win_top", 45);
             next.right = ffInt(cr, "voyahtune_win_right", 1920);
@@ -360,6 +376,21 @@ Java.perform(function () {
             String(fullscreenCsv || "").split(",").forEach(function (raw) {
                 var pkg = raw.trim();
                 if (pkg) next.fullscreen[pkg] = true;
+            });
+            if (next.left < 0 || next.top < 0 || next.right <= next.left
+                    || next.bottom <= next.top || next.compactBottom <= next.top
+                    || next.compactBottom > next.bottom
+                    || [next.left, next.top, next.right, next.bottom, next.compactBottom]
+                            .some(function (n) { return n > 2147483647; })
+                    || (next.liftType !== 1 && next.liftType !== 2)) {
+                throw new Error("invalid viewport");
+            }
+            Object.keys(next.dpi).forEach(function (pkg) {
+                var dpi = next.dpi[pkg];
+                if (!/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(pkg)
+                        || (dpi !== 0 && (dpi < 100 || dpi > 640))) {
+                    throw new Error("invalid DPI policy " + pkg);
+                }
             });
             FF = next;
             Log.i(TAG, "freeform cfg on=" + FF.on + " liftType=" + FF.liftType + " rect="
@@ -481,6 +512,77 @@ Java.perform(function () {
         Log.i(TAG, "ff " + why + " pkg=" + pkg + " display=" + displayId + " mode=" + mode);
     }
 
+    function ffRestoreWindow(win) {
+        var value = ffOriginalRequestedSize.get(win);
+        if (value === null) return true;
+        // Rect is only a Java value record: original width/height, last applied width/height.
+        // It contains no reference to its weak key.
+        var record = Java.cast(value, ffSizeRecordClass);
+        var failed = false;
+        try {
+            if (ffRequestedWidthField.getInt(win) === record.right.value)
+                ffRequestedWidthField.setInt(win, record.left.value);
+        } catch (e) { failed = true; }
+        try {
+            if (ffRequestedHeightField.getInt(win) === record.bottom.value)
+                ffRequestedHeightField.setInt(win, record.top.value);
+        } catch (e) { failed = true; }
+        if (!failed) ffOriginalRequestedSize.remove(win);
+        return !failed;
+    }
+
+    function ffCleanupInWmContext() {
+        var keys = ffOriginalRequestedSize.keySet().iterator();
+        var windows = [];
+        while (keys.hasNext() && windows.length < FF_WINDOW_CACHE_LIMIT) windows.push(keys.next());
+        var clean = true;
+        windows.forEach(function (object) {
+            var win = Java.cast(object, Java.use("com.android.server.wm.WindowState"));
+            try {
+                if (ffCleanupAll || !FF.on || !ffFullscreen(String(win.getOwningPackage()))) {
+                    if (!ffRestoreWindow(win)) clean = false;
+                }
+            } catch (e) { clean = false; }
+        });
+        ffCleanupRequested = !clean;
+    }
+
+    function restoreTrackedWindows(all) {
+        if (ffOriginalRequestedSize.size() === 0) return true;
+        ffCleanupAll = all;
+        ffCleanupRequested = true;
+        // LocalService enters mGlobalLock, then calls the rare WMS requestTraversal below.
+        // Do not acquire a JNI monitor from the Frida timer thread or enumerate the Java heap.
+        resolveFreeformTraversalRequester();
+        if (ffTraversalService === null || ffTraversalMethod === null) return false;
+        ffTraversalMethod.call(ffTraversalService);
+        return !ffCleanupRequested;
+    }
+    restoreAgentWindows = function () { return restoreTrackedWindows(true); };
+
+    var WMS = Java.use("com.android.server.wm.WindowManagerService");
+    var ffGlobalLockField = WMS.class.getDeclaredField("mGlobalLock");
+    ffGlobalLockField.setAccessible(true);
+    var ffThreadClass = Java.use("java.lang.Thread");
+    var ffWmTraversal = WMS.requestTraversal.overload();
+    trackReplacement(ffWmTraversal);
+    ffWmTraversal.implementation = function () {
+        try {
+            if (ffCleanupRequested && ffThreadClass.holdsLock(ffGlobalLockField.get(this))) {
+                ffCleanupInWmContext();
+            }
+        } catch (e) { Log.e(TAG, "window cleanup unavailable: " + e); }
+        return ffWmTraversal.call(this);
+    };
+    var ffWindowRemove = Java.use("com.android.server.wm.WindowState").removeImmediately.overload();
+    trackReplacement(ffWindowRemove);
+    ffWindowRemove.implementation = function () {
+        try { if (!ffRestoreWindow(this)) Log.w(TAG, "removed window size restore incomplete"); }
+        catch (e) { Log.w(TAG, "removed window size restore skipped: " + e); }
+        finally { ffOriginalRequestedSize.remove(this); }
+        return ffWindowRemove.call(this);
+    };
+
     if (!refreshFreeformCfg()) throw new Error("initial policy unavailable");
     resolveFreeformTraversalRequester();
     if (SYSTEM_SERVER_FREEFORM_HOT_HOOKS) {
@@ -511,6 +613,9 @@ Java.perform(function () {
                             Java.perform(function () {
                                 try {
                                     if (!refreshFreeformCfg()) return;
+                                    if (!restoreTrackedWindows(!FF.on)) {
+                                        failAgent("window.restore"); return;
+                                    }
                                     if (!FF.on) {
                                         cancelFreeformPending();
                                         if (detachFreeformHotHooks("config off")) {
@@ -619,6 +724,26 @@ Java.perform(function () {
                 // значение и обязательно возвращаем его после computeFrame; WindowFrames самого окна
                 // остаются уменьшенными.
                 var stable = df.mStable.value;
+                var frameNames = ["mStableFrame", "mParentFrame", "mDisplayFrame",
+                    "mContentFrame", "mVisibleFrame", "mDecorFrame"];
+                var savedFrames = [];
+                function checkRect(rect) {
+                    if (!rect || typeof rect.set !== "function") throw new Error("unsupported Rect");
+                    var values = [rect.left.value, rect.top.value, rect.right.value, rect.bottom.value];
+                    if (values.some(function (n) { return typeof n !== "number" || !isFinite(n); }))
+                        throw new Error("unsupported Rect fields");
+                    return values;
+                }
+                var savedStable = checkRect(stable);
+                frameNames.forEach(function (name) {
+                    savedFrames.push({ rect: wf[name].value, bounds: checkRect(wf[name].value) });
+                });
+                if (typeof attrs.width.value !== "number" || typeof attrs.height.value !== "number")
+                    throw new Error("unsupported LayoutParams");
+                if (typeof win.computeFrame !== "function") throw new Error("unsupported computeFrame");
+                // Read both fields before changing either one.
+                var currentRequestedWidth = ffRequestedWidthField.getInt(win);
+                var currentRequestedHeight = ffRequestedHeightField.getInt(win);
                 var bottom = ffBottom();
                 var targetLeft = fullscreen ? 0 : FF.left;
                 // Fullscreen removes only the left dock reservation. The OEM status bar remains
@@ -627,36 +752,37 @@ Java.perform(function () {
                 var targetTop = FF.top;
                 if (fullscreen) ffNote("user-fullscreen", pkg, displayId, wmode);
                 // Не создаём Rect на каждом layout: этот метод вызывается сотни раз на screen-on.
-                var savedLeft = stable.left.value, savedTop = stable.top.value;
-                var savedRight = stable.right.value, savedBottom = stable.bottom.value;
+                var savedLeft = savedStable[0], savedTop = savedStable[1];
+                var savedRight = savedStable[2], savedBottom = savedStable[3];
                 // Некоторые автомобильные приложения сами просят ширину ровно 1780 px и gravity END,
                 // заранее резервируя 140 px под OEM dock. Рамок 0..1920 для них недостаточно: computeFrame
                 // снова применяет requested width и оставляет фактический mFrame=[140..1920]. Только для
                 // явно выбранного fullscreen-пакета на время расчёта подменяем LayoutParams на MATCH_PARENT.
                 var savedAttrWidth = attrs.width.value, savedAttrHeight = attrs.height.value;
-                var requestedKey = pkg + "|" + win.hashCode();
-                // TYPE_BASE_APPLICATION (1) is the ActivityRecord main window. Only its Surface was
-                // observed retaining the app-requested 1780px buffer; dialogs, child panels and
-                // starting windows must keep their own requested geometry.
-                if (fullscreen && wt === 1
-                        && ffRequestedWidthField !== null && ffRequestedHeightField !== null) {
-                    if (!ffOriginalRequestedSize[requestedKey]) {
-                        ffOriginalRequestedSize[requestedKey] = [
-                            ffRequestedWidthField.getInt(win), ffRequestedHeightField.getInt(win)
-                        ];
-                    }
-                    // WindowStateAnimator sizes the Surface after DisplayPolicy returns. Keeping only
-                    // mFrame=1920 while restoring the app's requested 1780 leaves a 1780-px buffer.
-                    ffRequestedWidthField.setInt(win, FF.right - targetLeft);
-                    ffRequestedHeightField.setInt(win, bottom - targetTop);
-                } else if (!fullscreen && wt === 1 && ffOriginalRequestedSize[requestedKey]
-                        && ffRequestedWidthField !== null && ffRequestedHeightField !== null) {
-                    var originalRequested = ffOriginalRequestedSize[requestedKey];
-                    ffRequestedWidthField.setInt(win, originalRequested[0]);
-                    ffRequestedHeightField.setInt(win, originalRequested[1]);
-                    delete ffOriginalRequestedSize[requestedKey];
+                var sizeRecord = ffOriginalRequestedSize.get(win);
+                if (sizeRecord !== null) sizeRecord = Java.cast(sizeRecord, ffSizeRecordClass);
+                if (fullscreen && wt === 1 && sizeRecord === null) {
+                    // At capacity, preserve stock layout and requested size for this new window.
+                    if (ffOriginalRequestedSize.size() >= FF_WINDOW_CACHE_LIMIT) return;
+                    sizeRecord = ffSizeRecordClass.$new(currentRequestedWidth, currentRequestedHeight,
+                            currentRequestedWidth, currentRequestedHeight);
+                    ffOriginalRequestedSize.put(win, sizeRecord);
                 }
+                var layoutComplete = false, restoreFailed = false;
                 try {
+                    if (fullscreen && wt === 1) {
+                        // A later app relayout can replace its request; keep that new original.
+                        if (currentRequestedWidth !== sizeRecord.right.value)
+                            sizeRecord.left.value = currentRequestedWidth;
+                        if (currentRequestedHeight !== sizeRecord.bottom.value)
+                            sizeRecord.top.value = currentRequestedHeight;
+                        sizeRecord.right.value = FF.right - targetLeft;
+                        sizeRecord.bottom.value = bottom - targetTop;
+                        ffRequestedWidthField.setInt(win, FF.right - targetLeft);
+                        ffRequestedHeightField.setInt(win, bottom - targetTop);
+                    } else if (sizeRecord !== null && !ffRestoreWindow(win)) {
+                        throw new Error("requested size restore failed");
+                    }
                     if (fullscreen) {
                         attrs.width.value = -1;   // WindowManager.LayoutParams.MATCH_PARENT
                         attrs.height.value = -1;
@@ -669,10 +795,24 @@ Java.perform(function () {
                     wf.mVisibleFrame.value.set(targetLeft, targetTop, FF.right, bottom);
                     wf.mDecorFrame.value.set(targetLeft, targetTop, FF.right, bottom);
                     win.computeFrame(df);
+                    layoutComplete = true;
                 } finally {
-                    attrs.width.value = savedAttrWidth;
-                    attrs.height.value = savedAttrHeight;
-                    stable.set(savedLeft, savedTop, savedRight, savedBottom);
+                    // Each shared field gets its own recovery attempt, even if a prior one throws.
+                    try { attrs.width.value = savedAttrWidth; } catch (e) { restoreFailed = true; }
+                    try { attrs.height.value = savedAttrHeight; } catch (e) { restoreFailed = true; }
+                    try { stable.set(savedLeft, savedTop, savedRight, savedBottom); }
+                    catch (e) { restoreFailed = true; }
+                    if (!layoutComplete) {
+                        savedFrames.forEach(function (saved) {
+                            try { saved.rect.set.apply(saved.rect, saved.bounds); }
+                            catch (e) { restoreFailed = true; }
+                        });
+                        if (!ffRestoreWindow(win)) restoreFailed = true;
+                    }
+                    if (restoreFailed) {
+                        agentWindowRollbackIncomplete = true;
+                        failAgent("window.fields.restore");
+                    }
                 }
             } catch (e) {
                 // Ошибка на КОНКРЕТНОМ окне (напр. нестандартное окно без ожидаемых полей WindowFrames) →
@@ -918,6 +1058,9 @@ Java.perform(function () {
                                 var attachDelay = noteFreeformScreenTransition();
                                 FF.screenOn = true;
                                 refreshFreeformCfg();
+                                if (!restoreTrackedWindows(!FF.on)) {
+                                    failAgent("window.restore"); return;
+                                }
                                 if (FF.on) scheduleFreeformHotAttach(attachDelay,
                                         "SCREEN_ON +" + attachDelay + "ms");
                                 else setFreeformHookState("disabled");
