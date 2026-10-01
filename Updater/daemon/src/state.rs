@@ -48,8 +48,10 @@ impl State {
     pub fn repair(&self) -> bool {
         self.phase == "repair-required"
     }
-    pub fn finish_success(&mut self) {
-        if self.phase != "committed" {
+    pub fn finish_result(&mut self, reset_errors: bool) {
+        // Opening the menu may finish success, but only the owner's explicit
+        // Finish resets errors. An active installation and USB repair stay durable.
+        if self.busy() || self.repair() || (self.phase != "committed" && !reset_errors) {
             return;
         }
         self.phase = "idle".into();
@@ -63,6 +65,7 @@ impl State {
         self.error = None;
         self.notice = None;
         self.notice_opened = true;
+        self.apply_boot.clear();
     }
     pub fn installation_started(&self) -> bool {
         matches!(
@@ -221,7 +224,7 @@ mod tests {
         s.notice = Some("success".into());
         s.completed_steps = 8;
         s.total_steps = 8;
-        s.finish_success();
+        s.finish_result(false);
         assert_eq!(s.phase, "idle");
         assert_eq!(s.step, "Готово к проверке обновлений");
         assert!(s.selected.is_none() && s.notice.is_none());
@@ -246,6 +249,67 @@ mod tests {
                     "repair-required"
                 }
             );
+        }
+    }
+    #[test]
+    fn explicit_finish_clears_preparation_errors_and_selection_across_restart() {
+        let t = tempfile::tempdir().unwrap();
+        for phase in ["failed", "verified", "idle"] {
+            let mut s = preparing();
+            s.phase = phase.into();
+            s.error = Some("Ошибка подготовки".into());
+            s.bytes = 100;
+            s.total = 100;
+            s.completed_steps = 1;
+            s.total_steps = 8;
+            s.installed_archive_sha256 = "b".repeat(64);
+            s.last_auto_wall = 123;
+            s.source_generation = 7;
+            s.finish_result(true);
+            save(t.path(), "state.json", &s).unwrap();
+            let restored: State = read(&t.path().join("state.json")).unwrap();
+            assert_eq!(restored.phase, "idle");
+            assert!(restored.error.is_none() && restored.selected.is_none());
+            assert!(!restored.same_version);
+            assert_eq!((restored.bytes, restored.total), (0, 0));
+            assert_eq!((restored.completed_steps, restored.total_steps), (0, 0));
+            assert_eq!(restored.installed_version, "3.15.0");
+            assert_eq!(restored.installed_archive_sha256, "b".repeat(64));
+            assert_eq!(
+                (restored.last_auto_wall, restored.source_generation),
+                (123, 7)
+            );
+        }
+    }
+    #[test]
+    fn opening_menu_keeps_errors_and_downloaded_release() {
+        for phase in ["failed", "verified", "idle"] {
+            let mut s = preparing();
+            s.phase = phase.into();
+            s.error = Some("Ошибка".into());
+            let before = serde_json::to_value(&s).unwrap();
+            s.finish_result(false);
+            assert_eq!(serde_json::to_value(&s).unwrap(), before);
+        }
+    }
+    #[test]
+    fn finish_never_cancels_active_work_or_usb_repair() {
+        for phase in [
+            "checking",
+            "downloading",
+            "verifying",
+            "preparing",
+            "applying",
+            "reboot-pending",
+            "validating",
+            "repair-required",
+        ] {
+            let mut s = preparing();
+            s.phase = phase.into();
+            s.error = Some("Ошибка".into());
+            let before = serde_json::to_value(&s).unwrap();
+            s.finish_result(true);
+            assert_eq!(serde_json::to_value(&s).unwrap(), before);
         }
     }
     #[test]

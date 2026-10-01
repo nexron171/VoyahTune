@@ -29,8 +29,9 @@ public final class MainActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final RootClient client = new RootClient();
     private final Handler poll = new Handler(Looper.getMainLooper());
-    private boolean polling, actionBusy, resumed, connected, dnsSupported, resetCompletedOnOpen, hideCompletedResult;
+    private boolean polling, actionBusy, resumed, connected, dnsSupported, resetCompletedOnOpen, hideCompletedResult, hideConnectionError, pendingErrorFinish;
     private String connectionError = "", commandError = "", noticeShowing;
+    private String hiddenResultKey, hiddenSettingsError;
     private JSONObject state = new JSONObject(), settings = new JSONObject();
     private UpdatePresentation presentation;
     private ProgressBar progress;
@@ -79,7 +80,7 @@ public final class MainActivity extends Activity {
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         resetCompletedOnOpen = intent.getBooleanExtra(OPEN_INITIAL_SCREEN, false);
-        hideCompletedResult=false;
+        hideCompletedResult=false; hiddenResultKey=null; hideConnectionError=false;
         if (!polling && !actionBusy) refresh();
     }
     @Override protected void onResume() { super.onResume(); resumed=true; poll.removeCallbacks(tick); poll.post(tick); }
@@ -95,19 +96,26 @@ public final class MainActivity extends Activity {
     private void accept(JSONObject response) throws Exception {
         state=response.getJSONObject("state");
         if(!"committed".equals(state.optString("phase"))) hideCompletedResult=false;
+        if(hiddenResultKey!=null && (!hiddenResultKey.equals(resultKey()) || UpdatePresentation.isBusy(state.optString("phase")))) hiddenResultKey=null;
         JSONObject config=response.optJSONObject("settings");
         if(config!=null) settings=config;
         JSONArray capabilities=response.optJSONArray("capabilities");
         dnsSupported=false;
         if(capabilities!=null) for(int i=0;i<capabilities.length();i++) if("dns-settings".equals(capabilities.optString(i))) dnsSupported=true;
-        connected=true; connectionError="";
-        if(!response.isNull("settingsError")) commandError=response.optString("settingsError");
+        connected=true; connectionError=""; hideConnectionError=false;
+        String settingsError=response.optString("settingsError", "");
+        if(!response.isNull("settingsError") && !settingsError.equals(hiddenSettingsError)) commandError=settingsError;
         render();
+        if(pendingErrorFinish && !actionBusy) {
+            pendingErrorFinish=false;
+            sendFinish();
+            return;
+        }
         if(resumed && settingsDialog==null && !actionBusy) showNotice();
     }
     private void refresh() {
         if(polling || worker.isShutdown()) return;
-        // Finish only a completed update. The daemon keeps active work and repair errors intact.
+        // Opening from RestoreMode resets success only; errors require an explicit Finish.
         if(resetCompletedOnOpen && !actionBusy) {
             resetCompletedOnOpen=false;
             connected=false;
@@ -147,7 +155,11 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     actionBusy=false; if(!alive())return;
                     hideCompletedResult=hideCompletedResult||hideLegacyResult;
-                    try{accept(fresh);result.apply(reply);}catch(Exception e){commandError=reason(e);}
+                    try{
+                        accept(fresh);
+                        if("finish".equals(input.optString("command")) && input.optBoolean("reset_errors")) resetResultScreen();
+                        result.apply(reply);
+                    }catch(Exception e){commandError=reason(e);}
                     render(); if(!polling)refresh();
                 });
             } catch(Exception e) {
@@ -156,18 +168,49 @@ public final class MainActivity extends Activity {
         });
     }
     private void perform(String name, boolean same) {
+        beginAction();
         try {
             JSONObject input=request(name);
             if("check".equals(name))input.put("same_version",same);
             command(input,result -> {});
         } catch(Exception e){commandError=reason(e);render();}
     }
+    private String resultKey() {
+        return state.optString("phase")+"/"+state.optString("error")+"/"+state.optString("installedVersion")+"/"+state.optLong("sourceGeneration")+"/"+state.optLong("lastAutoWall")+"/"+state.optJSONObject("selected");
+    }
+    private void resetResultScreen() {
+        hiddenResultKey=UpdatePresentation.isBusy(state.optString("phase"))?null:resultKey();
+        if(!commandError.isEmpty()) hiddenSettingsError=commandError;
+        commandError=""; connectionError=""; hideConnectionError=!connected;
+        hideCompletedResult=false;
+        noticeShowing=state.optString("notice");
+        if(settingsDialog!=null) settingsDialog.dismiss();
+        if(noticeDialog!=null) noticeDialog.dismiss();
+        render();
+    }
+    private void sendFinish() {
+        try { command(request("finish").put("reset_errors",true), result -> {}); }
+        catch(Exception e) { commandError=reason(e); render(); }
+    }
+    private void finishResult() {
+        resetCompletedOnOpen=false;
+        boolean available=connected;
+        resetResultScreen();
+        if(!available) {
+            pendingErrorFinish=true;
+            return;
+        }
+        sendFinish();
+    }
+    private void beginAction() {
+        hiddenResultKey=null; hiddenSettingsError=null; hideConnectionError=false; hideCompletedResult=false;
+    }
     private void primaryAction() {
+        if(presentation!=null && "finish".equals(presentation.command)){finishResult();return;}
+        beginAction();
         if(!connected){refresh();return;}
         if(presentation==null)return;
         switch(presentation.command){
-            case "finish": perform("finish",false); break;
-            case "close": finish(); break;
             case "apply": confirmInstall(); break;
             case "check": perform("check",false); break;
             case "download": perform("download",false); break;
@@ -183,22 +226,26 @@ public final class MainActivity extends Activity {
     }
     private void render() {
         String phase=state.optString("phase","idle"), step=state.optString("step");
-        String menuPhase=UpdatePresentation.menuPhase(phase,hideCompletedResult);
+        boolean initialDisconnected=!connected&&hideConnectionError;
+        boolean resultHidden=initialDisconnected || hiddenResultKey!=null && hiddenResultKey.equals(resultKey()) && !UpdatePresentation.isBusy(phase);
+        if(initialDisconnected) phase="idle";
+        String menuPhase=UpdatePresentation.menuPhase(phase,hideCompletedResult||resultHidden);
         boolean completedHidden=!menuPhase.equals(phase);
-        if(completedHidden){phase=menuPhase;step="Готово к проверке обновлений";}
-        JSONObject selected=completedHidden?null:state.optJSONObject("selected");
+        if(completedHidden||resultHidden){phase=menuPhase;step="Готово к проверке обновлений";}
+        JSONObject selected=completedHidden||resultHidden?null:state.optJSONObject("selected");
         JSONObject archive=selected==null?null:selected.optJSONObject("payload");
         presentation=UpdatePresentation.from(phase,selected!=null,step,state.optLong("bytes"),state.optLong("total"),state.optLong("completedSteps"),state.optLong("totalSteps"));
         UpdatePresentation p=presentation;
         String installed=state.optString("installedVersion","—");
         boolean failed="repair-required".equals(phase)||"failed".equals(phase);
-        String error=!state.isNull("error")?state.optString("error"):commandError;
-        if(!connected)error=connectionError;
+        String error=!resultHidden&&!state.isNull("error")?state.optString("error"):commandError;
+        if(!connected)error=hideConnectionError?"":connectionError;
+        p.offerFinish(failed||!error.isEmpty());
         text(R.id.service,connected?"●  Служба доступна":connectionError.isEmpty()?"Подключение…":"●  Нет связи со службой");
         text(R.id.installed,"Установлено: "+installed);
         text(R.id.eyebrow,!connected?"СЛУЖБА ОБНОВЛЕНИЙ":p.eyebrow);
-        text(R.id.title,!connected?(connectionError.isEmpty()?"Подключаемся к службе":"Служба обновления недоступна"):p.title);
-        text(R.id.subtitle,!connected?"Если установка уже шла, её результат пока неизвестен.":p.subtitle);
+        text(R.id.title,!connected&&!initialDisconnected?(connectionError.isEmpty()?"Подключаемся к службе":"Служба обновления недоступна"):p.title);
+        text(R.id.subtitle,!connected&&!initialDisconnected?"Если установка уже шла, её результат пока неизвестен.":p.subtitle);
         text(R.id.release,"VoyahTune "+(selected==null?installed:selected.optString("version")));
         text(R.id.meta,selected==null?"Установленная версия": "Релиз "+selected.optString("version")+(archive==null?"":" · "+archive.optLong("size")/(1024*1024)+" МБ")+(state.optBoolean("sameVersion")?" · Повторная установка":""));
         text(R.id.badge,!connected?"Нет связи":p.badge);
@@ -220,8 +267,8 @@ public final class MainActivity extends Activity {
         text(R.id.aside_title,failed||!error.isEmpty()?"Установите через USB":installing?"Сохраняйте питание":p.success?"Всё на месте":"Настройки останутся с вами");
         text(R.id.aside_text,failed||!error.isEmpty()?"Установите релиз через USB с компьютера. Причина ошибки показана на экране.":installing?"Оставьте автомобиль в P. Не выключайте головное устройство до завершения установки и проверки запуска.":p.success?"Настройки VoyahTune сохранены. Можно вернуться к привычным функциям приложения.":"Обновление сохраняет настройки VoyahTune.\nПеред установкой переведите автомобиль в P и сохраняйте питание до завершения.");
         text(R.id.footer_note,failed?"Для восстановления потребуется USB и компьютер.":installing?"Обновление выполняется автономно. Не отключайте питание.":p.success?"Установка и проверка запуска завершены.":"Проверка новых версий — автоматически, не чаще одного раза в 24 часа.");
-        text(R.id.primary,!connected?"Обновить состояние":p.primary+("download".equals(p.command)&&archive!=null?" · "+archive.optLong("size")/(1024*1024)+" МБ":""));
-        enabled(primary,!actionBusy&&(!connected||!p.busy));
+        text(R.id.primary,p.primary+("download".equals(p.command)&&archive!=null?" · "+archive.optLong("size")/(1024*1024)+" МБ":""));
+        enabled(primary,!actionBusy&&("finish".equals(p.command)||!connected||!p.busy));
         visible(R.id.secondary,connected&&p.secondary);enabled(secondary,!actionBusy&&!p.busy);
         if(settingsDialog!=null){
             if(settingsSave!=null)enabled(settingsSave,!actionBusy&&!p.busy);
@@ -232,6 +279,7 @@ public final class MainActivity extends Activity {
 
     private void openSettings() {
         if(settingsDialog!=null)return;
+        beginAction();
         LinearLayout content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(dp(24),dp(12),dp(24),0);
         label(content,"Адрес каталога релизов",18);
         EditText url=new EditText(this);url.setSingleLine(true);url.setText(settings.optString("catalogUrl"));url.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);content.addView(url);
@@ -243,7 +291,7 @@ public final class MainActivity extends Activity {
         Button repeat=new Button(this);repeat.setAllCaps(false);repeat.setText("Проверить релиз для повторной установки");content.addView(repeat);
         label(content,"Позволяет скачать и установить ту же версию VoyahTune.",15);
         ScrollView scroll=new ScrollView(this);scroll.addView(content);
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Настройки обновлений").setView(scroll).setNegativeButton("Отмена",null).setPositiveButton("Сохранить",null).create();
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Настройки обновлений").setView(scroll).setNegativeButton("Отмена",null).setNeutralButton("Завершить",(d,w)->finishResult()).setPositiveButton("Сохранить",null).create();
         settingsDialog=dialog;settingsRepeat=repeat;settingsMessage=dnsInfo;
         dialog.setOnDismissListener(d->{if(settingsDialog==dialog){settingsDialog=null;settingsSave=null;settingsRepeat=null;settingsMessage=null;}});
         dialog.show();settingsSave=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
@@ -274,12 +322,13 @@ public final class MainActivity extends Activity {
     private void showNotice() {
         if(state.isNull("notice")){noticeShowing=null;return;}
         String notice=state.optString("notice");
-        if(hideCompletedResult && "success".equals(notice))return;
+        if((hideCompletedResult && "success".equals(notice)) || hiddenResultKey!=null)return;
         if(notice.equals(noticeShowing)||noticeDialog!=null)return;
         noticeShowing=notice;
         String title="error".equals(notice)?"Ошибка обновления VoyahTune":"success".equals(notice)?"VoyahTune обновлён":"Доступна новая версия VoyahTune";
         String message="error".equals(notice)?state.optString("error")+"\nУстановите релиз через USB с компьютера.":"success".equals(notice)?"Проверка запуска служб завершена успешно.":"Версия "+notice+". Скачать её можно в меню обновления.";
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("Открыть меню",(d,w)->{}).setNegativeButton("Скрыть",(d,w)->finish()).create();
+        boolean terminal="error".equals(notice)||"success".equals(notice);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton(terminal?"Завершить":"Открыть меню",(d,w)->{if(terminal)finishResult();}).setNegativeButton("Скрыть",(d,w)->finish()).create();
         noticeDialog=dialog;
         dialog.setOnDismissListener(d->{noticeDialog=null;if(!worker.isShutdown())worker.execute(()->{try{client.call(request("dismiss"));}catch(Exception ignored){}});});
         dialog.setOnCancelListener(d->finish());dialog.show();

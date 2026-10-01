@@ -8,8 +8,16 @@ final class UpdatePresentation {
     int nav, percent;
     boolean busy, meter, indeterminate, secondary, success;
 
-    static String menuPhase(String phase, boolean hideCompletedResult) {
-        return hideCompletedResult && "committed".equals(phase) ? "idle" : phase;
+    static String menuPhase(String phase, boolean hideResult) {
+        return hideResult && !isBusy(phase) ? "idle" : phase;
+    }
+
+    void offerFinish(boolean hasError) {
+        if (success || hasError) {
+            primary = "Завершить";
+            command = "finish";
+            secondary = false;
+        }
     }
 
     static UpdatePresentation from(String phase, boolean selected, String step,
@@ -56,13 +64,14 @@ final class UpdatePresentation {
                 p.nav = 3; p.primary = "Завершить"; p.command = "finish"; p.success = true; break;
             case "repair-required":
                 p.heading("ОШИБКА УСТАНОВКИ", "Не удалось завершить обновление", "Установите релиз через USB с компьютера.", "Нужен USB");
-                p.nav = 2; p.primary = "В VoyahTune"; p.command = "close"; break;
+                p.nav = 2; p.primary = "Завершить"; p.command = "finish"; break;
             default:
                 if (selected && !"failed".equals(phase)) {
                     p.heading("НОВАЯ ВЕРСИЯ", "Доступен релиз", "Скачайте релиз, затем запустите установку в удобное время.", "Готов к скачиванию");
                     p.primary = "Скачать"; p.command = "download"; p.secondary = true;
                 } else if ("failed".equals(phase)) {
                     p.heading("ОШИБКА ОБНОВЛЕНИЯ", "Не удалось подготовить релиз", "Подробная причина показана ниже.", "Ошибка");
+                    p.primary = "Завершить"; p.command = "finish";
                 } else if (!step.isEmpty()) p.subtitle = step;
         }
         return p;

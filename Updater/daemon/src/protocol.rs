@@ -24,7 +24,10 @@ pub enum Request {
     },
     Download {},
     Apply {},
-    Finish {},
+    Finish {
+        #[serde(default)]
+        reset_errors: bool,
+    },
     Dismiss {},
 }
 
@@ -153,6 +156,21 @@ mod tests {
             Request::Status {}
         ));
         assert!(read_request(&mut &vec![b' '; MAX_REQUEST + 1][..]).is_err());
+    }
+    #[test]
+    fn finish_resets_errors_only_when_explicitly_requested() {
+        for (input, expected) in [
+            ("{\"command\":\"finish\"}\n", false),
+            ("{\"command\":\"finish\",\"reset_errors\":true}\n", true),
+        ] {
+            match read_request(&mut input.as_bytes()).unwrap() {
+                Request::Finish { reset_errors } => assert_eq!(reset_errors, expected),
+                _ => panic!("Unexpected command"),
+            }
+        }
+        assert!(
+            read_request(&mut &b"{\"command\":\"finish\",\"reset_errors\":\"yes\"}\n"[..]).is_err()
+        );
     }
     #[test]
     fn user_apk_cannot_impersonate_system_interface() {

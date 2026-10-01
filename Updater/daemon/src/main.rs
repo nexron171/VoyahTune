@@ -237,11 +237,9 @@ fn run() -> io::Result<()> {
                 workflow::queue(&shared, &jobs, workflow::Job::Apply)?;
                 Ok(json!({"schema":1,"ok":true}))
             }
-            protocol::Request::Finish {} => {
+            protocol::Request::Finish { reset_errors } => {
                 workflow::update(&shared, |s| {
-                    if s.phase == "committed" {
-                        s.finish_success();
-                    }
+                    s.finish_result(reset_errors);
                 })?;
                 Ok(json!({"schema":1,"ok":true}))
             }

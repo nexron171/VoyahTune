@@ -2,10 +2,12 @@ package ru.big.town.updater;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public final class UpdatePresentationTest {
-    @Test public void legacyFinishHidesOnlyCompletedResult(){
+    @Test public void explicitFinishHidesInactiveResultsButKeepsActiveWork(){
         assertEquals("idle",UpdatePresentation.menuPhase("committed",true));
         assertEquals("committed",UpdatePresentation.menuPhase("committed",false));
-        for(String phase:new String[]{"verified","applying","validating","repair-required","failed"})
+        for(String phase:new String[]{"verified","repair-required","failed","idle"})
+            assertEquals("idle",UpdatePresentation.menuPhase(phase,true));
+        for(String phase:new String[]{"checking","downloading","verifying","preparing","applying","reboot-pending","validating"})
             assertEquals(phase,UpdatePresentation.menuPhase(phase,true));
     }
     private UpdatePresentation view(String phase,long done,long count){return UpdatePresentation.from(phase,true,"Установка Native",145,145,done,count);}
@@ -28,10 +30,23 @@ public final class UpdatePresentationTest {
         assertEquals("Завершить",view("committed",8,8).primary);
         assertEquals("finish",view("committed",8,8).command);
     }
-    @Test public void preparationFailureCanRetryButRepairCannot(){
+    @Test public void terminalErrorsAlwaysOfferFinish(){
         assertEquals("apply",view("verified",0,8).command);
-        assertEquals("close",view("repair-required",5,8).command);
-        assertEquals("check",view("failed",0,0).command);
+        for(String phase:new String[]{"repair-required","failed"}) {
+            assertEquals("Завершить",view(phase,5,8).primary);
+            assertEquals("finish",view(phase,5,8).command);
+        }
+    }
+    @Test public void errorsOutsideFailurePhasesAlsoOfferFinish(){
+        for(String phase:new String[]{"idle","verified","checking","applying"}) {
+            UpdatePresentation p=view(phase,1,8);
+            boolean busy=p.busy;
+            p.offerFinish(true);
+            assertEquals("Завершить",p.primary);
+            assertEquals("finish",p.command);
+            assertFalse(p.secondary);
+            assertEquals(busy,p.busy);
+        }
     }
     @Test public void downloadUsesBytesAndHandlesUnknownLength(){
         assertEquals(50,UpdatePresentation.from("downloading",true,"",50,100,8,8).percent);
