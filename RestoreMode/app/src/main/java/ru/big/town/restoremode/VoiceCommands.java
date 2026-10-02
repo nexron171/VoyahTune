@@ -6,10 +6,12 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ResolveInfo;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Adds the actions already available in the UI to the shared built-in phrase catalog. */
 final class VoiceCommands {
@@ -17,7 +19,41 @@ final class VoiceCommands {
     static final String START = VoiceSteeringPolicy.ACTION;
     static final int MESSAGE = 36;
 
+    /** Rebuilt only after a settings change or TTL expiry; the returned list is shared and read-only. */
+    private static final Object LOCK = new Object();
+    private static final long TTL_MS = 5 * 60 * 1000L;
+    private static List<VoiceCommandCatalog.Command> cached;
+    private static long cachedAt;
+    private static final ExecutorService PRELOADER = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "voice-catalog-preload");
+        thread.setPriority(Thread.MIN_PRIORITY);
+        return thread;
+    });
+
     static List<VoiceCommandCatalog.Command> load(Context context) {
+        synchronized (LOCK) {
+            if (cached != null && System.currentTimeMillis() - cachedAt < TTL_MS) return cached;
+        }
+        List<VoiceCommandCatalog.Command> fresh = build(context.getApplicationContext());
+        synchronized (LOCK) {
+            cached = Collections.unmodifiableList(fresh);
+            cachedAt = System.currentTimeMillis();
+        }
+        return cached;
+    }
+
+    /** Warms the shared cache on a background thread so the first visible invocation is fast. */
+    static void preload(Context context) {
+        final Context app = context.getApplicationContext();
+        PRELOADER.execute(() -> load(app));
+    }
+
+    /** Settings edits invalidate the cache; the next load rebuilds it. */
+    static void invalidate() {
+        synchronized (LOCK) { cached = null; }
+    }
+
+    private static List<VoiceCommandCatalog.Command> build(Context context) {
         List<VoiceCommandCatalog.Command> out = VoiceCommandCatalog.builtIns();
         SharedPreferences prefs = context.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
         for (String[] example : AdvanceActivity.EXAMPLE_COMMANDS) {
