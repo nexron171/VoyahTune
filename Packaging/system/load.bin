@@ -1099,8 +1099,11 @@ discover_app_client() {
             continue
         fi
         FC_EXE=$(readlink "/proc/$FC_PID/exe" 2>/dev/null)
-        case "$FC_EXE" in
-            *app_process64) FC_INJECTOR=$FI ;;
+        # The shipped arm64 injector also embeds the 32-bit agent (used by CAN hooks).
+        # RdsApp on the verified OEM build is app_process32. Keep other app-client
+        # targets 64-bit only; the radio adapter resolves its singleton without Java.choose.
+        case "$FC_PACKAGE:$FC_EXE" in
+            *:*/app_process64|com.pateo.rdsapp:*/app_process32) FC_INJECTOR=$FI ;;
             *)
                 reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
                 loge "app client unsupported process ABI package=$FC_PACKAGE exe=$FC_EXE"

@@ -68,8 +68,8 @@ set_view_hook_line=$(grep -nF 'setView.implementation = function' "$AGENT" | cut
 [ "$receiver_line" -lt "$set_view_hook_line" ] \
     || fail "ViewRoot hook is installed before reversible WIN_RELOAD lifecycle"
 
-# Loader: exact 64-bit main process only, user 0 only, one background worker and a two-rapid-restart
-# circuit breaker. Agent readiness must precede the active marker.
+# Loader: exact main process, 64-bit or the specific 32-bit RdsApp, user 0 only, and one worker.
+# A circuit breaker blocks two rapid restarts. Agent readiness must precede the active marker.
 for REQUIRED in \
         'APP_CLIENT=/data/local/bin/app_client.js' \
         'APP_CLIENT_FULLSCREEN_SETTING=voyahtune_fullscreen_apps' \
@@ -80,7 +80,7 @@ for REQUIRED in \
         'FC_CURRENT_ID=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE"' \
         'FC_ID_BEFORE=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE"' \
         '[ "$FC_UID" -lt 100000 ]' \
-        '*app_process64) FC_INJECTOR=$FI' \
+        '*:*/app_process64|com.pateo.rdsapp:*/app_process32) FC_INJECTOR=$FI' \
         'reserve_injection_attempt "$FC_TARGET_ID" "$FC_TARGET_ATTEMPT"' \
         'grep -qF "$APP_CLIENT_READY" "$FC_TRY"' \
         'grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"' \
@@ -135,6 +135,5 @@ done
 require "$RELEASE" 'app_client.js'
 forbid "$RELEASE" 'fullscreen_client.js'
 forbid "$LOADER" 'FI32='
-forbid "$LOADER" 'app_process32'
 
 echo "app client contract: OK"

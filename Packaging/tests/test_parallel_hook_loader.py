@@ -133,7 +133,8 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.loader = self.root / "load.bin"
         self.loader.write_text(source)
 
-    def rds_probe(self, uid=10109, executable="/system/bin/app_process64", enabled=True):
+    def rds_probe(self, uid=10109, executable="/system/bin/app_process64", enabled=True,
+                  package="com.pateo.rdsapp"):
         if enabled:
             (self.root / "enable_rds").touch()
         (self.root / "proc/sys/kernel/random").mkdir(parents=True, exist_ok=True)
@@ -144,8 +145,12 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         if not exe.is_symlink():
             exe.symlink_to(executable)
         (self.root / "app_client.js").touch()
+        selection = 'settings() { echo null; }; '
+        if package != "com.pateo.rdsapp":
+            selection = (f'pidof() {{ [ "$1" = {shlex.quote(package)} ] && echo 109; }}; '
+                         f'settings() {{ echo {shlex.quote(package)}; }}; ')
         subprocess.run(["sh", str(self.loader), "--probe",
-                        'APP_CLIENT="$FIXTURE/app_client.js"; settings() { echo null; }; '
+                        'APP_CLIENT="$FIXTURE/app_client.js"; ' + selection +
                         'fixture_discover_app_client; wait'],
                        check=True, timeout=10, env=self.env, capture_output=True)
 
@@ -170,10 +175,41 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.rds_probe(uid=110109)
         self.assertEqual((self.root / "events").read_text(), "")
 
-    def test_rds_rejects_unsupported_32_bit_process(self):
+    def test_rds_32_bit_uses_existing_injector(self):
+        self.rds_probe(uid=1000, executable="/system/bin/app_process32")
+        marker = self.root / "voyahtune_app_client.com.pateo.rdsapp.pid"
+        self.assertTrue(marker.exists(), "32-bit OEM RdsApp must reach the injector")
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe(uid=1000, executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_rds_32_bit_still_requires_specific_ready_marker(self):
+        (self.root / "missing_rds_ready").touch()
         self.rds_probe(executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
+        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+
+    def test_rds_32_bit_rejects_secondary_android_user(self):
+        self.rds_probe(uid=101000, executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_other_32_bit_apps_remain_unsupported(self):
+        self.rds_probe(package="example.player", executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text(), "")
+        self.assertTrue((self.root / "voyahtune_app_client.example.player.attempt").exists())
+
+    def test_rds_rejects_unknown_process_executable(self):
+        self.rds_probe(executable="/system/bin/unknown")
         self.assertEqual((self.root / "events").read_text(), "")
         self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+
+    def test_rds_32_bit_rapid_restart_circuit_breaker(self):
+        for generation in range(1, 4):
+            (self.root / "generation.109").write_text(f"{generation}\n")
+            self.rds_probe(executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 2)
+        self.assertEqual((self.root / "voyahtune_app_client.com.pateo.rdsapp.blocked").read_text().strip(), "test-boot")
 
     def test_rds_rapid_restart_circuit_breaker(self):
         for generation in range(1, 4):
