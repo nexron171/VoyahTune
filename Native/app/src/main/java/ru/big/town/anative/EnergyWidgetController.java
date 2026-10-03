@@ -25,6 +25,7 @@ final class EnergyWidgetController {
     private final CanBusEventHub.Subscription subscription;
     private final SharedPreferences prefs;
     private final EnergyHistory history = new EnergyHistory();
+    private final EnergyInstantFreshness instantFreshness = new EnergyInstantFreshness();
     private final float[][] values = new float[4][];
     private final long[] received = {-1, -1, -1, -1};
     private Messenger client;
@@ -70,12 +71,16 @@ final class EnergyWidgetController {
         if (event.kind == CanBusEvent.Kind.CONNECTION
                 || event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
             connected = event.kind == CanBusEvent.Kind.CONNECTION;
-            Arrays.fill(received, -1); history.breakSegment();
+            Arrays.fill(received, -1); instantFreshness.reset(); history.breakSegment();
             if (connected) hub.requestEnergySnapshot();
             publish(SystemClock.elapsedRealtime());
         } else if (event.telemetry != null) {
             int kind = event.telemetry.kind;
-            values[kind] = event.telemetry.values.clone(); received[kind] = event.elapsedRealtime;
+            values[kind] = event.telemetry.values.clone();
+            received[kind] = kind == EnergyTelemetrySample.INSTANT
+                    ? instantFreshness.observe(event.telemetry, event.elapsedRealtime,
+                            event.origin == CanBusEvent.Origin.LIVE)
+                    : event.elapsedRealtime;
             if (kind == EnergyTelemetrySample.INSTANT || kind == EnergyTelemetrySample.TRIP) {
                 dirty |= history.sample(values[1][0], values[0][0], values[0][1],
                         event.elapsedRealtime, received[1], received[0]);
@@ -117,14 +122,15 @@ final class EnergyWidgetController {
                 row.put(Float.isFinite(p.fuel) ? (Object) p.fuel : org.json.JSONObject.NULL);
                 row.put(p.gap); out.put(row);
             }
-            prefs.edit().putString("pointsV1",out.toString()).apply();
+            prefs.edit().putString("pointsV2",out.toString()).apply();
             dirty=false; lastSave=now;
         } catch (Exception e) { Log.w("EnergyWidgets", "Cannot persist history", e); }
     }
 
     private void restore() {
         try {
-            JSONArray rows = new JSONArray(prefs.getString("pointsV1","[]"));
+            // V1 recorded cached getter values as new measurements; those points are unverified.
+            JSONArray rows = new JSONArray(prefs.getString("pointsV2","[]"));
             if (rows.length() > EnergyHistory.MAX_POINTS) return;
             List<EnergyHistory.Point> points = new ArrayList<>();
             for (int i=0;i<rows.length();i++) { JSONArray r=rows.getJSONArray(i);

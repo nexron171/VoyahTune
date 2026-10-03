@@ -7,10 +7,16 @@ final class EnergyTelemetrySample {
     static final int[] WORD_COUNTS = {35, 20, 11, 10};
     final int kind;
     final float[] values;
+    final int sourceIndex;
 
     EnergyTelemetrySample(int kind, float... values) {
+        this(kind, values, -1);
+    }
+
+    private EnergyTelemetrySample(int kind, float[] values, int sourceIndex) {
         this.kind = kind;
         this.values = values.clone();
+        this.sourceIndex = sourceIndex;
     }
 
     static EnergyTelemetrySample unavailable(int kind) {
@@ -25,8 +31,8 @@ final class EnergyTelemetrySample {
         if (words == null || words.length < WORD_COUNTS[kind]) return unavailable(kind);
         switch (kind) {
             case INSTANT:
-                return new EnergyTelemetrySample(kind, value(words[33], -20, 106),
-                        value(words[34], 0, 31));
+                return new EnergyTelemetrySample(kind, new float[]{value(words[33], -20, 106),
+                        value(words[34], 0, 31)}, words[32]);
             case TRIP:
                 return new EnergyTelemetrySample(kind, value(words[0], 0, 2_000_000),
                         value(words[1], -50, 2000), value(words[3], 0, 200));
