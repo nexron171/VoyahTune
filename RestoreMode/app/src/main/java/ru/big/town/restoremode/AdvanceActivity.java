@@ -559,6 +559,27 @@ public class AdvanceActivity extends AppCompatActivity {
         bindTileSizeSpinners(R.id.suspensionSettingWidth, R.id.suspensionSettingHeight,
                 TileSizeStore.SUSPENSION_WIDGET_ID,
                 TileSizeStore.SUSPENSION_DEFAULT_WIDTH, TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
+        bindShowSwitch(R.id.switchShowEnergy, "show_energyWidget", false, R.id.EnergySizeRow);
+        bindTileSizeSpinners(R.id.EnergySettingWidth, R.id.EnergySettingHeight, "energyWidget", 8, 3);
+        bindShowSwitch(R.id.switchShowEnergyTrip, "show_energyTripWidget", false, R.id.EnergyTripSizeRow);
+        bindTileSizeSpinners(R.id.EnergyTripSettingWidth, R.id.EnergyTripSettingHeight, "energyTripWidget", 8, 2);
+        bindShowSwitch(R.id.switchShowTirePressure, "show_tirePressureWidget", false, R.id.TirePressureSizeRow);
+        bindTileSizeSpinners(R.id.TirePressureSettingWidth, R.id.TirePressureSettingHeight, "tirePressureWidget", 4, 4);
+        bindShowSwitch(R.id.switchShowOdometer, "show_odometerWidget", false, R.id.OdometerSizeRow);
+        bindTileSizeSpinners(R.id.OdometerSettingWidth, R.id.OdometerSettingHeight, "odometerWidget", 4, 1);
+        android.widget.Spinner carColor = findViewById(R.id.energyCarColor);
+        android.widget.ArrayAdapter<String> carColors = new android.widget.ArrayAdapter<>(this,
+                R.layout.spinner_item, EnergyWidgetView.COLOR_NAMES);
+        carColors.setDropDownViewResource(R.layout.spinner_dropdown_item);
+        carColor.setAdapter(carColors);
+        carColor.setSelection(java.util.Arrays.asList(EnergyWidgetView.COLORS).indexOf(
+                EnergyWidgetView.color(prefs.getString("energyCarColor", "burgundy"))));
+        carColor.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                prefs.edit().putString("energyCarColor", EnergyWidgetView.COLORS[position]).apply();
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
         initDialWidgets();
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
