@@ -17,7 +17,27 @@
 // selected per-app DPI to MapWindow.scaleFactor (physical pixels per independent point). The Surface
 // keeps its native physical resolution; no VirtualDisplay or compositor upscaling is involved.
 
+// frida-inject 16.2.1 awaits RPC init before -e eternalizes/detaches the script.
+// Keep stdout connected until both ordinary bootstrap and the main-thread RDS hook finish.
+var appClientBootstrapResolve;
+var appClientBootstrap = new Promise(function (resolve) { appClientBootstrapResolve = resolve; });
+var appClientRdsReady = Promise.resolve();
+if (typeof rpc !== "undefined") {
+    rpc.exports = {init: function () {
+        return appClientBootstrap.then(function () { return appClientRdsReady; });
+    }};
+}
+function scheduleRdsStationRestore(application) {
+    appClientRdsReady = new Promise(function (resolve) {
+        Java.scheduleOnMainThread(function () {
+            try { installRdsStationRestore(application); }
+            finally { resolve(); }
+        });
+    });
+}
+
 Java.perform(function () {
+    try {
     var TAG = "vt_app_client";
     var READY_MARKER = "[app-client] hook ready v1";
     var MAPKIT_READY_MARKER = "[mapkit-dpi] hook ready v1";
@@ -64,7 +84,7 @@ Java.perform(function () {
     if (packageName === "com.pateo.rdsapp") {
         // Finish Application.onCreate before resolving RdsManager's singleton. Initializing it
         // from the attach thread too early can see BaseApplication.mContext == null.
-        Java.scheduleOnMainThread(function () { installRdsStationRestore(application); });
+        scheduleRdsStationRestore(application);
         // Continue the existing opt-in geometry handler, including future WIN_RELOAD changes.
     }
     var enabled = false;
@@ -506,6 +526,7 @@ Java.perform(function () {
         + " mapkitDpi=" + mapkitDpi + " mapkitHooks=" + mapkitHooksInstalled);
     console.log(READY_MARKER + " package=" + packageName + " enabled=" + enabled
         + " mapkitDpi=" + mapkitDpi + " mapkitHooks=" + mapkitHooksInstalled);
+    } finally { appClientBootstrapResolve(); }
 });
 
 // RDS persistence is intentionally in the RdsApp process: keep its OEM audio-focus and

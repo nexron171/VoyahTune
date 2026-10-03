@@ -150,7 +150,8 @@ test("close invalidates every delayed task", () => {
 // Execute the real Frida adapter against a small RdsApp facade, including nested OEM calls.
 function adapterFixture(options = {}) {
     const f = {current: options.current ?? reset, prefs: options.raw ?? JSON.stringify({schema: 1, station: original}),
-        timers: [], time: 0, ready: true, calls: [], logs: [], writes: [], methods: [], fields: {}, nextId: 1};
+        timers: [], time: 0, ready: true, calls: [], logs: [], writes: [], methods: [], fields: {}, nextId: 1,
+        mainTasks: []};
     function method(name, fn) {
         const m = {implementation: null, overload() { return m; },
             call(self, ...args) { return fn.apply(self, args); },
@@ -219,16 +220,22 @@ function adapterFixture(options = {}) {
     })};
     let loading = true;
     const sandbox = {
+        rpc: {exports: {}},
         console: {log: text => f.logs.push(text)},
         setTimeout: (fn, delay) => f.timers.push({fn, at: f.time + delay}),
         Java: {
-            perform: fn => { if (!loading) fn(); }, scheduleOnMainThread: fn => fn(), retain: x => x,
+            perform: fn => { if (!loading) fn(); },
+            scheduleOnMainThread: fn => options.deferredBootstrap ? f.mainTasks.push(fn) : fn(), retain: x => x,
             use: name => { if (name === options.missing) throw Error("ClassNotFoundException");
                 if (!classes[name]) throw Error("unexpected class " + name); return classes[name]; }
         }
     };
     vm.runInNewContext(source, sandbox); loading = false;
-    sandbox.installRdsStationRestore(app);
+    if (options.deferredBootstrap) sandbox.scheduleRdsStationRestore(app);
+    else sandbox.installRdsStationRestore(app);
+    f.readyPromise = sandbox.rpc.exports.init();
+    f.completeBootstrap = sandbox.appClientBootstrapResolve;
+    f.flushMain = () => { while (f.mainTasks.length) f.mainTasks.shift()(); };
     f.tick = ms => {
         const end = f.time + ms;
         while (f.timers.some(t => t.at <= end)) {
@@ -367,4 +374,21 @@ test("a new request after suspend does not wait for an overdue timer", () => {
     f.time = 20000; f.ready = true; f.resume();
     assert.deepEqual(f.tunes, [original]);
 });
-console.log("RDS restore: " + count + " tests passed");
+(async function () {
+    for (const fail of [false, true]) {
+        const f = adapterFixture({deferredBootstrap: true,
+            missing: fail ? "com.pateo.overSideRadio.base.dab.RdsManager$3" : undefined});
+        let finished = false;
+        f.readyPromise.then(() => { finished = true; });
+        f.completeBootstrap();
+        await Promise.resolve(); await Promise.resolve();
+        assert.equal(finished, false, "injector must wait for the actual main-thread install");
+        f.flushMain();
+        await f.readyPromise;
+        assert.equal(finished, true);
+        assert.equal(f.logs.some(s => s.includes("[rds-restore] hook ready")), !fail);
+        console.log("OK RPC init waits for delayed RDS " + (fail ? "failure" : "readiness"));
+        count++;
+    }
+    console.log("RDS restore: " + count + " tests passed");
+})().catch(error => { console.error(error); process.exitCode = 1; });
