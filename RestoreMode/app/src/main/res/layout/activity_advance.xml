@@ -643,7 +643,7 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
                 <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                    android:text="Расход энергии" android:textColor="#FFFFFF" android:textSize="26px" />
+                    android:text="Заряд и топливо" android:textColor="#FFFFFF" android:textSize="26px" />
                 <Switch android:id="@+id/switchShowEnergy" android:layout_width="wrap_content"
                     android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
             </LinearLayout>
@@ -704,7 +704,7 @@
                 android:text="Цвет автомобиля в карточке шин" android:textColor="#AAAAAA" android:textSize="22px" />
             <Spinner android:id="@+id/energyCarColor" android:layout_width="260dp" android:layout_height="60dp" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="Расход: кВт·ч/100 км и л/100 км. История записывается по мере движения; недоступные показания обозначены прочерком. Время поездки учитывается только в D."
+                android:text="Батарея и топливо в %. История записывается каждые 100 м. Средний бензиновый расход оценивается по уровню бака 56 л; электрический — по данным автомобиля. Время поездки учитывается только в D."
                 android:textColor="#AAAAAA" android:textSize="20px" />
 
             <!-- Карточки «Набрать номер» (0..100) -->

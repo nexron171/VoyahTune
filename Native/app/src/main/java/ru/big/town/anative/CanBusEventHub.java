@@ -89,7 +89,7 @@ final class CanBusEventHub {
     private final Handler vehicleQueryHandler;
     private final Handler telemetryQueryHandler;
     private final AtomicBoolean telemetryQueryPending = new AtomicBoolean();
-    private final long[] telemetryRevision = new long[4]; // guarded by eventLock
+    private final long[] telemetryRevision = new long[EnergyTelemetrySample.COUNT]; // guarded by eventLock
     private final Executor ioExecutor;
     private final CanBusEventRouter router = new CanBusEventRouter();
     private final AtomicInteger subscriberCount = new AtomicInteger();
@@ -193,7 +193,7 @@ final class CanBusEventHub {
             }
             telemetryQueryHandler.post(() -> {
                 try {
-                    for (int kind = 0; kind < 4; kind++) {
+                    for (int kind = 0; kind < EnergyTelemetrySample.COUNT; kind++) {
                         long revision;
                         synchronized (eventLock) {
                             if (activeEpoch != epoch) return;
@@ -228,8 +228,11 @@ final class CanBusEventHub {
     }
 
     private EnergyTelemetrySample decodeEnergyParcel(Parcel parcel, int kind) {
-        if (parcel.dataAvail() < 4) throw new IllegalArgumentException("missing presence");
-        if (parcel.readInt() == 0) return EnergyTelemetrySample.unavailable(kind);
+        // SOC is a scalar float; the other getters/callbacks carry a nullable Parcelable.
+        if (kind != EnergyTelemetrySample.SOC) {
+            if (parcel.dataAvail() < 4) throw new IllegalArgumentException("missing presence");
+            if (parcel.readInt() == 0) return EnergyTelemetrySample.unavailable(kind);
+        }
         int count = EnergyTelemetrySample.WORD_COUNTS[kind];
         if (parcel.dataAvail() < count * 4) throw new IllegalArgumentException("short telemetry parcel");
         int[] words = new int[count];
@@ -721,13 +724,15 @@ final class CanBusEventHub {
                 throws RemoteException {
             try {
                 switch (code) {
-                    case 59: // onEnergyConsumptionPercentChanged
+                    case 46: // onBatteryRemainingCapacityChanged: scalar float
+                    case 17: // onFuelLevelChanged: FuelLevel Parcelable
                     case 60: // onEnergyConsumptionInfoChanged
                     case 45: // onTPMSInfoChange
                     case 25: { // onOdometerChanged (callback direction, not getter code)
                         if (!router.hasInterest(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY)) return true;
                         data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        int kind = code == 59 ? EnergyTelemetrySample.INSTANT
+                        int kind = code == 46 ? EnergyTelemetrySample.SOC
+                                : code == 17 ? EnergyTelemetrySample.FUEL
                                 : code == 60 ? EnergyTelemetrySample.TRIP
                                 : code == 45 ? EnergyTelemetrySample.TIRES : EnergyTelemetrySample.ODOMETER;
                         routeEnergy(epoch, decodeEnergyParcel(data, kind));

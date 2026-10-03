@@ -26,7 +26,7 @@ final class EnergyWidgetView extends View {
     static final String ENERGY = "energyWidget", TRIP = "energyTripWidget",
             TIRES = "tirePressureWidget", ODO = "odometerWidget";
     static final String[] IDS = {ENERGY, TRIP, TIRES, ODO};
-    static final String[] NAMES = {"Расход энергии", "Текущая поездка", "Давление в шинах", "Общий пробег"};
+    static final String[] NAMES = {"Заряд и топливо", "Текущая поездка", "Давление в шинах", "Общий пробег"};
     static final String[] COLORS = {"black", "white", "dark_gray", "dark_green", "burgundy", "gold_bronze", "sage_green"};
     static final String[] COLOR_NAMES = {"Чёрный", "Белый", "Тёмно-серый", "Тёмно-зелёный", "Бургунди", "Золотисто-бронзовый", "Серо-зелёный"};
     private static final int WHITE=0xffeef1f6, MUTED=0xffaab3c4, GREEN=0xff66d3ad,
@@ -127,8 +127,8 @@ final class EnergyWidgetView extends View {
         if(TIRES.equals(kind)) return "Давление в шинах, bar. Левое переднее "+num(current(EnergyWidgetProtocol.TIRES,0))
                 +", правое переднее "+num(current(EnergyWidgetProtocol.TIRES,1))+", левое заднее "
                 +num(current(EnergyWidgetProtocol.TIRES,2))+", правое заднее "+num(current(EnergyWidgetProtocol.TIRES,3));
-        return ENERGY.equals(kind)?"Расход энергии: "+num(current(EnergyWidgetProtocol.INSTANT,0))+" кВт·ч/100 км, "
-                +num(current(EnergyWidgetProtocol.INSTANT,1))+" л/100 км":TRIP.equals(kind)?"Текущая поездка":"Общий пробег";
+        return ENERGY.equals(kind)?"Заряд батареи: "+num(current(EnergyWidgetProtocol.LEVELS,0))+" процентов, топливо "
+                +num(current(EnergyWidgetProtocol.LEVELS,1))+" процентов":TRIP.equals(kind)?"Текущая поездка":"Общий пробег";
     }
 
     @Override protected void onDraw(Canvas c) {
@@ -182,7 +182,7 @@ final class EnergyWidgetView extends View {
     private void drawTrip(Canvas c) {
         text(c,"Текущая поездка",27,55,28,WHITE,true);
         right(c,!live()?"Нет связи":inDrive?"В пути":"На стоянке",1140,51,18,MUTED);
-        String[] labels={"Время в пути","Пробег","Средний расход","Средний расход"};
+        String[] labels={"Время в пути","Пробег","Средний расход","Бензин · оценка"};
         float[] left={27,369,627,886};
         String time="—";
         if(tripMs>=0&&live()) {long s=tripMs/1000;time=String.format(Locale.US,"%02d:%02d:%02d",s/3600,(s/60)%60,s%60);}
@@ -196,12 +196,13 @@ final class EnergyWidgetView extends View {
             if(i>0) line(c,left[i]-26,87,left[i]-26,175,BORDER,1);
         }
         text(c,"Время учитывается только в D",27,211,18,MUTED,false);
-        right(c,live()&&!Float.isFinite(current(EnergyWidgetProtocol.TRIP,2))
-                ?"Средний расход бензина недоступен от автомобиля"
-                :"Расход и пробег — текущая поездка OEM",1140,211,16,MUTED);
+        float measuredKm=state.getFloat(EnergyWidgetProtocol.FUEL_ESTIMATE_KM,Float.NaN);
+        right(c,!live()?"Нет связи с автомобилем":!Float.isFinite(measuredKm)?"Ожидание уровня топлива"
+                :measuredKm<1?"Расчёт бензина после 1 км наблюдения"
+                :"Бензин ≈ по уровню бака 56 л · за "+num(measuredKm)+" км",1140,211,16,MUTED);
     }
     private void drawEnergy(Canvas c) {
-        text(c,"Расход энергии",27,55,28,WHITE,true);
+        text(c,"Заряд и топливо",27,55,28,WHITE,true);
         for(int i=0;i<3;i++) {
             int range=new int[]{5,15,30}[i];float x=baseW-303+i*90;
             paint.setColor(range==window?0xff414b5c:0xff1d212a);c.drawRoundRect(x,24,x+86,68,9,9,paint);
@@ -210,34 +211,31 @@ final class EnergyWidgetView extends View {
         float[] distances=array(EnergyWidgetProtocol.HISTORY_X,0), ev=array(EnergyWidgetProtocol.HISTORY_EV,distances.length), fuel=array(EnergyWidgetProtocol.HISTORY_FUEL,distances.length);
         boolean[] gaps=state.getBooleanArray(EnergyWidgetProtocol.HISTORY_BREAK);
         int n=Math.min(distances.length,Math.min(ev.length,fuel.length));
-        float currentEv=current(EnergyWidgetProtocol.INSTANT,0), currentFuel=current(EnergyWidgetProtocol.INSTANT,1);
+        float currentEv=current(EnergyWidgetProtocol.LEVELS,0), currentFuel=current(EnergyWidgetProtocol.LEVELS,1);
         boolean hasCurrent=Float.isFinite(currentEv)||Float.isFinite(currentFuel);
         if(selected>=0&&selected<n) {currentEv=ev[selected];currentFuel=fuel[selected];}
         text(c,"—",27,122,34,GREEN,false);text(c,num(currentEv),68,125,49,GREEN,true);
-        text(c,"Электричество",235,117,17,GREEN,true);text(c,"кВт·ч/100 км",180,153,18,MUTED,false);
+        text(c,"Батарея",235,117,17,GREEN,true);text(c,"%",180,153,18,MUTED,false);
         text(c,"⋯",370,122,34,BLUE,true);text(c,num(currentFuel),410,125,49,BLUE,true);
-        text(c,"Бензин",564,117,17,BLUE,true);text(c,"л/100 км",487,153,18,MUTED,false);
+        text(c,"Топливо",564,117,17,BLUE,true);text(c,"%",487,153,18,MUTED,false);
         right(c,selected>=0?"Выбранная точка":!live()?"Нет связи с автомобилем"
-                :hasCurrent?"Текущий расход":"Нет свежих данных расхода",1140,124,18,MUTED);
+                :hasCurrent?"Текущие уровни":"Нет свежих данных уровней",1140,124,18,MUTED);
         float end=n>0?Math.max(1,distances[n-1]):window,start=Math.max(0,end-window),span=end-start;
-        float maxEv=60,maxFuel=12;
-        for(int i=0;i<n;i++) if(distances[i]>=start) {if(Float.isFinite(ev[i]))maxEv=Math.max(maxEv,(float)Math.ceil(ev[i]/20)*20);if(Float.isFinite(fuel[i]))maxFuel=Math.max(maxFuel,(float)Math.ceil(fuel[i]/3)*3);}
         float left=77,right=1091,top=174,bottom=292;
         for(int i=0;i<=4;i++) {
-            float y=top+(bottom-top)*i/4, value=maxEv-(maxEv+20)*i/4;
-            line(c,left,y,right,y,value==0?0xff596575:BORDER,value==0?1.5f:1);
-            right(c,String.format(RU,"%.0f",value),left-13,y+5,16,MUTED);
-            if(value>=0)text(c,String.format(RU,"%.0f",value/maxEv*maxFuel),right+13,y+5,16,MUTED,false);
+            float y=top+(bottom-top)*i/4, value=100-25*i;
+            line(c,left,y,right,y,BORDER,1);
+            right(c,String.format(RU,"%.0f%%",value),left-13,y+5,16,MUTED);
         }
         for(int i=0;i<6;i++) {float d=start+span*i/5; text(c,num(d),left+(right-left)*i/5-15,321,17,MUTED,false);}
         if(n<2) text(c,!live()?"Нет записанной истории":hasCurrent
-                ?"История появится по мере движения":"Ожидание данных расхода от автомобиля",290,242,22,MUTED,false);
+                ?"История появится по мере движения":"Ожидание уровней батареи и топлива",290,242,22,MUTED,false);
         for(int series=0;series<2;series++) {
             Path path=new Path();boolean drawing=false;
             for(int i=0;i<n;i++) {
-                float v=series==0?ev[i]:fuel[i]*maxEv/maxFuel;
-                if(distances[i]<start||!Float.isFinite(v)) {drawing=false;continue;}
-                float x=left+(distances[i]-start)/span*(right-left),y=bottom-(v+20)/(maxEv+20)*(bottom-top);
+                float v=series==0?ev[i]:fuel[i];
+                if(distances[i]<start||!Float.isFinite(v)||v<0||v>100) {drawing=false;continue;}
+                float x=left+(distances[i]-start)/span*(right-left),y=bottom-v/100f*(bottom-top);
                 if(!drawing||gaps==null||i>=gaps.length||gaps[i])path.moveTo(x,y);else path.lineTo(x,y);
                 drawing=true;
                 paint.setColor(series==0?GREEN:BLUE);c.drawCircle(x,y,2,paint);
@@ -249,7 +247,7 @@ final class EnergyWidgetView extends View {
         if(selected>=0&&selected<n&&distances[selected]>=start) {
             float x=left+(distances[selected]-start)/span*(right-left);line(c,x,top,x,bottom,0xff7b8799,1);
         }
-        text(c,"Электричество — слева · бензин — справа",27,348,17,MUTED,false);
+        text(c,"Батарея — зелёный · топливо — голубой · шаг 100 м",27,348,17,MUTED,false);
         right(c,num(start)+"–"+num(end)+" км · пробег поездки",1140,348,16,MUTED);
     }
 }

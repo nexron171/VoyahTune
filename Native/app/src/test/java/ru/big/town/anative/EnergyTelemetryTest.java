@@ -5,116 +5,94 @@ import static org.junit.Assert.*;
 
 public class EnergyTelemetryTest {
     private static int f(float v) { return Float.floatToIntBits(v); }
-    @Test public void decodesFloatAndIntegerParcelPositionsWithoutUsingPercentages() {
-        int[] words = new int[35];
-        words[0]=f(85); words[32]=76; words[33]=f(-8); words[34]=f(2.5f);
-        assertArrayEquals(new float[]{-8,2.5f},EnergyTelemetrySample.decode(0,words).values,0);
-        assertEquals(76,EnergyTelemetrySample.decode(0,words).sourceIndex);
+
+    @Test public void levelsUseSocFloatAndFuelPercentageNotCapacityOrConsumption() {
+        assertEquals(48.1f, EnergyTelemetrySample.decode(EnergyTelemetrySample.SOC,
+                new int[]{0x42406666}).values[0], .0001f);
+        int[] fuel = {52, 0, f(30), 0, f(9), f(5), f(6)};
+        assertEquals(30, EnergyTelemetrySample.decode(EnergyTelemetrySample.FUEL, fuel).values[0], 0);
+        assertArrayEquals(new int[]{71,80,70,1,9}, EnergyTelemetrySample.TRANSACTIONS);
+    }
+
+    @Test public void preservesElectricAverageAndTripCounterWithoutUsingOemFuelAverage() {
         int[] trip=new int[20]; trip[0]=f(42.3f);trip[1]=f(18.7f);trip[2]=55;trip[3]=f(1.9f);trip[4]=28;
-        assertArrayEquals(new float[]{42.3f,18.7f,1.9f},EnergyTelemetrySample.decode(1,trip).values,0);
+        EnergyTelemetrySample decoded=EnergyTelemetrySample.decode(EnergyTelemetrySample.TRIP,trip);
+        assertEquals(42.3f,decoded.values[0],0);assertEquals(18.7f,decoded.values[1],0);
+        assertTrue(Float.isNaN(decoded.values[2]));assertEquals(28,decoded.tripCounter);
         int[] tires=new int[11];tires[7]=f(2.6f);tires[8]=f(2.7f);tires[9]=f(2.8f);tires[10]=f(2.9f);
         assertArrayEquals(new float[]{2.6f,2.7f,2.8f,2.9f},EnergyTelemetrySample.decode(2,tires).values,0);
         int[] odo=new int[10];odo[0]=350;odo[1]=15278;odo[3]=4699;odo[6]=f(15278);
         assertEquals(15278,EnergyTelemetrySample.decode(3,odo).values[0],0);
     }
-    @Test public void unknownInvalidNonfiniteAndShortParcelsNeverBecomeZero() {
-        for(float bad:new float[]{-1000,-9999,Float.MIN_VALUE,Float.NaN,Float.POSITIVE_INFINITY}) {
-            int[] words=new int[35];words[33]=f(bad);words[34]=f(bad);
-            for(float v:EnergyTelemetrySample.decode(0,words).values) assertTrue(Float.isNaN(v));
+
+    @Test public void invalidLevelsNeverBecomeZeroAndEmptyOrFullRemainValid() {
+        for(float bad:new float[]{-1,-1000,-9999,101,102.3f,Float.MIN_VALUE,Float.NaN,Float.POSITIVE_INFINITY}) {
+            assertTrue(Float.isNaN(EnergyTelemetrySample.decode(0,new int[]{f(bad)}).values[0]));
+            int[] fuel=new int[7];fuel[2]=f(bad);
+            assertTrue(Float.isNaN(EnergyTelemetrySample.decode(4,fuel).values[0]));
         }
-        for(float v:EnergyTelemetrySample.decode(2,new int[10]).values) assertTrue(Float.isNaN(v));
-        assertTrue(Float.isNaN(EnergyTelemetrySample.decode(3,new int[10]).values[0]));
-        int[] zero=new int[35];assertEquals(0,EnergyTelemetrySample.decode(0,zero).values[0],0);
+        for(int kind=0;kind<EnergyTelemetrySample.COUNT;kind++)
+            for(float v:EnergyTelemetrySample.decode(kind,new int[0]).values) assertTrue(Float.isNaN(v));
+        for(float valid:new float[]{0,100}) {
+            assertEquals(valid,EnergyTelemetrySample.decode(0,new int[]{f(valid)}).values[0],0);
+            int[] fuel=new int[7];fuel[2]=f(valid);
+            assertEquals(valid,EnergyTelemetrySample.decode(4,fuel).values[0],0);
+        }
     }
-    @Test public void historyUsesDistanceAndBreaksAcrossStaleInputReconnectAndRollback() {
+
+    @Test public void historyUsesHundredMeterStepsIncludingConstantLevelsAndCharging() {
         EnergyHistory h=new EnergyHistory();
-        assertTrue(h.sample(0,12,0,1000,1000,1000));
-        assertFalse(h.sample(0,15,0,1500,1500,1500));
-        assertTrue(h.sample(.1f,15,0,2000,2000,2000));
+        assertTrue(h.sample(0,48,30,1000,1000,1000,1000));
+        assertFalse(h.sample(.04f,48,30,1500,1500,1500,1500));
+        assertTrue(h.sample(.1f,48,30,2000,2000,2000,2000));
         assertFalse(h.points().get(1).gap);
-        assertFalse(h.sample(.2f,15,0,20000,20000,2000));
-        assertTrue(h.sample(.2f,15,0,21000,21000,21000));
+        assertTrue(h.sample(.1f,49,30,3000,3000,3000,3000)); // parked charging updates endpoint
+        assertEquals(2,h.points().size());assertEquals(49,h.points().get(1).ev,0);
+        h.sample(.2f,48.9f,30,4000,4000,4000,4000);
+        assertEquals(3,h.points().size());
+    }
+
+    @Test public void staleGroupsAreIndependentAndDisconnectOrDistanceJumpBreaksLine() {
+        EnergyHistory h=new EnergyHistory();
+        h.sample(0,48,30,0,0,0,0);
+        h.sample(.1f,48,30,20000,20000,20000,0);
+        assertTrue(Float.isNaN(h.points().get(1).fuel));assertEquals(48,h.points().get(1).ev,0);
+        assertFalse(h.sample(.2f,48,30,40000,40000,20000,0));
+        h.sample(.2f,47,29,41000,41000,41000,41000);
         assertTrue(h.points().get(2).gap);
-        h.breakSegment(); h.sample(.3f,12,0,22000,22000,22000);
+        h.breakSegment();h.sample(.3f,47,29,42000,42000,42000,42000);
         assertTrue(h.points().get(3).gap);
-        h.sample(0,10,0,23000,23000,23000);
+        h.sample(1,47,29,43000,43000,43000,43000);assertTrue(h.points().get(4).gap);
+        h.sample(0,47,29,44000,44000,44000,44000);
         assertEquals(1,h.points().size());assertTrue(h.points().get(0).gap);
     }
+
     @Test public void historyIsBoundedAndRestartCannotBridgeStoredPoints() {
         EnergyHistory h=new EnergyHistory();
-        for(int i=0;i<1000;i++)h.sample(i*.1f,10,0,i*100L,i*100L,i*100L);
+        for(int i=0;i<1000;i++)h.sample(i*.1f,48,30,i*100L,i*100L,i*100L,i*100L);
         assertTrue(h.points().size()<=301);
         assertTrue(h.points().get(h.points().size()-1).km-h.points().get(0).km<=30);
         EnergyHistory restored=new EnergyHistory();restored.restore(h.points());
-        restored.sample(100,11,0,100000,100000,100000);
+        restored.sample(100,48,30,100000,100000,100000,100000);
         assertTrue(restored.points().get(restored.points().size()-1).gap);
     }
+
     @Test public void continuousSignalsAtLowSpeedDoNotCreateArtificialGaps() {
-        EnergyHistory h=new EnergyHistory();
-        h.sample(0,12,0,0,0,0);
-        for(int i=1;i<30;i++)h.sample(0,12,0,i*1000L,i*1000L,i*1000L);
-        h.sample(.1f,12,0,30000,30000,30000);
+        EnergyHistory h=new EnergyHistory();h.sample(0,48,30,0,0,0,0);
+        for(int i=1;i<30;i++)h.sample(0,48,30,i*1000L,i*1000L,i*1000L,i*1000L);
+        h.sample(.1f,48,30,30000,30000,30000,30000);
         assertEquals(2,h.points().size());assertFalse(h.points().get(1).gap);
     }
-    @Test public void routerKeepsDifferentTelemetryKindsAndRefreshesIdenticalValues() {
+
+    @Test public void routerKeepsIndependentSocAndFuelAndRefreshesUnchangedLevels() {
         CanBusEventRouter r=new CanBusEventRouter();java.util.List<CanBusEvent> out=new java.util.ArrayList<>();
         r.subscribe(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY,null,Runnable::run,out::add);
-        EnergyTelemetrySample s=new EnergyTelemetrySample(0,0,0);
+        EnergyTelemetrySample s=new EnergyTelemetrySample(0,48);
         r.dispatch(CanBusEvent.telemetry(CanBusEvent.Origin.LIVE,1,1,1000,s));
         r.dispatch(CanBusEvent.telemetry(CanBusEvent.Origin.LIVE,1,2,2000,s));
-        r.dispatch(CanBusEvent.telemetry(CanBusEvent.Origin.LIVE,1,3,3000,new EnergyTelemetrySample(2,2.6f,2.6f,2.6f,2.7f)));
+        r.dispatch(CanBusEvent.telemetry(CanBusEvent.Origin.LIVE,1,3,3000,new EnergyTelemetrySample(4,30)));
         assertEquals(3,out.size());
         r.invalidateThrough(1);
         r.dispatch(CanBusEvent.telemetry(CanBusEvent.Origin.LIVE,1,4,4000,s));assertEquals(3,out.size());
-    }
-
-    private static EnergyTelemetrySample instant(int index, float ev, float fuel) {
-        int[] words = new int[35]; words[32]=index; words[33]=f(ev); words[34]=f(fuel);
-        return EnergyTelemetrySample.decode(EnergyTelemetrySample.INSTANT,words);
-    }
-
-    @Test public void frozenOemGetterCannotCreateLiveZeroHistoryWhileDistanceIncreases() {
-        EnergyInstantFreshness freshness = new EnergyInstantFreshness();
-        EnergyHistory history = new EnergyHistory();
-        EnergyTelemetrySample cached = instant(329,0,0); // observed on H97X in motion
-        for(int i=0;i<20;i++) {
-            long now=i*5000L;
-            long measuredAt=freshness.observe(cached,now,false);
-            assertEquals(-1,measuredAt);
-            assertFalse(history.sample(i*.1f,0,0,now,now,measuredAt));
-        }
-        assertTrue(history.points().isEmpty());
-    }
-
-    @Test public void changedIndexOrValuesConfirmSamplesButRepeatedCacheCannotKeepThemFresh() {
-        EnergyInstantFreshness freshness = new EnergyInstantFreshness();
-        assertEquals(-1,freshness.observe(instant(329,0,0),1000,false));
-        assertEquals(2000,freshness.observe(instant(330,0,0),2000,false));
-        assertEquals(2000,freshness.observe(instant(330,0,0),50000,false));
-        assertEquals(2000,freshness.observe(instant(330,0,0),51000,true));
-        assertEquals(52000,freshness.observe(instant(330,-8,2.5f),52000,false));
-        assertEquals(53000,freshness.observe(instant(1,-8,2.5f),53000,true));
-        freshness.reset();
-        assertEquals(-1,freshness.observe(instant(1,-8,2.5f),54000,false));
-        assertEquals(-1,freshness.observe(EnergyTelemetrySample.unavailable(0),55000,false));
-        assertEquals(-1,freshness.observe(instant(1,-8,2.5f),56000,false));
-    }
-
-    @Test public void liveFirstCallbackAndInvalidSampleIndicesAreHandledSeparately() {
-        EnergyInstantFreshness freshness = new EnergyInstantFreshness();
-        assertEquals(1000,freshness.observe(instant(329,0,0),1000,true));
-        for(int invalid:new int[]{0,-1000,-9999,511})
-            assertEquals(-1,freshness.observe(instant(invalid,0,0),2000,true));
-        assertEquals(-1,freshness.observe(instant(330,Float.NaN,Float.NaN),3000,true));
-        assertEquals(4000,freshness.observe(instant(330,12,Float.NaN),4000,true));
-    }
-
-    @Test public void liveTripInvalidFuelRemainsUnavailableAlongsideValidElectricAverage() {
-        int[] trip = new int[20];
-        trip[0]=0x3f800000; trip[1]=0x41c00000; trip[2]=7;
-        trip[3]=0xc61c3c00; trip[4]=7; // OEM: 1.0 km, 24.0 kWh/100km, INVALID fuel
-        float[] values=EnergyTelemetrySample.decode(EnergyTelemetrySample.TRIP,trip).values;
-        assertEquals(1,values[0],0); assertEquals(24,values[1],0);
-        assertTrue(Float.isNaN(values[2]));
     }
 }

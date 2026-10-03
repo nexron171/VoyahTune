@@ -2,25 +2,25 @@ package ru.big.town.anative;
 
 /** Fixed primitive layouts verified against H97X CanBusService; no OEM classes are loaded. */
 final class EnergyTelemetrySample {
-    static final int INSTANT = 0, TRIP = 1, TIRES = 2, ODOMETER = 3;
-    static final int[] TRANSACTIONS = {79, 80, 70, 1};
-    static final int[] WORD_COUNTS = {35, 20, 11, 10};
+    static final int SOC = 0, TRIP = 1, TIRES = 2, ODOMETER = 3, FUEL = 4, COUNT = 5;
+    static final int[] TRANSACTIONS = {71, 80, 70, 1, 9};
+    static final int[] WORD_COUNTS = {1, 20, 11, 10, 7};
     final int kind;
     final float[] values;
-    final int sourceIndex;
+    final int tripCounter;
 
     EnergyTelemetrySample(int kind, float... values) {
         this(kind, values, -1);
     }
 
-    private EnergyTelemetrySample(int kind, float[] values, int sourceIndex) {
+    private EnergyTelemetrySample(int kind, float[] values, int tripCounter) {
         this.kind = kind;
         this.values = values.clone();
-        this.sourceIndex = sourceIndex;
+        this.tripCounter = tripCounter;
     }
 
     static EnergyTelemetrySample unavailable(int kind) {
-        int count = kind == TIRES ? 4 : kind == TRIP ? 3 : kind == INSTANT ? 2 : 1;
+        int count = kind == TIRES ? 4 : kind == TRIP ? 3 : 1;
         float[] values = new float[count];
         java.util.Arrays.fill(values, Float.NaN);
         return new EnergyTelemetrySample(kind, values);
@@ -30,12 +30,14 @@ final class EnergyTelemetrySample {
         if (kind < 0 || kind >= WORD_COUNTS.length) throw new IllegalArgumentException("kind");
         if (words == null || words.length < WORD_COUNTS[kind]) return unavailable(kind);
         switch (kind) {
-            case INSTANT:
-                return new EnergyTelemetrySample(kind, new float[]{value(words[33], -20, 106),
-                        value(words[34], 0, 31)}, words[32]);
+            case SOC:
+                return new EnergyTelemetrySample(kind, value(words[0], 0, 100));
+            case FUEL:
+                // Ignore the OEM tank capacity (52 on H97X); the estimate uses the agreed 56 L.
+                return new EnergyTelemetrySample(kind, value(words[2], 0, 100));
             case TRIP:
-                return new EnergyTelemetrySample(kind, value(words[0], 0, 2_000_000),
-                        value(words[1], -50, 2000), value(words[3], 0, 200));
+                return new EnergyTelemetrySample(kind, new float[]{value(words[0], 0, 2_000_000),
+                        value(words[1], -50, 2000), Float.NaN}, words[4] >= 0 ? words[4] : -1);
             case TIRES:
                 return new EnergyTelemetrySample(kind, value(words[7], 0, 25),
                         value(words[8], 0, 25), value(words[9], 0, 25), value(words[10], 0, 25));
