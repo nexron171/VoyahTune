@@ -984,7 +984,11 @@ inject_app_client_bg() {
         fi
         cat "$FC_TRY" >> "$FC_TARGET_LOG"
         FC_READY_OK=0
-        if [ "$FC_RC" -eq 0 ] && grep -qF "$APP_CLIENT_READY" "$FC_TRY"; then
+        # Like the other OEM agents, RDS can keep its eternalized hooks alive after
+        # the injector wrapper times out. Its two exact ready markers below and the
+        # unchanged process identity confirm installation independently of that exit code.
+        if { [ "$FC_RC" -eq 0 ] || [ "$FC_TARGET_PACKAGE" = com.pateo.rdsapp ]; } \
+                && grep -qF "$APP_CLIENT_READY" "$FC_TRY"; then
             if [ "$FC_TARGET_REQUIRE_MAPKIT" != 1 ] \
                     || grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"; then
                 FC_READY_OK=1

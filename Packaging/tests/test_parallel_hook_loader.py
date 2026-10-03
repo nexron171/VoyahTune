@@ -63,6 +63,7 @@ case "$script" in
 esac
 while [ "$gate" != none ] && [ ! -f "$root/release_$gate" ]; do sleep 0.05; done
 printf 'end %s %s\n' "$script" "$pid" >> "$root/events"
+if [ "$script" = app_client.js ] && [ -f "$root/app_client_timeout" ]; then exit 124; fi
 """.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root))))
         self.injector.chmod(0o755)
         overrides = r'''
@@ -193,6 +194,27 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
     def test_rds_32_bit_rejects_secondary_android_user(self):
         self.rds_probe(uid=101000, executable="/system/bin/app_process32")
         self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_rds_ready_survives_injector_timeout(self):
+        (self.root / "app_client_timeout").touch()
+        self.rds_probe(executable="/system/bin/app_process32")
+        marker = self.root / "voyahtune_app_client.com.pateo.rdsapp.pid"
+        self.assertTrue(marker.exists(), "eternalized RDS agent readiness survives wrapper timeout")
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe(executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_rds_timeout_without_radio_ready_is_not_success(self):
+        (self.root / "app_client_timeout").touch()
+        (self.root / "missing_rds_ready").touch()
+        self.rds_probe(executable="/system/bin/app_process32")
+        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
+
+    def test_other_app_timeout_still_requires_successful_exit(self):
+        (self.root / "app_client_timeout").touch()
+        self.rds_probe(package="example.player")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+        self.assertFalse((self.root / "voyahtune_app_client.example.player.pid").exists())
 
     def test_other_32_bit_apps_remain_unsupported(self):
         self.rds_probe(package="example.player", executable="/system/bin/app_process32")
