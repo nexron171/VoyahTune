@@ -88,9 +88,24 @@ test("matching station resumes audio without retuning", () => {
     const f = fixture(); f.current = original; f.resume();
     assert.equal(f.plays, 1); assert.equal(f.tunes.length, 0);
 });
-test("RDS AF keeps station identity and saves confirmed alternative frequency", () => {
-    const f = fixture(); f.resume(); f.observe(fm(10230, 1234)); f.tick(750);
-    assert.deepEqual(f.writes, [fm(10230, 1234)]);
+test("stale RDS PI after wake cannot overwrite the saved frequency", () => {
+    const f = fixture(fm(10210, 30489));
+    f.observe(fm(10210, 30489)); f.tick(80);
+    f.observe(reset); f.observe(fm(8750, 30489)); f.tick(1000);
+    assert.equal(f.writes.length, 0);
+    f.resume(); assert.deepEqual(f.tunes, [fm(10210, 30489)]);
+    assert.equal(f.logs.some(s => s.includes("restore confirmed")), false);
+    f.observe(fm(10210)); f.tick(750);
+    assert.equal(f.logs.some(s => s.includes("restore confirmed 10210")), true);
+});
+test("unrequested AF frequency cannot replace the user's durable frequency by PI alone", () => {
+    const f = fixture(); f.observe(fm(10230, 1234)); f.tick(750);
+    assert.equal(f.writes.length, 0);
+});
+test("a stale PI cannot confirm a manual choice at a different frequency", () => {
+    const f = fixture(); f.controller.select(fm(10210, 30489));
+    f.observe(fm(8750, 30489)); f.tick(1000);
+    assert.equal(f.writes.length, 0);
 });
 test("traffic announcement cannot overwrite the station", () => {
     const f = fixture(); f.observe({...fm(10230, 1234), ta: true}); f.tick(1000);
@@ -231,7 +246,7 @@ function adapterFixture(options = {}) {
 
 test("adapter UI play restores saved station rather than saving OEM default", () => {
     const f = adapterFixture(); f.invoke("modelPlay");
-    assert.deepEqual(f.calls.filter(c => c[0] === "tune"), [["tune", original]]);
+    assert.deepEqual(f.calls.filter(c => c[0] === "tune"), [["tune", fm(original.freq)]]);
     f.update(original); f.tick(750);
     assert.equal(f.writes.length, 0);
 });
@@ -291,7 +306,22 @@ test("owned delayed tune replay is still restoration, not a user selection", () 
 test("OEM automatic radio playback restores after wake without a UI play press", () => {
     const f = adapterFixture(); assert.equal(f.calls.length, 0);
     f.invoke("audioStatus", false);
-    assert.deepEqual(f.calls.filter(c => c[0] === "tune"), [["tune", original]]);
+    assert.deepEqual(f.calls.filter(c => c[0] === "tune"), [["tune", fm(original.freq)]]);
+});
+test("paused OEM wake reset preserves the selected station until UI playback", () => {
+    const chosen = fm(10210, 30489);
+    const f = adapterFixture({current: chosen, raw: JSON.stringify({schema: 1, station: chosen})});
+    f.playing = false;
+    f.invoke("init"); f.tick(80);
+    f.update(reset); f.update(fm(8750, 30489)); f.tick(1000);
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.writes.length, 0);
+    assert.deepEqual(JSON.parse(f.prefs).station, chosen);
+    f.invoke("modelPlay");
+    assert.deepEqual(f.calls.filter(c => c[0] === "tune"), [["tune", fm(10210)]]);
+    assert.ok(!f.logs.some(s => s.includes("restore confirmed")));
+    f.update(fm(10210, 30489)); f.tick(750);
+    assert.ok(f.logs.some(s => s.includes("restore confirmed 10210")));
 });
 test("OEM source other than radio never triggers automatic restore", () => {
     const f = adapterFixture(); f.radioSource = false; f.invoke("audioStatus", false);

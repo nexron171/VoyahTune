@@ -518,8 +518,9 @@ function createRdsRestoreController(io, initial) {
             && typeof s.rds === "boolean" && Number.isInteger(s.pi) && s.pi >= 0 && s.pi <= 65535;
     }
     function same(a, b) {
-        return valid(a) && valid(b) && a.fm === b.fm
-            && (a.freq === b.freq || (a.fm && a.rds && b.rds && a.pi > 0 && a.pi === b.pi));
+        // This OEM can report the reset frequency with the previous station's PI/PS
+        // after wake. PI alone proves neither a tune nor a genuine AF transition.
+        return valid(a) && valid(b) && a.fm === b.fm && a.freq === b.freq;
     }
     function exact(a, b) {
         return a && b && a.fm === b.fm && a.freq === b.freq && a.rds === b.rds && a.pi === b.pi;
@@ -784,8 +785,10 @@ function installRdsStationRestore(application) {
                 cancelOwned();
                 owned = Java.retain(Station.$new(station.freq));
                 owned.setIsFMStation(station.fm);
-                owned.setIsRDS(station.rds && station.pi > 0);
-                owned.setPICode(station.pi);
+                // Tune the confirmed frequency, not an OEM PI that may be stale after wake.
+                // RDS metadata is filled by subsequent tuner callbacks at this frequency.
+                owned.setIsRDS(false);
+                owned.setPICode(0);
                 dispatching = station;
                 try { playbackCalls++; playStation.call(manager, owned); }
                 finally {
