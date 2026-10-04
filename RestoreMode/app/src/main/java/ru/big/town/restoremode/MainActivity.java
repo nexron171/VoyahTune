@@ -198,6 +198,7 @@ public class MainActivity extends AppCompatActivity {
         return true;
     }));
     private void watchEnergyWidgets() {
+        if (energyWidgetPreviewState() != null) return;
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) return;
         boolean show = false;
         for (String id : EnergyWidgetView.IDS) show |= sharedPreferences.getBoolean("show_" + id, false);
@@ -379,6 +380,8 @@ public class MainActivity extends AppCompatActivity {
     };
 
     private void updateTripTimer() {
+        Bundle preview = energyWidgetPreviewState();
+        if (preview != null) energyWidgetState = preview;
         if (tripDate != null) {
             String date = LocalDate.now().format(TRIP_DATE_FORMAT);
             if (!date.contentEquals(tripDate.getText())) tripDate.setText(date);
@@ -386,7 +389,9 @@ public class MainActivity extends AppCompatActivity {
         long ms = tripAccumMs;
         if (tripActive && tripInDrive) ms += SystemClock.elapsedRealtime() - tripDriveStartElapsed;
         for (EnergyWidgetView view : energyWidgetViews) {
-            view.timer(tripTimerReceived ? Math.max(0, ms) : -1, tripInDrive);
+            if (preview != null) view.update(preview);
+            view.timer(preview != null ? preview.getLong("previewTripMs") : tripTimerReceived ? Math.max(0, ms) : -1,
+                    preview != null || tripInDrive);
             view.invalidate(); // expire a silent/stalled Native connection even without messages
         }
         if (tripTimer != null) tripTimer.setText(fmtDuration(ms));
@@ -646,6 +651,7 @@ public class MainActivity extends AppCompatActivity {
     };
 
     private void bindToMessengerService() {
+        if (energyWidgetPreviewState() != null) return;
         if (destroyed || bindingRequested) return;
         uiHandler.removeCallbacks(messengerRebindRunnable);
         Log.i(TAG, "bindToMessengerService() begin");
@@ -777,6 +783,9 @@ public class MainActivity extends AppCompatActivity {
         badge.setText(on ? "активно" : "не активно");
         badge.setBackgroundResource(on ? R.drawable.pill_active : R.drawable.pill_inactive);
     }
+
+    /** Temporary hook: only the debug emulator activity supplies a fixture. */
+    protected Bundle energyWidgetPreviewState() { return null; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

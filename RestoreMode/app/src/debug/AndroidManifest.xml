@@ -2,6 +2,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity
+            android:name=".EnergyWidgetDemoActivity"
+            android:label="VoyahTune · тестовые виджеты"
+            android:exported="true"
+            android:taskAffinity="ru.big.town.restoremode.energyDemo"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
             android:name=".VoiceAnimationPreviewActivity"
             android:label="Голос · тест анимации"
             android:exported="true"
