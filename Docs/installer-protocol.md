@@ -1,17 +1,25 @@
 # Контракт установщика и payload
 
 Версия GUI/движка определяется `Installer/Cargo.toml` (текущая версия —
-1.2.0). Версия VoyahTune внутри payload независима от неё. Публичный каталог имеет простой формат `releases[]`,
+1.5.0). Версия VoyahTune внутри payload независима от неё. Публичный каталог имеет простой формат `releases[]`,
 новый payload — schema 4, recipe — schema 3 / engine `qinggan-v3`.
 
 ## Совместимость
 
 До обращения к автомобилю проверяются `requirements.minInstallerVersion` (SemVer)
 и `requirements.requiredCapabilities`. Текущие возможности: `qinggan-v3`,
-`single-package-v1`, `files-v1`, `ota-bootstrap-v1`. Изменение состава в рамках этих операций не требует
+`single-package-v1`, `files-v1`, `ota-bootstrap-v1`, `infrastructure-v1`. Новые PI/OD payload
+требуют Installer 1.5.0. Изменение состава в рамках этих операций не требует
 пересборки GUI. Новый обработчик/семантика получает новую capability и минимальную
 версию; неизвестные schema, поля операций и capability отклоняются целиком.
 Ошибка `INSTALLER_UPDATE_REQUIRED` сообщает требуемую и текущую версию.
+
+`infrastructure` имеет значение `pi` или `od`. Сборка всегда задаёт его явно в manifest
+и в подписанных metadata Native/RestoreMode; суффикс версии `-pi`/`-od` должен
+соответствовать этому полю. GUI и remover общие: процесс выбирается по payload.
+Root-служба собирается для своего профиля и отклоняет чужой payload с
+`INFRASTRUCTURE_MISMATCH`. Android читает профиль из APK asset `voyahtune-build.json`.
+Старые Rust metadata без поля трактуются как OD, неизвестное значение отклоняется.
 
 Архивы прежних схем не преобразуются и не устанавливаются новым движком.
 Прежняя установка на ГУ не блокирует обычную установку нового релиза поверх.
@@ -19,10 +27,15 @@
 
 ## Каталог
 
-Новый установщик и root-служба читают [Releases/ota/index.json](../Releases/ota/index.json):
+Общий установщик и root-службы PI/OD по умолчанию читают [Releases/ota/index.json](../Releases/ota/index.json):
 `https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json`.
 Формат — объект с массивом `releases`; у записи только `version`, `url`, `size`, `sha256`.
 [Описание полей и проверки](ota-release-format.md).
+Один каталог содержит отдельные версии `3.22.0-pi` и `3.22.0-od`. Эти суффиксы
+признаются стабильными профильными релизами; GUI показывает оба для выбора.
+OTA отбирает свой профиль до определения последней версии и скачивания. Старые
+номера без суффикса относятся к OD. После скачивания проверяются manifest,
+подписанные metadata и соответствие профиля; суффикс не заменяет эту проверку.
 
 Старый `Installer/releases/index.json` сохраняет прежний формат и прежние релизы.
 Новый клиент не обращается к нему и использует отдельный файл локального кэша.
@@ -34,13 +47,16 @@
 ## Payload и файловые операции
 
 В корне ZIP лежит `manifest.json`: `schema`, `product`, `releaseVersion`,
-`buildRevision`, `requirements`, `recipe`, `artifacts`. Для удаления существует
+`buildRevision`, `infrastructure`, `requirements`, `recipe`, `artifacts`. Для удаления существует
 внутренний архив ресурсов с `removalOnly: true`, непригодный для установки.
-Артефакт имеет `name`, относительный `path`, `size`, `sha256`; в schema 4 нет `variant`. В архиве ровно одна общая пара APK. DNS APK также общий.
-Подписанные APK metadata schema 3 содержат `recipeSha256` и `runtimeHashes`.
+Артефакт имеет `name`, относительный `path`, `size`, `sha256`; в schema 4 нет `variant`. В архиве одна пара Native/RestoreMode APK; PI дополнительно содержит RunYN
+(`runyn.apk`, пакет `big.town.runyn`) для навигационной карточки приборной панели.
+DNS APK общий.
+Подписанные APK metadata schema 3 содержат `infrastructure`, `recipeSha256` и `runtimeHashes`.
 
-Источник recipe — [payload-spec.json](../Packaging/installer/payload-spec.json).
-Сборщик добавляет обнаруженные `.js/.json` из `Packaging/inject`, формирует recipe
+Источник recipe — [общий spec](../Packaging/installer/payload-spec.json).
+Сборщик выбирает loader по инфраструктуре и добавляет RunYN только для PI.
+Сборщик добавляет обнаруженные `.js/.json` из `Packaging/pi/inject` либо `Packaging/od/inject`, формирует recipe
 и передаёт его в обе Gradle-сборки. Пример новой конфигурации:
 
 ```json
@@ -60,12 +76,13 @@
 recipe исключаются из очистки при обновлении. При удалении очищаются также текущие
 файлы recipe. `removeDirectories` — точные собственные каталоги для полного удаления.
 Tombstones старых выпусков сохраняются: пользователь может пропускать версии.
-В schema 3 нет произвольного shell/exec, новых произвольных пакетов или prefix-delete.
+В schema 3 нет произвольного shell/exec, произвольных package IDs или prefix-delete.
+RunYN — явно поддержанный PI-пакет; его хеш включён в подписанный состав релиза.
 Системные пути ограничены существующими ролями; новые собственные файлы допускаются
 под `voyahtune_`/`voyahtune-` в поддерживаемых `/data/local/bin`, `/data/local/tmp`
 и `/sdcard/tmp`. Для каталогов/attributes поддерживается только `/data/local`.
 
-Native, whitelist, RestoreMode, boot и DNS остаются типизированными обработчиками.
+Native, whitelist, RestoreMode, PI RunYN, boot и DNS остаются типизированными обработчиками.
 Их fixed destination и обязательные роли нельзя переопределить файловым recipe.
 Изменение содержимого произвольного файла задаётся его заменой; общего текстового
 редактора чужих системных файлов в протоколе нет.
@@ -78,10 +95,10 @@ Native, whitelist, RestoreMode, boot и DNS остаются типизиров�
 | Root и диагностика | Root/wait/root, общий OTA lock, остановка updater и выгрузка прежних логов |
 | CAN permission | Прежняя проверка; удаление VoyahHlCTRL только с отдельным согласием |
 | Remount | Прежняя процедура, включая перезагрузку при необходимости |
-| Backup / подписи | Backup перед заменой файлов; CE/DE reset только при смене подписи |
-| Runtime / files | Остановка hooks, обновление app_client и файловый recipe |
+| Backup / подписи | Копии только системных/runtime-файлов; Native/RestoreMode APK не копируются; CE/DE reset только при смене подписи |
+| Runtime / files | Остановка hooks, runtime выбранного профиля и файловый recipe |
 | Boot | Backup/миграция init.logcat, staging/publish/rollback boot-hook |
-| Native / RestoreMode / DNS | Прежние процедуры APK, whitelist и DNS overlay |
+| Native / RestoreMode / RunYN / DNS | APK, whitelist, дополнительный RunYN в PI и DNS overlay |
 | Reboot / verify | Ожидание загрузки, проверка Native, регистрации updater APK, init-службы и IPC 1 |
 | Remove | Отключение, DNS restore, boot cleanup, recipe cleanup, настройки, приложения, reboot |
 
@@ -94,7 +111,9 @@ Native, whitelist, RestoreMode, boot и DNS остаются типизиров�
 ## Единая установка
 
 Единственные действия — `install` и `remove`. Все APK и runtime-файлы применяются
-одним релизом. Android и loader не читают флаг выбора варианта. Существующие
+одним релизом. Профиль задаётся при сборке `--pi`/`--od`, переключения при установке
+или в настройках Android нет. Native выбирает совместимый путь восстановления
+по metadata: PI — native door/Drive, OD — ACC hooks. Существующие
 установки можно обновить поверх либо предварительно удалить. Специального определения
 прежнего варианта, очистки его флага или сценария перехода нет.
 

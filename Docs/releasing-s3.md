@@ -2,9 +2,14 @@
 
 Этот путь размещает payload в `s3://voyahtune/vVERSION/`, самостоятельные
 установщики — в `s3://voyahtune/Installers/INSTALLER_VERSION/`, а каталог — в
-GitHub `master-od`. Версии VoyahTune и Installer независимы. `3.17.0` ниже — пример нового номера;
+GitHub `master-od` (общий каталог PI/OD). Версии VoyahTune и Installer независимы. `3.22.0-od` ниже — пример нового номера;
 не заменяйте байты уже опубликованной версии. Полная среда и проверки описаны
 в [релизном процессе](releasing.md) и [сборке Installer](../Installer/BUILDING.md).
+
+Примеры используют полный номер `3.22.0-od`; для PI передайте `--pi` при сборке
+и используйте `3.22.0-pi`. В общем каталоге это отдельные записи. GUI-установщики
+общие, без профильного суффикса и без флага `--pi`/`--od` при самостоятельной сборке.
+Публикация и push выполняются только по поручению; эта инструкция не отмечает их выполненными.
 
 ## Обязательные пути артефактов
 
@@ -12,11 +17,13 @@ GitHub `master-od`. Версии VoyahTune и Installer независимы. `3
 
 | Артефакты | Папка в S3 | Пример |
 | --- | --- | --- |
-| Payload и его JSON, описание релиза, SHA256SUMS | `v<версия-VoyahTune>/` в корне бакета | `v3.21.0/payload_3.21.0.zip` |
-| Установщики и их BUILD-INFO.json, SHA256SUMS | `Installers/<версия-Installer>/` | `Installers/1.4.0/VoyahTune-Installer-1.4.0-macos.zip` |
+| Payload и его JSON, описание релиза, SHA256SUMS | `v<версия-VoyahTune>/` в корне бакета | `v3.22.0-od/payload_3.22.0-od.zip` |
+| Установщики и их BUILD-INFO.json, SHA256SUMS | `Installers/<версия-Installer>/` | `Installers/1.5.0/VoyahTune-Installer-1.5.0-macos.zip` |
 
 Префикс `v` у корневой папки payload сохраняет принятую схему `vVERSION/`.
-Все файлы размещаются непосредственно в своей папке версии. Вложенности одного
+Все файлы размещаются непосредственно в своей папке версии. Полный номер
+payload включает профиль: `v3.22.0-od/` и `v3.22.0-pi/` — разные папки. GUI общий,
+его папка `Installers/1.5.0/` не зависит от версии или профиля payload. Вложенности одного
 типа артефактов в другой быть не должно: запрещены и `vVERSION/Installers/`,
 и payload внутри `Installers/INSTALLER_VERSION/`. Дополнительные уровни вроде
 `Installers/INSTALLER_VERSION/builds/RELEASE_VERSION/` также не используются.
@@ -47,8 +54,8 @@ aws configure --profile voyahtune
 Из чистого, зафиксированного checkout после профильных тестов:
 
 ```sh
-RELEASE_VERSION=3.17.0
-./make_release.sh "$RELEASE_VERSION" --payload
+RELEASE_VERSION=3.22.0-od
+./make_release.sh "$RELEASE_VERSION" --od --payload
 ./Installer/scripts/build-all-macos.sh --mac --windows \
   --output "Releases/build/release-${RELEASE_VERSION}-installers"
 ./Installer/scripts/build-all-macos.sh --windows-arch x86 \
@@ -146,7 +153,7 @@ python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --dry-run
 python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --update-catalog
 
 # Независимая публикация macOS Universal и Windows x64/x86 GUI.
-INSTALLER_VERSION=1.4.0  # фактическая версия из Installer/Cargo.toml
+INSTALLER_VERSION=1.5.0  # фактическая версия из Installer/Cargo.toml
 python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION" --dry-run
 python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION"
 python3 Installer/scripts/upload-installers-s3.py "$INSTALLER_VERSION" --check-remote
@@ -163,7 +170,7 @@ python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" --check-remote
 поручения, а повышение версии Installer определяется изменением логики установки.
 
 Без `--update-catalog` выполняется только загрузка payload. `--directory` задаёт другую
-плоскую папку; по умолчанию используется `Releases/dist/s3-vVERSION` относительно
+плоскую папку; по умолчанию используется `Releases/dist/s3-vVERSION` (VERSION включает профиль) относительно
 репозитория. `--profile` и `--bucket` переопределяют `voyahtune` (URL entry должен
 соответствовать выбранному бакету). Для каталога доступны `--index` и `--builder`.
 Режимы `--dry-run`/`--check-remote` нельзя сочетать с `--update-catalog`.

@@ -1,6 +1,9 @@
 # Ранний перехват гостевого ACC ON на Sport+
 
-Агент `Packaging/inject/voyahtune_acc_restore.js` устанавливается в
+Описание относится к инфраструктуре **OD** (`Packaging/od/`); перенос этих hooks
+в PI не подразумевается. [Разделение релизов](installer-payload.md).
+
+Агент `Packaging/od/inject/voyahtune_acc_restore.js` устанавливается в
 `com.qinggan.canbus.service`. В H97X он перехватывает
 `DongfengH97CCanBusComponentImpl.onBCM_PEPSChangeData(int[], boolean)`,
 когда младшие три бита первого байта равны 2 (ON), а текущий ACC ещё не равен 2.

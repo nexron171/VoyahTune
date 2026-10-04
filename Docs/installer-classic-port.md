@@ -1,6 +1,6 @@
 # Процесс установки GUI: порт классических скриптов
 
-Актуально для единого процесса Installer 1.1.0. GUI не запускает host install/remove:
+Актуально для общего Installer 1.5.0 и PI/OD payload. GUI не запускает host install/remove:
 порядок и команды исполняет Rust. [Контракт recipe](installer-protocol.md).
 
 ## Где менять процесс
@@ -15,8 +15,9 @@
 - `Installer/desktop/src/App.svelte`: отображение событий, текущего шага,
   завершённых шагов, ошибок и журнала. Здесь нет логики установки на автомобиль.
 
-Эталоны: `Packaging/installer/device/install.sh`, `Packaging/installer/device/remove.sh`
-и соответствующие `.bat`. Единое удаление использует полный remover независимо
+Эталоны: `Packaging/pi/installer/device/install.sh`, `remove.sh` и соответствующие `.bat`
+для PI; `Packaging/od/installer/device/` для OD. GUI общий, использует инфраструктуру
+проверенного payload и умеет удалять компоненты обоих профилей. Единое удаление использует полный remover независимо
 от установленного набора, как было согласовано для GUI.
 
 ## Порядок действий
@@ -24,9 +25,9 @@
 | Шаг | Установка | Удаление |
 | --- | --- | --- |
 | Root/system | root, remount, при необходимости reboot | root, remount и проверка записи |
-| Backup/signatures | Backup; при другом APK-ключе отдельный reset данных | Без проверки APK-подписей |
+| Backup/signatures | Backup системных/runtime-файлов, без копий Native/RestoreMode APK; при другом APK-ключе reset данных | Без проверки APK-подписей |
 | Runtime/files | Остановка loader, полный recipe, legacy init.logcat и boot transaction | Остановка, восстановление DNS/legacy, удаление runtime |
-| Apps | Native/whitelist и RestoreMode | PackageManager uninstall и удаление системных файлов |
+| Apps | Native/whitelist, RestoreMode и RunYN для PI | PackageManager uninstall и удаление системных файлов |
 | Завершение | Reboot, CE/DE и запуск Native | Reboot |
 
 Прежняя проверка checked/best-effort результатов сохранена. Нет выбора вариантов
@@ -64,10 +65,10 @@ Windows-вариант старого permission-check допускает неи
 установку из-за metadata, версии, хешей старого набора или изменения token.
 `inventoryToken` оставлен в структуре Request, условием запуска он не является.
 
-Постоянного mutex на автомобиле и файлового mutex операций на компьютере нет.
-Старый `/data/local/voyahtune-installer/lock/owner` очищается best effort после root;
-новый маркер не создаётся. Старые receipt/ownership/hash-записи движка не используются
-как условия продолжения. GUI предотвращает повторное нажатие во время своей операции.
+Установка использует общую с OTA блокировку на ГУ и снимает её перед финальной
+перезагрузкой; postflight использует отдельную ограниченную по времени блокировку.
+Старые receipt/ownership/hash-записи движка не используются как условия продолжения.
+GUI предотвращает повторное нажатие во время своей операции.
 
 SHA/подписи всего payload проверяются при сборке, импорте/выборе и перед применением.
 Новая доставка использует каталог, SHA ZIP и атомарный кэш. Подписанные metadata
@@ -79,11 +80,11 @@ SHA/подписи всего payload проверяются при сборке
 python3 Installer/scripts/sync-classic-commands.py --check
 cargo test --manifest-path Installer/Cargo.toml -p installer-core -p installer-build
 cargo build --release --manifest-path Installer/Cargo.toml -p installer-core --example fixture-driver
-VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" python3 Installer/tests/test_canbus.py
+VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION-od" python3 Installer/tests/test_canbus.py
 python3 Installer/tests/test_release.py
-VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
+VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION-od" \
   python3 Installer/tests/test_classic_port.py
-VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
+VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION-od" \
   python3 Installer/tests/integration.py
 ```
 

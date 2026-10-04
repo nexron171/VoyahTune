@@ -1,9 +1,17 @@
 # Сборка VoyahTune Installer
 
-GUI выпускается независимо от автомобильного релиза. Для нового payload:
+GUI общий для PI и OD и выпускается независимо от автомобильного релиза.
+Команда `make_release.sh` требует ровно один `--pi` или `--od`; суффикс профиля
+становится частью версии (`3.22.0-pi`/`3.22.0-od`). Самостоятельные GUI-сборки
+`build-all-macos.sh` и `build.mjs` не требуют профиля: один установщик поддерживает
+оба payload. В общем каталоге пользователь выбирает нужную версию, backend
+определяет инфраструктуру по проверенному manifest. Новый контракт требует
+Installer 1.5.0 и capability `infrastructure-v1`.
+
+Для нового payload:
 
 ```sh
-./make_release.sh 3.13.0 --payload
+./make_release.sh 3.22.0 --od --payload
 ```
 
 Для самостоятельного macOS Universal GUI без APK:
@@ -12,33 +20,33 @@ GUI выпускается независимо от автомобильног�
 ./Installer/scripts/build-all-macos.sh --mac
 ```
 
-Результат: `Releases/build/installers-1.0.0/macos-universal.tar.gz` и `build-info.json`.
+Результат: `Releases/build/installers-1.5.0/macos-universal.tar.gz` и `build-info.json`.
 Версия GUI берётся из Cargo. При необходимости offline bundle задайте `--payload DIRECTORY`;
 обычная сборка включает только ADB и небольшой remover. Пользователь выбирает/скачивает
 версию в GUI. Пользовательского CLI нет, `installer-build` остаётся инструментом разработчика.
 
-`./make_release.sh VERSION --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
-macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.0.0/`. `--installers` по умолчанию
-выбирает все платформы; для текущей проверки используйте только `--mac`.
+`./make_release.sh VERSION --od --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
+macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.5.0/`. `--installers` по умолчанию
+выбирает все платформы; для одной macOS используйте `--mac`.
 Подробности и публикация: [Docs/releasing.md](../Docs/releasing.md).
 
 ## Полная сборка из macOS
 
-Обёртка `make_release.sh VERSION --installers` собирает два общих Android APK,
+Обёртка `make_release.sh VERSION --od --installers` собирает общие Native/RestoreMode APK, дополнительно RunYN для PI,
 проверенный ZIP payload и самостоятельные GUI. Результаты разделены:
-`Releases/dist/payload_VERSION.zip` и `Releases/dist/VoyahTune-Installer-INSTALLER_VERSION/`.
+`Releases/dist/payload_VERSION.zip` (VERSION включает профиль) и `Releases/dist/VoyahTune-Installer-INSTALLER_VERSION/`.
 
 Флаги `--mac`, `--windows`, `--linux` выбирают платформы и могут сочетаться.
 В `make_release.sh` они включают режим установщиков без отдельного `--installers`:
 
 ```sh
-./make_release.sh 3.3.0 --mac
-./make_release.sh 3.3.0 --windows --linux
-./Installer/scripts/build-all-macos.sh --mac --payload Releases/build/installer-payload-3.3.0
+./make_release.sh 3.22.0 --od --mac
+./make_release.sh 3.22.0 --od --windows --linux
+./Installer/scripts/build-all-macos.sh --mac --payload Releases/build/installer-payload-3.22.0-od
 ```
 
 Без выбора платформ `--installers` собирает все три. `--mac` сохраняет Universal
-ARM64+x86-64, Windows/Linux — только x64. Для `--mac` Docker/Colima не нужны:
+ARM64+x86-64, Windows по умолчанию x64, `--windows-arch x86` выбирает x86; Linux — x64. Для `--mac` Docker/Colima не нужны:
 они не проверяются и не запускаются. Повторный выпуск той же версии перезаписывает
 локальный payload и каталог выпуска; ZIP остаются только для выбранных платформ.
 
@@ -53,10 +61,10 @@ ARM64+x86-64, Windows/Linux — только x64. Для `--mac` Docker/Colima �
 
 ```sh
 ./Installer/scripts/build-all-macos.sh \
-  --payload Releases/build/installer-payload-3.3.0
+  --payload Releases/build/installer-payload-3.22.0-od
 ```
 
-Результат этой низкоуровневой команды — `Releases/build/installers-1.0.0/`:
+Результат этой низкоуровневой команды — `Releases/build/installers-1.5.0/`:
 macos-universal.tar.gz, windows-x64.exe, linux-x64.run и build-info.json.
 Можно указать другой каталог внутри Releases через `--output`.
 Существующий результат заменяется после успешной сборки всех выбранных платформ;
@@ -149,7 +157,7 @@ vti_docker exec vti-linux-amd64 uname -m
 ./Installer/scripts/build-all-macos.sh --check --windows --linux
 # После подготовки также Android SDK и локального Rust для macOS:
 ./Installer/scripts/build-all-macos.sh --check
-./make_release.sh 3.3.0 --installers
+./make_release.sh 3.22.0 --od --installers
 ```
 
 Скрипт сам копирует исходники Installer и опциональный payload в каталоги `hosts/`;
@@ -177,7 +185,7 @@ payload Android SDK/Java не требуются.
 rustup toolchain install 1.98.1 --profile minimal --component rustfmt,clippy
 rustup target add --toolchain 1.98.1 aarch64-apple-darwin x86_64-apple-darwin
 node Installer/scripts/build.mjs --bundles app \
-  --payload Releases/build/installer-payload-3.3.0
+  --payload Releases/build/installer-payload-3.22.0-od
 ```
 
 Результат: `Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app`.
@@ -188,7 +196,8 @@ Google ADB и ресурсы удаления (payload опционален), п
 
 ```sh
 lipo -archs 'Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app/Contents/MacOS/voyahtune-desktop'
-'Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app/Contents/MacOS/voyahtune' verify
+Installer/target/release/installer-build verify-host \
+  'Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app/Contents/Resources/bundle'
 ```
 
 Если Rust хранится в проектном кэше, build.mjs находит его автоматически. Для ручных

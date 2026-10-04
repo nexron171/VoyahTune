@@ -1,6 +1,9 @@
 # Подстраховка восстановления при событиях аккаунта Sport+
 
-В релиз входит `Packaging/inject/voyahtune_drive_reset.js` для процесса
+Описание относится к инфраструктуре **OD** (`Packaging/od/`); перенос этих hooks
+в PI не подразумевается. [Разделение релизов](installer-payload.md).
+
+В релиз входит `Packaging/od/inject/voyahtune_drive_reset.js` для процесса
 `com.qinggan.app.vehiclesetting`. Он ограничен H97X (`AppCommonUtils.is97X()`) и
 двумя методами `VehicleMemoryManager` из VehicleSettings Sport+ 13.1:
 

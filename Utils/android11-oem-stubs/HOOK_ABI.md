@@ -30,7 +30,7 @@ class/method surface and assign their hook implementations:
 | `steeringwheelkeys.js` | `com.qinggan.keymanager.service` | `KeyManagerReader.onKeyEvent(android.view.KeyEvent): boolean` |
 | `launcherdock.js` | `com.qinggan.app.launcher` | OD `NavigationBarMain`; independent passenger `NavigationBarSecond` with stock Air/Seat layout controls (not remappable slots); shared `NavigationBarController.doScreenLift(int)`/`show()`/`dismiss()` distinguished by `mScreenId`; `LauncherModel` lift, top-activity and transfer lifecycle; live H97C `com.qinggan.launcher.allapp` family plus legacy `launcher.base` fallback for dual-display `AllAppDataManager.getAllApps(int)`/`reload()`, `AppBean`, `AllAppBarView` and both `AllAppAdapter.onBindViewHolder(...)` overloads; `AppLauncher.startApp(Context,Intent,int)`; optional OD `SecondAllAppAdapter` + `SecondMainFragment.onItemClick(AppBean)` |
 | `multidisplay.js` | `com.qinggan.systemservice` | `MultiDisplayImpl.isWhiteListApp(String): boolean` |
-| `apollo_tech.js` | `com.qinggan.app.vehiclesetting` | static no-argument `BaiduProviderUtil.doQuerySubscribeInfo(): String` and `doQueryNOALearnInfo(): String` |
+| `apollo_tech.js` | `com.qinggan.app.vehiclesetting` | static `BaiduProviderUtil.doQuerySubscribeInfo(Context): String` and `doQueryNOALearnInfo(Context,String): String`; instance `DriveAssistantConfig.isSupportSDB()`, `DriveAssistantData.getStatusType()/isShowAIIntelligence()`, and four pure `DriveAssistanceAdasStatusManager` getters |
 | `keyboard_lock_en.js` | `com.qinggan.app.qgime` | `InputModeSwitcher` English constants, `getInstance()`, `saveInputMode(int)`; `QGInputConfig.DISABLE_VOICE`; `SkbPool.getInstance()/resetCachedSkb()`; optional loader/reflection surface |
 | `keyboard_ru.js` | `com.qinggan.app.qgime` | class/method/field resolution for the hook assignments in the current agent, including pool, soft-key, keyboard, IME, input-processor, loader, theme, resources, and toast facades |
 
@@ -41,7 +41,7 @@ after injection. Expected success markers are:
 |---|---|
 | steering wheel | `[swk] keymanager hooks installed` |
 | launcher dock | `[dock] NavigationBarMain hooks installed` |
-| multidisplay | `isWhiteListApp hooked` |
+| multidisplay | `[multidisplay] hook ready v2` |
 | Apollo | `[apollo] hook ready` |
 | English keyboard | `keyboard-lock-en-mod: Agent started` |
 | Russian keyboard | `keyboard-ru-mod: Agent started` |
@@ -100,9 +100,13 @@ Qinggan display-transfer call site, gesture, animation, or firmware whitelist.
 
 ### `apollo_tech.js`
 
-Only the two entitlement query signatures are represented. There is no OEM
-provider caller or ADAS UI state machine. The stubs contain no CAN API and
-cannot validate vehicle-side activation.
+The complete class/method surface required by the current OD agent is represented:
+the two entitlement queries, SDB capability, two display-state getters, and
+subscription, expiry, remaining-day and learning-status getters. All fixture
+implementations are inert. There is no OEM provider caller, ADAS UI state machine,
+subscription service or CAN API; these stubs cannot validate vehicle-side activation.
+This synthetic surface matches the agent's requirements, not every firmware's ABI.
+PI uses the same OD Apollo agent; its other agents retain their separate profile.
 
 ### Keyboard agents
 
@@ -124,6 +128,6 @@ layout rendering and text entry still require an H97C integration test.
 ## Drift rule
 
 `tests/agent-contract-checks.sh` compares this fixture surface with the six
-scripts currently under `Packaging/inject`. If a target class or primary method
+scripts currently under `Packaging/od/inject`. If a target class or primary method
 changes, static validation fails until this document and the relevant fixture
 are deliberately updated.
