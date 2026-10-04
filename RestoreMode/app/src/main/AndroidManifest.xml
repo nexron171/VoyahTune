@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
     <!-- Список установленных приложений для «Выдать права на установку» -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
@@ -75,6 +76,20 @@
             android:name=".SavedConfigSyncReceiver"
             android:exported="true"
             android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+
+        <!-- Preloads the offline voice models after a reboot / app update so the first
+             assistant invocation is not cold. BOOT_COMPLETED and QUICK_BOOT_COMPLETED are
+             protected system broadcasts; the receiver is exported but only the system can
+             deliver them. -->
+        <receiver
+            android:name=".VoiceBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICK_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name=".RestoreModeContentProvider"

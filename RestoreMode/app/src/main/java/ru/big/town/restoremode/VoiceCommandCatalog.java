@@ -16,6 +16,8 @@ final class VoiceCommandCatalog {
         final boolean confirm;
         private final List<Set<String>> repairedPhrases = new ArrayList<>();
         final List<VoiceFuzzyMatcher.Phrase> fuzzyPhrases = new ArrayList<>();
+        /** Normalized word sets, computed once; match() compares against these instead of re-parsing. */
+        final List<Set<String>> phraseWordSets = new ArrayList<>();
         Command(String action, String title, boolean confirm, String... phrases) {
             this(action, title, confirm, false, phrases);
         }
@@ -24,10 +26,17 @@ final class VoiceCommandCatalog {
             this.title = title;
             this.confirm = confirm;
             this.phrases = Collections.unmodifiableList(Arrays.asList(phrases));
+            for (String phrase : phrases) {
+                Set<String> set = words(phrase);
+                if (set != null) phraseWordSets.add(set);
+            }
             if (allowRepair && !confirm) {
                 for (String phrase : phrases) {
                     String repaired = VoiceCommandRepair.normalize(phrase, false);
-                    if (repaired != null) repairedPhrases.add(words(repaired));
+                    if (repaired != null) {
+                        Set<String> set = words(repaired);
+                        if (set != null) repairedPhrases.add(set);
+                    }
                     if (!action.startsWith(VoiceFuelCommand.PREFIX)) {
                         VoiceFuzzyMatcher.Phrase fuzzy = VoiceFuzzyMatcher.prepare(phrase);
                         if (fuzzy != null) fuzzyPhrases.add(fuzzy);
@@ -83,8 +92,8 @@ final class VoiceCommandCatalog {
             // Structured commands retain location, number and repeated tokens for strict parsing.
             if (command.action.startsWith(VoiceFuelCommand.PREFIX) || VoiceSeatCommands.isAction(command.action)
                     || VoiceWindowCommands.isAction(command.action)) continue;
-            for (String phrase : command.phrases) {
-                if (!input.equals(words(phrase))) continue;
+            for (Set<String> phraseWords : command.phraseWordSets) {
+                if (!input.equals(phraseWords)) continue;
                 if (found != null && !found.action.equals(command.action)) return null;
                 found = command;
             }
@@ -105,7 +114,21 @@ final class VoiceCommandCatalog {
         return found != null ? found : VoiceFuzzyMatcher.match(commands, text);
     }
 
+    private static volatile List<Command> BUILT_INS;
+
+    /** Deterministic catalog, built once per process; returns a mutable copy for the caller. */
     static List<Command> builtIns() {
+        List<Command> local = BUILT_INS;
+        if (local == null) {
+            synchronized (VoiceCommandCatalog.class) {
+                if (BUILT_INS == null) BUILT_INS = Collections.unmodifiableList(buildBuiltIns());
+                local = BUILT_INS;
+            }
+        }
+        return new ArrayList<>(local);
+    }
+
+    private static List<Command> buildBuiltIns() {
         List<Command> all = new ArrayList<>();
         VoiceSeatCommands.addTo(all);
         VoiceWindowCommands.addTo(all);
