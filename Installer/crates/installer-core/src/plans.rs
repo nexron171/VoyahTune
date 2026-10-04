@@ -106,7 +106,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     if !resets.is_empty() {
         warnings.push(format!("Другой ключ подписи: {}. Эти приложения будут автоматически удалены вместе с настройками и данными, затем установлены заново.", resets.join(", ")));
     }
-    let steps = classic_steps(action);
+    let steps = operation_steps(action);
     use sha2::{Digest, Sha256};
     Ok(Plan {
         installer_version: crate::compatibility::INSTALLER_VERSION.into(),
@@ -140,11 +140,15 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     })
 }
 
-/// Shared with the GUI plan; these are presentation boundaries in the classic flow.
-fn classic_steps(action: Action) -> Vec<(&'static str, &'static str)> {
+/// Presentation boundaries must match every step emitted by Engine::execute.
+fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
     let mut s = vec![
         ("preflight", "Подготовка файлов релиза"),
         ("root", "Получение системного доступа"),
+        (
+            "updater-lock",
+            "Блокировка установки и сохранение OTA-логов",
+        ),
     ];
     if action != Action::Remove {
         s.push(("permission", "Проверка владельца CAN-разрешения"));
@@ -175,8 +179,9 @@ fn classic_steps(action: Action) -> Vec<(&'static str, &'static str)> {
             ("native", "Установка Native и разрешений"),
             ("packages", "Установка RestoreMode и настроек"),
             ("dns", "Настройка DNS"),
+            ("updater-bootstrap", "Подготовка первого запуска OTA"),
             ("reboot", "Перезагрузка автомобиля"),
-            ("verify", "Проверка запуска Native"),
+            ("verify", "Проверка Native и готовности OTA"),
         ]);
     }
     s

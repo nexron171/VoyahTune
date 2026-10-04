@@ -507,7 +507,7 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
     }
     recovery::write_json(
         &path.join("gui.json"),
-        &json!({"schema":1,"events":events,"originalOperationDirectory":operation_dir,"note":"Резервные копии APK и файлов остаются в исходной папке операции."}),
+        &json!({"schema":1,"events":events,"originalOperationDirectory":operation_dir,"note":"Резервные копии файлов остаются в исходной папке операции."}),
     )?;
     Ok(path.display().to_string())
 }

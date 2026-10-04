@@ -2,7 +2,7 @@
 # Capture a self-contained multi-display failure bundle immediately after reproducing a three-finger
 # move or the OEM swap-button failure. Read-only on the head unit: no settings, processes or files are
 # changed. Usage:
-#   ./Packaging/tools/capture_multidisplay_diagnostics.sh [serial] [output-dir]
+#   ./Packaging/pi/tools/capture_multidisplay_diagnostics.sh [serial] [output-dir]
 set -eu
 
 ADB_BIN=${ADB_BIN:-adb}
