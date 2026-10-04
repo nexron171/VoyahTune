@@ -1,11 +1,22 @@
 #!/bin/bash
 
 adb root
+adb wait-for-device
+adb shell settings put global hidden_api_policy 1
 adb shell settings put global voyahtune_install_mode full
 
-adb shell "mkdir -p /data/local/tmp ; mkdir -p /data/local/bin ; chmod 777 /data/local/bin ; chmod 777 /data/local/tmp"
+adb shell "mkdir -p /data/local"
+adb shell "mkdir -p /data/local/tmp"
+adb shell "mkdir -p /data/local/bin"
+adb shell "chmod 777 /data/local/bin"
+adb shell "chmod 777 /data/local/tmp"
+
+adb push frida-inject /data/local/bin
+adb shell "chmod 777 /data/local/bin/frida-inject"
 
 adb push loaderFrida /data/local/bin
+adb shell "chmod 777 /data/local/bin/loaderFrida"
+
 adb push apollo_tech.js /data/local/bin
 adb push clusternavi.js /data/local/bin
 adb push keyboard_lock_en.js /data/local/bin
@@ -31,7 +42,7 @@ adb install -r -g restore-mode.apk
 adb install -r -g RunYN.apk
 
 echo "Если что то пошло не так, то запускаем в терминале"
-echo "  Mac, Linux /install.sh > install.log 2>&1"
+echo "  Mac, Linux ./install.sh > install.log 2>&1"
 echo "  Windows10 install-win10.bat > install.log 2>&1"
 echo "  Windows11 install-win11.bat > install.log 2>&1"
 echo "И отправляем в чат разработчикам https://t.me/VoyahTuneChat/"
