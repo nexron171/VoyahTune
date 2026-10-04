@@ -45,6 +45,25 @@ public class EnergyWidgetTest {
         assertEquals(150,EnergyWidgetSettings.window(30));assertEquals(75,EnergyWidgetSettings.window(-1));
         for(int w:new int[]{25,75,150})assertEquals(w,EnergyWidgetSettings.window(w));
     }
+    @Test public void odometerAxisCountsBackwardsInWholeKilometersAtEveryScale() {
+        for(int window:new int[]{25,75,150}) {
+            EnergyChartAxis axis=new EnergyChartAxis(180,window,15417.6f);
+            for(int i=0;i<=5;i++)assertEquals(15418-window*i/5d,axis.tick(i),.001);
+            assertEquals(1,axis.position(180),.00001);
+            assertEquals(0,axis.position(180-window),.00001);
+            assertEquals(15418-window/2d,axis.odometerAt(axis.distanceAt(.5f)),.001);
+        }
+    }
+    @Test public void shortHistoryStaysOnRightWithoutInventingOdometer() {
+        EnergyChartAxis axis=new EnergyChartAxis(5,25,15417);
+        assertEquals(.8,axis.position(0),.00001);
+        assertEquals(1,axis.position(5),.00001);
+        assertEquals(15412,axis.odometerAt(0),.001);
+        assertEquals(-20,axis.distanceAt(0),.001);
+        for(float unavailable:new float[]{Float.NaN,Float.POSITIVE_INFINITY,0,-1})
+            assertTrue(Double.isNaN(new EnergyChartAxis(5,25,unavailable).tick(0)));
+        assertTrue(Double.isNaN(new EnergyChartAxis(0,25,10).tick(5)));
+    }
     @Test public void selectedWindowUsesCumulativeDropsAndActualObservedDistance() {
         float[] x={0,50,100,150};double[] drop={0,4,6,10},distance={0,50,100,150};
         EnergyPeriodEstimate all=EnergyPeriodEstimate.calculate(150,x,drop,drop,distance,distance,43,56);
