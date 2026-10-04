@@ -1,4 +1,8 @@
 #!/bin/sh
+if [ ! -s ./stop-loader-device.sh ]; then
+    echo "Missing stop-loader-device.sh; device was not changed." >&2
+    exit 1
+fi
 # Удаление Open Voyah v@VERSION@ — полный откат к состоянию ДО установки нашего приложения.
 if [ ! -f ./dns-overlay.sh ]; then
     echo "!!! Не найден ./dns-overlay.sh — удаление прервано до изменения устройства."
@@ -193,6 +197,7 @@ adb root >/dev/null 2>&1
 adb disable-verity >/dev/null 2>&1
 adb remount >/dev/null 2>&1
 adb shell 'mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null'
+# @installer-command REMOVE_RW_TEST
 if [ "$(adb shell 'touch /system/.ovw_remove_rwtest 2>/dev/null && rm -f /system/.ovw_remove_rwtest && echo RW || echo RO' | tr -d '\r')" != "RW" ]; then
     echo "!!! /system недоступен для записи — удаление прервано до изменения компонентов."
     exit 1
@@ -242,42 +247,62 @@ if ! stop_voyahtune_service; then
     fi
     exit 1
 fi
+# @installer-command REMOVE_BOOT
 if ! adb shell "rm -f /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.load.sh /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.load.rc && test ! -e /system/etc/init.voyahtune.load.sh && test ! -e /system/etc/init/voyahtune.load.sh && test ! -e /system/etc/init/voyahtune.setenforce.rc"; then
     echo "!!! Не удалось удалить voyahtune RC-файлы — удаление прервано."
     echo "    Не перезагружайте ГУ; восстановите ADB и повторите remove."
     exit 1
 fi
 LEGACY_INIT_MIGRATED=0
+# @installer-command REMOVE_TRANSACTIONS
 if ! adb shell "rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback /system/etc/init.logcat.sh.voyahtune.new /system/etc/init.logcat.sh.voyahtune.rollback"; then
     echo "  ПРЕДУПРЕЖДЕНИЕ: часть неактивных transaction-файлов не очищена; boot-hook уже удалён."
 fi
 
 # --- Остановить наши живые Frida-хуки и load.bin (до ребута) ---
-adb shell "pkill -f /data/local/bin/load.bin" 2>/dev/null
+adb push stop-loader-device.sh /data/local/tmp/voyahtune-stop-loader.sh >/dev/null || exit 1
+if ! adb shell sh /data/local/tmp/voyahtune-stop-loader.sh; then
+    adb shell rm -f /data/local/tmp/voyahtune-stop-loader.sh >/dev/null 2>&1
+    echo "Loader stop failed; removal stopped." >&2
+    exit 1
+fi
+adb shell rm -f /data/local/tmp/voyahtune-stop-loader.sh >/dev/null || exit 1
 adb shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock" 2>/dev/null
 adb shell "rm -rf /data/local/tmp/voyah_load.lock" 2>/dev/null
+# @installer-command REMOVE_PROCESSES
 adb shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|voyahtune_acc_restore|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print \$2}' | xargs -r kill -9" 2>/dev/null
 # Eternalized agent живёт в target без frida-inject; force-stop выгружает его до финального reboot.
 adb shell "am force-stop com.qinggan.app.vehiclesetting" 2>/dev/null
 adb shell "am force-stop com.qinggan.app.qgime" 2>/dev/null
+# @installer-command STOP_FULLSCREEN
 adb shell 'fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for fullscreen_pkg in $fullscreen_csv; do IFS=$old_ifs; case "$fullscreen_pkg" in ""|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop "$fullscreen_pkg" >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs' 2>/dev/null
 for APP_CLIENT_PACKAGE in ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android; do
     adb shell "am force-stop '$APP_CLIENT_PACKAGE'" 2>/dev/null
 done
 
+adb shell 'pkill -x loaderFrida 2>/dev/null || true; pi_stop_wait=0; while pidof loaderFrida >/dev/null 2>&1; do [ "$pi_stop_wait" -lt 5 ] || exit 1; sleep 1; pi_stop_wait=$((pi_stop_wait + 1)); done' || exit 1
+adb shell "rm -f /system/etc/init/init.voyah_tune.rc /data/local/bin/loaderFrida /data/local/bin/injects.json /data/local/bin/clusternavi.js /data/local/bin/phone-num.js /data/local/tmp/voyahtune-pi-loader-status.json /data/local/tmp/loaderFrida.log /data/local/tmp/com.qinggan.app.qgime.pid /data/local/tmp/com.qinggan.app.qgime.log /data/local/tmp/com.qinggan.app.launcher.pid /data/local/tmp/com.qinggan.app.launcher.log /data/local/tmp/com.qinggan.systemservice.pid /data/local/tmp/com.qinggan.systemservice.log /data/local/tmp/system_server.pid /data/local/tmp/system_server.log /data/local/tmp/com.qinggan.keymanager.service.pid /data/local/tmp/com.qinggan.keymanager.service.log /data/local/tmp/com.qinggan.app.vehiclesetting.pid /data/local/tmp/com.qinggan.app.vehiclesetting.log /data/local/tmp/com.qinggan.cluster.pid /data/local/tmp/com.qinggan.cluster.log /data/local/tmp/com.qinggan.bluetoothphone.pid /data/local/tmp/com.qinggan.bluetoothphone.log && rm -rf /data/local/tmp/voyahtune-pi" || exit 1
+
 # --- Убрать наши Frida-файлы (или вернуть бэкап, если что-то было до нас) ---
 if [ -f backup/load.bin ]; then adb push backup/load.bin /data/local/bin/load.bin; else adb shell "rm -f /data/local/bin/load.bin"; fi
+# @installer-command REMOVE_EARLY_VD
 adb shell "rm -f /data/local/bin/vd_bypass.js"
+# @installer-command REMOVE_EARLY_HOOKS
 adb shell "rm -f /data/local/bin/steeringwheelkeys.js /data/local/bin/launcherdock.js /data/local/bin/multidisplay.js /data/local/bin/keymng2.js"   # keymng2 — легаси до объединения хуков руля
 # Apollo entitlement hook принадлежит Open Voyah и при remove удаляется без восстановления backup.
+# @installer-command REMOVE_EARLY_APOLLO
 adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new"
+# @installer-command REMOVE_EARLY_KEYBOARD
 adb shell "rm -f /data/local/bin/keyboard_lock_en.js /data/local/bin/keyboard_ru.js /data/local/bin/voyahtune_keyboard_en_config.json /data/local/bin/voyahtune_keyboard_ru_config.json /data/local/bin/voyahtune_skb_qwerty_ru.json"
+# @installer-command REMOVE_EARLY_FULLSCREEN
 adb shell "rm -f /data/local/bin/app_client.js /data/local/bin/app_client.js.voyahtune.new /data/local/bin/fullscreen_client.js /data/local/bin/fullscreen_client.js.voyahtune.new /data/local/tmp/voyahtune_worker.* /data/local/tmp/voyahtune_app_client.* /data/local/tmp/voyahtune_fullscreen_client.*"
+# @installer-command REMOVE_EARLY_MANIFEST
 adb shell "rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/tmp/voyahtune-hook-status.v1 /data/local/tmp/voyahtune-hook-status.v1.*.new"
 if [ -f backup/frida-inject ]; then adb push backup/frida-inject /data/local/bin/frida-inject; else adb shell "rm -f /data/local/bin/frida-inject"; fi
 # Project-owned Frida scripts, PID/lock markers and diagnostic logs. Generic CUNBA/Frida files
 # are deliberately not touched: only paths created by Open Voyah installers/runtime are listed.
 echo "=== Очистка файлов Open Voyah ==="
+# @installer-command REMOVE_FILES
 if ! adb shell '
     rm -f \
         /data/local/bin/vd_bypass.js \
@@ -428,6 +453,7 @@ if ! adb shell 'test ! -e /data/local/bin/voyahtune-hook-manifest.json && test !
     echo "!!! Legacy hook manifest/status не удалены — перезагрузка отменена."
     exit 1
 fi
+# @installer-command REMOVE_CLIENT_CHECK
 if ! adb shell 'test ! -e /data/local/bin/app_client.js && test ! -e /data/local/bin/app_client.js.voyahtune.new && test ! -e /data/local/bin/fullscreen_client.js && test ! -e /data/local/bin/fullscreen_client.js.voyahtune.new && ! ls /data/local/tmp/voyahtune_worker.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_app_client.* >/dev/null 2>&1 && ! ls /data/local/tmp/voyahtune_fullscreen_client.* >/dev/null 2>&1'; then
     echo "!!! App client или его legacy-файлы удалены не полностью — перезагрузка отменена."
     exit 1
@@ -435,6 +461,7 @@ fi
 # Почистить конфиг дока и кнопок руля в Settings.Global, чтобы чистая переустановка
 # не подхватила старые назначения до первой синхронизации из RestoreMode.
 echo "=== Очистка Settings.Global ==="
+# @installer-command REMOVE_SETTINGS
 if ! adb shell '
     for setting_name in \
         voyahtune_dock1 voyahtune_dock2 voyahtune_dock1Dpi voyahtune_dock2Dpi \
@@ -463,23 +490,28 @@ echo "  Настройки Open Voyah очищены."
 echo "=== Удаление APK Open Voyah ==="
 adb shell am force-stop ru.big.town.anative >/dev/null 2>&1
 adb shell am force-stop ru.big.town.restoremode >/dev/null 2>&1
+adb shell am force-stop big.town.runyn >/dev/null 2>&1
 # PackageManager/installd обязаны сами удалить CE/DE, profiles и external app data. На Android 11
 # нельзя делать rm -rf /data/user[_de] вручную: эти пути связаны с /data_mirror и encryption policy;
 # ручное удаление оставляет PackageManager в состоянии installed=true с отсутствующим DE source,
 # после чего zygote падает на каждом запуске Native.
 # Сначала снимаем возможный /data/app update системного Native, затем удаляем его для user 0.
-# RestoreMode — обычный data APK, его удаляет штатный pm uninstall.
+# RestoreMode и RunYN — обычные data APK; их удаляет штатный pm uninstall.
+# @installer-command REMOVE_PACKAGES
 if ! adb shell '
     pm uninstall ru.big.town.anative >/dev/null 2>&1 || true
     pm uninstall --user 0 ru.big.town.anative >/dev/null 2>&1 || true
     pm uninstall ru.big.town.restoremode >/dev/null 2>&1 || true
+    pm uninstall big.town.runyn >/dev/null 2>&1 || true
     if pm path ru.big.town.anative 2>/dev/null | grep -q "^package:/data/app/"; then exit 1; fi
     if pm path ru.big.town.restoremode 2>/dev/null | grep -q "^package:"; then exit 1; fi
+    if pm path big.town.runyn 2>/dev/null | grep -q "^package:"; then exit 1; fi
 '; then
     echo "!!! PackageManager не завершил удаление APK Open Voyah — перезагрузка отменена."
     exit 1
 fi
-echo "  PackageManager удалил user-data, RestoreMode и Native update; raw app-data не трогаем."
+echo "  PackageManager удалил user-data, RestoreMode, RunYN и Native update; raw app-data не трогаем."
+# @installer-command REMOVE_SYSTEM
 if ! adb shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new /system/priv-app/.Native.apk.voyahtune.new && rm -rf /system/priv-app/Native && test ! -e /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml && test ! -e /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new && test ! -e /system/priv-app/.Native.apk.voyahtune.new && test ! -e /system/priv-app/Native"; then
     echo "!!! Не удалось полностью удалить системные файлы Open Voyah — перезагрузка отменена."
     exit 1

@@ -6,21 +6,21 @@ UI="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.
 SYNC="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/SplitConfigSync.java"
 LAYOUT="$ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
 NATIVE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesConfigReceiver.java"
-LOADER="$ROOT/Packaging/system/load.bin"
-FULL_INSTALL="$ROOT/Packaging/installer/device/install.sh"
-FULL_REMOVE="$ROOT/Packaging/installer/device/remove.sh"
+LOADER="$ROOT/Packaging/od/system/load.bin"
+FULL_INSTALL="$ROOT/Packaging/od/installer/device/install.sh"
+FULL_REMOVE="$ROOT/Packaging/od/installer/device/remove.sh"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 require() { grep -qF "$2" "$1" || fail "$1: missing $2"; }
 
 for asset in keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json \
         voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json; do
-    [ -s "$ROOT/Packaging/inject/$asset" ] || fail "missing keyboard asset: $asset"
+    [ -s "$ROOT/Packaging/od/inject/$asset" ] || fail "missing keyboard asset: $asset"
 done
 
 if command -v node > /dev/null 2>&1; then
-  node --check "$ROOT/Packaging/inject/keyboard_lock_en.js"
-  node --check "$ROOT/Packaging/inject/keyboard_ru.js"
+  node --check "$ROOT/Packaging/od/inject/keyboard_lock_en.js"
+  node --check "$ROOT/Packaging/od/inject/keyboard_ru.js"
 fi
 
 require "$LAYOUT" 'android:id="@+id/switchKeyboardEnglish"'

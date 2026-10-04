@@ -119,8 +119,9 @@ androidComponents {
                 recipeFiles.from(recipeFile)
                 val recipe = groovy.json.JsonSlurper().parse(recipeFile) as Map<*, *>
                 val sources = groovy.json.JsonSlurper().parse(file(providers.gradleProperty("voyahReleaseSources").get())) as Map<*, *>
-                (recipe["files"] as List<*>).map { it as Map<*, *> }.filter {
-                    it["artifact"] != "native.apk"
+                val recipeArtifacts = (recipe["files"] as List<*>) + (recipe["packages"] as List<*>)
+                recipeArtifacts.map { it as Map<*, *> }.filter {
+                    it["artifact"] != "native.apk" && it["artifact"] != "restore_mode.apk"
                 }.forEach { operation ->
                     val source = (sources["artifacts"] as List<*>).map { it as Map<*, *> }.single {
                         it["name"] == operation["artifact"]
@@ -135,6 +136,15 @@ androidComponents {
                 runtimeFiles.from(fileTree(infra.resolve("inject")) { include("*.js", "*.json") })
                 runtimeFiles.from(listOf("voyahtune.load.rc", "voyahtune.load.sh").map { infra.resolve("system/$it") })
                 if (profile == "od") runtimeFiles.from(infra.resolve("system/load.bin"))
+                if (profile == "pi") {
+                    runtimeFiles.from(infra.resolve("loaderFrida/injects.json"))
+                    providers.gradleProperty("voyahPiLoader").orNull?.let { runtimeFiles.from(file(it)) }
+                    providers.gradleProperty("voyahRunynApk").orNull?.let {
+                        val apk = file(it)
+                        runtimeFiles.from(apk)
+                        runtimeAliases.put(apk.canonicalPath, "runyn.apk")
+                    }
+                }
                 runtimeFiles.from(infra.resolve("tools/frida-inject-16.2.1-android-arm64"))
             }
             }

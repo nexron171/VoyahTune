@@ -3,8 +3,7 @@ use crate::{compatibility::Requirements, Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
-pub const CATALOG_URL: &str =
-    "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json";
+pub const CATALOG_URL: &str = env!("VOYAH_CATALOG_URL");
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Archive {
@@ -81,7 +80,7 @@ impl Catalog {
         }
         let mut versions = BTreeSet::new();
         for r in &self.releases {
-            let version = semver::Version::parse(&r.version).map_err(|e| invalid(e.to_string()))?;
+            let version = crate::infrastructure::release_version(&r.version)?;
             if !versions.insert(&r.version)
                 || !["stable", "prerelease"].contains(&r.channel.as_str())
                 || (r.channel == "stable" && !version.pre.is_empty())
@@ -108,9 +107,9 @@ impl Catalog {
             https_url(&i.url)?;
         }
         self.releases.sort_by(|a, b| {
-            semver::Version::parse(&b.version)
+            crate::infrastructure::release_version(&b.version)
                 .unwrap()
-                .cmp(&semver::Version::parse(&a.version).unwrap())
+                .cmp(&crate::infrastructure::release_version(&a.version).unwrap())
         });
         Ok(())
     }
@@ -154,7 +153,9 @@ impl UpdateRelease {
         Release {
             version: self.version.clone(),
             published_at: String::new(),
-            channel: if self.version.split('+').next().unwrap_or("").contains('-') {
+            channel: if crate::infrastructure::release_version(&self.version)
+                .is_ok_and(|v| !v.pre.is_empty())
+            {
                 "prerelease".into()
             } else {
                 "stable".into()
@@ -188,6 +189,41 @@ impl UpdateCatalog {
 #[cfg(test)]
 mod update_tests {
     use super::*;
+    #[test]
+    fn shared_catalog_keeps_both_profiles_and_profile_only_versions_are_stable() {
+        let catalog = UpdateCatalog {
+            releases: ["3.22.0-pi", "3.22.0-od", "3.23.0-beta.1-pi", "3.21.0"]
+                .into_iter()
+                .map(|version| UpdateRelease {
+                    version: version.into(),
+                    url: "https://example.org/payload.zip".into(),
+                    size: 1,
+                    sha256: "a".repeat(64),
+                })
+                .collect(),
+        }
+        .resolve()
+        .unwrap();
+        assert_eq!(catalog.releases.len(), 4);
+        assert_eq!(
+            catalog
+                .releases
+                .iter()
+                .filter(|r| r.channel == "stable")
+                .count(),
+            3
+        );
+        let pi: Vec<_> = catalog
+            .ota_releases()
+            .filter(|r| {
+                crate::infrastructure::Infrastructure::from_version(&r.version).unwrap()
+                    == crate::infrastructure::Infrastructure::Pi
+                    && r.channel == "stable"
+            })
+            .collect();
+        assert_eq!(pi.len(), 1);
+        assert_eq!(pi[0].version, "3.22.0-pi");
+    }
     #[test]
     fn simple_catalog_validates_identity_urls_and_duplicates() {
         let entry = UpdateRelease {

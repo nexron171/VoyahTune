@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
-const source = fs.readFileSync(path.join(__dirname, "../inject/app_client.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../od/inject/app_client.js"), "utf8");
 const context = {Java: {perform() {}}, console};
 vm.runInNewContext(source, context);
 const fm = (freq, pi = 0) => ({fm: true, freq, pi, rds: pi > 0, ta: false});

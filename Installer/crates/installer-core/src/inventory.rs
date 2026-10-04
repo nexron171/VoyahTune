@@ -188,7 +188,7 @@ pub fn inspect_for_action(
         }
     }
     let mut foreign_files = BTreeMap::new();
-    for name in ["load.bin", "frida-inject"] {
+    for name in ["load.bin", "loaderFrida", "frida-inject"] {
         let path = payload::destination(name).unwrap().0;
         if let Some(hash) = files.get(&path).cloned() {
             let marker = if name == "load.bin" {
@@ -202,7 +202,7 @@ pub fn inspect_for_action(
                     b.product == "VoyahTune" && b.runtime_hashes.get(name) == Some(&hash)
                 })
             });
-            if hash != payload.artifact(name)?.sha256 && !marker && !signed_owned {
+            if payload.artifact(name).is_ok_and(|a| hash != a.sha256) && !marker && !signed_owned {
                 files.remove(&path);
                 foreign_files.insert(path, hash);
             }
@@ -298,16 +298,32 @@ fn classify(
         return ("unknown".into(), None);
     }
     let b = builds[0];
-    if builds
-        .iter()
-        .any(|x| x.release_version != b.release_version || x.build_revision != b.build_revision)
-    {
+    if builds.iter().any(|x| {
+        x.release_version != b.release_version
+            || x.build_revision != b.build_revision
+            || x.infrastructure != b.infrastructure
+    }) {
         return ("mixed".into(), None);
     }
     let mut state = "complete";
     // Classify an older release using its signed hashes. An unknown retired
     // target is reported as partial, never guessed from the current release.
     for (name, hash) in &b.runtime_hashes {
+        if let Some(package) = payload
+            .manifest
+            .recipe
+            .packages
+            .iter()
+            .find(|p| &p.artifact == name)
+        {
+            if packages
+                .get(&package.package)
+                .is_none_or(|p| &p.sha256 != hash)
+            {
+                state = "partial";
+            }
+            continue;
+        }
         let Some(file) = payload
             .manifest
             .recipe

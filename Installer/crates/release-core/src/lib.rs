@@ -1,5 +1,7 @@
 //! Platform-neutral release models and verification. No ADB, UI, networking or executor.
 pub mod catalog;
+pub mod infrastructure;
+pub mod pi_health;
 pub mod compatibility;
 pub mod error;
 pub mod paths;

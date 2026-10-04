@@ -14,6 +14,9 @@ def remote(path):return root/path.lstrip('/')
 def record(args,script=None):
  with (base/'calls.jsonl').open('a') as f:f.write(json.dumps({'args':args,'script':script})+'\n')
 def put(path,text=''):p=remote(path);p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);return p
+def infrastructure():
+ p=remote('/system/etc/voyahtune-ota-bootstrap.json')
+ return json.loads(p.read_text()).get('infrastructure','od') if p.exists() else os.environ.get('VOYAH_INFRASTRUCTURE','od')
 def package_data(package):
  for parent in ['/data/user/0/','/data/user_de/0/']:remote(parent+package).mkdir(parents=True,exist_ok=True)
 def main():
@@ -55,6 +58,12 @@ def main():
      s['packages'].pop('com.voyah.hl.service',None)
    if remote('/system/etc/init/voyahtune.updater.rc').exists() and remote('/data/local/bin/voyahtune-updater').exists():
     s['updater']='running';s['packages']['ru.big.town.updater']='/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk';package_data('ru.big.town.updater')
+   if remote('/data/local/bin/loaderFrida').exists() and remote('/system/etc/init/voyahtune.load.rc').exists():
+    s['loader']='running'
+    put('/proc/uptime','100.00 100.00\n')
+    put('/proc/42/stat','42 (loaderFrida) S '+'0 '*18+'300 0\n')
+    put('/proc/42/cmdline','/data/local/bin/loaderFrida\0')
+    put('/data/local/tmp/voyahtune-pi-loader-status.json',json.dumps(dict(schema=1,infrastructure='pi',loaderPid=42,loaderStartTicks='300',bootId=s['boot'],updatedUptimeSeconds=100,state='running')))
    save(s)
   elif args[0]=='push':
    dest=remote(args[2]);dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(args[1],dest)
@@ -76,8 +85,8 @@ def main():
    script=sys.stdin.read() if args[1:]==['sh','-s'] else ' '.join(args[1:]);record(args,script)
    if s.get('failShell') and s['failShell'] in script:print('injected shell failure',file=sys.stderr);return 1
    if script.strip()=='/data/local/bin/voyahtune-updater --version':
-    print(json.dumps({'version':'0.1.0','ipcSchema':1}));return 0
-   script=script.replace('/data/local/bin/voyahtune-updater --version', "printf '%s\\n' '{\"version\":\"0.1.0\",\"ipcSchema\":1}'")
+    print(json.dumps({'version':'0.2.0','ipcSchema':1,'infrastructure':infrastructure()}));return 0
+   script=script.replace('/data/local/bin/voyahtune-updater --version', "printf '%s\\n' '"+json.dumps({'version':'0.2.0','ipcSchema':1,'infrastructure':infrastructure()})+"'")
    if 'sh /data/local/tmp/open_voyah_dns_overlay.sh' in script:
     # The DNS helper has separate repository tests; emulate only its host protocol here.
     if 'restore' in script:shutil.rmtree(remote('/data/local/open_voyah/qgdns'),ignore_errors=True)

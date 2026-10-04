@@ -16,6 +16,17 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        providers.gradleProperty("voyahReleaseVersion").orNull?.let { release ->
+            val parts = release.substringBefore('-').substringBefore('+').split('.').map { it.toInt() }
+            require(parts.size == 3 && parts.all { it in 0..999 }) {
+                "voyahReleaseVersion must have a major.minor.patch base"
+            }
+            versionCode = parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
+            versionName = release
+        }
+        require(providers.gradleProperty("voyahInfrastructure").orElse("pi").get() == "pi") {
+            "RunYN belongs to PI infrastructure"
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -27,8 +38,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-        signingConfig = signingConfigs.getByName("debug")
-
+            // Preserve the existing local signing identity used by the other APKs.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

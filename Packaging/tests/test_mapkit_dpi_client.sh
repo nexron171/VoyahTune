@@ -2,8 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-AGENT="$ROOT/Packaging/inject/app_client.js"
-LOADER="$ROOT/Packaging/system/load.bin"
+AGENT="$ROOT/Packaging/od/inject/app_client.js"
+LOADER="$ROOT/Packaging/od/system/load.bin"
 
 fail() { echo "MapKit DPI client contract test failed: $*" >&2; exit 1; }
 require() { grep -Fq -- "$2" "$1" || fail "$1: missing $2"; }

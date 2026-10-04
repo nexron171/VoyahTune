@@ -17,3 +17,4 @@ pub mod session;
 pub use error::{Error, Result};
 pub const PROTOCOL_VERSION: u32 = 1;
 pub use release_core::ota;
+pub use release_core::infrastructure;

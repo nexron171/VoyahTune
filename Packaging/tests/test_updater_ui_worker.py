@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class LoaderWorkerTest(unittest.TestCase):
     def test_pending_ui_update_does_not_hold_up_hooks(self):
-        source = (ROOT / "Packaging/system/voyahtune.load.sh").read_text()
+        source = (ROOT / "Packaging/od/system/voyahtune.load.sh").read_text()
         section = source[source.index("# This worker"):]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

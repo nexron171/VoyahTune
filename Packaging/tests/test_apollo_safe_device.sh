@@ -28,7 +28,7 @@ cp "$restore" "$restore.bak"
 printf '<map>\n<boolean name="cacheApolloStockUiEnabled" value="true" />\n<boolean name="cacheApolloTrafficLightsEnabled" value="true" />\n</map>\n' > "$native"
 printf 'enabled\n' > "$temp/data/user_de/0/ru.big.town.anative/files/apollo_settings_runtime.v1"
 sed "s#/data/#$temp/data/#g" \
-    "$root/Packaging/installer/common/apollo-safe-device.sh" > "$temp/apollo-safe.sh"
+    "$root/Packaging/od/installer/common/apollo-safe-device.sh" > "$temp/apollo-safe.sh"
 
 PATH="$temp/bin:$PATH" sh "$temp/apollo-safe.sh" > "$temp/result"
 grep -q 'migrated=1' "$temp/result"

@@ -97,8 +97,6 @@ call :backup_pull /data/local/bin/vd_bypass.js           vd_bypass.js
 if errorlevel 1 exit /b 1
 call :backup_pull /data/local/bin/frida-inject           frida-inject
 if errorlevel 1 exit /b 1
-call :backup_pull /system/priv-app/Native/Native.apk     Native.apk
-if errorlevel 1 exit /b 1
 call :backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml
 if errorlevel 1 exit /b 1
 
@@ -108,6 +106,9 @@ call :stop_hook_runtime_for_update
 if errorlevel 1 (
     echo WARNING: init did not confirm hook-loader stop. Continuing atomic publish and mandatory reboot.
 )
+
+adb.exe shell "pkill -x loaderFrida 2>/dev/null || true; pi_stop_wait=0; while pidof loaderFrida >/dev/null 2>&1; do [ $pi_stop_wait -lt 5 ] || exit 1; sleep 1; pi_stop_wait=$((pi_stop_wait + 1)); done"
+if errorlevel 1 exit /b 1
 
 echo === Removing old Apollo VehicleSetting hook ===
 call :put_apollo_safe_key open_voyah_apollo_legacy_hook_enabled
@@ -222,6 +223,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
+adb.exe shell "rm -f /system/etc/init/init.voyah_tune.rc"
+if errorlevel 1 exit /b 1
 adb.exe shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode"
 if errorlevel 1 exit /b 1
 
@@ -242,6 +245,9 @@ if errorlevel 1 (
     echo !!! Files were installed, but the Native Android 11 package lifecycle was not restored.
     exit /b 1
 )
+adb.exe shell "rm -f /system/etc/init/init.voyah_tune.rc /data/local/bin/loaderFrida /data/local/bin/injects.json /data/local/bin/clusternavi.js /data/local/bin/phone-num.js /data/local/tmp/voyahtune-pi-loader-status.json /data/local/tmp/loaderFrida.log /data/local/tmp/com.qinggan.app.qgime.pid /data/local/tmp/com.qinggan.app.qgime.log /data/local/tmp/com.qinggan.app.launcher.pid /data/local/tmp/com.qinggan.app.launcher.log /data/local/tmp/com.qinggan.systemservice.pid /data/local/tmp/com.qinggan.systemservice.log /data/local/tmp/system_server.pid /data/local/tmp/system_server.log /data/local/tmp/com.qinggan.keymanager.service.pid /data/local/tmp/com.qinggan.keymanager.service.log /data/local/tmp/com.qinggan.app.vehiclesetting.pid /data/local/tmp/com.qinggan.app.vehiclesetting.log /data/local/tmp/com.qinggan.cluster.pid /data/local/tmp/com.qinggan.cluster.log /data/local/tmp/com.qinggan.bluetoothphone.pid /data/local/tmp/com.qinggan.bluetoothphone.log && rm -rf /data/local/tmp/voyahtune-pi"
+if errorlevel 1 exit /b 1
+
 echo Installation complete and verified.
 echo Run install-yandex-dns.bat separately if Yandex DNS is required.
 exit /b 0

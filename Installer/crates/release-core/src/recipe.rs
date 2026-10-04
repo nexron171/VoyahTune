@@ -75,12 +75,16 @@ fn owned(path: &str) -> bool {
         ]
         .iter()
         .any(|name| payload::destination(name).is_some_and(|(p, _)| p == path))
+            || path == "/data/local/tmp/voyahtune-pi"
             || path == NATIVE_PATH
             || path == WHITELIST
             || payload::RUNTIME_NAMES
                 .iter()
                 .any(|n| payload::destination(n).is_some_and(|d| d.0 == path))
             || include_str!("cleanup_paths.txt").lines().any(|p| p == path)
+            || include_str!("pi-cleanup-paths.txt")
+                .lines()
+                .any(|p| p == path)
             || [
                 "/system/etc/init/voyahtune.setenforce.rc",
                 "/system/etc/init/voyahtune.load.sh",
@@ -114,7 +118,7 @@ impl Recipe {
         if self.files.len() > 512 || self.packages.len() > 64 || self.remove_files.len() > 2048 {
             return Err(fail("Слишком большой манифест".into()));
         }
-        if self.packages.len() != 1
+        if !(1..=2).contains(&self.packages.len())
             || !self.remove_packages.is_empty()
             || !self.remove_prefixes.is_empty()
         {
@@ -155,6 +159,8 @@ impl Recipe {
                 "native.apk",
                 "whitelist.xml",
                 "load.bin",
+                "loaderFrida",
+                "injects.json",
                 "frida-inject",
                 "voyahtune.load.rc",
                 "voyahtune.load.sh",
@@ -169,7 +175,6 @@ impl Recipe {
         for name in [
             "native.apk",
             "whitelist.xml",
-            "load.bin",
             "frida-inject",
             "voyahtune.load.rc",
             "voyahtune.load.sh",
@@ -178,10 +183,24 @@ impl Recipe {
                 return Err(fail(format!("Обязательная роль: {name}")));
             }
         }
+        let loaders = self
+            .files
+            .iter()
+            .filter(|f| ["load.bin", "loaderFrida"].contains(&f.artifact.as_str()))
+            .count();
+        if loaders != 1 {
+            return Err(fail("Требуется ровно один загрузчик инфраструктуры".into()));
+        }
+        if self.files.iter().any(|f| f.artifact == "loaderFrida")
+            && !self.files.iter().any(|f| f.artifact == "injects.json")
+        {
+            return Err(fail("PI требует injects.json".into()));
+        }
         let mut ids = BTreeSet::new();
         for package in &self.packages {
             if !ids.insert(&package.package)
-                || !(package.package == RESTORE || package.package.starts_with("ru.voyahtune."))
+                || !((package.package == RESTORE && package.artifact == "restore_mode.apk")
+                    || (package.package == payload::RUNYN && package.artifact == "runyn.apk"))
                 || !package.package.split('.').all(|s| {
                     !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
                 })

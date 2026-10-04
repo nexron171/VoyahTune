@@ -3,7 +3,7 @@
 # TMPDIR=/data/local/tmp sh test_loader_pipe_records.sh /data/local/bin/load.bin
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-LOADER=${1:-$ROOT/Packaging/system/load.bin}
+LOADER=${1:-$ROOT/Packaging/od/system/load.bin}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/voyahtune-records.XXXXXX")
 trap 'rm -rf "$WORK"' 0
 fail() { echo "FAIL: $*" >&2; exit 1; }

@@ -23,22 +23,28 @@ def prepare(directory, version):
         if path.stat().st_size > release.MAX_OBJECT_SIZE:
             raise ValueError(f'File exceeds the 5 GB limit: {path.name}')
         files[path.name] = release.hashes(path)
+    sums_name = 'SHA256SUMS'
+    info_name = 'BUILD-INFO.json'
     required = {f'VoyahTune-Installer-{version}-macos.zip',
                 f'VoyahTune-Installer-{version}-windows-x64.exe',
-                f'VoyahTune-Installer-{version}-windows-x86.exe', 'SHA256SUMS'}
-    allowed = required | {'BUILD-INFO.json'}
+                f'VoyahTune-Installer-{version}-windows-x86.exe', sums_name}
+    allowed = required | {info_name}
     if not required <= files.keys() or not files.keys() <= allowed:
-        raise ValueError(f'Installer directory must contain {sorted(required)} and optionally BUILD-INFO.json')
+        raise ValueError(f'Installer directory must contain {sorted(required)} and optionally {info_name}')
     expected = {}
-    for line in (directory / 'SHA256SUMS').read_text().splitlines():
+    for line in (directory / sums_name).read_text().splitlines():
         match = release.re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._-]*)', line)
-        if not match or match[2] in expected or match[2] == 'SHA256SUMS':
+        if not match or match[2] in expected or match[2] == sums_name:
             raise ValueError('Invalid SHA256SUMS')
         expected[match[2]] = match[1]
-    if set(expected) != set(files) - {'SHA256SUMS'}:
+    if set(expected) != set(files) - {sums_name}:
         raise ValueError('SHA256SUMS must list every installer file')
     if any(files[name]['sha256'] != digest for name, digest in expected.items()):
         raise ValueError('Local SHA-256 mismatch')
+    if info_name in files:
+        info = release.json.loads((directory / info_name).read_text())
+        if info.get('installerVersion') != version:
+            raise ValueError('Build metadata does not match selected Installer version')
     return files
 
 

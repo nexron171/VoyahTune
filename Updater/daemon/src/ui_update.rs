@@ -77,6 +77,8 @@ fn same_release(s: &State, native: &BuildMetadata, restore: &BuildMetadata) -> b
     stable(s)
         && native.schema == 3
         && restore.schema == 3
+        && native.infrastructure == restore.infrastructure
+        && native.infrastructure == release_core::infrastructure::Infrastructure::compiled()
         && native.product == "VoyahTune"
         && restore.product == "VoyahTune"
         && native.component == payload::NATIVE
@@ -541,6 +543,7 @@ mod tests {
     fn changed_release_or_inconsistent_signed_metadata_blocks_ui_replacement() {
         let s = State::fresh("3.20.0".into(), "rom".into());
         let native = BuildMetadata {
+            infrastructure: release_core::infrastructure::Infrastructure::compiled(),
             schema: 3,
             product: "VoyahTune".into(),
             component: payload::NATIVE.into(),

@@ -1,4 +1,7 @@
 import importlib.util
+import contextlib
+import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -24,6 +27,25 @@ class FakeS3:
 
 
 class InstallerUploadTests(unittest.TestCase):
+    def test_common_installer_names_and_build_metadata_are_verified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for suffix in ('macos.zip', 'windows-x64.exe', 'windows-x86.exe'):
+                (directory / f'VoyahTune-Installer-1.5.0-{suffix}').write_bytes(suffix.encode())
+            info = directory / 'BUILD-INFO.json'
+            info.write_text(json.dumps({'installerVersion':'1.5.0'}))
+            sums = directory / 'SHA256SUMS'
+            def checksums():
+                sums.write_text(''.join(f'{upload.release.hashes(path)["sha256"]}  {path.name}\n' for path in sorted(directory.iterdir()) if path != sums))
+            checksums()
+            self.assertEqual(len(upload.prepare(directory, '1.5.0')), 5)
+            with patch.object(upload.release, 'S3') as store, contextlib.redirect_stdout(io.StringIO()):
+                upload.main(['1.5.0', '--directory', str(directory), '--dry-run'])
+                store.assert_not_called()
+            info.write_text(json.dumps({'installerVersion':'1.4.0'})); checksums()
+            with self.assertRaisesRegex(ValueError, 'Build metadata'):
+                upload.prepare(directory, '1.5.0')
+
     def test_compatible_rebuild_preserves_existing_version_objects(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

@@ -203,7 +203,7 @@ mod tests {
         .unwrap();
         let payload = Payload {
             root: Default::default(),
-            manifest: serde_json::from_value(json!({"schema":1,"product":"VoyahTune",
+            manifest: serde_json::from_value(json!({"schema":1,"infrastructure":crate::infrastructure::Infrastructure::compiled(),"product":"VoyahTune",
                 "releaseVersion":"1.0.0","buildRevision":"older","artifacts":[]}))
             .unwrap(),
         };

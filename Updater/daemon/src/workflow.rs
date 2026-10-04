@@ -66,6 +66,15 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     } else {
         let boot: serde_json::Value =
             state::read(Path::new("/system/etc/voyahtune-ota-bootstrap.json"))?;
+        let infrastructure: release_core::infrastructure::Infrastructure = serde_json::from_value(
+            boot.get("infrastructure")
+                .cloned()
+                .unwrap_or(serde_json::json!("od")),
+        )
+        .map_err(|e| invalid(&e.to_string()))?;
+        infrastructure
+            .require(release_core::infrastructure::Infrastructure::compiled())
+            .map_err(|e| invalid(&e.to_string()))?;
         State::fresh(
             boot["version"]
                 .as_str()
@@ -207,6 +216,11 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
         return Err(invalid("Релиз выбран из прежнего источника"));
     }
     let r = s.selected.ok_or_else(|| invalid("Нет выбранного релиза"))?;
+    for version in [&r.version, &s.installed_version] {
+        release_core::infrastructure::Infrastructure::from_version(version)
+            .and_then(|i| i.require(release_core::infrastructure::Infrastructure::compiled()))
+            .map_err(|e| invalid(&e.to_string()))?;
+    }
     let c = ota::verify(&r).map_err(|e| invalid(&e.to_string()))?;
     if c.version == s.installed_version
         && !s.installed_archive_sha256.is_empty()
@@ -238,16 +252,26 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
             s.last_auto_uptime = device::uptime();
         })?;
     }
+    if url.is_empty() {
+        return Err(invalid("Адрес каталога не настроен. Укажите HTTPS адрес каталога для установленной инфраструктуры."));
+    }
     phase(shared, "checking", "Проверка каталога релизов")?;
     if device::prop("ro.build.fingerprint")? != snapshot(shared).fingerprint {
         return Err(invalid("Прошивка ГУ изменилась. Требуется USB-установка"));
     }
     let catalog = network::catalog(&url)?;
     let current = snapshot(shared);
+    release_core::infrastructure::Infrastructure::from_version(&current.installed_version)
+        .and_then(|i| i.require(release_core::infrastructure::Infrastructure::compiled()))
+        .map_err(|e| invalid(&e.to_string()))?;
     let mut chosen = None;
     let mut rejected = None;
     for r in catalog
         .ota_releases()
+        .filter(|r| {
+            release_core::infrastructure::Infrastructure::from_version(&r.version)
+                .is_ok_and(|i| i == release_core::infrastructure::Infrastructure::compiled())
+        })
         .filter(|r| r.channel == "stable" && (!same || r.version == current.installed_version))
     {
         let result =
@@ -348,6 +372,8 @@ fn download(shared: &Shared) -> io::Result<()> {
         });
     })?;
     let p = Payload::open(&root().join("staging")).map_err(|e| invalid(&e.to_string()))?;
+    p.require_infrastructure(release_core::infrastructure::Infrastructure::compiled())
+        .map_err(|e| invalid(&e.to_string()))?;
     ota::verify_payload(&p, &claims).map_err(|e| invalid(&e.to_string()))?;
     crate::install::compatible(&p)?;
     phase(shared, "verified", "Релиз проверен. Можно начать установку")
@@ -355,6 +381,8 @@ fn download(shared: &Shared) -> io::Result<()> {
 pub fn verified(shared: &Shared) -> io::Result<(Payload, ota::Claims)> {
     let (_, claims) = selected(shared)?;
     let p = Payload::open(&root().join("staging")).map_err(|e| invalid(&e.to_string()))?;
+    p.require_infrastructure(release_core::infrastructure::Infrastructure::compiled())
+        .map_err(|e| invalid(&e.to_string()))?;
     ota::verify_payload(&p, &claims).map_err(|e| invalid(&e.to_string()))?;
     Ok((p, claims))
 }

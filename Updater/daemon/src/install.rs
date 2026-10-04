@@ -40,7 +40,7 @@ mod tests {
         let mut p = Payload {
             root: root.clone(),
             manifest: serde_json::from_value(serde_json::json!({
-                "schema": 4, "product": "VoyahTune", "releaseVersion": "3.15.0",
+                "schema": 4, "infrastructure": release_core::infrastructure::Infrastructure::compiled(), "product": "VoyahTune", "releaseVersion": "3.15.0",
                 "buildRevision": "test", "artifacts": [],
                 "recipe": {"schema": 3, "engine": "qinggan-v3", "files": [],
                     "packages": [], "removeFiles": [], "removeDirectories": [],
@@ -117,11 +117,23 @@ mod tests {
             assert!(!STABLE.contains(&name));
             let source = p.root.join(name);
             fs::write(&source, b"new delivery").unwrap();
-            p.manifest.artifacts.push(Artifact { name: name.into(), path: name.into(),
-                sha256: payload::sha256(&source).unwrap(), size: 12 });
-            p.manifest.recipe.files.push(CopyFile { artifact: name.into(),
-                destination: p.root.join(format!("installed-{name}")).to_str().unwrap().into(),
-                mode: 0o644, phase: Phase::Files });
+            p.manifest.artifacts.push(Artifact {
+                name: name.into(),
+                path: name.into(),
+                sha256: payload::sha256(&source).unwrap(),
+                size: 12,
+            });
+            p.manifest.recipe.files.push(CopyFile {
+                artifact: name.into(),
+                destination: p
+                    .root
+                    .join(format!("installed-{name}"))
+                    .to_str()
+                    .unwrap()
+                    .into(),
+                mode: 0o644,
+                phase: Phase::Files,
+            });
         }
         compatible(&p).unwrap();
     }
@@ -183,6 +195,8 @@ mod tests {
 }
 
 pub fn compatible(p: &Payload) -> io::Result<()> {
+    p.require_infrastructure(release_core::infrastructure::Infrastructure::compiled())
+        .map_err(error)?;
     for f in &p.manifest.recipe.files {
         // STABLE files are never installed by OTA, so their archive bytes may differ.
         // The loader init contract is applied and still requires an exact match.
@@ -209,7 +223,12 @@ pub fn compatible(p: &Payload) -> io::Result<()> {
     if !p.manifest.recipe.remove_directories.is_empty() {
         // Existing legacy loader lock is the only accepted directory tombstone.
         for path in &p.manifest.recipe.remove_directories {
-            if path != "/data/local/tmp/voyah_load.lock" {
+            if ![
+                "/data/local/tmp/voyah_load.lock",
+                "/data/local/tmp/voyahtune-pi",
+            ]
+            .contains(&path.as_str())
+            {
                 return Err(invalid("Удаление каталога требует USB"));
             }
         }
@@ -270,7 +289,17 @@ fn preflight(p: &Payload) -> io::Result<()> {
         ("native.apk", payload::NATIVE),
         ("restore_mode.apk", payload::RESTORE),
     ] {
-        if payload::verified_signers(Path::new(&package_path(package)?)).map_err(error)?
+        let installed = package_path(package)?;
+        let installed_metadata = payload::apk_metadata(Path::new(&installed))
+            .map_err(error)?
+            .ok_or_else(|| {
+                invalid("Установленный APK не содержит подписанных метаданных инфраструктуры")
+            })?;
+        installed_metadata
+            .infrastructure
+            .require(p.manifest.infrastructure)
+            .map_err(error)?;
+        if payload::verified_signers(Path::new(&installed)).map_err(error)?
             != payload::verified_signers(&p.file(file).map_err(error)?).map_err(error)?
         {
             return Err(invalid(&format!(
@@ -299,7 +328,15 @@ fn preflight(p: &Payload) -> io::Result<()> {
         .sum();
     device::space(Path::new("/system"), system_bytes + 64 * 1024 * 1024)?;
     let apk_bytes = p.artifact("native.apk").map_err(error)?.size
-        + p.artifact("restore_mode.apk").map_err(error)?.size;
+        + p.manifest
+            .recipe
+            .packages
+            .iter()
+            .map(|package| p.artifact(&package.artifact).map(|a| a.size))
+            .collect::<release_core::Result<Vec<_>>>()
+            .map_err(error)?
+            .iter()
+            .sum::<u64>();
     device::space(root(), apk_bytes.saturating_mul(3) + 256 * 1024 * 1024)?;
     Ok(())
 }
@@ -398,7 +435,10 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     workflow::phase(shared, "applying", "Отключение старой активации Apollo")?;
     command(
         "/system/bin/sh",
-        &["-c", include_str!("../../../Packaging/installer/common/apollo-safe-device.sh")],
+        &[
+            "-c",
+            include_str!("../../../Packaging/od/installer/common/apollo-safe-device.sh"),
+        ],
         60,
     )?;
     // Injected agents are unloaded by the mandatory reboot. Stop in-flight injector workers.
@@ -491,6 +531,31 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
         workflow::update(shared, |s| s.completed_steps = 5 + index as u32)?;
     }
     fs::remove_file(restore)?;
+    for package in p
+        .manifest
+        .recipe
+        .packages
+        .iter()
+        .filter(|p| p.package == payload::RUNYN)
+    {
+        workflow::phase(shared, "applying", "Установка RunYN")?;
+        let path = Path::new("/data/local/tmp/voyahtune-runyn-ota.apk");
+        device::atomic_copy(&p.file(&package.artifact).map_err(error)?, path, 0o644)?;
+        let output = command(
+            "/system/bin/pm",
+            &["install", "-r", "--user", "0", path.to_str().unwrap()],
+            180,
+        )?;
+        if !output.lines().any(|s| s.trim() == "Success") {
+            return Err(invalid(&format!("RunYN PackageManager: {output}")));
+        }
+        check_active_apk(
+            &p,
+            &package.artifact,
+            Path::new(&package_path(payload::RUNYN)?),
+        )?;
+        fs::remove_file(path)?;
+    }
     workflow::phase(shared, "applying", crate::dns::title(dns_action))?;
     crate::dns::apply(&p, dns_action)?;
     workflow::update(shared, |s| s.completed_steps = 7)?;
@@ -563,6 +628,27 @@ fn check_native_data(data: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn pi_health() -> io::Result<String> {
+    let data = fs::read_to_string("/data/local/tmp/voyahtune-pi-loader-status.json")?;
+    let status: release_core::pi_health::Status = serde_json::from_str(&data).map_err(error)?;
+    let stat = fs::read_to_string(format!("/proc/{}/stat", status.loader_pid))?;
+    let start = stat
+        .rsplit_once(") ")
+        .and_then(|(_, rest)| rest.split_whitespace().nth(19))
+        .ok_or_else(|| invalid("Нет process identity PI loader"))?;
+    let cmdline = fs::read(format!("/proc/{}/cmdline", status.loader_pid))?;
+    status
+        .validate(
+            &device::boot(),
+            device::uptime(),
+            start,
+            &cmdline,
+            &device::prop("init.svc.voyahtune_load")?,
+        )
+        .map_err(error)?;
+    // This confirms watchdog liveness only. Vehicle behavior is accepted separately by the user.
+    Ok(data)
+}
 fn hook_health() -> io::Result<String> {
     let data = fs::read_to_string("/data/local/tmp/voyahtune-hook-status.v1")?;
     if !data.starts_with("v=1;loader=running;pid=") {
@@ -663,6 +749,19 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
     ] {
         check_active_apk(&p, artifact, Path::new(&package_path(package)?))?;
     }
+    for package in p
+        .manifest
+        .recipe
+        .packages
+        .iter()
+        .filter(|p| p.package == payload::RUNYN)
+    {
+        check_active_apk(
+            &p,
+            &package.artifact,
+            Path::new(&package_path(payload::RUNYN)?),
+        )?;
+    }
     let mut ready_since = None;
     let deadline = Instant::now() + Duration::from_secs(180);
     let mut last = "Службы не готовы".to_owned();
@@ -674,7 +773,10 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
             if native.contains("error=") || !native.contains("otaReady=true") {
                 return Err(invalid(&native));
             }
-            let hooks = hook_health()?;
+            let hooks = match p.manifest.infrastructure {
+                release_core::infrastructure::Infrastructure::Pi => pi_health()?,
+                release_core::infrastructure::Infrastructure::Od => hook_health()?,
+            };
             if previous_hooks.as_ref() != Some(&hooks) {
                 crate::log(root(), &format!("postboot_hooks {}", hooks.trim()))?;
                 previous_hooks = Some(hooks);

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """A single library driver installs signed fixtures A/B, offline imports and removes B."""
-import hashlib,json,shutil,unittest,zipfile
+import hashlib,json,os,shutil,unittest,zipfile
 from pathlib import Path
 from integration import InstallerTests,ROOT,DRIVER
-FIXTURES=ROOT/'Releases/build/installer-remake-acceptance'
+FIXTURES=ROOT/'Releases/build/installer-remake-acceptance'/os.environ.get('VOYAH_INFRASTRUCTURE','od')
 class EvolutionTests(InstallerTests):
  def use(self,payload):
   p=self.bundle/'payload';p.unlink();p.symlink_to(payload,target_is_directory=True)

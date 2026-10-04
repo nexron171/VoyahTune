@@ -4,7 +4,7 @@ set -euo pipefail
 
 readonly HARNESS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPOSITORY_ROOT="$(cd "$HARNESS_ROOT/../.." && pwd)"
-readonly AGENT_ROOT="$REPOSITORY_ROOT/Packaging/inject"
+readonly AGENT_ROOT="$REPOSITORY_ROOT/Packaging/od/inject"
 
 fail() {
     printf 'agent contract check failed: %s\n' "$*" >&2
@@ -189,7 +189,14 @@ require_fixture_text \
     'void onItemClick(AppBean appBean)'
 
 require_text "$AGENT_ROOT/multidisplay.js" 'com.qinggan.systemservice.multidisplay.MultiDisplayImpl'
-require_text "$AGENT_ROOT/multidisplay.js" 'MDI.isWhiteListApp.overload("java.lang.String")'
+# OD resolves compatible overloads dynamically, retaining the fixture's primary
+# boolean(String) ABI and rejecting an ambiguous second String argument.
+require_text "$AGENT_ROOT/multidisplay.js" 'var method = MDI.isWhiteListApp;'
+require_text "$AGENT_ROOT/multidisplay.js" 'var packageIndex = firstStringArgumentIndex(overload);'
+require_text "$AGENT_ROOT/multidisplay.js" 'overload.argumentTypes[i].className) === "java.lang.String"'
+require_text "$AGENT_ROOT/multidisplay.js" 'if (found >= 0) return -1;'
+require_text "$AGENT_ROOT/multidisplay.js" 'returnType !== "boolean" && returnType !== "java.lang.Boolean"'
+require_text "$AGENT_ROOT/multidisplay.js" 'if (installed < 1) throw new Error("no compatible isWhiteListApp overload installed")'
 require_fixture_text \
     'systemservice/java/com/qinggan/systemservice/multidisplay/MultiDisplayImpl.java' \
     'boolean isWhiteListApp(String packageName)'
@@ -197,9 +204,29 @@ require_fixture_text \
 require_text "$AGENT_ROOT/apollo_tech.js" 'com.qinggan.app.vehiclesetting.fragments.driveassistance.adas.BaiduProviderUtil'
 for method in doQuerySubscribeInfo doQueryNOALearnInfo; do
     require_text "$AGENT_ROOT/apollo_tech.js" "BaiduProviderUtil.$method"
+done
+require_text "$AGENT_ROOT/apollo_tech.js" 'BaiduProviderUtil.doQuerySubscribeInfo.overload("android.content.Context")'
+require_text "$AGENT_ROOT/apollo_tech.js" '"android.content.Context", "java.lang.String")'
+require_fixture_text \
+    'vehiclesetting/java/com/qinggan/app/vehiclesetting/fragments/driveassistance/adas/BaiduProviderUtil.java' \
+    'static String doQuerySubscribeInfo(Context context)'
+require_fixture_text \
+    'vehiclesetting/java/com/qinggan/app/vehiclesetting/fragments/driveassistance/adas/BaiduProviderUtil.java' \
+    'static String doQueryNOALearnInfo(Context context, String accountId)'
+require_text "$AGENT_ROOT/apollo_tech.js" 'DriveAssistantConfig.isSupportSDB.overload()'
+require_fixture_text \
+    'vehiclesetting/java/com/qinggan/app/vehiclesetting/fragments/driveassistance/DriveAssistantConfig.java' \
+    'boolean isSupportSDB()'
+for signature in 'int getStatusType()' 'boolean isShowAIIntelligence()'; do
     require_fixture_text \
-        'vehiclesetting/java/com/qinggan/app/vehiclesetting/fragments/driveassistance/adas/BaiduProviderUtil.java' \
-        "String $method()"
+        'vehiclesetting/java/com/qinggan/app/vehiclesetting/fragments/driveassistance/DriveAssistantData.java' \
+        "$signature"
+done
+for signature in 'boolean getSubscriptionStatus()' 'boolean getExpireStatus()' \
+        'int getRemainDay()' 'int getLearnStatus()'; do
+    require_fixture_text \
+        'vehiclesetting/java/com/qinggan/app/vehiclesetting/fragments/driveassistance/adas/DriveAssistanceAdasStatusManager.java' \
+        "$signature"
 done
 
 for agent in keyboard_lock_en.js keyboard_ru.js; do

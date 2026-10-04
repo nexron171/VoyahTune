@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 ENDPOINT = 'https://storage.yandexcloud.net'
@@ -54,16 +55,17 @@ def prepare(directory, version, bucket):
         files[path.name] = hashes(path)
     payload_name = f'payload_{version}.zip'
     entry_name = f'payload_{version}.json'
-    required = {'SHA256SUMS', payload_name, entry_name}
+    sums_name = 'SHA256SUMS'
+    required = {sums_name, payload_name, entry_name}
     if not required <= files.keys():
         raise ValueError(f'Missing required files: {sorted(required - files.keys())}')
     expected = {}
-    for line in (directory / 'SHA256SUMS').read_text().splitlines():
+    for line in (directory / sums_name).read_text().splitlines():
         match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._-]*)', line)
-        if not match or match[2] in expected or match[2] == 'SHA256SUMS':
+        if not match or match[2] in expected or match[2] == sums_name:
             raise ValueError('SHA256SUMS must contain unique SHA-256 + two spaces + basename lines')
         expected[match[2]] = match[1]
-    if set(expected) != set(files) - {'SHA256SUMS'}:
+    if set(expected) != set(files) - {sums_name}:
         raise ValueError('SHA256SUMS must list every release file except itself; remove unrelated files')
     for name, digest in expected.items():
         if files[name]['sha256'] != digest:
@@ -77,6 +79,20 @@ def prepare(directory, version, bucket):
     expected_url = release_url(bucket, version, payload_name)
     if entry['url'] != expected_url:
         raise ValueError(f'Set entry url to {expected_url}, then regenerate SHA256SUMS')
+    suffix = version.split('+', 1)[0].rsplit('-', 1)[-1]
+    infrastructure = suffix if suffix in {'pi', 'od'} else 'od'
+    # A profile suffix is not evidence of the ZIP's contents. Reject renamed OD/PI
+    # payloads before any S3 request; full signed verification remains the builder's job.
+    with zipfile.ZipFile(directory / payload_name) as archive:
+        manifests = [info for info in archive.infolist() if info.filename == 'manifest.json']
+        if len(manifests) != 1 or manifests[0].file_size > 4 * 1024 * 1024:
+            raise ValueError('Payload must contain one bounded manifest.json')
+        manifest = json.loads(archive.read(manifests[0]))
+    if (manifest.get('product') != 'VoyahTune' or manifest.get('releaseVersion') != version
+            or manifest.get('infrastructure', 'od') != infrastructure):
+        raise ValueError('Payload manifest version/infrastructure does not match the selected release')
+    if any(name.startswith('payload_') and name.endswith(('.zip', '.json')) and name not in {payload_name, entry_name} for name in files):
+        raise ValueError('Release directory mixes release versions')
     return files, entry
 
 
@@ -167,7 +183,7 @@ def publish(directory, version, bucket, files, store, check_only=False):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('version', help='VoyahTune release version, e.g. 3.17.0')
+    parser.add_argument('version', help='Full VoyahTune release version, e.g. 3.22.0-od')
     parser.add_argument('--directory', type=Path, help='Flat release directory (default: Releases/dist/s3-vVERSION)')
     parser.add_argument('--profile', default='voyahtune')
     parser.add_argument('--bucket', default='voyahtune')
@@ -175,11 +191,12 @@ def main(argv=None):
     modes.add_argument('--dry-run', action='store_true', help='Validate local inputs and print plan; no network or writes')
     modes.add_argument('--check-remote', action='store_true', help='Check existing objects and public HEAD; no upload or catalog edits')
     parser.add_argument('--update-catalog', action='store_true', help='After all HEAD checks succeed, merge into the local catalog; no git commit/push')
-    parser.add_argument('--index', type=Path, default=ROOT / 'Releases/ota/index.json')
+    parser.add_argument('--index', type=Path, help='Shared catalog path (default: Releases/ota/index.json)')
     parser.add_argument('--builder', type=Path, default=ROOT / 'Installer/target/release/installer-build')
     args = parser.parse_args(argv)
     if args.update_catalog and (args.dry_run or args.check_remote):
         parser.error('--update-catalog cannot be combined with --dry-run or --check-remote')
+    args.index = args.index or ROOT / 'Releases/ota/index.json'
     directory = args.directory or ROOT / 'Releases/dist' / f's3-v{args.version}'
     files, entry = prepare(directory, args.version, args.bucket)
     # Check version immutability even if this invocation does not edit the catalog.
@@ -209,6 +226,6 @@ def main(argv=None):
 if __name__ == '__main__':
     try:
         main()
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, subprocess.CalledProcessError) as error:
         print(f'Error: {error}', file=sys.stderr)
         sys.exit(1)

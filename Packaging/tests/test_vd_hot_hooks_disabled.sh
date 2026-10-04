@@ -2,12 +2,13 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-VD="$ROOT/Packaging/inject/vd_bypass.js"
-DOCK="$ROOT/Packaging/inject/launcherdock.js"
+VD="$ROOT/Packaging/od/inject/vd_bypass.js"
+DOCK="$ROOT/Packaging/od/inject/launcherdock.js"
 RECEIVER="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java"
 APP_LAUNCHER="$ROOT/Native/app/src/main/java/ru/big/town/anative/AppDisplayLauncher.java"
 SERVICE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 HOST="$ROOT/Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java"
+VD_FACTORY="$ROOT/Native/app/src/main/java/ru/big/town/anative/OemVirtualDisplay.java"
 MANIFEST="$ROOT/Native/app/src/main/AndroidManifest.xml"
 RESTORE_MAIN="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/MainActivity.java"
 
@@ -297,9 +298,15 @@ if grep -Fq 'closeActiveSplit' "$RECEIVER" "$HOST"; then
 fi
 grep -Fq 'static boolean closeActiveHost()' "$HOST" \
     || fail "physical launch cannot retire an active VD split"
-grep -Fq 'VD_FLAGS_TRUSTED  = 1 | 8 | 256 | 1024' "$HOST" \
-    || fail "trusted VD must destroy content when removed"
-grep -Fq 'VD_FLAGS_FALLBACK = 1 | 8 | 256' "$HOST" \
-    || fail "fallback VD must destroy content when removed"
+grep -Fq 'OemVirtualDisplay.create(displayManager, name, pane.w, pane.h, dpi, surface, true)' "$HOST" \
+    || fail "trusted split VD must use the shared display contract"
+grep -Fq 'OemVirtualDisplay.create(displayManager, name, pane.w, pane.h, dpi, surface, false)' "$HOST" \
+    || fail "fallback split VD must use the shared display contract"
+grep -Fq 'DESTROY_CONTENT_ON_REMOVAL = 1 << 8' "$VD_FACTORY" \
+    || fail "shared VD factory changed Android 11 destroy-content flag"
+grep -Fq 'TRUSTED = 1 << 10' "$VD_FACTORY" \
+    || fail "shared VD factory changed Android 11 trusted flag"
+grep -Fq '| DESTROY_CONTENT_ON_REMOVAL | (trusted ? TRUSTED : 0)' "$VD_FACTORY" \
+    || fail "both trusted and fallback VD must destroy content when removed"
 
 echo "vd/freeform hook contract test: OK"

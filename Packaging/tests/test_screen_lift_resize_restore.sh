@@ -6,8 +6,8 @@ HOST="$ROOT/Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java"
 RESTORER="$ROOT/Native/app/src/main/java/ru/big/town/anative/ScreenLiftTaskRestorer.java"
 SERVICE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 MANIFEST="$ROOT/Native/app/src/main/AndroidManifest.xml"
-VD="$ROOT/Packaging/inject/vd_bypass.js"
-DOCK="$ROOT/Packaging/inject/launcherdock.js"
+VD="$ROOT/Packaging/od/inject/vd_bypass.js"
+DOCK="$ROOT/Packaging/od/inject/launcherdock.js"
 
 fail() {
     echo "screen-lift resize/restore contract test failed: $*" >&2

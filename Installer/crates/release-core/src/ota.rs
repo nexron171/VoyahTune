@@ -26,7 +26,10 @@ pub fn verify(release: &Release) -> Result<Claims> {
     })
 }
 pub fn compatible(c: &Claims, installed: &str, same_version: bool) -> Result<()> {
-    let parse = |s: &str| semver::Version::parse(s).map_err(|e| invalid(e.to_string()));
+    crate::infrastructure::Infrastructure::from_version(&c.version)?.require(
+        crate::infrastructure::Infrastructure::from_version(installed)?,
+    )?;
+    let parse = crate::infrastructure::release_version;
     let target = parse(&c.version)?;
     let current = parse(installed)?;
     if target < current || (target == current && !same_version) {
@@ -44,10 +47,13 @@ pub fn verify_payload(p: &Payload, c: &Claims) -> Result<()> {
         .as_ref()
         .ok_or_else(|| invalid("Нет требований релиза"))?
         .validate()?;
-    for (file, package) in [
-        ("native.apk", payload::NATIVE),
-        ("restore_mode.apk", payload::RESTORE),
-    ] {
+    for (file, package) in std::iter::once(("native.apk", payload::NATIVE)).chain(
+        p.manifest
+            .recipe
+            .packages
+            .iter()
+            .map(|p| (p.artifact.as_str(), p.package.as_str())),
+    ) {
         let (actual_id, actual_code, actual_version) = crate::apk_identity::read(&p.file(file)?)?;
         let version = semver::Version::parse(&c.version).map_err(|e| invalid(e.to_string()))?;
         if version.major > 999 || version.minor > 999 || version.patch > 999 {
@@ -71,6 +77,21 @@ pub fn verify_payload(p: &Payload, c: &Claims) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ota_preserves_profile_and_accepts_legacy_od_versions() {
+        let mut c = Claims {
+            version: "3.22.0-pi".into(),
+            archive_sha256: "a".repeat(64),
+            archive_size: 1,
+        };
+        assert!(compatible(&c, "3.21.0-pi", false).is_ok());
+        assert!(compatible(&c, "3.21.0-od", false).is_err());
+        assert!(compatible(&c, "3.21.0", false).is_err());
+        c.version = "3.22.0-od".into();
+        assert!(compatible(&c, "3.21.0", false).is_ok());
+        assert!(compatible(&c, "3.22.0-od", false).is_err());
+        assert!(compatible(&c, "3.22.0-od", true).is_ok());
+    }
     #[test]
     fn rejects_downgrade_and_requires_explicit_same_version() {
         let c = Claims {

@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
-const source = fs.readFileSync(path.join(__dirname, "../inject/voyahtune_drive_reset.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../od/inject/voyahtune_drive_reset.js"), "utf8");
 
 function fixture(options = {}) {
     const f = Object.assign({mode: "SPORT", enabled: 1, energyEnabled: 0, energy: "EV",

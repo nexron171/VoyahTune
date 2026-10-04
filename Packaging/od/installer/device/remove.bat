@@ -1,6 +1,10 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
+if not exist "stop-loader-device.sh" (
+    echo Missing stop-loader-device.sh. Device was not changed.
+    exit /b 1
+)
 set "YDNS_HELPER=%~dp0dns-overlay.bat"
 if not exist "%YDNS_HELPER%" (
     echo !!! Missing dns-overlay.bat. Removal stopped before changing the device.
@@ -83,7 +87,16 @@ set "LEGACY_INIT_MIGRATED=0"
 adb.exe shell "rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback /system/etc/init.logcat.sh.voyahtune.new /system/etc/init.logcat.sh.voyahtune.rollback"
 if errorlevel 1 echo   WARNING: some inactive transaction files remain; the boot hook is already removed.
 
-adb.exe shell "pkill -f /data/local/bin/load.bin"
+adb.exe push stop-loader-device.sh /data/local/tmp/voyahtune-stop-loader.sh >nul
+if errorlevel 1 exit /b 1
+adb.exe shell sh /data/local/tmp/voyahtune-stop-loader.sh
+if errorlevel 1 (
+    adb.exe shell rm -f /data/local/tmp/voyahtune-stop-loader.sh >nul 2>nul
+    echo Loader stop failed. Removal stopped.
+    exit /b 1
+)
+adb.exe shell rm -f /data/local/tmp/voyahtune-stop-loader.sh >nul
+if errorlevel 1 exit /b 1
 adb.exe shell "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock"
 adb.exe shell "rm -rf /data/local/tmp/voyah_load.lock"
 adb.exe shell "ps -ef | grep frida-inject | grep -E 'vd_bypass|steeringwheelkeys|launcherdock|multidisplay|apollo_tech|voyahtune_drive_reset|voyahtune_acc_restore|keyboard_lock_en|keyboard_ru|app_client|fullscreen_client' | grep -v grep | awk '{print $2}' | xargs -r kill -9"
@@ -91,6 +104,11 @@ adb.exe shell "am force-stop com.qinggan.app.vehiclesetting"
 adb.exe shell "am force-stop com.qinggan.app.qgime"
 adb.exe shell "fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null); old_ifs=$IFS; IFS=,; for fullscreen_pkg in $fullscreen_csv; do IFS=$old_ifs; case $fullscreen_pkg in ''|*[!A-Za-z0-9._]*) IFS=,; continue;; esac; am force-stop $fullscreen_pkg >/dev/null 2>&1; IFS=,; done; IFS=$old_ifs"
 for %%P in (ru.yandex.yandexnavi ru.yandex.yandexmaps com.yango.maps.android) do adb.exe shell "am force-stop %%P" 1>nul 2>nul
+
+adb.exe shell "pkill -x loaderFrida 2>/dev/null || true; pi_stop_wait=0; while pidof loaderFrida >/dev/null 2>&1; do [ $pi_stop_wait -lt 5 ] || exit 1; sleep 1; pi_stop_wait=$((pi_stop_wait + 1)); done"
+if errorlevel 1 exit /b 1
+adb.exe shell "rm -f /system/etc/init/init.voyah_tune.rc /data/local/bin/loaderFrida /data/local/bin/injects.json /data/local/bin/clusternavi.js /data/local/bin/phone-num.js /data/local/tmp/voyahtune-pi-loader-status.json /data/local/tmp/loaderFrida.log /data/local/tmp/com.qinggan.app.qgime.pid /data/local/tmp/com.qinggan.app.qgime.log /data/local/tmp/com.qinggan.app.launcher.pid /data/local/tmp/com.qinggan.app.launcher.log /data/local/tmp/com.qinggan.systemservice.pid /data/local/tmp/com.qinggan.systemservice.log /data/local/tmp/system_server.pid /data/local/tmp/system_server.log /data/local/tmp/com.qinggan.keymanager.service.pid /data/local/tmp/com.qinggan.keymanager.service.log /data/local/tmp/com.qinggan.app.vehiclesetting.pid /data/local/tmp/com.qinggan.app.vehiclesetting.log /data/local/tmp/com.qinggan.cluster.pid /data/local/tmp/com.qinggan.cluster.log /data/local/tmp/com.qinggan.bluetoothphone.pid /data/local/tmp/com.qinggan.bluetoothphone.log && rm -rf /data/local/tmp/voyahtune-pi"
+if errorlevel 1 exit /b 1
 
 if exist "backup\load.bin" (
     adb.exe push backup\load.bin /data/local/bin/load.bin
@@ -132,13 +150,14 @@ echo   Open Voyah settings were cleaned.
 echo === Removing Open Voyah APKs ===
 adb.exe shell am force-stop ru.big.town.anative >nul 2>nul
 adb.exe shell am force-stop ru.big.town.restoremode >nul 2>nul
+adb.exe shell am force-stop big.town.runyn >nul 2>nul
 rem Android 11 CE/DE and /data_mirror state must be removed by PackageManager/installd only.
-adb.exe shell "pm uninstall ru.big.town.anative >/dev/null 2>&1 || true; pm uninstall --user 0 ru.big.town.anative >/dev/null 2>&1 || true; pm uninstall ru.big.town.restoremode >/dev/null 2>&1 || true; if pm path ru.big.town.anative 2>/dev/null | grep -q '^package:/data/app/'; then exit 1; fi; if pm path ru.big.town.restoremode 2>/dev/null | grep -q '^package:'; then exit 1; fi"
+adb.exe shell "pm uninstall ru.big.town.anative >/dev/null 2>&1 || true; pm uninstall --user 0 ru.big.town.anative >/dev/null 2>&1 || true; pm uninstall ru.big.town.restoremode >/dev/null 2>&1 || true; pm uninstall big.town.runyn >/dev/null 2>&1 || true; if pm path ru.big.town.anative 2>/dev/null | grep -q '^package:/data/app/'; then exit 1; fi; if pm path ru.big.town.restoremode 2>/dev/null | grep -q '^package:'; then exit 1; fi; if pm path big.town.runyn 2>/dev/null | grep -q '^package:'; then exit 1; fi"
 if errorlevel 1 (
     echo !!! Could not remove an Open Voyah data APK or update. Reboot was cancelled.
     exit /b 1
 )
-echo   PackageManager removed user data, RestoreMode, and any Native update.
+echo   PackageManager removed user data, RestoreMode, RunYN, and any Native update.
 adb.exe shell "rm -f /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new /system/priv-app/.Native.apk.voyahtune.new && rm -rf /system/priv-app/Native && test ! -e /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml && test ! -e /system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new && test ! -e /system/priv-app/.Native.apk.voyahtune.new && test ! -e /system/priv-app/Native"
 if errorlevel 1 (
     echo !!! Could not completely remove Open Voyah system files. Reboot was cancelled.

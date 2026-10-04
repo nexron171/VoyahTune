@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-VD="$ROOT/Packaging/inject/vd_bypass.js"
+VD="$ROOT/Packaging/od/inject/vd_bypass.js"
 
 fail() {
     echo "vd physical-reparent replay contract test failed: $*" >&2

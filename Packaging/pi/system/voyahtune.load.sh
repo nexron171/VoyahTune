@@ -1,15 +1,11 @@
 #!/system/bin/sh
-# voyahtune.load.sh — тело Frida-оркестратора, запускается voyahtune_load из voyahtune.load.rc.
+# voyahtune.load.sh — PI Go Frida-оркестратор, запускается voyahtune_load из voyahtune.load.rc.
 # Извлечено из старого init.logcat.sh (монки-патча штатного логирования): здесь остаётся только
 # рут-обвязка, logcat своим порядком поднимает штатный /system/etc/init.logcat.sh (не тронут).
-# Unified APK mode: no hooks before a completed Full installation.
-# During early boot Settings may not be available; init will retry this service.
-[ "$(settings get global voyahtune_install_mode 2>/dev/null)" = full ] || exit 0
-
 LOG_TAG="vt_load_sh"
 logi () { /system/bin/log -t $LOG_TAG -p i "$@"; }
 
-# /data/local/bin — доступно рано при загрузке; /sdcard монтируется позже, там load.bin держать нельзя.
+# /data/local/bin — доступно рано при загрузке; /sdcard монтируется позже, там loaderFrida держать нельзя.
 # Restore directory access before injection, including after firmware/third-party changes.
 # Never chmod recursively: agent configs stay 0644, root worker state stays private.
 prepare_data_directories() {
@@ -28,5 +24,13 @@ if ! prepare_data_directories; then
     exit 1
 fi
 
-logi "starting load.bin watchdog"
-exec /system/bin/sh /data/local/bin/load.bin >> /data/local/tmp/voyahtune_load.txt 2>&1
+# A persistent block belongs to the independent updater. USB repair clears it.
+# Wait instead of exiting: init must not create a restart loop after an interrupted install.
+while [ -e /data/local/bin/voyahtune-update.block ]; do sleep 10; done
+# This worker waits for successful OTA independently; hooks must start now so
+# the old updater can finish its postboot validation. It owns its own flock.
+if [ -x /data/local/bin/voyahtune-ui-maintenance ]; then
+    /data/local/bin/voyahtune-ui-maintenance --update-ui >/dev/null 2>&1 &
+fi
+logi "starting PI loaderFrida watchdog"
+exec /data/local/bin/loaderFrida >> /data/local/tmp/voyahtune_load.txt 2>&1

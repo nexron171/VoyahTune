@@ -1,12 +1,12 @@
 #!/bin/sh
-# ./make_release.sh VERSION → ZIP VoyahTune со скриптами установки и удаления.
-# ./make_release.sh VERSION --installers → три автономных GUI-установщика.
-# ./make_release.sh VERSION --mac [--windows] [--linux] → только выбранные установщики.
+# ./make_release.sh VERSION (--pi|--od) → ZIP VoyahTune со скриптами установки и удаления.
+# ./make_release.sh VERSION (--pi|--od) --installers → три автономных GUI-установщика.
+# ./make_release.sh VERSION (--pi|--od) --mac [--windows] [--linux] → выбранные установщики.
 #
-#   ./make_release.sh 3.2.2              → Releases/build/VoyahTune-3.2.2 + Releases/dist/*.zip
-#   ./make_release.sh 3.2.2 --no-build   → не пересобирать APK, только переразложить файлы
+#   ./make_release.sh 3.2.2 --od              → Releases/build/VoyahTune-3.2.2-od
+#   ./make_release.sh 3.2.2 --pi --no-build   → не пересобирать APK, только переразложить файлы
 #                                          (APK берутся из уже существующей папки сборки)
-#   ./make_release.sh 3.2.2 --no-zip     → не паковать архивы
+#   ./make_release.sh 3.2.2 --od --no-zip     → не паковать архивы
 #
 # Источник всего, кроме APK — Packaging/ (см. Packaging/README.md). Он В GIT.
 # Releases/ — ТОЛЬКО вывод и целиком в .gitignore: сборки в Releases/build/, готовые к
@@ -16,7 +16,7 @@ set -e
 # Preserve the classic shell-only default. The Python branch consumes --installers.
 for release_arg in "$@"; do
     case "$release_arg" in
-        --payload|--installers|--mac|--windows|--linux)
+        --payload|--installers|--mac|--windows|--windows-arch|--linux)
             exec python3 "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/Installer/scripts/release.py" "$@" ;;
     esac
 done
@@ -31,15 +31,19 @@ DNS_OVERLAY_NAME="framework-res__config_ethernet_interfaces_yandexdns.apk"
 DNS_OVERLAY="$COMMON/vendor-overlay/$DNS_OVERLAY_NAME"
 DNS_OVERLAY_SHA256="c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d"
 COMMON_INSTALLER="$COMMON/installer/common"
-COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh apollo-safe-device.sh"
+COMMON_INSTALLER_FILES="dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh apollo-safe-device.sh stop-loader-device.sh"
 RELEASE_README="$COMMON/README.txt"
 
 VERSION=""
+INFRASTRUCTURE=""
 DO_BUILD=1
 DO_ZIP=1
 
 for arg in "$@"; do
     case "$arg" in
+        --pi|--od)
+            [ -z "$INFRASTRUCTURE" ] || { echo "Укажите ровно один флаг --pi или --od" >&2; exit 2; }
+            INFRASTRUCTURE=${arg#--} ;;
         --no-build)   DO_BUILD=0 ;;
         --no-zip)     DO_ZIP=0 ;;
         -h|--help)    sed -n '2,16p' "$0"; exit 0 ;;
@@ -48,12 +52,22 @@ for arg in "$@"; do
     esac
 done
 
+[ -n "$INFRASTRUCTURE" ] || { echo "Укажите инфраструктуру: --pi или --od" >&2; exit 2; }
+COMMON="$ROOT/Packaging/$INFRASTRUCTURE"
+COMMON_INSTALLER="$COMMON/installer/common"
+
 if [ -z "$VERSION" ]; then
-    echo "Не указана версия. Пример: ./make_release.sh 3.2.2" >&2
+    echo "Не указана версия. Пример: ./make_release.sh 3.2.2 --od" >&2
     exit 1
 fi
 # Версию принимаем и как «3.2.2», и как «v3.2.2» — нормализуем к виду без префикса.
-VERSION="${VERSION#v}"
+VERSION=$(python3 - "$ROOT" "$VERSION" "$INFRASTRUCTURE" <<'NORMALIZE_VERSION'
+import sys
+sys.path.insert(0, sys.argv[1] + '/Installer/scripts')
+from release import normalize_version
+print(normalize_version(sys.argv[2], sys.argv[3]))
+NORMALIZE_VERSION
+)
 # Ниже готовая папка заменяется целиком, поэтому имя обязано быть одним безопасным path-компонентом.
 case "$VERSION" in
     [A-Za-z0-9]*) ;;
@@ -166,7 +180,7 @@ trap cleanup_release_stage EXIT
 trap handle_release_signal HUP INT TERM
 
 mkdir -p "$BUILD"
-RELEASE_LOCK="$BUILD/.release-$VERSION.lock"
+RELEASE_LOCK="$BUILD/.release.lock"
 # Блокируем обработчики только на tiny critical section mkdir+ownership flag: иначе signal между
 # успешным mkdir и assignment оставит stale lock, а преждевременный cleanup мог бы тронуть чужой lock.
 trap '' HUP INT TERM
@@ -201,42 +215,7 @@ sha256_file() {
 verify_common_release_assets() {
     # A clean remove -> install cycle is safety-critical on Android 11: raw deletion of CE/DE
     # desynchronizes PackageManager from /data_mirror and makes Native crash in zygote.
-    if ! sh "$COMMON/tests/test_android11_package_lifecycle.sh"; then
-        echo "Android 11 package lifecycle guard failed; release was not created." >&2
-        exit 1
-    fi
-    if ! sh "$COMMON/tests/test_saved_config_startup_wake.sh"; then
-        echo "Startup/wake saved-config guard failed; release was not created." >&2
-        exit 1
-    fi
-    if ! sh "$COMMON/tests/test_keyboard_modes.sh"; then
-        echo "Keyboard opt-in lifecycle guard failed; release was not created." >&2
-        exit 1
-    fi
-    if ! sh "$COMMON/tests/test_hook_status.sh"; then
-        echo "Hook status/install contract guard failed; release was not created." >&2
-        exit 1
-    fi
-    if ! sh "$COMMON/tests/test_app_client.sh"; then
-        echo "App client geometry/packaging guard failed; release was not created." >&2
-        exit 1
-    fi
-    if ! sh "$COMMON/tests/test_mapkit_dpi_client.sh"; then
-        echo "MapKit DPI client guard failed; release was not created." >&2
-        exit 1
-    fi
-    if ! sh "$COMMON/tests/test_acc_restore_hook.sh"; then
-        echo "ACC restore hook guard failed; release was not created." >&2
-        exit 1
-    fi
-    if ! sh "$COMMON/tests/test_drive_reset_hook.sh"; then
-        echo "Account reset hook guard failed; release was not created." >&2
-        exit 1
-    fi
-    if ! bash "$ROOT/Utils/android11-oem-stubs/tests/static-checks.sh"; then
-        echo "Android 11 OEM stub harness guard failed; release was not created." >&2
-        exit 1
-    fi
+    python3 "$ROOT/Packaging/tests/test_infrastructure_profiles.py" --profile "$INFRASTRUCTURE" || exit 1
 
     if [ ! -f "$DNS_OVERLAY" ]; then
         echo "Нет $DNS_OVERLAY — добавьте зафиксированный DNS RRO APK." >&2
@@ -386,8 +365,13 @@ verify_windows_batch_files() {
 
 verify_release_payload() {
     out="$1"
-    required="README.txt native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh apollo-safe-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
-    required="$required frida-inject-16.2.1-android-arm64 load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
+    required="README.txt native.apk restore_mode.apk $DNS_OVERLAY_NAME dns-overlay.sh dns-overlay.bat install-yandex-dns.bat dns-overlay-device.sh apollo-safe-device.sh stop-loader-device.sh install.sh install.bat remove.sh remove.bat privapp-permissions-ru.big.town.anative.xml adb.exe AdbWinApi.dll AdbWinUsbApi.dll"
+    required="$required frida-inject-16.2.1-android-arm64 steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js apollo_tech.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json init.logcat.original.sh voyahtune.load.rc voyahtune.load.sh"
+    if [ "$INFRASTRUCTURE" = pi ]; then
+        required="$required loaderFrida injects.json clusternavi.js phone-num.js runyn.apk"
+    else
+        required="$required load.bin app_client.js voyahtune_drive_reset.js voyahtune_acc_restore.js"
+    fi
     for payload in $required; do
         if [ ! -s "$out/$payload" ]; then
             echo "Релиз неполон: отсутствует или пуст $out/$payload." >&2
@@ -396,6 +380,36 @@ verify_release_payload() {
     done
     sh -n "$out/install.sh"
     sh -n "$out/remove.sh"
+    python3 - "$out" "$VERSION" "$INFRASTRUCTURE" "$COMMON" <<'VERIFY_CLASSIC'
+import hashlib, json, sys, zipfile
+from pathlib import Path
+root = Path(sys.argv[1])
+aliases = {'whitelist.xml': 'privapp-permissions-ru.big.town.anative.xml',
+           'frida-inject': 'frida-inject-16.2.1-android-arm64'}
+profile_source = Path(sys.argv[4])
+expected_runtime = {'whitelist.xml', 'frida-inject', 'voyahtune.load.rc', 'voyahtune.load.sh'}
+expected_runtime.update(path.name for pattern in ('*.js', '*.json')
+                        for path in (profile_source/'inject').glob(pattern))
+expected_runtime.update({'loaderFrida', 'injects.json', 'runyn.apk'}
+                        if sys.argv[3] == 'pi' else {'load.bin'})
+identities = []
+for apk in ('native.apk', 'restore_mode.apk'):
+    with zipfile.ZipFile(root/apk) as archive:
+        identity = json.loads(archive.read('assets/voyahtune-build.json'))
+    assert identity.get('infrastructure') == sys.argv[3], f'{apk}: wrong infrastructure; rebuild APKs'
+    assert identity['releaseVersion'] == sys.argv[2], f'{apk}: wrong release version; rebuild APKs'
+    hashes = identity['runtimeHashes']
+    assert set(hashes) == expected_runtime, (
+        f'{apk}: signed runtime set does not match {sys.argv[3]}; '
+        f'missing={sorted(expected_runtime-set(hashes))}, '
+        f'unexpected={sorted(set(hashes)-expected_runtime)}; rebuild APKs')
+    for name, expected in hashes.items():
+        source = root/aliases.get(name, name)
+        assert source.is_file(), f'{apk}: missing signed runtime {name}'
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == expected, f'{apk}: stale runtime {name}; rebuild APKs'
+    identities.append(hashes)
+assert identities[0] == identities[1], 'Native and RestoreMode describe different runtime files'
+VERIFY_CLASSIC
 }
 
 # Build the application pair for the release.
@@ -403,18 +417,31 @@ APKS_BUILT=0
 build_apks() {
     out="$1"
     if [ "$APKS_BUILT" = 0 ]; then
-        (cd "$ROOT/Native" && ./gradlew assembleRelease -q)
-        (cd "$ROOT/RestoreMode" && ./gradlew assembleRelease -q)
+        pi_loader_arg=""
+        pi_runyn_arg=""
+        if [ "$INFRASTRUCTURE" = pi ]; then
+            sh "$COMMON/loaderFrida/build.sh"
+            (cd "$ROOT/RunYN" && ./gradlew assembleRelease -q "-PvoyahReleaseVersion=$VERSION" -PvoyahInfrastructure=pi)
+            pi_runyn_arg="-PvoyahRunynApk=$ROOT/RunYN/app/build/outputs/apk/release/app-release.apk"
+            pi_loader_arg="-PvoyahPiLoader=$ROOT/Releases/build/pi/loaderFrida/arm64-v8a/loaderFrida"
+        fi
+        (cd "$ROOT/Native" && ./gradlew assembleRelease -q "-PvoyahReleaseVersion=$VERSION" "-PvoyahInfrastructure=$INFRASTRUCTURE" ${pi_loader_arg:+"$pi_loader_arg"} ${pi_runyn_arg:+"$pi_runyn_arg"})
+        (cd "$ROOT/RestoreMode" && ./gradlew assembleRelease -q "-PvoyahReleaseVersion=$VERSION" "-PvoyahInfrastructure=$INFRASTRUCTURE" ${pi_loader_arg:+"$pi_loader_arg"} ${pi_runyn_arg:+"$pi_runyn_arg"})
         APKS_BUILT=1
     fi
     cp "$ROOT/Native/app/build/outputs/apk/release/app-release.apk" "$out/native.apk"
     cp "$ROOT/RestoreMode/app/build/outputs/apk/release/app-release.apk" "$out/restore_mode.apk"
+    if [ "$INFRASTRUCTURE" = pi ]; then
+        cp "$ROOT/RunYN/app/build/outputs/apk/release/app-release.apk" "$out/runyn.apk"
+    fi
 }
 
 # Проверка, что в папке релиза лежат APK — при --no-build мы их не собираем, но релиз без них невалиден.
 require_apks() {
     out="$1"
-    for f in native.apk restore_mode.apk; do
+    release_apks="native.apk restore_mode.apk"
+    if [ "$INFRASTRUCTURE" = pi ]; then release_apks="$release_apks runyn.apk"; fi
+    for f in $release_apks; do
         if [ ! -s "$out/$f" ]; then
             echo "Нет $out/$f — с --no-build APK должны уже лежать в папке релиза." >&2
             exit 1
@@ -435,7 +462,9 @@ prepare_release_dir() {
     mkdir "$STAGED_OUT"
 
     if [ "$DO_BUILD" != 1 ]; then
-        for apk in native.apk restore_mode.apk; do
+        release_apks="native.apk restore_mode.apk"
+        if [ "$INFRASTRUCTURE" = pi ]; then release_apks="$release_apks runyn.apk"; fi
+        for apk in $release_apks; do
             cp -p "$final_out/$apk" "$STAGED_OUT/$apk"
             if ! cmp -s "$final_out/$apk" "$STAGED_OUT/$apk"; then
                 echo "Копия $apk в clean staging не совпала с исходным APK." >&2
@@ -516,6 +545,13 @@ fi
     cp "$COMMON/inject/"*.js                                "$STAGE/"
     cp "$COMMON/inject/"*.json                              "$STAGE/"
     cp "$COMMON/system/"*                                   "$STAGE/"
+    cp "$ROOT/Packaging/system/privapp-permissions-ru.big.town.anative.xml" "$STAGE/"
+    if [ "$INFRASTRUCTURE" = pi ]; then
+        if [ "$DO_BUILD" != 1 ]; then sh "$COMMON/loaderFrida/build.sh"; fi
+        cp "$ROOT/Releases/build/pi/loaderFrida/arm64-v8a/loaderFrida" "$STAGE/loaderFrida"
+        cp "$COMMON/loaderFrida/injects.json" "$STAGE/injects.json"
+    fi
+    printf '%s\n' "$INFRASTRUCTURE" > "$STAGE/infrastructure.txt"
     copy_common_release_assets "$STAGE"
     for f in "$COMMON/installer/device/"*; do
         copy_stamped "$f" "$STAGE/$(basename "$f")"

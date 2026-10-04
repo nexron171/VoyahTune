@@ -5,6 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 
 CHECK=0
+CATALOG_URL=''
 PAYLOAD=''
 OUTPUT=''
 MAC=0
@@ -14,11 +15,15 @@ LINUX_BUILD=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
-      echo 'Usage: ./Installer/scripts/build-all-macos.sh [--payload DIRECTORY] [--output Releases/build/DIRECTORY] [--mac] [--windows] [--windows-arch x64|x86] [--linux]'
+      echo 'Usage: ./Installer/scripts/build-all-macos.sh [--catalog-url HTTPS_URL] [--payload DIRECTORY] [--output Releases/build/DIRECTORY] [--mac] [--windows] [--windows-arch x64|x86] [--linux]'
       echo 'Standalone macOS Universal + Windows x64/x86 + Linux x64, GUI with ADB; optional offline payload.'
-      echo 'Use ./make_release.sh VERSION --installers for the complete release.'
+      echo 'Use ./make_release.sh VERSION (--pi|--od) --installers for the complete release.'
       echo '--check: check the prepared build environment without building.'
       exit 0 ;;
+    --pi|--od) echo 'The GUI supports both infrastructures; select PI/OD when building the payload.' >&2; exit 2 ;;
+    --catalog-url)
+      [[ $# -ge 2 ]] || { echo 'Missing --catalog-url value' >&2; exit 2; }
+      CATALOG_URL=$2; shift 2 ;;
     --check) CHECK=1; shift ;;
     --mac) MAC=1; shift ;;
     --windows) WINDOWS=1; shift ;;
@@ -34,6 +39,8 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+CATALOG_ARGS=()
+if [[ -n "$CATALOG_URL" ]]; then CATALOG_ARGS+=(--catalog-url "$CATALOG_URL"); fi
 if [[ $MAC == 0 && $WINDOWS == 0 && $LINUX_BUILD == 0 ]]; then MAC=1; WINDOWS=1; LINUX_BUILD=1; fi
 WINDOWS_TARGET=x86_64-pc-windows-msvc
 if [[ $WINDOWS_ARCH == x86 ]]; then WINDOWS_TARGET=i686-pc-windows-msvc; fi
@@ -190,7 +197,7 @@ if [[ -n "$PAYLOAD" ]]; then
 fi
 if [[ $MAC == 1 ]]; then
 echo "macOS Universal tooling ${VERSION}…"
-CARGO_TARGET_DIR="$ROOT/Installer/target" node Installer/scripts/build.mjs --bundles app ${PAYLOAD_ARGS[@]+"${PAYLOAD_ARGS[@]}"} >"$LOGS/macos.log" 2>&1
+CARGO_TARGET_DIR="$ROOT/Installer/target" node Installer/scripts/build.mjs ${CATALOG_ARGS[@]+"${CATALOG_ARGS[@]}"} --bundles app ${PAYLOAD_ARGS[@]+"${PAYLOAD_ARGS[@]}"} >"$LOGS/macos.log" 2>&1
 MAC_APP="$ROOT/Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app"
 COPYFILE_DISABLE=1 tar -czf "$STAGE/macos-universal.tar.gz" -C "$(dirname "$MAC_APP")" "$(basename "$MAC_APP")"
 
@@ -209,7 +216,7 @@ if [[ $REMOTE == 1 ]]; then
 fi
 if [[ $WINDOWS == 1 ]]; then
 echo "Windows $WINDOWS_ARCH tooling…"
-"${DOCKER[@]}" exec -w /work vti-windows node Installer/scripts/build.mjs --frontend-dist /work/Releases/build/frontend --target "$WINDOWS_TARGET" ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/windows.log" 2>&1
+"${DOCKER[@]}" exec -w /work vti-windows node Installer/scripts/build.mjs ${CATALOG_ARGS[@]+"${CATALOG_ARGS[@]}"} --frontend-dist /work/Releases/build/frontend --target "$WINDOWS_TARGET" ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/windows.log" 2>&1
 WIN_TARGET="$ROOT/Releases/build/hosts/windows/Installer/target/$WINDOWS_TARGET/release"
 cp "$WIN_TARGET/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_${WINDOWS_ARCH}-setup.exe" "$STAGE/windows-$WINDOWS_ARCH.exe"
 "${DOCKER[@]}" exec vti-windows 7z t "/work/Installer/target/$WINDOWS_TARGET/release/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_${WINDOWS_ARCH}-setup.exe" >"$LOGS/windows-verify.log" 2>&1
@@ -217,7 +224,7 @@ cp "$WIN_TARGET/bundle/nsis/VoyahTune Installer_${PACKAGE_VERSION}_${WINDOWS_ARC
 fi
 if [[ $LINUX_BUILD == 1 ]]; then
 echo 'Linux x64 tooling…'
-"${DOCKER[@]}" exec -w /work vti-linux-amd64 node Installer/scripts/build.mjs --frontend-dist /work/Releases/build/frontend --no-bundle ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/linux.log" 2>&1
+"${DOCKER[@]}" exec -w /work vti-linux-amd64 node Installer/scripts/build.mjs ${CATALOG_ARGS[@]+"${CATALOG_ARGS[@]}"} --frontend-dist /work/Releases/build/frontend --no-bundle ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/linux.log" 2>&1
 "${DOCKER[@]}" exec -i -w /work vti-linux-amd64 bash -s >"$LOGS/linux-package.log" 2>&1 <<'LINUX'
 set -euo pipefail
 mkdir -p /opt/target/release
@@ -261,7 +268,7 @@ LINUX
 cp Releases/build/hosts/linux-amd64/Releases/dist/linux-all-x64.run "$STAGE/linux-x64.run"
 chmod +x "$STAGE/linux-x64.run"
 fi
-python3 - "$STAGE" "$OUTPUT" "$PAYLOAD" "$VERSION" "$WINDOWS_ARCH" <<'PY'
+python3 - "$STAGE" "$OUTPUT" "$PAYLOAD" "$VERSION" "$WINDOWS_ARCH" "$CATALOG_URL" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
 stage,dest=map(Path,sys.argv[1:3])
@@ -275,7 +282,7 @@ def sha(p):
 platforms={name:{'file':file,'sha256':sha(stage/file),'bytes':(stage/file).stat().st_size}
     for name,file in [('macos','macos-universal.tar.gz'),('windows',f'windows-{sys.argv[5]}.exe'),('linux','linux-x64.run')] if (stage/file).is_file()}
 if 'windows' in platforms: platforms['windows']['architecture']=sys.argv[5]
-info={'installerVersion':sys.argv[4], 'engineVersion':sys.argv[4],
+info={'catalogUrl':sys.argv[6] or None, 'installerVersion':sys.argv[4], 'engineVersion':sys.argv[4],
       'releaseVersion':manifest['releaseVersion'] if manifest else None,
       'payloadSha256':sha(payload/'manifest.json') if payload else None,'embeddedPayload':payload is not None,'platforms':platforms}
 (stage/'build-info.json').write_text(json.dumps(info,ensure_ascii=False,indent=2)+'\n')

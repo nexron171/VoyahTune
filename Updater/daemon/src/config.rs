@@ -12,6 +12,8 @@ pub const DEFAULT_CATALOG_URL: &str = release_core::catalog::CATALOG_URL;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
+    #[serde(default)]
+    pub infrastructure: release_core::infrastructure::Infrastructure,
     pub schema: u32,
     pub catalog_url: String,
     pub source_generation: u64,
@@ -21,6 +23,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            infrastructure: release_core::infrastructure::Infrastructure::compiled(),
             schema: 1,
             catalog_url: DEFAULT_CATALOG_URL.into(),
             source_generation: 0,
@@ -30,6 +33,9 @@ impl Default for Config {
 }
 
 pub fn normalize_url(value: &str) -> io::Result<String> {
+    if value.is_empty() {
+        return Ok(String::new());
+    }
     if value.len() > 4096 || value.bytes().any(|c| c.is_ascii_control()) {
         return Err(invalid("Некорректный URL каталога"));
     }
@@ -76,6 +82,17 @@ pub fn load(root: &Path) -> io::Result<Config> {
         serde_json::from_slice(&bytes).map_err(|_| invalid("Настройки повреждены"))?;
     if config.schema != 1 {
         return Err(invalid("Неизвестный формат настроек"));
+    }
+    let selected = release_core::infrastructure::Infrastructure::compiled();
+    if config.infrastructure != selected {
+        // A USB installation can replace the infrastructure. Invalidate any
+        // pending selection while retaining the user's shared catalog and DNS choice.
+        config.infrastructure = selected;
+        config.source_generation = config
+            .source_generation
+            .checked_add(1)
+            .ok_or_else(|| invalid("Счётчик источника исчерпан"))?;
+        save(root, &config)?;
     }
     config.catalog_url = normalize_url(&config.catalog_url)?;
     Ok(config)
@@ -151,6 +168,29 @@ mod tests {
         );
     }
     #[test]
+    fn usb_profile_change_invalidates_selection_and_preserves_shared_catalog_and_dns() {
+        let root = tempfile::tempdir().unwrap();
+        let mut old = Config::default();
+        old.infrastructure = match old.infrastructure {
+            release_core::infrastructure::Infrastructure::Pi => {
+                release_core::infrastructure::Infrastructure::Od
+            }
+            _ => release_core::infrastructure::Infrastructure::Pi,
+        };
+        old.catalog_url = "https://old-profile.example/catalog.json".into();
+        old.dns_enabled = Some(true);
+        save(root.path(), &old).unwrap();
+        let current = load(root.path()).unwrap();
+        assert_eq!(
+            current.infrastructure,
+            release_core::infrastructure::Infrastructure::compiled()
+        );
+        assert_eq!(current.catalog_url, old.catalog_url);
+        assert_eq!(current.dns_enabled, Some(true));
+        assert_eq!(current.source_generation, 1);
+        assert_eq!(load(root.path()).unwrap(), current);
+    }
+    #[test]
     fn invalid_address_does_not_replace_settings() {
         let root = tempfile::tempdir().unwrap();
         let mut config = load(root.path()).unwrap();
@@ -212,7 +252,7 @@ mod dns_tests {
     #[test]
     fn old_settings_default_to_preserving_dns_and_changes_are_atomic() {
         let original: Config = serde_json::from_value(
-            serde_json::json!({"schema":1,"catalogUrl":DEFAULT_CATALOG_URL,"sourceGeneration":0}),
+            serde_json::json!({"schema":1,"infrastructure":release_core::infrastructure::Infrastructure::compiled(),"catalogUrl":DEFAULT_CATALOG_URL,"sourceGeneration":0}),
         )
         .unwrap();
         assert_eq!(original.dns_enabled, None);

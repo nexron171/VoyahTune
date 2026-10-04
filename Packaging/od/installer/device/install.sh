@@ -94,6 +94,7 @@ wait_for_android_boot() {
 }
 
 native_user_data_ready() {
+# @installer-command NATIVE_READY
     [ "$(adb shell '
         if pm list packages --user 0 2>/dev/null | grep -qx "package:ru.big.town.anative" \
                 && pm path ru.big.town.anative 2>/dev/null | grep -q "^package:" \
@@ -125,6 +126,7 @@ ensure_native_user_ready() {
 
     # BOOT_COMPLETED мог пройти до install-existing. Поднимаем тот же штатный receiver один раз и
     # проверяем фактический process attach, чтобы installer не объявил успех при zygote crash-loop.
+# @installer-command NATIVE_BROADCAST
     adb shell "am broadcast -a com.qinggan.intent.QINGGAN_BOOT_COMPLETE -n ru.big.town.anative/.SetModesReceiverStatic >/dev/null" \
         || return 1
     NATIVE_START_WAIT=0
@@ -181,7 +183,9 @@ esac
 # разделов (устойчивее сырого mount -o rw,remount). При невозможности — прерываемся, НЕ трогая /system.
 system_is_writable() {
     adb remount >/dev/null 2>&1
+# @installer-command MOUNT
     adb shell 'mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null' >/dev/null 2>&1
+# @installer-command RW_TEST
     [ "$(adb shell 'touch /system/.ovw_rwtest 2>/dev/null && rm -f /system/.ovw_rwtest && echo RW || echo RO' | tr -d '\r')" = "RW" ]
 }
 
@@ -343,6 +347,7 @@ LEGACY_INIT_ROLLBACK_SOURCE="$BACKUP_DIR/init.logcat.voyahtune-legacy.sh"
 LEGACY_INIT_MIGRATED=0
 
 legacy_init_state() {
+# @installer-command LEGACY_STATE
     LEGACY_INIT_STATE=$(adb shell "if [ ! -e '$LEGACY_INIT_DEVICE' ]; then echo MISSING; elif [ ! -f '$LEGACY_INIT_DEVICE' ]; then echo ERROR; else grep -qF '$LEGACY_INIT_MARKER' '$LEGACY_INIT_DEVICE' 2>/dev/null; legacy_grep_status=\$?; if [ \$legacy_grep_status -eq 0 ]; then echo LEGACY; elif [ \$legacy_grep_status -eq 1 ]; then echo CLEAN; else echo ERROR; fi; fi" 2>/dev/null) || return 1
     LEGACY_INIT_STATE=$(printf '%s' "$LEGACY_INIT_STATE" | tr -d '\r')
     return 0
@@ -388,6 +393,7 @@ rollback_legacy_init_logcat() {
         echo "!!! Не удалось передать rollback-копию legacy init.logcat.sh."
         return 1
     fi
+# @installer-command LEGACY_ROLLBACK
     if ! adb shell "chown 0:0 '$LEGACY_INIT_DEVICE.voyahtune.rollback' && chmod 644 '$LEGACY_INIT_DEVICE.voyahtune.rollback' && /system/bin/sh -n '$LEGACY_INIT_DEVICE.voyahtune.rollback' && restorecon '$LEGACY_INIT_DEVICE.voyahtune.rollback' && mv -f '$LEGACY_INIT_DEVICE.voyahtune.rollback' '$LEGACY_INIT_DEVICE' && restorecon '$LEGACY_INIT_DEVICE' && sync"; then
         echo "!!! Не удалось вернуть legacy init.logcat.sh. Не перезагружайте ГУ; повторите установку."
         return 1
@@ -447,6 +453,7 @@ migrate_legacy_init_logcat() {
         return 1
     fi
     LEGACY_INIT_MIGRATED=1
+# @installer-command LEGACY_PUBLISH
     if ! adb shell "chown 0:0 '$LEGACY_INIT_DEVICE.voyahtune.new' && chmod 644 '$LEGACY_INIT_DEVICE.voyahtune.new' && /system/bin/sh -n '$LEGACY_INIT_DEVICE.voyahtune.new' && restorecon '$LEGACY_INIT_DEVICE.voyahtune.new' && mv -f '$LEGACY_INIT_DEVICE.voyahtune.new' '$LEGACY_INIT_DEVICE' && restorecon '$LEGACY_INIT_DEVICE' && sync"; then
         adb shell "rm -f '$LEGACY_INIT_DEVICE.voyahtune.new'" >/dev/null 2>&1
         if ! rollback_legacy_init_logcat; then
@@ -468,14 +475,17 @@ migrate_legacy_init_logcat() {
 
 boot_hook_cleanup_stage() {
     # /system/etc/init сканирует все regular files, поэтому staging обязательно держим снаружи.
+# @installer-command BOOT_CLEAN_STAGE
     adb shell "rm -f /system/etc/.voyahtune.setenforce.rc.new /system/etc/.voyahtune.load.rc.new /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.setenforce.rc.rollback /system/etc/.voyahtune.load.rc.rollback /system/etc/.voyahtune.load.sh.rollback" >/dev/null 2>&1
 }
 
 boot_hook_cleanup_snapshot() {
+# @installer-command BOOT_CLEAN_SNAPSHOT
     adb shell "rm -f /system/etc/.voyahtune.setenforce.rc.previous /system/etc/.voyahtune.setenforce.rc.absent /system/etc/.voyahtune.load.rc.previous /system/etc/.voyahtune.load.rc.absent /system/etc/.voyahtune.load.sh.previous /system/etc/.voyahtune.load.sh.absent" >/dev/null 2>&1
 }
 
 boot_hook_final_state() {
+# @installer-command BOOT_STATE
     BOOT_HOOK_FINAL_STATE=$(adb shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/init/voyahtune.load.rc && grep -qFx '    start voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; elif [ ! -e /system/etc/init.voyahtune.load.sh ] && [ ! -e /system/etc/init/voyahtune.setenforce.rc ] && [ ! -e /system/etc/init/voyahtune.load.rc ]; then echo ABSENT; else echo PARTIAL; fi" 2>/dev/null) || return 1
     BOOT_HOOK_FINAL_STATE=$(printf '%s' "$BOOT_HOOK_FINAL_STATE" | tr -d '\r')
     case "$BOOT_HOOK_FINAL_STATE" in
@@ -486,6 +496,7 @@ boot_hook_final_state() {
 
 boot_hook_snapshot() {
     boot_hook_cleanup_snapshot || return 1
+# @installer-command BOOT_SNAPSHOT
     adb shell "if [ -f /system/etc/init/voyahtune.setenforce.rc ]; then cp -p /system/etc/init/voyahtune.setenforce.rc /system/etc/.voyahtune.setenforce.rc.previous; else : > /system/etc/.voyahtune.setenforce.rc.absent; fi && if [ -f /system/etc/init/voyahtune.load.rc ]; then cp -p /system/etc/init/voyahtune.load.rc /system/etc/.voyahtune.load.rc.previous; else : > /system/etc/.voyahtune.load.rc.absent; fi && if [ -f /system/etc/init.voyahtune.load.sh ]; then cp -p /system/etc/init.voyahtune.load.sh /system/etc/.voyahtune.load.sh.previous; else : > /system/etc/.voyahtune.load.sh.absent; fi && sync"
 }
 
@@ -493,6 +504,7 @@ boot_hook_rollback() {
     BOOT_HOOK_ROLLBACK_FAILED=0
     # Если старого load.rc не было, сначала деактивируем новый composite. Если был — wrapper и
     # standalone setenforce восстанавливаются раньше старого load.rc, который возвращается последним.
+# @installer-command BOOT_ROLLBACK
     adb shell "restore_one() { if [ -f \"\$1.previous\" ]; then cp -p \"\$1.previous\" \"\$1.rollback\" && mv -f \"\$1.rollback\" \"\$2\"; elif [ -f \"\$1.absent\" ]; then rm -f \"\$2\"; else return 1; fi; }; if [ -f /system/etc/.voyahtune.load.rc.absent ]; then rm -f /system/etc/init/voyahtune.load.rc && restore_one /system/etc/.voyahtune.load.sh /system/etc/init.voyahtune.load.sh && restore_one /system/etc/.voyahtune.setenforce.rc /system/etc/init/voyahtune.setenforce.rc; elif [ -f /system/etc/.voyahtune.load.rc.previous ]; then restore_one /system/etc/.voyahtune.load.sh /system/etc/init.voyahtune.load.sh && restore_one /system/etc/.voyahtune.setenforce.rc /system/etc/init/voyahtune.setenforce.rc && restore_one /system/etc/.voyahtune.load.rc /system/etc/init/voyahtune.load.rc; else exit 1; fi && for f in /system/etc/init/voyahtune.setenforce.rc /system/etc/init/voyahtune.load.rc /system/etc/init.voyahtune.load.sh; do [ ! -e \"\$f\" ] || restorecon \"\$f\" || exit 1; done && sync" >/dev/null 2>&1 || BOOT_HOOK_ROLLBACK_FAILED=1
     boot_hook_cleanup_stage
     if [ "$BOOT_HOOK_ROLLBACK_FAILED" = 0 ]; then
@@ -525,6 +537,7 @@ install_boot_hooks() {
         return 1
     fi
 
+# @installer-command BOOT_PREPARE
     if ! adb shell "chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && grep -qF '/data/local/bin/load.bin' /system/etc/.voyahtune.load.sh.new && grep -qF 'on post-fs-data' /system/etc/.voyahtune.load.rc.new && grep -qF '/system/bin/setenforce 0' /system/etc/.voyahtune.load.rc.new && grep -qF 'service voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/.voyahtune.load.rc.new && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/.voyahtune.load.rc.new && grep -qFx '    start voyahtune_load' /system/etc/.voyahtune.load.rc.new && grep -qF 'enable voyahtune_load' /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync"; then
         boot_hook_cleanup_stage
         echo "!!! Не удалось подготовить права/SELinux labels boot-hook — рабочая версия сохранена."
@@ -538,6 +551,7 @@ install_boot_hooks() {
     fi
 
     # Composite load.rc содержит и setenforce-action, и service/property: один rename активирует всё.
+# @installer-command BOOT_PUBLISH
     if ! adb shell "mv -f /system/etc/.voyahtune.load.sh.new /system/etc/init.voyahtune.load.sh && mv -f /system/etc/.voyahtune.load.rc.new /system/etc/init/voyahtune.load.rc && restorecon /system/etc/init.voyahtune.load.sh /system/etc/init/voyahtune.load.rc && sync"; then
         if boot_hook_rollback; then
             echo "!!! Не удалось завершить boot-hook; предыдущая версия восстановлена."
@@ -548,6 +562,7 @@ install_boot_hooks() {
         fi
     fi
 
+# @installer-command BOOT_READY
     BOOT_HOOK_STATE=$(adb shell "if [ -x /system/etc/init.voyahtune.load.sh ] && grep -qF '/data/local/bin/load.bin' /system/etc/init.voyahtune.load.sh && [ -r /system/etc/init/voyahtune.load.rc ] && grep -qF 'on post-fs-data' /system/etc/init/voyahtune.load.rc && grep -qF '/system/bin/setenforce 0' /system/etc/init/voyahtune.load.rc && grep -qF 'service voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'MD-priority-before-app-cache-v1' /system/etc/init/voyahtune.load.rc && grep -qF 'ACC-priority-post-fs-data-v1' /system/etc/init/voyahtune.load.rc && grep -qFx '    start voyahtune_load' /system/etc/init/voyahtune.load.rc && grep -qF 'enable voyahtune_load' /system/etc/init/voyahtune.load.rc; then echo READY; else echo BROKEN; fi" 2>/dev/null) || {
         if boot_hook_rollback; then
             echo "!!! ADB не смог проверить boot-hook; предыдущая версия восстановлена."
@@ -568,6 +583,7 @@ install_boot_hooks() {
         fi
     fi
     # Уже установленный вариант PR мог оставить отдельный action; composite делает его избыточным.
+# @installer-command BOOT_REMOVE_OLD
     if ! adb shell "rm -f /system/etc/init/voyahtune.setenforce.rc && test ! -e /system/etc/init/voyahtune.setenforce.rc && sync"; then
         echo "  ПРЕДУПРЕЖДЕНИЕ: obsolete voyahtune.setenforce.rc не удалён; повторный setenforce идемпотентен."
     fi
@@ -582,7 +598,6 @@ backup_pull /data/local/bin/launcherdock.js        launcherdock.js || exit 1
 backup_pull /data/local/bin/multidisplay.js        multidisplay.js || exit 1
 backup_pull /data/local/bin/vd_bypass.js           vd_bypass.js || exit 1
 backup_pull /data/local/bin/frida-inject           frida-inject || exit 1
-backup_pull /system/priv-app/Native/Native.apk     Native.apk || exit 1
 backup_pull /system/etc/permissions/privapp-permissions-ru.big.town.anative.xml privapp-permissions-ru.big.town.anative.xml || exit 1
 
 # Последний возможный verity-reboot уже позади, все read-only preflight/backup завершены. Армим
@@ -592,6 +607,8 @@ HOOK_UPDATE_BARRIER_ARMED=1
 if ! stop_hook_runtime_for_update; then
     echo "  ПРЕДУПРЕЖДЕНИЕ: init не подтвердил остановку hook-loader; продолжаем атомарную публикацию и обязательный reboot."
 fi
+
+adb shell 'pkill -x loaderFrida 2>/dev/null || true; pi_stop_wait=0; while pidof loaderFrida >/dev/null 2>&1; do [ "$pi_stop_wait" -lt 5 ] || exit 1; sleep 1; pi_stop_wait=$((pi_stop_wait + 1)); done' || exit 1
 
 # Одноразовая миграция: сначала заставляем старый eternalized agent уйти в pass-through,
 # затем выгружаем его host-процесс и удаляем скрипт/маркеры/устаревшие Settings.Global.
@@ -613,6 +630,7 @@ for APOLLO_SAFE_KEY in \
     fi
 done
 adb shell am force-stop com.qinggan.app.vehiclesetting 2>/dev/null
+# @installer-command APOLLO_FILES
 adb shell "rm -f /data/local/bin/apollo_tech.js /data/local/bin/voyahtune_drive_reset.js /data/local/bin/voyahtune_acc_restore.js /data/local/bin/apollo_tech.js.new /data/local/bin/voyahtune_drive_reset.js.new /data/local/bin/voyahtune_acc_restore.js.new /data/local/tmp/voyahtune_apollo.pid /data/local/tmp/voyahtune_drive_reset.pid /data/local/tmp/voyahtune_acc_restore.pid /data/local/tmp/voyahtune_apollo.attempt /data/local/tmp/voyahtune_drive_reset.attempt /data/local/tmp/voyahtune_acc_restore.attempt /data/local/tmp/voyahtune_apollo.txt /data/local/tmp/voyahtune_drive_reset.txt /data/local/tmp/voyahtune_acc_restore.txt /data/local/tmp/voyahtune_apollo.txt.try /data/local/tmp/voyahtune_drive_reset.txt.try /data/local/tmp/voyahtune_acc_restore.txt.try /data/local/tmp/voyah_apollo.pid /data/local/tmp/voyah_apollo.down /data/local/tmp/voyah_apollo.disabled /data/local/tmp/voyah_apollo.txt /data/local/tmp/voyah_apollo.txt.1 /data/local/tmp/voyah_apollo.txt.try" 2>/dev/null
 for APOLLO_OLD_KEY in open_voyah_apollo_legacy_hook_enabled open_voyah_apollo_master \
         open_voyah_apollo_asc open_voyah_apollo_sdb open_voyah_apollo_profile_supported \
@@ -635,6 +653,7 @@ adb shell rm -f /data/local/tmp/voyahtune-apollo-safe.sh >/dev/null || exit 1
 echo "=== Frida-инфраструктура (руль + VirtualDisplay + boot-scoped Apollo) ==="
 # Frida agents use the target process UID: readable files also need traversable parents.
 # Five octal digits explicitly clear inherited setgid/sticky bits on directories.
+# @installer-command PREPARE_DATA_DIRECTORIES
 if ! adb shell '
 mkdir -p /data/local/bin /data/local/tmp &&
 chown 0:0 /data/local /data/local/bin &&
@@ -668,6 +687,7 @@ install_required_data_file frida-inject-16.2.1-android-arm64 /data/local/bin/fri
 # app_client.js заменяет прежний fullscreen_client.js. Сначала новый файл опубликован атомарно,
 # затем выгружаем возможные legacy-agent процессы и удаляем старый файл/оба поколения маркеров.
 echo "=== Миграция client-agent fullscreen_client.js -> app_client.js ==="
+# @installer-command APP_CLIENT_MIGRATION
 if ! adb shell '
     fullscreen_csv=$(settings get global voyahtune_fullscreen_apps 2>/dev/null)
     old_ifs=$IFS
@@ -821,6 +841,7 @@ case "${YDNS_REQUEST:-keep}" in
         ;;
 esac
 
+adb shell "rm -f /system/etc/init/init.voyah_tune.rc" || exit 1
 adb shell "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode" || exit 1
 if ! adb reboot; then
     echo "!!! ADB не смог перезагрузить ГУ; пробуем запустить установленный hook-loader без reboot."
@@ -838,4 +859,6 @@ if ! ensure_native_user_ready; then
     echo "!!! Установка файлов завершена, но Native lifecycle не восстановлен."
     exit 1
 fi
+adb shell "rm -f /system/etc/init/init.voyah_tune.rc /data/local/bin/loaderFrida /data/local/bin/injects.json /data/local/bin/clusternavi.js /data/local/bin/phone-num.js /data/local/tmp/voyahtune-pi-loader-status.json /data/local/tmp/loaderFrida.log /data/local/tmp/com.qinggan.app.qgime.pid /data/local/tmp/com.qinggan.app.qgime.log /data/local/tmp/com.qinggan.app.launcher.pid /data/local/tmp/com.qinggan.app.launcher.log /data/local/tmp/com.qinggan.systemservice.pid /data/local/tmp/com.qinggan.systemservice.log /data/local/tmp/system_server.pid /data/local/tmp/system_server.log /data/local/tmp/com.qinggan.keymanager.service.pid /data/local/tmp/com.qinggan.keymanager.service.log /data/local/tmp/com.qinggan.app.vehiclesetting.pid /data/local/tmp/com.qinggan.app.vehiclesetting.log /data/local/tmp/com.qinggan.cluster.pid /data/local/tmp/com.qinggan.cluster.log /data/local/tmp/com.qinggan.bluetoothphone.pid /data/local/tmp/com.qinggan.bluetoothphone.log && rm -rf /data/local/tmp/voyahtune-pi" || exit 1
+
 echo "Установка завершена и проверена."

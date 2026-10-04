@@ -11,7 +11,7 @@ on post-fs-data
     # from its first appearance. start is non-blocking; do not hold Android init for Frida.
     start voyahtune_load
 
-# load.bin — watchdog-цикл сам по себе, поэтому НЕ oneshot: init перезапустит сервис, если он упадёт.
+# PI loaderFrida — watchdog-цикл сам по себе, поэтому НЕ oneshot: init перезапустит сервис, если он упадёт.
 # disabled + enable в post-fs-data гарантируют, что сервис не стартует до смонтированного /data и
 # synchronous setenforce выше. Явный start не ждёт class late_start; enable сохраняет участие
 # в последующих class_reset/class_start после suspend/resume.

@@ -3,7 +3,7 @@ use crate::{config::invalid, device};
 use release_core::payload::{self, Payload};
 use std::{fs, io, path::Path};
 
-const HELPER: &str = include_str!("../../../Packaging/installer/common/dns-overlay-device.sh");
+const HELPER: &str = include_str!("../../../Packaging/od/installer/common/dns-overlay-device.sh");
 const DNS_SHA: &str = "c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d";
 const INCOMING: &str = "/data/local/tmp/open_voyah_yandex_dns.apk";
 

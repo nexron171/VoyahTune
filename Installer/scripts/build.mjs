@@ -12,12 +12,15 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const args=process.argv.slice(2);
 const flag=name=>args.includes(name);
 const option=name=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};
+if(flag('--pi')||flag('--od'))throw Error('The GUI supports both infrastructures; use --pi/--od when building the payload.');
+const catalogUrl=option('--catalog-url')||'';
+if(catalogUrl){const u=new URL(catalogUrl);if(u.protocol!=='https:'||u.username||u.password||u.hash)throw Error('Catalog must be an HTTPS URL without credentials or fragment');}
 if(option('--version'))throw Error('Installer version is defined in Installer/Cargo.toml.');
 const payloadPath=option('--payload')?resolve(option('--payload')):undefined;
 const payloadManifest=payloadPath?JSON.parse(await readFile(join(payloadPath,'manifest.json'),'utf8')):undefined;
 const toolingVersion=(await readFile(join(root,'Installer/Cargo.toml'),'utf8')).match(/version = "([^"]+)"/)[1];
 const packageVersion=toolingVersion;
-const env={...process.env};
+const env={...process.env,VOYAH_INFRASTRUCTURE:'od',VOYAH_CATALOG_URL:catalogUrl};
 const cachedCargo=join(root,'Releases/cache/cargo');
 if(!env.CARGO_HOME&&existsSync(cachedCargo)){
   env.CARGO_HOME=cachedCargo;

@@ -2,14 +2,14 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-LOADER="$ROOT/Packaging/system/load.bin"
+LOADER="$ROOT/Packaging/od/system/load.bin"
 PROVIDER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
 CONTRACT="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/HookStatusContract.java"
 APP_MANIFEST="$ROOT/RestoreMode/app/src/main/AndroidManifest.xml"
 ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
 LAYOUT="$ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
-FULL_INSTALL="$ROOT/Packaging/installer/device/install.sh"
-FULL_INSTALL_BAT="$ROOT/Packaging/installer/device/install.bat"
+FULL_INSTALL="$ROOT/Packaging/od/installer/device/install.sh"
+FULL_INSTALL_BAT="$ROOT/Packaging/od/installer/device/install.bat"
 
 fail() { echo "hook status/install test failed: $*" >&2; exit 1; }
 require() { grep -Fq -- "$2" "$1" || fail "$1: missing $2"; }
@@ -71,7 +71,10 @@ require "$LOADER" 'mv -f "$WS_TMP" "$WORKER_PREFIX.$WORKER_LANE.state"'
 require "$FULL_INSTALL" 'setprop ctl.stop voyahtune_load'
 require "$FULL_INSTALL" 'getprop init.svc.voyahtune_load'
 forbid "$FULL_INSTALL" 'pgrep -f'
-forbid "$FULL_INSTALL" 'pkill -'
+# A legacy PI Go executable has an exact process name and is stopped with -x.
+# Never restore the old shell-loader substring kill, which can match its caller.
+forbid "$FULL_INSTALL" 'pkill -f'
+require "$FULL_INSTALL" 'pkill -x loaderFrida'
 forbid "$FULL_INSTALL" 'signal_hook_runtime'
 
 # Update safety: the process freeze is after the only possible verity reboot, before the first
@@ -108,7 +111,8 @@ full_bat_mutation=$(line_first "$FULL_INSTALL_BAT" 'call :put_apollo_safe_key op
 require "$FULL_INSTALL_BAT" 'setprop ctl.stop voyahtune_load'
 require "$FULL_INSTALL_BAT" 'getprop init.svc.voyahtune_load'
 forbid "$FULL_INSTALL_BAT" 'pgrep -f'
-forbid "$FULL_INSTALL_BAT" 'pkill -'
+forbid "$FULL_INSTALL_BAT" 'pkill -f'
+require "$FULL_INSTALL_BAT" 'pkill -x loaderFrida'
 forbid "$FULL_INSTALL_BAT" 'signal_hook_runtime'
 require "$FULL_INSTALL_BAT" 'setprop ctl.start voyahtune_load'
 require "$FULL_INSTALL_BAT" 'Waiting for the device to boot to verify installation integrity...'

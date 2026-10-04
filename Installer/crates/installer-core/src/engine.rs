@@ -1,4 +1,4 @@
-//! Rust port of Packaging/installer/device/install.sh and device/remove.sh.
+//! Common Rust engine; classic commands are derived from Packaging/od/installer/device.
 //! Each checked result below corresponds to a checked branch in those scripts.
 //! GUI steps, diagnostics and journals do not add vehicle preconditions.
 //! The approved VoyahHlCTRL remediation is an opt-in extension to the permission step.
@@ -25,7 +25,8 @@ use std::{
     time::Duration,
 };
 // pkill uses status 1 for an already absent process; other failures remain warnings.
-const STOP_LOADER: &str = "pkill -f /data/local/bin/load.bin; stop_status=$?; if [ $stop_status -gt 1 ]; then exit $stop_status; fi\n";
+const STOP_LOADER: &str =
+    include_str!("../../../../Packaging/od/installer/common/stop-loader-device.sh");
 const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
 const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
 // Postflight commands may repair package registration. Keep each command exclusive,
@@ -225,7 +226,11 @@ impl Engine {
     }
     fn postflight_shell(&self, script: &str) -> Result<String> {
         self.adb.shell(
-            &postflight_script(script, &format!("desktop:{}:postflight", self.operation.id), 180),
+            &postflight_script(
+                script,
+                &format!("desktop:{}:postflight", self.operation.id),
+                180,
+            ),
             Duration::from_secs(210),
         )
     }
@@ -249,7 +254,10 @@ impl Engine {
             self.warning(&error);
             let mut ready = false;
             for _ in 0..15 {
-                if self.shell("getprop sys.boot_completed\n").unwrap_or_default() == "1"
+                if self
+                    .shell("getprop sys.boot_completed\n")
+                    .unwrap_or_default()
+                    == "1"
                     && self.shell("pidof system_server\n").unwrap_or_default() == after
                 {
                     ready = true;
@@ -258,9 +266,16 @@ impl Engine {
                 thread::sleep(Duration::from_secs(3));
             }
             if !ready {
-                return Err(self.fail("Android не восстановился после рестарта system_server", error));
+                return Err(self.fail(
+                    "Android не восстановился после рестарта system_server",
+                    error,
+                ));
             }
-            if self.shell("pidof ru.big.town.anative\n").unwrap_or_default().is_empty() {
+            if self
+                .shell("pidof ru.big.town.anative\n")
+                .unwrap_or_default()
+                .is_empty()
+            {
                 self.adb.shell(&command, Duration::from_secs(25))?;
             }
         }
@@ -349,9 +364,16 @@ impl Engine {
                 e.freeze()
             })?;
 
-            self.step("apollo-migration", "Отключение старой активации Apollo", |e| {
-                e.shell(include_str!("../../../../Packaging/installer/common/apollo-safe-device.sh")).map(|_| ())
-            })?;
+            self.step(
+                "apollo-migration",
+                "Отключение старой активации Apollo",
+                |e| {
+                    e.shell(include_str!(
+                        "../../../../Packaging/od/installer/common/apollo-safe-device.sh"
+                    ))
+                    .map(|_| ())
+                },
+            )?;
 
             self.step("files", "Установка файлов релиза", |e| e.recipe_files())?;
 
@@ -391,6 +413,7 @@ impl Engine {
                 "Проверка Native и готовности OTA",
                 |e| {
                     e.wait_boot(true)?;
+                    e.cleanup_retired_loader()?;
                     e.native_ready()?;
                     e.updater_ready()?;
                     let service = e.shell("getprop init.svc.voyahtune_updater\n")?;
@@ -400,8 +423,15 @@ impl Engine {
                     let version: serde_json::Value = serde_json::from_str(
                         &e.shell("/data/local/bin/voyahtune-updater --version\n")?,
                     )?;
-                    if version["ipcSchema"] != 1 {
-                        return Err(e.fail("Несовместимый IPC updater", version));
+                    if version["ipcSchema"] != 1
+                        || version["infrastructure"] != e.payload.manifest.infrastructure.as_str()
+                    {
+                        return Err(e.fail("Несовместимый IPC или инфраструктура updater", version));
+                    }
+                    if e.payload.manifest.infrastructure
+                        == crate::infrastructure::Infrastructure::Pi
+                    {
+                        e.pi_loader_ready()?;
                     }
                     Ok(())
                 },
@@ -753,16 +783,17 @@ fi
 
         made?;
 
-        let mut paths = vec![
-            (NATIVE_PATH.to_owned(), "Native.apk".to_owned()),
-            (
-                payload::WHITELIST.to_owned(),
-                "privapp-permissions-ru.big.town.anative.xml".to_owned(),
-            ),
-        ];
+        let mut paths = vec![(
+            payload::WHITELIST.to_owned(),
+            "privapp-permissions-ru.big.town.anative.xml".to_owned(),
+        )];
 
         let mut runtime_backup = vec![];
         for name in [
+            "loaderFrida",
+            "injects.json",
+            "clusternavi.js",
+            "phone-num.js",
             "load.bin",
             "steeringwheelkeys.js",
             "launcherdock.js",
@@ -913,10 +944,22 @@ fi
             self.shell(&format!("chown 0:0 {p} && chmod {:o} {p}\n", attr.mode))?;
         }
 
-        self.shell(c::APP_CLIENT_MIGRATION)?;
+        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
+            self.shell(c::APP_CLIENT_MIGRATION)?;
+        }
 
         // Retired exact paths are cumulative. Never delete an active target.
         for path in &recipe.remove_files {
+            // init retains the previous service command until reboot. Keep its Go loader
+            // and config available if installation fails and restart_loader runs.
+            if [
+                "/data/local/bin/loaderFrida",
+                "/data/local/bin/injects.json",
+            ]
+            .contains(&path.as_str())
+            {
+                continue;
+            }
             if !recipe.files.iter().any(|f| f.destination == *path) {
                 self.shell(&format!("rm -f {}\n", quote(path)))?;
             }
@@ -961,7 +1004,30 @@ fi
             self.ignore(&format!("settings put global {key} 1\n"));
         }
 
-        self.install_restore(&self.payload.file("restore_mode.apk")?)
+        self.install_restore(&self.payload.file("restore_mode.apk")?)?;
+        for package in self
+            .payload
+            .manifest
+            .recipe
+            .packages
+            .iter()
+            .filter(|p| p.package == payload::RUNYN)
+        {
+            let path = self.payload.file(&package.artifact)?;
+            payload::verified_signers(&path)?;
+            if release_core::apk_identity::read(&path)?.0 != payload::RUNYN {
+                return Err(self.fail("Неверный package ID RunYN", &package.artifact));
+            }
+            self.raw(&[
+                "install",
+                "-r",
+                "-g",
+                path.to_str()
+                    .ok_or_else(|| self.fail("Некорректный путь RunYN", path.display()))?,
+            ])?
+            .checked("RunYN не установлен; существующие данные сохранены")?;
+        }
+        Ok(())
     }
     fn verify_active_apk(&self, package: &str, artifact: &str, repair: Option<&str>) -> Result<()> {
         let expected = &self.payload.artifact(artifact)?.sha256;
@@ -1001,20 +1067,77 @@ fi
         )?;
         Ok(())
     }
+    fn cleanup_retired_loader(&self) -> Result<()> {
+        // The new init service is now loaded. Opposite-profile executable files no
+        // longer participate in recovery and must not remain installed.
+        let names: &[&str] = match self.payload.manifest.infrastructure {
+            crate::infrastructure::Infrastructure::Od => &["loaderFrida", "injects.json"],
+            crate::infrastructure::Infrastructure::Pi => &["load.bin"],
+        };
+        for name in names {
+            self.shell(&format!("rm -f /data/local/bin/{name}\n"))?;
+        }
+        Ok(())
+    }
+    fn pi_loader_ready(&self) -> Result<()> {
+        let mut last = Error::new("PI_LOADER_NOT_READY", "PI watchdog ещё не запустился");
+        for _ in 0..20 {
+            let result = (|| -> Result<()> {
+                let data = self.shell("cat /data/local/tmp/voyahtune-pi-loader-status.json\n")?;
+                let status: release_core::pi_health::Status = serde_json::from_str(&data)?;
+                let stat = self.shell(&format!("cat /proc/{}/stat\n", status.loader_pid))?;
+                let start = stat
+                    .rsplit_once(") ")
+                    .and_then(|(_, rest)| rest.split_whitespace().nth(19))
+                    .ok_or_else(|| {
+                        Error::new("PI_LOADER_IDENTITY", "Нет времени старта PI loader")
+                    })?;
+                let uptime = self
+                    .shell("cat /proc/uptime\n")?
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .ok_or_else(|| Error::new("PI_LOADER_IDENTITY", "Нет uptime"))?
+                    as u64;
+                status.validate(
+                    &self.shell("cat /proc/sys/kernel/random/boot_id\n")?,
+                    uptime,
+                    start,
+                    self.shell(&format!("cat /proc/{}/cmdline\n", status.loader_pid))?
+                        .as_bytes(),
+                    &self.shell("getprop init.svc.voyahtune_load\n")?,
+                )
+            })();
+            match result {
+                Ok(()) => return Ok(()),
+                Err(error) => last = error,
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+        Err(last)
+    }
     fn native_ready(&self) -> Result<()> {
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
             self.postflight_shell(
                 "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true\n",
             )?;
-            self.postflight_shell(
-                "cmd package install-existing --user 0 ru.big.town.anative\n",
-            )?;
+            self.postflight_shell("cmd package install-existing --user 0 ru.big.town.anative\n")?;
         }
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
             return Err(self.fail("PackageManager не создал CE/DE Native", NATIVE));
         }
         self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
         self.verify_active_apk(RESTORE, "restore_mode.apk", None)?;
+        if self
+            .payload
+            .manifest
+            .recipe
+            .packages
+            .iter()
+            .any(|p| p.package == payload::RUNYN)
+        {
+            self.verify_active_apk(payload::RUNYN, "runyn.apk", None)?;
+        }
         self.native_broadcast()?;
         for _ in 0..20 {
             if !self
@@ -1146,6 +1269,48 @@ fi
         }
         result.map(|_| ())
     }
+    fn pi_boot_check(&self, staged: bool) -> Result<String> {
+        let mut script = String::new();
+        for (artifact, staged_path, installed_path) in [
+            (
+                "voyahtune.load.sh",
+                "/system/etc/.voyahtune.load.sh.new",
+                "/system/etc/init.voyahtune.load.sh",
+            ),
+            (
+                "voyahtune.load.rc",
+                "/system/etc/.voyahtune.load.rc.new",
+                "/system/etc/init/voyahtune.load.rc",
+            ),
+        ] {
+            let path = quote(if staged { staged_path } else { installed_path });
+            let hash = &self.payload.artifact(artifact)?.sha256;
+            script.push_str(&format!(
+                "digest=$(sha256sum {path}) || exit 1\n[ \"${{digest%% *}}\" = {} ] || exit 1\n",
+                quote(hash)
+            ));
+        }
+        Ok(script)
+    }
+    fn boot_prepare(&self) -> Result<()> {
+        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
+            self.shell(c::BOOT_PREPARE)?;
+        } else {
+            let mut command = self.pi_boot_check(true)?;
+            command.push_str("chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync\n");
+            self.shell(&command)?;
+        }
+        Ok(())
+    }
+    fn boot_ready(&self) -> Result<String> {
+        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
+            return self.shell(c::BOOT_READY);
+        }
+        self.shell(
+            &(self.pi_boot_check(false)?
+                + "test -x /system/etc/init.voyahtune.load.sh && echo READY\n"),
+        )
+    }
     fn boot_transaction(&self) -> Result<()> {
         for name in ["voyahtune.load.rc", "voyahtune.load.sh"] {
             self.payload.file(name)?;
@@ -1161,7 +1326,7 @@ fi
                 &self.payload.file("voyahtune.load.rc")?,
                 "/system/etc/.voyahtune.load.rc.new",
             )?;
-            self.shell(c::BOOT_PREPARE)?;
+            self.boot_prepare()?;
             Ok(())
         })();
         if prepare.is_err() {
@@ -1178,7 +1343,7 @@ fi
         }
         let publish = (|| {
             self.shell(c::BOOT_PUBLISH)?;
-            if self.shell(c::BOOT_READY)? != "READY" {
+            if self.boot_ready()? != "READY" {
                 return Err(self.fail("Проверка boot-hook не пройдена", "BOOT_HOOK_STATE != READY"));
             }
             Ok(())
@@ -1214,6 +1379,7 @@ fi
     }
     fn stop_runtime_for_update(&self) -> Result<()> {
         self.stop_service()?;
+        self.shell(STOP_LOADER)?;
         self.shell("rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock && rm -rf /data/local/tmp/voyah_load.lock\n")?;
         Ok(())
     }
@@ -1264,6 +1430,7 @@ fi
         // The classic remover restores host backups when present and otherwise
         // removes these generic files. No ownership/hash database is consulted.
         self.restore_host_file("load.bin");
+        self.restore_host_file("loaderFrida");
         for command in [
             c::REMOVE_EARLY_VD,
             c::REMOVE_EARLY_HOOKS,
@@ -1518,6 +1685,50 @@ pm() {
                 .unwrap();
             assert_eq!(output.status.code(), Some(if code <= 1 { 0 } else { code }));
         }
+    }
+
+    #[test]
+    fn legacy_loader_stop_uses_exact_argv_and_does_not_match_command_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let proc = dir.path().join("proc");
+        let locks = dir.path().join("locks");
+        fs::create_dir(&locks).unwrap();
+        for (pid, cmdline) in [
+            (42, b"/system/bin/sh\0/data/local/bin/load.bin\0".as_slice()),
+            (
+                43,
+                b"/system/bin/sh\0-c\0pkill -f /data/local/bin/load.bin\0".as_slice(),
+            ),
+            (44, b"/other/process\0/data/local/bin/load.bin\0".as_slice()),
+        ] {
+            let path = proc.join(pid.to_string());
+            fs::create_dir_all(&path).unwrap();
+            fs::write(
+                path.join("stat"),
+                format!("{pid} (sh) S {}300 0\n", "0 ".repeat(18)),
+            )
+            .unwrap();
+            fs::write(path.join("cmdline"), cmdline).unwrap();
+        }
+        for (name, pid) in [
+            ("voyahtune_load.v2.lock", 42),
+            ("voyah_load.v2.lock", 43),
+            ("voyah_load.lock", 44),
+        ] {
+            std::os::unix::fs::symlink(pid.to_string(), locks.join(name)).unwrap();
+        }
+        let script = STOP_LOADER
+            .replace("/proc/", &format!("{}/", proc.display()))
+            .replace("/data/local/tmp/", &format!("{}/", locks.display()));
+        let output = Command::new("sh").args(["-c", &format!(
+            "pkill() {{ [ \"$*\" = '-x loaderFrida' ] || exit 99; return 1; }}\nkill() {{ printf 'stopped:%s\\n' \"$1\"; rm -f {}/$1/cmdline; }}\n{script}", proc.display()
+        )]).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "stopped:42\n");
     }
 
     #[test]

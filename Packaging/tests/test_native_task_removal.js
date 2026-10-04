@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '../..');
-const source = fs.readFileSync(path.join(root, 'Packaging/inject/vd_bypass.js'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'Packaging/od/inject/vd_bypass.js'), 'utf8');
 const block = source.split('// BEGIN_NATIVE_TASK_REMOVAL')[1].split('// END_NATIVE_TASK_REMOVAL')[0];
 
 function install(ourUid, callerUid, shouldThrow = false) {

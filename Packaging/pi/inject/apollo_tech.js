@@ -67,10 +67,6 @@ Java.perform(function () {
         install(AdasStatusManager.getLearnStatus.overload(), function () { return 1; });
 
         JavaSystem.setProperty(SENTINEL_KEY, "installed");
-        // При выгрузке скрипта хуки откатываются — снимаем метку для следующей инъекции.
-        rpc.exports.dispose = function () {
-            Java.performNow(function () { JavaSystem.clearProperty(SENTINEL_KEY); });
-        };
         ready("profile=persisted-target ui=stock_visibility subscription=active noa_learned=1 can=none");
     } catch (e) {
         for (var i = installedMethods.length - 1; i >= 0; i--) {

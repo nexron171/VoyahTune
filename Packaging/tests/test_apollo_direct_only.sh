@@ -2,8 +2,8 @@
 set -eu
 
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-HOOK="$REPO_ROOT/Packaging/inject/apollo_tech.js"
-LOAD_BIN="$REPO_ROOT/Packaging/system/load.bin"
+HOOK="$REPO_ROOT/Packaging/od/inject/apollo_tech.js"
+LOAD_BIN="$REPO_ROOT/Packaging/od/system/load.bin"
 README="$REPO_ROOT/Packaging/README.md"
 ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
 APOLLO_SETTINGS="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/ApolloSettings.java"
@@ -133,8 +133,9 @@ forbid_fixed "$RESTORE_POLICY" 'Parking'
 # Restoration has no debounce; explicit Apply remains immediate.
 forbid_fixed "$APPLY_ENGINE" 'DEBOUNCE_MS'
 require_fixed "$APPLY_ENGINE" 'public static void applyNow('
-require_fixed "$README" 'Скрытые на 97X строки отдельных функций не раскрываются'
+require_fixed "$README" 'включить, так и выключить функцию, не раскрывая штатные'
+require_fixed "$README" '97X-строки и не вводя отдельные CAN subscriptions'
 require_fixed "$README" 'Автоматическое'
-require_fixed "$README" 'восстановление выполняется один раз в ACC-цикле'
+require_fixed "$README" 'восстановление OD выполняется один раз в ACC-цикле'
 
 echo "PASS: Apollo UI and functions use persisted event-driven restore targets"

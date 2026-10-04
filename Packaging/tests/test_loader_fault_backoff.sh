@@ -3,11 +3,11 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
-LOAD_BIN="$REPO_ROOT/Packaging/system/load.bin"
-MULTIDISPLAY="$REPO_ROOT/Packaging/inject/multidisplay.js"
-LOAD_RC="$REPO_ROOT/Packaging/system/voyahtune.load.rc"
-FULL_INSTALL="$REPO_ROOT/Packaging/installer/device/install.sh"
-FULL_INSTALL_BAT="$REPO_ROOT/Packaging/installer/device/install.bat"
+LOAD_BIN="$REPO_ROOT/Packaging/od/system/load.bin"
+MULTIDISPLAY="$REPO_ROOT/Packaging/od/inject/multidisplay.js"
+LOAD_RC="$REPO_ROOT/Packaging/od/system/voyahtune.load.rc"
+FULL_INSTALL="$REPO_ROOT/Packaging/od/installer/device/install.sh"
+FULL_INSTALL_BAT="$REPO_ROOT/Packaging/od/installer/device/install.bat"
 
 fail() {
     echo "FAIL: $*" >&2

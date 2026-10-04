@@ -14,7 +14,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = (ROOT / "Packaging/system/load.bin").read_text()
+SOURCE = (ROOT / "Packaging/od/system/load.bin").read_text()
 
 
 class ParallelLoaderTest(unittest.TestCase):

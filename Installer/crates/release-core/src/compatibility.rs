@@ -7,6 +7,7 @@ pub const CAPABILITIES: &[&str] = &[
     "single-package-v1",
     "files-v1",
     "ota-bootstrap-v1",
+    "infrastructure-v1",
 ];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -18,11 +19,21 @@ impl Default for Requirements {
     fn default() -> Self {
         Self {
             min_installer_version: "1.2.0".into(),
-            required_capabilities: CAPABILITIES.iter().map(|s| s.to_string()).collect(),
+            required_capabilities: CAPABILITIES
+                .iter()
+                .filter(|s| **s != "infrastructure-v1")
+                .map(|s| s.to_string())
+                .collect(),
         }
     }
 }
 impl Requirements {
+    pub fn infrastructure() -> Self {
+        Self {
+            min_installer_version: "1.5.0".into(),
+            required_capabilities: CAPABILITIES.iter().map(|s| s.to_string()).collect(),
+        }
+    }
     pub fn validate(&self) -> Result<()> {
         let required = semver::Version::parse(&self.min_installer_version).map_err(|e| {
             Error::new(

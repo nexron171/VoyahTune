@@ -2,12 +2,12 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-AGENT="$ROOT/Packaging/inject/app_client.js"
-LOADER="$ROOT/Packaging/system/load.bin"
-FULL_INSTALL="$ROOT/Packaging/installer/device/install.sh"
-FULL_INSTALL_BAT="$ROOT/Packaging/installer/device/install.bat"
-FULL_REMOVE="$ROOT/Packaging/installer/device/remove.sh"
-FULL_REMOVE_BAT="$ROOT/Packaging/installer/device/remove.bat"
+AGENT="$ROOT/Packaging/od/inject/app_client.js"
+LOADER="$ROOT/Packaging/od/system/load.bin"
+FULL_INSTALL="$ROOT/Packaging/od/installer/device/install.sh"
+FULL_INSTALL_BAT="$ROOT/Packaging/od/installer/device/install.bat"
+FULL_REMOVE="$ROOT/Packaging/od/installer/device/remove.sh"
+FULL_REMOVE_BAT="$ROOT/Packaging/od/installer/device/remove.bat"
 RELEASE="$ROOT/make_release.sh"
 
 fail() { echo "app client contract test failed: $*" >&2; exit 1; }

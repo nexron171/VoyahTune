@@ -684,7 +684,7 @@ mod tests {
     fn archive_identity_and_manifest_requirements_are_checked() {
         let requirements = Requirements::default();
         let mut payload=Payload {root:PathBuf::new(),manifest:serde_json::from_value(serde_json::json!({
-            "schema":4,"product":"VoyahTune","releaseVersion":"3.13.0","buildRevision":"fixture",
+            "schema":4,"infrastructure":crate::infrastructure::Infrastructure::compiled(),"product":"VoyahTune","releaseVersion":"3.13.0","buildRevision":"fixture",
             "requirements":requirements,"artifacts":[]
         })).unwrap()};
         let release = Release {

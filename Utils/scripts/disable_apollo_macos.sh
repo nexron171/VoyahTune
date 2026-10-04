@@ -7,7 +7,7 @@ adb_bin=${ADB_BIN:-adb}
 restore_prefs=/data/user/0/ru.big.town.restoremode/shared_prefs/DrivePreferences.xml
 native_prefs=/data/user/0/ru.big.town.anative/shared_prefs/NativePrefs.xml
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-device_script="$script_dir/../../Packaging/installer/common/apollo-safe-device.sh"
+device_script="$script_dir/../../Packaging/od/installer/common/apollo-safe-device.sh"
 [ -s "$device_script" ] || { echo "Не найден $device_script" >&2; exit 1; }
 
 command -v "$adb_bin" >/dev/null || { echo "ADB не найден: $adb_bin" >&2; exit 1; }

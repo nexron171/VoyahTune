@@ -15,8 +15,8 @@
   let downloadBusy = $state(false), downloadProgress = $state<PayloadProgress|null>(null);
   type ReleaseRow = {version:string; release?:Release; cached?:CachedPayload};
   const releaseRows = $derived.by(() => {
-    const stable = catalog?.catalog.releases.filter(r=>r.channel==='stable') || [];
-    const cached = catalog?.cached.filter(c=>!c.version.includes('-')) || [];
+    const stable = catalog?.catalog.releases || [];
+    const cached = catalog?.cached || [];
     const rows:ReleaseRow[] = stable.map(release=>({version:release.version,release,cached:cached.find(c=>c.path.replaceAll('\\','/').endsWith('/'+release.payload.sha256))}));
     for(const entry of cached) if(!rows.some(row=>row.cached?.path===entry.path)) rows.push({version:entry.version,cached:entry});
     return rows.sort((a,b)=>b.version.localeCompare(a.version,undefined,{numeric:true}));

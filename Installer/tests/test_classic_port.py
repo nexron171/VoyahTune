@@ -17,8 +17,9 @@ class ClassicPortTests(unittest.TestCase):
   names={'frida-inject':'frida-inject-16.2.1-android-arm64','whitelist.xml':'privapp-permissions-ru.big.town.anative.xml','dns-helper.sh':'dns-overlay-device.sh','dns.apk':'framework-res__config_ethernet_interfaces_yandexdns.apk'}
   for artifact in manifest['artifacts']:
    shutil.copyfile(PAYLOAD/artifact['path'],release/names.get(artifact['name'],artifact['name']))
-  shutil.copyfile(ROOT/f'Packaging/installer/device/{verb}.sh',release/f'{verb}.sh')
-  shutil.copyfile(ROOT/'Packaging/installer/common/dns-overlay.sh',release/'dns-overlay.sh')
+  shutil.copyfile(ROOT/f'Packaging/od/installer/device/{verb}.sh',release/f'{verb}.sh')
+  shutil.copyfile(ROOT/'Packaging/od/installer/common/dns-overlay.sh',release/'dns-overlay.sh')
+  shutil.copyfile(ROOT/'Packaging/od/installer/common/stop-loader-device.sh',release/'stop-loader-device.sh')
   env={**f.env,'PATH':str(f.bundle/'adb')+os.pathsep+os.environ['PATH']}
   result=subprocess.run(['/bin/sh',f'{verb}.sh'],cwd=release,env=env,text=True,capture_output=True,timeout=180)
   return result
@@ -51,9 +52,9 @@ class ClassicPortTests(unittest.TestCase):
  def test_boot_and_windows_use_same_directory_preparation(self):
   rust=(ROOT/'Installer/crates/installer-core/src/classic_commands.rs').read_text()
   command=re.search(r'pub const PREPARE_DATA_DIRECTORIES: &str = r###"(.*?)"###;',rust,re.S)[1]
-  boot=(ROOT/'Packaging/system/voyahtune.load.sh').read_text()
+  boot=(ROOT/'Packaging/od/system/voyahtune.load.sh').read_text()
   function=re.search(r'prepare_data_directories\(\) \{(.*?)\n}',boot,re.S)[1]
-  windows=(ROOT/'Packaging/installer/device/install.bat').read_text()
+  windows=(ROOT/'Packaging/od/installer/device/install.bat').read_text()
   bat=next(line[len('adb.exe shell "'):-1].replace('%%','%') for line in windows.splitlines() if line.startswith('adb.exe shell "mkdir -p /data/local/bin /data/local/tmp'))
   normalize=lambda s:' '.join(s.split())
   self.assertEqual(normalize(command),normalize(function))
@@ -104,7 +105,10 @@ class ClassicPortTests(unittest.TestCase):
  def test_remove_matches_classic_and_does_not_wait_after_reboot(self):
   _,port,_,_=self.compare('remove',seed=lambda f:f.seed_apps(old_key=True,broken=True))
   calls=port.calls();last_reboot=max(i for i,c in enumerate(calls) if c['args']==['reboot']);self.assertEqual(last_reboot,len(calls)-1)
- def test_install_backup_failure_stops_before_runtime_like_classic(self):self.compare('install',{'failPull':True},lambda f:f.seed_apps())
+ def test_install_backup_failure_stops_before_runtime_like_classic(self):
+  def seed(f):
+   f.seed_apps();(f.device/'data/local/bin/load.bin').write_text('foreign loader')
+  self.compare('install',{'failPull':True},seed)
  def test_install_ignores_freeform_setting_failure_like_classic(self):self.compare('install',{'failShell':'settings put global enable_freeform_support'})
  def test_atomic_publish_failure_stops_and_restores_loader_like_classic(self):self.compare('install',{'failShell':'&& mv -f'})
  def test_obsolete_engine_records_do_not_block(self):

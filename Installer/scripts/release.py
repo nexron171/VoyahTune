@@ -91,10 +91,30 @@ def payload_entry(folder,archive):
             'size':archive.stat().st_size,'sha256':sha(archive)}
 
 
+
+def normalize_version(value, infrastructure):
+    version = value.removeprefix('v')
+    if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', version):
+        raise ValueError('Нужна SemVer-версия, например 3.22.0')
+    base, plus, metadata = version.partition('+')
+    profile = next((p for p in ('pi', 'od') if base.endswith('-'+p)), None)
+    if profile and profile != infrastructure:
+        raise ValueError(f'Суффикс версии {profile} не соответствует --{infrastructure}')
+    if not profile:
+        base += '-'+infrastructure
+    return base + (plus+metadata if plus else '')
+
+
 def main():
     import tomllib
     parser = argparse.ArgumentParser(description='Build a single VoyahTune payload; optionally build GUI installers separately.')
     parser.add_argument('version')
+    profiles = parser.add_mutually_exclusive_group(required=True)
+    profiles.add_argument('--pi', dest='infrastructure', action='store_const', const='pi')
+    profiles.add_argument('--od', dest='infrastructure', action='store_const', const='od')
+    parser.add_argument('--catalog-url', help='Override the shared HTTPS release catalog embedded in the updater and optional GUI')
+    parser.add_argument('--windows-arch', choices=['x64', 'x86'], default='x64')
+    parser.add_argument('--offline-bundle', action='store_true', help='Embed the selected payload in the GUI installer')
     parser.add_argument('--payload', action='store_true', help='Build only the shared payload ZIP; no desktop tools or containers')
     parser.add_argument('--installers', action='store_true', help='Build standalone installers; all platforms unless selected below')
     for flag in ['mac', 'windows', 'linux']:
@@ -107,7 +127,16 @@ def main():
         parser.error('--payload cannot be combined with desktop platform flags')
     desktop_build = not args.payload and not args.no_zip
     selected = [name for name, enabled in [('macos', args.mac), ('windows', args.windows), ('linux', args.linux)] if enabled] or ['macos', 'windows', 'linux']
-    version = args.version.removeprefix('v')
+    infrastructure = args.infrastructure
+    try:
+        version = normalize_version(args.version, infrastructure)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.catalog_url:
+        from urllib.parse import urlsplit
+        catalog = urlsplit(args.catalog_url)
+        if catalog.scheme != 'https' or not catalog.hostname or catalog.username or catalog.password or catalog.fragment:
+            parser.error('--catalog-url must be an HTTPS URL without credentials or fragment')
     if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', version):
         parser.error('Нужна SemVer-версия, например 3.3.0')
     if desktop_build and platform.system() != 'Darwin':
@@ -116,9 +145,13 @@ def main():
     build.mkdir(parents=True, exist_ok=True)
     installer_version=tomllib.loads((ROOT/'Installer/Cargo.toml').read_text())['workspace']['package']['version']
     destination = ROOT / 'Releases/dist' / f'VoyahTune-Installer-{installer_version}'
+    if 'windows' in selected and args.windows_arch == 'x86':
+        destination = destination.with_name(destination.name + '-windows-x86')
     payload_output = build / f'installer-payload-{version}'
     revision = args.revision or subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip() + ('-dirty' if subprocess.check_output(['git','status','--porcelain'],cwd=ROOT) else '')
     env = os.environ.copy()
+    env['VOYAH_INFRASTRUCTURE'] = infrastructure
+    env['VOYAH_CATALOG_URL'] = args.catalog_url or ''
     cached = ROOT / 'Releases/cache/cargo'
     if not env.get('CARGO_HOME') and cached.exists():
         env.update(CARGO_HOME=str(cached),RUSTUP_HOME=str(ROOT/'Releases/cache/rustup'))
@@ -126,24 +159,26 @@ def main():
     env['RUSTUP_TOOLCHAIN'] = tomllib.loads((ROOT/'Installer/rust-toolchain.toml').read_text())['toolchain']['channel']
     target = Path(env.get('CARGO_TARGET_DIR', ROOT/'Installer/target')).resolve()
     builder = target/'release'/('installer-build.exe' if os.name=='nt' else 'installer-build')
-    lock = build / f'.release-{version}.lock'
+    # Both profiles share Android and Rust output directories: serialize the entire build.
+    lock = build / '.release.lock'
     lock.mkdir()
     try:
         with tempfile.TemporaryDirectory(prefix='.release-',dir=build) as temporary:
             work = Path(temporary)
-            for script in ['test_android11_package_lifecycle.sh','test_saved_config_startup_wake.sh','test_keyboard_modes.sh','test_hook_status.sh','test_app_client.sh','test_mapkit_dpi_client.sh','test_acc_restore_hook.sh','test_drive_reset_hook.sh','test_apollo_safe_device.sh']:
-                run(['sh',ROOT/'Packaging/tests'/script])
-            run(['bash',ROOT/'Utils/android11-oem-stubs/tests/static-checks.sh'])
+            run(['python3', ROOT/'Packaging/tests/test_infrastructure_profiles.py', '--profile', infrastructure])
             run(['cargo','build','--locked','--release','--manifest-path',ROOT/'Installer/Cargo.toml','-p','installer-build'],env=env,cwd=ROOT)
             payload = work/'payload'
-            run([builder,'build','--root',ROOT,'--version',version,'--revision',revision,'--output',payload,*(['--skip-android'] if args.no_build else [])],env=env)
+            run([builder,'build','--root',ROOT,'--version',version,'--revision',revision,'--infrastructure',infrastructure,'--output',payload,*(['--skip-android'] if args.no_build else [])],env=env)
             packages = work/'packages'
             packages.mkdir()
             if desktop_build:
                 compiled = work/'compiled'
-                run([ROOT/'Installer/scripts/build-all-macos.sh','--output',compiled,*['--'+('mac' if name=='macos' else name) for name in selected]],env=env)
+                run([ROOT/'Installer/scripts/build-all-macos.sh','--output',compiled,
+                     *(['--catalog-url',args.catalog_url] if args.catalog_url else []),
+                     *(['--payload',payload] if args.offline_bundle else []),
+                     *(['--windows-arch',args.windows_arch] if 'windows' in selected else []),*['--'+('mac' if name=='macos' else name) for name in selected]],env=env)
                 record = json.loads((compiled/'build-info.json').read_text())
-                if record['installerVersion'] != installer_version or record.get('embeddedPayload'):
+                if record['installerVersion'] != installer_version or bool(record.get('embeddedPayload')) != args.offline_bundle:
                     raise ValueError('Неверная версия или обязательный встроенный payload установщика')
                 if set(record['platforms']) != set(selected):
                     raise ValueError('Список собранных платформ не совпадает с выбранным')
@@ -151,7 +186,8 @@ def main():
                     tool = compiled/entry['file']
                     if sha(tool) != entry['sha256']:
                         raise ValueError(f'Повреждён установщик {os_name}')
-                    folder = work/f'VoyahTune-Installer-{installer_version}-{os_name}'
+                    platform_name = f'windows-{args.windows_arch}' if os_name == 'windows' else os_name
+                    folder = work/f'VoyahTune-Installer-{installer_version}-{platform_name}'
                     folder.mkdir()
                     if os_name == 'macos':
                         with tarfile.open(tool) as archive: archive.extractall(folder,filter='data')

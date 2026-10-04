@@ -35,10 +35,11 @@ class ReleaseTests(unittest.TestCase):
                 raise subprocess.CalledProcessError(1, args)
             payload = Path(args[args.index('--output')+1]);payload.mkdir()
             version = args[args.index('--version')+1]
-            (payload/'manifest.json').write_text(json.dumps({'schema':4,'requirements':{'minInstallerVersion':'1.0.0','requiredCapabilities':['files-v1']},'releaseVersion':version,'buildRevision':'fixture','generation':self.generation}))
+            (payload/'manifest.json').write_text(json.dumps({'schema':4,'requirements':{'minInstallerVersion':'1.0.0','requiredCapabilities':['files-v1']},'releaseVersion':version,'buildRevision':'fixture','infrastructure':args[args.index('--infrastructure')+1],'generation':self.generation}))
         elif Path(args[0]).name == 'build-all-macos.sh':
             dest = Path(args[args.index('--output')+1]);dest.mkdir()
-            self.assertNotIn('--payload',args)
+            self.assertNotIn('--pi', args)
+            self.assertNotIn('--od', args)
             names = [name for flag,name in [('--mac','macos'),('--windows','windows'),('--linux','linux')] if flag in args]
             self.selected = names
             entries = {}
@@ -51,12 +52,12 @@ class ReleaseTests(unittest.TestCase):
                     with tarfile.open(artifact,'w:gz') as archive:archive.add(app,arcname=app.name)
                 else:artifact.write_text(str(self.generation))
                 entries[name] = {'file':filename,'sha256':release.sha(artifact)}
-            record = dict(installerVersion='1.0.0',embeddedPayload=False,platforms=entries,generation=self.generation)
+            record = dict(installerVersion='1.0.0',embeddedPayload='--payload' in args,platforms=entries,generation=self.generation)
             (dest/'build-info.json').write_text(json.dumps(record))
 
     def run_release(self, *flags):
         self.generation += 1
-        with patch.object(release,'ROOT',self.root), patch.object(release,'run',self.fake_run), patch.object(release.platform,'system',return_value='Darwin'), patch('sys.argv',['release.py','4.5.6','--revision','fixture',*flags]):
+        with patch.object(release,'ROOT',self.root), patch.object(release,'run',self.fake_run), patch.object(release.platform,'system',return_value='Darwin'), patch('sys.argv',['release.py','4.5.6','--revision','fixture',*(['--od'] if '--pi' not in flags and '--od' not in flags else []),*flags]):
             release.main()
 
     def test_platform_selection_and_same_version_overwrite(self):
@@ -65,13 +66,13 @@ class ReleaseTests(unittest.TestCase):
                 self.run_release(*flags)
                 self.assertEqual(self.selected,expected)
                 dest=self.root/'Releases/dist/VoyahTune-Installer-1.0.0'
-                self.assertEqual(sorted(p.name for p in dest.glob('*.zip')),sorted('VoyahTune-Installer-1.0.0-'+name+'.zip' for name in expected))
+                self.assertEqual(sorted(p.name for p in dest.glob('*.zip')),sorted('VoyahTune-Installer-1.0.0-'+('windows-x64' if name=='windows' else name)+'.zip' for name in expected))
                 self.assertEqual(json.loads((dest/'release.json').read_text())['generation'],self.generation)
 
     def test_payload_only_skips_platform_packaging(self):
         self.run_release('--payload')
         self.assertEqual(self.selected,[])
-        archive=self.root/'Releases/dist/payload_4.5.6.zip'
+        archive=self.root/'Releases/dist/payload_4.5.6-od.zip'
         entry=json.loads(archive.with_suffix('.json').read_text())
         self.assertEqual(entry['sha256'],release.sha(archive))
         self.assertEqual(set(entry), {'version','url','size','sha256'})
@@ -82,7 +83,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_failed_rebuild_preserves_previous_outputs(self):
         self.run_release('--mac')
-        payload=self.root/'Releases/build/installer-payload-4.5.6/manifest.json'
+        payload=self.root/'Releases/build/installer-payload-4.5.6-od/manifest.json'
         record=self.root/'Releases/dist/VoyahTune-Installer-1.0.0/release.json'
         previous=(payload.read_bytes(),record.read_bytes())
         self.fail=True
@@ -108,17 +109,41 @@ class ReleaseTests(unittest.TestCase):
 
     def test_prebuild_checks_exist_and_match_classic_release(self):
         with patch.object(self, 'fake_run', wraps=self.fake_run) as fake:
-            # Record the real orchestrator's calls while keeping SDK/build operations fake.
             self.run_release('--mac')
             commands = [list(map(str, call.args[0])) for call in fake.call_args_list]
-        actual = [Path(c[1]).relative_to(self.root).as_posix()
-                  for c in commands if c[0] in ('sh', 'bash')]
-        classic = (REPO/'make_release.sh').read_text()
-        expected = ['Packaging/tests/' + name for name in re.findall(
-            r'sh "\$COMMON/tests/([^"]+)"', classic)]
-        expected += ['Utils/android11-oem-stubs/tests/static-checks.sh']
-        self.assertEqual(actual, expected)
-        for script in actual:
-            self.assertTrue((REPO/script).is_file(), script)
+        checks = [c for c in commands if c[0] == 'python3']
+        self.assertEqual(checks, [['python3', str(self.root/'Packaging/tests/test_infrastructure_profiles.py'), '--profile', 'od']])
+        self.assertIn('test_infrastructure_profiles.py', (REPO/'make_release.sh').read_text())
+
+    def test_profile_outputs_coexist(self):
+        self.run_release('--od', '--mac')
+        archive = self.root/'Releases/dist/payload_4.5.6-od.zip'
+        previous = archive.read_bytes()
+        self.run_release('--pi', '--mac', '--offline-bundle')
+        self.assertEqual(archive.read_bytes(), previous)
+        record = json.loads((self.root/'Releases/dist/VoyahTune-Installer-1.0.0/release.json').read_text())
+        self.assertTrue(record['embeddedPayload'])
+        self.assertTrue((self.root/'Releases/dist/payload_4.5.6-pi.zip').exists())
+
+    def test_windows_architectures_do_not_overwrite_each_other(self):
+        self.run_release('--od', '--windows')
+        original = self.root/'Releases/dist/VoyahTune-Installer-1.0.0/VoyahTune-Installer-1.0.0-windows-x64.zip'
+        before = original.read_bytes()
+        self.run_release('--od', '--windows', '--windows-arch', 'x86')
+        self.assertEqual(original.read_bytes(), before)
+        self.assertTrue((self.root/'Releases/dist/VoyahTune-Installer-1.0.0-windows-x86/VoyahTune-Installer-1.0.0-windows-x86.zip').exists())
+
+    def test_release_version_carries_selected_infrastructure(self):
+        self.assertEqual(release.normalize_version('3.22.0', 'od'), '3.22.0-od')
+        self.assertEqual(release.normalize_version('v3.22.0-pi', 'pi'), '3.22.0-pi')
+        self.assertEqual(release.normalize_version('3.22.0-beta.1+test', 'pi'), '3.22.0-beta.1-pi+test')
+        with self.assertRaises(ValueError): release.normalize_version('3.22.0-od', 'pi')
+
+    def test_release_requires_exactly_one_profile(self):
+        for flags in ([], ['--pi', '--od']):
+            with self.subTest(flags=flags), patch('sys.argv', ['release.py', '4.5.6', '--payload', *flags]):
+                with self.assertRaises(SystemExit) as raised:
+                    release.main()
+                self.assertEqual(raised.exception.code, 2)
 
 if __name__=='__main__':unittest.main(verbosity=2)

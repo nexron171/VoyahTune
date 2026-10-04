@@ -4,7 +4,7 @@ members = ["crates/release-core", "crates/installer-core", "crates/installer-bui
 default-members = ["crates/release-core", "crates/installer-core", "crates/installer-build"]
 
 [workspace.package]
-version = "1.4.0"
+version = "1.5.0"
 edition = "2021"
 rust-version = "1.88"
 

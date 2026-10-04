@@ -271,7 +271,7 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!(
             "{}",
-            json!({"version":env!("CARGO_PKG_VERSION"),"ipcSchema":1})
+            json!({"version":env!("CARGO_PKG_VERSION"),"ipcSchema":1,"infrastructure":release_core::infrastructure::Infrastructure::compiled()})
         );
         return;
     }
