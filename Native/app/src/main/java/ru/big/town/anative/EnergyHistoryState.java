@@ -10,11 +10,12 @@ import java.util.zip.CRC32;
 final class EnergyHistoryState {
     double[] distance, tripBattery, tripFuel;
     List<EnergyHistory.Point> points;
+    EnergyConsumptionHistory.State consumption=new EnergyConsumptionHistory.State();
 
     String encode() throws IOException {
         ByteArrayOutputStream bytes=new ByteArrayOutputStream();
         DataOutputStream out=new DataOutputStream(bytes);
-        out.writeInt(2);
+        out.writeInt(3);
         for(double v:distance) out.writeDouble(v);
         for(double v:tripBattery) out.writeDouble(v);
         for(double v:tripFuel) out.writeDouble(v);
@@ -24,6 +25,7 @@ final class EnergyHistoryState {
             out.writeDouble(p.evDrop);out.writeDouble(p.fuelDrop);out.writeDouble(p.evKm);out.writeDouble(p.fuelKm);
             out.writeDouble(p.startEvDrop);out.writeDouble(p.startFuelDrop);out.writeDouble(p.startEvKm);out.writeDouble(p.startFuelKm);
         }
+        consumption.write(out);
         out.flush();
         CRC32 crc=new CRC32();crc.update(bytes.toByteArray());out.writeLong(crc.getValue());out.flush();
         return Base64.getEncoder().encodeToString(bytes.toByteArray());
@@ -35,7 +37,7 @@ final class EnergyHistoryState {
             if(bytes.length<72) throw new IOException("Truncated snapshot");
             CRC32 crc=new CRC32();crc.update(bytes,0,bytes.length-8);
             DataInputStream in=new DataInputStream(new ByteArrayInputStream(bytes));
-            if(in.readInt()!=2) throw new IOException("Unknown snapshot schema");
+            int version=in.readInt();if(version!=2&&version!=3) throw new IOException("Unknown snapshot schema");
             EnergyHistoryState state=new EnergyHistoryState();
             state.distance=read(in,3);state.tripBattery=read(in,2);state.tripFuel=read(in,2);
             int n=in.readInt();if(n<0 || n>EnergyHistory.MAX_POINTS) throw new IOException("Invalid point count");
@@ -43,6 +45,7 @@ final class EnergyHistoryState {
             for(int i=0;i<n;i++) state.points.add(new EnergyHistory.Point(in.readFloat(),in.readFloat(),in.readFloat(),
                     in.readBoolean(),in.readDouble(),in.readDouble(),in.readDouble(),in.readDouble(),
                     in.readDouble(),in.readDouble(),in.readDouble(),in.readDouble()));
+            if(version==3)state.consumption=EnergyConsumptionHistory.State.read(in);
             if(in.readLong()!=crc.getValue() || in.available()!=0) throw new IOException("Snapshot checksum mismatch");
             validate(state);
             return state;
@@ -58,6 +61,7 @@ final class EnergyHistoryState {
             throw new IOException("Invalid distance baseline");
         for(double v:state.tripBattery)if(!nonnegative(v))throw new IOException("Invalid trip total");
         for(double v:state.tripFuel)if(!nonnegative(v))throw new IOException("Invalid trip total");
+        state.consumption.validate(axis[0]);
         EnergyHistory.Point previous=null;
         for(EnergyHistory.Point p:state.points) {
             if(!nonnegative(p.km)||!level(p.ev)||!level(p.fuel)||!nonnegative(p.evDrop)||!nonnegative(p.fuelDrop)
