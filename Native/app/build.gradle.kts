@@ -12,8 +12,11 @@ android {
         applicationId = "ru.big.town.anative"
         minSdk = 30
         targetSdk = 35
-        versionCode = 6
-        versionName = "3.14.0"
+        val release = providers.gradleProperty("voyahReleaseVersion").orElse("3.14.0").get()
+        val parts = release.substringBefore('-').substringBefore('+').split('.').map { it.toInt() }
+        require(parts.size == 3 && parts.all { it in 0..999 })
+        versionCode = parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
+        versionName = release
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -64,7 +67,7 @@ dependencies {
 }
 
 // Release identity travels inside the signed APK. It is independent of Android's
-// versionName/versionCode and describes one universal APK for both installation modes.
+// versionName/versionCode and describes the installed release.
 abstract class VoyahBuildIdentity : DefaultTask() {
     @get:Input abstract val releaseVersion: Property<String>
     @get:Input abstract val revision: Property<String>
@@ -79,8 +82,8 @@ abstract class VoyahBuildIdentity : DefaultTask() {
         val dir = outputDirectory.get().asFile
         dir.mkdirs()
         dir.resolve("voyahtune-build.json").writeText(groovy.json.JsonOutput.toJson(mapOf(
-            "schema" to 2, "product" to "VoyahTune", "component" to component.get(),
-            "supportedModes" to listOf("full", "light"), "releaseVersion" to releaseVersion.get(),
+            "schema" to 3, "product" to "VoyahTune", "component" to component.get(),
+            "releaseVersion" to releaseVersion.get(),
             "buildRevision" to revision.get(),
             "recipeSha256" to recipeFiles.files.singleOrNull()?.let { source ->
                 MessageDigest.getInstance("SHA-256").digest(source.readBytes()).joinToString("") { "%02x".format(it) }
@@ -114,7 +117,7 @@ androidComponents {
                     it["artifact"] != "native.apk"
                 }.forEach { operation ->
                     val source = (sources["artifacts"] as List<*>).map { it as Map<*, *> }.single {
-                        it["name"] == operation["artifact"] && it["variant"] == null
+                        it["name"] == operation["artifact"]
                     }
                     val runtimeSource = rootProject.projectDir.parentFile.resolve(source["source"] as String)
                     runtimeFiles.from(runtimeSource)

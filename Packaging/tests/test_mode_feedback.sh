@@ -14,6 +14,7 @@ NATIVE_MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivit
 ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
 PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
 ADVANCE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
+BRIDGE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -39,12 +40,15 @@ if grep -Eq 'ModeFeedback|MODE_REMEMBER|persistModeFeedback|INTEREST_VEHICLE_STA
     fail "TripStatsService contains vehicle-mode responsibilities"
 fi
 
-# Feedback needs first Drive as well as a completed pass, and never causes correction retries.
-require_fixed "$MODE_POLICY" 'feedbackOpen && acceptsExternalFeedback(modeKey)'
-require_fixed "$VEHICLE_STATE" 'ApplyEngine.noteDriverDoorOpened();'
-require_fixed "$VEHICLE_STATE" 'ApplyEngine.noteGear(event.first);'
+# Feedback needs a completed ACC pass/explicit command, and never causes correction retries.
+require_fixed "$MODE_POLICY" 'canRememberSelection() && acceptsExternalFeedback(modeKey)'
+if grep -Eq 'ApplyEngine.noteDriverDoorOpened|ApplyEngine.noteGear' "$VEHICLE_STATE"; then
+    fail "door/gear must not open the mode feedback gate"
+fi
 require_fixed "$MODE_POLICY" 'canRememberSelection()'
-require_fixed "$NATIVE_MAIN" 'if (!ApplyEngine.canRememberModeSelection()) return;'
+require_fixed "$NATIVE_MAIN" 'if (!ApplyEngine.canRememberModeSelection(explicit)) return;'
+require_fixed "$BRIDGE" 'MainActivity.persistExplicitMode(app, modeKey, next)'
+require_fixed "$MODE_POLICY" 'return explicit || canRememberSelection();'
 require_fixed "$APPLY_ENGINE" 'MODE_SYNC_POLICY.canPersist('
 require_fixed "$NATIVE_MAIN" '!remembersMode(context, modeKey)'
 require_fixed "$PROVIDER" 'sharedPreferences.getBoolean(rememberKey, true)'

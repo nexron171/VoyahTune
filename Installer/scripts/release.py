@@ -84,20 +84,16 @@ def zip_payload(folder,output):
 
 
 def payload_entry(folder,archive):
-    from datetime import datetime,timezone
     manifest=json.loads((folder/'manifest.json').read_text())
     version=manifest['releaseVersion']
-    return {'version':version,'publishedAt':datetime.now(timezone.utc).isoformat(),
-            'channel':'prerelease' if '-' in version.split('+')[0] else 'stable',
-            'notesUrl':f'https://github.com/nexron171/VoyahTune/releases/tag/v{version}',
-            'payload':{'url':f'https://github.com/nexron171/VoyahTune/releases/download/v{version}/{archive.name}',
-                       'size':archive.stat().st_size,'sha256':sha(archive),'manifestSchema':manifest['schema']},
-            'requirements':manifest['requirements']}
+    return {'version':version,
+            'url':f'https://github.com/nexron171/VoyahTune/releases/download/v{version}/{archive.name}',
+            'size':archive.stat().st_size,'sha256':sha(archive)}
 
 
 def main():
     import tomllib
-    parser = argparse.ArgumentParser(description='Build a shared runtime-mode payload; optionally build GUI installers separately.')
+    parser = argparse.ArgumentParser(description='Build a single VoyahTune payload; optionally build GUI installers separately.')
     parser.add_argument('version')
     parser.add_argument('--payload', action='store_true', help='Build only the shared payload ZIP; no desktop tools or containers')
     parser.add_argument('--installers', action='store_true', help='Build standalone installers; all platforms unless selected below')
@@ -135,7 +131,7 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix='.release-',dir=build) as temporary:
             work = Path(temporary)
-            for script in ['test_android11_package_lifecycle.sh','test_saved_config_startup_wake.sh','test_keyboard_modes.sh','test_hook_status.sh','test_app_client.sh','test_mapkit_dpi_client.sh','test_acc_restore_hook.sh','test_drive_reset_hook.sh']:
+            for script in ['test_android11_package_lifecycle.sh','test_saved_config_startup_wake.sh','test_keyboard_modes.sh','test_hook_status.sh','test_app_client.sh','test_mapkit_dpi_client.sh','test_acc_restore_hook.sh','test_drive_reset_hook.sh','test_apollo_safe_device.sh']:
                 run(['sh',ROOT/'Packaging/tests'/script])
             run(['bash',ROOT/'Utils/android11-oem-stubs/tests/static-checks.sh'])
             run(['cargo','build','--locked','--release','--manifest-path',ROOT/'Installer/Cargo.toml','-p','installer-build'],env=env,cwd=ROOT)

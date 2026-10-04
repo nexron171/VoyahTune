@@ -1,0 +1,524 @@
+{
+  "keyboard": {
+    "attrs": {
+      "balloon": true,
+      "height": 0.243,
+      "key_type": 0,
+      "key_xmargin": 0.0031,
+      "key_ymargin": 0.0172,
+      "qwerty": true,
+      "qwerty_uppercase": true,
+      "repeat": false,
+      "skb_cache_flag": true,
+      "skb_sticky_flag": true,
+      "skb_template": "@xml/skb_template1_no_voice",
+      "width": 0.0823
+    },
+    "rows": [
+      {
+        "start_pos_x": 0.0094,
+        "start_pos_y": 0.0172,
+        "keys": [
+          { "label": "Й", "code": 45 },
+          { "label": "Ц", "code": 51 },
+          { "label": "У", "code": 33 },
+          { "label": "К", "code": 46 },
+          { "label": "Е", "code": 48 },
+          { "label": "Н", "code": 53 },
+          { "label": "Г", "code": 49 },
+          { "label": "Ш", "code": 37 },
+          { "label": "Щ", "code": 43 },
+          { "label": "З", "code": 44 },
+          { "label": "Х", "code": 10001 },
+          { "label": "Ъ", "code": 10002 }
+        ]
+      },
+      {
+        "start_pos_x": 0.0599,
+        "keys": [
+          { "label": "Ф", "code": 29 },
+          { "label": "Ы", "code": 47 },
+          { "label": "В", "code": 32 },
+          { "label": "А", "code": 34 },
+          { "label": "П", "code": 35 },
+          { "label": "Р", "code": 36 },
+          { "label": "О", "code": 38 },
+          { "label": "Л", "code": 39 },
+          { "label": "Д", "code": 40 },
+          { "label": "Ж", "code": 10003 },
+          { "label": "Э", "code": 10004 }
+        ]
+      },
+      {
+        "start_pos_x": 0.0094,
+        "keys": [
+          {
+            "balloon": false,
+            "code": -1,
+            "key_type": 0,
+            "width": 0.0823,
+            "toggle_states": [
+              {
+                "code": -1,
+                "icon": "@drawable/shift_lower_c53",
+                "icon_popup": "@drawable/shift_lower_c53",
+                "state_id": 2
+              },
+              {
+                "code": -1,
+                "icon": "@drawable/shift_uppercase_c53",
+                "icon_popup": "@drawable/shift_uppercase_c53",
+                "state_id": 3
+              },
+              {
+                "code": -1,
+                "icon": "@drawable/shift_uppercase_c53_temp",
+                "icon_popup": "@drawable/shift_uppercase_c53_temp",
+                "state_id": 16
+              }
+            ]
+          },
+          { "label": "Я", "code": 54 },
+          { "label": "Ч", "code": 52 },
+          { "label": "С", "code": 31 },
+          { "label": "М", "code": 50 },
+          { "label": "И", "code": 30 },
+          { "label": "Т", "code": 42 },
+          { "label": "Ь", "code": 41 },
+          { "label": "Б", "code": 10005 },
+          { "label": "Ю", "code": 10006 },
+          { "label": "Ё", "code": 10007 },
+          {
+            "balloon" : false,
+            "code": 67,
+            "key_type": 1,
+            "repeat": true
+          }
+        ]
+      },
+      {
+        "row_id": 12,
+        "start_pos_x": 0.0094,
+        "start_pos_y": 0.7415,
+        "keys": [
+          {
+            "balloon": false,
+            "code": -3,
+            "height": 0.243,
+            "label": "12&",
+            "start_pos_x": 0.1672,
+            "start_pos_y": 0.7415,
+            "width": 0.0969
+          },
+          {
+            "balloon": false,
+            "code": -2,
+            "height": 0.243,
+            "icon": "@drawable/chinese_input_method",
+            "icon_popup": "@drawable/chinese_input_method",
+            "start_pos_x": 0.2495,
+            "start_pos_y": 0.7415,
+            "width": 0.1937,
+            "toggle_states": [
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 2
+              },
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 3
+              },
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 16
+              }
+            ]
+          },
+          {
+            "key_type": 0,
+            "label": "，"
+          },
+          {
+            "code": 62,
+            "key_type": 1,
+            "width": 0.2897
+          },
+          {
+            "icon_popup": "@drawable/period_full_icon",
+            "key_type": 0,
+            "label": "。"
+          },
+          {
+            "balloon": false,
+            "code": -7,
+            "height": 0.243,
+            "icon": "@drawable/hide_keyboard_x37",
+            "label": "",
+            "start_pos_x": 0.7433,
+            "start_pos_y": 0.7415,
+            "width": 0.0823
+          },
+          {
+            "balloon": false,
+            "code": 66,
+            "height": 0.243,
+            "key_type": 0,
+            "start_pos_x": 0.826,
+            "start_pos_y": 0.7415,
+            "width": 0.1646,
+            "toggle_states": [
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 7
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 8
+              },
+              {
+                 "code": 66,
+                 "label": "Ввод",
+                 "state_id": 9
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 10
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 11
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "row_id": 13,
+        "start_pos_x": 0.0094,
+        "start_pos_y": 0.7415,
+        "keys": [
+          {
+            "balloon": false,
+            "code": -3,
+            "height": 0.243,
+            "label": "12&",
+            "start_pos_x": 0.1672,
+            "start_pos_y": 0.7415,
+            "width": 0.0969
+          },
+          {
+            "balloon": false,
+            "code": -2,
+            "height": 0.243,
+            "icon": "@drawable/chinese_input_method",
+            "icon_popup": "@drawable/chinese_input_method",
+            "start_pos_x": 0.2495,
+            "start_pos_y": 0.7415,
+            "width": 0.1937,
+            "toggle_states": [
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 2
+              },
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 3
+              },
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 16
+              }
+            ]
+          },
+          {
+            "label": ",",
+            "key_type": 0,
+            "icon_popup": "@drawable/comma_full_icon"
+          },
+          {
+            "code": 62,
+            "key_type": 1,
+            "width": 0.2897
+          },
+          {
+            "label": ".",
+            "key_type": 0,
+            "icon_popup": "@drawable/period_icon"
+          },
+          {
+            "balloon": false,
+            "code": -7,
+            "height": 0.243,
+            "icon": "@drawable/hide_keyboard_x37",
+            "label": "",
+            "start_pos_x": 0.7433,
+            "start_pos_y": 0.7415,
+            "width": 0.0823
+          },
+          {
+            "balloon": false,
+            "code": 66,
+            "height": 0.243,
+            "key_type": 0,
+            "start_pos_x": 0.826,
+            "start_pos_y": 0.7415,
+            "width": 0.1646,
+            "toggle_states": [
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 7
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 8
+              },
+              {
+                 "code": 66,
+                 "label": "Ввод",
+                 "state_id": 9
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 10
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 11
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "row_id": 14,
+        "start_pos_x": 0.0094,
+        "start_pos_y": 0.7415,
+        "keys": [
+          {
+            "balloon": false,
+            "code": -3,
+            "height": 0.243,
+            "label": "12&",
+            "start_pos_x": 0.1672,
+            "start_pos_y": 0.7415,
+            "width": 0.0969
+          },
+          {
+            "balloon": false,
+            "code": -2,
+            "height": 0.243,
+            "icon": "@drawable/chinese_input_method",
+            "icon_popup": "@drawable/chinese_input_method",
+            "start_pos_x": 0.2495,
+            "start_pos_y": 0.7415,
+            "width": 0.1937,
+            "toggle_states": [
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 2
+              },
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 3
+              },
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 16
+              }
+            ]
+          },
+          {
+            "code": 62,
+            "key_type": 1,
+            "width": 0.2897
+          },
+          {
+            "label": "/"
+          },
+          {
+            "icon_popup": "@drawable/period_icon",
+            "key_type": 0,
+            "label": "."
+          },
+          {
+            "balloon": false,
+            "code": -7,
+            "height": 0.243,
+            "icon": "@drawable/hide_keyboard_x37",
+            "label": "",
+            "start_pos_x": 0.7433,
+            "start_pos_y": 0.7415,
+            "width": 0.0823
+          },
+          {
+            "balloon": false,
+            "code": 66,
+            "height": 0.243,
+            "key_type": 0,
+            "start_pos_x": 0.826,
+            "start_pos_y": 0.7415,
+            "width": 0.1646,
+            "toggle_states": [
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 7
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 8
+              },
+              {
+                 "code": 66,
+                 "label": "Ввод",
+                 "state_id": 9
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 10
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 11
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "row_id": 15,
+        "start_pos_x": 0.0094,
+        "start_pos_y": 0.7415,
+        "keys": [
+          {
+            "balloon": false,
+            "code": -3,
+            "height": 0.243,
+            "label": "12&",
+            "start_pos_x": 0.1672,
+            "start_pos_y": 0.7415,
+            "width": 0.0969
+          },
+          {
+            "balloon": false,
+            "code": -2,
+            "height": 0.243,
+            "icon": "@drawable/chinese_input_method",
+            "icon_popup": "@drawable/chinese_input_method",
+            "start_pos_x": 0.2495,
+            "start_pos_y": 0.7415,
+            "width": 0.1937,
+            "toggle_states": [
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 2
+              },
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 3
+              },
+              {
+                "code": -2,
+                "icon": "@drawable/english_input_method",
+                "icon_popup": "@drawable/english_input_method",
+                "state_id": 16
+              }
+            ]
+          },
+          {
+            "code": 62,
+            "key_type": 1,
+            "width": 0.2897
+          },
+          {
+            "label": "@"
+          },
+          {
+            "icon_popup": "@drawable/period_icon",
+            "key_type": 0,
+            "label": "."
+          },
+          {
+            "balloon": false,
+            "code": -7,
+            "height": 0.243,
+            "icon": "@drawable/hide_keyboard_x37",
+            "label": "",
+            "start_pos_x": 0.7433,
+            "start_pos_y": 0.7415,
+            "width": 0.0823
+          },
+          {
+            "balloon": false,
+            "code": 66,
+            "height": 0.243,
+            "key_type": 0,
+            "start_pos_x": 0.826,
+            "start_pos_y": 0.7415,
+            "width": 0.1646,
+            "toggle_states": [
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 7
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 8
+              },
+              {
+                 "code": 66,
+                 "label": "Ввод",
+                 "state_id": 9
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 10
+              },
+              {
+                "code": 66,
+                "label": "Ввод",
+                "state_id": 11
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

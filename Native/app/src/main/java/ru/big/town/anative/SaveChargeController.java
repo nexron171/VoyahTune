@@ -18,8 +18,6 @@ final class SaveChargeController {
     static SaveChargeSequence.Result apply(Context context, int percent, BooleanSupplier active) {
         SaveChargeSequence.Result result = SaveChargeSequence.run(percent, new SaveChargeSequence.Vehicle() {
             @Override public SaveChargeSequence.State read() {
-                // Debug transport returns invented zeroes: they must not confirm a real target.
-                if (CanSender.isDebugMode()) return null;
                 Map<OemVehicleStateTransport.StateKey, Integer> state =
                         OemVehicleStateTransport.readVehicleStates(context, Arrays.asList(MODE, LEVEL));
                 return state == null ? null : new SaveChargeSequence.State(state.get(MODE), state.get(LEVEL));

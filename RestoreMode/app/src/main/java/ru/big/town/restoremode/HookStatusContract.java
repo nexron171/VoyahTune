@@ -33,10 +33,7 @@ final class HookStatusContract {
         return parse(payload) != null;
     }
 
-    static String renderForUi(String payload, boolean fullFlavor) {
-        if (!fullFlavor) {
-            return "Hook-loader отсутствует в Light-версии.";
-        }
+    static String renderForUi(String payload) {
         Snapshot snapshot = parse(payload);
         if (snapshot == null) {
             return "Состояние ещё не опубликовано. Проверьте boot-сервис voyahtune_load.";

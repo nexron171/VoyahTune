@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-import ru.big.town.common.InstallMode;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -48,7 +47,6 @@ public class MainActivity extends AppCompatActivity {
     private static boolean apolloTrafficLightsEnabled = false;
     private static boolean apolloGreenSoundEnabled = false;
     private static boolean apolloTrafficSignsEnabled = false;
-    private static boolean apolloStockUiEnabled = false;
 
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
@@ -196,6 +194,13 @@ public class MainActivity extends AppCompatActivity {
         int target = VehicleRestorePolicy.SOC_FORCE_EV;
         if (!on) {
             String savedEnergy = currentSavedMode(context, "energy");
+            if ("FORCE_EV".equals(savedEnergy)) {
+                try {
+                    android.os.Bundle snapshot = context.getContentResolver().call(
+                            MODES_PROVIDER_URI, "driveHookV2", "snapshot", null);
+                    savedEnergy = snapshot == null ? "EV" : snapshot.getString("configuredEnergy", "EV");
+                } catch (RuntimeException e) { savedEnergy = "EV"; }
+            }
             try {
                 target = VehicleRestorePolicy.requireEnergy(savedEnergy);
             } catch (IllegalArgumentException e) {
@@ -213,10 +218,6 @@ public class MainActivity extends AppCompatActivity {
     public static boolean setHeadlights(Context context, boolean on){
         String command = on ? "LOW_BEAM" : "OUT_LAMP_OFF";
         Log.i("$$$ MainActivity setHeadlights $$$", "OEM CAN: " + command);
-        if (CanSender.isDebugMode()) {
-            Log.i("$$$ MainActivity setHeadlights $$$", "EMULATE OEM TX58: " + command + " state=1");
-            return true;
-        }
         return HeadlightCanTransport.send(context, on);
     }
 
@@ -224,10 +225,6 @@ public class MainActivity extends AppCompatActivity {
     public static boolean setHeadlightsAutoLow(Context context, boolean lowBeam){
         String command = lowBeam ? "LOW_BEAM" : "AUTO_LAMP_SWITCH";
         Log.i("$$$ MainActivity setHeadlights $$$", "OEM CAN: " + command);
-        if (CanSender.isDebugMode()) {
-            Log.i("$$$ MainActivity setHeadlights $$$", "EMULATE OEM TX58: " + command + " state=1");
-            return true;
-        }
         return HeadlightCanTransport.sendAutoPair(context, lowBeam);
     }
 
@@ -343,15 +340,11 @@ public class MainActivity extends AppCompatActivity {
                         && cursor.getInt(26) == 1;
                 apolloTrafficSignsEnabled = cursor.getColumnCount() > 27
                         && cursor.getInt(27) == 1;
-                apolloStockUiEnabled = cursor.getColumnCount() > 28
-                        && cursor.getInt(28) == 1;
                 // cols 29..31 — opt-out remember-last flags. Older providers and SQL-style NULL
                 // both mean true, so an update never silently changes historical behaviour.
                 driveRememberLast = cursorBooleanDefaultTrue(cursor, 29);
                 energyRememberLast = cursorBooleanDefaultTrue(cursor, 30);
                 recycleRememberLast = cursorBooleanDefaultTrue(cursor, 31);
-                // col 12 — «Режим отладки»: эмуляция CAN в логи вместо реальной отправки
-                boolean debugMode = cursor.getColumnCount() > 12 && cursor.getInt(12) == 1;
                 // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
                 boolean wiperColdMode = cursor.getColumnCount() > 13 && cursor.getInt(13) == 1;
                 // cols 14,15 — команды кнопок на руле (короткое/долгое нажатие)
@@ -359,8 +352,8 @@ public class MainActivity extends AppCompatActivity {
                 if (cursor.getColumnCount() > 15) customCommandStarButton2 = cursor.getString(15);
                 // col 18 — «Пауза музыки при открытии двери водителя»: второй потребитель сигнала двери
                 boolean pauseMediaOnDoor = cursor.getColumnCount() > 18 && cursor.getInt(18) == 1;
-                applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
-                saveModesCache(context, debugMode, wiperColdMode, pauseMediaOnDoor);
+                applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor);
+                saveModesCache(context, wiperColdMode, pauseMediaOnDoor);
                 ApplyEngine.noteLoadedModes(
                         driveMode, energy, recycle,
                         driveEnabled, energyEnabled, recycleEnabled,
@@ -375,8 +368,7 @@ public class MainActivity extends AppCompatActivity {
                         + "/" + fragranceIntensity
                         + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
                         + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
-                        + " stockUi=" + apolloStockUiEnabled
-                        + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
+                        + " wiperColdMode=" + wiperColdMode
                         + " pauseMediaOnDoor=" + pauseMediaOnDoor);
                 return 2;
             } else {
@@ -402,33 +394,13 @@ public class MainActivity extends AppCompatActivity {
         return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
-    /** Narrow read for early polling: never starts services or mutates the full restore snapshot. */
-    static EarlyDriveModeRestore.Settings readEarlyDriveRestoreSettings(Context context) {
-        try (Cursor cursor = context.getContentResolver().query(Uri.parse(
-                "content://ru.big.town.restoremode.restoremodecontentprovider/"),
-                null, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst() && cursor.getColumnCount() > 6) {
-                return new EarlyDriveModeRestore.Settings(cursor.getString(0),
-                        cursor.getInt(6) == 1,
-                        cursor.getColumnCount() > 12 && cursor.getInt(12) == 1);
-            }
-        } catch (RuntimeException e) {
-            Log.w(MODES_LOG, "Early drive settings unavailable; using saved cache");
-        }
-        SharedPreferences cache = nativePrefs(context);
-        if (!cache.getBoolean("cacheValid", false)) return null;
-        return new EarlyDriveModeRestore.Settings(cache.getString("cacheDriveMode", null),
-                cache.getBoolean("cacheDriveEnabled", false),
-                cache.getBoolean("cacheDebugMode", false));
-    }
-
     /** Missing or NULL opt-out fields are enabled; only an explicit numeric zero disables them. */
     private static boolean cursorBooleanDefaultTrue(Cursor cursor, int column) {
         return cursor.getColumnCount() <= column || cursor.isNull(column) || cursor.getInt(column) != 0;
     }
 
     /** Сохраняет успешно прочитанный снимок настроек в NativePrefs (кэш на случай «глухого» пробуждения). */
-    private static void saveModesCache(Context context, boolean debugMode, boolean wiperColdMode, boolean pauseMediaOnDoor) {
+    private static void saveModesCache(Context context, boolean wiperColdMode, boolean pauseMediaOnDoor) {
         nativePrefs(context).edit()
                 .putString("cacheDriveMode", driveMode)
                 .putString("cacheEnergy", energy)
@@ -452,8 +424,7 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheApolloTrafficLightsEnabled", apolloTrafficLightsEnabled)
                 .putBoolean("cacheApolloGreenSoundEnabled", apolloGreenSoundEnabled)
                 .putBoolean("cacheApolloTrafficSignsEnabled", apolloTrafficSignsEnabled)
-                .putBoolean("cacheApolloStockUiEnabled", apolloStockUiEnabled)
-                .putBoolean("cacheDebugMode", debugMode)
+                .remove("cacheApolloStockUiEnabled")
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
                 .putBoolean("cacheValid", true)
@@ -493,11 +464,9 @@ public class MainActivity extends AppCompatActivity {
         apolloTrafficLightsEnabled = p.getBoolean("cacheApolloTrafficLightsEnabled", false);
         apolloGreenSoundEnabled = p.getBoolean("cacheApolloGreenSoundEnabled", false);
         apolloTrafficSignsEnabled = p.getBoolean("cacheApolloTrafficSignsEnabled", false);
-        apolloStockUiEnabled = p.getBoolean("cacheApolloStockUiEnabled", false);
-        boolean debugMode     = p.getBoolean("cacheDebugMode", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
-        applyModeSideEffects(context, debugMode, wiperColdMode, pauseMediaOnDoor);
+        applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor);
         ApplyEngine.noteLoadedModes(
                 driveMode, energy, recycle,
                 driveEnabled, energyEnabled, recycleEnabled,
@@ -512,15 +481,13 @@ public class MainActivity extends AppCompatActivity {
                 + "/" + fragranceIntensity
                 + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
                 + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
-                + " stockUi=" + apolloStockUiEnabled
-                + " debugMode=" + debugMode + " wiperColdMode=" + wiperColdMode
+                + " wiperColdMode=" + wiperColdMode
                 + " pauseMediaOnDoor=" + pauseMediaOnDoor);
         return true;
     }
 
-    /** Побочные эффекты настроек, не зависящие от отправки CAN: режим отладки и сервис-реактор двери водителя. */
-    private static void applyModeSideEffects(Context context, boolean debugMode, boolean wiperColdMode, boolean pauseMediaOnDoor) {
-        CanSender.setDebugMode(debugMode);
+    /** Побочные эффекты настроек: сервисы, связанные с дверью водителя. */
+    private static void applyModeSideEffects(Context context, boolean wiperColdMode, boolean pauseMediaOnDoor) {
         applyDoorReactor(context, wiperColdMode, pauseMediaOnDoor);
     }
 
@@ -590,7 +557,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Builds one validated pass before the first OEM request is submitted. */
-    static CanRestorePlan createCanRestorePlan() {
+    static CanRestorePlan createCanRestorePlan() { return createCanRestorePlan(true); }
+
+    static CanRestorePlan createCanRestorePlan(boolean includeModes) {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
                 + " disablePedestrianSound=" + disablePedestrianSound
@@ -599,33 +568,40 @@ public class MainActivity extends AppCompatActivity {
                 + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled);
         CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
         final Context context = GlobalVars.SAVE_CONTEXT;
+        plan.addOnce("auto light saved service switch", () -> {
+            try {
+                AutoLightSettings.restore(context);
+                return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+            } catch (RuntimeException e) {
+                Log.w(MODES_LOG, "Auto light service restore failed", e);
+                return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+            }
+        });
         final Map<String, Integer> primaryValues = new LinkedHashMap<>();
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
-        if (InstallMode.isFull()) {
-            final boolean stockUiTarget = apolloStockUiEnabled;
-            plan.addOnce("Apollo stock subscription/exam UI", () -> {
-                ApolloSettingsRuntimeState.TargetApplyResult result =
-                        ApolloSettingsRuntimeState.applyTarget(context, stockUiTarget);
-                if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
-                    return CanRestorePlan.OperationResult.CONFIRMED;
-                }
-                if (result == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
-                    return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
-                }
-                return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
-            });
-        }
+        plan.addOnce("Apollo stock subscription/exam UI", () -> {
+            ApolloSettingsRuntimeState.TargetApplyResult result =
+                    ApolloSettingsRuntimeState.applyTarget(context, false);
+            if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
+                return CanRestorePlan.OperationResult.CONFIRMED;
+            }
+            if (result == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
+                return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+            }
+            return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+        });
 
-        if (driveEnabled) {
+
+        if (includeModes && driveEnabled) {
             if (!DriveModeCanTransport.appendStates(
                     context, driveMode, primaryValues, stableIds)) {
                 throw new IllegalArgumentException("Unsupported drive mode: " + driveMode);
             }
         }
         VehicleRestorePolicy.appendPrimaryTo(
-                primaryValues, energyEnabled, energy, forcedEv);
+                primaryValues, includeModes && energyEnabled, energy, includeModes && forcedEv);
         VehicleRestorePolicy.appendRecuperationTo(
                 trailingValues, recycleEnabled, recycle, driveMode);
         stableIds.putAll(VehicleRestorePolicy.stableIds());
@@ -652,8 +628,8 @@ public class MainActivity extends AppCompatActivity {
 
         if (!primaryValues.isEmpty() || !trailingValues.isEmpty()) {
             final OemVehicleStateTransport.StateValue firstState = fragranceDurationState;
-            final String appliedDrive = driveEnabled ? driveMode : null;
-            final String appliedEnergy = forcedEv ? "FORCE_EV" : energyEnabled ? energy : null;
+            final String appliedDrive = includeModes && driveEnabled ? driveMode : null;
+            final String appliedEnergy = !includeModes ? null : forcedEv ? "FORCE_EV" : energyEnabled ? energy : null;
             final String appliedRecycle = recycleEnabled
                     && VehicleRestorePolicy.allowsRecuperationRestore(driveMode) ? recycle : null;
             plan.addOnce("OEM vehicle restore snapshot", () -> {
@@ -805,11 +781,37 @@ public class MainActivity extends AppCompatActivity {
         persistSavedMode(context, isEnergy ? "energy" : "driveMode", mode);
     }
 
-    /** Saves an external/steering selection only after first Drive, with remember-last enabled. */
+    /** Explicit choices work in Parking; automatic recuperation feedback waits for the ACC pass. */
     public static void persistSavedMode(Context context, String modeKey, String mode) {
+        persistSavedMode(context, modeKey, mode, false);
+    }
+
+    /** A successful explicit command is intent even while its feedback gate is closed. */
+    static void persistExplicitMode(Context context, String modeKey, String mode) {
+        persistSavedMode(context, modeKey, mode, true);
+    }
+
+    private static void persistSavedMode(Context context, String modeKey, String mode,
+                                         boolean explicit) {
         if (context == null || mode == null || mode.isEmpty()) return;
+        if ("driveMode".equals(modeKey)) {
+            DriveSelectionStore.record(context, mode, ru.big.town.common.DriveSelectionPolicy.EXPLICIT);
+            return;
+        }
+        if ("energy".equals(modeKey)) {
+            try {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put("energySelection", mode);
+                if (context.getContentResolver().update(MODES_PROVIDER_URI, values, null, null) > 0) {
+                    energy = mode;
+                    ApplyEngine.noteSavedMode("energy", mode);
+                    ApplyEngine.driveSelectionSaved();
+                }
+            } catch (RuntimeException e) { Log.w(MODES_LOG, "Energy selection unavailable", e); }
+            return;
+        }
         if (modeColumn(modeKey) < 0 || !remembersMode(context, modeKey)) return;
-        if (!ApplyEngine.canRememberModeSelection()) return;
+        if (!ApplyEngine.canRememberModeSelection(explicit)) return;
         boolean written = false;
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
@@ -889,7 +891,7 @@ public class MainActivity extends AppCompatActivity {
     /** Сохранить бинарное действие и синхронизировать открытый UI VoyahTune. */
     public static void persistSavedToggle(Context context, String key, boolean value) {
         if (context == null || (!"forcedEv".equals(key) && !"disablePedestrianSound".equals(key)
-                && !"suspensionMaintenance".equals(key))) return;
+                && !"suspensionMaintenance".equals(key) && !"autoLight".equals(key))) return;
         boolean written = false;
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
@@ -900,7 +902,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if ("forcedEv".equals(key)) forcedEv = value;
         else if ("suspensionMaintenance".equals(key)) suspensionMaintenance = value;
-        else disablePedestrianSound = value;
+        else if ("disablePedestrianSound".equals(key)) disablePedestrianSound = value;
         try {
             Intent bi = new Intent("ru.big.town.anative.SETTING_SYNCED");
             bi.setPackage("ru.big.town.restoremode");
@@ -913,6 +915,7 @@ public class MainActivity extends AppCompatActivity {
                 context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
                         .putBoolean("forcedEv".equals(key) ? "cacheForcedEv"
                                 : "suspensionMaintenance".equals(key) ? "cacheSuspensionMaintenance"
+                                : "autoLight".equals(key) ? "autoLight"
                                 : "cacheDisablePedestrianSound", value)
                         .apply();
             } catch (Exception ignored) {}

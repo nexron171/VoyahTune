@@ -77,7 +77,7 @@ grep -Fq 'var targetTop = FF.top;' "$VD" \
 if grep -Fq 'var targetTop = fullscreen ? 0 : FF.top;' "$VD"; then
     fail "fullscreen package removes the required status-bar inset"
 fi
-grep -Fq 'if (wmode == 5) return;' "$VD" \
+grep -Fq 'if (wmode == 5) { ffNote("skip-freeform", pkg, displayId, wmode); return; }' "$VD" \
     || fail "DisplayPolicy hot path attempts to mutate a real freeform task"
 if grep -Fq 'wmode == 5 && !fullscreen' "$VD"; then
     fail "fullscreen allowlist bypasses the safe real-freeform guard"

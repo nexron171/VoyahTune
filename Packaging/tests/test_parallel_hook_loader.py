@@ -22,12 +22,11 @@ class ParallelLoaderTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="voyahtune-loader-")
         self.root = Path(self.temp.name)
         self.processes = []
-        (self.root / "mode").write_text("full\n")
         settings=self.root/"settings"
-        settings.write_text("#!/bin/sh\ncat "+shlex.quote(str(self.root/"mode"))+"\n")
+        settings.write_text("#!/bin/sh\nexit 1\n")
         settings.chmod(0o755)
         self.env={**os.environ,"PATH":str(self.root)+os.pathsep+os.environ["PATH"]}
-        for pid in range(101, 108):
+        for pid in range(101, 110):
             (self.root / f"generation.{pid}").write_text("1\n")
         (self.root / "proc").mkdir()
         (self.root / "proc/uptime").write_text("100.00 0\n")
@@ -51,15 +50,20 @@ case "$script" in
     apollo_tech.js) echo '[apollo] hook ready'; gate=none ;;
     voyahtune_acc_restore.js)
         while [ -f "$root/hold_acc_ready" ]; do sleep 0.05; done
-        if [ ! -f "$root/missing_acc_ready" ]; then echo '[acc-restore] hook ready v1'; fi
+        if [ ! -f "$root/missing_acc_ready" ]; then echo '[acc-restore] hook ready v2'; fi
         if [ -f "$root/block_acc" ]; then gate=acc; else gate=none; fi ;;
+    app_client.js)
+        echo '[app-client] hook ready v1'
+        if [ ! -f "$root/missing_rds_ready" ]; then echo '[rds-restore] hook ready v1'; fi
+        gate=none ;;
     voyahtune_drive_reset.js)
-        if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v1'; fi
+        if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v2'; fi
         gate=none ;;
     *) gate=none ;;
 esac
 while [ "$gate" != none ] && [ ! -f "$root/release_$gate" ]; do sleep 0.05; done
 printf 'end %s %s\n' "$script" "$pid" >> "$root/events"
+if [ "$script" = app_client.js ] && [ -f "$root/app_client_timeout" ]; then exit 124; fi
 """.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root))))
         self.injector.chmod(0o755)
         overrides = r'''
@@ -88,6 +92,8 @@ pidof() {
         system_server) echo 104 ;;
         com.qinggan.app.vehiclesetting) echo 105 ;;
         com.qinggan.app.qgime) echo 106 ;;
+        com.qinggan.app.vehicle) [ ! -e "$FIXTURE/enable_vehicle" ] || echo 108 ;;
+        com.pateo.rdsapp) [ ! -e "$FIXTURE/enable_rds" ] || echo 109 ;;
         com.qinggan.canbus.service) [ -e "$FIXTURE/missing_acc" ] || echo 107 ;;
         frida-inject)
             for f in "$FIXTURE"/proc/*/cmdline; do
@@ -98,6 +104,11 @@ pidof() {
             ;;
     esac
 }
+drive_agent_attempt_finished() {
+    fixture_drive_agent_attempt_finished "$@"
+    printf '%s\n' "$1" >> "$FIXTURE/finished_attempts"
+}
+prepare_drive_health() { mkdir -p "${1%/*}"; [ -e "$1" ] || : > "$1"; }
 logi() { printf '%s\n' "$*" >> "$FIXTURE/log"; }
 loge() { logi "$*"; }
 log() { :; }
@@ -114,12 +125,120 @@ discover_app_client() {
 }
 if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
 '''.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root)))
-        source = SOURCE.replace("/data/local/tmp", str(self.root))
+        source = SOURCE.replace("/data/local/tmp", str(self.root)).replace("/data/local/open_voyah", str(self.root / "runtime"))
+        source = source.replace("drive_agent_attempt_finished() {", "fixture_drive_agent_attempt_finished() {")
+        source = source.replace("discover_app_client() {", "fixture_discover_app_client() {")
         source = source.replace("/proc/", str(self.root / "proc") + "/")
         entry = 'if [ "${1:-}" = --worker ]; then'
         source = source.replace(entry, overrides + "\n" + entry)
         self.loader = self.root / "load.bin"
         self.loader.write_text(source)
+
+    def rds_probe(self, uid=10109, executable="/system/bin/app_process64", enabled=True,
+                  package="com.pateo.rdsapp"):
+        if enabled:
+            (self.root / "enable_rds").touch()
+        (self.root / "proc/sys/kernel/random").mkdir(parents=True, exist_ok=True)
+        (self.root / "proc/sys/kernel/random/boot_id").write_text("test-boot\n")
+        (self.root / "proc/109").mkdir(exist_ok=True)
+        (self.root / "proc/109/status").write_text(f"Uid: {uid} {uid} {uid} {uid}\n")
+        exe = self.root / "proc/109/exe"
+        if not exe.is_symlink():
+            exe.symlink_to(executable)
+        (self.root / "app_client.js").touch()
+        selection = 'settings() { echo null; }; '
+        if package != "com.pateo.rdsapp":
+            selection = (f'pidof() {{ [ "$1" = {shlex.quote(package)} ] && echo 109; }}; '
+                         f'settings() {{ echo {shlex.quote(package)}; }}; ')
+        subprocess.run(["sh", str(self.loader), "--probe",
+                        'APP_CLIENT="$FIXTURE/app_client.js"; ' + selection +
+                        'fixture_discover_app_client; wait'],
+                       check=True, timeout=10, env=self.env, capture_output=True)
+
+    def test_rds_discovered_without_fullscreen_or_dpi_selection(self):
+        self.rds_probe()
+        marker = self.root / "voyahtune_app_client.com.pateo.rdsapp.pid"
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe()
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_rds_requires_specific_ready_marker(self):
+        (self.root / "missing_rds_ready").touch()
+        self.rds_probe()
+        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
+        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+
+    def test_rds_does_not_attach_without_a_running_process(self):
+        self.rds_probe(enabled=False)
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_rds_rejects_secondary_android_user(self):
+        self.rds_probe(uid=110109)
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_rds_32_bit_uses_existing_injector(self):
+        self.rds_probe(uid=1000, executable="/system/bin/app_process32")
+        marker = self.root / "voyahtune_app_client.com.pateo.rdsapp.pid"
+        self.assertTrue(marker.exists(), "32-bit OEM RdsApp must reach the injector")
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe(uid=1000, executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_rds_32_bit_still_requires_specific_ready_marker(self):
+        (self.root / "missing_rds_ready").touch()
+        self.rds_probe(executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
+        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+
+    def test_rds_32_bit_rejects_secondary_android_user(self):
+        self.rds_probe(uid=101000, executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_rds_ready_survives_injector_timeout(self):
+        (self.root / "app_client_timeout").touch()
+        self.rds_probe(executable="/system/bin/app_process32")
+        marker = self.root / "voyahtune_app_client.com.pateo.rdsapp.pid"
+        self.assertTrue(marker.exists(), "eternalized RDS agent readiness survives wrapper timeout")
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe(executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_rds_timeout_without_radio_ready_is_not_success(self):
+        (self.root / "app_client_timeout").touch()
+        (self.root / "missing_rds_ready").touch()
+        self.rds_probe(executable="/system/bin/app_process32")
+        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
+
+    def test_other_app_timeout_still_requires_successful_exit(self):
+        (self.root / "app_client_timeout").touch()
+        self.rds_probe(package="example.player")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+        self.assertFalse((self.root / "voyahtune_app_client.example.player.pid").exists())
+
+    def test_other_32_bit_apps_remain_unsupported(self):
+        self.rds_probe(package="example.player", executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text(), "")
+        self.assertTrue((self.root / "voyahtune_app_client.example.player.attempt").exists())
+
+    def test_rds_rejects_unknown_process_executable(self):
+        self.rds_probe(executable="/system/bin/unknown")
+        self.assertEqual((self.root / "events").read_text(), "")
+        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+
+    def test_rds_32_bit_rapid_restart_circuit_breaker(self):
+        for generation in range(1, 4):
+            (self.root / "generation.109").write_text(f"{generation}\n")
+            self.rds_probe(executable="/system/bin/app_process32")
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 2)
+        self.assertEqual((self.root / "voyahtune_app_client.com.pateo.rdsapp.blocked").read_text().strip(), "test-boot")
+
+    def test_rds_rapid_restart_circuit_breaker(self):
+        for generation in range(1, 4):
+            (self.root / "generation.109").write_text(f"{generation}\n")
+            self.rds_probe()
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 2)
+        self.assertEqual((self.root / "voyahtune_app_client.com.pateo.rdsapp.blocked").read_text().strip(), "test-boot")
 
     def start(self):
         log = open(self.root / f"stderr.{len(self.processes)}", "w")
@@ -137,7 +256,15 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
             except ProcessLookupError:
                 pass
             proc.wait(timeout=5)
-        self.temp.cleanup()
+        # A just-killed grandchild can finish its EXIT cleanup after the direct shell exited.
+        for attempt in range(5):
+            try:
+                self.temp.cleanup()
+                break
+            except OSError as error:
+                if error.errno != 66 or attempt == 4:
+                    raise
+                time.sleep(0.05)
 
     def until(self, predicate, message, seconds=12):
         deadline = time.monotonic() + seconds
@@ -169,16 +296,6 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
     def probe(self, code):
         return subprocess.check_output(["sh", str(self.loader), "--probe", code],
                                        text=True, timeout=5,env=self.env).strip()
-
-    def test_light_unknown_and_unavailable_mode_do_not_start_any_hook(self):
-        for mode in ["light", "null", "invalid", ""]:
-            with self.subTest(mode=mode):
-                (self.root/"mode").write_text(mode)
-                self.assertEqual(self.start().wait(timeout=3),0)
-                self.assertEqual(self.events(),"")
-        (self.root/"mode").unlink()
-        self.assertEqual(self.start().wait(timeout=3),0)
-        self.assertEqual(self.events(),"")
 
     def test_acc_has_priority_until_ready_but_not_until_wrapper_exit(self):
         (self.root / "hold_acc_ready").touch()
@@ -212,7 +329,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.until(lambda: self.state("acc") == "active", "CanBus discovery stopped after deadline")
         self.assertNotIn("end vd_bypass.js", self.events())
 
-    def test_failed_acc_releases_workers_and_only_new_identity_retries(self):
+    def test_failed_acc_retries_after_backoff_in_same_process(self):
         (self.root / "missing_acc_ready").touch()
         self.start()
         self.until(lambda: "start vd_bypass.js" in self.events(), "Failed ACC blocked workers")
@@ -222,9 +339,36 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / "missing_acc_ready").unlink()
         time.sleep(0.2)
         self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
-        (self.root / "generation.107").write_text("2\n")
-        self.until(lambda: self.state("acc") == "active", "New CanBus identity missed hook")
+        (self.root / "proc/uptime").write_text("102.00 0\n")
+        self.until(lambda: self.state("acc") == "active", "Same-process retry did not recover hook")
         self.assertEqual(2, self.events().count("start voyahtune_acc_restore.js"))
+
+    def test_expired_acc_pulse_reinstalls_without_process_restart(self):
+        self.start()
+        self.until(lambda: self.state("acc") == "active", "ACC not ready")
+        self.until(lambda: (self.root / "finished_attempts").exists() and "voyahtune_acc_restore.attempt" in (self.root / "finished_attempts").read_text(), "Attempt not finished")
+        (self.root / "proc/uptime").write_text("116.00 0\n")
+        self.until(lambda: self.events().count("start voyahtune_acc_restore.js") == 2, "Expired pulse not repaired")
+
+    def test_rapid_canbus_restarts_stop_injection(self):
+        self.start()
+        self.until(lambda: self.state("acc") == "active", "ACC not ready")
+        for generation in [2, 3]:
+            (self.root / "generation.107").write_text(str(generation) + "\n")
+            self.until(lambda: self.events().count("start voyahtune_acc_restore.js") == generation, "Restart not injected")
+            self.until(lambda: self.state("acc") == "active", "Restart not ready")
+        (self.root / "generation.107").write_text("4\n")
+        self.until(lambda: self.state("acc") == "failed", "Rapid restarts not blocked")
+        self.assertEqual(3, self.events().count("start voyahtune_acc_restore.js"))
+
+    def test_fresh_acc_pulse_keeps_existing_agent(self):
+        self.start()
+        self.until(lambda: self.state("acc") == "active", "ACC not ready")
+        (self.root / "runtime/drive_hooks/voyahtune_acc_restore.health").write_text("107|119|v2\n")
+        (self.root / "proc/uptime").write_text("120.00 0\n")
+        time.sleep(0.3)
+        self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
+        self.assertEqual("active", self.state("acc"))
 
     def test_all_core_hooks_start_while_vd_status_and_apps_are_blocked(self):
         self.start()
@@ -264,6 +408,27 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / "generation.105").write_text("2\n")
         self.until(lambda: marker.read_text().strip().endswith(":2"), "New VehicleSettings missed hook")
         self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js"))
+
+    def test_vehicle_hook_has_independent_lifecycle_and_health(self):
+        (self.root / "enable_vehicle").touch()
+        (self.root / "disable_apollo").touch()
+        self.start()
+        vehicle = self.root / "runtime/drive_hooks/vehicle.pid"
+        settings = self.root / "voyahtune_drive_reset.pid"
+        self.until(lambda: vehicle.exists() and settings.exists(), "Both drive hooks must start")
+        self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 108"))
+        self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 105"))
+        health = self.root / "runtime/drive_hooks"
+        (health / "vehicle.health").write_text("108|120|v2\n")
+        (health / "voyahtune_drive_reset.health").write_text("105|120|v2\n")
+        (self.root / "proc/uptime").write_text("120.00 0\n")
+        time.sleep(0.5)
+        self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js"))
+        (self.root / "generation.108").write_text("2\n")
+        self.until(lambda: vehicle.read_text().strip().endswith(":2"), "New VehicleAir missed hook")
+        self.assertTrue(settings.read_text().strip().endswith(":1"))
+        self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js 108"))
+        self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 105"))
 
     def test_failed_drive_reset_attach_does_not_loop_or_block_apollo(self):
         (self.root / "missing_drive_ready").touch()

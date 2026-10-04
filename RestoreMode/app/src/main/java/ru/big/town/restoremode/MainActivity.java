@@ -1,6 +1,5 @@
 package ru.big.town.restoremode;
 
-import ru.big.town.common.InstallMode;
 
 
 import android.content.BroadcastReceiver;
@@ -187,6 +186,30 @@ public class MainActivity extends AppCompatActivity {
 
     // -------- Drag-and-drop для переупорядочивания плиток --------
     private TileDragController tileDragController;
+    private final java.util.List<EnergyWidgetView> energyWidgetViews = new java.util.ArrayList<>();
+    private Bundle energyWidgetState = new Bundle();
+    private boolean tripTimerReceived;
+    private final Messenger energyWidgetClient = new Messenger(new Handler(android.os.Looper.getMainLooper(), msg -> {
+        if (msg.what != ru.big.town.common.EnergyWidgetProtocol.STATE) return false;
+        Bundle data = msg.getData();
+        if (data.getInt(ru.big.town.common.EnergyWidgetProtocol.SCHEMA) != ru.big.town.common.EnergyWidgetProtocol.VERSION) return true;
+        energyWidgetState = new Bundle(data);
+        for (EnergyWidgetView view : energyWidgetViews) view.update(energyWidgetState);
+        return true;
+    }));
+    private void watchEnergyWidgets() {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) return;
+        boolean show = false;
+        for (String id : EnergyWidgetView.IDS) show |= sharedPreferences.getBoolean("show_" + id, false);
+        try {
+            EnergyWidgetPreferences.sync(GlobalVars.serviceMessenger, sharedPreferences);
+            Message msg = Message.obtain(null, show && suspensionScreenResumed
+                    ? ru.big.town.common.EnergyWidgetProtocol.WATCH : ru.big.town.common.EnergyWidgetProtocol.UNWATCH);
+            msg.replyTo = energyWidgetClient;
+            GlobalVars.serviceMessenger.send(msg);
+        } catch (RemoteException e) { Log.w(TAG, "Energy widgets service unavailable", e); }
+    }
+
     private SuspensionWidgetView suspensionWidgetView;
     private Bundle suspensionState = new Bundle();
     private boolean suspensionScreenResumed;
@@ -223,6 +246,7 @@ public class MainActivity extends AppCompatActivity {
     private final BroadcastReceiver tripReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            tripTimerReceived = true;
             tripActive = intent.getBooleanExtra("tripActive", false);
             tripInDrive = intent.getBooleanExtra("inDrive", false);
             tripAccumMs = intent.getLongExtra("accumMs", 0L);
@@ -338,6 +362,7 @@ public class MainActivity extends AppCompatActivity {
             boolean value = intent.getBooleanExtra("value", false);
             editor.putBoolean(key, value).apply();
             if ("forcedEv".equals(key)) forcedEvOn = value;
+            else if ("autoLight".equals(key)) autoLightOn = value;
             else if ("suspensionMaintenance".equals(key)) suspensionMaintenanceOn = value;
             else if ("disablePedestrianSound".equals(key)) pedestrianOn = !value;
             else return;
@@ -360,6 +385,10 @@ public class MainActivity extends AppCompatActivity {
         }
         long ms = tripAccumMs;
         if (tripActive && tripInDrive) ms += SystemClock.elapsedRealtime() - tripDriveStartElapsed;
+        for (EnergyWidgetView view : energyWidgetViews) {
+            view.timer(tripTimerReceived ? Math.max(0, ms) : -1, tripInDrive);
+            view.invalidate(); // expire a silent/stalled Native connection even without messages
+        }
         if (tripTimer != null) tripTimer.setText(fmtDuration(ms));
         if (tripStatus != null) {
             tripStatus.setText(!tripActive ? "нет активной поездки"
@@ -591,6 +620,7 @@ public class MainActivity extends AppCompatActivity {
                 connectionReported = true;
                 GlobalVars.clientConnected(new Messenger(service));
                 watchSuspension();
+                watchEnergyWidgets();
             }
         }
 
@@ -598,6 +628,9 @@ public class MainActivity extends AppCompatActivity {
         public void onServiceDisconnected(ComponentName name) {
             clearReportedConnection();
             suspensionState = new Bundle();
+            energyWidgetState = new Bundle();
+            tripTimerReceived = false;
+            for (EnergyWidgetView view : energyWidgetViews) view.update(energyWidgetState);
             if (suspensionWidgetView != null) suspensionWidgetView.update(suspensionState);
         }
 
@@ -1000,10 +1033,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Открыть приложение обычной задачей на выбранном дисплее: 0 — водитель, 1 — пассажир. */
     private void launchAppOnDisplay(String pkg, int displayId) {
-        if (!InstallMode.isFull()) {
-            launchAppNormally(pkg);
-            return;
-        }
+
         try {
             Intent intent = new Intent(ACTION_OPEN_ON_DISPLAY)
                     .setPackage("ru.big.town.anative")
@@ -1019,10 +1049,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Открыть приложение внутри выбранного app_widget, не меняя его настройки. */
     private void launchInsideAppWidget(String pkg, String widgetId) {
-        if (!InstallMode.isFull()) {
-            launchAppNormally(pkg);
-            return;
-        }
+
         AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
         if (entry == null) {
             showSnack("Виджет приложения не найден");
@@ -1142,6 +1169,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isWidgetVisible(String widgetId) {
+        if (EnergyWidgetView.isWidget(widgetId)) return sharedPreferences.getBoolean("show_" + widgetId, false);
         switch (widgetId) {
             case "suspensionWidget": return sharedPreferences.getBoolean("showSuspensionWidget", false);
             case "tripCard":         return sharedPreferences.getBoolean("showTripTimer", true);
@@ -1199,6 +1227,10 @@ public class MainActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (EnergyWidgetView.isWidget(widgetId)) {
+            int[] size = EnergyWidgetView.size(widgetId);
+            return TileSizeStore.dimensions(sharedPreferences, widgetId, size[0], size[1]);
+        }
         if (TileSizeStore.SUSPENSION_WIDGET_ID.equals(widgetId)) return TileSizeStore.dimensions(
                 sharedPreferences, widgetId, TileSizeStore.SUSPENSION_DEFAULT_WIDTH, TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
         if ("tripCard".equals(widgetId)) return new int[]{3, 2};
@@ -1227,7 +1259,9 @@ public class MainActivity extends AppCompatActivity {
         if (tileDragController != null) tileDragController.cancel();
         splitTilesGrid.removeAllViews();
         suspensionWidgetView = null;
+        energyWidgetViews.clear();
         watchSuspension();
+        watchEnergyWidgets();
         appWidgetTileViews.clear();
         PackageManager pm = getPackageManager();
         LayoutInflater inf = LayoutInflater.from(this);
@@ -1271,14 +1305,13 @@ public class MainActivity extends AppCompatActivity {
         
         // Создаём карту сплитов по id для быстрого доступа
         Map<String, SplitStore.Preset> splitMap = new HashMap<>();
-        if (InstallMode.isFull()) {
-            List<SplitStore.Preset> splits = SplitStore.load(sharedPreferences);
-            for (SplitStore.Preset ps : splits) {
-                if (ps.ready()) {
-                    splitMap.put(ps.id, ps);
-                }
+        List<SplitStore.Preset> splits = SplitStore.load(sharedPreferences);
+        for (SplitStore.Preset ps : splits) {
+            if (ps.ready()) {
+                splitMap.put(ps.id, ps);
             }
         }
+
         
         List<boolean[]> occupied = new ArrayList<>();
         for (int pos = 0; pos < tiles.size(); pos++) {
@@ -1323,6 +1356,18 @@ public class MainActivity extends AppCompatActivity {
                 View widgetView = null;
                 
                 switch(tile.id) {
+                    case EnergyWidgetView.ENERGY:
+                    case EnergyWidgetView.TRIP:
+                    case EnergyWidgetView.TIRES:
+                    case EnergyWidgetView.ODO:
+                        EnergyWidgetView energyView = new EnergyWidgetView(this, tile.id,
+                                sharedPreferences.getString("energyCarColor", "burgundy"),
+                                getWidgetDimensions(tile.id)[0], getWidgetDimensions(tile.id)[1]);
+                        energyView.update(energyWidgetState);
+                        energyWidgetViews.add(energyView);
+                        updateTripTimer();
+                        widgetView = energyView;
+                        break;
                     case "suspensionWidget":
                         suspensionWidgetView = new SuspensionWidgetView(this, level -> {
                             if (!GlobalVars.isBound) { showSnack("Сервис не готов"); return; }
@@ -1610,16 +1655,12 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Клик по плитке-ярлыку приложения:
-     *  - full  → открыть обычной задачей, которую системный hook ужмёт в окно;
-     *  - light → обычный запуск приложения (без VD/root).
+     * Открыть обычной задачей, которую системный hook ужмёт в окно.
      */
     private void onAppTileClick(String pkg) {
-        if (InstallMode.isFull()) {
-            if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
-            sendAppWindow(pkg);
-        } else {
-            launchAppNormally(pkg);
-        }
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) { showSnack("Сервис не готов"); return; }
+        sendAppWindow(pkg);
+
     }
 
     private void populateAppWidgetLauncher(View widgetView, AppWidgetStore.Entry entry) {
@@ -1721,10 +1762,6 @@ public class MainActivity extends AppCompatActivity {
      */
     private void showEmbeddedAppWidget(View widgetView, AppWidgetStore.Entry entry,
                                        String packageName, int profileDpi, String moveFromWidgetId) {
-        if (!InstallMode.isFull()) {
-            launchAppNormally(packageName);
-            return;
-        }
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
             showSnack("Сервис не готов");
             return;
@@ -1768,11 +1805,7 @@ public class MainActivity extends AppCompatActivity {
                     String running = embeddedWidgetPackages.get(widgetId);
                     releaseEmbeddedWidget(widgetId, widgetView);
                     if (running == null) return;
-                    if (InstallMode.isFull()) {
-                        sendAppWindow(running);
-                    } else {
-                        launchAppNormally(running);
-                    }
+                    sendAppWindow(running);
                 });
             }
 
@@ -2211,7 +2244,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** LIGHT: обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
+    /** Обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
     private void launchAppNormally(String pkg) {
         try {
             Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
@@ -2294,6 +2327,9 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         suspensionScreenResumed = false;
         watchSuspension();
+        watchEnergyWidgets();
+        energyWidgetState = new Bundle();
+        tripTimerReceived = false;
         suspensionState = new Bundle();
         for (String widgetId : new ArrayList<>(embeddedWidgetSurfaces.keySet())) {
             sendEmbeddedRelease(widgetId);

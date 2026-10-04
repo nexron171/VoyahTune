@@ -6,8 +6,8 @@ REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 LOAD_BIN="$REPO_ROOT/Packaging/system/load.bin"
 MULTIDISPLAY="$REPO_ROOT/Packaging/inject/multidisplay.js"
 LOAD_RC="$REPO_ROOT/Packaging/system/voyahtune.load.rc"
-FULL_INSTALL="$REPO_ROOT/Packaging/installer/full/install.sh"
-FULL_INSTALL_BAT="$REPO_ROOT/Packaging/installer/full/install.bat"
+FULL_INSTALL="$REPO_ROOT/Packaging/installer/device/install.sh"
+FULL_INSTALL_BAT="$REPO_ROOT/Packaging/installer/device/install.bat"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -64,10 +64,14 @@ done
 for REQUIRED in \
         'var READY_MARKER = "[multidisplay] hook ready v2";' \
         'var FAILURE_MARKER = "[multidisplay] hook failed v2";' \
-        'MDI.isWhiteListApp.overload("java.lang.String")' \
-        'return !isNever(packageName === null ? null : "" + packageName);' \
-        'marker(READY_MARKER + " receiver="' \
-        'marker(FAILURE_MARKER + " stage=core_install'; do
+        'overload.call.apply(overload, [receiver].concat(args))' \
+        'if (installed < 1) throw new Error("no compatible isWhiteListApp overload installed")' \
+        'traceWhitelist(pkg, false, "never")' \
+        'traceWhitelist(pkg, true, "server-override")' \
+        'var QUERY_TRACE_MAX = 20;' \
+        'var method = MDI.showDelayDialog;' \
+        'var method = MDI.setEnableActivityAnimation;' \
+        'signalReady("core_overloads=" + coreCount'; do
     require_fixed "$MULTIDISPLAY" "$REQUIRED"
 done
 

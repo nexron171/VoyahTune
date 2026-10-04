@@ -637,6 +637,97 @@
                 android:text="Самый низкий — удобная посадка без смены режима. Остальные уровни выбирают соответствующий режим движения."
                 android:textColor="#AAAAAA" android:textSize="20px" />
 
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="24dp" android:text="Энергия и автомобиль"
+                android:textColor="#FFFFFF" android:textSize="28px" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="Заряд и топливо" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowEnergy" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/EnergySizeRow" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical"
+                android:padding="10dp" android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ширина" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/EnergySettingWidth" android:layout_width="120dp" android:layout_height="60dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Высота" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/EnergySettingHeight" android:layout_width="120dp" android:layout_height="60dp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="Текущая поездка" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowEnergyTrip" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/EnergyTripSizeRow" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical"
+                android:padding="10dp" android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ширина" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/EnergyTripSettingWidth" android:layout_width="120dp" android:layout_height="60dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Высота" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/EnergyTripSettingHeight" android:layout_width="120dp" android:layout_height="60dp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="Давление в шинах" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowTirePressure" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/TirePressureSizeRow" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical"
+                android:padding="10dp" android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ширина" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/TirePressureSettingWidth" android:layout_width="120dp" android:layout_height="60dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Высота" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/TirePressureSettingHeight" android:layout_width="120dp" android:layout_height="60dp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="Общий пробег" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowOdometer" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/OdometerSizeRow" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical"
+                android:padding="10dp" android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ширина" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/OdometerSettingWidth" android:layout_width="120dp" android:layout_height="60dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Высота" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/OdometerSettingHeight" android:layout_width="120dp" android:layout_height="60dp" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Цвет автомобиля в карточке шин" android:textColor="#AAAAAA" android:textSize="22px" />
+            <Spinner android:id="@+id/energyCarColor" android:layout_width="260dp" android:layout_height="60dp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:labelFor="@id/energyBatteryCapacity" android:text="Батарея, кВт·ч"
+                    android:textColor="#E0E0E0" android:textSize="24px" />
+                <EditText android:id="@+id/energyBatteryCapacity" android:layout_width="130dp"
+                    android:layout_height="60dp" android:layout_marginStart="12dp" android:inputType="numberDecimal"
+                    android:singleLine="true" android:imeOptions="actionDone" android:textColor="#FFFFFF" android:textSize="26px" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="30dp" android:labelFor="@id/energyTankCapacity"
+                    android:text="Бак, л" android:textColor="#E0E0E0" android:textSize="24px" />
+                <EditText android:id="@+id/energyTankCapacity" android:layout_width="130dp"
+                    android:layout_height="60dp" android:layout_marginStart="12dp" android:inputType="numberDecimal"
+                    android:singleLine="true" android:imeOptions="actionDone" android:textColor="#FFFFFF" android:textSize="26px" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="По умолчанию: батарея 43 кВт·ч, бак 56 л. Значения общие для графика и текущей поездки."
+                android:textColor="#AAAAAA" android:textSize="20px" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:text="Расчёты приблизительны и не должны использоваться для принятия решения о заправке или зарядке."
+                android:textColor="#C1B396" android:textSize="20px" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="История уровней сохраняется за последние 150 км с шагом 100 м. Оба средних расхода учитывают только снижения уровней; зарядка и заправка не вычитаются из расхода. Время поездки учитывается только в D."
+                android:textColor="#AAAAAA" android:textSize="20px" />
+
             <!-- Карточки «Набрать номер» (0..100) -->
             <LinearLayout
                 android:id="@+id/dialWidgetsContainer"
@@ -2048,7 +2139,7 @@
             android:paddingHorizontal="28dp"
             android:paddingVertical="20dp">
 
-            <!-- Системный док (Frida-фича: в light весь раздел скрыт кодом — navSplitScreen GONE) -->
+            <!-- Системный док -->
             <LinearLayout
                 android:id="@+id/dockOverrideBlock"
                 android:layout_width="match_parent"
@@ -2257,64 +2348,6 @@
                 android:text="VoyahTune управляет выбранными Apollo-функциями без чтения текущего состояния автомобиля. Настройки применяются кнопкой «Применить» и автоматически через 10 секунд после пробуждения."
                 android:textColor="#FFFFFF"
                 android:textSize="24px" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
-                android:background="@drawable/layout_category_bg"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Активация функций Apollo"
-                        android:textColor="#FFFFFF"
-                        android:textSize="27px" />
-
-                    <TextView
-                        android:id="@+id/textApolloSettingsActivationStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Выключено. Применяется вместе с остальными настройками."
-                        android:textColor="#aaaaaa"
-                        android:textSize="20px" />
-
-                </LinearLayout>
-
-                <Switch
-                    android:id="@+id/switchApolloSettingsActivation"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
-                    android:checked="false"
-                    android:enabled="false"
-                    android:thumb="@drawable/switch_thumb"
-                    android:track="@drawable/switch_track" />
-
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/textApolloFullOnly"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:background="@drawable/layout_category_bg"
-                android:padding="16dp"
-                android:text="Light-версия не содержит Frida, поэтому эмуляция подписки и экзамена для штатного меню в ней недоступна. Управление функциями ниже остаётся доступным."
-                android:textColor="#ffb36b"
-                android:textSize="22px"
-                android:visibility="gone" />
 
             <LinearLayout
                 android:id="@+id/apolloControls"
@@ -2575,6 +2608,13 @@
 
         </LinearLayout>
 
+        <Button
+            android:id="@+id/buttonOpenUpdates"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:text="Обновления VoyahTune" />
+
         <!-- Диагностика ресурсов существует только пока открыт раздел «Другое». -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -2698,7 +2738,34 @@
 
         </LinearLayout>
 
-        <!-- Опциональные модификации штатной Qinggan-клавиатуры (только full). -->
+        <LinearLayout
+            android:id="@+id/debugInformationBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/layout_category_bg"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Отладочная информация"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <LinearLayout
+                android:id="@+id/debugLightSensorRows"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="vertical" />
+
+        </LinearLayout>
+
+        <!-- Опциональные модификации штатной Qinggan-клавиатуры. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -2730,7 +2797,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Форсировать английский режим штатной клавиатуры · только full"
+                        android:text="Форсировать английский режим штатной клавиатуры"
                         android:textColor="#888888"
                         android:textSize="20px" />
 
@@ -2773,7 +2840,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Добавить переключение EN ↔ RU (ЙЦУКЕН) · только full"
+                        android:text="Добавить переключение EN ↔ RU (ЙЦУКЕН)"
                         android:textColor="#888888"
                         android:textSize="20px" />
 
@@ -3179,7 +3246,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
-                android:text="На короткое и долгое нажатие можно назначить несколько действий. Они выполняются сверху вниз; порядок показан номерами. Пустой список сохраняет штатное системное поведение. Долгое нажатие срабатывает по удержанию (~0.6 с), не дожидаясь отпускания. Перехват работает через frida (только сборка full)."
+                android:text="На короткое и долгое нажатие можно назначить несколько действий. Они выполняются сверху вниз; порядок показан номерами. Пустой список сохраняет штатное системное поведение. Долгое нажатие срабатывает по удержанию (~0.6 с), не дожидаясь отпускания. Перехват работает через frida."
                 android:textColor="#888888"
                 android:textSize="20px" />
 

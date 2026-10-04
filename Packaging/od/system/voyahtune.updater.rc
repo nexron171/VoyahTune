@@ -1,0 +1,19 @@
+# Independent from the loader and both APKs; init maintains one process and restarts it.
+# Install this rc only together with the root executable and system UI APK.
+on post-fs-data
+    mkdir /data/local/voyahtune-updater 0700 root root
+    chmod 0700 /data/local/voyahtune-updater
+    chown root root /data/local/voyahtune-updater
+    enable voyahtune_updater
+    start voyahtune_updater
+
+service voyahtune_updater /data/local/bin/voyahtune-updater
+    class late_start
+    user root
+    group root inet
+    seclabel u:r:su:s0
+    disabled
+    # Connection is possible for the UI UID; the daemon validates SO_PEERCRED
+    # against PackageManager's registry before reading any command.
+    socket voyahtune_updater stream 0666 root root
+    restart_period 10

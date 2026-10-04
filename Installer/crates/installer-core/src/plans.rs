@@ -1,24 +1,10 @@
-use crate::{
-    inventory::Inventory,
-    payload::{Payload, Variant},
-    Result,
-};
+use crate::{inventory::Inventory, payload::Payload, Result};
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
-    Full,
-    Light,
+    Install,
     Remove,
-}
-impl Action {
-    pub fn variant(self) -> Option<Variant> {
-        match self {
-            Self::Full => Some(Variant::Full),
-            Self::Light => Some(Variant::Light),
-            Self::Remove => None,
-        }
-    }
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -53,8 +39,6 @@ pub struct Plan {
     #[serde(default)]
     pub recipe_sha256: String,
     #[serde(default)]
-    pub current_mode: Option<crate::mode::CurrentMode>,
-    #[serde(default)]
     pub recipe: Option<crate::recipe::Recipe>,
     pub request: Request,
     pub inventory: Inventory,
@@ -69,9 +53,9 @@ pub fn signature_resets(
     payload: &Payload,
     action: Action,
 ) -> Result<Vec<String>> {
-    let Some(variant) = action.variant() else {
+    if action == Action::Remove {
         return Ok(Vec::new());
-    };
+    }
     let mut resets = Vec::new();
     for (id, artifact) in [
         (crate::payload::NATIVE, "native.apk"),
@@ -86,7 +70,7 @@ pub fn signature_resets(
         if installed.is_none() && base.is_none() {
             continue;
         }
-        let expected = crate::payload::verified_signers(&payload.file(artifact, Some(variant))?)?;
+        let expected = crate::payload::verified_signers(&payload.file(artifact)?)?;
         if installed
             .into_iter()
             .chain(base)
@@ -105,41 +89,24 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     } else if inventory.state == "absent" {
         "install"
     } else if inventory.state != "complete" {
-        warnings.push("Установлен старый или неполный комплект. Сначала будут сохранены найденные файлы, затем восстановлен выбранный набор.".into());
+        warnings.push("Обнаружена старая или неполная установка. Сначала будут сохранены найденные файлы, затем установлены файлы выбранного релиза.".into());
         "repair"
-    } else if inventory.variant != action.variant() {
-        "switch"
     } else if inventory.version.as_deref() == Some(&payload.manifest.release_version) {
         "repair"
     } else {
         "update"
     };
     if action == Action::Remove {
-        warnings.push("Будут удалены оба набора, их настройки и журналы; DNS будет восстановлен из сохранённого исходного состояния. Заводская прошивка и состояние загрузчика не восстанавливаются.".into());
+        warnings.push("Будут удалены VoyahTune, его настройки и журналы; DNS будет восстановлен из сохранённого исходного состояния. Заводская прошивка и состояние загрузчика не восстанавливаются.".into());
     }
     if action == Action::Remove && payload.manifest.build_revision == "builtin-remover" {
-        warnings.push("Используются встроенные правила удаления известных компонентов. Для комплекта с новыми файлами откройте его payload ZIP перед удалением; неизвестный будущий формат требует обновления установщика.".into());
+        warnings.push("Используются встроенные правила удаления известных компонентов. Для релиза с новыми файлами откройте его payload ZIP перед удалением; неизвестный будущий формат требует обновления установщика.".into());
     }
     let resets = signature_resets(&inventory, payload, action).unwrap_or_default();
     if !resets.is_empty() {
         warnings.push(format!("Другой ключ подписи: {}. Эти приложения будут автоматически удалены вместе с настройками и данными, затем установлены заново.", resets.join(", ")));
     }
-    if action == Action::Light {
-        warnings.push("Если раньше был установлен Full, рекомендуется предварительное полное удаление. Оно стирает настройки и данные VoyahTune. Можно продолжить поверх: установщик удалит только хуки и Frida-инфраструктуру, затем обновит приложения.".into());
-    }
-    let mut steps = classic_steps(action);
-    if action == Action::Light {
-        let runtime = steps.iter().position(|(id, _)| *id == "runtime").unwrap();
-        let signing = steps
-            .iter()
-            .position(|(id, _)| *id == "signing-reset")
-            .unwrap();
-        steps.swap(runtime, signing);
-    }
-    if payload.manifest.schema == 3 && action == Action::Light {
-        let i = steps.iter().position(|(id, _)| *id == "native").unwrap();
-        steps.insert(i, ("files", "Установка файлов комплекта"));
-    }
+    let steps = classic_steps(action);
     use sha2::{Digest, Sha256};
     Ok(Plan {
         installer_version: crate::compatibility::INSTALLER_VERSION.into(),
@@ -152,7 +119,6 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
         recipe_sha256: hex::encode(Sha256::digest(serde_json::to_vec(&serde_json::to_value(
             &payload.manifest.recipe,
         )?)?)),
-        current_mode: None,
         recipe: Some(payload.manifest.recipe.clone()),
         request: Request {
             action,
@@ -177,11 +143,10 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
 /// Shared with the GUI plan; these are presentation boundaries in the classic flow.
 fn classic_steps(action: Action) -> Vec<(&'static str, &'static str)> {
     let mut s = vec![
-        ("preflight", "Подготовка файлов комплекта"),
+        ("preflight", "Подготовка файлов релиза"),
         ("root", "Получение системного доступа"),
     ];
     if action != Action::Remove {
-        s.push(("mode-check", "Чтение текущего режима"));
         s.push(("permission", "Проверка владельца CAN-разрешения"));
     }
     s.push(("system", "Подготовка системного раздела"));
@@ -194,34 +159,22 @@ fn classic_steps(action: Action) -> Vec<(&'static str, &'static str)> {
             ("files", "Удаление hooks и временных файлов"),
             ("settings", "Очистка настроек VoyahTune"),
             ("packages", "Удаление приложений"),
-            ("mode", "Удаление флага режима"),
             ("reboot", "Перезагрузка автомобиля"),
         ]);
     } else {
         s.extend([
             ("backup", "Сохранение файлов перед заменой"),
             ("signing-reset", "Переустановка при смене подписи"),
-            (
-                "runtime",
-                if action == Action::Light {
-                    "Удаление hooks и Frida без очистки данных"
-                } else {
-                    "Остановка старых hooks"
-                },
-            ),
+            ("runtime", "Остановка старых hooks"),
+            ("apollo-migration", "Отключение старой активации Apollo"),
+            ("files", "Установка файлов релиза"),
+            ("migration", "Миграция старого init.logcat.sh"),
+            ("boot-hooks", "Установка boot-hook"),
         ]);
-        if action == Action::Full {
-            s.extend([
-                ("files", "Установка Frida и скриптов"),
-                ("migration", "Миграция старого init.logcat.sh"),
-                ("boot-hooks", "Установка boot-hook"),
-            ]);
-        }
         s.extend([
             ("native", "Установка Native и разрешений"),
             ("packages", "Установка RestoreMode и настроек"),
             ("dns", "Настройка DNS"),
-            ("mode", "Сохранение режима приложения"),
             ("reboot", "Перезагрузка автомобиля"),
             ("verify", "Проверка запуска Native"),
         ]);
@@ -241,11 +194,11 @@ mod tests {
             "abi":"arm64-v8a", "problems":[], "baseNative":null,
             "packages":{"ru.big.town.anative":{
                 "path":"/system/priv-app/Native/Native.apk", "sha256":"verified", "signers":[],
-                "build":{"schema":1,"product":"VoyahTune","component":"native","variant":"full",
+                "build":{"schema":1,"product":"VoyahTune","component":"native",
                     "releaseVersion":"9.0.0","buildRevision":"future","runtimeHashes":{}}
             }},
             "files":{}, "foreignFiles":{}, "remnants":[], "state":"partial",
-            "variant":null, "version":null, "token":"test"
+            "version":null, "token":"test"
         }))
         .unwrap();
         let payload = Payload {

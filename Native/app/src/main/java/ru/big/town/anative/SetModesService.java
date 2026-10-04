@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-import ru.big.town.common.InstallMode;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -106,11 +105,17 @@ public class SetModesService extends Service {
     private final VoiceCommandController voiceCommands = new VoiceCommandController(this);
 
     private SuspensionWidgetController suspensionWidget;
+    private EnergyWidgetController energyWidgets;
 
     class IncomingHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case ru.big.town.common.EnergyWidgetProtocol.WATCH:
+                case ru.big.town.common.EnergyWidgetProtocol.UNWATCH:
+                case ru.big.town.common.EnergyWidgetProtocol.CONFIGURE:
+                    if (energyWidgets != null) energyWidgets.handle(msg);
+                    break;
                 case ru.big.town.common.SuspensionWidgetProtocol.WATCH:
                 case ru.big.town.common.SuspensionWidgetProtocol.UNWATCH:
                 case ru.big.town.common.SuspensionWidgetProtocol.SELECT:
@@ -143,14 +148,12 @@ public class SetModesService extends Service {
 
                 case MSG_AUTO_LIGHT_ENABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_ENABLE");
-                    saveAutoLightState(true);
-                    startLightSensorService();
+                    setAutoLightEnabled(true);
                     break;
 
                 case MSG_AUTO_LIGHT_DISABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_DISABLE");
-                    saveAutoLightState(false);
-                    stopLightSensorService();
+                    setAutoLightEnabled(false);
                     break;
 
                 case MSG_LEAVE_CAR:
@@ -240,7 +243,7 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_SPLIT_LAUNCH_VD: {
-                    if (!InstallMode.isFull()) { Log.i(TAG, "MSG_SPLIT_LAUNCH_VD игнор (light-сборка)"); break; }
+
                     android.os.Bundle d = msg.getData();
                     String left = (d != null) ? d.getString("left") : null;
                     String right = (d != null) ? d.getString("right") : null;
@@ -299,7 +302,6 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_EMBEDDED_TRANSFER: {
-                    if (!InstallMode.isFull()) { Log.i(TAG, "MSG_EMBEDDED_TRANSFER игнор (light-сборка)"); break; }
                     android.os.Bundle t = msg.getData();
                     if (t == null) break;
                     if (t.getBoolean("embeddedMove", false)) {
@@ -352,8 +354,15 @@ public class SetModesService extends Service {
             else if (action.equals("reboot")) rebootSystem();
             else if (action.startsWith("auto_light:")) {
                 boolean enabled = action.endsWith(":on");
-                saveAutoLightState(enabled);
-                if (enabled) startLightSensorService(); else stopLightSensorService();
+                ApplyEngine.postIndependentUserCommand("voice auto light", () -> {
+                    try {
+                        AutoLightSettings.set(this, enabled);
+                        VoiceCommandController.respond(reply, true, null);
+                    } catch (RuntimeException e) {
+                        VoiceCommandController.respond(reply, false, "Не удалось выполнить команду");
+                    }
+                });
+                return;
             }
             VoiceCommandController.respond(reply, true, null);
         } catch (RuntimeException e) {
@@ -916,17 +925,17 @@ public class SetModesService extends Service {
         Log.i(TAG, "applyTheme mode=" + mode);
     }
 
-    private void saveAutoLightState(boolean enabled) {
-        prefs().edit().putBoolean("autoLight", enabled).apply();
-        Log.i(TAG, "saveAutoLightState: " + enabled);
+    private void restoreAutoLightState() {
+        ApplyEngine.postWakeAction("restore auto light service switch", () -> {
+            AutoLightSettings.restore(this);
+            return true;
+        }, null);
     }
 
-    private void restoreAutoLightState() {
-        boolean autoLight = prefs().getBoolean("autoLight", false);
-        Log.i(TAG, "restoreAutoLightState: autoLight=" + autoLight);
-        if (autoLight) {
-            startLightSensorService();
-        }
+    private void setAutoLightEnabled(boolean enabled) {
+        ApplyEngine.postIndependentUserCommand("auto light switch", () -> {
+            AutoLightSettings.set(this, enabled);
+        });
     }
 
     /**
@@ -984,18 +993,6 @@ public class SetModesService extends Service {
             Intent intent = new Intent(this, WiperColdService.class);
             startForegroundService(intent);
         }
-    }
-
-    private void startLightSensorService() {
-        Intent intent = new Intent(this, LightSensorService.class);
-        startForegroundService(intent);
-        Log.i(TAG, "LightSensorService started");
-    }
-
-    private void stopLightSensorService() {
-        Intent intent = new Intent(this, LightSensorService.class);
-        stopService(intent);
-        Log.i(TAG, "LightSensorService stopped");
     }
 
     //private boolean isWorking = false;
@@ -1125,6 +1122,7 @@ public class SetModesService extends Service {
         if (serviceDestroyed) return;
         if (beginWakeSession()) {
             requestSavedConfigSync("physical wake");
+            restoreAutoLightState();
             resetWiperColdOnPowerOn();
             forwardPowerOnToTripStats();
             BatteryHeatService.requestPhysicalWake(this);
@@ -1177,6 +1175,7 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        energyWidgets = new EnergyWidgetController(this);
         ApplyEngine.activateWake("service create");
         // A stale file from an earlier boot is fail-closed and removed on first service creation.
         ApolloSettingsRuntimeState.isEnabled(this);
@@ -1202,10 +1201,9 @@ public class SetModesService extends Service {
         setModesReceiverDynamic = new SetModesReceiverDynamic(
                 this::handleScreenOffFallback,
                 this::handleScreenOnFallback);
-        if (InstallMode.isFull()) {
-            screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
-            screenLiftTaskRestorer.register();
-        }
+        screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
+        screenLiftTaskRestorer.register();
+
         // Приёмник запроса снимка логов + восстановление захвата регистрируем в onCreate
         // (срабатывает и при простом bind, не только при startService).
         try {
@@ -1547,7 +1545,7 @@ public class SetModesService extends Service {
         // Fallback-подписку на пробуждение через броадкасты держим ВСЕГДА (belt-and-suspenders),
         // а не только когда mCarPowerManager==null: слушатель питания может «протухнуть» при
         // рестарте CarService, и тогда единственным триггером остаётся SCREEN_ON/GARAGE_MODE_OFF.
-        // Режимы восстанавливаются отдельно по двери и Drive.
+        // Восстановление настроек запускается отдельно из сохранённого ACC-цикла.
         if (!receiverRegistered) {
             IntentFilter filter = new IntentFilter();
             filter.addAction("android.intent.action.KEYCODE_SWC_USER_DEFINE");
@@ -1574,6 +1572,8 @@ public class SetModesService extends Service {
         } else {
             Log.i(TAG, "onStartCommand(): already initialized");
         }
+        // Both an ACC notification and a normal service restart reconcile the same durable claim.
+        ApplyEngine.scheduleAccApply(this);
         //if(action.equals("ru.big.town.anative.APPLY_DRIVE_MODES")){
         //  Log.i(TAG, "onStartCommand() Intent is ru.big.town.anative.APPLY_DRIVE_MODES!");
         //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
@@ -1604,9 +1604,9 @@ public class SetModesService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
         if (suspensionWidget != null) suspensionWidget.close();
+        if (energyWidgets != null) energyWidgets.close();
         voiceCommands.close();
         serviceDestroyed = true;
-        ApplyEngine.stopEarlyDriveRestore("service destroyed");
         for (VirtualDisplay display : embeddedDisplays.values()) {
             try { display.release(); } catch (Exception ignored) {}
         }

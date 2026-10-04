@@ -1,18 +1,24 @@
 package ru.big.town.restoremode;
 
-import ru.big.town.common.InstallMode;
 
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.ServiceConnection;
 import android.app.ActivityManager;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
@@ -124,6 +130,52 @@ public class AdvanceActivity extends AppCompatActivity {
     static final int MSG_APPLY_SUSPENSION_MAINTENANCE = 37;
     static final int MSG_APPLY_FORCED_EV    = 35;
     private static final String NATIVE_PACKAGE = "ru.big.town.anative";
+    private static final int LIGHT_DIAGNOSTICS_WATCH = 1;
+    private static final int LIGHT_DIAGNOSTICS_UPDATE = 2;
+    private static final int LIGHT_DIAGNOSTICS_UNKNOWN = Integer.MIN_VALUE;
+    private static final String[] LIGHT_DIAGNOSTICS_LABELS = {
+            "SWReason", "RSM · внешняя освещённость", "RSM · освещённость впереди",
+            "RSM · ИК-освещённость", "CarSignal · уровень света", "CarSignal · PAS уровень света",
+            "Android · освещённость (лк)"
+    };
+    private final TextView[] lightDiagnosticsRows = new TextView[7];
+    private boolean lightDiagnosticsActive;
+    private boolean lightDiagnosticsBound;
+    private int lightDiagnosticsSession;
+    private SensorManager lightSensorManager;
+    private final SensorEventListener androidLightListener = new SensorEventListener() {
+        @Override public void onSensorChanged(SensorEvent event) {
+            if (lightDiagnosticsActive && event.values.length > 0 && lightDiagnosticsRows[6] != null) {
+                lightDiagnosticsRows[6].setText(LIGHT_DIAGNOSTICS_LABELS[6] + ": "
+                        + String.format(Locale.getDefault(), "%.1f", event.values[0]));
+            }
+        }
+        @Override public void onAccuracyChanged(Sensor sensor, int accuracy) { }
+    };
+    private final Messenger lightDiagnosticsClient = new Messenger(new Handler(Looper.getMainLooper()) {
+        @Override public void handleMessage(Message msg) {
+            if (msg.what == LIGHT_DIAGNOSTICS_UPDATE) {
+                int[] values = msg.getData().getIntArray("values");
+                if (values != null && values.length == 6 && msg.arg1 == lightDiagnosticsSession
+                        && lightDiagnosticsActive) showLightDiagnostics(values);
+            } else super.handleMessage(msg);
+        }
+    });
+    private final ServiceConnection lightDiagnosticsConnection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            if (!lightDiagnosticsActive || !lightDiagnosticsBound) return;
+            Message watch = Message.obtain(null, LIGHT_DIAGNOSTICS_WATCH);
+            watch.arg1 = lightDiagnosticsSession;
+            watch.replyTo = lightDiagnosticsClient;
+            try { new Messenger(binder).send(watch); }
+            catch (RemoteException e) { Log.w("LightDiagnostics", "Watch failed", e); }
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            int[] unknown = new int[6];
+            java.util.Arrays.fill(unknown, LIGHT_DIAGNOSTICS_UNKNOWN);
+            showLightDiagnostics(unknown);
+        }
+    };
 
     private static final String ACTION_BATTERY_HEAT_AUTO_CHANGED =
             "ru.big.town.anative.BATTERY_HEAT_AUTO_CHANGED";
@@ -133,11 +185,9 @@ public class AdvanceActivity extends AppCompatActivity {
     private static final String EXTRA_MODE_KEY = "modeKey";
     private static final String EXTRA_REMEMBER_LAST = "rememberLast";
 
-    // Apollo Tech owns persisted targets, including the stock subscription/exam UI.
-    private Switch switchApolloSettingsActivation, switchApolloTlc, switchApolloTrafficLights,
-            switchApolloTrafficSigns;
+    // Apollo Tech keeps only the individual feature targets.
+    private Switch switchApolloTlc, switchApolloTrafficLights, switchApolloTrafficSigns;
     private RadioGroup apolloGreenSoundGroup;
-    private TextView textApolloSettingsActivationStatus, textApolloStatus, textApolloFullOnly;
     private View apolloGreenSoundContainer;
 
     // Кнопка «Применить» (верхняя панель) — блокировка + прогресс на время цикла отправки
@@ -169,6 +219,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
     // Реал-тайм слежение селектора за текущим режимом в машине: Native шлёт MODE_SYNCED при смене режима
     // (штатным меню/кнопкой руля/применением) → двигаем нужный radio, даже если экран настроек открыт.
+    private boolean syncingModeUi;
     private final BroadcastReceiver modeSyncReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -185,7 +236,9 @@ public class AdvanceActivity extends AppCompatActivity {
                     : "recycle".equals(modeKey) ? R.id.recycle_modes_group
                     : R.id.drive_modes_group;
             RadioGroup g = findViewById(groupId);
-            if (g != null) checkRadioByTag(g, mode);
+            syncingModeUi = true;
+            try { if (g != null) checkRadioByTag(g, mode); }
+            finally { syncingModeUi = false; }
         }
     };
 
@@ -204,6 +257,8 @@ public class AdvanceActivity extends AppCompatActivity {
                 if ("forcedEv".equals(key)) {
                     RadioGroup group = findViewById(R.id.forcedEvGroup);
                     if (group != null) group.check(value ? R.id.forcedEvOn : R.id.forcedEvOff);
+                } else if ("autoLight".equals(key)) {
+                    if (autoLightGroup != null) autoLightGroup.check(value ? R.id.autoLightOn : R.id.autoLightOff);
                 } else if ("suspensionMaintenance".equals(key)) {
                     Switch toggle = findViewById(R.id.switchSuspensionMaintenance);
                     if (toggle != null) toggle.setChecked(value);
@@ -483,11 +538,7 @@ public class AdvanceActivity extends AppCompatActivity {
         navCustomCommands.setVisibility(
                 prefs.getBoolean(PREF_SHOW_CUSTOM_COMMANDS, false) ? View.VISIBLE : View.GONE);
 
-        // LIGHT: скрываем разделы «Приложения и разделение экрана» (2) и «Кнопки на руле» (5) — split/VD и Frida-руль.
-        if (!InstallMode.isFull()) {
-            if (navSplitScreen != null)     navSplitScreen.setVisibility(View.GONE);
-            if (navSteeringButtons != null) navSteeringButtons.setVisibility(View.GONE);
-        }
+
 
         // Раздел «Главный экран»: тумблеры видимости карточек (по умолчанию все включены)
         bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer", true);
@@ -508,6 +559,29 @@ public class AdvanceActivity extends AppCompatActivity {
         bindTileSizeSpinners(R.id.suspensionSettingWidth, R.id.suspensionSettingHeight,
                 TileSizeStore.SUSPENSION_WIDGET_ID,
                 TileSizeStore.SUSPENSION_DEFAULT_WIDTH, TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
+        bindShowSwitch(R.id.switchShowEnergy, "show_energyWidget", false, R.id.EnergySizeRow);
+        bindTileSizeSpinners(R.id.EnergySettingWidth, R.id.EnergySettingHeight, "energyWidget", 8, 3);
+        bindShowSwitch(R.id.switchShowEnergyTrip, "show_energyTripWidget", false, R.id.EnergyTripSizeRow);
+        bindTileSizeSpinners(R.id.EnergyTripSettingWidth, R.id.EnergyTripSettingHeight, "energyTripWidget", 8, 2);
+        bindShowSwitch(R.id.switchShowTirePressure, "show_tirePressureWidget", false, R.id.TirePressureSizeRow);
+        bindTileSizeSpinners(R.id.TirePressureSettingWidth, R.id.TirePressureSettingHeight, "tirePressureWidget", 4, 4);
+        bindShowSwitch(R.id.switchShowOdometer, "show_odometerWidget", false, R.id.OdometerSizeRow);
+        bindTileSizeSpinners(R.id.OdometerSettingWidth, R.id.OdometerSettingHeight, "odometerWidget", 4, 1);
+        android.widget.Spinner carColor = findViewById(R.id.energyCarColor);
+        android.widget.ArrayAdapter<String> carColors = new android.widget.ArrayAdapter<>(this,
+                R.layout.spinner_item, EnergyWidgetView.COLOR_NAMES);
+        carColors.setDropDownViewResource(R.layout.spinner_dropdown_item);
+        carColor.setAdapter(carColors);
+        carColor.setSelection(java.util.Arrays.asList(EnergyWidgetView.COLORS).indexOf(
+                EnergyWidgetView.color(prefs.getString("energyCarColor", "burgundy"))));
+        carColor.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                prefs.edit().putString("energyCarColor", EnergyWidgetView.COLORS[position]).apply();
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+        bindEnergyCapacity(R.id.energyBatteryCapacity, ru.big.town.common.EnergyWidgetSettings.BATTERY_KEY, 43);
+        bindEnergyCapacity(R.id.energyTankCapacity, ru.big.town.common.EnergyWidgetSettings.TANK_KEY, 56);
         initDialWidgets();
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
@@ -520,16 +594,14 @@ public class AdvanceActivity extends AppCompatActivity {
             sendBroadcast(i);
         });
 
-        // Ярлыки приложений на главном — в обоих флейворах (в light открывают приложение обычным
-        // способом, в full — на VD). Пресеты сплита и per-app DPI — только в full.
+        // Ярлыки приложений, пресеты сплита и per-app DPI.
         initAppShortcuts();
         initAppWidgets();
         initDockOverride();
-        if (InstallMode.isFull()) {
-            initFullscreenApps();
-            initSplitScreen();
-            initAppDpiList();
-        }
+        initFullscreenApps();
+        initSplitScreen();
+        initAppDpiList();
+
 
         // Раздел «Настройки автомобиля» (режимы + безопасность + комфорт слиты в один раздел)
         initModeRadios();
@@ -575,12 +647,41 @@ public class AdvanceActivity extends AppCompatActivity {
 
         TextView textAppVersion = findViewById(R.id.textAppVersion);
         textAppVersion.setText(BuildConfig.VERSION_NAME);
+        findViewById(R.id.buttonOpenUpdates).setOnClickListener(v -> {
+            Intent updates = new Intent(Intent.ACTION_MAIN)
+                    .setComponent(new android.content.ComponentName(
+                            "ru.big.town.updater", "ru.big.town.updater.MainActivity"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    .putExtra("ru.big.town.updater.OPEN_INITIAL_SCREEN", true);
+            try {
+                startActivity(updates);
+            } catch (android.content.ActivityNotFoundException | SecurityException unavailable) {
+                android.widget.Toast.makeText(this,
+                        "Обновления недоступны. Установите релиз с поддержкой OTA через USB с компьютера.",
+                        android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
 
         // Раздел «Другое»: тоггл «Режим отладки»
         Switch switchDebugMode = findViewById(R.id.switchDebugMode);
+        View debugInformationBlock = findViewById(R.id.debugInformationBlock);
+        LinearLayout lightRows = findViewById(R.id.debugLightSensorRows);
+        for (int i = 0; i < lightDiagnosticsRows.length; i++) {
+            TextView row = new TextView(this);
+            row.setTextColor(Color.WHITE);
+            row.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 20);
+            row.setPadding(0, 4, 0, 4);
+            lightRows.addView(row);
+            lightDiagnosticsRows[i] = row;
+        }
+        resetLightDiagnostics();
         switchDebugMode.setChecked(prefs.getBoolean("debugMode", false));
-        switchDebugMode.setOnCheckedChangeListener((b, checked) ->
-                prefs.edit().putBoolean("debugMode", checked).apply());
+        debugInformationBlock.setVisibility(switchDebugMode.isChecked() ? View.VISIBLE : View.GONE);
+        switchDebugMode.setOnCheckedChangeListener((b, checked) -> {
+            prefs.edit().putBoolean("debugMode", checked).apply();
+            debugInformationBlock.setVisibility(checked ? View.VISIBLE : View.GONE);
+            updateLightDiagnosticsBinding();
+        });
 
         // Раздел «Другое»: тоггл «Полноэкранная сетка» главного экрана и число растянутых колонок
         Switch switchFullscreenGrid = findViewById(R.id.switchFullscreenGrid);
@@ -601,21 +702,17 @@ public class AdvanceActivity extends AppCompatActivity {
             pickerFullscreenGridColumns.setEnabled(checked);
         });
 
-        // Keyboard modifications are optional full-only Frida agents. The agents overlap in the
+        // Keyboard modifications are optional Frida agents. The agents overlap in the
         // Qinggan IME, so the two switches expose one mutually-exclusive off/en/ru preference.
         Switch switchKeyboardEnglish = findViewById(R.id.switchKeyboardEnglish);
         Switch switchKeyboardRussian = findViewById(R.id.switchKeyboardRussian);
         if (switchKeyboardEnglish != null && switchKeyboardRussian != null) {
-            String keyboardMode = InstallMode.isFull()
-                    ? SplitConfigSync.normalizeKeyboardMode(prefs.getString("keyboardMode", "off"))
-                    : "off";
+            String keyboardMode = SplitConfigSync.normalizeKeyboardMode(prefs.getString("keyboardMode", "off"));
             switchKeyboardEnglish.setChecked("en".equals(keyboardMode));
             switchKeyboardRussian.setChecked("ru".equals(keyboardMode));
-            switchKeyboardEnglish.setEnabled(InstallMode.isFull());
-            switchKeyboardRussian.setEnabled(InstallMode.isFull());
             final boolean[] updatingKeyboardSwitches = {false};
             switchKeyboardEnglish.setOnCheckedChangeListener((button, checked) -> {
-                if (updatingKeyboardSwitches[0] || !InstallMode.isFull()) return;
+                if (updatingKeyboardSwitches[0]) return;
                 updatingKeyboardSwitches[0] = true;
                 if (checked) switchKeyboardRussian.setChecked(false);
                 String mode = checked ? "en" : (switchKeyboardRussian.isChecked() ? "ru" : "off");
@@ -624,7 +721,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 updatingKeyboardSwitches[0] = false;
             });
             switchKeyboardRussian.setOnCheckedChangeListener((button, checked) -> {
-                if (updatingKeyboardSwitches[0] || !InstallMode.isFull()) return;
+                if (updatingKeyboardSwitches[0]) return;
                 updatingKeyboardSwitches[0] = true;
                 if (checked) switchKeyboardEnglish.setChecked(false);
                 String mode = checked ? "ru" : (switchKeyboardEnglish.isChecked() ? "en" : "off");
@@ -690,10 +787,9 @@ public class AdvanceActivity extends AppCompatActivity {
             });
         }
 
-        // Раздел «Кнопки на руле» (Frida-перехват кнопки-звёздочки) — только в full.
-        if (InstallMode.isFull()) {
-            initSteeringButtons();
-        }
+        // Раздел «Кнопки на руле» (Frida-перехват кнопки-звёздочки).
+        initSteeringButtons();
+
     }
 
     private void initDialWidgets() {
@@ -841,6 +937,13 @@ public class AdvanceActivity extends AppCompatActivity {
         android.widget.Spinner widthSpinner = findViewById(widthSpinnerId);
         android.widget.Spinner heightSpinner = findViewById(heightSpinnerId);
         if (widthSpinner == null || heightSpinner == null) return;
+        if (EnergyWidgetLayout.isWidget(widgetId)) {
+            bindEnergySize(widthSpinner, widgetId, true, defaultWidth,
+                    EnergyWidgetLayout.minWidth(widgetId), EnergyWidgetLayout.maxWidth(widgetId));
+            bindEnergySize(heightSpinner, widgetId, false, defaultHeight,
+                    EnergyWidgetLayout.minHeight(widgetId), EnergyWidgetLayout.maxHeight(widgetId));
+            return;
+        }
 
         String[] widths = {"1 ячейка", "2 ячейки", "3 ячейки", "4 ячейки", "5 ячеек", "6 ячеек",
                            "7 ячеек", "8 ячеек", "9 ячеек", "10 ячеек", "11 ячеек", "12 ячеек"};
@@ -876,6 +979,43 @@ public class AdvanceActivity extends AppCompatActivity {
             }
 
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
+    }
+
+    private void bindEnergySize(android.widget.Spinner spinner, String id, boolean width,
+                                int fallback, int min, int max) {
+        String[] labels=new String[max-min+1];
+        for(int i=0;i<labels.length;i++)labels[i]=String.valueOf(min+i);
+        android.widget.ArrayAdapter<String> adapter=new android.widget.ArrayAdapter<>(this,R.layout.spinner_item,labels);
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);spinner.setAdapter(adapter);
+        spinner.setSelection((width?TileSizeStore.width(prefs,id,fallback):TileSizeStore.height(prefs,id,fallback))-min);
+        spinner.setEnabled(max>min);
+        spinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,int position,long itemId) {
+                int value=min+position;
+                if(width)TileSizeStore.setWidth(prefs,id,value);else TileSizeStore.setHeight(prefs,id,value);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+    }
+
+    private void bindEnergyCapacity(int fieldId,String key,float fallback) {
+        android.widget.EditText field=findViewById(fieldId);
+        field.setKeyListener(android.text.method.DigitsKeyListener.getInstance("0123456789.,"));
+        float saved=EnergyWidgetPreferences.capacity(prefs,key,fallback);
+        field.setText(new java.text.DecimalFormat("0.#").format(saved));
+        field.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s,int start,int count,int after) {}
+            @Override public void onTextChanged(CharSequence s,int start,int before,int count) {}
+            @Override public void afterTextChanged(android.text.Editable value) {
+                float parsed=ru.big.town.common.EnergyWidgetSettings.parseCapacity(value.toString());
+                if(!Float.isFinite(parsed)){field.setError("Число больше 0, до 1 знака после запятой");return;}
+                field.setError(null);prefs.edit().putFloat(key,parsed).apply();
+                if(GlobalVars.isBound&&GlobalVars.serviceMessenger!=null) {
+                    try{EnergyWidgetPreferences.sync(GlobalVars.serviceMessenger,prefs);}
+                    catch(RemoteException e){Log.w("EnergyWidgets","Capacity settings will sync on reconnect",e);}
+                }
+            }
         });
     }
 
@@ -998,12 +1138,7 @@ public class AdvanceActivity extends AppCompatActivity {
     private Button dockSplit1Btn, dockSplit2Btn;
 
     private void initDockOverride() {
-        // «Системный док» завязан на Frida-хук лаунчера → только full. В light прячем весь блок.
-        View block = findViewById(R.id.dockOverrideBlock);
-        if (!InstallMode.isFull()) {
-            if (block != null) block.setVisibility(View.GONE);
-            return;
-        }
+
         dockApp1Btn = findViewById(R.id.buttonDockApp1);
         dockApp2Btn = findViewById(R.id.buttonDockApp2);
         dockSplit1Btn = findViewById(R.id.buttonDockSplit1);
@@ -1737,6 +1872,66 @@ public class AdvanceActivity extends AppCompatActivity {
             applyProgressAdvance.setVisibility(applying && index != SECTION_VOICE ? View.VISIBLE : View.GONE);
         }
         updateSystemMetricsPolling();
+        updateLightDiagnosticsBinding();
+    }
+
+    private void updateLightDiagnosticsBinding() {
+        boolean shouldBind = activityResumed && currentSection == 6
+                && prefs.getBoolean("debugMode", false) && !isFinishing();
+        if (shouldBind == lightDiagnosticsActive) return;
+        lightDiagnosticsActive = shouldBind;
+        if (shouldBind) {
+            ++lightDiagnosticsSession;
+            resetLightDiagnostics();
+            lightSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+            if (lightSensorManager != null) {
+                Sensor light = lightSensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
+                if (light != null) lightSensorManager.registerListener(
+                        androidLightListener, light, SensorManager.SENSOR_DELAY_NORMAL);
+            }
+            Intent intent = new Intent().setClassName(NATIVE_PACKAGE,
+                    "ru.big.town.anative.LightDiagnosticsService");
+            try { lightDiagnosticsBound = bindService(intent, lightDiagnosticsConnection, BIND_AUTO_CREATE); }
+            catch (SecurityException | IllegalArgumentException e) {
+                Log.w("LightDiagnostics", "Native diagnostics unavailable", e);
+            }
+        } else {
+            boolean wasBound = lightDiagnosticsBound;
+            lightDiagnosticsBound = false;
+            if (lightSensorManager != null) lightSensorManager.unregisterListener(androidLightListener);
+            lightSensorManager = null;
+            if (wasBound) {
+                try { unbindService(lightDiagnosticsConnection); } catch (IllegalArgumentException ignored) { }
+            }
+            resetLightDiagnostics();
+        }
+    }
+
+    private void resetLightDiagnostics() {
+        int[] unknown = new int[lightDiagnosticsRows.length];
+        java.util.Arrays.fill(unknown, LIGHT_DIAGNOSTICS_UNKNOWN);
+        showLightDiagnostics(unknown);
+    }
+
+    private void showLightDiagnostics(int[] values) {
+        for (int i = 0; i < values.length; i++) {
+            if (lightDiagnosticsRows[i] == null) continue;
+            String value = values[i] == LIGHT_DIAGNOSTICS_UNKNOWN ? "—"
+                    : i == 0 ? values[i] + " — " + swReasonDescription(values[i])
+                    : Integer.toString(values[i]);
+            lightDiagnosticsRows[i].setText(LIGHT_DIAGNOSTICS_LABELS[i] + ": " + value);
+        }
+    }
+
+    private static String swReasonDescription(int value) {
+        switch (value) {
+            case 0: return "день";
+            case 1: return "другое";
+            case 2: return "темно";
+            case 3: return "тоннель";
+            case 4: return "начало темноты";
+            default: return "неизвестно";
+        }
     }
 
     /** Старт/стоп строго следует видимости раздела; вне «Другого» callbacks полностью отсутствуют. */
@@ -1812,7 +2007,7 @@ public class AdvanceActivity extends AppCompatActivity {
         String hookPayload = getSharedPreferences(
                 HookStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
                 .getString(HookStatusContract.PAYLOAD_KEY, null);
-        String hookStatus = HookStatusContract.renderForUi(hookPayload, InstallMode.isFull());
+        String hookStatus = HookStatusContract.renderForUi(hookPayload);
         return new SystemMetricsSnapshot(total, Math.max(0L, total - available), available, cpu,
                 hookStatus);
     }
@@ -1881,30 +2076,18 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     // -------------------------------------------------------------------------
-    // Apollo Tech — persisted subscription/exam reveal + persisted VoyahTune targets.
+    // Apollo Tech — persisted targets for individual vehicle features.
     // -------------------------------------------------------------------------
 
+    private TextView textApolloStatus;
+
     private void initApolloTech() {
-        switchApolloSettingsActivation = findViewById(R.id.switchApolloSettingsActivation);
         switchApolloTlc = findViewById(R.id.switchApolloTlc);
         switchApolloTrafficLights = findViewById(R.id.switchApolloTrafficLights);
         switchApolloTrafficSigns = findViewById(R.id.switchApolloTrafficSigns);
         apolloGreenSoundGroup = findViewById(R.id.apolloGreenSoundGroup);
         apolloGreenSoundContainer = findViewById(R.id.apolloGreenSoundContainer);
-        textApolloSettingsActivationStatus = findViewById(
-                R.id.textApolloSettingsActivationStatus);
         textApolloStatus = findViewById(R.id.textApolloStatus);
-        textApolloFullOnly = findViewById(R.id.textApolloFullOnly);
-
-        if (switchApolloSettingsActivation != null) {
-            switchApolloSettingsActivation.setChecked(prefs.getBoolean(
-                    ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED));
-            switchApolloSettingsActivation.setEnabled(InstallMode.isFull());
-            switchApolloSettingsActivation.setOnCheckedChangeListener((button, checked) -> {
-                prefs.edit().putBoolean(ApolloSettings.STOCK_UI, checked).apply();
-                updateApolloUi();
-            });
-        }
         bindApolloSwitch(switchApolloTlc, ApolloSettings.TLC);
         bindApolloSwitch(switchApolloTrafficSigns, ApolloSettings.TRAFFIC_SIGNS);
         bindApolloSwitch(switchApolloTrafficLights, ApolloSettings.TRAFFIC_LIGHTS);
@@ -1935,24 +2118,6 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void updateApolloUi() {
-        if (textApolloFullOnly != null) {
-            textApolloFullOnly.setVisibility(InstallMode.isFull() ? View.GONE : View.VISIBLE);
-        }
-
-        if (textApolloSettingsActivationStatus != null) {
-            if (!InstallMode.isFull()) {
-                textApolloSettingsActivationStatus.setText(
-                        "Недоступно в Light-версии: в ней нет Frida hook-loader.");
-            } else if (switchApolloSettingsActivation != null
-                    && switchApolloSettingsActivation.isChecked()) {
-                textApolloSettingsActivationStatus.setText(
-                        "Включено. Применяется вместе с остальными настройками.");
-            } else {
-                textApolloSettingsActivationStatus.setText(
-                        "Выключено. Применяется вместе с остальными настройками.");
-            }
-        }
-
         boolean trafficLightsEnabled = switchApolloTrafficLights != null
                 && switchApolloTrafficLights.isChecked();
         if (apolloGreenSoundGroup != null) apolloGreenSoundGroup.setEnabled(trafficLightsEnabled);
@@ -2202,7 +2367,7 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private boolean voiceOwnsSlot(String key) {
-        return VoiceSteeringPolicy.ownsSlot(InstallMode.isFull(), prefs.getBoolean(VoiceCommands.ENABLED, false),
+        return VoiceSteeringPolicy.ownsSlot( prefs.getBoolean(VoiceCommands.ENABLED, false),
                 prefs.getString(VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG), key);
     }
 
@@ -2387,6 +2552,11 @@ public class AdvanceActivity extends AppCompatActivity {
         checkRadioByTag(energy,  prefs.getString("energy",    "SREV"));
         checkRadioByTag(recycle, prefs.getString("recycle",   "LOW"));
         if (drive != null)   drive.setOnCheckedChangeListener((g, id) -> saveRadio("driveMode", id));
+        // Selecting the already checked pinned profile also relinquishes a widget override.
+        if (drive != null) for (int i = 0; i < drive.getChildCount(); i++) {
+            View child = drive.getChildAt(i);
+            if (child instanceof RadioButton) child.setOnClickListener(v -> saveRadio("driveMode", v.getId()));
+        }
         if (energy != null)  energy.setOnCheckedChangeListener((g, id) -> saveRadio("energy", id));
         if (recycle != null) recycle.setOnCheckedChangeListener((g, id) -> saveRadio("recycle", id));
     }
@@ -2403,9 +2573,15 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void saveRadio(String key, int checkedId) {
+        if (syncingModeUi) return;
         View v = findViewById(checkedId);
         if (v != null && v.getTag() != null) {
-            prefs.edit().putString(key, v.getTag().toString()).apply();
+            if ("driveMode".equals(key)) {
+                DriveSelectionPreferences.select(prefs, v.getTag().toString(),
+                        ru.big.town.common.DriveSelectionPolicy.SETTINGS);
+            } else if ("energy".equals(key)) {
+                DriveSelectionPreferences.selectEnergy(prefs, v.getTag().toString(), true);
+            } else prefs.edit().putString(key, v.getTag().toString()).apply();
             Log.i("$$$ Advance mode $$$", key + "=" + v.getTag());
         }
     }
@@ -2603,6 +2779,7 @@ public class AdvanceActivity extends AppCompatActivity {
             syncingSettingUi = false;
         }
         updateSystemMetricsPolling();
+        updateLightDiagnosticsBinding();
         IntentFilter filter = new IntentFilter("ru.big.town.anative.LUX_UPDATE");
         registerReceiver(luxReceiver, filter, RECEIVER_EXPORTED);
         registerReceiver(modeSyncReceiver, new IntentFilter("ru.big.town.anative.MODE_SYNCED"), RECEIVER_EXPORTED);
@@ -2617,6 +2794,7 @@ public class AdvanceActivity extends AppCompatActivity {
     protected void onPause() {
         activityResumed = false;
         updateSystemMetricsPolling();
+        updateLightDiagnosticsBinding();
         super.onPause();
         try { unregisterReceiver(luxReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(modeSyncReceiver); } catch (Exception ignored) {}

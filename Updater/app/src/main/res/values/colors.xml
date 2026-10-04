@@ -1,0 +1,8 @@
+<resources>
+    <color name="page">#101418</color><color name="surface">#151B21</color>
+    <color name="sidebar">#11171C</color><color name="panel">#1B242C</color>
+    <color name="ink">#E7EEF3</color><color name="muted">#9DAEBC</color>
+    <color name="line">#303E49</color><color name="teal">#5BD6C0</color>
+    <color name="teal_dark">#102C27</color><color name="teal_panel">#183832</color>
+    <color name="error">#FF9298</color>
+</resources>

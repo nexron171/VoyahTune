@@ -1690,7 +1690,7 @@ dependencies = [
 
 [[package]]
 name = "installer-build"
-version = "1.0.2"
+version = "1.4.0"
 dependencies = [
  "chrono",
  "clap",
@@ -1702,14 +1702,14 @@ dependencies = [
 
 [[package]]
 name = "installer-core"
-version = "1.0.2"
+version = "1.4.0"
 dependencies = [
- "apksig",
  "chrono",
  "clap",
  "directories",
  "fs2",
  "hex",
+ "release-core",
  "semver",
  "serde",
  "serde_json",
@@ -2876,6 +2876,21 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "release-core"
+version = "1.4.0"
+dependencies = [
+ "apksig",
+ "hex",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "url",
+ "zip",
+]
 
 [[package]]
 name = "reqwest"
@@ -4405,7 +4420,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voyahtune-desktop"
-version = "1.0.2"
+version = "1.4.0"
 dependencies = [
  "installer-core",
  "serde",

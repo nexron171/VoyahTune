@@ -85,9 +85,9 @@ public class WiperColdService extends Service {
             (FADE_TOTAL_MS + FADE_STEPS - 1L) / FADE_STEPS;
     private static final long REMOTE_AUDIO_DRAIN_MS = 2_200L;
 
-    // Native не может вызвать оригинальный Qinggan KeyManagerReader напрямую. В full-сборке это
+    // Native не может вызвать оригинальный Qinggan KeyManagerReader напрямую. Это
     // действие принимает защищённый runtime-receiver в steeringwheelkeys.js; если инжект отсутствует
-    // (включая light), ordered-broadcast completion делает безопасный стандартный fallback.
+    // ordered-broadcast completion делает безопасный стандартный fallback.
     private static final String MEDIA_PROXY_ACTION = "ru.big.town.anative.MEDIA_KEY_PROXY";
     private static final String KEYMANAGER_PACKAGE = "com.qinggan.keymanager.service";
     private static final int MEDIA_PROXY_ACK = -1;
@@ -229,8 +229,7 @@ public class WiperColdService extends Service {
         wiperTogglePending = true;
         ApplyEngine.postWakeAction(label, () -> {
             byte[] frame = MainActivity.parseHexBinary(WIPER_TOGGLE_FRAME);
-            Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME
-                    + " debugMode=" + CanSender.isDebugMode());
+            Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME);
             return CanSender.send(CAN_CMD_NUM, frame, label);
         }, result -> {
             if (!destroyed) {
@@ -508,7 +507,7 @@ public class WiperColdService extends Service {
         }
     }
 
-    /** Last-resort standard key path for light builds or a missing runtime hook. */
+    /** Last-resort standard key path when the runtime hook is unavailable. */
     private void dispatchGlobalMediaKey(AudioManager supplied, int keyCode) {
         try {
             AudioManager am = supplied != null

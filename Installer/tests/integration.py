@@ -20,6 +20,7 @@ class InstallerTests(unittest.TestCase):
   self.device=self.base/'device'
   for path in ['system/etc/init','system/etc/permissions','system/bin','system/priv-app','data/local/tmp','data/local/bin','proc/sys/kernel/random','sdcard/tmp']:(self.device/path).mkdir(parents=True,exist_ok=True)
   (self.device/'system/bin/sh').symlink_to('/bin/sh');(self.device/'proc/sys/kernel/random/boot_id').write_text('0\n')
+  (self.device/'system/bin/timeout').symlink_to(self.bundle/'adb/fake-adb')
   self.state={'root':False,'packages':{'android':'/system/framework/framework-res.apk','com.qinggan.canbus.service':'/system/canbus.apk','com.qinggan.keymanager.service':'/system/keys.apk'},'settings':{}}
   self.write_state();self.env={**os.environ,'VOYAH_FAKE_ROOT':str(self.base)}
  def tearDown(self):self.tmp.cleanup()
@@ -29,12 +30,12 @@ class InstallerTests(unittest.TestCase):
   result=subprocess.run([str(DRIVER),'--bundle',str(self.bundle),*args],env=self.env,text=True,capture_output=True,timeout=120)
   if okay:self.assertEqual(result.returncode,0,result.stdout[-5000:]+result.stderr)
   return result
- def plan(self,action='full'):
+ def plan(self,action='install'):
   return json.loads(self.cli('plan','--device','CAR-001','--action',action).stdout)
  def apply(self,plan,okay=True):return self.cli('apply','--device','CAR-001','--action',plan['request']['action'],'--token',plan['request']['inventoryToken'],'--yes','--logs',str(self.base/'logs'),okay=okay)
  def artifact(self,name):
   manifest=json.loads((PAYLOAD/'manifest.json').read_text())
-  return PAYLOAD/next(a['path'] for a in manifest['artifacts'] if a['name']==name and a.get('variant') in (None,'light'))
+  return PAYLOAD/next(a['path'] for a in manifest['artifacts'] if a['name']==name)
  def seed_apps(self,old_key=False,broken=False):
   files={'ru.big.town.anative':('/system/priv-app/Native/Native.apk',ROOT/'Native/app/release/app-release.apk' if old_key else self.artifact('native.apk')),
          'ru.big.town.restoremode':('/data/app/ru.big.town.restoremode/base.apk',ROOT/'RestoreMode/app/debug/app-debug.apk' if old_key else self.artifact('restore_mode.apk'))}
@@ -45,7 +46,6 @@ class InstallerTests(unittest.TestCase):
    self.state['packages'][package]=path
    for parent in ['data/user/0','data/user_de/0']:
     data=self.device/parent/package;data.mkdir(parents=True,exist_ok=True);(data/'settings-marker').write_text('preserve unless reset')
-  self.state['settings']['voyahtune_install_mode']='light'
   if old_key:
    self.state['rejectRestoreUpdate']=True
    self.state['nativeOldHash']=hashlib.sha256((self.device/'system/priv-app/Native/Native.apk').read_bytes()).hexdigest()
@@ -55,6 +55,91 @@ class InstallerTests(unittest.TestCase):
   for package in ['ru.big.town.anative','ru.big.town.restoremode']:
    for parent in ['data/user/0','data/user_de/0']:
     self.assertEqual((self.device/parent/package/'settings-marker').exists(),present)
+ def seed_native_overlay(self):
+  self.seed_apps()
+  path='/data/app/ru.big.town.anative/base.apk';apk=self.device/path.lstrip('/');apk.parent.mkdir(parents=True);apk.write_bytes(b'old same-version Native')
+  self.state['packages']['ru.big.town.anative']=path;self.write_state()
+ def test_native_overlay_replaced_with_payload_without_data_loss(self):
+  self.seed_native_overlay();self.apply(self.plan());self.assert_app_data(True)
+  active=self.device/self.read_state()['packages']['ru.big.town.anative'].lstrip('/')
+  self.assertEqual(active.read_bytes(),(self.device/'system/priv-app/Native/Native.apk').read_bytes())
+ def test_native_overlay_false_install_success_is_rejected(self):
+  self.seed_native_overlay();self.state['nativeInstallFalseSuccess']=True;self.write_state()
+  result=self.apply(self.plan(),okay=False);self.assertNotEqual(result.returncode,0);self.assert_app_data(True)
+ def test_ota_bootstrap_install_repair_diagnostics_and_remove(self):
+  self.seed_apps()
+  lock=self.device/'data/local/voyahtune-install.lock';lock.mkdir()
+  (lock/'owner').write_text('ota');(lock/'boot').write_text('previous-boot')
+  diagnostics=self.device/'data/local/voyahtune-updater';diagnostics.mkdir()
+  (diagnostics/'updater.log').write_text('FAILED interrupted apply')
+  (diagnostics/'state.json').write_text('{"phase":"repair-required"}')
+  (self.device/'data/local/bin/voyahtune-update.block').write_text('interrupted')
+  self.apply(self.plan());self.assert_app_data(True)
+  for path in ['data/local/bin/voyahtune-updater','system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk','system/etc/init/voyahtune.updater.rc']:
+   self.assertTrue((self.device/path).is_file(),path)
+  self.assertFalse(lock.exists());self.assertFalse((self.device/'data/local/bin/voyahtune-update.block').exists())
+  logs=list((self.base/'logs').rglob('ota-diagnostics/updater.log'))
+  self.assertEqual(len(logs),1);self.assertEqual(logs[0].read_text(),'FAILED interrupted apply')
+  self.apply(self.plan('remove'))
+  self.assertFalse(diagnostics.exists())
+  self.assertFalse((self.device/'system/priv-app/VoyahTuneUpdater').exists())
+ def test_live_ota_lock_blocks_desktop_before_file_changes(self):
+  lock=self.device/'data/local/voyahtune-install.lock';lock.mkdir()
+  (lock/'owner').write_text('ota');(lock/'boot').write_text('0')
+  result=self.apply(self.plan(),okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertEqual((lock/'owner').read_text(),'ota')
+  self.assertFalse((self.device/'system/priv-app/Native/Native.apk').exists())
+ def test_final_reboot_happens_after_unlock_for_install_and_remove(self):
+  self.seed_apps()
+  self.apply(self.plan())
+  self.assertFalse(self.read_state()['locksAtReboot'][-1])
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+  self.apply(self.plan('remove'))
+  self.assertFalse(self.read_state()['locksAtReboot'][-1])
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+ def test_ready_updater_does_not_wait_for_install_existing(self):
+  self.seed_apps()
+  self.apply(self.plan())
+  calls=self.calls()
+  self.assertFalse(any('cmd package install-existing' in (call['script'] or '')
+                       and 'ru.big.town.updater' in call['script'] for call in calls))
+  self.assertFalse(any('cmd package install-existing --user 0 --wait' in (call['script'] or '')
+                       for call in calls))
+ def test_system_server_restart_during_native_broadcast_recovers(self):
+  self.seed_apps();self.state['restartSystemServerOnBroadcast']=True;self.write_state()
+  self.apply(self.plan())
+  self.assertEqual(self.read_state()['systemServerPid'],'202')
+  reports=list((self.base/'logs').rglob('report.json'))
+  self.assertEqual(len(reports),1)
+  self.assertTrue(json.loads(reports[0].read_text())['success'])
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+ def test_native_broadcast_failure_without_system_restart_stays_failed(self):
+  self.seed_apps()
+  plan=self.plan()
+  self.state['failShell']='am broadcast -a com.qinggan.intent.QINGGAN_BOOT_COMPLETE'
+  self.write_state()
+  result=self.apply(plan,okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertEqual(self.read_state().get('systemServerPid','101'),'101')
+  reports=list((self.base/'logs').rglob('report.json'))
+  self.assertEqual(len(reports),1)
+  self.assertFalse(json.loads(reports[0].read_text())['success'])
+ def test_failed_unlock_blocks_final_reboot_and_success(self):
+  self.seed_apps();self.state['failShell']='# release desktop installation lock';self.write_state()
+  result=self.apply(self.plan(),okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertEqual(self.read_state().get('reboots',0),0)
+  self.assertTrue((self.device/'data/local/voyahtune-install.lock/owner').exists())
+ def test_postflight_timeout_releases_its_lock_and_reports_failure(self):
+  self.seed_apps();self.state['postflightTimeout']=True;self.write_state()
+  result=self.apply(self.plan(),okay=False)
+  self.assertNotEqual(result.returncode,0)
+  self.assertFalse(self.read_state()['locksAtReboot'][-1])
+  self.assertFalse((self.device/'data/local/voyahtune-install.lock').exists())
+  reports=list((self.base/'logs').rglob('report.json'))
+  self.assertEqual(len(reports),1)
+  self.assertFalse(json.loads(reports[0].read_text())['success'])
  def test_remove_does_not_verify_old_or_broken_signatures(self):
   self.seed_apps(old_key=True,broken=True)
   p=self.plan('remove');self.assertTrue(all(not app['signers'] for app in p['inventory']['packages'].values()))
@@ -78,28 +163,28 @@ class InstallerTests(unittest.TestCase):
  def test_regular_file_symlink_matches_classic_backup(self):
   target=self.device/'data/local/tmp/unrelated-tool.txt';target.write_text('keep')
   link=self.device/'data/local/bin/keyboard_ru.js';link.symlink_to(target)
-  r=self.cli('plan','--device','CAR-001','--action','full',okay=False)
+  r=self.cli('plan','--device','CAR-001','--action','install',okay=False)
   self.assertEqual(r.returncode,0,r.stdout);self.assertEqual(target.read_text(),'keep')
  def test_traversable_data_without_listing_permission(self):
   parent=self.device/'data';parent.chmod(0o111)
   try:
    self.assertFalse(os.access(parent,os.R_OK));self.assertTrue(os.access(parent,os.X_OK))
-   self.assertEqual(self.plan('light')['inventory']['state'],'absent')
+   self.assertEqual(self.plan('install')['inventory']['state'],'absent')
    self.assertEqual(self.plan('remove')['inventory']['state'],'absent')
   finally:parent.chmod(0o755)
  def test_profile_and_release_metadata_do_not_block_classic_flow(self):
   self.state['sdk']='31';self.state['abi']='armeabi-v7a';self.state['packages'].pop('com.qinggan.keymanager.service');self.write_state()
-  p=self.plan('light');self.assertTrue(p['warnings']);self.assertEqual(p['request']['action'],'light')
+  p=self.plan('install');self.assertTrue(p['warnings']);self.assertEqual(p['request']['action'],'install')
  def test_plan_requests_root_before_inspecting_files(self):
-  self.plan('light');calls=self.calls()
+  self.plan('install');calls=self.calls()
   root=next(i for i,c in enumerate(calls) if c['args']==['root'])
   file_check=next(i for i,c in enumerate(calls) if 'sha256sum' in (c['script'] or ''))
   self.assertLess(root,file_check)
  def test_cancellation_is_reported_without_mutations(self):
-  p=self.plan();r=subprocess.run([str(DRIVER),'--bundle',str(self.bundle),'apply','--device','CAR-001','--action','full','--token',p['request']['inventoryToken'],'--yes','--interactive','--logs',str(self.base/'logs')],env=self.env,input='{"cancel":true}\n',text=True,capture_output=True,timeout=120)
+  p=self.plan();r=subprocess.run([str(DRIVER),'--bundle',str(self.bundle),'apply','--device','CAR-001','--action','install','--token',p['request']['inventoryToken'],'--yes','--interactive','--logs',str(self.base/'logs')],env=self.env,input='{"cancel":true}\n',text=True,capture_output=True,timeout=120)
   self.assertEqual(r.returncode,130,r.stdout[-5000:]);self.assertIn('CANCELLED',r.stdout[-5000:]);self.assertFalse((self.device/'data/local/voyahtune-installer').exists())
  def test_multiple_including_unauthorized_blocks_plan(self):
-  self.state['devices']=[['CAR-001','device'],['PHONE','unauthorized']];self.write_state();r=self.cli('plan','--device','CAR-001','--action','full',okay=False);self.assertNotEqual(r.returncode,0);self.assertIn('MULTIPLE_DEVICES',r.stdout);self.assertFalse((self.device/'data/local/voyahtune-installer').exists())
+  self.state['devices']=[['CAR-001','device'],['PHONE','unauthorized']];self.write_state();r=self.cli('plan','--device','CAR-001','--action','install',okay=False);self.assertNotEqual(r.returncode,0);self.assertIn('MULTIPLE_DEVICES',r.stdout);self.assertFalse((self.device/'data/local/voyahtune-installer').exists())
  def test_confirmation_required_before_mutation(self):
-  p=self.plan();r=self.cli('apply','--device','CAR-001','--action','full','--token',p['request']['inventoryToken'],okay=False);self.assertIn('CONFIRMATION_REQUIRED',r.stdout);self.assertFalse((self.device/'data/local/voyahtune-installer').exists())
+  p=self.plan();r=self.cli('apply','--device','CAR-001','--action','install','--token',p['request']['inventoryToken'],okay=False);self.assertIn('CONFIRMATION_REQUIRED',r.stdout);self.assertFalse((self.device/'data/local/voyahtune-installer').exists())
 if __name__=='__main__':unittest.main(verbosity=2)

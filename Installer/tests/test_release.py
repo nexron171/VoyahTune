@@ -35,7 +35,7 @@ class ReleaseTests(unittest.TestCase):
                 raise subprocess.CalledProcessError(1, args)
             payload = Path(args[args.index('--output')+1]);payload.mkdir()
             version = args[args.index('--version')+1]
-            (payload/'manifest.json').write_text(json.dumps({'schema':3,'requirements':{'minInstallerVersion':'1.0.0','requiredCapabilities':['files-v1']},'releaseVersion':version,'buildRevision':'fixture','generation':self.generation}))
+            (payload/'manifest.json').write_text(json.dumps({'schema':4,'requirements':{'minInstallerVersion':'1.0.0','requiredCapabilities':['files-v1']},'releaseVersion':version,'buildRevision':'fixture','generation':self.generation}))
         elif Path(args[0]).name == 'build-all-macos.sh':
             dest = Path(args[args.index('--output')+1]);dest.mkdir()
             self.assertNotIn('--payload',args)
@@ -73,8 +73,9 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(self.selected,[])
         archive=self.root/'Releases/dist/payload_4.5.6.zip'
         entry=json.loads(archive.with_suffix('.json').read_text())
-        self.assertEqual(entry['payload']['sha256'],release.sha(archive))
-        self.assertEqual(entry['requirements']['minInstallerVersion'],'1.0.0')
+        self.assertEqual(entry['sha256'],release.sha(archive))
+        self.assertEqual(set(entry), {'version','url','size','sha256'})
+        self.assertEqual(entry['size'],archive.stat().st_size)
         import zipfile
         with zipfile.ZipFile(archive) as z:self.assertIn('manifest.json',z.namelist())
         self.assertFalse((archive.parent/'VoyahTune-Installer-1.0.0').exists())

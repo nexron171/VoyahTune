@@ -46,17 +46,18 @@ for SYMBOL in forceApolloBindingVisible FragmentDriveAssistanceBindingImpl \
 done
 node --check "$HOOK"
 
-# The stock-menu target is a normal persisted setting. The boot-bound file is only a fail-closed
-# loader transport republished by the same delayed restore plan.
-require_fixed "$LAYOUT" 'android:text="Активация функций Apollo"'
-require_fixed "$LAYOUT" 'android:id="@+id/switchApolloSettingsActivation"'
-require_fixed "$LAYOUT" 'android:checked="false"'
+# The retired stock-menu target is never exposed or republished. The old hook transport remains
+# fail-closed while the installer and Updater migrate prior installations.
+forbid_fixed "$LAYOUT" 'android:id="@+id/switchApolloSettingsActivation"'
+forbid_fixed "$ADVANCE" 'switchApolloSettingsActivation'
 require_fixed "$APOLLO_SETTINGS" 'static final String STOCK_UI = "apolloStockUiEnabled";'
-require_fixed "$ADVANCE" 'ApolloSettings.STOCK_UI, ApolloSettings.DEFAULT_ENABLED'
+require_fixed "$PROVIDER" 'remove(ApolloSettings.STOCK_UI).commit()'
 require_fixed "$PROVIDER" 'ApolloSettings.STOCK_UI,      // 28'
-require_fixed "$MAIN" 'apolloStockUiEnabled = cursor.getColumnCount() > 28'
+require_fixed "$PROVIDER" '0, // 28: retired stock UI target'
+forbid_fixed "$MAIN" 'apolloStockUiEnabled = cursor.getColumnCount() > 28'
+forbid_fixed "$MAIN" 'cacheApolloStockUiEnabled", apolloStockUiEnabled'
 require_fixed "$MAIN" 'plan.addOnce("Apollo stock subscription/exam UI"'
-require_fixed "$MAIN" 'ApolloSettingsRuntimeState.applyTarget(context, stockUiTarget)'
+require_fixed "$MAIN" 'ApolloSettingsRuntimeState.applyTarget(context, false)'
 require_fixed "$RUNTIME_STATE" 'static TargetApplyResult applyTarget(Context context, boolean enabled)'
 require_fixed "$RUNTIME_STATE" 'forceStop.invoke(am, "com.qinggan.app.vehiclesetting")'
 require_fixed "$RUNTIME_FLAG" 'boot='
@@ -76,7 +77,7 @@ forbid_fixed "$ADVANCE" 'MSG_APOLLO_SETTINGS_STATE'
 forbid_fixed "$SET_MODES" 'MSG_APOLLO_SETTINGS_SET'
 forbid_fixed "$SET_MODES" 'MSG_APOLLO_SETTINGS_STATE'
 
-# VoyahTune owns five persisted targets. There is no current-state query or parking gate.
+# Only the four individual feature targets remain selectable; STOCK_UI is migration-only.
 for KEY in STOCK_UI TLC TRAFFIC_LIGHTS GREEN_SOUND TRAFFIC_SIGNS; do
     require_fixed "$APOLLO_SETTINGS" "static final String $KEY"
 done
@@ -134,6 +135,6 @@ forbid_fixed "$APPLY_ENGINE" 'DEBOUNCE_MS'
 require_fixed "$APPLY_ENGINE" 'public static void applyNow('
 require_fixed "$README" 'Скрытые на 97X строки отдельных функций не раскрываются'
 require_fixed "$README" 'Автоматическое'
-require_fixed "$README" 'восстановление выполняется по открытию водительской двери и переходу в Drive.'
+require_fixed "$README" 'восстановление выполняется один раз в ACC-цикле'
 
 echo "PASS: Apollo UI and functions use persisted event-driven restore targets"

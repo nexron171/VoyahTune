@@ -1,30 +1,36 @@
 # Состав и сборка payload
 
-Один `payload_VERSION.zip` содержит `manifest.json` и общие APK/runtime-артефакты
-для Full/Light. На релиз собираются ровно один Native и один RestoreMode APK,
-с одинаковыми package ID и ключами для двух режимов. Различие — внешние файлы
-и `Settings.Global.voyahtune_install_mode`, а не build flavor.
+Один `payload_VERSION.zip` содержит `manifest.json`, один Native APK, один RestoreMode
+APK, инфраструктуру OTA и полный runtime. Вариантов установки, supportedModes и системного флага режима нет.
 
 Источники: `Native/`, `RestoreMode/`, `SharedAndroid/`, `Packaging/inject/`,
-`Packaging/system/`, `Packaging/tools/`, DNS helper и overlay из `Packaging/`.
-[Payload spec](../Packaging/installer/payload-spec.json) задаёт специальные роли,
-режимы, права и накопительную очистку. `.js/.json` обнаруживаются автоматически;
-новые собственные имена используют `voyahtune_`/`voyahtune-`. По умолчанию они Full;
-явная запись в spec позволяет выбрать Light/оба режима и собственную цель.
+`Packaging/system/`, `Packaging/tools/`, `Updater/`, DNS helper и overlay из `Packaging/`.
+[Payload spec](../Packaging/installer/payload-spec.json) задаёт роли, права и
+накопительную очистку. `.js/.json` обнаруживаются автоматически; новые собственные
+имена используют `voyahtune_`/`voyahtune-`.
+
+Payload schema 4, recipe schema 3 / `qinggan-v3`, APK metadata schema 3.
+Минимум Installer 1.2.0, capabilities `qinggan-v3`, `single-package-v1`, `files-v1`,
+`ota-bootstrap-v1`. Сборщик сначала собирает ARM64 updater и его APK, затем передаёт
+их хеши вместе с recipe в metadata Native и RestoreMode.
+Требования проверяются внутри payload; каталог содержит только version/url/size/sha256. Старые архивы не преобразуются
+новым установщиком; для установки используйте новый релиз. Опубликованные
+записи старых релизов не переписываются.
 
 Исполнитель использует recipe для copy/replace/remove/directories/attributes.
-Добавление или удаление такого файла не требует пересборки установщика. Старый путь
-при удалении исходника нужно оставить в `removeFiles`, включая пропущенные релизы.
-Новые системные роли, новые команды и семантика требуют версии установщика/capability.
-[Схемы, примеры и ограничения операций](installer-protocol.md).
+Новый собственный файл в рамках этих операций не требует пересборки GUI. Старый путь
+при удалении исходника остаётся в `removeFiles`, включая пропущенные релизы.
+Новые системные роли и семантика требуют новой capability/версии установщика.
+[Полный контракт](installer-protocol.md).
 
 Сборка: `./make_release.sh VERSION --payload`. Результаты:
-`Releases/dist/payload_VERSION.zip`, `payload_VERSION.json` (заготовка записи каталога),
+`Releases/dist/payload_VERSION.zip`, `payload_VERSION.json` (запись каталога),
 `Releases/build/installer-payload-VERSION/`. Desktop toolchain не запускается.
-Metadata schema 2 подписана внутри APK: общие runtime hashes, recipe digest,
-`supportedModes`. Сборщик сверяет подписи, хеши и версии до упаковки ZIP.
+Подписанные metadata APK содержат runtime hashes и recipe digest; сборщик сверяет
+подписи, хеши и версии перед упаковкой ZIP.
 
-Классические Full/Light ZIP остаются отдельным форматом доставки с одной и той же
-парой APK. Их списки `.sh/.bat` обновляются отдельно; новый recipe не исполняется
-классическими сценариями. GUI скачивает payload через каталог либо импортирует ZIP.
-ADB и host GUI-файлы в payload не входят.
+Классический `VoyahTune-VERSION.zip` со скриптами — отдельный формат доставки.
+Его списки `.sh/.bat` обновляются отдельно; файловый recipe эти скрипты не исполняют.
+Первую установку инфраструктуры OTA выполняйте GUI 1.2.0: классический ZIP
+не реализует новый протокол bootstrap/блокировки/USB-диагностики.
+GUI скачивает payload через каталог либо импортирует ZIP. ADB и GUI в payload не входят.

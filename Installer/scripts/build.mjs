@@ -38,12 +38,17 @@ const desktop=join(root,'Installer/desktop');
 const host=run('rustc',['-vV'],root,true).split('\n').find(line=>line.startsWith('host: ')).slice(6);
 const target=option('--target')||(process.platform==='darwin'?'universal-apple-darwin':process.platform==='win32'?'x86_64-pc-windows-msvc':host);
 const supported=['universal-apple-darwin','aarch64-apple-darwin','x86_64-apple-darwin',
-  'x86_64-unknown-linux-gnu','x86_64-pc-windows-msvc'];
+  'x86_64-unknown-linux-gnu','x86_64-pc-windows-msvc','i686-pc-windows-msvc'];
 if(!supported.includes(target))throw Error(`Unsupported target: ${target}`);
 const platform=target.includes('windows')?'windows':target.includes('linux')?'linux':'darwin';
 if(platform==='darwin'&&process.platform!=='darwin')throw Error('macOS packages require a macOS build host');
 if(platform==='linux'&&target!==host)throw Error('Build each Linux architecture in its matching container');
 const crossWindows=platform==='windows'&&process.platform!=='win32';
+if(crossWindows&&target==='i686-pc-windows-msvc'){
+  // cargo-xwin defaults to x64/ARM64; keep its x86 SDK separate from that cache.
+  env.XWIN_ARCH='x86';
+  env.XWIN_CACHE_DIR=env.XWIN_CACHE_DIR||join(root,'Releases/cache/cargo-xwin-x86');
+}
 const targetRoot=env.CARGO_TARGET_DIR?resolve(env.CARGO_TARGET_DIR):join(root,'Installer/target');
 const hostExe=join(targetRoot,'release',`installer-build${process.platform==='win32'?'.exe':''}`);
 const cargoArgs=['--locked','--release','--manifest-path',join(root,'Installer/Cargo.toml')];
@@ -82,6 +87,11 @@ const adbVersion=lock.version;
     if(!entry.startsWith('platform-tools/')||entry.endsWith('/'))continue;
     const name=entry.slice('platform-tools/'.length);
     if(name.split('/').some(part=>part==='..')||name.startsWith('/'))throw Error('Unsafe archive entry');
+    if(target==='i686-pc-windows-msvc'&&/\.(exe|dll)$/i.test(name)){
+      const pe=Buffer.from(content);
+      const header=pe.length>=64?pe.readUInt32LE(0x3c):-1;
+      if(header<0||header+6>pe.length||pe.toString('ascii',header,header+4)!=='PE\0\0'||pe.readUInt16LE(header+4)!==0x14c)throw Error(`Windows x86 requires 32-bit ADB binaries: ${name}`);
+    }
     const destination=join(bundle,'adb',name);
     await mkdir(dirname(destination),{recursive:true});
     await writeFile(destination,content);
@@ -111,6 +121,13 @@ await rename(bundle,finalBundle);
 await rm(join(desktop,'src-tauri/binaries'),{recursive:true,force:true});
 if(flag('--prepare-only')){console.log(`Prepared GUI resources: ${finalBundle}`);process.exit(0);}
 const releaseConfig={version:packageVersion};
+// Platform-independent web assets may be built on the native host to avoid running
+// esbuild's Go runtime under x64 emulation. The orchestrator supplies a fresh build.
+if(option('--frontend-dist')){
+  const frontend=resolve(option('--frontend-dist'));
+  if(!existsSync(join(frontend,'index.html')))throw Error('Prebuilt frontend is missing index.html');
+  releaseConfig.build={frontendDist:frontend,beforeBuildCommand:'node -e "process.exit(0)"'};
+}
 if(platform==='linux'){
   const files={'/usr/share/voyahtune-installer/bundle/':'resources/bundle/'};
   releaseConfig.bundle={resources:[],linux:{appimage:{files},deb:{files}}};

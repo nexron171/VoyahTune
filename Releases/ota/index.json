@@ -1,0 +1,46 @@
+{
+  "releases": [
+    {
+      "version": "3.15.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/payload_3.15.0.zip",
+      "size": 149407190,
+      "sha256": "92347612bec3e147d4bf54aee0f4f08e9646fe219ba2c47605367faa6827d84d"
+    },
+    {
+      "version": "3.16.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/v3.16.0/payload_3.16.0.zip",
+      "size": 149410661,
+      "sha256": "65a557fe91b5531b5f856822902fde77caafa8c6f6315798c6a55471820398ae"
+    },
+    {
+      "version": "3.17.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/v3.17.0/payload_3.17.0.zip",
+      "size": 149410516,
+      "sha256": "40d5be3e83ce5f2db75858bac2d56e541bd28b86ec3c4ba3f819587789432fec"
+    },
+    {
+      "version": "3.18.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/v3.18.0/payload_3.18.0.zip",
+      "size": 122598504,
+      "sha256": "f51f484d8a4ab26580b04652129615a0580e528c75e87a8772566e5c200e16aa"
+    },
+    {
+      "version": "3.19.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/v3.19.0/payload_3.19.0.zip",
+      "size": 122607737,
+      "sha256": "96b03b18948430007db2ffa2c5c64f24e0745186ae1962ab380a880304263513"
+    },
+    {
+      "version": "3.20.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/v3.20.0/payload_3.20.0.zip",
+      "size": 124679976,
+      "sha256": "29f12d2c372c0a13e0720216c672c825e8c71e3844283327c4de7873181ff0df"
+    },
+    {
+      "version": "3.21.0",
+      "url": "https://storage.yandexcloud.net/voyahtune/v3.21.0/payload_3.21.0.zip",
+      "size": 124688239,
+      "sha256": "e7007f955cfe53f039ee749dbd4315fe20ec76a23dbb24565a5be652070e03e2"
+    }
+  ]
+}

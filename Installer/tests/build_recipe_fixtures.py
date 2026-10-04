@@ -21,10 +21,10 @@ for label,version in [('A','3.13.0'),('B','3.13.1')]:
   (SOURCE/'Packaging/inject'/filename).unlink(missing_ok=True)
  filename='voyahtune_acceptance_'+('old' if label=='A' else 'new')+'.json'
  (SOURCE/'Packaging/inject'/filename).write_text(json.dumps({'fixture':label}))
- recipe['files'].append(dict(artifact=filename,variantArtifact=False,variants=['full','light'],destination='/data/local/bin/'+filename,mode=420,phase='files'))
+ recipe['files'].append(dict(artifact=filename,destination='/data/local/bin/'+filename,mode=420,phase='files'))
  if label=='B':
   recipe['removeFiles'].append('/data/local/bin/voyahtune_acceptance_old.json')
-  recipe['directories']=[dict(path='/data/local/bin/voyahtune_fixture',mode=493,variants=['full','light'])]
-  recipe['attributes']=[dict(path='/data/local/bin/'+filename,mode=493,variants=['full','light'])]
+  recipe['directories']=[dict(path='/data/local/bin/voyahtune_fixture',mode=493)]
+  recipe['attributes']=[dict(path='/data/local/bin/'+filename,mode=493)]
  (SOURCE/'Packaging/installer/payload-spec.json').write_text(json.dumps(recipe))
  subprocess.run([str(ROOT/'Installer/target/release/installer-build'),'build','--root',str(SOURCE),'--version',version,'--revision','acceptance-'+label,'--output',str(WORK/label)],check=True)

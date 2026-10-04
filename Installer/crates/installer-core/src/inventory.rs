@@ -1,6 +1,6 @@
 use crate::{
     adb::{quote, Adb},
-    payload::{self, BuildMetadata, Payload, Variant, NATIVE, NATIVE_PATH, RESTORE},
+    payload::{self, BuildMetadata, Payload, NATIVE, NATIVE_PATH, RESTORE},
     Error, Result,
 };
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,6 @@ pub struct Inventory {
     pub foreign_files: BTreeMap<String, String>,
     pub remnants: Vec<String>,
     pub state: String,
-    pub variant: Option<Variant>,
     pub version: Option<String>,
     pub token: String,
 }
@@ -94,7 +93,7 @@ fn package(adb: &Adb, path: &str, verify_signature: bool) -> Result<Package> {
     })
 }
 pub fn inspect(adb: &Adb, payload: &Payload) -> Result<Inventory> {
-    inspect_for_action(adb, payload, crate::plans::Action::Full)
+    inspect_for_action(adb, payload, crate::plans::Action::Install)
 }
 pub fn inspect_for_action(
     adb: &Adb,
@@ -203,7 +202,7 @@ pub fn inspect_for_action(
                     b.product == "VoyahTune" && b.runtime_hashes.get(name) == Some(&hash)
                 })
             });
-            if hash != payload.artifact(name, None)?.sha256 && !marker && !signed_owned {
+            if hash != payload.artifact(name)?.sha256 && !marker && !signed_owned {
                 files.remove(&path);
                 foreign_files.insert(path, hash);
             }
@@ -229,16 +228,7 @@ pub fn inspect_for_action(
         .lines()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    let setting_mode = match adb
-        .read(&format!("settings get global {}\n", crate::mode::KEY))
-        .as_deref()
-    {
-        Ok("full") => Some(Variant::Full),
-        Ok("light") => Some(Variant::Light),
-        _ => None,
-    };
-    let (mut state, variant, version) =
-        classify(&packages, &base_native, &files, payload, setting_mode);
+    let (mut state, version) = classify(&packages, &base_native, &files, payload);
     if state == "absent" && !remnants.is_empty() {
         state = "remnants".into();
     }
@@ -255,7 +245,6 @@ pub fn inspect_for_action(
         foreign_files,
         remnants,
         state,
-        variant,
         version,
         token: String::new(),
     };
@@ -279,8 +268,7 @@ fn classify(
     base: &Option<Package>,
     files: &BTreeMap<String, String>,
     payload: &Payload,
-    setting_mode: Option<Variant>,
-) -> (String, Option<Variant>, Option<String>) {
+) -> (String, Option<String>) {
     if packages.is_empty() && base.is_none() {
         return (
             if files.is_empty() {
@@ -289,7 +277,6 @@ fn classify(
                 "remnants"
             }
             .into(),
-            None,
             None,
         );
     }
@@ -301,30 +288,22 @@ fn classify(
         .filter_map(|p| p.build.as_ref())
         .collect();
     if !packages.contains_key(NATIVE) || !packages.contains_key(RESTORE) || base.is_none() {
-        return ("partial".into(), None, None);
+        return ("partial".into(), None);
     }
     if builds.len() != 3
         || builds
             .iter()
-            .any(|b| ![1, 2].contains(&b.schema) || b.product != "VoyahTune")
+            .any(|b| b.schema != 3 || b.product != "VoyahTune")
     {
-        return ("unknown".into(), None, None);
+        return ("unknown".into(), None);
     }
     let b = builds[0];
-    if builds.iter().any(|x| {
-        x.variant != b.variant
-            || x.release_version != b.release_version
-            || x.build_revision != b.build_revision
-    }) {
-        return ("mixed".into(), None, None);
+    if builds
+        .iter()
+        .any(|x| x.release_version != b.release_version || x.build_revision != b.build_revision)
+    {
+        return ("mixed".into(), None);
     }
-    let Some(variant) = (if b.schema == 2 {
-        setting_mode
-    } else {
-        b.variant
-    }) else {
-        return ("unknown".into(), None, Some(b.release_version.clone()));
-    };
     let mut state = "complete";
     // Classify an older release using its signed hashes. An unknown retired
     // target is reported as partial, never guessed from the current release.
@@ -339,9 +318,6 @@ fn classify(
             state = "partial";
             continue;
         };
-        if b.schema == 2 && !file.variants.contains(&variant) {
-            continue;
-        }
         if files.get(&file.destination) != Some(hash) {
             state = "partial";
         }
@@ -349,18 +325,9 @@ fn classify(
     if b.runtime_hashes.is_empty() {
         state = "unknown";
     }
-    for file in &payload.manifest.recipe.files {
-        if !file.variants.contains(&variant) && files.contains_key(&file.destination) {
-            state = "mixed";
-        }
-    }
     for package in &payload.manifest.recipe.packages {
-        if package.variants.contains(&variant) {
-            if !packages.contains_key(&package.package) {
-                state = "partial";
-            }
-        } else if packages.contains_key(&package.package) {
-            state = "mixed";
+        if !packages.contains_key(&package.package) {
+            state = "partial";
         }
     }
     // A receipt or metadata alone is not proof that installed bytes match this release.
@@ -368,58 +335,33 @@ fn classify(
         && b.build_revision == payload.manifest.build_revision
     {
         for (id, name) in [(NATIVE, "native.apk"), (RESTORE, "restore_mode.apk")] {
-            if packages[id].sha256 != payload.artifact(name, Some(variant)).unwrap().sha256 {
+            if packages[id].sha256 != payload.artifact(name).unwrap().sha256 {
                 state = "partial";
             }
         }
-        if base.as_ref().unwrap().sha256
-            != payload
-                .artifact("native.apk", Some(variant))
-                .unwrap()
-                .sha256
-        {
+        if base.as_ref().unwrap().sha256 != payload.artifact("native.apk").unwrap().sha256 {
             state = "mixed";
         }
-        if files.get(payload::WHITELIST)
-            != Some(&payload.artifact("whitelist.xml", None).unwrap().sha256)
+        if files.get(payload::WHITELIST) != Some(&payload.artifact("whitelist.xml").unwrap().sha256)
         {
             state = "partial";
         }
-        for file in payload.manifest.recipe.runtime(variant) {
+        for file in payload.manifest.recipe.runtime() {
             if files.get(&file.destination)
-                != Some(
-                    &payload
-                        .artifact(&file.artifact, file.variant_artifact.then_some(variant))
-                        .unwrap()
-                        .sha256,
-                )
+                != Some(&payload.artifact(&file.artifact).unwrap().sha256)
             {
                 state = "partial";
             }
         }
-        for package in payload
-            .manifest
-            .recipe
-            .packages
-            .iter()
-            .filter(|p| p.variants.contains(&variant))
-        {
+        for package in payload.manifest.recipe.packages.iter() {
             if packages.get(&package.package).map(|p| &p.sha256)
-                != Some(
-                    &payload
-                        .artifact(
-                            &package.artifact,
-                            package.variant_artifact.then_some(variant),
-                        )
-                        .unwrap()
-                        .sha256,
-                )
+                != Some(&payload.artifact(&package.artifact).unwrap().sha256)
             {
                 state = "partial";
             }
         }
     }
-    (state.into(), Some(variant), Some(b.release_version.clone()))
+    (state.into(), Some(b.release_version.clone()))
 }
 
 /// UI information only: unavailable metadata must not become an installation gate.
@@ -449,7 +391,6 @@ pub fn diagnose(adb: &Adb, payload: &Payload, action: crate::plans::Action) -> I
                 foreign_files: Default::default(),
                 remnants: vec![],
                 state: "unknown".into(),
-                variant: None,
                 version: None,
                 token: String::new(),
             }

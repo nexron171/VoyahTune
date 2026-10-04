@@ -18,7 +18,7 @@ public class HookStatusContractTest {
     @Test
     public void validPayloadIsRendered() {
         assertTrue(HookStatusContract.isValidPayload(VALID));
-        String rendered = HookStatusContract.renderForUi(VALID, true);
+        String rendered = HookStatusContract.renderForUi(VALID);
         assertTrue(rendered.contains("Loader: работает (PID 321)"));
         assertTrue(rendered.contains("Окна / VirtualDisplay: активен (PID 100)"));
         assertTrue(rendered.contains("Кнопки руля: устанавливается (PID 101)"));
@@ -52,11 +52,7 @@ public class HookStatusContractTest {
         String stopped = VALID.replace("loader=running", "loader=stopped")
                 .replace("pid=321", "pid=0");
         assertTrue(HookStatusContract.isValidPayload(stopped));
-        assertTrue(HookStatusContract.renderForUi(stopped, true).contains("Loader: остановлен"));
+        assertTrue(HookStatusContract.renderForUi(stopped).contains("Loader: остановлен"));
     }
 
-    @Test
-    public void lightFlavorNeverClaimsRootHooks() {
-        assertTrue(HookStatusContract.renderForUi(VALID, false).contains("Light-версии"));
-    }
 }

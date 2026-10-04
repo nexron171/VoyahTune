@@ -1,11 +1,12 @@
 //! Release catalog, verified downloads and offline cache. No vehicle commands here.
+mod download;
 use crate::{
-    compatibility::{Requirements, INSTALLER_VERSION},
+    compatibility::INSTALLER_VERSION,
     payload::{self, Payload},
     recovery, Error, Result,
 };
 use fs2::FileExt;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
@@ -15,115 +16,13 @@ use std::{
     time::Duration,
 };
 
-pub const CATALOG_URL: &str =
-    "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Installer/releases/index.json";
+pub use release_core::catalog::CATALOG_URL;
 const MAX_CATALOG: u64 = 4 * 1024 * 1024;
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED: u64 = 4 * 1024 * 1024 * 1024;
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Archive {
-    pub url: String,
-    pub size: u64,
-    pub sha256: String,
-    pub manifest_schema: u32,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Release {
-    pub version: String,
-    pub published_at: String,
-    pub channel: String,
-    pub notes_url: String,
-    pub payload: Archive,
-    pub requirements: Requirements,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct InstallerDownload {
-    pub version: String,
-    pub platform: String,
-    pub url: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Catalog {
-    pub schema_version: u32,
-    pub generated_at: String,
-    pub releases: Vec<Release>,
-    pub installer_downloads: Vec<InstallerDownload>,
-}
-impl Catalog {
-    pub fn installer_updates(
-        &self,
-        requirements: &Requirements,
-        platform: &str,
-    ) -> Vec<InstallerDownload> {
-        let Ok(minimum) = semver::Version::parse(&requirements.min_installer_version) else {
-            return vec![];
-        };
-        let mut updates: Vec<_> = self
-            .installer_downloads
-            .iter()
-            .filter(|u| {
-                u.platform == platform
-                    && semver::Version::parse(&u.version).is_ok_and(|v| v >= minimum)
-            })
-            .cloned()
-            .collect();
-        updates.sort_by(|a, b| {
-            semver::Version::parse(&b.version)
-                .unwrap()
-                .cmp(&semver::Version::parse(&a.version).unwrap())
-        });
-        updates
-    }
-    pub fn empty() -> Self {
-        Self {
-            schema_version: 1,
-            generated_at: String::new(),
-            releases: vec![],
-            installer_downloads: vec![],
-        }
-    }
-    pub fn validate(&mut self) -> Result<()> {
-        if self.schema_version != 1 || self.releases.len() > 1000 {
-            return Err(invalid("Неподдерживаемый каталог релизов"));
-        }
-        let mut versions = BTreeSet::new();
-        for r in &self.releases {
-            let version = semver::Version::parse(&r.version).map_err(|e| invalid(e.to_string()))?;
-            if !versions.insert(&r.version)
-                || !["stable", "prerelease"].contains(&r.channel.as_str())
-                || (r.channel == "stable" && !version.pre.is_empty())
-                || r.payload.size == 0
-                || r.payload.size > MAX_ARCHIVE
-                || !digest_valid(&r.payload.sha256)
-                || r.payload.manifest_schema < 3
-            {
-                return Err(invalid(format!("Некорректная запись {}", r.version)));
-            }
-            // Future requirements are displayed, not rejected with the entire catalog.
-            semver::Version::parse(&r.requirements.min_installer_version)
-                .map_err(|e| invalid(e.to_string()))?;
-            https_url(&r.payload.url)?;
-            https_url(&r.notes_url)?;
-        }
-        for i in &self.installer_downloads {
-            semver::Version::parse(&i.version).map_err(|e| invalid(e.to_string()))?;
-            if !["macos", "windows", "linux"].contains(&i.platform.as_str()) {
-                return Err(invalid("Неизвестная платформа"));
-            }
-            https_url(&i.url)?;
-        }
-        self.releases.sort_by(|a, b| {
-            semver::Version::parse(&b.version)
-                .unwrap()
-                .cmp(&semver::Version::parse(&a.version).unwrap())
-        });
-        Ok(())
-    }
-}
+pub use release_core::catalog::{
+    Archive, Catalog, InstallerDownload, Release, UpdateCatalog, UpdateRelease,
+};
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedPayload {
@@ -177,7 +76,7 @@ fn network(e: impl ToString) -> Error {
         "Не удалось скачать файл. Проверьте подключение или откройте локальный ZIP.",
     )
     .detail(e)
-    .retry("Повторите загрузку или выберите сохранённый комплект.")
+    .retry("Повторите загрузку или выберите сохранённый релиз.")
 }
 fn cancelled(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::Relaxed) {
@@ -192,7 +91,7 @@ fn agent(seconds: u64) -> ureq::Agent {
         .max_redirects(5)
         .timeout_global(Some(Duration::from_secs(seconds)))
         .timeout_connect(Some(Duration::from_secs(10)))
-        .timeout_recv_body(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
         .tls_config(
             ureq::tls::TlsConfig::builder()
                 .root_certs(ureq::tls::RootCerts::PlatformVerifier)
@@ -242,7 +141,7 @@ impl Cache {
         refresh: bool,
     ) -> Result<CatalogState> {
         let _lock = self.lock()?;
-        let stored = self.root.join("catalog.json");
+        let stored = self.root.join("ota-catalog.json");
         let mut warning = None;
         let mut catalog = None;
         if refresh {
@@ -314,7 +213,7 @@ impl Cache {
         if !digest_valid(digest) || path.parent() != Some(folder.as_path()) {
             return Err(Error::new(
                 "CACHE_PATH",
-                "Удалять можно только скачанные комплекты из кэша",
+                "Удалять можно только скачанные релизы из кэша",
             ));
         }
         let root = self.root.canonicalize()?;
@@ -322,10 +221,7 @@ impl Cache {
             || fs::symlink_metadata(path)?.file_type().is_symlink()
             || path.canonicalize()? != root.join("payloads").join(digest)
         {
-            return Err(Error::new(
-                "CACHE_PATH",
-                "Небезопасный путь комплекта в кэше",
-            ));
+            return Err(Error::new("CACHE_PATH", "Небезопасный путь релиза в кэше"));
         }
         let receipts = self.root.join("receipts");
         if receipts.exists() {
@@ -348,13 +244,8 @@ impl Cache {
         progress: ProgressCallback,
     ) -> Result<Payload> {
         cancelled(cancel)?;
+        payload::validate_schema(release.payload.manifest_schema)?;
         release.requirements.validate()?;
-        if release.payload.manifest_schema != 3 {
-            return Err(Error::new(
-                "INSTALLER_UPDATE_REQUIRED",
-                "Обновите установщик для этого формата комплекта",
-            ));
-        }
         https_url(&release.payload.url)?;
         if !digest_valid(&release.payload.sha256)
             || release.payload.size == 0
@@ -374,30 +265,13 @@ impl Cache {
                 return Ok(payload);
             }
         }
-        let mut archive = tempfile::NamedTempFile::new_in(&self.root)?;
-        cancelled(cancel)?;
-        let mut response = agent(1800)
-            .get(&release.payload.url)
-            .call()
-            .map_err(network)?;
-        let mut reader = response.body_mut().as_reader();
-        transfer(
-            &mut reader,
-            archive.as_file_mut(),
-            release.payload.size,
-            cancel,
-            progress,
-            "download",
-        )?;
-        if archive.as_file().metadata()?.len() != release.payload.size
-            || payload::sha256(archive.path())? != release.payload.sha256
-        {
-            return Err(Error::new(
-                "DOWNLOAD_HASH",
-                "Размер или SHA-256 загруженного архива не совпадает с каталогом",
-            ));
-        }
-        self.accept(archive.path(), Some(release), cancel, progress)
+        let partials = self.root.join("partial");
+        fs::create_dir_all(&partials)?;
+        let archive = partials.join(format!("{}.part", release.payload.sha256));
+        download::fetch(&agent(120), &release.payload, &archive, cancel, progress)?;
+        let payload = self.accept(&archive, Some(release), cancel, progress)?;
+        fs::remove_file(archive)?;
+        Ok(payload)
     }
     pub fn import(
         &self,
@@ -435,10 +309,10 @@ impl Cache {
         if payload.manifest.removal_only {
             return Err(Error::new(
                 "PAYLOAD_REQUIRED",
-                "Это комплект удаления, а не установки",
+                "Это ресурсы удаления, а не установки",
             ));
         }
-        if payload.manifest.schema != 3 {
+        if payload.manifest.schema != 4 {
             return Err(Error::new(
                 "PAYLOAD_SCHEMA",
                 "Импорт ZIP требует новый единый payload. Старую папку можно открыть отдельно.",
@@ -486,20 +360,25 @@ fn fetch_catalog(client: &ureq::Agent, url: &str) -> Result<Catalog> {
         .limit(MAX_CATALOG)
         .read_to_vec()
         .map_err(network)?;
-    let mut catalog: Catalog = serde_json::from_slice(&bytes)?;
-    catalog.validate()?;
-    Ok(catalog)
+    let catalog: release_core::catalog::UpdateCatalog = serde_json::from_slice(&bytes)?;
+    catalog.resolve()
 }
 fn verify_release(payload: &Payload, release: &Release) -> Result<()> {
     if payload.manifest.release_version != release.version
         || payload.manifest.schema != release.payload.manifest_schema
-        || payload.manifest.requirements.as_ref() != Some(&release.requirements)
     {
         return Err(Error::new(
             "CATALOG_MISMATCH",
             "Манифест архива не соответствует выбранному релизу",
         ));
     }
+    // Requirements come from the verified manifest, not the discovery catalog.
+    payload
+        .manifest
+        .requirements
+        .as_ref()
+        .ok_or_else(|| invalid("Нет требований релиза"))?
+        .validate()?;
     Ok(())
 }
 fn transfer(
@@ -582,7 +461,7 @@ fn extract(
             .checked_add(entry.size())
             .ok_or_else(|| invalid("Переполнение размера ZIP"))?;
         if total > MAX_EXTRACTED {
-            return Err(invalid("Слишком большой распакованный комплект"));
+            return Err(invalid("Слишком большой распакованный релиз"));
         }
         let output = target.join(&name);
         if entry.is_dir() {
@@ -606,52 +485,27 @@ fn extract(
     }
     Ok(())
 }
-/// Portable paths: reject traversal, Windows drives/devices and ambiguous names on macOS/Windows.
-pub fn safe_path(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() < 1024
-        && name.split('/').all(|part| {
-            !part.is_empty()
-                && part != "."
-                && part != ".."
-                && !part.ends_with('.')
-                && part
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
-                && !matches!(
-                    part.split('.')
-                        .next()
-                        .unwrap()
-                        .to_ascii_lowercase()
-                        .as_str(),
-                    "con"
-                        | "prn"
-                        | "aux"
-                        | "nul"
-                        | "com1"
-                        | "com2"
-                        | "com3"
-                        | "com4"
-                        | "com5"
-                        | "com6"
-                        | "com7"
-                        | "com8"
-                        | "com9"
-                        | "lpt1"
-                        | "lpt2"
-                        | "lpt3"
-                        | "lpt4"
-                        | "lpt5"
-                        | "lpt6"
-                        | "lpt7"
-                        | "lpt8"
-                        | "lpt9"
-                )
-        })
-}
+pub use release_core::paths::safe_path;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compatibility::Requirements;
+    fn public_catalog(c: &Catalog) -> String {
+        serde_json::to_string(&UpdateCatalog {
+            releases: c
+                .releases
+                .iter()
+                .map(|r| UpdateRelease {
+                    version: r.version.clone(),
+                    url: r.payload.url.clone(),
+                    size: r.payload.size,
+                    sha256: r.payload.sha256.clone(),
+                })
+                .collect(),
+        })
+        .unwrap()
+    }
     fn server(status: &str, body: &str) -> (String, std::thread::JoinHandle<()>) {
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -679,7 +533,6 @@ mod tests {
             .build()
             .new_agent();
         let mut a = Catalog::empty();
-        a.generated_at = "A".into();
         a.releases.push(Release {
             version: "3.13.0".into(),
             published_at: "2026-09-27".into(),
@@ -690,17 +543,18 @@ mod tests {
                 url: "https://example.org/A.zip".into(),
                 size: 100,
                 sha256: "a".repeat(64),
-                manifest_schema: 3,
+                manifest_schema: 4,
             },
         });
-        let (url, worker) = server("200 OK", &serde_json::to_string(&a).unwrap());
+        let (url, worker) = server("200 OK", &public_catalog(&a));
         assert_eq!(
             cache
                 .state_with(|| fetch_catalog(&client, &url), true)
                 .unwrap()
                 .catalog
-                .generated_at,
-            "A"
+                .releases[0]
+                .version,
+            "3.13.0"
         );
         worker.join().unwrap();
         for (status, body) in [
@@ -712,14 +566,13 @@ mod tests {
             let state = cache
                 .state_with(|| fetch_catalog(&client, &url), true)
                 .unwrap();
-            assert_eq!(state.catalog.generated_at, "A");
+            assert_eq!(state.catalog.releases[0].version, "3.13.0");
             assert!(state.warning.is_some());
             worker.join().unwrap();
         }
         let offline = cache.state_with(|| Err(network("offline")), true).unwrap();
-        assert_eq!(offline.catalog.generated_at, "A");
+        assert_eq!(offline.catalog.releases[0].version, "3.13.0");
         assert!(offline.warning.is_some());
-        a.generated_at = "B".into();
         let selected = a.releases[0].clone();
         let mut next = selected.clone();
         next.version = "3.13.1".into();
@@ -730,11 +583,11 @@ mod tests {
         let reopened = Cache {
             root: dir.path().into(),
         };
-        let (url, worker) = server("200 OK", &serde_json::to_string(&a).unwrap());
+        let (url, worker) = server("200 OK", &public_catalog(&a));
         let refreshed = reopened
             .state_with(|| fetch_catalog(&client, &url), true)
             .unwrap();
-        assert_eq!(refreshed.catalog.generated_at, "B");
+        assert_eq!(refreshed.catalog.releases[0].version, "3.13.1");
         assert!(refreshed
             .catalog
             .releases
@@ -828,10 +681,10 @@ mod tests {
         .is_err());
     }
     #[test]
-    fn archive_identity_must_match_catalog_requirements_and_version() {
+    fn archive_identity_and_manifest_requirements_are_checked() {
         let requirements = Requirements::default();
         let mut payload=Payload {root:PathBuf::new(),manifest:serde_json::from_value(serde_json::json!({
-            "schema":3,"product":"VoyahTune","releaseVersion":"3.13.0","buildRevision":"fixture",
+            "schema":4,"product":"VoyahTune","releaseVersion":"3.13.0","buildRevision":"fixture",
             "requirements":requirements,"artifacts":[]
         })).unwrap()};
         let release = Release {
@@ -844,7 +697,7 @@ mod tests {
                 url: "https://example.org/payload.zip".into(),
                 size: 1,
                 sha256: "a".repeat(64),
-                manifest_schema: 3,
+                manifest_schema: 4,
             },
         };
         assert!(verify_release(&payload, &release).is_ok());
@@ -853,10 +706,10 @@ mod tests {
             .requirements
             .as_mut()
             .unwrap()
-            .min_installer_version = "0.1.0".into();
+            .min_installer_version = "99.0.0".into();
         assert_eq!(
             verify_release(&payload, &release).unwrap_err().code,
-            "CATALOG_MISMATCH"
+            "INSTALLER_UPDATE_REQUIRED"
         );
         payload.manifest.requirements = Some(release.requirements.clone());
         payload.manifest.release_version = "3.13.1".into();
@@ -895,7 +748,7 @@ mod tests {
                 url: "https://example.org/file.zip".into(),
                 size: 1,
                 sha256: "a".repeat(64),
-                manifest_schema: 3,
+                manifest_schema: 4,
             },
             requirements: Requirements {
                 min_installer_version: "99.0.0".into(),

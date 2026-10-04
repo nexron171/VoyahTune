@@ -9,7 +9,7 @@
     <!-- Перенос приложения между сплитом/фриформом БЕЗ убийства процесса: завершаем задачу приложения
          (removeTask), а не force-stop процесса — плейбек в foreground-сервисе выживает (музыка не глохнет).
          REAL_GET_TASKS — перечислить задачи всех приложений; REMOVE_TASKS — завершить чужую задачу.
-         OEM REMOVE_TASKS = signature|documenter: Full использует UID-scoped ATMS.removeTask hook. -->
+         OEM REMOVE_TASKS = signature|documenter: VoyahTune использует UID-scoped ATMS.removeTask hook. -->
     <uses-permission android:name="android.permission.REAL_GET_TASKS" />
     <uses-permission android:name="android.permission.REMOVE_TASKS" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
@@ -163,6 +163,8 @@
              DE-каталога (/data/user_de/0/...) при boot-скане /system priv-app на этой ROM →
              zygote-краш "Failed to mount data_de/null". Сервис стартует по BOOT_COMPLETED
              (уже после разблокировки), direct-boot ему не нужен. -->
+        <provider android:name=".OtaStatusProvider" android:authorities="ru.big.town.anative.ota" android:exported="true" />
+
         <service
             android:name=".SetModesService"
             android:enabled="true"
@@ -175,6 +177,12 @@
             android:enabled="true"
             android:exported="false"
             />
+
+        <service
+            android:name=".LightDiagnosticsService"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
 
         <service
             android:name=".WiperColdService"

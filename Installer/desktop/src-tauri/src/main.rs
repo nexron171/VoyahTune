@@ -94,7 +94,7 @@ fn operation_payload(app: &tauri::AppHandle, serial: &str, action: Action) -> Re
     }
     Err(Error::new(
         "PAYLOAD_REQUIRED",
-        "Выберите и скачайте комплект или откройте локальный ZIP",
+        "Выберите и скачайте релиз или откройте локальный ZIP",
     ))
 }
 fn select_payload(app: &tauri::AppHandle, payload: Payload) -> Result<Value> {
@@ -138,7 +138,7 @@ async fn release_info(app: tauri::AppHandle, path: Option<String>) -> Result<Val
     let result = tauri::async_runtime::spawn_blocking(move || {
         let path = path
             .filter(|p| !p.trim().is_empty())
-            .ok_or_else(|| Error::new("PAYLOAD_REQUIRED", "Укажите ZIP или папку комплекта"))?;
+            .ok_or_else(|| Error::new("PAYLOAD_REQUIRED", "Укажите ZIP или папку релиза"))?;
         let path = PathBuf::from(path);
         let cancel = handle
             .state::<Runtime>()
@@ -164,7 +164,7 @@ async fn release_info(app: tauri::AppHandle, path: Option<String>) -> Result<Val
             Payload::open(root)?
         };
         if payload.manifest.removal_only {
-            return Err(Error::new("PAYLOAD_REQUIRED", "Выбран комплект удаления"));
+            return Err(Error::new("PAYLOAD_REQUIRED", "Выбран ресурсы удаления"));
         }
         select_payload(&handle, payload)
     })
@@ -188,33 +188,9 @@ async fn release_catalog(app: tauri::AppHandle, refresh: bool) -> Result<Value> 
                 .unwrap()
                 .push(json!({"version":embedded.manifest.release_version,"path":embedded.root}));
         }
-        for (entry, release) in value["catalog"]["releases"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .zip(state.catalog.releases.iter())
-        {
-            let error = release.requirements.validate().err().or_else(|| {
-                (release.payload.manifest_schema != 3).then(|| {
-                    Error::new(
-                        "INSTALLER_UPDATE_REQUIRED",
-                        "Обновите установщик для этого формата комплекта",
-                    )
-                })
-            });
-            let platform = if cfg!(target_os = "macos") {
-                "macos"
-            } else if cfg!(windows) {
-                "windows"
-            } else {
-                "linux"
-            };
-            entry["installerUpdates"] = json!(state
-                .catalog
-                .installer_updates(&release.requirements, platform));
-            entry["compatible"] = json!(error.is_none());
-            entry["incompatibility"] = json!(error.map(|e| e.message));
-        }
+        // The public catalog only describes the archive. Compatibility is checked
+        // from its verified manifest after download, before selecting/installing it.
+
         Ok(value)
     })
     .await
@@ -284,7 +260,7 @@ async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Valu
         select_payload(&handle, payload)
     })
     .await
-    .map_err(|e| Error::new("WORKER", "Не удалось скачать комплект").detail(e))
+    .map_err(|e| Error::new("WORKER", "Не удалось скачать релиз").detail(e))
     .and_then(|v| v);
     release(&app.state::<Runtime>());
     result
@@ -307,7 +283,7 @@ async fn delete_payload(app: tauri::AppHandle, path: String) -> Result<Value> {
         Ok(json!({"deselected":deselected}))
     })
     .await
-    .map_err(|e| Error::new("WORKER", "Не удалось удалить скачанный комплект").detail(e))
+    .map_err(|e| Error::new("WORKER", "Не удалось удалить скачанный релиз").detail(e))
     .and_then(|v| v);
     release(&app.state::<Runtime>());
     result
@@ -395,7 +371,7 @@ fn run_operation(app: &tauri::AppHandle, request: Request) -> Result<()> {
     if payload::sha256(&payload.root.join("manifest.json"))? != digest {
         return Err(Error::new(
             "PAYLOAD_CHANGED",
-            "Комплект изменился. Постройте план заново.",
+            "Релиз изменился. Постройте план заново.",
         ));
     }
     // DNS is an explicit choice on the review page, after initial diagnosis.
@@ -518,7 +494,6 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
         for name in [
             "events.jsonl",
             "plan.json",
-            "mode.json",
             "report.json",
             "backup.json",
             "after.json",

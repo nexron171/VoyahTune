@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-import ru.big.town.common.InstallMode;
 
 import static ru.big.town.anative.SetModesService.MSG_APPLY_DRIVE_MODES_STAR_BUTTON;
 import static ru.big.town.anative.SetModesService.STATE_SHUTDOWN_PREPARE;
@@ -62,8 +61,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
 
         // Одиночное приложение из дока открываем обычной задачей целевого пакета на физическом дисплее.
-        // Возврат из медиакарточки восстанавливает OEM-карточку и учитывает экран нажатия. Только full.
-        if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent) && InstallMode.isFull()) {
+        // Возврат из медиакарточки восстанавливает OEM-карточку и учитывает экран нажатия.
+        if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent)) {
             // Accept only configured dock packages and the two physical application screens.
             String pkg = intent.getStringExtra("pkg");
             int displayId = intent.getIntExtra("display", 0);
@@ -77,8 +76,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
 
         // Плитка «Быстрый запуск»: открыть приложение на выбранном физическом дисплее.
-        // 0 — водительский экран, 1 — пассажирский. Как и OPEN_FREEFORM, только в full-сборке.
-        if ("ru.big.town.anative.OPEN_ON_DISPLAY".equals(receivedIntent) && InstallMode.isFull()) {
+        // 0 — водительский экран, 1 — пассажирский.
+        if ("ru.big.town.anative.OPEN_ON_DISPLAY".equals(receivedIntent)) {
             String pkg = intent.getStringExtra("pkg");
             int displayId = intent.getIntExtra("display", 0);
             if (displayId != 0 && displayId != 1) {
@@ -93,7 +92,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // Launcher hook routes an allowlisted All Apps tile here so ActivityOptions can normalize a
         // reused freeform task before the activity is resumed. The exported bridge accepts only the
         // exact package persisted by the protected fullscreen config receiver.
-        if ("ru.big.town.anative.OPEN_FULLSCREEN".equals(receivedIntent) && InstallMode.isFull()) {
+        if ("ru.big.town.anative.OPEN_FULLSCREEN".equals(receivedIntent)) {
             String pkg = intent.getStringExtra("pkg");
             int displayId = intent.getIntExtra("display", 0);
             if (displayId != 0 && displayId != 1) {
@@ -108,7 +107,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // Long press resolves only protected slot config: split or the slot app in the cluster.
         // Keep the legacy action for an older launcher hook during upgrades.
         if (("ru.big.town.anative.OPEN_DOCK_SPLIT".equals(receivedIntent)
-                || "ru.big.town.anative.OPEN_DOCK_LONG_PRESS".equals(receivedIntent)) && InstallMode.isFull()) {
+                || "ru.big.town.anative.OPEN_DOCK_LONG_PRESS".equals(receivedIntent))) {
             int slot = intent.getIntExtra("slot", 0);
             if (slot == 1 || slot == 2) {
                 android.content.ContentResolver cr = context.getContentResolver();
@@ -138,8 +137,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
-        // Исполнение назначенного действия кнопки руля. Только full.
-        if ("ru.big.town.anative.STEER_ACTION".equals(receivedIntent) && InstallMode.isFull()) {
+        // Исполнение назначенного действия кнопки руля.
+        if ("ru.big.town.anative.STEER_ACTION".equals(receivedIntent)) {
             String action = intent.getStringExtra("action");
             if (isConfiguredSteerAction(context, action)) handleSteerActions(context, action);
             else Log.w(TAG, "STEER_ACTION отклонён: действие не настроено: " + action);
@@ -161,7 +160,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
         // Fallback-триггер пробуждения через броадкасты. Держим его активным всегда (даже если
         // power-listener работает): при рестарте CarService слушатель может «протухнуть», а этот
-        // путь остаётся. Режимы восстанавливаются отдельно по двери и Drive.
+        // путь остаётся. Настройки восстанавливаются по сохранённому ACC-циклу.
         if (!explicitComponent && (Intent.ACTION_SCREEN_ON.equals(receivedIntent) ||
                 "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent))) {
             Log.i(TAG, "onReceive ACTION_SCREEN_ON or GARAGE_MODE_OFF");
@@ -592,7 +591,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 return;
             }
             ApplyEngine.noteVehicleMode(modeKey, next);
-            MainActivity.persistSavedMode(app, modeKey, next);
+            MainActivity.persistExplicitMode(app, modeKey, next);
             Log.i(TAG, "STEER_ACTION " + modeKey + ": набор=" + csv
                     + " тек=" + cur + " → " + next);
         }, completion);

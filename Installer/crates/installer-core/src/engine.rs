@@ -1,4 +1,4 @@
-//! Rust port of Packaging/installer/{full,light}/install.sh and full/remove.sh.
+//! Rust port of Packaging/installer/device/install.sh and device/remove.sh.
 //! Each checked result below corresponds to a checked branch in those scripts.
 //! GUI steps, diagnostics and journals do not add vehicle preconditions.
 //! The approved VoyahHlCTRL remediation is an opt-in extension to the permission step.
@@ -7,8 +7,8 @@ use crate::{
     canbus::{self, RemovalConsent},
     classic_commands as c,
     events::{EventCallback, Events},
-    inventory, mode,
-    payload::{self, Payload, Variant, NATIVE, NATIVE_PATH, RESTORE},
+    inventory,
+    payload::{self, Payload, NATIVE, NATIVE_PATH, RESTORE},
     plans::{self, Action, Dns, Request},
     recovery::{self, Operation, DEVICE_STATE},
     Error, Result,
@@ -28,6 +28,58 @@ use std::{
 const STOP_LOADER: &str = "pkill -f /data/local/bin/load.bin; stop_status=$?; if [ $stop_status -gt 1 ]; then exit $stop_status; fi\n";
 const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
 const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
+// Postflight commands may repair package registration. Keep each command exclusive,
+// but let the device release its lock even if the desktop disconnects.
+fn postflight_script(script: &str, owner: &str, timeout_seconds: u32) -> String {
+    let owner = quote(owner);
+    format!(
+        r#"lock=/data/local/voyahtune-install.lock
+[ ! -L "$lock" ] || exit 1
+mkdir "$lock" 2>/dev/null || {{ echo 'OTA или другой установщик уже использует ГУ'; exit 1; }}
+release_postflight_lock() {{
+    [ "$(cat "$lock/owner" 2>/dev/null)" = {owner} ] || return 1
+    rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" && sync
+}}
+printf '%s' {owner} > "$lock/owner" || {{ rmdir "$lock"; exit 1; }}
+trap 'release_postflight_lock' EXIT
+trap 'exit 1' HUP INT TERM
+cat /proc/sys/kernel/random/boot_id > "$lock/boot" && chmod 700 "$lock" || exit 1
+/system/bin/timeout {timeout_seconds} /system/bin/sh -c {command}
+command_status=$?
+release_postflight_lock || exit 1
+trap - EXIT
+exit "$command_status"
+"#,
+        command = quote(script)
+    )
+}
+// PackageManager may retain an older /data/app update with the same versionCode.
+// Never uninstall it (that risks preferences); replace it and verify the active bytes.
+fn active_apk_script(package: &str, expected: &str, repair: Option<&str>) -> String {
+    let repair = repair.map(|path| format!(
+        "source_hash=$(sha256sum {} ) || exit 1\n[ \"${{source_hash%% *}}\" = {expected} ] || exit 1\nresult=$(pm install -r --user 0 {}) || exit 1\nprintf '%s\\n' \"$result\" | grep -qx Success || exit 1\n",
+        quote(path), quote(path)
+    )).unwrap_or_else(|| "exit 1\n".into());
+    format!(
+        r#"active_matches() {{
+    paths=$(pm path --user 0 {package}) || return 1
+    case "$paths" in package:*) ;; *) return 1 ;; esac
+    active=${{paths#package:}}
+    case "$active" in /*) ;; *) return 1 ;; esac
+    case "$active" in *'
+'*) return 1 ;; esac
+    digest=$(sha256sum "$active") || return 1
+    [ "${{digest%% *}}" = {expected} ]
+}}
+if ! active_matches; then
+    {repair}
+fi
+active_matches || {{ echo 'Активный APK {package} не совпадает с payload'; exit 1; }}
+"#,
+        package = quote(package),
+        expected = quote(expected)
+    )
+}
 pub struct Engine {
     pub adb: Adb,
     pub payload: Payload,
@@ -36,6 +88,7 @@ pub struct Engine {
     pub canbus_consent: Option<Arc<RemovalConsent>>,
     restart_loader: bool,
     legacy_migrated: bool,
+    ota_locked: bool,
 }
 impl Engine {
     pub fn new(
@@ -61,6 +114,7 @@ impl Engine {
             canbus_consent: None,
             restart_loader: false,
             legacy_migrated: false,
+            ota_locked: false,
         })
     }
     pub fn run(&mut self, request: Request) -> Result<()> {
@@ -70,9 +124,18 @@ impl Engine {
                 "Подтвердите найденный автомобиль и план операции",
             ));
         }
-        let result = self.execute(request);
-        // full_install_exit / light_install_exit: only before Light teardown, or
-        // before the accepted final reboot for Full. Do not restart after reboot.
+        let mut result = self.execute(request);
+        if let Err(error) = self.ota_unlock() {
+            if result.is_ok() {
+                result = Err(error);
+            } else {
+                self.warning(&error);
+            }
+        }
+        if result.is_err() {
+            self.ignore("if [ -x /data/local/bin/voyahtune-updater ]; then setprop ctl.start voyahtune_updater; fi\n");
+        }
+        // Restart the loader only before the accepted final reboot.
         if self.restart_loader {
             self.ignore("setprop ctl.start voyahtune_load 2>/dev/null || true\n");
         }
@@ -146,10 +209,62 @@ impl Engine {
         }
     }
     fn raw(&self, args: &[&str]) -> Result<crate::adb::Output> {
-        self.adb.run(args, None, Duration::MAX)
+        let timeout = if self.adb.step.as_deref() == Some("verify") {
+            Duration::from_secs(if args == ["wait-for-device"] { 180 } else { 30 })
+        } else {
+            Duration::MAX
+        };
+        self.adb.run(args, None, timeout)
     }
     fn shell(&self, script: &str) -> Result<String> {
-        self.adb.shell(script, Duration::MAX)
+        if self.adb.step.as_deref() == Some("verify") {
+            self.adb.shell(script, Duration::from_secs(30))
+        } else {
+            self.adb.shell(script, Duration::MAX)
+        }
+    }
+    fn postflight_shell(&self, script: &str) -> Result<String> {
+        self.adb.shell(
+            &postflight_script(script, &format!("desktop:{}:postflight", self.operation.id), 180),
+            Duration::from_secs(210),
+        )
+    }
+    fn native_broadcast(&self) -> Result<()> {
+        let before = self.shell("pidof system_server\n")?;
+        let owner = format!("desktop:{}:postflight", self.operation.id);
+        let command = postflight_script(c::NATIVE_BROADCAST, &owner, 15);
+        let first = self.adb.shell(&command, Duration::from_secs(25));
+        if let Err(error) = first {
+            let after = self.shell("pidof system_server\n").unwrap_or_default();
+            if before.is_empty() || after.is_empty() || before == after {
+                return Err(error);
+            }
+            if self
+                .shell("[ ! -e /data/local/voyahtune-install.lock ] && echo CLEAR\n")
+                .unwrap_or_default()
+                != "CLEAR"
+            {
+                return Err(error);
+            }
+            self.warning(&error);
+            let mut ready = false;
+            for _ in 0..15 {
+                if self.shell("getprop sys.boot_completed\n").unwrap_or_default() == "1"
+                    && self.shell("pidof system_server\n").unwrap_or_default() == after
+                {
+                    ready = true;
+                    break;
+                }
+                thread::sleep(Duration::from_secs(3));
+            }
+            if !ready {
+                return Err(self.fail("Android не восстановился после рестарта system_server", error));
+            }
+            if self.shell("pidof ru.big.town.anative\n").unwrap_or_default().is_empty() {
+                self.adb.shell(&command, Duration::from_secs(25))?;
+            }
+        }
+        Ok(())
     }
     fn ignore(&self, script: &str) {
         if let Err(e) = self.shell(script) {
@@ -187,7 +302,7 @@ impl Engine {
         )?;
         self.step(
             "preflight",
-            "Подготовка файлов комплекта",
+            "Подготовка файлов релиза",
             |e| {
                 e.adb.require_single()?;
                 e.local_files(r.action)
@@ -201,20 +316,11 @@ impl Engine {
                 Ok(())
             },
         )?;
-        if r.action != Action::Remove {
-            self.step(
-                "mode-check",
-                "Чтение текущего режима",
-                |e| {
-                    let current = mode::inspect(&e.adb);
-                    recovery::write_json(
-                        &e.operation.dir.join("mode.json"),
-                        &json!({"previous":current,"target":r.action}),
-                    )?;
-                    Ok(())
-                },
-            )?;
-        }
+        self.step(
+            "updater-lock",
+            "Блокировка установки и сохранение OTA-логов",
+            |e| e.ota_prepare(),
+        )?;
         self.ignore(&format!("rm -f {DEVICE_STATE}/lock/owner 2>/dev/null; rmdir {DEVICE_STATE}/lock 2>/dev/null; rmdir {DEVICE_STATE} 2>/dev/null; true\n"));
         if r.action != Action::Remove {
             self.step(
@@ -228,59 +334,78 @@ impl Engine {
             "Подготовка системного раздела",
             |e| e.writable(r.action == Action::Remove),
         )?;
-        if let Some(v) = r.action.variant() {
-            self.step("backup", "Сохранение файлов перед заменой", |e| e.backup(v))?;
-            if v == Variant::Light {
-                self.step("runtime", "Удаление hooks и Frida без очистки данных", |e| e.freeze(v))?;
-            }
+        self.ota_lock()?; // remount may have rebooted; retain this desktop operation across boot.
+        self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
+        if r.action == Action::Install {
+            self.step("backup", "Сохранение файлов перед заменой", |e| e.backup())?;
+
             self.step(
                 "signing-reset",
                 "Переустановка при смене подписи",
                 |e| e.signing_reset(r.action),
             )?;
-            if v == Variant::Full {
-                self.step("runtime", "Остановка старых hooks", |e| e.freeze(v))?;
-            }
-            if self.payload.manifest.schema == 3 {
-                self.step("files", "Установка файлов комплекта", |e| e.recipe_files(v))?;
-            }
-            if v == Variant::Full {
-                if self.payload.manifest.schema != 3 {
-                    self.step("files", "Установка Frida и скриптов", |e| e.full_files())?;
-                }
-                self.step(
-                    "migration",
-                    "Миграция старого init.logcat.sh",
-                    |e| e.migrate_legacy(),
-                )?;
-                self.step("boot-hooks", "Установка boot-hook", |e| {
-                    e.boot_hooks()
-                })?;
-            }
-            self.step("native", "Установка Native и разрешений", |e| e.native(v))?;
+
+            self.step("runtime", "Остановка старых hooks", |e| {
+                e.freeze()
+            })?;
+
+            self.step("apollo-migration", "Отключение старой активации Apollo", |e| {
+                e.shell(include_str!("../../../../Packaging/installer/common/apollo-safe-device.sh")).map(|_| ())
+            })?;
+
+            self.step("files", "Установка файлов релиза", |e| e.recipe_files())?;
+
+            self.step(
+                "migration",
+                "Миграция старого init.logcat.sh",
+                |e| e.migrate_legacy(),
+            )?;
+            self.step("boot-hooks", "Установка boot-hook", |e| {
+                e.boot_hooks()
+            })?;
+
+            self.step("native", "Установка Native и разрешений", |e| e.native())?;
             self.step(
                 "packages",
                 "Установка RestoreMode и настроек",
-                |e| e.packages(v),
+                |e| e.packages(),
             )?;
             self.step("dns", "Настройка DNS", |e| e.dns_choice(r.dns))?;
-            self.step("mode", "Сохранение режима приложения", |e| {
-                e.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
-                mode::commit(&e.adb,v)
+            self.step("updater-bootstrap", "Подготовка первого запуска OTA", |e| {
+                e.shell("rm -f /data/local/voyahtune-updater/state.json /data/local/voyahtune-updater/.state.json.new /data/local/bin/voyahtune-update.block && sync\n")?;
+                Ok(())
             })?;
             self.step(
                 "reboot",
                 "Перезагрузка автомобиля",
                 |e| {
+                    e.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
+                    e.ota_unlock()?;
                     e.raw(&["reboot"])?.checked("ADB не принял перезагрузку")?;
                     e.restart_loader = false;
                     Ok(())
                 },
             )?;
-            self.step("verify", "Проверка запуска Native", |e| {
-                e.wait_boot(true)?;
-                e.native_ready()
-            })?;
+            self.step(
+                "verify",
+                "Проверка Native и готовности OTA",
+                |e| {
+                    e.wait_boot(true)?;
+                    e.native_ready()?;
+                    e.updater_ready()?;
+                    let service = e.shell("getprop init.svc.voyahtune_updater\n")?;
+                    if service != "running" {
+                        return Err(e.fail("Root-служба OTA не запустилась", service));
+                    }
+                    let version: serde_json::Value = serde_json::from_str(
+                        &e.shell("/data/local/bin/voyahtune-updater --version\n")?,
+                    )?;
+                    if version["ipcSchema"] != 1 {
+                        return Err(e.fail("Несовместимый IPC updater", version));
+                    }
+                    Ok(())
+                },
+            )?;
         } else {
             self.step("deactivate", "Отключение Apollo", |e| {
                 e.apollo_safe(false)?;
@@ -317,14 +442,12 @@ impl Engine {
                 e.shell(c::REMOVE_SYSTEM)?;
                 Ok(())
             })?;
-            self.step("mode", "Удаление флага режима", |e| {
-                mode::clear(&e.adb)
-            })?;
             // The classic remover ends with adb reboot, without postflight inventory.
             self.step(
                 "reboot",
                 "Перезагрузка автомобиля",
                 |e| {
+                    e.ota_unlock()?;
                     e.raw(&["reboot"])?.checked("ADB не принял перезагрузку")?;
                     Ok(())
                 },
@@ -332,11 +455,81 @@ impl Engine {
         }
         Ok(())
     }
+    fn ota_lock(&mut self) -> Result<()> {
+        let owner = quote(&format!("desktop:{}", self.operation.id));
+        self.shell(&format!(r#"lock=/data/local/voyahtune-install.lock
+boot=$(cat /proc/sys/kernel/random/boot_id) || exit 1
+[ ! -L "$lock" ] || exit 1
+if mkdir "$lock" 2>/dev/null; then :
+else
+    old=$(cat "$lock/owner" 2>/dev/null)
+    if [ "$old" = {owner} ]; then :
+    elif [ "$old" = ota ] && {{ [ "$(cat "$lock/boot" 2>/dev/null)" != "$boot" ] || [ "$(/data/local/bin/voyahtune-updater --repair-status 2>/dev/null)" = repair-required ]; }}; then
+        rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" && mkdir "$lock" || exit 1
+    else echo 'OTA или другой установщик уже использует ГУ'; exit 1; fi
+fi
+printf '%s' {owner} > "$lock/owner" && printf '%s' "$boot" > "$lock/boot" && chmod 700 "$lock" && sync
+"#))?;
+        self.ota_locked = true;
+        Ok(())
+    }
+    fn ota_unlock(&mut self) -> Result<()> {
+        if !self.ota_locked {
+            return Ok(());
+        }
+        let owner = quote(&format!("desktop:{}", self.operation.id));
+        self.adb.shell(&format!(r#"# release desktop installation lock
+lock=/data/local/voyahtune-install.lock
+[ ! -L "$lock" ] || exit 1
+if [ -d "$lock" ]; then
+    [ "$(cat "$lock/owner" 2>/dev/null)" = {owner} ] || {{ echo 'Владелец блокировки изменился'; exit 1; }}
+    rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" || exit 1
+fi
+[ ! -e "$lock" ] && sync
+"#), Duration::from_secs(30))?;
+        self.ota_locked = false;
+        Ok(())
+    }
+    fn ota_prepare(&mut self) -> Result<()> {
+        self.ota_lock()?;
+        self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
+        for _ in 0..20 {
+            if self.shell("getprop init.svc.voyahtune_updater\n")? != "running" {
+                break;
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+        if self.shell("getprop init.svc.voyahtune_updater\n")? == "running" {
+            return Err(self.fail(
+                "Не удалось остановить OTA-службу",
+                "Повторите после завершения OTA",
+            ));
+        }
+        let diagnostics = self.operation.dir.join("ota-diagnostics");
+        fs::create_dir_all(&diagnostics)?;
+        for name in [
+            "state.json",
+            "state.corrupt.json",
+            "updater.log",
+            "updater.log.1",
+            "command.log",
+        ] {
+            let remote = format!("/data/local/voyahtune-updater/{name}");
+            if self.shell(&format!(
+                "if [ -f {} ]; then echo PRESENT; fi\n",
+                quote(&remote)
+            ))? == "PRESENT"
+            {
+                self.adb.pull(&remote, &diagnostics.join(name))?;
+            }
+        }
+        Ok(())
+    }
     fn local_files(&self, a: Action) -> Result<()> {
         if a != Action::Remove && self.payload.manifest.removal_only {
             return Err(Error::new(
                 "PAYLOAD_REQUIRED",
-                "Комплект удаления нельзя использовать для установки",
+                "Ресурсы удаления нельзя использовать для установки",
             ));
         }
         let mut names = vec!["dns-helper.sh"];
@@ -344,21 +537,18 @@ impl Engine {
             names.extend(["dns.apk", "whitelist.xml"]);
         }
         names.push("init.logcat.original.sh");
-        if a == Action::Full && self.payload.manifest.schema != 3 {
-            names.extend(payload::FULL_NAMES.iter().copied());
-        }
-        if self.payload.manifest.schema == 3 {
-            self.payload.verify()?;
-        }
+
+        self.payload.verify()?;
+
         for name in names {
-            let p = self.payload.file(name, None)?;
+            let p = self.payload.file(name)?;
             if !p.is_file() || p.metadata()?.len() == 0 {
-                return Err(self.fail("Нет обязательного файла комплекта", name));
+                return Err(self.fail("Нет обязательного файла релиза", name));
             }
         }
-        if let Some(v) = a.variant() {
+        if a == Action::Install {
             for name in ["native.apk", "restore_mode.apk"] {
-                let p = self.payload.file(name, Some(v))?;
+                let p = self.payload.file(name)?;
                 if p.metadata()?.len() == 0 {
                     return Err(self.fail("Пустой обязательный APK", name));
                 }
@@ -366,7 +556,7 @@ impl Engine {
         }
         // ydns_prepare_helper's existing pinned RRO check, not a new payload gate.
         if a != Action::Remove
-            && payload::sha256(&self.payload.file("dns.apk", None)?)?
+            && payload::sha256(&self.payload.file("dns.apk")?)?
                 != "c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d"
         {
             return Err(self.fail(
@@ -557,12 +747,12 @@ impl Engine {
     fn backup_dir(&self) -> PathBuf {
         self.operation.dir.parent().unwrap().join("backup")
     }
-    fn backup(&self, v: Variant) -> Result<()> {
+    fn backup(&self) -> Result<()> {
         let dir = self.backup_dir();
         let made = fs::create_dir_all(&dir);
-        if v == Variant::Full {
-            made?;
-        }
+
+        made?;
+
         let mut paths = vec![
             (NATIVE_PATH.to_owned(), "Native.apk".to_owned()),
             (
@@ -570,29 +760,24 @@ impl Engine {
                 "privapp-permissions-ru.big.town.anative.xml".to_owned(),
             ),
         ];
-        if v == Variant::Full {
-            let mut full = vec![];
-            for name in [
-                "load.bin",
-                "steeringwheelkeys.js",
-                "launcherdock.js",
-                "multidisplay.js",
-                "vd_bypass.js",
-                "frida-inject",
-            ] {
-                full.push((format!("/data/local/bin/{name}"), name.into()));
-            }
-            full.extend(paths);
-            paths = full;
+
+        let mut runtime_backup = vec![];
+        for name in [
+            "load.bin",
+            "steeringwheelkeys.js",
+            "launcherdock.js",
+            "multidisplay.js",
+            "vd_bypass.js",
+            "frida-inject",
+        ] {
+            runtime_backup.push((format!("/data/local/bin/{name}"), name.into()));
         }
+        runtime_backup.extend(paths);
+        paths = runtime_backup;
+
         for (remote, name) in paths {
             let dst = dir.join(&name);
-            if v == Variant::Light {
-                if !dst.is_file() {
-                    let _ = self.adb.pull(&remote, &dst);
-                }
-                continue;
-            }
+
             if dst.exists() {
                 if dst.is_file() && dst.metadata()?.len() > 0 {
                     continue;
@@ -641,22 +826,17 @@ impl Engine {
         }
         Ok(())
     }
-    fn freeze(&mut self, v: Variant) -> Result<()> {
-        if v == Variant::Light {
-            return self.soft_remove_full_runtime();
-        }
+    fn freeze(&mut self) -> Result<()> {
         self.restart_loader = true;
-        // Light has no init service. Absence is already stopped, not a failure.
+        // An absent init service is already stopped, not a failure.
         if let Err(error) = self.stop_runtime_for_update() {
             self.warning(&error);
         }
         self.apollo_safe(true)?;
         self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
-        if v == Variant::Light {
-            self.restart_loader = false;
-        } else {
-            self.ignore(c::APOLLO_FILES);
-        }
+
+        self.ignore(c::APOLLO_FILES);
+
         for key in [
             "open_voyah_apollo_legacy_hook_enabled",
             "open_voyah_apollo_master",
@@ -667,39 +847,7 @@ impl Engine {
         ] {
             self.ignore(&format!("settings delete global {key}\n"));
         }
-        if v == Variant::Light {
-            self.ignore("settings delete global voyahtune_keyboard_mode\n");
-        }
-        Ok(())
-    }
-    fn soft_remove_full_runtime(&mut self) -> Result<()> {
-        // Old APKs can still activate their hooks; stop them without clearing data.
-        self.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
-        self.migrate_legacy()?;
-        self.remove_boot()?;
-        // After boot removal, an interrupted cleanup must never restart Full.
-        self.restart_loader = false;
-        self.ignore(STOP_LOADER);
-        self.ignore(c::REMOVE_PROCESSES);
-        self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
-        self.ignore("am force-stop com.qinggan.app.qgime\n");
-        self.shell(c::LIGHT_RUNTIME_REMOVE)?;
-        let recipe = &self.payload.manifest.recipe;
-        // Include new Full-only files from future payloads, not only today's hooks.
-        for file in recipe.files.iter().filter(|f| !f.variants.contains(&Variant::Light)) {
-            let path = quote(&file.destination);
-            self.shell(&format!("rm -f {path} && test ! -e {path} && test ! -L {path}\n"))?;
-        }
-        for directory in recipe.directories.iter().filter(|d| !d.variants.contains(&Variant::Light)) {
-            let prefix = format!("{}/", directory.path);
-            if recipe.files.iter().any(|f| f.variants.contains(&Variant::Light) && f.destination.starts_with(&prefix))
-                || recipe.directories.iter().any(|d| d.variants.contains(&Variant::Light) && d.path.starts_with(&prefix)) {
-                continue;
-            }
-            let path = quote(&directory.path);
-            self.shell(&format!("rm -rf {path} && test ! -e {path} && test ! -L {path}\n"))?;
-        }
-        self.shell("test ! -e /data/local/bin/load.bin && test ! -e /data/local/bin/frida-inject\n")?;
+
         Ok(())
     }
     fn push_file(
@@ -734,14 +882,10 @@ impl Engine {
         }
         result
     }
-    fn recipe_files(&self, variant: Variant) -> Result<()> {
+    fn recipe_files(&self) -> Result<()> {
         self.shell(c::PREPARE_DATA_DIRECTORIES)?;
         let recipe = &self.payload.manifest.recipe;
-        for directory in recipe
-            .directories
-            .iter()
-            .filter(|d| d.variants.contains(&variant))
-        {
+        for directory in recipe.directories.iter() {
             let p = quote(&directory.path);
             self.shell(&format!(
                 "mkdir -p {p} && chown 0:0 {p} && chmod {:o} {p}\n",
@@ -749,30 +893,28 @@ impl Engine {
             ))?;
         }
         for file in recipe.files.iter().filter(|f| {
-            f.variants.contains(&variant)
-                && f.phase == crate::recipe::Phase::Files
+            f.phase == crate::recipe::Phase::Files
                 && !["native.apk", "whitelist.xml"].contains(&f.artifact.as_str())
         }) {
+            if file.artifact == "voyahtune-updater.apk" {
+                self.shell("mkdir -p /system/priv-app/VoyahTuneUpdater && chown 0:0 /system/priv-app/VoyahTuneUpdater && chmod 755 /system/priv-app/VoyahTuneUpdater\n")?;
+            }
             let stage = format!("{}.voyahtune.new", file.destination);
             self.push_file(
-                &self.payload.file(&file.artifact, None)?,
+                &self.payload.file(&file.artifact)?,
                 &stage,
                 &file.destination,
                 file.mode,
                 file.destination.starts_with("/system/"),
             )?;
         }
-        for attr in recipe
-            .attributes
-            .iter()
-            .filter(|a| a.variants.contains(&variant))
-        {
+        for attr in recipe.attributes.iter() {
             let p = quote(&attr.path);
             self.shell(&format!("chown 0:0 {p} && chmod {:o} {p}\n", attr.mode))?;
         }
-        if variant == Variant::Full {
-            self.shell(c::APP_CLIENT_MIGRATION)?;
-        }
+
+        self.shell(c::APP_CLIENT_MIGRATION)?;
+
         // Retired exact paths are cumulative. Never delete an active target.
         for path in &recipe.remove_files {
             if !recipe.files.iter().any(|f| f.destination == *path) {
@@ -781,51 +923,28 @@ impl Engine {
         }
         Ok(())
     }
-    fn full_files(&self) -> Result<()> {
-        self.shell(c::PREPARE_DATA_DIRECTORIES)?;
-        for name in payload::FULL_NAMES
-            .iter()
-            .filter(|s| !s.starts_with("voyahtune.load."))
-        {
-            let dst = format!("/data/local/bin/{name}");
-            self.push_file(
-                &self.payload.file(name, None)?,
-                &format!("{dst}.voyahtune.new"),
-                &dst,
-                if ["load.bin", "frida-inject"].contains(name) {
-                    0o755
-                } else {
-                    0o644
-                },
-                false,
-            )?;
-        }
-        self.shell(c::APP_CLIENT_MIGRATION)?;
-        self.shell("rm -f /data/local/bin/voyahtune-hook-manifest.json /data/local/bin/voyahtune-hook-manifest.json.voyahtune.new\n")?;
-        Ok(())
-    }
-    fn native(&self, v: Variant) -> Result<()> {
-        self.shell(if v==Variant::Light{"mkdir -p /system/priv-app/Native && chown 0:0 /system/priv-app/Native && chmod 755 /system/priv-app/Native && restorecon /system/priv-app/Native\n"}else{"mkdir -p /system/priv-app/Native && chmod 755 /system/priv-app/Native\n"})?;
+    fn native(&self) -> Result<()> {
+        self.shell("mkdir -p /system/priv-app/Native && chmod 755 /system/priv-app/Native\n")?;
         self.push_file(
-            &self.payload.file("native.apk", Some(v))?,
+            &self.payload.file("native.apk")?,
             "/system/priv-app/.Native.apk.voyahtune.new",
             NATIVE_PATH,
             0o644,
             true,
         )?;
-        if v == Variant::Full {
-            self.ignore("ls -all /system/priv-app/Native\n");
-        }
-        self.shell(if v==Variant::Light{"mkdir -p /system/etc/permissions && chown 0:0 /system/etc/permissions && chmod 755 /system/etc/permissions && restorecon /system/etc/permissions\n"}else{"mkdir -p /system/etc/permissions\n"})?;
+
+        self.ignore("ls -all /system/priv-app/Native\n");
+
+        self.shell("mkdir -p /system/etc/permissions\n")?;
         self.push_file(
-            &self.payload.file("whitelist.xml", None)?,
+            &self.payload.file("whitelist.xml")?,
             "/system/etc/.privapp-permissions-ru.big.town.anative.xml.voyahtune.new",
             payload::WHITELIST,
             0o644,
             true,
         )
     }
-    fn packages(&self, v: Variant) -> Result<()> {
+    fn packages(&self) -> Result<()> {
         if self
             .shell("getprop persist.app.feature.leavecar\n")
             .unwrap_or_default()
@@ -833,26 +952,70 @@ impl Engine {
         {
             self.ignore("setprop persist.app.feature.leavecar true\n");
         }
-        if v == Variant::Full {
-            for key in [
-                "enable_freeform_support",
-                "force_resizable_activities",
-                "hidden_api_policy",
-            ] {
-                self.ignore(&format!("settings put global {key} 1\n"));
-            }
+
+        for key in [
+            "enable_freeform_support",
+            "force_resizable_activities",
+            "hidden_api_policy",
+        ] {
+            self.ignore(&format!("settings put global {key} 1\n"));
         }
-        self.install_restore(&self.payload.file("restore_mode.apk", Some(v))?)
+
+        self.install_restore(&self.payload.file("restore_mode.apk")?)
+    }
+    fn verify_active_apk(&self, package: &str, artifact: &str, repair: Option<&str>) -> Result<()> {
+        let expected = &self.payload.artifact(artifact)?.sha256;
+        self.postflight_shell(&active_apk_script(package, expected, repair))?;
+        Ok(())
+    }
+    fn updater_ready(&self) -> Result<()> {
+        // ROM 650 can register a new system APK without its DE directory.
+        // PackageManager must create app data with the correct UID and context.
+        const READY: &str = r#"
+            if pm list packages --user 0 2>/dev/null | grep -qx 'package:ru.big.town.updater' \
+                    && pm path ru.big.town.updater 2>/dev/null | grep -q '^package:' \
+                    && [ -d /data/user/0/ru.big.town.updater ] \
+                    && [ -d /data/user_de/0/ru.big.town.updater ]; then
+                echo READY
+            else
+                echo BROKEN
+            fi
+        "#;
+        if self.shell(READY)? != "READY" {
+            self.postflight_shell("cmd package install-existing --user 0 ru.big.town.updater\n")?;
+        }
+        if self.shell(READY)? != "READY" {
+            self.postflight_shell("am force-stop ru.big.town.updater && pm uninstall -k --user 0 ru.big.town.updater\n")?;
+            self.postflight_shell("cmd package install-existing --user 0 ru.big.town.updater\n")?;
+        }
+        if self.shell(READY)? != "READY" {
+            return Err(self.fail(
+                "PackageManager не создал CE/DE Updater",
+                "ru.big.town.updater",
+            ));
+        }
+        self.verify_active_apk(
+            "ru.big.town.updater",
+            "voyahtune-updater.apk",
+            Some("/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk"),
+        )?;
+        Ok(())
     }
     fn native_ready(&self) -> Result<()> {
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
-            self.shell("pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true\n")?;
-            self.shell("cmd package install-existing --user 0 --wait ru.big.town.anative\n")?;
+            self.postflight_shell(
+                "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true\n",
+            )?;
+            self.postflight_shell(
+                "cmd package install-existing --user 0 ru.big.town.anative\n",
+            )?;
         }
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
             return Err(self.fail("PackageManager не создал CE/DE Native", NATIVE));
         }
-        self.shell(c::NATIVE_BROADCAST)?;
+        self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
+        self.verify_active_apk(RESTORE, "restore_mode.apk", None)?;
+        self.native_broadcast()?;
         for _ in 0..20 {
             if !self
                 .shell("pidof ru.big.town.anative\n")
@@ -946,7 +1109,7 @@ impl Engine {
         let source = if backup.is_file() && self.valid_original(&backup) {
             backup
         } else {
-            self.payload.file("init.logcat.original.sh", None)?
+            self.payload.file("init.logcat.original.sh")?
         };
         if !self.valid_original(&source) {
             return Err(self.fail(
@@ -985,17 +1148,17 @@ impl Engine {
     }
     fn boot_transaction(&self) -> Result<()> {
         for name in ["voyahtune.load.rc", "voyahtune.load.sh"] {
-            self.payload.file(name, None)?;
+            self.payload.file(name)?;
         }
         self.shell("mkdir -p /system/etc/init\n")?;
         self.ignore(c::BOOT_CLEAN_STAGE);
         let prepare = (|| {
             self.adb.push(
-                &self.payload.file("voyahtune.load.sh", None)?,
+                &self.payload.file("voyahtune.load.sh")?,
                 "/system/etc/.voyahtune.load.sh.new",
             )?;
             self.adb.push(
-                &self.payload.file("voyahtune.load.rc", None)?,
+                &self.payload.file("voyahtune.load.rc")?,
                 "/system/etc/.voyahtune.load.rc.new",
             )?;
             self.shell(c::BOOT_PREPARE)?;
@@ -1115,28 +1278,32 @@ impl Engine {
         self.shell(c::REMOVE_FILES)?;
         self.shell("test ! -e /data/local/bin/voyahtune-hook-manifest.json && test ! -e /data/local/tmp/voyahtune-hook-status.v1\n")?;
         self.shell(c::REMOVE_CLIENT_CHECK)?;
-        if self.payload.manifest.schema == 3 {
-            for path in self.payload.manifest.recipe.cleanup_files() {
-                self.shell(&format!("rm -f {}\n", quote(&path)))?;
-            }
-            for path in self
-                .payload
-                .manifest
-                .recipe
-                .remove_directories
-                .iter()
-                .chain(
-                    self.payload
-                        .manifest
-                        .recipe
-                        .directories
-                        .iter()
-                        .map(|d| &d.path),
-                )
-            {
-                self.shell(&format!("rm -rf {}\n", quote(path)))?;
-            }
+        self.ignore(
+            "am force-stop ru.big.town.updater; pm uninstall --user 0 ru.big.town.updater\n",
+        );
+        self.shell("rm -f /data/local/bin/voyahtune-update.block && rm -rf /data/local/voyahtune-updater /system/priv-app/VoyahTuneUpdater\n")?;
+
+        for path in self.payload.manifest.recipe.cleanup_files() {
+            self.shell(&format!("rm -f {}\n", quote(&path)))?;
         }
+        for path in self
+            .payload
+            .manifest
+            .recipe
+            .remove_directories
+            .iter()
+            .chain(
+                self.payload
+                    .manifest
+                    .recipe
+                    .directories
+                    .iter()
+                    .map(|d| &d.path),
+            )
+        {
+            self.shell(&format!("rm -rf {}\n", quote(path)))?;
+        }
+
         Ok(())
     }
     fn restore_host_file(&self, name: &str) {
@@ -1150,14 +1317,14 @@ impl Engine {
     }
     fn dns(&self, action: &str) -> Result<()> {
         self.adb.push(
-            &self.payload.file("dns-helper.sh", None)?,
+            &self.payload.file("dns-helper.sh")?,
             "/data/local/tmp/open_voyah_dns_overlay.sh",
         )?;
         self.shell("chmod 0700 /data/local/tmp/open_voyah_dns_overlay.sh\n")?;
         if action == "install" {
             let _ = self.raw(&["remount"]);
             self.adb.push(
-                &self.payload.file("dns.apk", None)?,
+                &self.payload.file("dns.apk")?,
                 "/data/local/tmp/open_voyah_yandex_dns.apk",
             )?;
             self.shell("chmod 0600 /data/local/tmp/open_voyah_yandex_dns.apk\n")?;
@@ -1175,7 +1342,7 @@ impl Engine {
     }
     fn dns_choice(&self, choice: Dns) -> Result<()> {
         self.adb.push(
-            &self.payload.file("dns-helper.sh", None)?,
+            &self.payload.file("dns-helper.sh")?,
             "/data/local/tmp/open_voyah_dns_overlay.sh",
         )?;
         self.shell("chmod 0700 /data/local/tmp/open_voyah_dns_overlay.sh\n")?;
@@ -1255,10 +1422,98 @@ mod runtime_stop_tests {
     use std::{os::unix::fs::PermissionsExt, process::Command};
 
     #[test]
+    fn active_apk_repair_preserves_data_and_rejects_false_success() {
+        // The fake PackageManager intentionally ignores versionName: both APKs have
+        // the same release number, as in the USB regression after an OTA update.
+        for (mode, repair, success, installs) in [
+            ("current", true, true, 0),
+            ("stale", true, true, 1),
+            ("false-success", true, false, 1),
+            ("failure", true, false, 1),
+            ("ambiguous", false, false, 0),
+            ("stale", false, false, 0),
+            ("bad-source", true, false, 0),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let source = dir.path().join("system.apk");
+            let active = dir.path().join("active.apk");
+            let calls = dir.path().join("calls");
+            fs::write(
+                &source,
+                if mode == "bad-source" {
+                    b"wrong"
+                } else {
+                    b"fresh"
+                },
+            )
+            .unwrap();
+            fs::write(
+                &active,
+                if mode == "current" {
+                    b"fresh"
+                } else {
+                    b"older"
+                },
+            )
+            .unwrap();
+            let expected_file = dir.path().join("expected.apk");
+            fs::write(&expected_file, b"fresh").unwrap();
+            let expected = payload::sha256(&expected_file).unwrap();
+            let mock = r#"
+sha256sum() { shasum -a 256 "$@"; }
+pm() {
+    case "$1" in
+        path)
+            printf 'package:%s\n' "$ACTIVE"
+            [ "$MODE" != ambiguous ] || printf 'package:/another.apk\n'
+            return 0 ;;
+        install)
+            [ "$*" = "install -r --user 0 $SOURCE" ] || exit 91
+            echo install >> "$CALLS"
+            [ "$MODE" != failure ] || return 1
+            [ "$MODE" = false-success ] || cp "$SOURCE" "$ACTIVE"
+            echo Success ;;
+        *) exit 92 ;;
+    esac
+}
+"#;
+            let script = active_apk_script(
+                NATIVE,
+                &expected,
+                if repair {
+                    Some(source.to_str().unwrap())
+                } else {
+                    None
+                },
+            );
+            let out = Command::new("sh")
+                .args(["-c", &format!("{mock}\n{script}")])
+                .env("MODE", mode)
+                .env("SOURCE", &source)
+                .env("ACTIVE", &active)
+                .env("CALLS", &calls)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.success(), success, "{mode}: {:?}", out);
+            assert_eq!(
+                fs::read_to_string(calls)
+                    .unwrap_or_default()
+                    .lines()
+                    .count(),
+                installs,
+                "{mode}"
+            );
+        }
+    }
+
+    #[test]
     fn absent_loader_is_success_but_real_pkill_errors_are_preserved() {
         for code in [0, 1, 2, 127] {
             let output = Command::new("sh")
-                .args(["-c", &format!("pkill() {{ return {code}; }}\n{STOP_LOADER}")])
+                .args([
+                    "-c",
+                    &format!("pkill() {{ return {code}; }}\n{STOP_LOADER}"),
+                ])
                 .output()
                 .unwrap();
             assert_eq!(output.status.code(), Some(if code <= 1 { 0 } else { code }));
@@ -1269,9 +1524,17 @@ mod runtime_stop_tests {
     fn hook_stop_skips_empty_input_and_only_targets_owned_hooks() {
         let dir = tempfile::tempdir().unwrap();
         let kill = dir.path().join("kill");
-        fs::write(&kill, "#!/bin/sh\nprintf '%s\\n' \"$*\"\nexit \"${TEST_KILL_STATUS:-0}\"\n").unwrap();
+        fs::write(
+            &kill,
+            "#!/bin/sh\nprintf '%s\\n' \"$*\"\nexit \"${TEST_KILL_STATUS:-0}\"\n",
+        )
+        .unwrap();
         fs::set_permissions(&kill, fs::Permissions::from_mode(0o755)).unwrap();
-        let path = format!("{}:{}", dir.path().display(), std::env::var("PATH").unwrap());
+        let path = format!(
+            "{}:{}",
+            dir.path().display(),
+            std::env::var("PATH").unwrap()
+        );
         for (rows, expected, code) in [
             ("", "", 0),
             ("root 101 1 frida-inject -s /data/local/bin/vd_bypass.js\nroot 102 1 frida-inject -s /other/app.js\nroot 103 1 unrelated-process", "-9 101\n", 0),

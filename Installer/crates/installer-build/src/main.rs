@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use installer_core::{
-    payload::{self, Artifact, Manifest, Payload, Variant},
+    payload::{self, Artifact, Manifest, Payload},
     recovery::write_json,
     Error, Result,
 };
@@ -23,6 +23,10 @@ enum CommandKind {
     },
     VerifyHost {
         path: PathBuf,
+    },
+    VerifyOta {
+        entry: PathBuf,
+        payload: PathBuf,
     },
     VerifyCatalog {
         path: PathBuf,
@@ -48,15 +52,47 @@ struct Args {
     skip_android: bool,
 }
 fn main() {
-    let result=match Cli::parse().command {
-        CommandKind::Recovery { root, output } => build_recovery(&root, &output),
-        CommandKind::Build(args)=>run(args),
-        CommandKind::VerifyPayload { path } => Payload::open(&path).map(|payload| println!("{}",serde_json::json!({"valid":true,"manifest":payload.manifest,"payloadRoot":payload.root}))),
-        CommandKind::VerifyCatalog { path } => (|| -> Result<()> {
-            let mut catalog:installer_core::catalog::Catalog=serde_json::from_slice(&fs::read(path)?)?;
-            catalog.validate()?; println!("{}",serde_json::to_string_pretty(&catalog)?); Ok(())
+    let result = match Cli::parse().command {
+        CommandKind::VerifyOta {
+            entry,
+            payload: directory,
+        } => (|| -> Result<()> {
+            let entry: installer_core::catalog::UpdateRelease =
+                serde_json::from_slice(&fs::read(entry)?)?;
+            let claims = installer_core::ota::verify(&entry.into_release())?;
+            installer_core::ota::verify_payload(&Payload::open(&directory)?, &claims)?;
+            println!("{}", serde_json::to_string(&claims)?);
+            Ok(())
         })(),
-        CommandKind::VerifyHost { path } => payload::verify_host(&path).map(|_| println!("{}",serde_json::json!({"valid":true}))),
+        CommandKind::Recovery { root, output } => build_recovery(&root, &output),
+        CommandKind::Build(args) => run(args),
+        CommandKind::VerifyPayload { path } => (|| -> Result<()> {
+            let p = Payload::open(&path)?;
+            let mut signers = std::collections::BTreeMap::new();
+            if !p.manifest.removal_only {
+                for (name, id) in [
+                    ("native.apk", payload::NATIVE),
+                    ("restore_mode.apk", payload::RESTORE),
+                ] {
+                    signers.insert(id, payload::verified_signers(&p.file(name)?)?);
+                }
+            }
+            println!(
+                "{}",
+                serde_json::json!({"valid":true,"manifest":p.manifest,"payloadRoot":p.root,"apkSigners":signers})
+            );
+            Ok(())
+        })(),
+        CommandKind::VerifyCatalog { path } => (|| -> Result<()> {
+            let catalog: installer_core::catalog::UpdateCatalog =
+                serde_json::from_slice(&fs::read(path)?)?;
+            catalog.validate()?;
+            println!("{}", serde_json::to_string_pretty(&catalog)?);
+            Ok(())
+        })(),
+        CommandKind::VerifyHost { path } => {
+            payload::verify_host(&path).map(|_| println!("{}", serde_json::json!({"valid":true})))
+        }
     };
     if let Err(e) = result {
         eprintln!("{e}");
@@ -70,6 +106,11 @@ fn run(args: Args) -> Result<()> {
     }
     let (recipe, source_spec) = discover(&root)?;
     recipe.validate()?;
+    fs::create_dir_all(root.join("Updater/build"))?;
+    write_json(
+        &root.join("Updater/build/bootstrap.json"),
+        &serde_json::json!({"schema":1,"version":args.version}),
+    )?;
     let parent = args.output.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
     let recipe_file = parent.join(format!(".recipe-{}.json", std::process::id()));
@@ -80,6 +121,39 @@ fn run(args: Args) -> Result<()> {
     let sources_file = parent.join(format!(".sources-{}.json", std::process::id()));
     write_json(&sources_file, &source_spec)?;
     if !args.skip_android {
+        let ndk = std::env::var_os("ANDROID_NDK_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("ANDROID_HOME").map(|p| PathBuf::from(p).join("ndk/27.0.12077973"))
+            })
+            .ok_or_else(|| {
+                Error::new("NDK_MISSING", "Задайте ANDROID_NDK_HOME для сборки updater")
+            })?;
+        let status = Command::new("python3")
+            .arg(root.join("Updater/build-daemon.py"))
+            .arg("--ndk")
+            .arg(ndk)
+            .status()?;
+        if !status.success() {
+            return Err(Error::new(
+                "UPDATER_BUILD",
+                "Не удалось собрать root-службу",
+            ));
+        }
+        let status = Command::new(root.join("Updater/gradlew"))
+            .current_dir(root.join("Updater"))
+            .args(["--offline", "assembleRelease"])
+            .status()?;
+        if !status.success() {
+            return Err(Error::new(
+                "UPDATER_BUILD",
+                "Не удалось собрать интерфейс обновления",
+            ));
+        }
+        // Gradle maps a canonical source path to one signed artifact name.
+        // Keep delivery and stable roles as separate files, even when bytes match.
+        fs::copy(root.join("Updater/app/build/outputs/apk/release/app-release.apk"),
+            root.join("Updater/build/ui-next.apk"))?;
         for project in ["Native", "RestoreMode"] {
             #[cfg(not(windows))]
             let mut cmd = Command::new(root.join(project).join("gradlew"));
@@ -122,7 +196,7 @@ fn run(args: Args) -> Result<()> {
     fs::create_dir(&stage)?;
     let result = (|| {
         let mut manifest = Manifest {
-            schema: 3,
+            schema: 4,
             removal_only: false,
             requirements: Some(Default::default()),
             recipe,
@@ -154,13 +228,12 @@ fn run(args: Args) -> Result<()> {
                     "Исходник выходит за пределы проекта",
                 ));
             }
-            let variant: Option<Variant> = serde_json::from_value(item["variant"].clone())?;
-            copy(&stage, &source, name, variant, &mut manifest)?;
+            copy(&stage, &source, name, &mut manifest)?;
         }
         write_json(&stage.join("manifest.json"), &manifest)?;
         Payload::open(&stage)?;
         if args.output.exists() {
-            return Err(Error::new("OUTPUT_EXISTS","Папка payload уже существует. Укажите новый output; готовый комплект не перезаписывается."));
+            return Err(Error::new("OUTPUT_EXISTS","Папка payload уже существует. Укажите новый output; готовый релиз не перезаписывается."));
         }
         fs::rename(&stage, &args.output)?;
         println!(
@@ -180,7 +253,7 @@ fn build_recovery(root: &Path, output: &Path) -> Result<()> {
     let (recipe, sources) = discover(root)?;
     fs::create_dir_all(output)?;
     let mut manifest = Manifest {
-        schema: 3,
+        schema: 4,
         removal_only: true,
         requirements: Some(Default::default()),
         recipe,
@@ -196,7 +269,6 @@ fn build_recovery(root: &Path, output: &Path) -> Result<()> {
             output,
             &root.join(item["source"].as_str().unwrap()),
             item["name"].as_str().unwrap(),
-            None,
             &mut manifest,
         )?;
     }
@@ -214,7 +286,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         ("native.apk", "Native"),
         ("restore_mode.apk", "RestoreMode"),
     ] {
-        artifacts.push(serde_json::json!({"name":name,"variant":null,
+        artifacts.push(serde_json::json!({"name":name,
             "source":format!("{project}/app/build/outputs/apk/release/app-release.apk")}));
     }
     // Hooks/configs are discovered automatically, including newly added owned files.
@@ -229,15 +301,13 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         .collect();
     recipe.files.retain(|f| {
         let is_hook = f.artifact.ends_with(".js") || f.artifact.ends_with(".json");
-        !is_hook || names.contains(&f.artifact)
+        !is_hook || f.artifact == "voyahtune-ota-bootstrap.json" || names.contains(&f.artifact)
     });
     for name in names {
         if !recipe.files.iter().any(|f| f.artifact == name) {
             recipe.files.push(CopyFile {
                 destination: format!("/data/local/bin/{name}"),
                 artifact: name,
-                variant_artifact: false,
-                variants: vec![Variant::Full],
                 mode: 0o644,
                 phase: Phase::Files,
             });
@@ -249,6 +319,14 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         }
         let name = &file.artifact;
         let source = match name.as_str() {
+            "voyahtune-updater" => "Updater/build/daemon/arm64-v8a/voyahtune-updater".into(),
+            "voyahtune-ui-maintenance" => "Updater/build/daemon/arm64-v8a/voyahtune-ui-maintenance".into(),
+            "voyahtune-ui-next.apk" => "Updater/build/ui-next.apk".into(),
+            "voyahtune-updater.apk" => {
+                "Updater/app/build/outputs/apk/release/app-release.apk".into()
+            }
+            "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json".into(),
+            "voyahtune.updater.rc" => format!("Packaging/system/{name}"),
             "whitelist.xml" => {
                 "Packaging/system/privapp-permissions-ru.big.town.anative.xml".into()
             }
@@ -258,7 +336,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
             }
             _ => format!("Packaging/inject/{name}"),
         };
-        artifacts.push(serde_json::json!({"name":name,"variant":null,"source":source}));
+        artifacts.push(serde_json::json!({"name":name,"source":source}));
     }
     for (name, source) in [
         (
@@ -274,7 +352,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
             "Packaging/vendor-overlay/framework-res__config_ethernet_interfaces_yandexdns.apk",
         ),
     ] {
-        artifacts.push(serde_json::json!({"name":name,"variant":null,"source":source}));
+        artifacts.push(serde_json::json!({"name":name,"source":source}));
     }
     recipe.validate()?;
     Ok((
@@ -282,13 +360,7 @@ fn discover(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::
         serde_json::json!({"schema":1,"artifacts":artifacts}),
     ))
 }
-fn copy(
-    stage: &Path,
-    source: &Path,
-    name: &str,
-    variant: Option<Variant>,
-    manifest: &mut Manifest,
-) -> Result<()> {
+fn copy(stage: &Path, source: &Path, name: &str, manifest: &mut Manifest) -> Result<()> {
     if name.is_empty()
         || !name
             .bytes()
@@ -298,14 +370,13 @@ fn copy(
     {
         return Err(Error::new("SOURCE_PATH", "Недопустимое имя артефакта").detail(name));
     }
-    let path = format!("{}/{}", variant.map(|v| v.name()).unwrap_or("common"), name);
+    let path = format!("common/{name}");
     let target = stage.join(&path);
     fs::create_dir_all(target.parent().unwrap())?;
     fs::copy(source, &target)?;
     manifest.artifacts.push(Artifact {
         name: name.into(),
         path,
-        variant,
         sha256: payload::sha256(&target)?,
         size: target.metadata()?.len(),
     });
@@ -316,11 +387,23 @@ fn copy(
 mod tests {
     use super::*;
     #[test]
-    fn checkout_payload_contains_every_required_full_file() {
+    fn checkout_payload_contains_every_required_runtime_file() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let (recipe, sources) = discover(&root).unwrap();
+        for (name, source) in [
+            ("voyahtune-ui-maintenance", "Updater/build/daemon/arm64-v8a/voyahtune-ui-maintenance"),
+            ("voyahtune-ui-next.apk", "Updater/build/ui-next.apk"),
+        ] {
+            assert!(recipe.files.iter().any(|f| f.artifact == name
+                && f.destination == format!("/data/local/bin/{name}")
+                && f.phase == installer_core::recipe::Phase::Files));
+            assert!(recipe.runtime().any(|f| f.artifact == name));
+            assert!(sources["artifacts"].as_array().unwrap().iter()
+                .any(|a| a["name"] == name && a["source"] == source));
+            assert!(recipe.cleanup_files().contains(&format!("/data/local/bin/{name}")));
+        }
         recipe.validate().unwrap();
-        for name in payload::FULL_NAMES {
+        for name in payload::RUNTIME_NAMES {
             let entry = sources["artifacts"]
                 .as_array()
                 .unwrap()

@@ -9,7 +9,8 @@ final class CanBusEvent {
         GEAR,
         LIGHT_STATUS,
         VEHICLE_STATE,
-        AMBIENT_TEMPERATURE
+        AMBIENT_TEMPERATURE,
+        ENERGY_TELEMETRY
     }
 
     enum Origin {
@@ -26,9 +27,16 @@ final class CanBusEvent {
     final int first;
     final int second;
     final int third;
+    final EnergyTelemetrySample telemetry;
 
     private CanBusEvent(Kind kind, Origin origin, long connectionEpoch, long sequence,
                         long elapsedRealtime, int first, int second, int third) {
+        this(kind, origin, connectionEpoch, sequence, elapsedRealtime, first, second, third, null);
+    }
+
+    private CanBusEvent(Kind kind, Origin origin, long connectionEpoch, long sequence,
+                        long elapsedRealtime, int first, int second, int third, EnergyTelemetrySample telemetry) {
+        this.telemetry = telemetry;
         this.kind = kind;
         this.origin = origin;
         this.connectionEpoch = connectionEpoch;
@@ -78,8 +86,12 @@ final class CanBusEvent {
                 elapsed, value, 0, 0);
     }
 
+    static CanBusEvent telemetry(Origin origin, long epoch, long sequence, long elapsed, EnergyTelemetrySample sample) {
+        return new CanBusEvent(Kind.ENERGY_TELEMETRY, origin, epoch, sequence, elapsed, sample.kind, 0, 0, sample);
+    }
+
     int signalKey() {
-        return kind == Kind.VEHICLE_STATE
+        return (kind == Kind.VEHICLE_STATE || kind == Kind.ENERGY_TELEMETRY)
                 ? (kind.ordinal() << 24) ^ first
                 : kind.ordinal() << 24;
     }
@@ -89,7 +101,8 @@ final class CanBusEvent {
     }
 
     boolean samePayload(CanBusEvent other) {
-        return other != null && kind == other.kind && origin == other.origin
+        // Telemetry repeats refresh transport freshness, even when the measured value is unchanged.
+        return kind != Kind.ENERGY_TELEMETRY && other != null && kind == other.kind && origin == other.origin
                 && connectionEpoch == other.connectionEpoch && first == other.first
                 && second == other.second && third == other.third;
     }

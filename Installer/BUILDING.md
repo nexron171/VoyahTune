@@ -1,6 +1,6 @@
 # Сборка VoyahTune Installer
 
-GUI выпускается независимо от автомобильного комплекта. Для нового payload:
+GUI выпускается независимо от автомобильного релиза. Для нового payload:
 
 ```sh
 ./make_release.sh 3.13.0 --payload
@@ -60,7 +60,7 @@ ARM64+x86-64, Windows/Linux — только x64. Для `--mac` Docker/Colima �
 macos-universal.tar.gz, windows-x64.exe, linux-x64.run и build-info.json.
 Можно указать другой каталог внутри Releases через `--output`.
 Существующий результат заменяется после успешной сборки всех выбранных платформ;
-при ошибке прежний комплект сохраняется. Логи: `Releases/cache/installer-all-XXXXXX/`.
+при ошибке прежний релиз сохраняется. Логи: `Releases/cache/installer-all-XXXXXX/`.
 
 Скрипт использует Colima profile `v` в `Releases/cache/colima` и два постоянных
 контейнера. Он запускает среду при необходимости и останавливает только то,
@@ -182,7 +182,7 @@ node Installer/scripts/build.mjs --bundles app \
 
 Результат: `Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app`.
 Этот target игнорируется Git. Скрипт объединяет обе архитектуры GUI, включает
-Google ADB и ресурсы удаления (payload опционален), проверяет комплект внутри `.app`.
+Google ADB и ресурсы удаления (payload опционален), проверяет релиз внутри `.app`.
 
 Проверки:
 
@@ -199,7 +199,7 @@ Developer ID / notarization пока не настроены.
 ## Windows: инструменты и отдельная сборка
 
 Нужны Windows 10/11 x64, Node.js 22/npm, Rust/rustup, Visual Studio 2022 Build Tools
-с Desktop development with C++, MSVC x64 и Windows SDK. Из Developer PowerShell:
+с Desktop development with C++, MSVC x64/x86 и Windows SDK. Из Developer PowerShell:
 
 ```powershell
 rustup toolchain install 1.98.1 --profile minimal
@@ -208,7 +208,7 @@ node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc --payload 'C:\p
 ```
 
 При нативной сборке результат:
-`Installer/target/release/bundle/nsis/VoyahTune Installer_3.3.0_x64-setup.exe`.
+`Installer/target/release/bundle/nsis/VoyahTune Installer_<версия>_x64-setup.exe`.
 При кросс-сборке — `Installer/target/x86_64-pc-windows-msvc/release/bundle/nsis/`.
 Имя версии берётся из Cargo. NSIS включает GUI, ADB и ресурсы удаления. WebView2 не включён: режим
 `downloadBootstrapper` скачивает и устанавливает его через интернет, только если
@@ -223,6 +223,34 @@ cargo install --locked cargo-xwin
 rustup target add --toolchain 1.98.1 x86_64-pc-windows-msvc
 node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc --payload /work/path/to/payload
 ```
+
+### Windows x86 (32 бита)
+
+Для Windows 10 x86 используйте target `i686-pc-windows-msvc`. В подготовленном
+окружении macOS отдельный установщик собирается командой:
+
+```sh
+./Installer/scripts/build-all-macos.sh --windows-arch x86
+```
+
+Результат: `Releases/build/installers-<версия>-windows-x86/windows-x86.exe`.
+Без `--windows-arch` Windows собирается для x64. Rust target для выбранной
+архитектуры устанавливается автоматически; `--check` только проверяет его наличие.
+
+Для прямой сборки на Windows или в Linux-контейнере:
+
+```sh
+rustup target add --toolchain 1.98.1 i686-pc-windows-msvc
+node Installer/scripts/build.mjs --target i686-pc-windows-msvc
+```
+
+При кросс-сборке сборщик выбирает x86 SDK для cargo-xwin и отдельный кэш
+`Releases/cache/cargo-xwin-x86` (можно переопределить через `XWIN_CACHE_DIR`).
+Сборщик проверяет, что встроенные ADB EXE и DLL тоже имеют архитектуру x86.
+Payload общий с x64 и macOS; отдельные APK или каталог для x86 не нужны.
+WebView2 скачивается при необходимости. Windows 11 не имеет 32-битного выпуска ОС;
+для 64-битной Windows используйте установщик x64. Проверка архива и архитектуры
+при сборке не заменяет проверку запуска GUI и подключения ADB на Windows 10 x86.
 
 ## Linux: инструменты и отдельная сборка
 
@@ -263,7 +291,10 @@ python3 Installer/scripts/package-linux.py \
 У AppImage runtime linuxdeploy и output plugin есть несовместимость с Rosetta.
 Общая команда обходит её автоматически: проверяет SHA, извлекает SquashFS напрямую,
 запускает внутренний AppRun и задаёт PATH для GTK/GStreamer plugins. Затем создаёт
-`.run`, которому AppImage runtime не нужен.
+`.run`, которому AppImage runtime не нужен. В извлечённом linuxdeploy используются
+`/usr/bin/patchelf` и `/usr/bin/strip` подготовленного контейнера: его статические
+встроенные копии также дали сбой под эмуляцией. Ошибки обработки библиотек
+не игнорируются; после упаковки проверяются вложенные ресурсы.
 
 На новом Mac подготовьте кэш (он не хранится в Git):
 
@@ -289,9 +320,18 @@ shasum -a 256 Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 уже сохранённые PNG/ICO/ICNS и Android-ресурсы.
 
 Версия движка задаётся в Installer/Cargo.toml. Версия самого устанавливаемого
-нативного пакета берётся из Cargo, автомобильного комплекта — из payload.
+нативного пакета берётся из Cargo, автомобильного релиза — из payload.
 Готовые binaries, validators, tooling.json в Packaging больше не используются.
 Публикуемые файлы — только результаты из Releases/dist.
 
-Проверяйте `installer-build verify-host PATH`, запуск на целевых ОС, Full/Light, обновление и удаление.
+Проверяйте `installer-build verify-host PATH`, запуск на целевых ОС, установку, обновление и удаление.
 Успешная кросс-сборка Windows и fake ADB не заменяют проверки на реальной ОС и машине.
+
+## Web-интерфейс при сборке через macOS
+
+`build-all-macos.sh` собирает общий Svelte/Vite интерфейс нативно на macOS и передаёт
+готовый `dist` контейнерам Windows/Linux. Rust и упаковка выполняются в соответствующем
+контейнере. Это исключает запуск Go runtime esbuild под эмуляцией x64, где наблюдался
+сбой сборщика мусора. При самостоятельной нативной сборке `build.mjs` по-прежнему
+собирает web-интерфейс обычным способом; `--frontend-dist PATH` разрешает явно передать
+свежую сборку и требует наличие `index.html`.

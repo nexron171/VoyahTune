@@ -29,7 +29,6 @@ final class VehicleStateControllers {
         }
     }
 
-    private final ModeRestoreTriggers restoreTriggers = new ModeRestoreTriggers();
     private final Context appContext;
     private final CanBusEventHub canBusEventHub;
     private final HandlerThread stateThread;
@@ -87,8 +86,7 @@ final class VehicleStateControllers {
     private void onCanBusEvent(CanBusEvent event) {
         switch (event.kind) {
             case CONNECTION:
-                // Preserve restore history across CAN reconnects: neither replayed states nor
-                // reconnecting during parking may grant another Drive restore.
+                // Connection replay only refreshes observable state.
                 gearStateController.reset();
                 driverDoorStateController.reset();
                 canBusEventHub.requestDriverDoorSeed();
@@ -99,11 +97,6 @@ final class VehicleStateControllers {
                 driverDoorStateController.reset();
                 break;
             case DOOR:
-                if (event.first == 1) ApplyEngine.stopEarlyDriveRestore("driver door open");
-                if (restoreTriggers.onDoor(event.first)) {
-                    ApplyEngine.noteDriverDoorOpened();
-                    ApplyEngine.scheduleApply("driver door opened");
-                }
                 driverDoorStateController.accept(
                         event.first,
                         event.origin == CanBusEvent.Origin.LIVE
@@ -111,12 +104,6 @@ final class VehicleStateControllers {
                                 : DriverDoorStateController.Source.SNAPSHOT);
                 break;
             case GEAR:
-                if (event.first == 3) ApplyEngine.stopEarlyDriveRestore("gear Drive");
-                if (restoreTriggers.onGear(event.first)) {
-                    ApplyEngine.scheduleApply("gear Drive");
-                }
-                // Close the restore gate above before allowing this trip's mode persistence.
-                ApplyEngine.noteGear(event.first);
                 gearStateController.accept(event.first);
                 break;
             case VEHICLE_STATE:
