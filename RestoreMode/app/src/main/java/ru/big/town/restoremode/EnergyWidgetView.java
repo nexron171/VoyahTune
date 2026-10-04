@@ -1,6 +1,7 @@
 package ru.big.town.restoremode;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -20,6 +21,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import ru.big.town.common.EnergyWidgetProtocol;
+import ru.big.town.common.EnergyWidgetSettings;
 
 /** Four native dashboard tiles. Coordinates match the approved 1920×720 prototype. */
 final class EnergyWidgetView extends View {
@@ -35,13 +37,16 @@ final class EnergyWidgetView extends View {
     private static final ExecutorService IMAGES = Executors.newSingleThreadExecutor();
     private static final LruCache<String,Bitmap> CACHE = new LruCache<>(2);
     private final String kind, color;
+    private final int columns, rows;
+    private final SharedPreferences prefs;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final float baseW, baseH;
     private Bundle state = new Bundle();
     private Bitmap car;
     private long tripMs=-1;
     private boolean inDrive;
-    private int window=15, selected=-1;
+    private int window, selected=-1;
+    private final Runnable clockTick=new Runnable(){@Override public void run(){invalidate();postDelayed(this,30_000);}};
     private float touchX, touchY, scale=1, offsetX, offsetY;
 
     static boolean isWidget(String id) {
@@ -59,10 +64,13 @@ final class EnergyWidgetView extends View {
         return "burgundy";
     }
 
-    EnergyWidgetView(Context context, String kind, String color) {
+    EnergyWidgetView(Context context, String kind, String color, int columns, int rows) {
         super(context); this.kind=kind; this.color=color(color);
-        baseW=(ENERGY.equals(kind)||TRIP.equals(kind))?1168:580;
-        baseH=ENERGY.equals(kind)?373:TRIP.equals(kind)?245:TIRES.equals(kind)?500:118;
+        this.columns=EnergyWidgetLayout.width(kind,columns);this.rows=EnergyWidgetLayout.height(kind,rows);
+        baseW=EnergyWidgetLayout.pixelsWide(this.columns);baseH=EnergyWidgetLayout.pixelsHigh(kind,this.rows);
+        prefs=context.getSharedPreferences("DrivePreferences",Context.MODE_PRIVATE);
+        window=EnergyWidgetSettings.window(prefs.getInt(EnergyWidgetSettings.WINDOW_KEY,75));
+        prefs.edit().putInt(EnergyWidgetSettings.WINDOW_KEY,window).apply();
         setFocusable(true); setClickable(true);
         if (TIRES.equals(kind)) {
             setLayerType(LAYER_TYPE_SOFTWARE,null); // alpha-shaped, soft bitmap shadow
@@ -80,14 +88,16 @@ final class EnergyWidgetView extends View {
         setOnClickListener(v -> {
             if(!ENERGY.equals(kind)) return;
             float x=(touchX-offsetX)/scale, y=(touchY-offsetY)/scale;
-            if(y>=24&&y<=74&&x>=baseW-303) {
-                int slot=Math.min(2,Math.max(0,(int)((x-(baseW-303))/90)));
-                window=new int[]{5,15,30}[slot]; selected=-1;
-            } else if(y>=160&&y<=320&&x>=77&&x<=baseW-77) {
+            float pad=columns<=5?20:27,button=columns<=5?65:90,buttonsLeft=baseW-pad-3*button;
+            if(y>=24&&y<=68&&x>=buttonsLeft&&x<=baseW-pad) {
+                int slot=Math.min(2,Math.max(0,(int)((x-buttonsLeft)/button)));
+                window=EnergyWidgetSettings.WINDOWS[slot];selected=-1;
+                prefs.edit().putInt(EnergyWidgetSettings.WINDOW_KEY,window).apply();
+            } else if(y>=155&&y<=279&&x>=pad+57&&x<=baseW-pad-22) {
                 float[] distances=array(EnergyWidgetProtocol.HISTORY_X,0);
                 if(distances.length>0) {
                     float end=distances[distances.length-1], start=Math.max(0,end-window);
-                    float target=start+(x-77)/(baseW-154)*Math.max(1,end-start), best=Float.MAX_VALUE;
+                    float target=start+(x-pad-57)/(baseW-2*pad-79)*Math.max(.1f,end-start), best=Float.MAX_VALUE;
                     for(int i=0;i<distances.length;i++) if(distances[i]>=start&&Math.abs(distances[i]-target)<best) {
                         best=Math.abs(distances[i]-target); selected=i;
                     }
@@ -97,6 +107,8 @@ final class EnergyWidgetView extends View {
         });
     }
 
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();if(ODO.equals(kind))post(clockTick);}
+    @Override protected void onDetachedFromWindow(){removeCallbacks(clockTick);super.onDetachedFromWindow();}
     void update(Bundle data) {
         float[] previous=array(EnergyWidgetProtocol.HISTORY_X,0);
         float selectedKm=selected>=0&&selected<previous.length?previous[selected]:Float.NaN;
@@ -157,97 +169,157 @@ final class EnergyWidgetView extends View {
     private void line(Canvas c,float x1,float y1,float x2,float y2,int color,float width) {
         paint.setColor(color);paint.setStrokeWidth(width);c.drawLine(x1,y1,x2,y2,paint);
     }
+    private float measured(String value,float size) {
+        paint.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));paint.setTextSize(size);return paint.measureText(value);
+    }
+    private float valueWithUnit(Canvas c,String value,String unit,float x,float y,float size,float unitSize,int color) {
+        text(c,value,x,y,size,color,false);
+        float next=x+measured(value,size)+6;
+        text(c,unit,next,y,unitSize,color,false);
+        return next+measured(unit,unitSize);
+    }
+    private void fitted(Canvas c,String value,float x,float y,float size,float maxWidth,int color) {
+        float width=measured(value,size);text(c,value,x,y,width>maxWidth?size*maxWidth/width:size,color,false);
+    }
+    private static String estimate(float value){return Float.isFinite(value)?"~"+num(value):"—";}
+    private float capacity(String key,float fallback) {
+        float value=state.getFloat(key,fallback);return EnergyWidgetSettings.validCapacity(value)?value:fallback;
+    }
     private void drawTires(Canvas c) {
-        text(c,"Давление в шинах",27,55,28,WHITE,true);right(c,"bar",553,55,19,MUTED);
+        boolean narrow=columns<4,shorter=rows==3;
+        float pad=columns==2?16:narrow?20:27,titleSize=columns==2?20:narrow?24:28;
+        float titleY=shorter?40:55;
+        text(c,"Давление в шинах",pad,titleY,titleSize,WHITE,true);right(c,"bar",baseW-pad,titleY,columns==2?14:19,MUTED);
+        float height=shorter?258:columns==2?325:columns==3?335:345,top=shorter?60:78;
         if(car!=null) {
-            float height=345,width=height*car.getWidth()/car.getHeight();
-            paint.setColor(Color.WHITE);paint.setShadowLayer(9,0,8,0xb0000000);
-            c.drawBitmap(car,null,new RectF((580-width)/2,78,(580+width)/2,423),paint);paint.clearShadowLayer();
-        } else text(c,"Загрузка изображения…",186,275,16,MUTED,false);
+            float width=height*car.getWidth()/car.getHeight();paint.setColor(Color.WHITE);paint.setShadowLayer(9,0,8,0xb0000000);
+            c.drawBitmap(car,null,new RectF((baseW-width)/2,top,(baseW+width)/2,top+height),paint);paint.clearShadowLayer();
+        } else text(c,"Загрузка…",baseW/2-42,baseH/2,16,MUTED,false);
         String[] names={"Левое переднее","Правое переднее","Левое заднее","Правое заднее"};
+        float pressureSize=shorter?(columns==2?30:columns==3?34:40):(columns==2?36:columns==3?42:53);
+        float labelSize=columns==2?12:columns==3?14:17,plateW=columns==2?120:137;
         for(int i=0;i<4;i++) {
-            float y=i<2?152:327;
-            if(i%2==0) {text(c,names[i],27,y,17,MUTED,false);text(c,num(current(EnergyWidgetProtocol.TIRES,i)),27,y+61,53,WHITE,false);line(c,162,y+32,192,y+32,BORDER,2);}
-            else {right(c,names[i],553,y,17,MUTED);right(c,num(current(EnergyWidgetProtocol.TIRES,i)),553,y+61,53,WHITE);line(c,388,y+32,418,y+32,BORDER,2);}
+            boolean left=i%2==0;
+            float y=shorter?(i<2?110:247):(i<2?152:327);
+            float valueY=y+pressureSize+10;
+            if(narrow){paint.setColor(0x7a000000);float x=left?pad:baseW-pad-plateW;
+                c.drawRoundRect(x,y-labelSize-8,x+plateW,valueY+8,4,4,paint);}
+            float x=left?pad+(narrow?8:0):baseW-pad-(narrow?8:0);
+            if(left){text(c,names[i],x,y,labelSize,MUTED,false);text(c,num(current(EnergyWidgetProtocol.TIRES,i)),x,valueY,pressureSize,WHITE,false);}
+            else {right(c,names[i],x,y,labelSize,MUTED);right(c,num(current(EnergyWidgetProtocol.TIRES,i)),x,valueY,pressureSize,WHITE);}
+            if(!narrow)line(c,left?162:baseW-192,y+32,left?192:baseW-162,y+32,BORDER,1);
         }
-        text(c,live()?"Показания автомобиля":"Нет связи с автомобилем",27,462,16,MUTED,false);
-        int index=java.util.Arrays.asList(COLORS).indexOf(color);right(c,COLOR_NAMES[index],553,462,16,MUTED);
+        float footer=shorter?baseH-27:462,footerSize=columns==2?12:columns==3?13:16;
+        text(c,live()?"Показания авто":"Нет связи",pad,footer,footerSize,MUTED,false);
+        int index=java.util.Arrays.asList(COLORS).indexOf(color);right(c,COLOR_NAMES[index],baseW-pad,footer,footerSize,MUTED);
     }
     private void drawOdo(Canvas c) {
-        text(c,"Общий пробег",27,54,24,WHITE,true);text(c,"ODO",27,83,18,MUTED,false);
+        float pad=columns==2?20:columns==3?22:27;
         float odo=current(EnergyWidgetProtocol.ODOMETER,0);
-        String n=Float.isFinite(odo)?String.format(RU,"%,.0f",odo):"—";
-        right(c,n,515,78,52,WHITE);right(c,"км",553,77,21,MUTED);
+        String value=Float.isFinite(odo)?String.format(RU,"%,.0f",odo):"—";
+        if(columns==2){text(c,"Общий пробег",pad,33,20,WHITE,true);text(c,"ODO",166,33,14,MUTED,false);
+            valueWithUnit(c,value,"км",pad,74,35,18,WHITE);
+        }else{ text(c,"Общий пробег",pad,42,columns==3?20:23,WHITE,true);text(c,"ODO",pad,66,17,MUTED,false);
+            float size=columns==3?38:49,end=baseW-pad;
+            right(c,"км",end,77,columns==3?18:22,MUTED);right(c,value,end-42,78,size,WHITE);}
+        String date=new java.text.SimpleDateFormat("dd.MM.yyyy",RU).format(new java.util.Date());
+        text(c,date,pad,baseH-13,columns==2?14:16,MUTED,false);
     }
     private void drawTrip(Canvas c) {
-        text(c,"Текущая поездка",27,55,28,WHITE,true);
-        right(c,!live()?"Нет связи":inDrive?"В пути":"На стоянке",1140,51,18,MUTED);
-        String[] labels={"Время в пути","Пробег","Средний расход","Бензин · оценка"};
-        float[] left={27,369,627,886};
+        boolean compact=columns<=6;
+        float pad=compact?22:27,rightEdge=baseW-pad;
+        text(c,"Текущая поездка",pad,compact?46:55,compact?24:28,WHITE,true);
+        right(c,!live()?"Нет связи":inDrive?"В пути":"На стоянке",rightEdge,compact?43:51,compact?13:18,MUTED);
         String time="—";
-        if(tripMs>=0&&live()) {long s=tripMs/1000;time=String.format(Locale.US,"%02d:%02d:%02d",s/3600,(s/60)%60,s%60);}
-        String[] numbers={time,num(current(EnergyWidgetProtocol.TRIP,0)),num(current(EnergyWidgetProtocol.TRIP,1)),num(current(EnergyWidgetProtocol.TRIP,2))};
+        if(tripMs>=0&&live()){long s=tripMs/1000;time=String.format(Locale.US,"%02d:%02d:%02d",s/3600,(s/60)%60,s%60);}
+        String[] labels={"Время в пути","Пробег","Электричество","Бензин"};
+        String[] values={time,num(current(EnergyWidgetProtocol.TRIP,0)),estimate(current(EnergyWidgetProtocol.TRIP,1)),estimate(current(EnergyWidgetProtocol.TRIP,2))};
         String[] units={"","км","кВт·ч/100 км","л/100 км"};
+        float content=baseW-2*pad,cell=content/4;
         for(int i=0;i<4;i++) {
-            text(c,labels[i],left[i],107,20,MUTED,false);
-            text(c,numbers[i],left[i],161,44,i==2?GREEN:i==3?BLUE:WHITE,false);
-            paint.setTextSize(44);float end=left[i]+paint.measureText(numbers[i])+10;
-            text(c,units[i],end,160,17,MUTED,false);
-            if(i>0) line(c,left[i]-26,87,left[i]-26,175,BORDER,1);
+            float x=compact?(i<2?pad:baseW/2+20):pad+cell*i+(i==0?0:18);
+            float y=compact?(i%2==0?78:151):107,numberY=compact?y+39:161;
+            float labelSize=compact?15:20,numberSize=compact?(i==0?32:34):columns==7?36:43;
+            float available=compact?baseW/2-2*pad-18:cell-(i==0?0:18);
+            float unitSize=compact?14:columns==7?15:17;
+            float total=measured(values[i],numberSize)+6+measured(units[i],unitSize);
+            if(total>available)numberSize=Math.max(22,numberSize-(total-available)/Math.max(1,values[i].length()*.55f));
+            text(c,labels[i],x,y,labelSize,MUTED,false);valueWithUnit(c,values[i],units[i],x,numberY,numberSize,unitSize,i==2?GREEN:i==3?BLUE:WHITE);
+            if(!compact&&i>0)line(c,x-18,87,x-18,175,BORDER,1);
         }
-        text(c,"Время учитывается только в D",27,211,18,MUTED,false);
-        float measuredKm=state.getFloat(EnergyWidgetProtocol.FUEL_ESTIMATE_KM,Float.NaN);
-        right(c,!live()?"Нет связи с автомобилем":!Float.isFinite(measuredKm)?"Ожидание уровня топлива"
-                :measuredKm<1?"Расчёт бензина после 1 км наблюдения"
-                :"Бензин ≈ по уровню бака 56 л · за "+num(measuredKm)+" км",1140,211,16,MUTED);
+        if(compact)line(c,baseW/2,63,baseW/2,198,BORDER,1);
+        text(c,"Время учитывается только в D",pad,baseH-22,compact?12:17,MUTED,false);
+        float evKm=current(EnergyWidgetProtocol.TRIP_OBSERVED_KM,0),fuelKm=current(EnergyWidgetProtocol.TRIP_OBSERVED_KM,1);
+        String note=!live()?"Нет связи с автомобилем":Math.max(evKm,fuelKm)<1?"Средние после 1 км наблюдения":
+                Math.abs(evKm-fuelKm)<.1?"Учтено "+num(Math.min(evKm,fuelKm))+" км · только снижение":
+                "Учтено: электро "+num(evKm)+", бензин "+num(fuelKm)+" км";
+        float noteSize=compact?12:16;
+        float maxNote=baseW/2-pad;
+        if(measured(note,noteSize)>maxNote)noteSize*=maxNote/measured(note,noteSize);
+        right(c,note,rightEdge,baseH-22,noteSize,MUTED);
     }
     private void drawEnergy(Canvas c) {
-        text(c,"Заряд и топливо",27,55,28,WHITE,true);
+        boolean compact=columns<=5;
+        float pad=compact?20:27,button=compact?65:90,buttonsLeft=baseW-pad-3*button;
+        text(c,"Заряд и топливо",pad,52,compact?24:28,WHITE,true);
         for(int i=0;i<3;i++) {
-            int range=new int[]{5,15,30}[i];float x=baseW-303+i*90;
-            paint.setColor(range==window?0xff414b5c:0xff1d212a);c.drawRoundRect(x,24,x+86,68,9,9,paint);
-            text(c,range+" км",x+20,53,18,range==window?WHITE:MUTED,true);
+            int range=EnergyWidgetSettings.WINDOWS[i];float x=buttonsLeft+i*button;
+            paint.setColor(range==window?0xff414b5c:0xff1d212a);c.drawRoundRect(x,24,x+button-4,68,9,9,paint);
+            String label=range+" км";float size=compact?16:18;
+            text(c,label,x+(button-4-measured(label,size))/2,52,size,range==window?WHITE:MUTED,false);
         }
-        float[] distances=array(EnergyWidgetProtocol.HISTORY_X,0), ev=array(EnergyWidgetProtocol.HISTORY_EV,distances.length), fuel=array(EnergyWidgetProtocol.HISTORY_FUEL,distances.length);
+        float[] distances=array(EnergyWidgetProtocol.HISTORY_X,0),ev=array(EnergyWidgetProtocol.HISTORY_EV,distances.length),fuel=array(EnergyWidgetProtocol.HISTORY_FUEL,distances.length);
         boolean[] gaps=state.getBooleanArray(EnergyWidgetProtocol.HISTORY_BREAK);
         int n=Math.min(distances.length,Math.min(ev.length,fuel.length));
-        float currentEv=current(EnergyWidgetProtocol.LEVELS,0), currentFuel=current(EnergyWidgetProtocol.LEVELS,1);
+        float currentEv=current(EnergyWidgetProtocol.LEVELS,0),currentFuel=current(EnergyWidgetProtocol.LEVELS,1);
         boolean hasCurrent=Float.isFinite(currentEv)||Float.isFinite(currentFuel);
-        if(selected>=0&&selected<n) {currentEv=ev[selected];currentFuel=fuel[selected];}
-        text(c,"—",27,122,34,GREEN,false);text(c,num(currentEv),68,125,49,GREEN,true);
-        text(c,"Батарея",235,117,17,GREEN,true);text(c,"%",180,153,18,MUTED,false);
-        text(c,"⋯",370,122,34,BLUE,true);text(c,num(currentFuel),410,125,49,BLUE,true);
-        text(c,"Топливо",564,117,17,BLUE,true);text(c,"%",487,153,18,MUTED,false);
-        right(c,selected>=0?"Выбранная точка":!live()?"Нет связи с автомобилем"
-                :hasCurrent?"Текущие уровни":"Нет свежих данных уровней",1140,124,18,MUTED);
-        float end=n>0?Math.max(1,distances[n-1]):window,start=Math.max(0,end-window),span=end-start;
-        float left=77,right=1091,top=174,bottom=292;
-        for(int i=0;i<=4;i++) {
-            float y=top+(bottom-top)*i/4, value=100-25*i;
-            line(c,left,y,right,y,BORDER,1);
-            right(c,String.format(RU,"%.0f%%",value),left-13,y+5,16,MUTED);
+        if(selected>=0&&selected<n){currentEv=ev[selected];currentFuel=fuel[selected];}
+        float batteryCapacity=capacity(EnergyWidgetProtocol.BATTERY_KWH,43),tankCapacity=capacity(EnergyWidgetProtocol.TANK_LITERS,56);
+        for(int i=0;i<2;i++) {
+            float x=i==0?pad:compact?baseW/2+8:370,value=i==0?currentEv:currentFuel;
+            int color=i==0?GREEN:BLUE;float size=compact?40:51,valueX=x+(compact?30:38);
+            text(c,i==0?"—":"⋯",x,108,compact?26:34,color,false);
+            float end=valueWithUnit(c,num(value),"%",valueX,110,size,size*.7f,color);
+            text(c,i==0?"Батарея":"Топливо",end+10,108,compact?15:16,color,false);
+            text(c,"Осталось "+estimate(value*(i==0?batteryCapacity:tankCapacity)/100)+(i==0?" кВт·ч":" л"),valueX,136,compact?15:16,color,false);
         }
-        for(int i=0;i<6;i++) {float d=start+span*i/5; text(c,num(d),left+(right-left)*i/5-15,321,17,MUTED,false);}
-        if(n<2) text(c,!live()?"Нет записанной истории":hasCurrent
-                ?"История появится по мере движения":"Ожидание уровней батареи и топлива",290,242,22,MUTED,false);
+        String status=selected>=0?"На "+num(distances[selected])+" км":!live()?"Нет связи с автомобилем":hasCurrent?"Текущие уровни":"Нет свежих данных";
+        right(c,status,baseW-pad,compact?153:122,compact?13:17,MUTED);
+        float end=n>0?Math.max(.1f,distances[n-1]):window,start=Math.max(0,end-window),span=end-start;
+        float left=pad+57,right=baseW-pad-22,top=163,bottom=250;
+        for(int i=0;i<=4;i++){float y=top+(bottom-top)*i/4;line(c,left,y,right,y,BORDER,1);
+            right(c,(100-25*i)+"%",left-13,y+5,compact?14:17,MUTED);}
+        int divisions=compact?3:5;
+        for(int i=0;i<=divisions;i++) {
+            float x=left+(right-left)*i/divisions;String label=num(start+span*i/divisions)+(i==divisions?" км":"");
+            if(i==divisions)right(c,label,x,276,compact?14:17,MUTED);else text(c,label,x-measured(label,compact?14:17)/2,276,compact?14:17,MUTED,false);
+        }
+        if(n<2)fitted(c,!live()?"Нет записанной истории":hasCurrent?"История появится по мере движения":"Ожидание уровней батареи и топлива",left+15,213,compact?18:22,right-left-25,MUTED);
         for(int series=0;series<2;series++) {
-            Path path=new Path();boolean drawing=false;
+            Path path=new Path();boolean drawing=false;int color=series==0?GREEN:BLUE;
             for(int i=0;i<n;i++) {
                 float v=series==0?ev[i]:fuel[i];
-                if(distances[i]<start||!Float.isFinite(v)||v<0||v>100) {drawing=false;continue;}
-                float x=left+(distances[i]-start)/span*(right-left),y=bottom-v/100f*(bottom-top);
+                if(distances[i]<start||!Float.isFinite(v)||v<0||v>100){drawing=false;continue;}
+                float x=left+(distances[i]-start)/span*(right-left),y=bottom-v/100*(bottom-top);
                 if(!drawing||gaps==null||i>=gaps.length||gaps[i])path.moveTo(x,y);else path.lineTo(x,y);
-                drawing=true;
-                paint.setColor(series==0?GREEN:BLUE);c.drawCircle(x,y,2,paint);
+                drawing=true;paint.setColor(color);c.drawCircle(x,y,1.5f,paint);
             }
-            paint.setColor(series==0?GREEN:BLUE);paint.setStrokeWidth(3);paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(color);paint.setStrokeWidth(3);paint.setStyle(Paint.Style.STROKE);
             if(series==1)paint.setPathEffect(new DashPathEffect(new float[]{8,6},0));
             c.drawPath(path,paint);paint.setPathEffect(null);paint.setStyle(Paint.Style.FILL);
         }
-        if(selected>=0&&selected<n&&distances[selected]>=start) {
-            float x=left+(distances[selected]-start)/span*(right-left);line(c,x,top,x,bottom,0xff7b8799,1);
-        }
-        text(c,"Батарея — зелёный · топливо — голубой · шаг 100 м",27,348,17,MUTED,false);
-        right(c,num(start)+"–"+num(end)+" км · пробег поездки",1140,348,16,MUTED);
+        if(selected>=0&&selected<n&&distances[selected]>=start){float x=left+(distances[selected]-start)/span*(right-left);line(c,x,top,x,bottom,0xff7b8799,1);}
+        EnergyPeriodEstimate period=EnergyPeriodEstimate.calculate(window,distances,
+                state.getDoubleArray(EnergyWidgetProtocol.HISTORY_EV_DROP),state.getDoubleArray(EnergyWidgetProtocol.HISTORY_FUEL_DROP),
+                state.getDoubleArray(EnergyWidgetProtocol.HISTORY_EV_KM),state.getDoubleArray(EnergyWidgetProtocol.HISTORY_FUEL_KM),batteryCapacity,tankCapacity,
+                state.getDoubleArray(EnergyWidgetProtocol.HISTORY_START_EV_DROP),state.getDoubleArray(EnergyWidgetProtocol.HISTORY_START_FUEL_DROP),
+                state.getDoubleArray(EnergyWidgetProtocol.HISTORY_START_EV_KM),state.getDoubleArray(EnergyWidgetProtocol.HISTORY_START_FUEL_KM));
+        line(c,pad,288,baseW-pad,288,BORDER,1);
+        text(c,"Средний расход за "+window+" км",pad,310,compact?15:16,MUTED,false);
+        float coverage=Math.min(period.batteryKm,period.fuelKm);
+        String note=Math.max(period.batteryKm,period.fuelKm)<1?"Нужно от 1 км истории":coverage<window-.1f?"Учтено "+num(coverage)+" из "+window+" км":"Только снижение";
+        right(c,note,baseW-pad,310,compact?12:13,MUTED);
+        float last=valueWithUnit(c,estimate(period.battery),"кВт·ч/100 км",pad,348,compact?26:29,compact?14:15,GREEN);
+        valueWithUnit(c,estimate(period.fuel),"л/100 км",last+32,348,compact?26:29,compact?14:15,BLUE);
     }
 }

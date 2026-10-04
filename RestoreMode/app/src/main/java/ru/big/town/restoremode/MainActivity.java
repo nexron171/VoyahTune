@@ -202,6 +202,7 @@ public class MainActivity extends AppCompatActivity {
         boolean show = false;
         for (String id : EnergyWidgetView.IDS) show |= sharedPreferences.getBoolean("show_" + id, false);
         try {
+            EnergyWidgetPreferences.sync(GlobalVars.serviceMessenger, sharedPreferences);
             Message msg = Message.obtain(null, show && suspensionScreenResumed
                     ? ru.big.town.common.EnergyWidgetProtocol.WATCH : ru.big.town.common.EnergyWidgetProtocol.UNWATCH);
             msg.replyTo = energyWidgetClient;
@@ -1360,7 +1361,8 @@ public class MainActivity extends AppCompatActivity {
                     case EnergyWidgetView.TIRES:
                     case EnergyWidgetView.ODO:
                         EnergyWidgetView energyView = new EnergyWidgetView(this, tile.id,
-                                sharedPreferences.getString("energyCarColor", "burgundy"));
+                                sharedPreferences.getString("energyCarColor", "burgundy"),
+                                getWidgetDimensions(tile.id)[0], getWidgetDimensions(tile.id)[1]);
                         energyView.update(energyWidgetState);
                         energyWidgetViews.add(energyView);
                         updateTripTimer();

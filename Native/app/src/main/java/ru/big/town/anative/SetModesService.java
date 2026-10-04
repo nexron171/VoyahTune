@@ -113,6 +113,7 @@ public class SetModesService extends Service {
             switch (msg.what) {
                 case ru.big.town.common.EnergyWidgetProtocol.WATCH:
                 case ru.big.town.common.EnergyWidgetProtocol.UNWATCH:
+                case ru.big.town.common.EnergyWidgetProtocol.CONFIGURE:
                     if (energyWidgets != null) energyWidgets.handle(msg);
                     break;
                 case ru.big.town.common.SuspensionWidgetProtocol.WATCH:

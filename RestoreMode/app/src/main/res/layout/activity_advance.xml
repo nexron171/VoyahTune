@@ -703,8 +703,29 @@
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="Цвет автомобиля в карточке шин" android:textColor="#AAAAAA" android:textSize="22px" />
             <Spinner android:id="@+id/energyCarColor" android:layout_width="260dp" android:layout_height="60dp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:labelFor="@id/energyBatteryCapacity" android:text="Батарея, кВт·ч"
+                    android:textColor="#E0E0E0" android:textSize="24px" />
+                <EditText android:id="@+id/energyBatteryCapacity" android:layout_width="130dp"
+                    android:layout_height="60dp" android:layout_marginStart="12dp" android:inputType="numberDecimal"
+                    android:singleLine="true" android:imeOptions="actionDone" android:textColor="#FFFFFF" android:textSize="26px" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="30dp" android:labelFor="@id/energyTankCapacity"
+                    android:text="Бак, л" android:textColor="#E0E0E0" android:textSize="24px" />
+                <EditText android:id="@+id/energyTankCapacity" android:layout_width="130dp"
+                    android:layout_height="60dp" android:layout_marginStart="12dp" android:inputType="numberDecimal"
+                    android:singleLine="true" android:imeOptions="actionDone" android:textColor="#FFFFFF" android:textSize="26px" />
+            </LinearLayout>
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="Батарея и топливо в %. История записывается каждые 100 м. Средний бензиновый расход оценивается по уровню бака 56 л; электрический — по данным автомобиля. Время поездки учитывается только в D."
+                android:text="По умолчанию: батарея 43 кВт·ч, бак 56 л. Значения общие для графика и текущей поездки."
+                android:textColor="#AAAAAA" android:textSize="20px" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:text="Расчёты приблизительны и не должны использоваться для принятия решения о заправке или зарядке."
+                android:textColor="#C1B396" android:textSize="20px" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="История уровней сохраняется за последние 150 км с шагом 100 м. Оба средних расхода учитывают только снижения уровней; зарядка и заправка не вычитаются из расхода. Время поездки учитывается только в D."
                 android:textColor="#AAAAAA" android:textSize="20px" />
 
             <!-- Карточки «Набрать номер» (0..100) -->

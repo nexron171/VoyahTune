@@ -580,6 +580,8 @@ public class AdvanceActivity extends AppCompatActivity {
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
         });
+        bindEnergyCapacity(R.id.energyBatteryCapacity, ru.big.town.common.EnergyWidgetSettings.BATTERY_KEY, 43);
+        bindEnergyCapacity(R.id.energyTankCapacity, ru.big.town.common.EnergyWidgetSettings.TANK_KEY, 56);
         initDialWidgets();
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
@@ -935,6 +937,13 @@ public class AdvanceActivity extends AppCompatActivity {
         android.widget.Spinner widthSpinner = findViewById(widthSpinnerId);
         android.widget.Spinner heightSpinner = findViewById(heightSpinnerId);
         if (widthSpinner == null || heightSpinner == null) return;
+        if (EnergyWidgetLayout.isWidget(widgetId)) {
+            bindEnergySize(widthSpinner, widgetId, true, defaultWidth,
+                    EnergyWidgetLayout.minWidth(widgetId), EnergyWidgetLayout.maxWidth(widgetId));
+            bindEnergySize(heightSpinner, widgetId, false, defaultHeight,
+                    EnergyWidgetLayout.minHeight(widgetId), EnergyWidgetLayout.maxHeight(widgetId));
+            return;
+        }
 
         String[] widths = {"1 ячейка", "2 ячейки", "3 ячейки", "4 ячейки", "5 ячеек", "6 ячеек",
                            "7 ячеек", "8 ячеек", "9 ячеек", "10 ячеек", "11 ячеек", "12 ячеек"};
@@ -970,6 +979,43 @@ public class AdvanceActivity extends AppCompatActivity {
             }
 
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
+    }
+
+    private void bindEnergySize(android.widget.Spinner spinner, String id, boolean width,
+                                int fallback, int min, int max) {
+        String[] labels=new String[max-min+1];
+        for(int i=0;i<labels.length;i++)labels[i]=String.valueOf(min+i);
+        android.widget.ArrayAdapter<String> adapter=new android.widget.ArrayAdapter<>(this,R.layout.spinner_item,labels);
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);spinner.setAdapter(adapter);
+        spinner.setSelection((width?TileSizeStore.width(prefs,id,fallback):TileSizeStore.height(prefs,id,fallback))-min);
+        spinner.setEnabled(max>min);
+        spinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,int position,long itemId) {
+                int value=min+position;
+                if(width)TileSizeStore.setWidth(prefs,id,value);else TileSizeStore.setHeight(prefs,id,value);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+    }
+
+    private void bindEnergyCapacity(int fieldId,String key,float fallback) {
+        android.widget.EditText field=findViewById(fieldId);
+        field.setKeyListener(android.text.method.DigitsKeyListener.getInstance("0123456789.,"));
+        float saved=EnergyWidgetPreferences.capacity(prefs,key,fallback);
+        field.setText(new java.text.DecimalFormat("0.#").format(saved));
+        field.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s,int start,int count,int after) {}
+            @Override public void onTextChanged(CharSequence s,int start,int before,int count) {}
+            @Override public void afterTextChanged(android.text.Editable value) {
+                float parsed=ru.big.town.common.EnergyWidgetSettings.parseCapacity(value.toString());
+                if(!Float.isFinite(parsed)){field.setError("Число больше 0, до 1 знака после запятой");return;}
+                field.setError(null);prefs.edit().putFloat(key,parsed).apply();
+                if(GlobalVars.isBound&&GlobalVars.serviceMessenger!=null) {
+                    try{EnergyWidgetPreferences.sync(GlobalVars.serviceMessenger,prefs);}
+                    catch(RemoteException e){Log.w("EnergyWidgets","Capacity settings will sync on reconnect",e);}
+                }
+            }
         });
     }
 

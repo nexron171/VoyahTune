@@ -43,7 +43,8 @@ public class EnergyTelemetryTest {
     @Test public void historyUsesHundredMeterStepsIncludingConstantLevelsAndCharging() {
         EnergyHistory h=new EnergyHistory();
         assertTrue(h.sample(0,48,30,1000,1000,1000,1000));
-        assertFalse(h.sample(.04f,48,30,1500,1500,1500,1500));
+        assertTrue(h.sample(.04f,48,30,1500,1500,1500,1500)); // observed distance updates before decimation
+        assertEquals(1,h.points().size());
         assertTrue(h.sample(.1f,48,30,2000,2000,2000,2000));
         assertFalse(h.points().get(1).gap);
         assertTrue(h.sample(.1f,49,30,3000,3000,3000,3000)); // parked charging updates endpoint
@@ -64,16 +65,16 @@ public class EnergyTelemetryTest {
         assertTrue(h.points().get(3).gap);
         h.sample(1,47,29,43000,43000,43000,43000);assertTrue(h.points().get(4).gap);
         h.sample(0,47,29,44000,44000,44000,44000);
-        assertEquals(1,h.points().size());assertTrue(h.points().get(0).gap);
+        assertEquals(5,h.points().size()); // bad axis rollback cannot discard recorded history
     }
 
     @Test public void historyIsBoundedAndRestartCannotBridgeStoredPoints() {
         EnergyHistory h=new EnergyHistory();
-        for(int i=0;i<1000;i++)h.sample(i*.1f,48,30,i*100L,i*100L,i*100L,i*100L);
-        assertTrue(h.points().size()<=301);
-        assertTrue(h.points().get(h.points().size()-1).km-h.points().get(0).km<=30);
+        for(int i=0;i<2000;i++)h.sample(i/10d,48,30,i*100L,i*100L,i*100L,i*100L);
+        assertEquals(1501,h.points().size());
+        assertEquals(150,h.points().get(h.points().size()-1).km-h.points().get(0).km,.001);
         EnergyHistory restored=new EnergyHistory();restored.restore(h.points());
-        restored.sample(100,48,30,100000,100000,100000,100000);
+        restored.sample(200,48,30,200000,200000,200000,200000);
         assertTrue(restored.points().get(restored.points().size()-1).gap);
     }
 

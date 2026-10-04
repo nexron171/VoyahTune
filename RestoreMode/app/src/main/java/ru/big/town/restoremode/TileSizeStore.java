@@ -31,23 +31,25 @@ class TileSizeStore {
 
     static int width(SharedPreferences prefs, String widgetId, int defaultValue) {
         if (prefs == null || widgetId == null) return defaultValue;
-        return AppWidgetStore.clampWidth(prefs.getInt(WIDTH_KEY_PREFIX + widgetId, defaultValue));
+        int value=prefs.getInt(WIDTH_KEY_PREFIX + widgetId, defaultValue);
+        return EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.width(widgetId,value):AppWidgetStore.clampWidth(value);
     }
 
     static int height(SharedPreferences prefs, String widgetId, int defaultValue) {
         if (prefs == null || widgetId == null) return defaultValue;
-        return AppWidgetStore.clampHeight(prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue));
+        int value=prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue);
+        return EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.height(widgetId,value):AppWidgetStore.clampHeight(value);
     }
 
     static void setWidth(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) return;
         prefs.edit().putInt(WIDTH_KEY_PREFIX + widgetId,
-                AppWidgetStore.clampWidth(value)).apply();
+                EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.width(widgetId,value):AppWidgetStore.clampWidth(value)).apply();
     }
 
     static void setHeight(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) return;
         prefs.edit().putInt(HEIGHT_KEY_PREFIX + widgetId,
-                AppWidgetStore.clampHeight(value)).apply();
+                EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.height(widgetId,value):AppWidgetStore.clampHeight(value)).apply();
     }
 }

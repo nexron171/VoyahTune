@@ -33,7 +33,7 @@ final class EnergyTelemetrySample {
             case SOC:
                 return new EnergyTelemetrySample(kind, value(words[0], 0, 100));
             case FUEL:
-                // Ignore the OEM tank capacity (52 on H97X); the estimate uses the agreed 56 L.
+                // Ignore OEM capacity (52 on H97X); estimates use the user setting, default 56 L.
                 return new EnergyTelemetrySample(kind, value(words[2], 0, 100));
             case TRIP:
                 return new EnergyTelemetrySample(kind, new float[]{value(words[0], 0, 2_000_000),
