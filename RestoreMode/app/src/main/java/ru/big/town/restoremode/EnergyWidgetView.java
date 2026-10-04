@@ -6,7 +6,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
@@ -278,7 +277,7 @@ final class EnergyWidgetView extends View {
         for(int i=0;i<2;i++) {
             float x=i==0?pad:compact?baseW/2+8:370,value=i==0?currentEv:currentFuel;
             int color=i==0?GREEN:BLUE;float size=compact?40:51,valueX=x+(compact?30:38);
-            text(c,i==0?"—":"⋯",x,108,compact?26:34,color,false);
+            text(c,"—",x,108,compact?26:34,color,false);
             float end=valueWithUnit(c,num(value),"%",valueX,110,size,size*.7f,color);
             text(c,i==0?"Батарея":"Топливо",end+10,108,compact?15:16,color,false);
             text(c,"Осталось "+estimate(value*(i==0?batteryCapacity:tankCapacity)/100)+(i==0?" кВт·ч":" л"),valueX,136,compact?15:16,color,false);
@@ -301,12 +300,21 @@ final class EnergyWidgetView extends View {
                 float v=series==0?ev[i]:fuel[i];
                 if(distances[i]<start||!Float.isFinite(v)||v<0||v>100){drawing=false;continue;}
                 float x=left+(distances[i]-start)/span*(right-left),y=bottom-v/100*(bottom-top);
-                if(!drawing||gaps==null||i>=gaps.length||gaps[i])path.moveTo(x,y);else path.lineTo(x,y);
-                drawing=true;paint.setColor(color);c.drawCircle(x,y,1.5f,paint);
+                if(!drawing||(gaps!=null&&i<gaps.length&&gaps[i]))path.moveTo(x,y);else path.lineTo(x,y);
+                drawing=true;
             }
             paint.setColor(color);paint.setStrokeWidth(3);paint.setStyle(Paint.Style.STROKE);
-            if(series==1)paint.setPathEffect(new DashPathEffect(new float[]{8,6},0));
-            c.drawPath(path,paint);paint.setPathEffect(null);paint.setStyle(Paint.Style.FILL);
+            paint.setPathEffect(null);paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);
+            c.drawPath(path,paint);
+            paint.setStrokeCap(Paint.Cap.BUTT);paint.setStrokeJoin(Paint.Join.MITER);paint.setStyle(Paint.Style.FILL);
+            int marker=selected>=0&&selected<n?selected:n-1;
+            if(marker>=0&&distances[marker]>=start) {
+                float v=series==0?ev[marker]:fuel[marker];
+                if(Float.isFinite(v)&&v>=0&&v<=100) {
+                    float x=left+(distances[marker]-start)/span*(right-left),y=bottom-v/100*(bottom-top);
+                    c.drawCircle(x,y,3,paint);
+                }
+            }
         }
         if(selected>=0&&selected<n&&distances[selected]>=start){float x=left+(distances[selected]-start)/span*(right-left);line(c,x,top,x,bottom,0xff7b8799,1);}
         EnergyPeriodEstimate period=EnergyPeriodEstimate.calculate(window,distances,
