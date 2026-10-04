@@ -5,10 +5,8 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.SystemClock;
@@ -34,14 +32,15 @@ final class EnergyWidgetView extends View {
             BLUE=0xff79b5f1, BORDER=0xff373f4a;
     private static final Locale RU = new Locale("ru", "RU");
     private static final ExecutorService IMAGES = Executors.newSingleThreadExecutor();
-    private static final LruCache<String,Bitmap> CACHE = new LruCache<>(2);
+    private static final LruCache<String,EnergyCarImage> CACHE = new LruCache<>(2);
     private final String kind, color;
     private final int columns, rows;
     private final SharedPreferences prefs;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint carPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final float baseW, baseH;
     private Bundle state = new Bundle();
-    private Bitmap car;
+    private EnergyCarImage car;
     private long tripMs=-1;
     private boolean inDrive;
     private int window, selected=-1;
@@ -72,16 +71,16 @@ final class EnergyWidgetView extends View {
         prefs.edit().putInt(EnergyWidgetSettings.WINDOW_KEY,window).apply();
         setFocusable(true); setClickable(true);
         if (TIRES.equals(kind)) {
-            setLayerType(LAYER_TYPE_SOFTWARE,null); // alpha-shaped, soft bitmap shadow
             car=CACHE.get(this.color);
             if(car==null) IMAGES.execute(() -> {
-                Bitmap loaded=null;
+                EnergyCarImage loaded=null;
                 try(InputStream in=context.getApplicationContext().getAssets().open("energy/car_"+this.color+".png")) {
                     BitmapFactory.Options options=new BitmapFactory.Options(); options.inSampleSize=2;
-                    loaded=BitmapFactory.decodeStream(in,null,options);
+                    Bitmap body=BitmapFactory.decodeStream(in,null,options);
+                    if(body!=null)loaded=new EnergyCarImage(body);
                 } catch(Exception ignored) {}
                 if(loaded!=null) CACHE.put(this.color,loaded);
-                Bitmap result=loaded; post(() -> {car=result; invalidate();});
+                EnergyCarImage result=loaded; post(() -> {car=result; invalidate();});
             });
         }
         setOnClickListener(v -> {
@@ -194,10 +193,8 @@ final class EnergyWidgetView extends View {
         float titleY=shorter?40:55;
         text(c,"Давление в шинах",pad,titleY,titleSize,WHITE,true);right(c,"bar",baseW-pad,titleY,columns==2?14:19,MUTED);
         float height=shorter?258:columns==2?325:columns==3?335:345,top=shorter?60:78;
-        if(car!=null) {
-            float width=height*car.getWidth()/car.getHeight();paint.setColor(Color.WHITE);paint.setShadowLayer(9,0,8,0xb0000000);
-            c.drawBitmap(car,null,new RectF((baseW-width)/2,top,(baseW+width)/2,top+height),paint);paint.clearShadowLayer();
-        } else text(c,"Загрузка…",baseW/2-42,baseH/2,16,MUTED,false);
+        if(car!=null)car.draw(c,carPaint,baseW/2,top,height);
+        else text(c,"Загрузка…",baseW/2-42,baseH/2,16,MUTED,false);
         String[] names={"Левое переднее","Правое переднее","Левое заднее","Правое заднее"};
         float pressureSize=shorter?(columns==2?30:columns==3?34:40):(columns==2?36:columns==3?42:53);
         float labelSize=columns==2?12:columns==3?14:17,plateW=columns==2?120:137;
