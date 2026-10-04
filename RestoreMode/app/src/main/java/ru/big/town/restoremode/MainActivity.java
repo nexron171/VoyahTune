@@ -1943,6 +1943,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** Изменить DPI запущенного в виджете приложения на соседнее значение из списка. */
     private void changeAppWidgetDpi(String widgetId, int direction) {
+        String runningPackage = embeddedWidgetPackages.get(widgetId);
+        if (runningPackage == null || runningPackage.isEmpty()) return;
         AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
         if (entry == null) return;
         int current = AppWidgetStore.normalizeDpi(runningDpi(widgetId));
@@ -1954,17 +1956,16 @@ public class MainActivity extends AppCompatActivity {
         if (next == index) return;
         int value = AppWidgetStore.DPI_VALUES[next];
 
-        // Сохраняем выбранный DPI в настройке виджета — он применится и при следующем запуске.
-        AppWidgetStore.Profile profile = entry.selected();
-        profile.dpi = value;
-        entry.dpi = value;
-        AppWidgetStore.update(sharedPreferences, entry);
+        // A swap/move keeps widget configuration intact. Update only this package's profile;
+        // a temporarily hosted app uses the per-app setting when launched here again.
+        if (entry.setPackageDpi(runningPackage, value)) AppWidgetStore.update(sharedPreferences, entry);
+        else AppDpiStore.set(sharedPreferences, runningPackage, value);
 
         // Переподключаем поверхность: Native пересчитывает плотность дисплея по новому DPI.
         embeddedWidgetDpi.put(widgetId, value);
         Surface output = embeddedWidgetOutputs.get(widgetId);
         if (output != null) {
-            sendEmbeddedSurface(widgetId, embeddedWidgetPackages.get(widgetId), value, output,
+            sendEmbeddedSurface(widgetId, runningPackage, value, output,
                     embeddedPixelWidth(widgetId), embeddedPixelHeight(widgetId));
         }
         showSnack(value == 0 ? "DPI: Авто" : "DPI: " + value);

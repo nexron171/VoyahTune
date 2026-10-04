@@ -96,6 +96,9 @@ public class RestoreModeContentProvider extends ContentProvider {
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
         if ("driveHookV2".equals(method)) {
+            if ("nativeRestore".equals(arg) && ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()) {
+                throw new IllegalArgumentException("Native restore boundary is unavailable with ACC hooks");
+            }
             int uid = Binder.getCallingUid();
             if (uid != 0 && uid != android.os.Process.SYSTEM_UID && uid != android.os.Process.myUid()) {
                 getContext().enforceCallingOrSelfPermission(

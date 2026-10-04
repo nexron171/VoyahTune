@@ -70,4 +70,19 @@ public class DriveSelectionPreferencesTest {
         DriveSelectionPreferences.selectEnergy(prefs(data), "EV", false);
         assertEquals(false, data.get("forcedEv")); assertEquals("EV", data.get("energy"));
     }
+
+    @Test public void nativeRestoreClearsOnlyCurrentTripAndRetainsPinnedWidgetTargets() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("driveMode", "COMFORT"); data.put("energy", "SREV");
+        data.put("driveRememberLast", false); data.put("energyRememberLast", false);
+        DriveSelectionPreferences.select(prefs(data), "SPORT", DriveSelectionPolicy.WIDGET);
+        DriveSelectionPreferences.selectEnergy(prefs(data), "EV", false);
+        long revision = (long) data.get("driveRevision");
+        assertTrue(DriveSelectionPreferences.beginNativeRestore(prefs(data)));
+        assertEquals(revision + 1, data.get("driveRevision"));
+        assertEquals("SPORT", DriveSelectionPreferences.read(prefs(data)).effective());
+        assertEquals("COMFORT", DriveSelectionPreferences.read(prefs(data)).configured);
+        assertEquals("SREV", DriveSelectionPreferences.energy(prefs(data)));
+        assertEquals("", data.get(DriveSelectionPolicy.CURRENT));
+    }
 }

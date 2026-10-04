@@ -14,7 +14,9 @@
         android:background="@drawable/layout_category_bg_noround"
         android:columnCount="3"
         android:padding="30dp"
-        android:rowCount="2">
+        android:rowCount="2"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
 
         <Button
             android:id="@+id/buttonBackStarButton"

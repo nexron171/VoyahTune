@@ -16,14 +16,22 @@ final class DriveSelectionStore {
             context.getContentResolver().call(URI, "driveHookV2", "manual", null);
         } catch (RuntimeException e) { Log.w("DriveSelection", "Configured selection unavailable", e); }
     }
+
+    static void beginNativeRestore(Context context) {
+        try {
+            context.getContentResolver().call(URI, "driveHookV2", "nativeRestore", null);
+        } catch (RuntimeException e) { Log.w("DriveSelection", "Native restore state unavailable", e); }
+    }
     static DriveSelectionPolicy read(Context context) {
         try (Cursor c = context.getContentResolver().query(URI, null, null, null, null)) {
-            if (c != null && c.moveToFirst() && c.getColumnIndex(DriveSelectionPolicy.CONFIGURED) >= 0) {
-                return new DriveSelectionPolicy(c.getString(c.getColumnIndex(DriveSelectionPolicy.CONFIGURED)),
-                        c.getString(c.getColumnIndex(DriveSelectionPolicy.OVERRIDE)),
-                        c.getString(c.getColumnIndex(DriveSelectionPolicy.MEDIUM)),
-                        c.getColumnIndex(DriveSelectionPolicy.CURRENT) < 0 ? ""
-                                : c.getString(c.getColumnIndex(DriveSelectionPolicy.CURRENT)));
+            if (c != null && c.moveToFirst()) {
+                int configured = c.getColumnIndex(DriveSelectionPolicy.CONFIGURED);
+                int override = c.getColumnIndex(DriveSelectionPolicy.OVERRIDE);
+                int medium = c.getColumnIndex(DriveSelectionPolicy.MEDIUM);
+                int current = c.getColumnIndex(DriveSelectionPolicy.CURRENT);
+                if (configured < 0 || override < 0 || medium < 0) return null;
+                return new DriveSelectionPolicy(c.getString(configured), c.getString(override),
+                        c.getString(medium), current < 0 ? "" : c.getString(current));
             }
         } catch (RuntimeException e) { Log.w("DriveSelection", "Read failed", e); }
         return null;

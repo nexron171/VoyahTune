@@ -20,10 +20,9 @@ final class VoiceCommands {
     static final int MESSAGE = 36;
 
     /** Rebuilt only after a settings change or TTL expiry; the returned list is shared and read-only. */
-    private static final Object LOCK = new Object();
     private static final long TTL_MS = 5 * 60 * 1000L;
-    private static List<VoiceCommandCatalog.Command> cached;
-    private static long cachedAt;
+    private static final VoiceCommandCache<List<VoiceCommandCatalog.Command>> CACHE =
+            new VoiceCommandCache<>(TTL_MS, () -> System.nanoTime() / 1_000_000L);
     private static final ExecutorService PRELOADER = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "voice-catalog-preload");
         thread.setPriority(Thread.MIN_PRIORITY);
@@ -31,15 +30,7 @@ final class VoiceCommands {
     });
 
     static List<VoiceCommandCatalog.Command> load(Context context) {
-        synchronized (LOCK) {
-            if (cached != null && System.currentTimeMillis() - cachedAt < TTL_MS) return cached;
-        }
-        List<VoiceCommandCatalog.Command> fresh = build(context.getApplicationContext());
-        synchronized (LOCK) {
-            cached = Collections.unmodifiableList(fresh);
-            cachedAt = System.currentTimeMillis();
-        }
-        return cached;
+        return CACHE.load(() -> Collections.unmodifiableList(build(context.getApplicationContext())));
     }
 
     /** Warms the shared cache on a background thread so the first visible invocation is fast. */
@@ -50,7 +41,7 @@ final class VoiceCommands {
 
     /** Settings edits invalidate the cache; the next load rebuilds it. */
     static void invalidate() {
-        synchronized (LOCK) { cached = null; }
+        CACHE.invalidate();
     }
 
     private static List<VoiceCommandCatalog.Command> build(Context context) {

@@ -139,8 +139,8 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
             texture.setDefaultBufferSize(WIDTH, HEIGHT);
             surface = new Surface(texture);
             DisplayManager manager = getSystemService(DisplayManager.class);
-            virtualDisplay = manager.createVirtualDisplay("voyah-cluster-media", WIDTH, HEIGHT, DPI,
-                    surface, 1 | 8 | 256 | 1024, new VirtualDisplay.Callback() {
+            virtualDisplay = OemVirtualDisplay.create(manager, "voyah-cluster-media", WIDTH, HEIGHT, DPI,
+                    surface, true, new VirtualDisplay.Callback() {
                         @Override public void onStopped() { if (!closing) close(); }
                     }, new Handler(Looper.getMainLooper()));
             if (virtualDisplay == null) throw new IllegalStateException("VirtualDisplay unavailable");

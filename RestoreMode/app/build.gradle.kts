@@ -118,6 +118,7 @@ abstract class VoyahBuildIdentity : DefaultTask() {
     @get:Input abstract val releaseVersion: Property<String>
     @get:Input abstract val revision: Property<String>
     @get:Input abstract val component: Property<String>
+    @get:Input abstract val infrastructure: Property<String>
     @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val runtimeFiles: ConfigurableFileCollection
     @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
@@ -129,6 +130,7 @@ abstract class VoyahBuildIdentity : DefaultTask() {
         dir.mkdirs()
         dir.resolve("voyahtune-build.json").writeText(groovy.json.JsonOutput.toJson(mapOf(
             "schema" to 3, "product" to "VoyahTune", "component" to component.get(),
+            "infrastructure" to infrastructure.get(),
             "releaseVersion" to releaseVersion.get(),
             "buildRevision" to revision.get(),
             "recipeSha256" to recipeFiles.files.singleOrNull()?.let { source ->
@@ -152,6 +154,10 @@ androidComponents {
             releaseVersion.set(providers.gradleProperty("voyahReleaseVersion").orElse("0.0.0-dev"))
             revision.set(providers.gradleProperty("voyahBuildRevision").orElse("local"))
             val packaging = rootProject.projectDir.parentFile.resolve("Packaging")
+            val profile = providers.gradleProperty("voyahInfrastructure").orElse("od").get()
+            require(profile == "pi" || profile == "od") { "voyahInfrastructure must be pi or od" }
+            infrastructure.set(profile)
+            val infra = packaging.resolve(profile)
             runtimeAliases.convention(emptyMap())
             val recipePath = providers.gradleProperty("voyahInstallRecipe").orNull
             if (recipePath != null) {
@@ -172,9 +178,10 @@ androidComponents {
             } else {
             runtimeFiles.from(packaging.resolve("system/privapp-permissions-ru.big.town.anative.xml"))
             run {
-                runtimeFiles.from(fileTree(packaging.resolve("inject")) { include("*.js", "*.json") })
-                runtimeFiles.from(listOf("load.bin", "voyahtune.load.rc", "voyahtune.load.sh").map { packaging.resolve("system/$it") })
-                runtimeFiles.from(packaging.resolve("tools/frida-inject-16.2.1-android-arm64"))
+                runtimeFiles.from(fileTree(infra.resolve("inject")) { include("*.js", "*.json") })
+                runtimeFiles.from(listOf("voyahtune.load.rc", "voyahtune.load.sh").map { infra.resolve("system/$it") })
+                if (profile == "od") runtimeFiles.from(infra.resolve("system/load.bin"))
+                runtimeFiles.from(infra.resolve("tools/frida-inject-16.2.1-android-arm64"))
             }
             }
             component.set(android.namespace!!)

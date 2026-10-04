@@ -40,11 +40,12 @@ if grep -Eq 'ModeFeedback|MODE_REMEMBER|persistModeFeedback|INTEREST_VEHICLE_STA
     fail "TripStatsService contains vehicle-mode responsibilities"
 fi
 
-# Feedback needs a completed ACC pass/explicit command, and never causes correction retries.
-require_fixed "$MODE_POLICY" 'canRememberSelection() && acceptsExternalFeedback(modeKey)'
-if grep -Eq 'ApplyEngine.noteDriverDoorOpened|ApplyEngine.noteGear' "$VEHICLE_STATE"; then
-    fail "door/gear must not open the mode feedback gate"
-fi
+# Feedback requires a completed restore/explicit command in both profiles. OD uses the ACC
+# completion gate; PI additionally waits for Drive. Door/gear events cannot open OD's gate.
+require_fixed "$MODE_POLICY" 'canRememberSelection() && feedbackOpen && acceptsExternalFeedback(modeKey)'
+require_fixed "$MODE_POLICY" 'wakeActive && (accHooks ? feedbackOpen : driveEntered)'
+require_fixed "$MODE_POLICY" 'if (accHooks) return;'
+require_fixed "$MODE_POLICY" 'if (accHooks || gear < 0) return;'
 require_fixed "$MODE_POLICY" 'canRememberSelection()'
 require_fixed "$NATIVE_MAIN" 'if (!ApplyEngine.canRememberModeSelection(explicit)) return;'
 require_fixed "$BRIDGE" 'MainActivity.persistExplicitMode(app, modeKey, next)'

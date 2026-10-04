@@ -10,6 +10,9 @@ final class ModeSyncPolicy {
     private long generation;
     private boolean wakeActive;
     private boolean feedbackOpen;
+    private boolean accHooks = true;
+    private boolean driveEntered, waitingForDrive;
+    private int lastGear = -1;
     private String expectedDrive;
     private final Map<String, String> currentModes = new HashMap<>();
     private boolean driveRememberLast = true;
@@ -18,8 +21,29 @@ final class ModeSyncPolicy {
 
     synchronized void activateWake() { wakeActive = true; }
 
+    synchronized void useAccHooks(boolean enabled) { accHooks = enabled; }
+
+    synchronized void onDriverDoorOpened() {
+        if (accHooks) return;
+        driveEntered = false;
+        waitingForDrive = true;
+        feedbackOpen = false;
+        generation++;
+    }
+
+    synchronized void onGear(int gear) {
+        if (accHooks || gear < 0) return;
+        if (wakeActive && waitingForDrive && gear == 3 && lastGear != 3) {
+            driveEntered = true;
+            waitingForDrive = false;
+        }
+        lastGear = gear;
+    }
+
     /** Guard feedback until this ACC cycle's Native restore or an explicit command completes. */
-    synchronized boolean canRememberSelection() { return wakeActive && feedbackOpen; }
+    synchronized boolean canRememberSelection() {
+        return wakeActive && (accHooks ? feedbackOpen : driveEntered);
+    }
 
     /** Explicit commands can finish while feedback is frozen, including a selection in Snow. */
     synchronized boolean canRememberSelection(boolean explicit) {
@@ -28,7 +52,7 @@ final class ModeSyncPolicy {
 
     /** A fresh Native process may reuse the completed durable ACC pass without sending it again. */
     synchronized boolean reconcileCompletedAcc(int acc, String settingsStartup) {
-        if (generation != 0 || !wakeActive || acc != 2 || !"submitted".equals(settingsStartup)) {
+        if (!accHooks || generation != 0 || !wakeActive || acc != 2 || !"submitted".equals(settingsStartup)) {
             return false;
         }
         feedbackOpen = true;
@@ -47,6 +71,9 @@ final class ModeSyncPolicy {
     synchronized long freeze() {
         wakeActive = false;
         feedbackOpen = false;
+        driveEntered = false;
+        waitingForDrive = false;
+        lastGear = -1;
         currentModes.clear();
         return ++generation;
     }
@@ -76,7 +103,7 @@ final class ModeSyncPolicy {
 
     synchronized boolean canPersist(long candidate, String modeKey) {
         return candidate == generation && canRememberSelection()
-                && acceptsExternalFeedback(modeKey);
+                && feedbackOpen && acceptsExternalFeedback(modeKey);
     }
 
     synchronized void updateExpected(String drive, String energy, String recycle,
@@ -111,7 +138,7 @@ final class ModeSyncPolicy {
         if (!knownModeKey(modeKey) || !valid(observedMode)) return Decision.IGNORE;
         // Even opted-out feedback is needed for steering cycles and Snow recuperation handling.
         observe(modeKey, observedMode);
-        return canRememberSelection() && acceptsExternalFeedback(modeKey)
+        return canRememberSelection() && feedbackOpen && acceptsExternalFeedback(modeKey)
                 ? Decision.ACCEPT : Decision.IGNORE;
     }
 

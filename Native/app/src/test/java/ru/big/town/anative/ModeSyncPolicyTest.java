@@ -102,4 +102,53 @@ public class ModeSyncPolicyTest {
         assertFalse(p.canRememberSelection());
         assertTrue(p.completeUserCommand(command));
     }
+
+    @Test public void nativeRestoreNeedsBothFirstDriveAndCompletedPassForFeedback() {
+        ModeSyncPolicy p = policy(true);
+        p.useAccHooks(false);
+        p.activateWake();
+        assertFalse(p.reconcileCompletedAcc(2, "submitted"));
+        p.onDriverDoorOpened();
+        long door = p.beginRestore();
+        assertTrue(p.completeRestore(door));
+        assertEquals(ModeSyncPolicy.Decision.IGNORE, p.evaluate("energy", "EV"));
+        p.onGear(0);
+        long drive = p.beginRestore();
+        p.onGear(3);
+        assertTrue(p.canRememberSelection());
+        assertFalse(p.canPersist(drive, "energy"));
+        assertTrue(p.completeRestore(drive));
+        assertEquals(ModeSyncPolicy.Decision.ACCEPT, p.evaluate("energy", "REV"));
+        assertTrue(p.canPersist(drive, "energy"));
+        p.onDriverDoorOpened();
+        assertFalse(p.canPersist(drive, "energy"));
+        assertFalse(p.completeRestore(drive));
+    }
+
+    @Test public void accRestoreIgnoresDoorAndGearGates() {
+        ModeSyncPolicy p = policy(true);
+        long restore = p.beginRestore();
+        p.onDriverDoorOpened();
+        p.onGear(0);
+        assertTrue(p.completeRestore(restore));
+        assertTrue(p.canRememberSelection());
+        p.onDriverDoorOpened();
+        assertTrue(p.canPersist(restore, "recycle"));
+    }
+
+    @Test public void nativeRestoreFeedbackIsFrozenAgainAfterSleep() {
+        ModeSyncPolicy p = policy(true);
+        p.useAccHooks(false);
+        p.activateWake();
+        p.onDriverDoorOpened();
+        p.onGear(0);
+        p.onGear(3);
+        long first = p.beginRestore();
+        p.completeRestore(first);
+        p.freeze();
+        p.activateWake();
+        p.completeRestore(p.beginRestore());
+        assertFalse(p.canRememberSelection());
+        assertEquals(ModeSyncPolicy.Decision.IGNORE, p.evaluate("driveMode", "ECO"));
+    }
 }

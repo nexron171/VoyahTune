@@ -90,10 +90,8 @@ public class SplitHostActivity extends Activity {
     // Флаги VirtualDisplay. TRUSTED(1<<10) обязателен, чтобы на дисплей можно было запускать
     // чужие активити и (в перспективе) роутить ввод; требует ADD_TRUSTED_DISPLAY (privapp whitelist).
     // PUBLIC(1<<0) | OWN_CONTENT_ONLY(1<<3) | DESTROY_CONTENT_ON_REMOVAL(1<<8) | TRUSTED(1<<10) = 1289.
-    private static final int VD_FLAGS_TRUSTED  = 1 | 8 | 256 | 1024;
     // Фолбэк без TRUSTED (если ADD_TRUSTED_DISPLAY не выдан, напр. на эмуляторе) — рендер будет,
     // запуск чужой активити может не пройти, но не роняем приложение.
-    private static final int VD_FLAGS_FALLBACK = 1 | 8 | 256;
     private static volatile WeakReference<SplitHostActivity> activeHost =
             new WeakReference<>(null);
 
@@ -414,14 +412,14 @@ public class SplitHostActivity extends Activity {
         int dpi = effectiveDpi(pane);
         String name = "voyah-split-" + pane.side;
         try {
-            pane.vd = displayManager.createVirtualDisplay(name, pane.w, pane.h, dpi, surface, VD_FLAGS_TRUSTED);
+            pane.vd = OemVirtualDisplay.create(displayManager, name, pane.w, pane.h, dpi, surface, true);
             Log.i(TAG, "VD " + pane.side + " (trusted) id="
                     + (pane.vd != null ? pane.vd.getDisplay().getDisplayId() : -1)
                     + " " + pane.w + "x" + pane.h + " dpi=" + dpi);
         } catch (Exception e) {
             Log.w(TAG, "VD " + pane.side + " trusted failed (" + e.getMessage() + ") → fallback");
             try {
-                pane.vd = displayManager.createVirtualDisplay(name, pane.w, pane.h, dpi, surface, VD_FLAGS_FALLBACK);
+                pane.vd = OemVirtualDisplay.create(displayManager, name, pane.w, pane.h, dpi, surface, false);
                 Log.i(TAG, "VD " + pane.side + " (fallback) id="
                         + (pane.vd != null ? pane.vd.getDisplay().getDisplayId() : -1));
             } catch (Exception e2) {
@@ -611,7 +609,7 @@ public class SplitHostActivity extends Activity {
             Method setDisplayId = MotionEvent.class.getMethod("setDisplayId", int.class);
             setDisplayId.invoke(copy, displayId);
             // InputManager.injectInputEvent(InputEvent, int) — hidden; 0 = INJECT_INPUT_EVENT_MODE_ASYNC
-            Object im = getSystemService("input");
+            Object im = getSystemService(Context.INPUT_SERVICE);
             Method inject = im.getClass().getMethod("injectInputEvent", InputEvent.class, int.class);
             inject.invoke(im, copy, 0);
         } catch (Exception e) {

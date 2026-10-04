@@ -2,20 +2,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Native is installed in /system/priv-app with its permission whitelist; these
+         protected permissions are intentional and checked by the installer. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Чтение метаданных ЛЮБОЙ активной медиа-сессии (сторонние плееры) через MediaSessionManager.
          signature|privileged → нужен privapp-whitelist (см. privapp-permissions-ru.big.town.anative.xml). -->
-    <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
+    <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" tools:ignore="ProtectedPermissions" />
     <!-- Перенос приложения между сплитом/фриформом БЕЗ убийства процесса: завершаем задачу приложения
          (removeTask), а не force-stop процесса — плейбек в foreground-сервисе выживает (музыка не глохнет).
          REAL_GET_TASKS — перечислить задачи всех приложений; REMOVE_TASKS — завершить чужую задачу.
          OEM REMOVE_TASKS = signature|documenter: VoyahTune использует UID-scoped ATMS.removeTask hook. -->
-    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
-    <uses-permission android:name="android.permission.REMOVE_TASKS" />
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REMOVE_TASKS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
-    <uses-permission android:name="android.permission.REBOOT" />
-    <uses-permission android:name="android.permission.MANAGE_APP_OPS_MODES" />
-    <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES" />
+    <uses-permission android:name="android.permission.REBOOT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_APP_OPS_MODES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -34,16 +36,16 @@
     <uses-permission android:name="android.car.permission.CAR_INSTRUMENT_CLUSTER_CONTROL" />
     <uses-permission android:name="android.car.permission.STORAGE_MONITORING" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.MANAGE_USB" />
+    <uses-permission android:name="android.permission.MANAGE_USB" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS" />
-    <uses-permission android:name="android.permission.INJECT_EVENTS" />
+    <uses-permission android:name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INJECT_EVENTS" tools:ignore="ProtectedPermissions" />
     <uses-permission
         android:name="android.permission.ADD_TRUSTED_DISPLAY"
         tools:ignore="ProtectedPermissions" />
@@ -148,6 +150,9 @@
 
         <receiver android:name=".WidgetActionReceiver" android:exported="false" />
         <!-- Удалены: RunningAppsWidget, MediaVolumeWidget — не работают, будут переделаны позже -->
+        <service android:name=".LaunchAppsRemoteViewsService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
         <receiver android:name=".LaunchAppsWidget" android:exported="false">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_launch_apps_info" />

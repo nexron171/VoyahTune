@@ -9,8 +9,9 @@ import android.util.Log;
 
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import ru.big.town.common.InfrastructureProfile;
 
-/** Applies one saved snapshot per ACC cycle, or an explicit Apply request. */
+/** Shared restore execution, driven by the installed infrastructure's OEM event source. */
 public final class ApplyEngine {
     static final String TAG = "$$$ ApplyEngine $$$";
 
@@ -31,6 +32,10 @@ public final class ApplyEngine {
     private static final String MODES_URI =
             "content://ru.big.town.restoremode.restoremodecontentprovider/";
 
+    static boolean usesAccHooks() {
+        return InfrastructureProfile.read(GlobalVars.SAVE_CONTEXT).usesAccHooks();
+    }
+
     private static long beginRestoreGate(String reason) {
         long generation = MODE_SYNC_POLICY.beginRestore();
         Log.i(TAG, "mode sync gate CLOSED gen=" + generation + " reason=" + reason);
@@ -46,6 +51,7 @@ public final class ApplyEngine {
         final long gateGeneration;
         final long runGeneration;
         synchronized (RESTORE_LOCK) {
+            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), reason);
             runGeneration = RESTORE_RUN_STATE.cancelAndAdvance();
             gateGeneration = MODE_SYNC_POLICY.freeze();
         }
@@ -93,6 +99,14 @@ public final class ApplyEngine {
         MODE_SYNC_POLICY.updateRememberLast(modeKey, rememberLast);
     }
 
+    static void noteDriverDoorOpened() {
+        synchronized (RESTORE_LOCK) { MODE_SYNC_POLICY.onDriverDoorOpened(); }
+    }
+
+    static void noteGear(int gear) {
+        synchronized (RESTORE_LOCK) { MODE_SYNC_POLICY.onGear(gear); }
+    }
+
     static boolean canRememberModeSelection() {
         return canRememberModeSelection(false);
     }
@@ -121,6 +135,7 @@ public final class ApplyEngine {
     /** Invalidate a queued ACC restore while a user drive command is being dispatched/saved. */
     static void driveSelectionSaved() {
         synchronized (RESTORE_LOCK) {
+            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), "saved user selection");
             RESTORE_RUN_STATE.cancelRestoreAndAdvance();
             long generation = MODE_SYNC_POLICY.cancelRestore();
             MODE_SYNC_POLICY.completeUserCommand(generation);
@@ -135,7 +150,7 @@ public final class ApplyEngine {
 
     static void persistModeFeedbackIfAllowed(
             Context context, String modeKey, String observedMode) {
-        if ("driveMode".equals(modeKey) || "energy".equals(modeKey)) {
+        if (usesAccHooks() && ("driveMode".equals(modeKey) || "energy".equals(modeKey))) {
             MODE_SYNC_POLICY.observe(modeKey, observedMode);
             // Origin-free callbacks are observations, never user intent.
             return;
@@ -182,14 +197,17 @@ public final class ApplyEngine {
     /** Wake side effects remain active independently of mode restoration. */
     public static void activateWake(String reason) {
         synchronized (RESTORE_LOCK) {
+            MODE_SYNC_POLICY.useAccHooks(usesAccHooks());
             RESTORE_RUN_STATE.activate(RESTORE_RUN_STATE.currentGeneration());
             MODE_SYNC_POLICY.activateWake();
+            if (!usesAccHooks()) EarlyDriveModeRestore.activate(RESTORE_RUN_STATE.currentGeneration(), reason);
         }
         Log.i(TAG, "wake active: " + reason);
     }
 
     /** Provider owns the durable ACC-cycle claim; Native executes its remaining settings once. */
     public static void scheduleAccApply(Context context) {
+        if (!InfrastructureProfile.read(context).usesAccHooks()) return;
         final Context app = context.getApplicationContext();
         bg().post(() -> {
             long cycle;
@@ -238,6 +256,17 @@ public final class ApplyEngine {
         });
     }
 
+    static void stopEarlyDriveRestore(String reason) {
+        synchronized (RESTORE_LOCK) {
+            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), reason);
+        }
+    }
+
+    /** PI retains the door/first-Drive triggers from master; OD uses the durable ACC claim above. */
+    static void scheduleNativeApply(String reason) {
+        if (!usesAccHooks()) enqueueApply(reason, false, null);
+    }
+
     /** Explicit Apply supersedes older queued restores and always notifies the client. */
     public static void applyNow(Runnable onDone) {
         enqueueApply("manual apply", true, onDone);
@@ -247,6 +276,7 @@ public final class ApplyEngine {
         final Handler h = bg();
         synchronized (RESTORE_LOCK) {
             final long wakeGeneration = RESTORE_RUN_STATE.currentGeneration();
+            EarlyDriveModeRestore.stop(wakeGeneration, reason);
             RESTORE_RUN_STATE.activate(wakeGeneration);
             final long restoreEpoch = manual ? RESTORE_RUN_STATE.cancelRestoreAndAdvance()
                     : RESTORE_RUN_STATE.currentRestoreEpoch();
@@ -377,6 +407,7 @@ public final class ApplyEngine {
             // An explicit command wins over every already queued/running automatic restore, but it
             // is not a new physical wake. Keeping wake generation intact means unrelated automated
             // wake actions retain their correct sleep cancellation token.
+            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), "user: " + reason);
             restoreEpoch = RESTORE_RUN_STATE.cancelRestoreAndAdvance();
             gateGeneration = MODE_SYNC_POLICY.cancelRestore();
         }
@@ -454,6 +485,9 @@ public final class ApplyEngine {
         if (manual) {
             DriveSelectionStore.applyConfigured(ctx);
             if (!current.getAsBoolean()) return CycleResult.CANCELLED;
+        } else if (!usesAccHooks()) {
+            DriveSelectionStore.beginNativeRestore(ctx);
+            if (!current.getAsBoolean()) return CycleResult.CANCELLED;
         }
         // Read once, using the last complete cache immediately if the provider is unavailable.
         int status = MainActivity.loadModes(ctx, true);
@@ -462,7 +496,7 @@ public final class ApplyEngine {
             Log.w(TAG, "no saved settings; skipping this restore event");
             return CycleResult.FAILED;
         }
-        final CanRestorePlan plan = MainActivity.createCanRestorePlan(manual);
+        final CanRestorePlan plan = MainActivity.createCanRestorePlan(manual || !usesAccHooks());
         final CanRestorePlan.AttemptResult[] result = {
                 CanRestorePlan.AttemptResult.TRANSIENT_FAILURE
         };

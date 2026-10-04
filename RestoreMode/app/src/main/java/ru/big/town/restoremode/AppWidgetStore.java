@@ -60,6 +60,20 @@ class AppWidgetStore {
             return profiles.get(selectedProfile);
         }
 
+        /** A transferred app need not be the selected (or even a configured) profile here. */
+        boolean setPackageDpi(String runningPackage, int value) {
+            if (runningPackage == null || runningPackage.isEmpty()) return false;
+            ensureProfiles();
+            for (Profile profile : profiles) {
+                if (runningPackage.equals(profile.packageName)) {
+                    profile.dpi = normalizeDpi(value);
+                    ensureProfiles();
+                    return true;
+                }
+            }
+            return false;
+        }
+
         void ensureProfiles() {
             if (profiles.isEmpty()) profiles.add(new Profile(packageName, dpi));
             selectedProfile = Math.max(0, Math.min(selectedProfile, profiles.size() - 1));

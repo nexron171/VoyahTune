@@ -39,6 +39,13 @@ final class DriveSelectionPreferences {
         return "SMART".equals(mode) || "EV".equals(mode) || "REV".equals(mode)
                 || "SREV".equals(mode) || "FORCE_EV".equals(mode);
     }
+
+    /** Native's PI restore boundary has no CAN-agent ACC claim; retain saved/widget targets. */
+    static synchronized boolean beginNativeRestore(SharedPreferences prefs) {
+        return prefs.edit().putString(DriveSelectionPolicy.CURRENT, "")
+                .putString("currentTripEnergy", "")
+                .putLong(REV, prefs.getLong(REV, 0) + 1).commit();
+    }
     static synchronized String energy(SharedPreferences prefs) {
         String current = prefs.getString("currentTripEnergy", "");
         return validEnergy(current) ? current : prefs.getString("energy", "SREV");
@@ -63,6 +70,8 @@ final class DriveSelectionPreferences {
                 }
                 if (!e.commit()) throw new IllegalStateException("ACC state not persisted");
             }
+        } else if ("nativeRestore".equals(action)) {
+            if (!beginNativeRestore(prefs)) throw new IllegalStateException("Native restore state not persisted");
         } else if ("claimSettings".equals(action)) {
             boolean claim = "pending".equals(prefs.getString(SETTINGS_START, "idle"))
                     && prefs.getInt(ACC, -1) == 2;

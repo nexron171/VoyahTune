@@ -30,6 +30,8 @@ final class VehicleStateControllers {
     }
 
     private final Context appContext;
+    private final ModeRestoreTriggers restoreTriggers = new ModeRestoreTriggers();
+    private final boolean accHooks;
     private final CanBusEventHub canBusEventHub;
     private final HandlerThread stateThread;
     private final Handler stateHandler;
@@ -41,6 +43,7 @@ final class VehicleStateControllers {
 
     private VehicleStateControllers(Context context) {
         appContext = context;
+        accHooks = ru.big.town.common.InfrastructureProfile.read(context).usesAccHooks();
         stateThread = new HandlerThread("VehicleStateControllers");
         stateThread.start();
         stateHandler = new Handler(stateThread.getLooper());
@@ -97,6 +100,13 @@ final class VehicleStateControllers {
                 driverDoorStateController.reset();
                 break;
             case DOOR:
+                if (!accHooks) {
+                    if (event.first == 1) ApplyEngine.stopEarlyDriveRestore("driver door open");
+                    if (restoreTriggers.onDoor(event.first)) {
+                        ApplyEngine.noteDriverDoorOpened();
+                        ApplyEngine.scheduleNativeApply("driver door opened");
+                    }
+                }
                 driverDoorStateController.accept(
                         event.first,
                         event.origin == CanBusEvent.Origin.LIVE
@@ -104,6 +114,11 @@ final class VehicleStateControllers {
                                 : DriverDoorStateController.Source.SNAPSHOT);
                 break;
             case GEAR:
+                if (!accHooks) {
+                    if (event.first == 3) ApplyEngine.stopEarlyDriveRestore("gear Drive");
+                    if (restoreTriggers.onGear(event.first)) ApplyEngine.scheduleNativeApply("gear Drive");
+                    ApplyEngine.noteGear(event.first);
+                }
                 gearStateController.accept(event.first);
                 break;
             case VEHICLE_STATE:

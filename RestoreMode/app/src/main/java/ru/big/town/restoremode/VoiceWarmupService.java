@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -24,7 +25,7 @@ public final class VoiceWarmupService extends Service {
         if (VoiceCommands.ENABLED.equals(key) || VoiceAudioConfig.DEEP_FILTER_DB_KEY.equals(key)) update();
     };
 
-    /** Called only from visible activities/settings; background process creation does not start FGS. */
+    /** Visible activities and the boot receiver request warmup; OEM background rejection is tolerated. */
     static void sync(Context context) {
         Context app = context.getApplicationContext();
         Intent intent = new Intent(app, VoiceWarmupService.class);
@@ -72,15 +73,20 @@ public final class VoiceWarmupService extends Service {
         requested = true;
         requestedDb = db;
         retaining = true;
-        getSystemService(NotificationManager.class).notify(NOTIFICATION, notification("Подготовка помощника…"));
+        updateNotification("Подготовка помощника…");
         // Warm the shared command catalog alongside the models on a background thread.
         VoiceCommands.preload(this);
         VoiceRecognizer.keepWarm(this, ready -> {
             if (destroyed) return;
             if (!ready) requested = false; // A later visible invocation may retry.
-            getSystemService(NotificationManager.class).notify(NOTIFICATION,
-                    notification(ready ? "Модели загружены · быстрый запуск" : "Подготовка не удалась. Откройте помощника для повтора"));
+            updateNotification(ready ? "Модели загружены · быстрый запуск" : "Подготовка не удалась. Откройте помощника для повтора");
         });
+    }
+
+    private void updateNotification(String text) {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) return;
+        getSystemService(NotificationManager.class).notify(NOTIFICATION, notification(text));
     }
 
     private Notification notification(String text) {

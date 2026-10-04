@@ -4,7 +4,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/launch_app_item"
     android:layout_width="72dp"
-    android:layout_height="match_parent"
+    android:layout_height="104dp"
     android:gravity="center"
     android:orientation="vertical"
     android:padding="4dp">
@@ -25,12 +25,13 @@
         android:textColor="#FFFFFF"
         android:textSize="9sp" />
     <!-- Разделитель -->
-    <View
+    <ImageView
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_marginTop="4dp"
         android:layout_marginBottom="4dp"
-        android:background="#555555" />
+        android:background="#555555"
+        android:contentDescription="@null" />
     <!-- Ряд кнопок действий -->
     <LinearLayout
         android:layout_width="match_parent"

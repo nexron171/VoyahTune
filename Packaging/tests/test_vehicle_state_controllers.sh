@@ -28,6 +28,22 @@ require_fixed "$COMPOSITION" 'CanBusEventRouter.INTEREST_GEAR'
 require_fixed "$COMPOSITION" 'gearStateController.accept(event.first);'
 require_fixed "$COMPOSITION" 'driverDoorStateController.accept('
 require_fixed "$COMPOSITION" 'canBusEventHub.requestDriverDoorSeed();'
+require_fixed "$COMPOSITION" 'InfrastructureProfile.read(context).usesAccHooks()'
+
+# PI's native restore observes the same typed transport; OD is driven only by ACC hooks.
+# Check each branch separately so moving a trigger outside its profile guard fails.
+for event in DOOR GEAR; do
+    awk -v event="$event" '
+        $0 ~ "case " event ":" { inside = 1; next }
+        inside && /if \(!accHooks\)/ { guarded = 1 }
+        inside && /ApplyEngine\.(noteDriverDoorOpened|noteGear|scheduleNativeApply)/ {
+            if (!guarded) exit 1
+            found = 1
+        }
+        inside && /break;/ { exit(found ? 0 : 1) }
+        END { if (!found) exit 1 }
+    ' "$COMPOSITION" || fail "$event native restore is missing or not restricted to PI"
+done
 
 # Domain controllers expose current typed state and consumer subscriptions without CAN knowledge.
 require_fixed "$GEAR" 'Subscription subscribe(Handler deliveryHandler, Listener listener)'

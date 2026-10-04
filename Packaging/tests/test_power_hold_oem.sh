@@ -10,7 +10,7 @@ CONTROLLER="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/PowerHoldCon
 SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 NATIVE_MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
 RESTORE_MAIN="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/MainActivity.java"
-RESTORE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout-land/activity_main.xml"
+RESTORE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/tile_power_hold.xml"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 require_fixed() { grep -Fq -- "$2" "$1" || fail "missing '$2' in $1"; }

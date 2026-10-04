@@ -654,13 +654,12 @@ public class SetModesService extends Service {
                 display.resize(width, height, dpi > 0 ? dpi : 213);
             } else {
                 DisplayManager manager = (DisplayManager) getSystemService(DISPLAY_SERVICE);
-                int flags = 1 | 8 | 256 | 1024;
                 try {
-                    display = manager.createVirtualDisplay("voyah-app-widget-" + widgetId,
-                            width, height, dpi > 0 ? dpi : 213, surface, flags);
+                    display = OemVirtualDisplay.create(manager, "voyah-app-widget-" + widgetId,
+                            width, height, dpi > 0 ? dpi : 213, surface, true);
                 } catch (Exception trustedFailure) {
-                    display = manager.createVirtualDisplay("voyah-app-widget-" + widgetId,
-                            width, height, dpi > 0 ? dpi : 213, surface, 1 | 8 | 256);
+                    display = OemVirtualDisplay.create(manager, "voyah-app-widget-" + widgetId,
+                            width, height, dpi > 0 ? dpi : 213, surface, false);
                 }
                 if (display == null) return;
                 // Re-attach explicitly after creation. On Android 11 a Surface received through
@@ -810,7 +809,7 @@ public class SetModesService extends Service {
             copy = MotionEvent.obtain(event);
             Method setDisplayId = MotionEvent.class.getMethod("setDisplayId", int.class);
             setDisplayId.invoke(copy, display.getDisplay().getDisplayId());
-            Object inputManager = getSystemService("input");
+            Object inputManager = getSystemService(Context.INPUT_SERVICE);
             Method inject = inputManager.getClass().getMethod("injectInputEvent", InputEvent.class, int.class);
             inject.invoke(inputManager, copy, 0);
         } catch (Exception e) {
@@ -918,7 +917,14 @@ public class SetModesService extends Service {
         }
         try {
             android.app.UiModeManager ui = (android.app.UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
-            if (ui != null) ui.setNightMode(mode);
+            if (ui != null) {
+                switch (mode) {
+                    case 1: ui.setNightMode(android.app.UiModeManager.MODE_NIGHT_NO); break;
+                    case 2: ui.setNightMode(android.app.UiModeManager.MODE_NIGHT_YES); break;
+                    case 3: ui.setNightMode(android.app.UiModeManager.MODE_NIGHT_CUSTOM); break;
+                    default: ui.setNightMode(android.app.UiModeManager.MODE_NIGHT_AUTO); break;
+                }
+            }
         } catch (Exception e) {
             Log.w(TAG, "applyTheme setNightMode (нет MODIFY_DAY_NIGHT_MODE?): " + e.getMessage());
         }
@@ -1607,6 +1613,7 @@ public class SetModesService extends Service {
         if (energyWidgets != null) energyWidgets.close();
         voiceCommands.close();
         serviceDestroyed = true;
+        ApplyEngine.stopEarlyDriveRestore("service destroyed");
         for (VirtualDisplay display : embeddedDisplays.values()) {
             try { display.release(); } catch (Exception ignored) {}
         }
