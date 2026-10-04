@@ -297,14 +297,15 @@ final class EnergyWidgetView extends View {
         }
         if(n<2)fitted(c,!live()?"Нет записанной истории":hasCurrent?"История появится по мере движения":"Ожидание уровней батареи и топлива",left+15,213,compact?18:22,right-left-25,MUTED);
         for(int series=0;series<2;series++) {
-            Path path=new Path();boolean drawing=false;int color=series==0?GREEN:BLUE;
-            for(int i=0;i<n;i++) {
-                float v=series==0?ev[i]:fuel[i];
-                if(axis.position(distances[i])<0||!Float.isFinite(v)||v<0||v>100){drawing=false;continue;}
-                float x=left+axis.position(distances[i])*(right-left),y=bottom-v/100*(bottom-top);
-                if(!drawing||(gaps!=null&&i<gaps.length&&gaps[i]))path.moveTo(x,y);else path.lineTo(x,y);
-                drawing=true;
-            }
+            Path path=new Path();int color=series==0?GREEN:BLUE;
+            EnergyChartCurve.trace(distances,series==0?ev:fuel,gaps,n,axis.distanceAt(0),new EnergyChartCurve.Sink() {
+                private float x(double km){return left+axis.position(km)*(right-left);}
+                private float y(double level){return bottom-(float)(level/100)*(bottom-top);}
+                @Override public void moveTo(double km,double level){path.moveTo(x(km),y(level));}
+                @Override public void cubicTo(double km1,double level1,double km2,double level2,double km,double level) {
+                    path.cubicTo(x(km1),y(level1),x(km2),y(level2),x(km),y(level));
+                }
+            });
             paint.setColor(color);paint.setStrokeWidth(3);paint.setStyle(Paint.Style.STROKE);
             paint.setPathEffect(null);paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);
             c.drawPath(path,paint);
