@@ -8,11 +8,14 @@ final class EnergyChartCurve {
     }
 
     static void trace(float[] x,float[] levels,boolean[] breaks,int count,double minDistance,Sink sink) {
+        trace(x,levels,breaks,count,minDistance,0,100,sink);
+    }
+    static void trace(float[] x,float[] levels,boolean[] breaks,int count,double minDistance,double minLevel,double maxLevel,Sink sink) {
         int n=Math.min(count,Math.min(x.length,levels.length)),start=0;
         while(start<n) {
-            if(!valid(x[start],levels[start],minDistance)){start++;continue;}
+            if(!valid(x[start],levels[start],minDistance,minLevel,maxLevel)){start++;continue;}
             int end=start+1;
-            while(end<n&&valid(x[end],levels[end],minDistance)&&x[end]>x[end-1]
+            while(end<n&&valid(x[end],levels[end],minDistance,minLevel,maxLevel)&&x[end]>x[end-1]
                     &&!(breaks!=null&&end<breaks.length&&breaks[end]))end++;
             sink.moveTo(x[start],levels[start]);
             for(int i=start;i<end-1;i++) {
@@ -24,8 +27,8 @@ final class EnergyChartCurve {
         }
     }
 
-    private static boolean valid(float x,float level,double minDistance) {
-        return Float.isFinite(x)&&x>=0&&x>=minDistance&&Float.isFinite(level)&&level>=0&&level<=100;
+    private static boolean valid(float x,float level,double minDistance,double minLevel,double maxLevel) {
+        return Float.isFinite(x)&&x>=0&&x>=minDistance&&Float.isFinite(level)&&level>=minLevel&&level<=maxLevel;
     }
     private static double slope(float[] x,float[] y,int i) {
         return ((double)y[i+1]-y[i])/((double)x[i+1]-x[i]);

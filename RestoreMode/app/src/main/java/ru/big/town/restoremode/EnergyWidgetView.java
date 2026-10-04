@@ -43,7 +43,8 @@ final class EnergyWidgetView extends View {
     private EnergyCarImage car;
     private long tripMs=-1;
     private boolean inDrive;
-    private int window, selected=-1;
+    private int window, selected=-1,selectedConsumption=-1;
+    private EnergyConsumptionChart consumption=new EnergyConsumptionChart(0,null,null,null,null,null);
     private final Runnable clockTick=new Runnable(){@Override public void run(){invalidate();postDelayed(this,30_000);}};
     private float touchX, touchY, scale=1, offsetX, offsetY;
 
@@ -86,24 +87,27 @@ final class EnergyWidgetView extends View {
         setOnClickListener(v -> {
             if(!ENERGY.equals(kind)) return;
             float x=(touchX-offsetX)/scale, y=(touchY-offsetY)/scale;
+            EnergyChartLayout chart=new EnergyChartLayout(baseW,columns<=5);
             float pad=columns<=5?20:27,button=columns<=5?65:90,buttonsLeft=baseW-pad-3*button;
             if(y>=24&&y<=68&&x>=buttonsLeft&&x<=baseW-pad) {
                 int slot=Math.min(2,Math.max(0,(int)((x-buttonsLeft)/button)));
                 window=EnergyWidgetSettings.WINDOWS[slot];selected=-1;
                 prefs.edit().putInt(EnergyWidgetSettings.WINDOW_KEY,window).apply();
-            } else if(y>=155&&y<=279&&x>=pad+57&&x<=baseW-pad-22) {
+            } else if(y>=EnergyChartLayout.TOP-10&&y<=279&&x>=chart.left&&x<=chart.right) {
                 if(selected>=0) selected=-1;
                 else {
                     float[] distances=array(EnergyWidgetProtocol.HISTORY_X,0);
                     if(distances.length>0) {
-                        EnergyChartAxis axis=new EnergyChartAxis(distances[distances.length-1],window,Float.NaN);
-                        double target=axis.distanceAt((x-pad-57)/(baseW-2*pad-79)),best=Double.MAX_VALUE;
+                        EnergyChartAxis axis=new EnergyChartAxis(recordedKm(),window,Float.NaN);
+                        double target=axis.distanceAt((x-chart.left)/(chart.right-chart.left)),best=Double.MAX_VALUE;
                         for(int i=0;i<distances.length;i++) if(axis.position(distances[i])>=0&&Math.abs(distances[i]-target)<best) {
                             best=Math.abs(distances[i]-target); selected=i;
                         }
                     }
                 }
-            } else selected=-1;
+            } else if(y>=EnergyChartLayout.TOP-10&&y<=279&&x>=chart.shortLeft&&x<=chart.shortRight) {
+                selectedConsumption=selectedConsumption>=0?-1:consumption.nearest((x-chart.shortLeft)/(chart.shortRight-chart.shortLeft));
+            } else {selected=-1;selectedConsumption=-1;}
             invalidate();
         });
     }
@@ -111,9 +115,15 @@ final class EnergyWidgetView extends View {
     @Override protected void onAttachedToWindow(){super.onAttachedToWindow();if(ODO.equals(kind))post(clockTick);}
     @Override protected void onDetachedFromWindow(){removeCallbacks(clockTick);super.onDetachedFromWindow();}
     void update(Bundle data) {
+        double selectedEnd=selectedConsumption>=0&&selectedConsumption<consumption.end.length?consumption.end[selectedConsumption]:Double.NaN;
         float[] previous=array(EnergyWidgetProtocol.HISTORY_X,0);
         float selectedKm=selected>=0&&selected<previous.length?previous[selected]:Float.NaN;
         state=data==null?new Bundle():new Bundle(data);
+        consumption=new EnergyConsumptionChart(recordedKm(),state.getDoubleArray(EnergyWidgetProtocol.CONSUMPTION_START),
+                state.getDoubleArray(EnergyWidgetProtocol.CONSUMPTION_END),state.getFloatArray(EnergyWidgetProtocol.CONSUMPTION_EV),
+                state.getFloatArray(EnergyWidgetProtocol.CONSUMPTION_FUEL),state.getBooleanArray(EnergyWidgetProtocol.CONSUMPTION_BREAK));
+        selectedConsumption=-1;
+        for(int i=0;i<consumption.end.length;i++)if(consumption.end[i]==selectedEnd){selectedConsumption=i;break;}
         selected=-1;
         float[] next=array(EnergyWidgetProtocol.HISTORY_X,0);
         for(int i=0;i<next.length;i++) if(next[i]==selectedKm) {selected=i;break;}
@@ -134,6 +144,11 @@ final class EnergyWidgetView extends View {
     }
     private float current(String key,int index) {
         float[] a=array(key,index+1); return live()&&a.length>index?a[index]:Float.NaN;
+    }
+    private double recordedKm() {
+        float[] x=array(EnergyWidgetProtocol.HISTORY_X,0);double fallback=x.length==0?0:x[x.length-1];
+        double km=state.getDouble(EnergyWidgetProtocol.RECORDED_KM,fallback);
+        return Double.isFinite(km)&&km>=0?km:fallback;
     }
     private static String num(float value) {return Float.isFinite(value)?String.format(RU,"%.1f",value):"—";}
     private static String mileage(double value) {return Double.isFinite(value)?String.format(RU,"%,.0f",value):"—";}
@@ -258,6 +273,7 @@ final class EnergyWidgetView extends View {
     }
     private void drawEnergy(Canvas c) {
         boolean compact=columns<=5;
+        EnergyChartLayout chart=new EnergyChartLayout(baseW,compact);
         float pad=compact?20:27,button=compact?65:90,buttonsLeft=baseW-pad-3*button;
         text(c,"Заряд и топливо",pad,52,compact?24:28,WHITE,true);
         for(int i=0;i<3;i++) {
@@ -269,7 +285,7 @@ final class EnergyWidgetView extends View {
         float[] distances=array(EnergyWidgetProtocol.HISTORY_X,0),ev=array(EnergyWidgetProtocol.HISTORY_EV,distances.length),fuel=array(EnergyWidgetProtocol.HISTORY_FUEL,distances.length);
         boolean[] gaps=state.getBooleanArray(EnergyWidgetProtocol.HISTORY_BREAK);
         int n=Math.min(distances.length,Math.min(ev.length,fuel.length));
-        EnergyChartAxis axis=new EnergyChartAxis(n>0?distances[n-1]:0,window,current(EnergyWidgetProtocol.ODOMETER,0));
+        EnergyChartAxis axis=new EnergyChartAxis(recordedKm(),window,current(EnergyWidgetProtocol.ODOMETER,0));
         float currentEv=current(EnergyWidgetProtocol.LEVELS,0),currentFuel=current(EnergyWidgetProtocol.LEVELS,1);
         boolean hasCurrent=Float.isFinite(currentEv)||Float.isFinite(currentFuel);
         if(selected>=0&&selected<n){currentEv=ev[selected];currentFuel=fuel[selected];}
@@ -285,12 +301,14 @@ final class EnergyWidgetView extends View {
         String status=selected>=0?(Double.isFinite(axis.odometerAt(distances[selected]))?"Пробег ~"+mileage(axis.odometerAt(distances[selected]))+" км":"Пробег недоступен"):
                 !live()?"Нет связи с автомобилем":hasCurrent?"":"Нет свежих данных";
         right(c,status,baseW-pad,compact?153:122,compact?13:17,MUTED);
-        float left=pad+57,right=baseW-pad-22,top=163,bottom=250;
+        text(c,"Уровни, %",pad,170,compact?12:14,MUTED,false);
+        float left=chart.left,right=chart.right,top=EnergyChartLayout.TOP,bottom=EnergyChartLayout.BOTTOM;
         for(int i=0;i<=4;i++){float y=top+(bottom-top)*i/4;line(c,left,y,right,y,BORDER,1);
-            right(c,(100-25*i)+"%",left-13,y+5,compact?14:17,MUTED);}
+            right(c,(100-25*i)+"%",left-(compact?7:13),y+5,compact?14:17,MUTED);}
         for(int i=0;i<=EnergyChartAxis.INTERVALS;i++) {
-            float x=right-(right-left)*i/EnergyChartAxis.INTERVALS;String label=mileage(axis.tick(i))+(i==0?" км":"");
-            if(i==0)right(c,label,x,276,compact?12:17,MUTED);else text(c,label,x-measured(label,compact?12:17)/2,276,compact?12:17,MUTED,false);
+            float x=right-(right-left)*i/EnergyChartAxis.INTERVALS;String label=mileage(axis.tick(i))+(i==0&&!compact?" км":"");
+            float size=compact?11:17;
+            if(i==0)right(c,label,x,276,size,MUTED);else text(c,label,i==EnergyChartAxis.INTERVALS?x:x-measured(label,size)/2,276,size,MUTED,false);
         }
         if(n<2)fitted(c,!live()?"Нет записанной истории":hasCurrent?"История появится по мере движения":"Ожидание уровней батареи и топлива",left+15,213,compact?18:22,right-left-25,MUTED);
         for(int series=0;series<2;series++) {
@@ -322,12 +340,75 @@ final class EnergyWidgetView extends View {
                 state.getDoubleArray(EnergyWidgetProtocol.HISTORY_EV_KM),state.getDoubleArray(EnergyWidgetProtocol.HISTORY_FUEL_KM),batteryCapacity,tankCapacity,
                 state.getDoubleArray(EnergyWidgetProtocol.HISTORY_START_EV_DROP),state.getDoubleArray(EnergyWidgetProtocol.HISTORY_START_FUEL_DROP),
                 state.getDoubleArray(EnergyWidgetProtocol.HISTORY_START_EV_KM),state.getDoubleArray(EnergyWidgetProtocol.HISTORY_START_FUEL_KM));
-        line(c,pad,288,baseW-pad,288,BORDER,1);
-        text(c,"Средний расход за "+window+" км",pad,310,compact?15:16,MUTED,false);
+        line(c,pad,288,chart.split,288,BORDER,1);
+        text(c,"Средний расход за "+window+" км",pad,310,compact?13:16,MUTED,false);
         float coverage=Math.min(period.batteryKm,period.fuelKm);
         String note=Math.max(period.batteryKm,period.fuelKm)<1?"Нужно от 1 км истории":coverage<window-.1f?"Учтено "+num(coverage)+" из "+window+" км":"";
-        right(c,note,baseW-pad,310,compact?12:13,MUTED);
-        float last=valueWithUnit(c,estimate(period.battery),"кВт·ч/100 км",pad,348,compact?26:29,compact?14:15,GREEN);
-        valueWithUnit(c,estimate(period.fuel),"л/100 км",last+32,348,compact?26:29,compact?14:15,BLUE);
+        right(c,note,chart.split,310,compact?10:13,MUTED);
+        float last=valueWithUnit(c,estimate(period.battery),"кВт·ч/100 км",pad,348,compact?22:29,compact?11:15,GREEN);
+        valueWithUnit(c,estimate(period.fuel),"л/100 км",last+(compact?16:32),348,compact?22:29,compact?11:15,BLUE);
+        drawConsumption(c,chart,axis,compact);
+    }
+    private static String quantity(float value) {
+        return Float.isFinite(value)?String.format(RU,"%.3f",Math.abs(value)<.0005?0:value):"—";
+    }
+    private static String axisQuantity(double value) {
+        if(value==0)return "0";
+        if(Math.abs(value)>=1000||Math.abs(value)<.001)return String.format(RU,"%.1e",value);
+        return String.format(RU,"%.3f",value).replaceAll("0+$","").replaceAll(",$","");
+    }
+    private void drawConsumption(Canvas c,EnergyChartLayout chart,EnergyChartAxis axis,boolean compact) {
+        float left=chart.shortLeft,right=chart.shortRight,top=EnergyChartLayout.TOP,bottom=EnergyChartLayout.BOTTOM;
+        float axisSize=compact?9:11,content=chart.shortContent,end=baseW-chart.pad;
+        float zero=top+(float)consumption.zero()*(bottom-top);
+        line(c,chart.shortColumn,153,chart.shortColumn,baseH-17,BORDER,1);
+        text(c,"Расход · 10 км",content,170,compact?12:14,MUTED,false);
+        if(!compact)right(c,"шаг 250 м",end,170,11,MUTED);
+        paint.setColor(0x0970e1ab);c.drawRect(left,zero,right,bottom,paint);
+        line(c,left,top,right,top,BORDER,1);line(c,left,bottom,right,bottom,BORDER,1);
+        line(c,left,zero,right,zero,0xff616b7b,1);
+        if(consumption.electricMax>0)right(c,axisQuantity(consumption.electricMax),left-5,top+3,axisSize,GREEN);
+        right(c,"0",left-5,zero+3,axisSize,GREEN);
+        if(consumption.electricMin<0)right(c,axisQuantity(consumption.electricMin),left-5,bottom+3,axisSize,GREEN);
+        if(consumption.fuelMax>0)text(c,axisQuantity(consumption.fuelMax),right+5,top+3,axisSize,BLUE,false);
+        text(c,"0",right+5,zero+3,axisSize,BLUE,false);
+        for(int i=0;i<=2;i++) {
+            if(compact&&i==1)continue;
+            float x=left+(right-left)*i/2;String label=mileage(axis.odometerAt(consumption.cursor-10+5*i));
+            if(i==2)right(c,label,x,276,axisSize,MUTED);else text(c,label,i==0?x:x-measured(label,axisSize)/2,276,axisSize,MUTED,false);
+        }
+        int count=consumption.end.length,marker=selectedConsumption>=0?selectedConsumption:count-1;
+        for(int series=0;series<2;series++) {
+            final boolean electric=series==0;float[] values=electric?consumption.battery:consumption.fuel;
+            int color=electric?GREEN:BLUE;Path path=new Path();
+            EnergyChartCurve.trace(consumption.position,values,consumption.gaps,count,0,electric?Double.NEGATIVE_INFINITY:0,
+                    Double.POSITIVE_INFINITY,new EnergyChartCurve.Sink() {
+                private float x(double position){return left+(float)(position/10)*(right-left);}
+                private float y(double value){return top+(float)(electric?consumption.electricPosition(value):consumption.fuelPosition(value))*(bottom-top);}
+                @Override public void moveTo(double position,double value){path.moveTo(x(position),y(value));}
+                @Override public void cubicTo(double x1,double y1,double x2,double y2,double x,double y){path.cubicTo(x(x1),y(y1),x(x2),y(y2),x(x),y(y));}
+            });
+            paint.setColor(color);paint.setStrokeWidth(1.2f);paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);c.drawPath(path,paint);
+            paint.setStrokeCap(Paint.Cap.BUTT);paint.setStrokeJoin(Paint.Join.MITER);paint.setStyle(Paint.Style.FILL);
+            if(marker>=0&&Float.isFinite(values[marker])) {
+                float x=left+consumption.position[marker]/10*(right-left);
+                float y=top+(float)(electric?consumption.electricPosition(values[marker]):consumption.fuelPosition(values[marker]))*(bottom-top);
+                c.drawCircle(x,y,2,paint);
+            }
+        }
+        if(selectedConsumption>=0){float x=left+consumption.position[selectedConsumption]/10*(right-left);line(c,x,top,x,bottom,0xff7b8799,1);}
+        if(count==0)fitted(c,"Ожидание 250 м",content,218,compact?11:13,end-content,MUTED);
+        line(c,content,288,end,288,BORDER,1);
+        String label="Последние 250 м";
+        if(marker>=0) {
+            if(selectedConsumption>=0&&Double.isFinite(axis.odometerAt(consumption.start[marker])))
+                label=String.format(RU,"%.2f–%.2f км",axis.odometerAt(consumption.start[marker]),axis.odometerAt(consumption.end[marker]));
+            else label="Последние "+Math.round((consumption.end[marker]-consumption.start[marker])*1000)+" м";
+        }
+        fitted(c,label,content,310,compact?10:12,end-content,MUTED);
+        float ev=marker>=0?consumption.battery[marker]:Float.NaN,fuel=marker>=0?consumption.fuel[marker]:Float.NaN;
+        if(columns<=6){valueWithUnit(c,quantity(ev),"кВт·ч",content,332,18,11,GREEN);valueWithUnit(c,quantity(fuel),"л",content,354,18,11,BLUE);}
+        else{float next=valueWithUnit(c,quantity(ev),"кВт·ч",content,348,25,13,GREEN);valueWithUnit(c,quantity(fuel),"л",next+16,348,25,13,BLUE);}
     }
 }

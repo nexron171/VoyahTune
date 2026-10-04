@@ -105,4 +105,11 @@ public class EnergyChartCurveTest {
         EnergyChartCurve.trace(new float[]{0,1,2},new float[]{50,49,48},null,1,0,result);
         assertEquals(1,result.moves.size());assertTrue(result.curves.isEmpty());
     }
+    @Test public void consumptionCurveAcceptsSignedAbsoluteValuesBeyondPercentRange() {
+        Trace result=new Trace();
+        EnergyChartCurve.trace(new float[]{1,2,3,4,5},new float[]{-2.15f,0,200,Float.NaN,.56f},null,5,0,
+                Double.NEGATIVE_INFINITY,Double.POSITIVE_INFINITY,result);
+        assertEquals(2,result.moves.size());assertEquals(2,result.curves.size());
+        assertEquals(-2.15,result.curves.get(0)[1],.00001);assertEquals(200,result.curves.get(1)[7],0);
+    }
 }
