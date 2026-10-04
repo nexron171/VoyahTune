@@ -208,9 +208,7 @@ final class EnergyWidgetView extends View {
             else {right(c,names[i],x,y,labelSize,MUTED);right(c,num(current(EnergyWidgetProtocol.TIRES,i)),x,valueY,pressureSize,WHITE);}
             if(!narrow)line(c,left?162:baseW-192,y+32,left?192:baseW-162,y+32,BORDER,1);
         }
-        float footer=shorter?baseH-27:462,footerSize=columns==2?12:columns==3?13:16;
-        text(c,live()?"Показания авто":"Нет связи",pad,footer,footerSize,MUTED,false);
-        int index=java.util.Arrays.asList(COLORS).indexOf(color);right(c,COLOR_NAMES[index],baseW-pad,footer,footerSize,MUTED);
+        if(!live())text(c,"Нет связи",pad,shorter?baseH-27:462,columns==2?12:columns==3?13:16,MUTED,false);
     }
     private void drawOdo(Canvas c) {
         float pad=columns==2?20:columns==3?22:27;
@@ -250,7 +248,7 @@ final class EnergyWidgetView extends View {
         text(c,"Время учитывается только в D",pad,baseH-22,compact?12:17,MUTED,false);
         float evKm=current(EnergyWidgetProtocol.TRIP_OBSERVED_KM,0),fuelKm=current(EnergyWidgetProtocol.TRIP_OBSERVED_KM,1);
         String note=!live()?"Нет связи с автомобилем":Math.max(evKm,fuelKm)<1?"Средние после 1 км наблюдения":
-                Math.abs(evKm-fuelKm)<.1?"Учтено "+num(Math.min(evKm,fuelKm))+" км · только снижение":
+                Math.abs(evKm-fuelKm)<.1?"Учтено "+num(Math.min(evKm,fuelKm))+" км":
                 "Учтено: электро "+num(evKm)+", бензин "+num(fuelKm)+" км";
         float noteSize=compact?12:16;
         float maxNote=baseW/2-pad;
@@ -282,7 +280,7 @@ final class EnergyWidgetView extends View {
             text(c,i==0?"Батарея":"Топливо",end+10,108,compact?15:16,color,false);
             text(c,"Осталось "+estimate(value*(i==0?batteryCapacity:tankCapacity)/100)+(i==0?" кВт·ч":" л"),valueX,136,compact?15:16,color,false);
         }
-        String status=selected>=0?"На "+num(distances[selected])+" км":!live()?"Нет связи с автомобилем":hasCurrent?"Текущие уровни":"Нет свежих данных";
+        String status=selected>=0?"На "+num(distances[selected])+" км":!live()?"Нет связи с автомобилем":hasCurrent?"":"Нет свежих данных";
         right(c,status,baseW-pad,compact?153:122,compact?13:17,MUTED);
         float end=n>0?Math.max(.1f,distances[n-1]):window,start=Math.max(0,end-window),span=end-start;
         float left=pad+57,right=baseW-pad-22,top=163,bottom=250;
@@ -325,7 +323,7 @@ final class EnergyWidgetView extends View {
         line(c,pad,288,baseW-pad,288,BORDER,1);
         text(c,"Средний расход за "+window+" км",pad,310,compact?15:16,MUTED,false);
         float coverage=Math.min(period.batteryKm,period.fuelKm);
-        String note=Math.max(period.batteryKm,period.fuelKm)<1?"Нужно от 1 км истории":coverage<window-.1f?"Учтено "+num(coverage)+" из "+window+" км":"Только снижение";
+        String note=Math.max(period.batteryKm,period.fuelKm)<1?"Нужно от 1 км истории":coverage<window-.1f?"Учтено "+num(coverage)+" из "+window+" км":"";
         right(c,note,baseW-pad,310,compact?12:13,MUTED);
         float last=valueWithUnit(c,estimate(period.battery),"кВт·ч/100 км",pad,348,compact?26:29,compact?14:15,GREEN);
         valueWithUnit(c,estimate(period.fuel),"л/100 км",last+32,348,compact?26:29,compact?14:15,BLUE);
