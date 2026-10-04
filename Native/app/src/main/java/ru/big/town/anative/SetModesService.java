@@ -105,11 +105,17 @@ public class SetModesService extends Service {
     private final VoiceCommandController voiceCommands = new VoiceCommandController(this);
 
     private SuspensionWidgetController suspensionWidget;
+    private EnergyWidgetController energyWidgets;
 
     class IncomingHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case ru.big.town.common.EnergyWidgetProtocol.WATCH:
+                case ru.big.town.common.EnergyWidgetProtocol.UNWATCH:
+                case ru.big.town.common.EnergyWidgetProtocol.CONFIGURE:
+                    if (energyWidgets != null) energyWidgets.handle(msg);
+                    break;
                 case ru.big.town.common.SuspensionWidgetProtocol.WATCH:
                 case ru.big.town.common.SuspensionWidgetProtocol.UNWATCH:
                 case ru.big.town.common.SuspensionWidgetProtocol.SELECT:
@@ -1169,6 +1175,7 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        energyWidgets = new EnergyWidgetController(this);
         ApplyEngine.activateWake("service create");
         // A stale file from an earlier boot is fail-closed and removed on first service creation.
         ApolloSettingsRuntimeState.isEnabled(this);
@@ -1597,6 +1604,7 @@ public class SetModesService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
         if (suspensionWidget != null) suspensionWidget.close();
+        if (energyWidgets != null) energyWidgets.close();
         voiceCommands.close();
         serviceDestroyed = true;
         for (VirtualDisplay display : embeddedDisplays.values()) {

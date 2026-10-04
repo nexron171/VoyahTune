@@ -21,6 +21,8 @@ final class CanBusEventRouter {
     static final int INTEREST_VEHICLE_STATE = 1 << 4;
     static final int INTEREST_AMBIENT_TEMPERATURE = 1 << 5;
 
+    static final int INTEREST_ENERGY_TELEMETRY = 1 << 6;
+
     private static final int DEFAULT_MAILBOX_CAPACITY = 32;
     // Consumer handlers may be the Android main looper. Yield after every callback so a retained
     // transition burst cannot monopolize one looper quantum.
@@ -196,6 +198,7 @@ final class CanBusEventRouter {
                 case GEAR: return hasInterest(INTEREST_GEAR);
                 case LIGHT_STATUS: return hasInterest(INTEREST_LIGHT_STATUS);
                 case VEHICLE_STATE: return acceptsVehicleState(event.first);
+                case ENERGY_TELEMETRY: return hasInterest(INTEREST_ENERGY_TELEMETRY);
                 case AMBIENT_TEMPERATURE: return hasInterest(INTEREST_AMBIENT_TEMPERATURE);
                 default: return false;
             }
