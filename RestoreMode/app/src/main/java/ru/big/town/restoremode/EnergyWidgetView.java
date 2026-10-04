@@ -93,12 +93,15 @@ final class EnergyWidgetView extends View {
                 window=EnergyWidgetSettings.WINDOWS[slot];selected=-1;
                 prefs.edit().putInt(EnergyWidgetSettings.WINDOW_KEY,window).apply();
             } else if(y>=155&&y<=279&&x>=pad+57&&x<=baseW-pad-22) {
-                float[] distances=array(EnergyWidgetProtocol.HISTORY_X,0);
-                if(distances.length>0) {
-                    float end=distances[distances.length-1], start=Math.max(0,end-window);
-                    float target=start+(x-pad-57)/(baseW-2*pad-79)*Math.max(.1f,end-start), best=Float.MAX_VALUE;
-                    for(int i=0;i<distances.length;i++) if(distances[i]>=start&&Math.abs(distances[i]-target)<best) {
-                        best=Math.abs(distances[i]-target); selected=i;
+                if(selected>=0) selected=-1;
+                else {
+                    float[] distances=array(EnergyWidgetProtocol.HISTORY_X,0);
+                    if(distances.length>0) {
+                        float end=distances[distances.length-1], start=Math.max(0,end-window);
+                        float target=start+(x-pad-57)/(baseW-2*pad-79)*Math.max(.1f,end-start), best=Float.MAX_VALUE;
+                        for(int i=0;i<distances.length;i++) if(distances[i]>=start&&Math.abs(distances[i]-target)<best) {
+                            best=Math.abs(distances[i]-target); selected=i;
+                        }
                     }
                 }
             } else selected=-1;
