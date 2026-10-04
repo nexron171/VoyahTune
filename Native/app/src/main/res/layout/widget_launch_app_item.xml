@@ -46,7 +46,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:orientation="vertical"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            android:background="@drawable/widget_action_background"
             android:padding="2dp">
             <ImageView
                 android:layout_width="16dp"
@@ -62,7 +62,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:orientation="vertical"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            android:background="@drawable/widget_action_background"
             android:padding="2dp">
             <ImageView
                 android:layout_width="16dp"
@@ -78,7 +78,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:orientation="vertical"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            android:background="@drawable/widget_action_background"
             android:padding="2dp">
             <ImageView
                 android:layout_width="16dp"
