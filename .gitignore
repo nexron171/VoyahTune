@@ -85,6 +85,9 @@ CONTEXT.md
 # Local plans, audits, investigations and checklists.
 /Plans/
 
+# Personal Codex instructions for this checkout.
+/AGENTS.override.md
+
 # Сборочный вывод игнорируется; основной и beta-каталоги OTA хранятся в Git.
 # Источник релиза (инжект-скрипты, установщики, boot-обвязка, tools) — в Packaging/.
 # Собрать: ./make_release.sh <версия>
