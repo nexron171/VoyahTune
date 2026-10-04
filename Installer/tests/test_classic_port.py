@@ -20,12 +20,20 @@ class ClassicPortTests(unittest.TestCase):
   shutil.copyfile(ROOT/f'Packaging/od/installer/device/{verb}.sh',release/f'{verb}.sh')
   shutil.copyfile(ROOT/'Packaging/od/installer/common/dns-overlay.sh',release/'dns-overlay.sh')
   shutil.copyfile(ROOT/'Packaging/od/installer/common/stop-loader-device.sh',release/'stop-loader-device.sh')
+  shutil.copyfile(ROOT/'Packaging/od/installer/common/apollo-safe-device.sh',release/'apollo-safe-device.sh')
   env={**f.env,'PATH':str(f.bundle/'adb')+os.pathsep+os.environ['PATH']}
   result=subprocess.run(['/bin/sh',f'{verb}.sh'],cwd=release,env=env,text=True,capture_output=True,timeout=180)
   return result
  def state(self,f):
-  files={str(p.relative_to(f.device)):hashlib.sha256(p.read_bytes()).hexdigest() for p in f.device.rglob('*') if p.is_file() and not p.is_symlink()}
-  return files,f.read_state()['settings'],f.read_state()['packages']
+  # Classic has no OTA payload. The six exact GUI OTA paths are checked by
+  # integration.py; keep all common APK/Frida bytes, settings and packages strict.
+  ota_paths={'data/local/bin/voyahtune-ui-maintenance','data/local/bin/voyahtune-ui-next.apk',
+   'data/local/bin/voyahtune-updater','system/etc/init/voyahtune.updater.rc',
+   'system/etc/voyahtune-ota-bootstrap.json','system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk'}
+  files={str(p.relative_to(f.device)):hashlib.sha256(p.read_bytes()).hexdigest() for p in f.device.rglob('*')
+   if p.is_file() and not p.is_symlink() and str(p.relative_to(f.device)) not in ota_paths}
+  state=f.read_state();packages={k:v for k,v in state['packages'].items() if k!='ru.big.town.updater'}
+  return files,state['settings'],packages
  def compare(self,action,state=None,seed=None):
   reference=self.fixture(state);port=self.fixture(state)
   if seed:seed(reference);seed(port)

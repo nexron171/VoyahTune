@@ -15,6 +15,7 @@ use crate::{
 };
 use serde_json::json;
 use std::{
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -90,6 +91,7 @@ pub struct Engine {
     restart_loader: bool,
     legacy_migrated: bool,
     ota_locked: bool,
+    installed_runtime_hashes: BTreeSet<(String, String)>,
 }
 impl Engine {
     pub fn new(
@@ -116,6 +118,7 @@ impl Engine {
             restart_loader: false,
             legacy_migrated: false,
             ota_locked: false,
+            installed_runtime_hashes: BTreeSet::new(),
         })
     }
     pub fn run(&mut self, request: Request) -> Result<()> {
@@ -413,7 +416,6 @@ impl Engine {
                 "Проверка Native и готовности OTA",
                 |e| {
                     e.wait_boot(true)?;
-                    e.cleanup_retired_loader()?;
                     e.native_ready()?;
                     e.updater_ready()?;
                     let service = e.shell("getprop init.svc.voyahtune_updater\n")?;
@@ -777,7 +779,8 @@ fi
     fn backup_dir(&self) -> PathBuf {
         self.operation.dir.parent().unwrap().join("backup")
     }
-    fn backup(&self) -> Result<()> {
+    fn backup(&mut self) -> Result<()> {
+        self.installed_runtime_hashes = inventory::signed_runtime_hashes(&self.adb);
         let dir = self.backup_dir();
         let made = fs::create_dir_all(&dir);
 
@@ -821,6 +824,17 @@ fi
             let q = quote(&remote);
             match self.shell(&format!("if [ -f {q} ]; then echo PRESENT; elif [ -e {q} ]; then echo ERROR; else echo ABSENT; fi\n"))?.as_str(){
                 "ABSENT"=>continue,"PRESENT"=>{},other=>return Err(self.fail("Не удалось сохранить существующий файл",format!("{remote}: {other}"))),}
+            if self
+                .installed_runtime_hashes
+                .iter()
+                .any(|(artifact, _)| artifact == &name)
+                && inventory::file_hash(&self.adb, &remote)?.is_some_and(|hash| {
+                    self.installed_runtime_hashes
+                        .contains(&(name.clone(), hash))
+                })
+            {
+                continue;
+            }
             let tmp = dir.join(format!("{name}.new"));
             let _ = fs::remove_file(&tmp);
             self.adb.pull(&remote, &tmp)?;
@@ -950,16 +964,6 @@ fi
 
         // Retired exact paths are cumulative. Never delete an active target.
         for path in &recipe.remove_files {
-            // init retains the previous service command until reboot. Keep its Go loader
-            // and config available if installation fails and restart_loader runs.
-            if [
-                "/data/local/bin/loaderFrida",
-                "/data/local/bin/injects.json",
-            ]
-            .contains(&path.as_str())
-            {
-                continue;
-            }
             if !recipe.files.iter().any(|f| f.destination == *path) {
                 self.shell(&format!("rm -f {}\n", quote(path)))?;
             }
@@ -1065,18 +1069,6 @@ fi
             "voyahtune-updater.apk",
             Some("/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk"),
         )?;
-        Ok(())
-    }
-    fn cleanup_retired_loader(&self) -> Result<()> {
-        // The new init service is now loaded. Opposite-profile executable files no
-        // longer participate in recovery and must not remain installed.
-        let names: &[&str] = match self.payload.manifest.infrastructure {
-            crate::infrastructure::Infrastructure::Od => &["loaderFrida", "injects.json"],
-            crate::infrastructure::Infrastructure::Pi => &["load.bin"],
-        };
-        for name in names {
-            self.shell(&format!("rm -f /data/local/bin/{name}\n"))?;
-        }
         Ok(())
     }
     fn pi_loader_ready(&self) -> Result<()> {
@@ -1410,7 +1402,8 @@ fi
         self.ignore(c::REMOVE_TRANSACTIONS);
         Ok(())
     }
-    fn remove_files(&self) -> Result<()> {
+    fn remove_files(&mut self) -> Result<()> {
+        self.installed_runtime_hashes = inventory::signed_runtime_hashes(&self.adb);
         self.ignore(STOP_LOADER);
         self.ignore(
             "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock\n",
@@ -1451,6 +1444,11 @@ fi
         self.shell("rm -f /data/local/bin/voyahtune-update.block && rm -rf /data/local/voyahtune-updater /system/priv-app/VoyahTuneUpdater\n")?;
 
         for path in self.payload.manifest.recipe.cleanup_files() {
+            // The exact loader path was already removed or restored from a foreign
+            // host backup above. Do not erase that restored foreign file again.
+            if path == "/data/local/bin/loaderFrida" {
+                continue;
+            }
             self.shell(&format!("rm -f {}\n", quote(&path)))?;
         }
         for path in self
@@ -1477,6 +1475,15 @@ fi
         let backup = self.backup_dir().join(name);
         let target = format!("/data/local/bin/{name}");
         if backup.is_file() {
+            if payload::sha256(&backup).is_ok_and(|hash| {
+                self.payload.artifact(name).is_ok_and(|a| a.sha256 == hash)
+                    || self
+                        .installed_runtime_hashes
+                        .contains(&(name.to_owned(), hash))
+            }) {
+                self.ignore(&format!("rm -f {target}\n"));
+                return;
+            }
             let _ = self.adb.push(&backup, &target);
         } else {
             self.ignore(&format!("rm -f {target}\n"));

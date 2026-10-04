@@ -83,17 +83,6 @@ pub fn load(root: &Path) -> io::Result<Config> {
     if config.schema != 1 {
         return Err(invalid("Неизвестный формат настроек"));
     }
-    let selected = release_core::infrastructure::Infrastructure::compiled();
-    if config.infrastructure != selected {
-        // A USB installation can replace the infrastructure. Invalidate any
-        // pending selection while retaining the user's shared catalog and DNS choice.
-        config.infrastructure = selected;
-        config.source_generation = config
-            .source_generation
-            .checked_add(1)
-            .ok_or_else(|| invalid("Счётчик источника исчерпан"))?;
-        save(root, &config)?;
-    }
     config.catalog_url = normalize_url(&config.catalog_url)?;
     Ok(config)
 }
@@ -166,29 +155,6 @@ mod tests {
                 & 0o777,
             0o600
         );
-    }
-    #[test]
-    fn usb_profile_change_invalidates_selection_and_preserves_shared_catalog_and_dns() {
-        let root = tempfile::tempdir().unwrap();
-        let mut old = Config::default();
-        old.infrastructure = match old.infrastructure {
-            release_core::infrastructure::Infrastructure::Pi => {
-                release_core::infrastructure::Infrastructure::Od
-            }
-            _ => release_core::infrastructure::Infrastructure::Pi,
-        };
-        old.catalog_url = "https://old-profile.example/catalog.json".into();
-        old.dns_enabled = Some(true);
-        save(root.path(), &old).unwrap();
-        let current = load(root.path()).unwrap();
-        assert_eq!(
-            current.infrastructure,
-            release_core::infrastructure::Infrastructure::compiled()
-        );
-        assert_eq!(current.catalog_url, old.catalog_url);
-        assert_eq!(current.dns_enabled, Some(true));
-        assert_eq!(current.source_generation, 1);
-        assert_eq!(load(root.path()).unwrap(), current);
     }
     #[test]
     fn invalid_address_does_not_replace_settings() {

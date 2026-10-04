@@ -58,7 +58,7 @@ def main():
      s['packages'].pop('com.voyah.hl.service',None)
    if remote('/system/etc/init/voyahtune.updater.rc').exists() and remote('/data/local/bin/voyahtune-updater').exists():
     s['updater']='running';s['packages']['ru.big.town.updater']='/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk';package_data('ru.big.town.updater')
-   if remote('/data/local/bin/loaderFrida').exists() and remote('/system/etc/init/voyahtune.load.rc').exists():
+   if infrastructure() == 'pi' and remote('/data/local/bin/loaderFrida').exists() and remote('/system/etc/init/voyahtune.load.rc').exists():
     s['loader']='running'
     put('/proc/uptime','100.00 100.00\n')
     put('/proc/42/stat','42 (loaderFrida) S '+'0 '*18+'300 0\n')
@@ -77,10 +77,13 @@ def main():
   elif args[0]=='install':
    if s.get('installError'):
     print('Failure ['+s['installError']+']',file=sys.stderr);return 1
-   if s.get('rejectRestoreUpdate') and 'ru.big.town.restoremode' in s['packages']:
+   package='big.town.runyn' if Path(args[-1]).name == 'runyn.apk' else 'ru.big.town.restoremode'
+   if package == 'big.town.runyn' and s.get('runynInstallError'):
+    print('Failure ['+s['runynInstallError']+']',file=sys.stderr);return 1
+   if package == 'ru.big.town.restoremode' and s.get('rejectRestoreUpdate') and package in s['packages']:
     print('Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package ru.big.town.restoremode signatures do not match previously installed version; ignoring!]',file=sys.stderr);return 1
-   path='/data/app/ru.big.town.restoremode/base.apk';target=remote(path);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(args[-1],target)
-   s['packages']['ru.big.town.restoremode']=path;package_data('ru.big.town.restoremode');save(s);print('Success')
+   path='/data/app/'+package+'/base.apk';target=remote(path);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(args[-1],target)
+   s['packages'][package]=path;package_data(package);save(s);print('Success')
   elif args[0]=='shell':
    script=sys.stdin.read() if args[1:]==['sh','-s'] else ' '.join(args[1:]);record(args,script)
    if s.get('failShell') and s['failShell'] in script:print('injected shell failure',file=sys.stderr);return 1
@@ -175,7 +178,11 @@ def main():
   if args[:1]==['broadcast'] and s.pop('restartSystemServerOnBroadcast',False):
    s['systemServerPid']='202';save(s);return 224
  elif name in ['restorecon','mount','pkill','ps']:pass
- elif name=='pidof':print(s.get('systemServerPid','101') if args[0]=='system_server' else '101')
+ elif name=='pidof':
+  if args[0]=='loaderFrida':
+   if s.get('loader')!='running' or not remote('/data/local/bin/loaderFrida').exists():return 1
+   print('42')
+  else:print(s.get('systemServerPid','101') if args[0]=='system_server' else '101')
  elif name=='sha256sum':
   for path in args:
    actual=remote(path) if path.startswith(('/system/','/data/')) else Path(path)

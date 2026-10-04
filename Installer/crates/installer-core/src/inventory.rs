@@ -92,6 +92,26 @@ fn package(adb: &Adb, path: &str, verify_signature: bool) -> Result<Package> {
         signers,
     })
 }
+/// Optional ownership evidence for backup/restore. Missing or broken signatures
+/// must never block removal, and APKs are read only into temporary verification files.
+pub fn signed_runtime_hashes(adb: &Adb) -> BTreeSet<(String, String)> {
+    let mut paths = BTreeSet::from([NATIVE_PATH.to_owned()]);
+    for id in [NATIVE, RESTORE] {
+        if let Ok(active) = adb.package_paths(id) {
+            paths.extend(active);
+        }
+    }
+    paths
+        .into_iter()
+        .filter_map(|path| package(adb, &path, true).ok()?.build)
+        .filter(|b| {
+            b.schema == 3
+                && b.product == "VoyahTune"
+                && [NATIVE, RESTORE].contains(&b.component.as_str())
+        })
+        .flat_map(|b| b.runtime_hashes)
+        .collect()
+}
 pub fn inspect(adb: &Adb, payload: &Payload) -> Result<Inventory> {
     inspect_for_action(adb, payload, crate::plans::Action::Install)
 }
@@ -140,8 +160,7 @@ pub fn inspect_for_action(
         }
     }
     let mut packages = BTreeMap::new();
-    for id in [NATIVE, payload::RUNYN]
-        .into_iter()
+    for id in std::iter::once(NATIVE)
         .chain(
             payload
                 .manifest
@@ -159,9 +178,6 @@ pub fn inspect_for_action(
                 .map(String::as_str),
         )
     {
-        if packages.contains_key(id) {
-            continue;
-        }
         if packages_text.lines().any(|l| l == format!("package:{id}")) {
             let paths = adb.package_paths(id)?;
             if paths.len() != 1 {
@@ -180,25 +196,15 @@ pub fn inspect_for_action(
         None
     };
     let mut files = BTreeMap::new();
-    let destinations: BTreeSet<_> = payload
+    for file in payload
         .manifest
         .recipe
         .files
         .iter()
         .filter(|f| f.artifact != "native.apk")
-        .map(|f| f.destination.clone())
-        .chain(
-            packages
-                .values()
-                .chain(base_native.iter())
-                .filter_map(|p| p.build.as_ref())
-                .flat_map(|b| b.runtime_hashes.keys())
-                .filter_map(|name| runtime_destination(payload, name)),
-        )
-        .collect();
-    for destination in destinations {
-        if let Some(hash) = file_hash(adb, &destination)? {
-            files.insert(destination, hash);
+    {
+        if let Some(hash) = file_hash(adb, &file.destination)? {
+            files.insert(file.destination.clone(), hash);
         }
     }
     let mut foreign_files = BTreeMap::new();
@@ -277,137 +283,6 @@ pub fn inspect_for_action(
     ))?));
     Ok(i)
 }
-
-#[cfg(test)]
-mod profile_tests {
-    use super::*;
-    use crate::infrastructure::Infrastructure;
-
-    #[test]
-    fn installed_profile_is_classified_from_its_signed_runtime_not_selected_profile() {
-        for installed in [Infrastructure::Od, Infrastructure::Pi] {
-            let selected = if installed == Infrastructure::Od {
-                Infrastructure::Pi
-            } else {
-                Infrastructure::Od
-            };
-            let mut recipe = crate::recipe::Recipe::default();
-            if selected == Infrastructure::Pi {
-                recipe.packages.push(crate::recipe::InstallPackage {
-                    artifact: "runyn.apk".into(),
-                    package: payload::RUNYN.into(),
-                });
-            }
-            let payload = Payload {
-                root: Default::default(),
-                manifest: payload::Manifest {
-                    infrastructure: selected,
-                    removal_only: false,
-                    requirements: Some(crate::compatibility::Requirements::infrastructure()),
-                    recipe,
-                    schema: 4,
-                    product: "VoyahTune".into(),
-                    release_version: format!("3.22.0-{}", selected.as_str()),
-                    build_revision: "selected".into(),
-                    artifacts: vec![],
-                },
-            };
-            let runtime: &[&str] = if installed == Infrastructure::Pi {
-                &["loaderFrida", "injects.json", "runyn.apk"]
-            } else {
-                &["load.bin", "app_client.js"]
-            };
-            let metadata = BuildMetadata {
-                infrastructure: installed,
-                recipe_sha256: None,
-                schema: 3,
-                product: "VoyahTune".into(),
-                component: NATIVE.into(),
-                release_version: format!("3.21.0-{}", installed.as_str()),
-                build_revision: "installed".into(),
-                runtime_hashes: runtime
-                    .iter()
-                    .map(|name| (name.to_string(), format!("hash-{name}")))
-                    .collect(),
-            };
-            let package = Package {
-                path: NATIVE_PATH.into(),
-                sha256: "native".into(),
-                build: Some(metadata.clone()),
-                signers: vec!["verified".into()],
-            };
-            let mut packages = BTreeMap::from([
-                (NATIVE.into(), package.clone()),
-                (RESTORE.into(), package.clone()),
-            ]);
-            let files: BTreeMap<_, _> = runtime
-                .iter()
-                .filter_map(|name| {
-                    runtime_destination(&payload, name).map(|path| (path, format!("hash-{name}")))
-                })
-                .collect();
-            if installed == Infrastructure::Pi {
-                packages.insert(
-                    payload::RUNYN.into(),
-                    Package {
-                        path: "/data/app/big.town.runyn/base.apk".into(),
-                        sha256: "hash-runyn.apk".into(),
-                        build: None,
-                        signers: vec!["verified".into()],
-                    },
-                );
-            }
-            let base = Some(package.clone());
-            assert_eq!(
-                classify(&packages, &base, &files, &payload),
-                ("complete".into(), Some(metadata.release_version.clone()))
-            );
-            let mut missing = files.clone();
-            missing.pop_first();
-            assert_eq!(classify(&packages, &base, &missing, &payload).0, "partial");
-            if installed == Infrastructure::Pi {
-                let mut missing_package = packages.clone();
-                missing_package.remove(payload::RUNYN);
-                assert_eq!(
-                    classify(&missing_package, &base, &files, &payload).0,
-                    "partial"
-                );
-            }
-            for p in packages.values_mut().chain(std::iter::empty()) {
-                if let Some(b) = p.build.as_mut() {
-                    b.runtime_hashes
-                        .insert("unknown-retired.js".into(), "hash".into());
-                }
-            }
-            let mut unknown_base = package;
-            unknown_base
-                .build
-                .as_mut()
-                .unwrap()
-                .runtime_hashes
-                .insert("unknown-retired.js".into(), "hash".into());
-            assert_eq!(
-                classify(&packages, &Some(unknown_base), &files, &payload).0,
-                "partial"
-            );
-        }
-    }
-}
-fn runtime_destination(payload: &Payload, name: &str) -> Option<String> {
-    // Fixed legacy/profile roles remain known when the selected payload uses
-    // the other infrastructure. Unknown retired artifacts are never guessed.
-    payload::destination(name)
-        .map(|(path, _)| path)
-        .or_else(|| {
-            payload
-                .manifest
-                .recipe
-                .files
-                .iter()
-                .find(|f| f.artifact == name)
-                .map(|f| f.destination.clone())
-        })
-}
 fn classify(
     packages: &BTreeMap<String, Package>,
     base: &Option<Package>,
@@ -454,33 +329,42 @@ fn classify(
     // Classify an older release using its signed hashes. An unknown retired
     // target is reported as partial, never guessed from the current release.
     for (name, hash) in &b.runtime_hashes {
-        let package = if name == "runyn.apk" {
-            Some(payload::RUNYN)
-        } else {
-            payload
-                .manifest
-                .recipe
-                .packages
-                .iter()
-                .find(|p| &p.artifact == name)
-                .map(|p| p.package.as_str())
-        };
-        if let Some(package) = package {
-            if packages.get(package).is_none_or(|p| &p.sha256 != hash) {
+        if let Some(package) = payload
+            .manifest
+            .recipe
+            .packages
+            .iter()
+            .find(|p| &p.artifact == name)
+        {
+            if packages
+                .get(&package.package)
+                .is_none_or(|p| &p.sha256 != hash)
+            {
                 state = "partial";
             }
             continue;
         }
-        let Some(destination) = runtime_destination(payload, name) else {
+        let Some(file) = payload
+            .manifest
+            .recipe
+            .files
+            .iter()
+            .find(|f| &f.artifact == name)
+        else {
             state = "partial";
             continue;
         };
-        if files.get(&destination) != Some(hash) {
+        if files.get(&file.destination) != Some(hash) {
             state = "partial";
         }
     }
     if b.runtime_hashes.is_empty() {
         state = "unknown";
+    }
+    for package in &payload.manifest.recipe.packages {
+        if !packages.contains_key(&package.package) {
+            state = "partial";
+        }
     }
     // A receipt or metadata alone is not proof that installed bytes match this release.
     if b.release_version == payload.manifest.release_version

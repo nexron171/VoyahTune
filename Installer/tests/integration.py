@@ -36,9 +36,29 @@ class InstallerTests(unittest.TestCase):
  def artifact(self,name):
   manifest=json.loads((PAYLOAD/'manifest.json').read_text())
   return PAYLOAD/next(a['path'] for a in manifest['artifacts'] if a['name']==name)
+ def different_key_apks(self):
+  # Generate signature-mismatch fixtures from the tested payload; no historic
+  # APK copies or Android rebuild are required. All outputs live in this test tempdir.
+  sdk=Path(os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT') or Path.home()/'Library/Android/sdk')
+  candidates=sorted((sdk/'build-tools').glob('*/apksigner'),reverse=True)
+  signer=shutil.which('apksigner') or (str(candidates[0]) if candidates else None)
+  keytool=shutil.which('keytool')
+  self.assertTrue(signer and keytool,'Signature regression requires existing Android apksigner and JDK keytool')
+  fixture=self.base/'different-key';fixture.mkdir()
+  key=fixture/'fixture.jks'
+  subprocess.run([keytool,'-genkeypair','-alias','fixture','-keystore',str(key),'-storepass','fixture-password',
+   '-keypass','fixture-password','-dname','CN=VoyahTune test fixture','-keyalg','RSA','-keysize','2048','-validity','1','-noprompt'],check=True,capture_output=True)
+  result={}
+  for name in ['native.apk','restore_mode.apk']:
+   output=fixture/name
+   subprocess.run([signer,'sign','--ks',str(key),'--ks-pass','pass:fixture-password','--key-pass','pass:fixture-password',
+    '--out',str(output),str(self.artifact(name))],check=True,capture_output=True)
+   result[name]=output
+  return result
  def seed_apps(self,old_key=False,broken=False):
-  files={'ru.big.town.anative':('/system/priv-app/Native/Native.apk',ROOT/'Native/app/release/app-release.apk' if old_key else self.artifact('native.apk')),
-         'ru.big.town.restoremode':('/data/app/ru.big.town.restoremode/base.apk',ROOT/'RestoreMode/app/debug/app-debug.apk' if old_key else self.artifact('restore_mode.apk'))}
+  sources=self.different_key_apks() if old_key and not broken else {name:self.artifact(name) for name in ['native.apk','restore_mode.apk']}
+  files={'ru.big.town.anative':('/system/priv-app/Native/Native.apk',sources['native.apk']),
+         'ru.big.town.restoremode':('/data/app/ru.big.town.restoremode/base.apk',sources['restore_mode.apk'])}
   for package,(path,source) in files.items():
    target=self.device/path.lstrip('/');target.parent.mkdir(parents=True,exist_ok=True)
    if broken:target.write_bytes(b'broken unsigned APK')
