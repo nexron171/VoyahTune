@@ -938,10 +938,14 @@ public class AdvanceActivity extends AppCompatActivity {
         android.widget.Spinner heightSpinner = findViewById(heightSpinnerId);
         if (widthSpinner == null || heightSpinner == null) return;
         if (EnergyWidgetLayout.isWidget(widgetId)) {
+            Runnable bindHeight = () -> {
+                int columns = TileSizeStore.width(prefs, widgetId, defaultWidth);
+                bindEnergySize(heightSpinner, widgetId, false, defaultHeight,
+                        EnergyWidgetLayout.minHeight(widgetId, columns), EnergyWidgetLayout.maxHeight(widgetId, columns), null);
+            };
+            bindHeight.run();
             bindEnergySize(widthSpinner, widgetId, true, defaultWidth,
-                    EnergyWidgetLayout.minWidth(widgetId), EnergyWidgetLayout.maxWidth(widgetId));
-            bindEnergySize(heightSpinner, widgetId, false, defaultHeight,
-                    EnergyWidgetLayout.minHeight(widgetId), EnergyWidgetLayout.maxHeight(widgetId));
+                    EnergyWidgetLayout.minWidth(widgetId), EnergyWidgetLayout.maxWidth(widgetId), bindHeight);
             return;
         }
 
@@ -983,17 +987,19 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void bindEnergySize(android.widget.Spinner spinner, String id, boolean width,
-                                int fallback, int min, int max) {
+                                int fallback, int min, int max, Runnable onChange) {
         String[] labels=new String[max-min+1];
         for(int i=0;i<labels.length;i++)labels[i]=String.valueOf(min+i);
         android.widget.ArrayAdapter<String> adapter=new android.widget.ArrayAdapter<>(this,R.layout.spinner_item,labels);
-        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);spinner.setAdapter(adapter);
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+        spinner.setOnItemSelectedListener(null);spinner.setAdapter(adapter);
         spinner.setSelection((width?TileSizeStore.width(prefs,id,fallback):TileSizeStore.height(prefs,id,fallback))-min);
         spinner.setEnabled(max>min);
         spinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,int position,long itemId) {
                 int value=min+position;
                 if(width)TileSizeStore.setWidth(prefs,id,value);else TileSizeStore.setHeight(prefs,id,value);
+                if(onChange!=null)onChange.run();
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
         });

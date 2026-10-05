@@ -22,13 +22,83 @@ public class EnergyWidgetTest {
         for(String id:new String[]{"energyWidget","energyTripWidget","tirePressureWidget","odometerWidget"}) {
             TileSizeStore.setWidth(prefs,id,1);TileSizeStore.setHeight(prefs,id,1);
             assertEquals(EnergyWidgetLayout.minWidth(id),TileSizeStore.width(prefs(saved),id,1));
-            assertEquals(EnergyWidgetLayout.minHeight(id),TileSizeStore.height(prefs(saved),id,1));
+            assertEquals(EnergyWidgetLayout.minHeight(id,EnergyWidgetLayout.minWidth(id)),TileSizeStore.height(prefs(saved),id,1));
             TileSizeStore.setWidth(prefs,id,12);TileSizeStore.setHeight(prefs,id,5);
             assertEquals(EnergyWidgetLayout.maxWidth(id),TileSizeStore.width(prefs(saved),id,1));
-            assertEquals(EnergyWidgetLayout.maxHeight(id),TileSizeStore.height(prefs(saved),id,1));
+            assertEquals(EnergyWidgetLayout.maxHeight(id,EnergyWidgetLayout.maxWidth(id)),TileSizeStore.height(prefs(saved),id,1));
         }
         assertEquals(286,EnergyWidgetLayout.pixelsWide(2));assertEquals(580,EnergyWidgetLayout.pixelsWide(4));
         assertEquals(1168,EnergyWidgetLayout.pixelsWide(8));assertEquals(373,EnergyWidgetLayout.pixelsHigh("tirePressureWidget",3));
+    }
+    @Test public void narrowEnergyWidthsForceFiveRowsAndResetWhenWidened() {
+        Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
+        for(int columns:new int[]{2,3}) {
+            TileSizeStore.setWidth(prefs,"energyWidget",columns);
+            assertEquals(5,saved.get("tileHeight_energyWidget"));
+            assertArrayEquals(new int[]{columns,5},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+            TileSizeStore.setHeight(prefs,"energyWidget",3);
+            assertEquals(5,TileSizeStore.height(prefs(saved),"energyWidget",3));
+            for(int wide=4;wide<=8;wide++) {
+                TileSizeStore.setWidth(prefs,"energyWidget",wide);
+                assertArrayEquals(new int[]{wide,3},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+                assertEquals(3,saved.get("tileHeight_energyWidget"));
+            }
+        }
+        assertEquals(627,EnergyWidgetLayout.pixelsHigh("energyWidget",5));
+    }
+    @Test public void staleEnergyHeightIsNormalizedFromStoredWidth() {
+        Map<String,Object> saved=new HashMap<>();
+        saved.put("tileWidth_energyWidget",2);saved.put("tileHeight_energyWidget",3);
+        assertArrayEquals(new int[]{2,5},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+        saved.put("tileWidth_energyWidget",3);saved.put("tileHeight_energyWidget",1);
+        assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+        saved.put("tileWidth_energyWidget",6);saved.put("tileHeight_energyWidget",5);
+        assertArrayEquals(new int[]{6,3},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+        saved.remove("tileWidth_energyWidget");
+        assertArrayEquals(new int[]{8,3},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+    }
+    @Test public void narrowEnergyRulesDoNotChangeTireOrOdometerSizes() {
+        Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
+        TileSizeStore.setWidth(prefs,"tirePressureWidget",2);
+        TileSizeStore.setHeight(prefs,"tirePressureWidget",4);
+        TileSizeStore.setWidth(prefs,"odometerWidget",2);
+        assertArrayEquals(new int[]{2,4},TileSizeStore.dimensions(prefs(saved),"tirePressureWidget",4,4));
+        assertArrayEquals(new int[]{2,1},TileSizeStore.dimensions(prefs(saved),"odometerWidget",4,1));
+    }
+    @Test public void narrowTripAllowsFourOrFiveRowsAndKeepsChoiceAcrossWidths() {
+        Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
+        for(int columns:new int[]{2,3}) {
+            TileSizeStore.setWidth(prefs,"energyTripWidget",columns);
+            assertArrayEquals(new int[]{columns,4},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+            TileSizeStore.setHeight(prefs,"energyTripWidget",5);
+            TileSizeStore.setWidth(prefs,"energyTripWidget",columns==2?3:2);
+            assertArrayEquals(new int[]{columns==2?3:2,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+            TileSizeStore.setHeight(prefs,"energyTripWidget",3);
+            assertEquals(4,TileSizeStore.height(prefs(saved),"energyTripWidget",2));
+            TileSizeStore.setHeight(prefs,"energyTripWidget",8);
+            assertEquals(5,TileSizeStore.height(prefs(saved),"energyTripWidget",2));
+            TileSizeStore.setWidth(prefs,"energyTripWidget",6);
+            assertArrayEquals(new int[]{6,2},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        }
+    }
+    @Test public void storedTripHeightIsConstrainedByWidthWithoutLosingValidFiveRows() {
+        Map<String,Object> saved=new HashMap<>();
+        saved.put("tileWidth_energyTripWidget",2);saved.put("tileHeight_energyTripWidget",2);
+        assertArrayEquals(new int[]{2,4},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        saved.put("tileHeight_energyTripWidget",5);
+        assertArrayEquals(new int[]{2,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        saved.put("tileWidth_energyTripWidget",3);
+        assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        saved.put("tileWidth_energyTripWidget",8);
+        assertArrayEquals(new int[]{8,2},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+    }
+    @Test public void tripDrawingHeightMatchesSelectedRows() {
+        assertEquals(245,EnergyWidgetLayout.pixelsHigh("energyTripWidget",2));
+        assertEquals(500,EnergyWidgetLayout.pixelsHigh("energyTripWidget",4));
+        assertEquals(627,EnergyWidgetLayout.pixelsHigh("energyTripWidget",5));
+        assertTrue(EnergyWidgetLayout.vertical("energyTripWidget",2));
+        assertTrue(EnergyWidgetLayout.vertical("energyTripWidget",3));
+        assertFalse(EnergyWidgetLayout.vertical("energyTripWidget",4));
     }
     @Test public void capacitiesDefaultsDecimalsAndInvalidStoredValues() {
         Map<String,Object> saved=new HashMap<>();
