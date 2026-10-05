@@ -88,6 +88,20 @@ final class ApolloRestorePolicy {
         switches.put(TSR_SWITCH, trafficSigns ? 1 : 2);
     }
 
+    interface Sender {
+        boolean send(Map<String, Integer> capabilities, Map<String, Integer> switches);
+    }
+
+    static void appendPlan(CanRestorePlan.Builder plan, boolean tlc, boolean lights,
+                           boolean sound, boolean signs, Sender sender) {
+        Map<String, Integer> capabilities = new LinkedHashMap<>();
+        Map<String, Integer> switches = new LinkedHashMap<>();
+        appendTo(capabilities, switches, tlc, lights, sound, signs);
+        plan.addOnce("Apollo individual targets", () -> sender.send(capabilities, switches)
+                ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
+                : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
+    }
+
     private static void putAllEntitlements(Map<String, Integer> target, int value) {
         target.put(RPA_FUNC_ENABLE, value);
         target.put(HPP_FUNC_ENABLE, value);

@@ -141,7 +141,7 @@ Java.perform(function () {
                 Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/"),
                 null, null, null, null);
             if (c === null) return null;
-            var mode, driveEnabled, energyEnabled, energy, forcedEv, maintenance;
+            var mode, driveEnabled, energyEnabled, energy, forcedEv, maintenance, recycle;
             try {
                 if (!c.moveToFirst() || c.getColumnCount() <= 32 || c.isNull(32))
                     return null; // Missing settings: stock behavior.
@@ -149,12 +149,15 @@ Java.perform(function () {
                 driveEnabled = c.getInt(6) === 1;
                 energyEnabled = c.getInt(8) === 1;
                 energy = String(c.getString(1));
+                recycle = c.getInt(7) === 1 && mode !== "SNOW"
+                    ? {LOW: 2, MEDIUM: 3, HIGH: 4}[String(c.getString(2))] : null;
+                if (recycle === undefined) return null;
                 forcedEv = c.getInt(19) === 1;
                 var maintenanceRaw = c.getInt(32);
                 if (maintenanceRaw !== 0 && maintenanceRaw !== 1) return null;
                 maintenance = maintenanceRaw === 1 ? 2 : 1; // HintSwitch: on=2, off=1.
             } finally { c.close(); }
-            var targets = {drive: null, energy: null, maintenance: maintenance};
+            var targets = {drive: null, energy: null, maintenance: maintenance, recycle: recycle};
             if (forcedEv) targets.energy = 5;
             else if (energyEnabled) {
                 var energies = {SMART: 1, Smart: 1, EV: 2, REV: 3, SREV: 4, FORCE_EV: 5};
@@ -193,13 +196,14 @@ Java.perform(function () {
                 try {
                     var targets = selectedTargets();
                     if (targets !== null && vehicle.containsKey("DRIVING_MODE_SET")) {
-                        outgoing = Bundle.$new(vehicle);
+                        outgoing = Bundle.$new(vehicle); outgoing.putBoolean("__vt_auto", true);
                         var profile = targets.drive;
                         if (profile !== null) {
                             outgoing.putInt("DRIVING_MODE_SET", profile[0]);
                             outgoing.putInt("EPS_MODE_SET", profile[1]);
                             outgoing.putInt("PROP_MODE_SET", profile[2]);
                         }
+                        if (targets.recycle !== null) outgoing.putInt("HUM_ENERGY_PTREGEN_LEVL", targets.recycle);
                         if (targets.energy !== null) outgoing.putInt("IVI_SOC_MODESET", targets.energy);
                         outgoing.putInt("ASC_MAINTAIN_SWITCH", targets.maintenance);
                         // Snow owns recuperation in the OEM drive-mode handler. Do not let the
@@ -258,6 +262,21 @@ Java.perform(function () {
                 } catch (e) { log("screen energy persistence unavailable: " + e); }
             }
             return single.call(this, state, value);
+        });
+        // This method is the stock UI's explicit recuperation selection. A drive-profile
+        // bundle also contains regen, but must never be mistaken for this independent choice.
+        var recycler = Fragment.setEnergyRecyclerMode.overload("int");
+        install(recycler, function (value) {
+            var result = recycler.call(this, value);
+            if (Platform.is97X() && value >= 2 && value <= 4) {
+                try {
+                    var args = Bundle.$new(); args.putString("recycle", ["LOW", "MEDIUM", "HIGH"][value - 2]);
+                    providerCall.call(ActivityThread.currentApplication().getContentResolver(),
+                        Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/"), "driveHookV2", "user", args);
+                    log("screen recuperation selection=" + value);
+                } catch (e) { log("screen recuperation persistence unavailable: " + e); }
+            }
+            return result;
         });
         System.setProperty(SENTINEL, "installed");
         pulse();

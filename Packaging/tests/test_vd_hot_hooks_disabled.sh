@@ -309,4 +309,6 @@ grep -Fq 'TRUSTED = 1 << 10' "$VD_FACTORY" \
 grep -Fq '| DESTROY_CONTENT_ON_REMOVAL | (trusted ? TRUSTED : 0)' "$VD_FACTORY" \
     || fail "both trusted and fallback VD must destroy content when removed"
 
+node "$ROOT/Packaging/tests/test_vd_stability.js"
+
 echo "vd/freeform hook contract test: OK"

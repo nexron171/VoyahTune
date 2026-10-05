@@ -62,6 +62,10 @@ case "$script" in
     *) gate=none ;;
 esac
 while [ "$gate" != none ] && [ ! -f "$root/release_$gate" ]; do sleep 0.05; done
+if [ "$script" = vd_bypass.js ] && [ ! -f "$root/missing_vd_ready" ]; then
+    mkdir -p "$root/runtime/vd_hooks"
+    printf 'v2:test:%s:%s|3.22.0-v1|active|geometry\n' "$pid" "$(cat "$root/generation.$pid")" > "$root/runtime/vd_hooks/status.v1"
+fi
 printf 'end %s %s\n' "$script" "$pid" >> "$root/events"
 if [ "$script" = app_client.js ] && [ -f "$root/app_client_timeout" ]; then exit 124; fi
 """.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root))))
@@ -108,6 +112,7 @@ drive_agent_attempt_finished() {
     fixture_drive_agent_attempt_finished "$@"
     printf '%s\n' "$1" >> "$FIXTURE/finished_attempts"
 }
+prepare_vd_status() { mkdir -p "$FIXTURE/runtime/vd_hooks"; }
 prepare_drive_health() { mkdir -p "${1%/*}"; [ -e "$1" ] || : > "$1"; }
 logi() { printf '%s\n' "$*" >> "$FIXTURE/log"; }
 loge() { logi "$*"; }
@@ -449,11 +454,13 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.assertEqual(1, self.events().count("start vd_bypass.js"))
         self.assertEqual(old, self.owner("vd"))
         self.release("vd")
-        self.until(lambda: self.owner("vd") not in (None, old) and self.state("vd") == "failed",
-                   "Replacement failed to preserve the one-shot reservation")
+        self.until(lambda: self.owner("vd") not in (None, old) and self.state("vd") == "active",
+                   "Replacement failed to recover confirmed agent readiness")
         self.assertEqual(1, self.events().count("start vd_bypass.js"))
         (self.root / "generation.104").write_text("2\n")
-        self.until(lambda: self.state("vd") == "active", "New target identity was not injected")
+        self.until(lambda: self.events().count("start vd_bypass.js") == 2,
+                   "New target identity was not injected")
+        self.until(lambda: self.state("vd") == "active", "New target readiness was not confirmed")
         self.assertEqual(2, self.events().count("start vd_bypass.js"))
 
     def test_supervisor_restart_keeps_active_hooks_without_reinjecting(self):
@@ -519,6 +526,32 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
             self.assertEqual("waiting:0", result)
         finally:
             os.kill(worker, signal.SIGCONT)
+
+    def test_vd_exit_zero_without_ready_is_failed_and_latched(self):
+        (self.root / "missing_vd_ready").touch()
+        self.release("vd")
+        self.start()
+        self.until(lambda: self.state("vd") == "failed", "exit 0 without readiness was accepted")
+        self.assertFalse((self.root / "voyahtune_vd.pid").exists())
+        time.sleep(0.2)
+        self.assertEqual(self.events().count("start vd_bypass.js"), 1)
+
+    def test_vd_status_requires_current_generation_and_agent_version(self):
+        (self.root / "missing_vd_ready").touch()
+        self.release("vd")
+        self.start()
+        self.until(lambda: self.state("vd") == "failed", "VD attempt did not finish")
+        status = self.root / "runtime/vd_hooks/status.v1"
+        for value in ["v2:test:104:0|3.22.0-v1|active|geometry",
+                      "v2:test:104:1|old|active|geometry"]:
+            status.write_text(value)
+            time.sleep(0.15)
+            self.assertEqual(self.state("vd"), "failed")
+        status.write_text("v2:test:104:1|3.22.0-v1|active|geometry")
+        self.until(lambda: self.state("vd") == "active", "late readiness was lost")
+        status.write_text("v2:test:104:1|3.22.0-v1|failed|partial.attach")
+        self.until(lambda: self.state("vd") == "failed", "later partial failure was hidden")
+        self.assertEqual(self.events().count("start vd_bypass.js"), 1)
 
 
 if __name__ == "__main__":

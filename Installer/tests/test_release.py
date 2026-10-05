@@ -26,12 +26,12 @@ class ReleaseTests(unittest.TestCase):
         (self.root/'Installer/Cargo.toml').write_text('[workspace.package]\nversion="1.0.0"\n')
         self.generation = 0
         self.selected = []
-        self.fail = False
+        self.fail_build = False
 
     def fake_run(self, command, **kwargs):
         args = list(map(str, command))
         if Path(args[0]).name == 'installer-build':
-            if self.fail:
+            if self.fail_build:
                 raise subprocess.CalledProcessError(1, args)
             payload = Path(args[args.index('--output')+1]);payload.mkdir()
             version = args[args.index('--version')+1]
@@ -86,7 +86,7 @@ class ReleaseTests(unittest.TestCase):
         payload=self.root/'Releases/build/installer-payload-4.5.6-od/manifest.json'
         record=self.root/'Releases/dist/VoyahTune-Installer-1.0.0/release.json'
         previous=(payload.read_bytes(),record.read_bytes())
-        self.fail=True
+        self.fail_build=True
         with self.assertRaises(subprocess.CalledProcessError):self.run_release('--windows')
         self.assertEqual((payload.read_bytes(),record.read_bytes()),previous)
 

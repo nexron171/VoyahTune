@@ -40,8 +40,8 @@ if grep -Eq 'ModeFeedback|MODE_REMEMBER|persistModeFeedback|INTEREST_VEHICLE_STA
     fail "TripStatsService contains vehicle-mode responsibilities"
 fi
 
-# Feedback requires a completed restore/explicit command in both profiles. OD uses the ACC
-# completion gate; PI additionally waits for Drive. Door/gear events cannot open OD's gate.
+# OD observes origin-free feedback without saving it. PI retains master's completed
+# restore/Drive gate and saved feedback path. Door/gear events cannot open OD's gate.
 require_fixed "$MODE_POLICY" 'canRememberSelection() && feedbackOpen && acceptsExternalFeedback(modeKey)'
 require_fixed "$MODE_POLICY" 'wakeActive && (accHooks ? feedbackOpen : driveEntered)'
 require_fixed "$MODE_POLICY" 'if (accHooks) return;'
@@ -50,7 +50,19 @@ require_fixed "$MODE_POLICY" 'canRememberSelection()'
 require_fixed "$NATIVE_MAIN" 'if (!ApplyEngine.canRememberModeSelection(explicit)) return;'
 require_fixed "$BRIDGE" 'MainActivity.persistExplicitMode(app, modeKey, next)'
 require_fixed "$MODE_POLICY" 'return explicit || canRememberSelection();'
+require_fixed "$APPLY_ENGINE" 'MODE_SYNC_POLICY.observe(modeKey, observedMode);'
 require_fixed "$APPLY_ENGINE" 'MODE_SYNC_POLICY.canPersist('
+require_fixed "$APPLY_ENGINE" 'MainActivity.persistSavedMode(context, modeKey, observedMode)'
+python3 - "$APPLY_ENGINE" <<'PY_CHECK'
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).read_text()
+start = source.index('static void persistModeFeedbackIfAllowed(\n')
+end = source.index('private ApplyEngine()', start)
+body = source[start:end]
+assert 'if (usesAccHooks()) {' in body, 'OD observation must be profile-gated'
+assert body.index('MODE_SYNC_POLICY.observe(modeKey, observedMode);') < body.index('return;') < body.index('MainActivity.persistSavedMode(context, modeKey, observedMode)'), 'OD must return before PI feedback persistence'
+PY_CHECK
 require_fixed "$NATIVE_MAIN" '!remembersMode(context, modeKey)'
 require_fixed "$PROVIDER" 'sharedPreferences.getBoolean(rememberKey, true)'
 require_fixed "$ADVANCE" 'if (!prefs.getBoolean(rememberKey, true)) return;'

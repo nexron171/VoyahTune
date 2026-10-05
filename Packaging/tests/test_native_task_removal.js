@@ -10,6 +10,7 @@ const block = source.split('// BEGIN_NATIVE_TASK_REMOVAL')[1].split('// END_NATI
 
 function install(ourUid, callerUid, shouldThrow = false) {
     const trace = [];
+    const replacements = [];
     let identity = callerUid;
     const original = { call(owner, taskId) {
         trace.push(['remove', taskId, identity, owner.name]);
@@ -18,6 +19,7 @@ function install(ourUid, callerUid, shouldThrow = false) {
     }};
     const context = {
         ourUid, TAG: 'test', installed: [], Log: {e: (_, message) => {throw new Error(message);}},
+        trackReplacement(method) { replacements.push(method); },
         Java: {use(name) {
             assert.equal(name, 'com.android.server.wm.ActivityTaskManagerService');
             return {removeTask: {overload(signature) { assert.equal(signature, 'int'); return original; }}};
@@ -29,6 +31,7 @@ function install(ourUid, callerUid, shouldThrow = false) {
         }
     };
     vm.runInNewContext(block, context);
+    assert.deepEqual(replacements, [original]);
     assert.equal(context.installed[0], 'ATMS.removeTask(native-uid)');
     return {trace, invoke: () => original.implementation.call({name: 'ATMS'}, 42), identity: () => identity};
 }
@@ -57,4 +60,4 @@ const host = fs.readFileSync(path.join(root,
 assert(!host.includes('Toast.makeText(this,'));
 assert(host.includes('manager.getDisplay(Display.DEFAULT_DISPLAY)'));
 assert(host.includes('Toast.makeText(app.createDisplayContext(physical),'));
-console.log('PASS: Native task-removal identity scope, restoration, and physical-display error notifications');
+console.log('PASS: Native task-removal rollback registration, identity scope, restoration, and physical-display error notifications');

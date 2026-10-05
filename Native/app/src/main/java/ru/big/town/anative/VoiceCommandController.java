@@ -10,6 +10,7 @@ import android.os.ResultReceiver;
 import android.os.SystemClock;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
+import ru.big.town.common.InfrastructureProfile;
 
 /** Invoked only through SetModesService's signature-protected binding, never public broadcasts. */
 final class VoiceCommandController {
@@ -163,7 +164,14 @@ final class VoiceCommandController {
             boolean sent = "drive".equals(type) ? MainActivity.sendDriveModeCommand(service, mode)
                     : "energy".equals(type) ? MainActivity.sendEnergyModeCommand(service, mode)
                     : MainActivity.sendRecuperationModeCommand(service, mode);
-            if (sent) { ApplyEngine.noteVehicleMode(key, mode); MainActivity.persistSavedMode(service, key, mode); }
+            if (sent) {
+                ApplyEngine.noteVehicleMode(key, mode);
+                if (InfrastructureProfile.read(service).usesAccHooks()) {
+                    MainActivity.persistExplicitMode(service, key, mode);
+                } else {
+                    MainActivity.persistSavedMode(service, key, mode);
+                }
+            }
             return sent;
         }
         if ("suspension_maintenance:on".equals(action) || "suspension_maintenance:off".equals(action)) {

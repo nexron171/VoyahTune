@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, "../od/inject/voyahtune_driv
 function fixture(options = {}) {
     const f = Object.assign({mode: "SPORT", enabled: 1, energyEnabled: 0, energy: "EV",
         forcedEv: 0, maintenance: 0, debug: 0, platform: true,
-        thread: 1, closes: 0, originals: 0, sends: [], logs: [], individual: {}}, options);
+        userRequests: [], thread: 1, closes: 0, originals: 0, sends: [], logs: [], individual: {}}, options);
     const properties = new Map();
     const methods = [];
     function method(original) {
@@ -59,8 +59,8 @@ function fixture(options = {}) {
         return {moveToFirst() { return individual ? value !== undefined : !f.empty; },
             getColumnCount() { return f.columns ?? 33; },
             getInt(i) { return i === 6 ? f.enabled : i === 12 ? f.debug :
-                i === 8 ? f.energyEnabled : i === 19 ? f.forcedEv : i === 32 ? f.maintenance : 0; },
-            getString(i) { return individual ? value : i === 1 ? f.energy : f.mode; },
+                i === 7 ? (f.recycleEnabled || 0) : i === 8 ? f.energyEnabled : i === 19 ? f.forcedEv : i === 32 ? f.maintenance : 0; },
+            getString(i) { return individual ? value : i === 1 ? f.energy : i === 2 ? (f.recycle || "LOW") : f.mode; },
             isNull() { return individual ? value === null : f.maintenance === null; },
             close() { f.closes++; }};
     }
@@ -89,6 +89,7 @@ function fixture(options = {}) {
         "com.qinggan.app.vehiclesetting.accountdata.VehicleMemoryManager":
             {resetSettings: reset, resetOverseaDriveMode: f.missingMethod ? undefined : overseas},
         "com.qinggan.app.vehiclesetting.fragments.drivepreference.DrivePreferenceFragment": {
+            setEnergyRecyclerMode: method(function () {}),
             onHintSwitchClick: method(function () {}),
             setDriveMode: method(function (v) { const b = new Bundle(); b.putInt("DRIVING_MODE_SET", v); setter.invoke({}, null, b); }),
             setPowerMode: method(function (v) { const b = new Bundle(); b.putInt("IVI_SOC_MODESET", v); setter.invoke({}, null, b); })},
@@ -100,7 +101,7 @@ function fixture(options = {}) {
         }},
         "android.net.Uri": {parse(s) { return s; }},
         "android.os.Bundle": {$new(b) { return new Bundle(b); }},
-        "android.content.ContentResolver": {query, call: method(function () { return new Bundle(); })}
+        "android.content.ContentResolver": {query, call: method(function (uri, method, action, args) { f.userRequests.push({...args.values}); return new Bundle(); })}
     };
     const context = vm.createContext({setInterval(fn) { return 1; }, clearInterval() {}, setTimeout(fn) { timers.push(fn); }, Java: {perform(fn) { fn(); }, use(name) {
         assert.ok(classes[name], name); return classes[name];
@@ -112,6 +113,7 @@ function fixture(options = {}) {
         return setter.invoke({}, null, b); };
     f.screen = (value, energy = false) => classes["com.qinggan.app.vehiclesetting.fragments.drivepreference.DrivePreferenceFragment"]
         [energy ? "setPowerMode" : "setDriveMode"].invoke({}, value);
+    f.recycler = value => classes["com.qinggan.app.vehiclesetting.fragments.drivepreference.DrivePreferenceFragment"].setEnergyRecyclerMode.invoke({}, value);
     f.install();
     if (!f.missingMethod) assert.equal(f.health, "1|100|v2\n");
     f.methods = methods;
@@ -156,7 +158,7 @@ for (const options of [{mode: "bad"}, {mode: "__proto__"},
     f.overseas();
     assert.deepEqual(f.sends[0].vehicle.values, {DRIVING_MODE_SET: 5,
         IVI_SOC_MODESET: 1, HUM_ENERGY_PTREGEN_LEVL: 4, EPS_MODE_SET: 3, PROP_MODE_SET: 3,
-        ASC_MAINTAIN_SWITCH: 1});
+        ASC_MAINTAIN_SWITCH: 1, __vt_auto: true});
     f.mode = "COMFORT"; f.overseas();
     assert.equal(f.sends[1].vehicle.values.DRIVING_MODE_SET, 2); // Fresh saved target every call.
     f.enabled = 0; f.overseas();
@@ -222,4 +224,20 @@ console.log("PASS: drive/energy/suspension targets, stock fields, fallback, thre
     assert.equal(f.sends[1].vehicle.values.IVI_SOC_MODESET, 4);
     assert.equal(f.sends[1].vehicle.values.__vt_user, true);
     f.plain(); assert.equal(f.sends[2].vehicle.values.__vt_user, undefined);
+}
+
+for (const [recycle, level] of Object.entries({LOW: 2, MEDIUM: 3, HIGH: 4})) {
+    const f = fixture({recycleEnabled: 1, recycle}); f.reset(); f.overseas();
+    for (const send of f.sends) {
+        assert.equal(send.vehicle.values.HUM_ENERGY_PTREGEN_LEVL, level);
+        assert.equal(send.vehicle.values.__vt_auto, true, "automatic origin survives substitution");
+    }
+}
+
+{
+    const f = fixture(); f.reset(); f.screen(6);
+    assert.equal(f.userRequests.length, 0, "profile/reset regen is never an independent choice");
+    for (const value of [2, 3, 4]) f.recycler(value);
+    assert.deepEqual(f.userRequests, [{recycle: "LOW"}, {recycle: "MEDIUM"}, {recycle: "HIGH"}]);
+    f.recycler(99); assert.equal(f.userRequests.length, 3);
 }

@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import ru.big.town.anative.databinding.ActivityMainBinding;
+import ru.big.town.common.InfrastructureProfile;
 
 public class MainActivity extends AppCompatActivity {
     public static String driveMode = "INDIVIDUAL";
@@ -582,6 +583,14 @@ public class MainActivity extends AppCompatActivity {
     /** Builds one validated pass before the first OEM request is submitted. */
     static CanRestorePlan createCanRestorePlan() { return createCanRestorePlan(true); }
 
+    static void appendApolloRestore(CanRestorePlan.Builder plan, Context context) {
+        ApolloRestorePolicy.appendPlan(plan, apolloTlcEnabled, apolloTrafficLightsEnabled,
+                apolloGreenSoundEnabled, apolloTrafficSignsEnabled,
+                (capabilities, switches) -> OemVehicleStateTransport.sendRestoreSequence(
+                        context, null, capabilities, switches, ApolloRestorePolicy.stableIds(),
+                        "Apollo capabilities then PLC/GLA/TSR").accepted());
+    }
+
     static CanRestorePlan createCanRestorePlan(boolean includeModes) {
         Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
                 + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
@@ -591,6 +600,7 @@ public class MainActivity extends AppCompatActivity {
                 + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled);
         CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
         final Context context = GlobalVars.SAVE_CONTEXT;
+        final boolean accHooks = InfrastructureProfile.read(context).usesAccHooks();
         plan.addOnce("auto light saved service switch", () -> {
             try {
                 AutoLightSettings.restore(context);
@@ -629,12 +639,16 @@ public class MainActivity extends AppCompatActivity {
                 trailingValues, recycleEnabled, recycle, driveMode);
         stableIds.putAll(VehicleRestorePolicy.stableIds());
 
-        // Entitlements belong to the primary TX77 task; actual switches are submitted in the
-        // following OEM task so ADCU capability bits are in place before PLC/GLA/TSR are changed.
-        ApolloRestorePolicy.appendTo(primaryValues, trailingValues,
-                apolloTlcEnabled, apolloTrafficLightsEnabled,
-                apolloGreenSoundEnabled, apolloTrafficSignsEnabled);
-        stableIds.putAll(ApolloRestorePolicy.stableIds());
+        if (accHooks) {
+            // OD applies Apollo independently of drive/fragrance support.
+            appendApolloRestore(plan, context);
+        } else {
+            // PI retains the primary entitlement task followed by switches.
+            ApolloRestorePolicy.appendTo(primaryValues, trailingValues,
+                    apolloTlcEnabled, apolloTrafficLightsEnabled,
+                    apolloGreenSoundEnabled, apolloTrafficSignsEnabled);
+            stableIds.putAll(ApolloRestorePolicy.stableIds());
+        }
 
         OemVehicleStateTransport.StateValue fragranceDurationState = null;
         if (fragranceEnabled) {
@@ -658,7 +672,8 @@ public class MainActivity extends AppCompatActivity {
             plan.addOnce("OEM vehicle restore snapshot", () -> {
                 boolean accepted = OemVehicleStateTransport.sendRestoreSequence(
                         context, firstState, primaryValues, trailingValues, stableIds,
-                        "drive/energy/fragrance/Apollo entitlements then switches/recuperation")
+                        accHooks ? "drive/energy/fragrance then recuperation"
+                                : "drive/energy/fragrance/Apollo entitlements then switches/recuperation")
                         .accepted();
                 if (!accepted) return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
                 // These are current vehicle targets, never writes to the pinned menu selection.
@@ -686,6 +701,20 @@ public class MainActivity extends AppCompatActivity {
                 () -> sendSuspensionMaintenanceCommand(context, maintenance)
                         ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
                         : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
+        if (accHooks) {
+            plan.addOnce("silent radio selection", () -> {
+                try {
+                    context.sendBroadcast(new Intent("ru.big.town.anative.RESTORE_RADIO_SELECTION")
+                            .setPackage("com.pateo.rdsapp"));
+                    // Delivery is not proof of tuning: RdsApp stages the choice without starting audio.
+                    Log.i(MODES_LOG, "Silent radio selection notification sent");
+                    return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+                } catch (RuntimeException e) {
+                    Log.w(MODES_LOG, "Silent radio selection notification failed", e);
+                    return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+                }
+            });
+        }
         return plan.build();
     }
 
@@ -804,7 +833,7 @@ public class MainActivity extends AppCompatActivity {
         persistSavedMode(context, isEnergy ? "energy" : "driveMode", mode);
     }
 
-    /** Explicit choices work in Parking; automatic recuperation feedback waits for the ACC pass. */
+    /** Persists a known command; origin-free vehicle callbacks are observation-only. */
     public static void persistSavedMode(Context context, String modeKey, String mode) {
         persistSavedMode(context, modeKey, mode, false);
     }
@@ -831,6 +860,25 @@ public class MainActivity extends AppCompatActivity {
                     ApplyEngine.driveSelectionSaved();
                 }
             } catch (RuntimeException e) { Log.w(MODES_LOG, "Energy selection unavailable", e); }
+            return;
+        }
+        if (explicit && InfrastructureProfile.read(context).usesAccHooks()
+                && "recycle".equals(modeKey)) {
+            try {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put("recycleSelection", mode);
+                if (context.getContentResolver().update(MODES_PROVIDER_URI, values, null, null) > 0) {
+                    recycle = mode;
+                    ApplyEngine.noteSavedMode("recycle", mode);
+                    context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
+                            .putString("cacheRecycle", mode).apply();
+                    if (remembersMode(context, "recycle")) {
+                        context.sendBroadcast(new Intent("ru.big.town.anative.MODE_SYNCED")
+                                .setPackage("ru.big.town.restoremode")
+                                .putExtra("modeKey", "recycle").putExtra("mode", mode));
+                    }
+                }
+            } catch (RuntimeException e) { Log.w(MODES_LOG, "Recuperation selection unavailable", e); }
             return;
         }
         if (modeColumn(modeKey) < 0 || !remembersMode(context, modeKey)) return;

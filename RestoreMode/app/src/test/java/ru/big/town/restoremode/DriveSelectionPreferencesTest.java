@@ -25,6 +25,24 @@ public class DriveSelectionPreferencesTest {
                     return null;
                 });
     }
+    @Test public void recuperationRemembersExplicitSelectionButHonorsOptOut() {
+        for (boolean remember : new boolean[]{true, false}) {
+            Map<String, Object> data = new HashMap<>(); data.put("recycle", "LOW");
+            data.put("recycleRememberLast", remember);
+            assertTrue(DriveSelectionPreferences.selectRecycle(prefs(data), "HIGH"));
+            assertEquals("HIGH", DriveSelectionPreferences.recycle(prefs(data)));
+            assertEquals(remember ? "HIGH" : "LOW", data.get("recycle"));
+            assertFalse(DriveSelectionPreferences.selectRecycle(prefs(data), "invalid"));
+        }
+    }
+    @Test public void piRecuperationKeepsConfiguredTargetAndNativeRestoreDoesNotClearOdTripState() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("recycle", "LOW"); data.put("currentTripRecycle", "HIGH");
+        assertEquals("LOW", DriveSelectionPreferences.recycle(prefs(data), false));
+        assertTrue(DriveSelectionPreferences.beginNativeRestore(prefs(data)));
+        assertEquals("LOW", DriveSelectionPreferences.recycle(prefs(data), false));
+        assertEquals("HIGH", data.get("currentTripRecycle"));
+    }
     @Test public void currentDriveSurvivesProviderRecreationWithoutReplacingPinnedMode() {
         Map<String, Object> data = new HashMap<>(); data.put("driveMode", "COMFORT"); data.put("driveRememberLast", false);
         assertTrue(DriveSelectionPreferences.select(prefs(data), "ECO", DriveSelectionPolicy.EXPLICIT));

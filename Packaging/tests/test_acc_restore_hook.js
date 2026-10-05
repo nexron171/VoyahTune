@@ -72,8 +72,8 @@ function fixture(options = {}) {
         return {moveToFirst() { return individual ? value !== undefined : !f.empty; },
             getColumnCount() { return f.columns ?? 33; },
             getInt(i) { return i === 6 ? f.enabled : i === 12 ? f.debug :
-                i === 8 ? f.energyEnabled : i === 19 ? f.forcedEv : i === 32 ? f.maintenance : 0; },
-            getString(i) { return individual ? value : i === 1 ? f.energy : f.mode; },
+                i === 7 ? (f.recycleEnabled || 0) : i === 8 ? f.energyEnabled : i === 19 ? f.forcedEv : i === 32 ? f.maintenance : 0; },
+            getString(i) { return individual ? value : i === 1 ? f.energy : i === 2 ? (f.recycle || "LOW") : f.mode; },
             isNull() { return individual ? value === null : f.maintenance === null; },
             close() { f.closes++; }};
     }
@@ -318,3 +318,15 @@ assert.ok(!source.includes("Java.choose("), "Never enumerate the heap of the 32-
     assert.equal(f.sends.length, 1, "screen selection before readiness cancels startup restore");
     assert.equal(f.mode, "COMFORT");
 }
+
+for (const [recycle, level] of Object.entries({LOW: 2, MEDIUM: 3, HIGH: 4})) {
+    const f = fixture({recycleEnabled: 1, recycle}); f.frame();
+    assert.equal(f.sends[0].vehicle.values.HUM_ENERGY_PTREGEN_LEVL, level);
+    assert.equal(f.originalBundle.values.HUM_ENERGY_PTREGEN_LEVL, 4, "never mutate OEM input");
+    const late = fixture({acc: 2, enabled: 0, energyEnabled: 0, recycleEnabled: 1, recycle});
+    late.bootstrap(); assert.equal(late.sends[0].vehicle.values.HUM_ENERGY_PTREGEN_LEVL, level);
+    late.bootstrap(); assert.equal(late.sends.length, 1);
+    const snow = fixture({mode: "SNOW", recycleEnabled: 1, recycle}); snow.frame();
+    assert.equal(snow.sends[0].vehicle.values.HUM_ENERGY_PTREGEN_LEVL, undefined);
+}
+console.log("PASS: early ACC and late bootstrap recuperation, including Snow");

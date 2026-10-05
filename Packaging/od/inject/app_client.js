@@ -555,6 +555,7 @@ function createRdsRestoreController(io, initial) {
     var candidateRevision = 0;
     var candidateStation = null;
     var closed = false;
+    var silentCycle = null;
 
     function cancel(reason, keepCandidate) {
         revision++;
@@ -623,7 +624,18 @@ function createRdsRestoreController(io, initial) {
     }
     return {
         observe: observe,
+        restoreSilent: function (cycle) {
+            if (closed || !Number.isInteger(cycle) || cycle <= 0 || cycle === silentCycle) return false;
+            silentCycle = cycle;
+            // A later Native pass must never undo a new user choice or an active playback request.
+            if (!saved || scanRequested || request || (selection && io.now() <= selection.until)
+                    || io.isPlaying()) return false;
+            io.stageSelected(saved);
+            io.log("silent selection restored " + saved.freq + " cycle=" + cycle + "; tuner unchanged");
+            return true;
+        },
         select: function (station) {
+            if (io.clearSelected) io.clearSelected();
             cancel("explicit station choice");
             scanRequested = false;
             selection = valid(station) ? {target: station, until: io.now() + 15000} : null;
@@ -633,6 +645,7 @@ function createRdsRestoreController(io, initial) {
             // Keep an outstanding explicit choice so its late confirmation can still be saved.
         },
         scan: function () {
+            if (io.clearSelected) io.clearSelected();
             cancel("explicit scan");
             selection = null;
             scanRequested = true;
@@ -655,6 +668,7 @@ function createRdsRestoreController(io, initial) {
             observe(io.current());
         },
         resume: function (fallback, alreadyPlaying) {
+            if (io.clearSelected) io.clearSelected();
             if (closed || scanRequested || (selection && io.now() <= selection.until) || !saved) {
                 fallback();
                 return;
@@ -672,7 +686,7 @@ function createRdsRestoreController(io, initial) {
             if (!io.acquireFocus()) { cancel("radio focus unavailable"); return; }
             step(token);
         },
-        close: function () { closed = true; cancel("hook closed"); }
+        close: function () { closed = true; if (io.clearSelected) io.clearSelected(); cancel("hook closed"); }
     };
 }
 
@@ -686,6 +700,8 @@ function installRdsStationRestore(application) {
     var ownsResumeDelay = false;
     var playbackCalls = 0;
     var stopped = false;
+    var silentReceiver = null;
+    var selectedStation = null;
     var Log = Java.use("android.util.Log");
     function log(text) { Log.i(TAG, text); }
     try {
@@ -705,6 +721,10 @@ function installRdsStationRestore(application) {
         var play = Rds.play.overload();
         var resume = Rds.resumePlay.overload();
         var modelPlay = Model.play.overload();
+        var modelCurrent = Model.getCurRadioStation.overload();
+        var modelPrivateCurrent = Model.getCurStation.overload();
+        var ModelListener = Java.use("com.pateo.rdsapp.main.model.RdsDataModel$1");
+        var modelUpdate = ModelListener.onCurrentStationUpdate.overload("com.adayo.proxy.dab.aidl.beans.RadioStation");
         var pause = Rds.pause.overload();
         var pauseNoAbandon = Rds.pauseNoAbandon.overload();
         var scan = Rds.fullScan.overload();
@@ -788,6 +808,19 @@ function installRdsStationRestore(application) {
             },
             current: current, ready: ready, log: log,
             hasFocus: hasFocus,
+            isPlaying: function () { return hasFocus() && manager.isRdsSource() && manager.isPlay(); },
+            clearSelected: function () {
+                if (selectedStation !== null) { selectedStation.$dispose(); selectedStation = null; }
+            },
+            stageSelected: function (station) {
+                if (selectedStation !== null) selectedStation.$dispose();
+                selectedStation = Java.retain(Station.$new(station.freq));
+                selectedStation.setIsFMStation(station.fm);
+                selectedStation.setIsRDS(false); selectedStation.setPICode(0);
+                // Presentation state only. Never manufacture tuner feedback or change its cache.
+                var listener = Java.cast(Model.getInstance().rdsInfoListener.value, ModelListener);
+                modelUpdate.call(listener, selectedStation);
+            },
             acquireFocus: function () {
                 // requestAudioFocus also sets delayPlay if the radio is not initialized yet.
                 ownsResumeDelay = !manager.isInit()
@@ -839,6 +872,15 @@ function installRdsStationRestore(application) {
                 fallback();
             }
         }
+        hook(modelCurrent, function () {
+            return selectedStation !== null ? selectedStation : modelCurrent.call(this);
+        });
+        hook(modelPrivateCurrent, function () {
+            return selectedStation !== null ? selectedStation : modelPrivateCurrent.call(this);
+        });
+        hook(modelUpdate, function (station) {
+            return modelUpdate.call(this, selectedStation !== null ? selectedStation : station);
+        });
         hook(playStation, function (station) {
             // AudioPolicy.onResume can replay our delayed RadioStation through this public method.
             if (owned !== null && station !== null && station.equals(owned)) {
@@ -911,13 +953,42 @@ function installRdsStationRestore(application) {
             });
             return result;
         });
-        Java.scheduleOnMainThread(function () {
-            if (!stopped) safely(function () { controller.observe(current()); }); // Never tunes on attach.
+        // The provider owns the durable ACC cycle. Read it on attach as well, so a radio
+        // process started after both broadcasts still recovers the selected station silently.
+        function restoreAccSelection() {
+            var Uri = Java.use("android.net.Uri");
+            var call = Java.use("android.content.ContentResolver").call.overload(
+                "android.net.Uri", "java.lang.String", "java.lang.String", "android.os.Bundle");
+            var snapshot = call.call(application.getContentResolver(),
+                Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                "driveHookV2", "snapshot", null);
+            if (snapshot !== null && snapshot.getInt("protocol", -1) === 2 && snapshot.getInt("acc", -1) === 2) {
+                controller.restoreSilent(Number(snapshot.getLong("cycle", -1)));
+            }
+        }
+        var Receiver = Java.registerClass({
+            name: "ru.big.town.voyahtune.RadioSelectionRestoreReceiver",
+            superClass: Java.use("android.content.BroadcastReceiver"),
+            methods: {onReceive: [{returnType: "void", argumentTypes: ["android.content.Context", "android.content.Intent"],
+                implementation: function () { if (!stopped) safely(restoreAccSelection); }}]}
         });
-        log("ready; restore on requested or confirmed active radio playback");
+        silentReceiver = Java.retain(Receiver.$new());
+        application.registerReceiver.overload("android.content.BroadcastReceiver", "android.content.IntentFilter",
+                "java.lang.String", "android.os.Handler").call(application, silentReceiver,
+                Java.use("android.content.IntentFilter").$new("ru.big.town.anative.RESTORE_RADIO_SELECTION"),
+                "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE",
+                Java.use("android.os.Handler").$new(Java.use("android.os.Looper").getMainLooper()));
+        Java.scheduleOnMainThread(function () {
+            if (!stopped) {
+                safely(restoreAccSelection);
+                safely(function () { controller.observe(current()); });
+            }
+        });
+        log("ready; silent ACC selection, tuning on requested or confirmed active radio playback");
         console.log("[rds-restore] hook ready v1");
     } catch (e) {
         stopped = true;
+        if (silentReceiver !== null) { try { application.unregisterReceiver(silentReceiver); } catch (_) {} }
         if (controller !== null) {
             try { controller.close(); } catch (_) { /* Keep rolling back all installed replacements. */ }
         }

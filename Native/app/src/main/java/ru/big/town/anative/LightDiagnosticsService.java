@@ -16,10 +16,12 @@ import android.util.Log;
 
 import java.util.Arrays;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.RejectedExecutionException;
+import ru.big.town.common.InfrastructureProfile;
 
 /** Read-only, bound diagnostic observer. No light-control commands are issued here. */
 public final class LightDiagnosticsService extends Service {
@@ -44,6 +46,18 @@ public final class LightDiagnosticsService extends Service {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final int[] values = new int[6];
+    private final LightDiagnosticsPoller rsmPoller = new LightDiagnosticsPoller(
+            new LightDiagnosticsPoller.Scheduler() {
+                @Override public void postDelayed(Runnable task, long delayMs) {
+                    main.postDelayed(task, delayMs);
+                }
+                @Override public void removeCallbacks(Runnable task) {
+                    main.removeCallbacks(task);
+                }
+            }, this::readRsmSnapshot, snapshot -> {
+                System.arraycopy(snapshot, 0, values, 0, snapshot.length);
+                publish();
+            });
     private final Messenger endpoint = new Messenger(new Handler(Looper.getMainLooper()) {
         @Override public void handleMessage(Message message) {
             if (message.what == WATCH) {
@@ -150,6 +164,10 @@ public final class LightDiagnosticsService extends Service {
 
     private void onCanEvent(int session, CanBusEvent event) {
         if (generation != session) return;
+        if (InfrastructureProfile.read(this).usesAccHooks()) {
+            onOdCanEvent(event);
+            return;
+        }
         if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
             ++canSnapshotRevision;
             Arrays.fill(values, 0, 4, UNKNOWN);
@@ -184,6 +202,49 @@ public final class LightDiagnosticsService extends Service {
         }
     }
 
+    private void onOdCanEvent(CanBusEvent event) {
+        if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
+            rsmPoller.stop();
+        } else if (event.kind == CanBusEvent.Kind.CONNECTION) {
+            rsmPoller.start();
+        } else if (event.kind == CanBusEvent.Kind.VEHICLE_STATE) {
+            for (int i = 0; i < 4; i++) {
+                if (event.first == RSM_IDS[i]) {
+                    rsmPoller.onEvent(i, event.second);
+                    break;
+                }
+            }
+        }
+    }
+
+    private void readRsmSnapshot(Consumer<int[]> completion) {
+        final int session = generation;
+        if (!submitIo(() -> {
+            int[] result = null;
+            try {
+                if (generation == session) {
+                    OemVehicleStateTransport.StateKey[] keys = new OemVehicleStateTransport.StateKey[4];
+                    for (int i = 0; i < keys.length; i++) keys[i] =
+                            new OemVehicleStateTransport.StateKey(RSM_NAMES[i], RSM_IDS[i]);
+                    Map<OemVehicleStateTransport.StateKey, Integer> snapshot =
+                            OemVehicleStateTransport.readVehicleStates(this, Arrays.asList(keys));
+                    if (snapshot != null) {
+                        result = new int[keys.length];
+                        for (int i = 0; i < keys.length; i++) {
+                            Integer value = snapshot.get(keys[i]);
+                            result[i] = value == null ? UNKNOWN : value;
+                        }
+                    }
+                }
+            } catch (RuntimeException e) {
+                Log.w(TAG, "RSM snapshot failed", e);
+            } finally {
+                final int[] snapshot = result;
+                main.post(() -> completion.accept(snapshot));
+            }
+        })) completion.accept(null);
+    }
+
     private void clearCarSignal() {
         carBinder = null;
         carCallback = null;
@@ -196,6 +257,7 @@ public final class LightDiagnosticsService extends Service {
         if (subscription == null && carConnection == null) return;
         ++generation;
         client = null;
+        if (InfrastructureProfile.read(this).usesAccHooks()) rsmPoller.stop();
         if (subscription != null) { subscription.close(); subscription = null; }
         IBinder binder = carBinder;
         IBinder callback = carCallback;
@@ -220,9 +282,12 @@ public final class LightDiagnosticsService extends Service {
         try { client.send(message); } catch (RemoteException e) { client = null; }
     }
 
-    private static void submitIo(Runnable task) {
-        try { IO.execute(task); }
-        catch (RejectedExecutionException e) { Log.w(TAG, "Diagnostic OEM queue full", e); }
+    private static boolean submitIo(Runnable task) {
+        try { IO.execute(task); return true; }
+        catch (RejectedExecutionException e) {
+            Log.w(TAG, "Diagnostic OEM queue full", e);
+            return false;
+        }
     }
 
     private static boolean transactCallback(IBinder binder, int code, IBinder callback) {

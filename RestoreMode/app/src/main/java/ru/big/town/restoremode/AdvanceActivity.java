@@ -2102,6 +2102,7 @@ public class AdvanceActivity extends AppCompatActivity {
                         && checkedId != R.id.apolloGreenSoundOff) return;
                 prefs.edit().putBoolean(ApolloSettings.GREEN_SOUND,
                         checkedId == R.id.apolloGreenSoundOn).apply();
+                applyApolloTargets();
             });
         }
         updateApolloUi();
@@ -2113,8 +2114,19 @@ public class AdvanceActivity extends AppCompatActivity {
         target.setEnabled(true);
         target.setOnCheckedChangeListener((button, checked) -> {
             prefs.edit().putBoolean(preference, checked).apply();
+            applyApolloTargets();
             if (ApolloSettings.TRAFFIC_LIGHTS.equals(preference)) updateApolloUi();
         });
+    }
+
+    private void applyApolloTargets() {
+        if (!ru.big.town.common.InfrastructureProfile.read(this).usesAccHooks()) return;
+        try {
+            startForegroundService(new Intent("ru.big.town.anative.APPLY_APOLLO")
+                    .setClassName("ru.big.town.anative", "ru.big.town.anative.SetModesService"));
+        } catch (RuntimeException e) {
+            Log.w("ApolloSettings", "Saved targets; immediate apply unavailable", e);
+        }
     }
 
     private void updateApolloUi() {
@@ -2131,8 +2143,11 @@ public class AdvanceActivity extends AppCompatActivity {
         if (textApolloStatus != null) {
             textApolloStatus.setText(
                     "VoyahTune хранит выбранные значения без чтения текущего состояния автомобиля. "
-                            + "Они применяются кнопкой «Применить» и автоматически через 10 секунд "
-                            + "после пробуждения.");
+                            + (ru.big.town.common.InfrastructureProfile.read(this).usesAccHooks()
+                            ? "Они применяются при изменении, кнопкой «Применить» и автоматически "
+                                    + "при пробуждении автомобиля."
+                            : "Они применяются кнопкой «Применить» и автоматически через 10 секунд "
+                                    + "после пробуждения."));
         }
     }
 
