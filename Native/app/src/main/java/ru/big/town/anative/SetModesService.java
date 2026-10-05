@@ -41,6 +41,7 @@ import androidx.core.content.ContextCompat;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import ru.big.town.common.InfrastructureProfile;
 
 
 public class SetModesService extends Service {
@@ -1580,6 +1581,10 @@ public class SetModesService extends Service {
         }
         // Both an ACC notification and a normal service restart reconcile the same durable claim.
         ApplyEngine.scheduleAccApply(this);
+        if (intent != null && "ru.big.town.anative.APPLY_APOLLO".equals(intent.getAction())
+                && InfrastructureProfile.read(this).usesAccHooks()) {
+            ApplyEngine.applyApolloTargets(this);
+        }
         //if(action.equals("ru.big.town.anative.APPLY_DRIVE_MODES")){
         //  Log.i(TAG, "onStartCommand() Intent is ru.big.town.anative.APPLY_DRIVE_MODES!");
         //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));

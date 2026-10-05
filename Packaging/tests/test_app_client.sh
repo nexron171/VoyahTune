@@ -31,6 +31,14 @@ sh -n "$LOADER"
 sh -n "$FULL_INSTALL"
 sh -n "$FULL_REMOVE"
 
+# Both ACC stages notify the same silent radio receiver. No activity/service playback launch.
+for FILE in "$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"         "$ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"; do
+    require "$FILE" 'ru.big.town.anative.RESTORE_RADIO_SELECTION'
+    require "$FILE" '.setPackage("com.pateo.rdsapp")'
+done
+require "$AGENT" '"ru.big.town.anative.permission.BIND_SET_MODES_SERVICE",'
+require "$AGENT" 'controller.restoreSilent(Number(snapshot.getLong("cycle", -1)));'
+
 # Client geometry: never mutate app-owned LayoutParams in the hooks. Only the base Activity window
 # on the two physical displays receives a cloned MATCH_PARENT width; height/status-bar geometry is
 # still owned by system_server.

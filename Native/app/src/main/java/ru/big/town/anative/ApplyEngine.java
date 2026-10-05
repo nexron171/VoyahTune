@@ -150,7 +150,7 @@ public final class ApplyEngine {
 
     static void persistModeFeedbackIfAllowed(
             Context context, String modeKey, String observedMode) {
-        if (usesAccHooks() && ("driveMode".equals(modeKey) || "energy".equals(modeKey))) {
+        if (usesAccHooks()) {
             MODE_SYNC_POLICY.observe(modeKey, observedMode);
             // Origin-free callbacks are observations, never user intent.
             return;
@@ -206,6 +206,20 @@ public final class ApplyEngine {
     }
 
     /** Provider owns the durable ACC-cycle claim; Native executes its remaining settings once. */
+    static void applyApolloTargets(Context context) {
+        if (!InfrastructureProfile.read(context).usesAccHooks()) return;
+        // Serialize with the ACC pass; changing Apollo must not cancel unrelated restoration.
+        bg().post(() -> {
+            if (MainActivity.loadModes(context, false) != 2) {
+                Log.w(TAG, "Apollo apply skipped: saved targets unavailable");
+                return;
+            }
+            CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
+            MainActivity.appendApolloRestore(builder, context);
+            Log.i(TAG, "Apollo apply: " + builder.build().sendPending((frames, label) -> false));
+        });
+    }
+
     public static void scheduleAccApply(Context context) {
         if (!InfrastructureProfile.read(context).usesAccHooks()) return;
         final Context app = context.getApplicationContext();

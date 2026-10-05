@@ -23,7 +23,7 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 // pkill uses status 1 for an already absent process; other failures remain warnings.
 const STOP_LOADER: &str =
@@ -82,6 +82,36 @@ active_matches || {{ echo 'Активный APK {package} не совпадае�
         expected = quote(expected)
     )
 }
+// A missing Android service is not evidence of damaged package registration.
+// Include the system_server generation so a restart invalidates both observations.
+const UPDATER_PROBE: &str = r#"
+android_generation() {
+    [ "$(getprop sys.boot_completed)" = 1 ] || return 1
+    generation=$(pidof system_server) || return 1
+    [ -n "$generation" ] || return 1
+    service check activity | grep -q ': found' || return 1
+    service check package | grep -q ': found' || return 1
+    printf '%s' "$generation"
+}
+probe_updater() {
+    before=$(android_generation) || { echo UNAVAILABLE; return; }
+    packages=$(pm list packages --user 0) || { echo UNAVAILABLE; return; }
+    # An empty/partial response from PackageManager must not trigger uninstall.
+    printf '%s\n' "$packages" | grep -qx 'package:android' || { echo UNAVAILABLE; return; }
+    state=BROKEN
+    if printf '%s\n' "$packages" | grep -qx 'package:ru.big.town.updater'; then
+        paths=$(pm path --user 0 ru.big.town.updater) || { echo UNAVAILABLE; return; }
+        if printf '%s\n' "$paths" | grep -q '^package:' \
+                && [ -d /data/user/0/ru.big.town.updater ] \
+                && [ -d /data/user_de/0/ru.big.town.updater ]; then
+            state=READY
+        fi
+    fi
+    after=$(android_generation) || { echo UNAVAILABLE; return; }
+    [ "$before" = "$after" ] || { echo UNAVAILABLE; return; }
+    echo "$state:$after"
+}
+"#;
 pub struct Engine {
     pub adb: Adb,
     pub payload: Payload,
@@ -1039,6 +1069,9 @@ fi
         Ok(())
     }
     fn updater_ready(&self) -> Result<()> {
+        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
+            return self.updater_ready_od();
+        }
         // ROM 650 can register a new system APK without its DE directory.
         // PackageManager must create app data with the correct UID and context.
         const READY: &str = r#"
@@ -1070,6 +1103,79 @@ fi
             Some("/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk"),
         )?;
         Ok(())
+    }
+    fn updater_ready_od(&self) -> Result<()> {
+        let probe = format!("{UPDATER_PROBE}\nprobe_updater\n");
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let mut previous = String::new();
+        let mut repairs = 0;
+        let mut warned = false;
+        for _ in 0..30 {
+            if Instant::now() >= deadline {
+                break;
+            }
+            let state = self.shell(&probe)?;
+            if state == "UNAVAILABLE" {
+                previous.clear();
+                if !warned {
+                    self.warning(&self.fail(
+                        "Ожидание системных служб Android перед проверкой Updater",
+                        "PackageManager или ActivityManager недоступен; восстановление пакета отложено",
+                    ));
+                    warned = true;
+                }
+            } else if state != previous {
+                previous = state;
+            } else if state.starts_with("READY:") {
+                // Even a successful probe can race a later system_server restart.
+                match self.verify_active_apk(
+                    "ru.big.town.updater",
+                    "voyahtune-updater.apk",
+                    Some("/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk"),
+                ) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => {
+                        let after = self.shell(&probe)?;
+                        if after != "UNAVAILABLE" && after == state {
+                            return Err(error);
+                        }
+                        self.warning(&error);
+                        previous.clear();
+                    }
+                }
+            } else if state.starts_with("BROKEN:") {
+                let command = match repairs {
+                    0 => "cmd package install-existing --user 0 ru.big.town.updater",
+                    1 => "am force-stop ru.big.town.updater && pm uninstall -k --user 0 ru.big.town.updater && cmd package install-existing --user 0 ru.big.town.updater",
+                    _ => return Err(self.fail("PackageManager не создал CE/DE Updater", state)),
+                };
+                // Recheck inside the lock immediately before any mutation. On a
+                // service restart, return to diagnosis instead of blindly retrying it.
+                let guarded = format!(
+                    "{UPDATER_PROBE}\nexpected={}\n\
+                     [ \"$(probe_updater)\" = \"$expected\" ] || {{ echo RECHECK; exit 0; }}\n\
+                     {command}\nstatus=$?\n\
+                     if [ \"$status\" -ne 0 ]; then\n\
+                         after=$(probe_updater)\n\
+                         if [ \"$after\" = UNAVAILABLE ] || [ \"${{after##*:}}\" != \"${{expected##*:}}\" ]; then\n\
+                             echo RECHECK; exit 0\n\
+                         fi\n\
+                     fi\nexit \"$status\"\n",
+                    quote(&state),
+                );
+                if self.postflight_shell(&guarded)?.lines().last() != Some("RECHECK") {
+                    repairs += 1;
+                }
+                previous.clear();
+            } else {
+                return Err(self.fail("Неизвестный результат проверки Updater", state));
+            }
+            thread::sleep(Duration::from_secs(2));
+        }
+        Err(self.fail(
+            "Android не восстановился для проверки Updater",
+            "Системные службы или регистрация пакета нестабильны; повторите установку после загрузки ГУ",
+        ))
     }
     fn pi_loader_ready(&self) -> Result<()> {
         let mut last = Error::new("PI_LOADER_NOT_READY", "PI watchdog ещё не запустился");

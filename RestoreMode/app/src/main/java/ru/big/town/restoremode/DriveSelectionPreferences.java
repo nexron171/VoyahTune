@@ -35,6 +35,20 @@ final class DriveSelectionPreferences {
         if (!"FORCE_EV".equals(mode) && (settings || prefs.getBoolean("energyRememberLast", true))) e.putString("energy", mode);
         return e.commit();
     }
+    static synchronized boolean selectRecycle(SharedPreferences prefs, String mode) {
+        if (!"LOW".equals(mode) && !"MEDIUM".equals(mode) && !"HIGH".equals(mode)) return false;
+        SharedPreferences.Editor e = prefs.edit().putString("currentTripRecycle", mode)
+                .putLong(REV, prefs.getLong(REV, 0) + 1);
+        if (prefs.getBoolean("recycleRememberLast", true)) e.putString("recycle", mode);
+        return e.commit();
+    }
+    static synchronized String recycle(SharedPreferences prefs) {
+        return recycle(prefs, true);
+    }
+    static synchronized String recycle(SharedPreferences prefs, boolean accHooks) {
+        String configured = prefs.getString("recycle", "LOW");
+        return accHooks ? prefs.getString("currentTripRecycle", configured) : configured;
+    }
     static boolean validEnergy(String mode) {
         return "SMART".equals(mode) || "EV".equals(mode) || "REV".equals(mode)
                 || "SREV".equals(mode) || "FORCE_EV".equals(mode);
@@ -51,6 +65,10 @@ final class DriveSelectionPreferences {
         return validEnergy(current) ? current : prefs.getString("energy", "SREV");
     }
     static synchronized Bundle hook(SharedPreferences prefs, String action, Bundle args, int boot) {
+        return hook(prefs, action, args, boot, true);
+    }
+    static synchronized Bundle hook(SharedPreferences prefs, String action, Bundle args, int boot,
+            boolean accHooks) {
         if (args == null) args = new Bundle();
         // Only CAN's actual ACC observation changes the trip boundary. A Native restart does not.
         if ("acc".equals(action)) {
@@ -66,7 +84,10 @@ final class DriveSelectionPreferences {
                     e.putLong(CYCLE, prefs.getLong(CYCLE, 0) + 1)
                             .putLong(REV, prefs.getLong(REV, 0) + 1);
                     e.putString(SETTINGS_START, "pending");
-                    if (!preserve) e.putString(DriveSelectionPolicy.CURRENT, "").putString("currentTripEnergy", "").putString(START, "pending");
+                    if (!preserve) {
+                        e.putString(DriveSelectionPolicy.CURRENT, "").putString("currentTripEnergy", "").putString(START, "pending");
+                        if (accHooks) e.remove("currentTripRecycle");
+                    }
                 }
                 if (!e.commit()) throw new IllegalStateException("ACC state not persisted");
             }
@@ -78,7 +99,7 @@ final class DriveSelectionPreferences {
             if (claim && !prefs.edit().putString(SETTINGS_START, "claimed").commit()) {
                 throw new IllegalStateException("Settings claim not persisted");
             }
-            Bundle result = snapshot(prefs);
+            Bundle result = snapshot(prefs, accHooks);
             result.putBoolean("claimed", claim);
             return result;
         } else if ("completeSettings".equals(action)) {
@@ -93,7 +114,13 @@ final class DriveSelectionPreferences {
             if (prefs.getBoolean("driveEnabled", false)) select(prefs, prefs.getString("driveMode", "INDIVIDUAL"), DriveSelectionPolicy.SETTINGS);
             if (prefs.getBoolean("energyEnabled", false) || prefs.getBoolean("forcedEv", false))
                 selectEnergy(prefs, prefs.getBoolean("forcedEv", false) ? "FORCE_EV" : prefs.getString("energy", "SREV"), true);
+            if (accHooks && prefs.getBoolean("recycleEnabled", false)) {
+                if (!prefs.edit().remove("currentTripRecycle").commit())
+                    throw new IllegalStateException("Recuperation target not persisted");
+            }
         } else if ("user".equals(action)) {
+            if (accHooks && args.containsKey("recycle") && !selectRecycle(prefs, args.getString("recycle")))
+                throw new IllegalArgumentException("Invalid user recuperation");
             if (args.containsKey("mode") && !select(prefs, args.getString("mode"), DriveSelectionPolicy.EXPLICIT))
                 throw new IllegalArgumentException("Invalid user drive mode");
             if (args.containsKey("energy") && !selectEnergy(prefs, args.getString("energy"), false))
@@ -103,11 +130,12 @@ final class DriveSelectionPreferences {
             boolean claim = "pending".equals(state) && prefs.getInt(ACC, -1) == 2
                     && args.getLong("revision", -1) == prefs.getLong(REV, 0)
                     && (prefs.getBoolean("driveEnabled", false) || prefs.getBoolean("energyEnabled", false)
-                        || prefs.getBoolean("forcedEv", false));
+                        || prefs.getBoolean("forcedEv", false)
+                        || (accHooks && prefs.getBoolean("recycleEnabled", false)));
             if (claim && !prefs.edit().putString(START, "claimed").commit()) {
                 throw new IllegalStateException("Startup claim not persisted");
             }
-            Bundle result = snapshot(prefs);
+            Bundle result = snapshot(prefs, accHooks);
             result.putBoolean("claimed", claim);
             return result;
         } else if ("complete".equals(action)) {
@@ -120,13 +148,14 @@ final class DriveSelectionPreferences {
         } else if (!"snapshot".equals(action)) {
             throw new IllegalArgumentException("Unknown drive hook operation");
         }
-        return snapshot(prefs);
+        return snapshot(prefs, accHooks);
     }
-    private static Bundle snapshot(SharedPreferences prefs) {
+    private static Bundle snapshot(SharedPreferences prefs, boolean accHooks) {
         Bundle result = new Bundle();
         result.putInt("protocol", 2);
         result.putString("mode", read(prefs).effective());
         result.putString("energy", energy(prefs));
+        if (accHooks) result.putString("recycle", recycle(prefs));
         result.putString("configuredEnergy", prefs.getString("energy", "SREV"));
         result.putLong("revision", prefs.getLong(REV, 0));
         result.putLong("cycle", prefs.getLong(CYCLE, 0));

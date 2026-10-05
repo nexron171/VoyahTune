@@ -117,3 +117,4 @@ CONTEXT.md
 # OTA root daemon build outputs.
 /Updater/daemon/target/
 /Updater/__pycache__/
+Installer/scripts/__pycache__

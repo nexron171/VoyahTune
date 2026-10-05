@@ -96,7 +96,8 @@ public class RestoreModeContentProvider extends ContentProvider {
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
         if ("driveHookV2".equals(method)) {
-            if ("nativeRestore".equals(arg) && ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()) {
+            boolean accHooks = ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks();
+            if ("nativeRestore".equals(arg) && accHooks) {
                 throw new IllegalArgumentException("Native restore boundary is unavailable with ACC hooks");
             }
             int uid = Binder.getCallingUid();
@@ -105,8 +106,17 @@ public class RestoreModeContentProvider extends ContentProvider {
                         "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Drive hook state");
             }
             int boot = android.provider.Settings.Global.getInt(getContext().getContentResolver(), "boot_count", -1);
+            int previousAcc = sharedPreferences.getInt("driveAcc", -1);
+            long previousCycle = sharedPreferences.getLong("driveCycle", 0);
             Bundle result = DriveSelectionPreferences.hook(sharedPreferences,
-                    "dispatchSettings".equals(arg) ? "snapshot" : arg, extras, boot);
+                    "dispatchSettings".equals(arg) ? "snapshot" : arg, extras, boot, accHooks);
+            if (accHooks && "acc".equals(arg) && result.getInt("acc", -1) == 2
+                    && (previousAcc != 2 || previousCycle != result.getLong("cycle", 0))) {
+                try {
+                    getContext().sendBroadcast(new Intent("ru.big.town.anative.RESTORE_RADIO_SELECTION")
+                            .setPackage("com.pateo.rdsapp"));
+                } catch (RuntimeException e) { Log.w("RadioRestore", "Early ACC notification unavailable", e); }
+            }
             boolean dispatched = false;
             if ("dispatchSettings".equals(arg) && result.getInt("acc", -1) == 2
                     && "pending".equals(result.getString("settingsStartup"))) {
@@ -123,6 +133,8 @@ public class RestoreModeContentProvider extends ContentProvider {
             if ("user".equals(arg) && extras != null) {
                 if (extras.containsKey("mode")) notifySavedMode("driveMode",
                         DriveSelectionPreferences.read(sharedPreferences).configured);
+                if (accHooks && extras.containsKey("recycle")) notifySavedMode("recycle",
+                        sharedPreferences.getString("recycle", "LOW"));
                 if (extras.containsKey("energy")) notifySavedMode("energy",
                         sharedPreferences.getString("energy", "SREV"));
             }
@@ -168,7 +180,8 @@ public class RestoreModeContentProvider extends ContentProvider {
         Log.i("$$$", "QUERY1");
         DriveSelectionPolicy driveSelection = DriveSelectionPreferences.read(sharedPreferences);
         energy = DriveSelectionPreferences.energy(sharedPreferences);
-        recycle = sharedPreferences.getString("recycle", "LOW");
+        recycle = DriveSelectionPreferences.recycle(sharedPreferences,
+                ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks());
         customCommand = sharedPreferences.getString("customCommand", "");
         customCommandCount = sharedPreferences.getInt("customCommandCount", 1);
         autoLight = sharedPreferences.getBoolean("autoLight", false);
@@ -305,6 +318,13 @@ public class RestoreModeContentProvider extends ContentProvider {
             if (Binder.getCallingUid() != 0) getContext().enforceCallingOrSelfPermission(
                     "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Energy selection update");
             return DriveSelectionPreferences.selectEnergy(sharedPreferences, values.getAsString("energySelection"), false) ? 1 : 0;
+        }
+        if (ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()
+                && values.containsKey("recycleSelection")) {
+            if (Binder.getCallingUid() != 0) getContext().enforceCallingOrSelfPermission(
+                    "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Saved vehicle target");
+            return DriveSelectionPreferences.selectRecycle(sharedPreferences,
+                    values.getAsString("recycleSelection")) ? 1 : 0;
         }
         SharedPreferences.Editor e = sharedPreferences.edit();
         int n = 0;

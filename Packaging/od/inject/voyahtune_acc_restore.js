@@ -124,6 +124,7 @@ Java.perform(function () {
                 outgoing.putInt("PROP_MODE_SET", targets.drive[2]);
                 if (targets.drive[0] === 6) outgoing.remove("HUM_ENERGY_PTREGEN_LEVL");
             }
+            if (targets.recycle !== null) outgoing.putInt("HUM_ENERGY_PTREGEN_LEVL", targets.recycle);
             if (targets.energy !== null) outgoing.putInt("IVI_SOC_MODESET", targets.energy);
         }
         install(taskInit, function (outer, component) {
@@ -169,7 +170,7 @@ Java.perform(function () {
                 Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/"),
                 null, null, null, null);
             if (c === null) return null;
-            var mode, driveEnabled, energyEnabled, energy, forcedEv, maintenance;
+            var mode, driveEnabled, energyEnabled, energy, forcedEv, maintenance, recycle;
             try {
                 if (!c.moveToFirst() || c.getColumnCount() <= 32 || c.isNull(32))
                     return null; // Missing settings: stock behavior.
@@ -177,12 +178,15 @@ Java.perform(function () {
                 driveEnabled = c.getInt(6) === 1;
                 energyEnabled = c.getInt(8) === 1;
                 energy = String(c.getString(1));
+                recycle = c.getInt(7) === 1 && mode !== "SNOW"
+                    ? {LOW: 2, MEDIUM: 3, HIGH: 4}[String(c.getString(2))] : null;
+                if (recycle === undefined) return null;
                 forcedEv = c.getInt(19) === 1;
                 var maintenanceRaw = c.getInt(32);
                 if (maintenanceRaw !== 0 && maintenanceRaw !== 1) return null;
                 maintenance = maintenanceRaw === 1 ? 2 : 1; // HintSwitch: on=2, off=1.
             } finally { c.close(); }
-            var targets = {drive: null, energy: null, maintenance: maintenance};
+            var targets = {drive: null, energy: null, maintenance: maintenance, recycle: recycle};
             if (forcedEv) targets.energy = 5;
             else if (energyEnabled) {
                 var energies = {SMART: 1, Smart: 1, EV: 2, REV: 3, SREV: 4, FORCE_EV: 5};
@@ -335,7 +339,7 @@ Java.perform(function () {
                 var startupState = String(snap.getString("startup"));
                 if (startupState !== "pending") { bootstrapDone = true; return; }
                 var targets = selectedTargets(component.contentResolver.value);
-                if (targets === null || (targets.drive === null && targets.energy === null)) return;
+                if (targets === null || (targets.drive === null && targets.energy === null && targets.recycle === null)) return;
                 var b = Bundle.$new(); applyTargets(b, targets);
                 var claim = Bundle.$new(); claim.putLong("revision", snap.getLong("revision"));
                 var claimed = hook(component.contentResolver.value, "claim", claim);

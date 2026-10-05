@@ -21,6 +21,8 @@ def package_data(package):
  for parent in ['/data/user/0/','/data/user_de/0/']:remote(parent+package).mkdir(parents=True,exist_ok=True)
 def main():
  args=sys.argv[1:]; name=Path(sys.argv[0]).name;s=load()
+ if name in ['pm','cmd','am','service']:
+  with (base/'device-calls.jsonl').open('a') as f:f.write(json.dumps({'name':name,'args':args})+'\n')
  if name in ['fake-adb','adb']:
   if args[:1]==['-s']:
    if args[1]!='CAR-001':print('device not found',file=sys.stderr);return 1
@@ -58,6 +60,7 @@ def main():
      s['packages'].pop('com.voyah.hl.service',None)
    if remote('/system/etc/init/voyahtune.updater.rc').exists() and remote('/data/local/bin/voyahtune-updater').exists():
     s['updater']='running';s['packages']['ru.big.town.updater']='/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk';package_data('ru.big.town.updater')
+    if s.get('updaterMissingDe'):shutil.rmtree(remote('/data/user_de/0/ru.big.town.updater'))
    if infrastructure() == 'pi' and remote('/data/local/bin/loaderFrida').exists() and remote('/system/etc/init/voyahtune.load.rc').exists():
     s['loader']='running'
     put('/proc/uptime','100.00 100.00\n')
@@ -108,6 +111,13 @@ def main():
    if not arg.startswith('-'):
     args[i]=arg.replace(str(root),'');break
   return subprocess.run(['/usr/bin/grep',*args]).returncode
+ elif name=='service':
+  if args[:1]!=['check']:raise RuntimeError(args)
+  missing=s.get('missingServices',0)
+  if missing:
+   if missing>0:s['missingServices']=missing-1;save(s)
+   print('Service '+args[1]+': not found')
+  else:print('Service '+args[1]+': found')
  elif name=='getprop':
   print({'ro.build.fingerprint':'qinggan/voyah/free:11/test','ro.product.model':'Voyah Free','ro.build.version.sdk':s.get('sdk','30'),'ro.product.cpu.abilist':s.get('abi','arm64-v8a,armeabi-v7a'),'sys.boot_completed':'1','init.svc.voyahtune_load':s.get('loader',''),'init.svc.voyahtune_updater':s.get('updater','')}.get(args[0],''))
  elif name=='setprop':
@@ -117,6 +127,13 @@ def main():
  elif name=='id':print('0' if s.get('root') else '2000')
  elif name=='pm':
   if args[:2]==['list','packages']:
+   if s.get('afterBroadcast') and s.get('updaterProbeFailure'):
+    s['updaterProbeCount']=s.get('updaterProbeCount',0)+1;save(s)
+    if s['updaterProbeCount']==s.get('updaterProbeFailureAt',2):
+     mode=s['updaterProbeFailure']
+     if mode=='empty':return 0
+     s['systemServerPid']='303';s['missingServices']=-1 if mode=='permanent' else 2;save(s)
+     print("cmd: Can't find service: package",file=sys.stderr);return 20
    for package in s['packages']:print('package:'+package)
   elif args[0]=='path':
    path=s['packages'].get(args[-1]);
@@ -140,7 +157,14 @@ def main():
   else:raise RuntimeError(args)
  elif name=='cmd':
   if args[:2]!=['package','install-existing']:raise RuntimeError(args)
-  package=args[-1];s['packages'][package]='/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk' if package=='ru.big.town.updater' else '/system/priv-app/Native/Native.apk';save(s);package_data(package);print('Package installed for user: 0')
+  package=args[-1]
+  if package=='ru.big.town.updater':
+   if s.get('updaterInstallFailure'):print('injected install-existing failure',file=sys.stderr);return 1
+   if s.pop('updaterInstallRestart',False):
+    s['systemServerPid']='404';s['missingServices']=2;save(s)
+    print("cmd: Can't find service: package",file=sys.stderr);return 20
+   if s.pop('updaterFirstInstallNoData',False):save(s);print('Package installed for user: 0');return 0
+  s['packages'][package]='/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk' if package=='ru.big.town.updater' else '/system/priv-app/Native/Native.apk';save(s);package_data(package);print('Package installed for user: 0')
  elif name=='timeout':
   if s.get('postflightTimeout'):return 124
   try:return subprocess.run(args[1:],timeout=float(args[0])).returncode
@@ -174,6 +198,7 @@ def main():
   p=Path(args[2]);owner=s.get('owners',{}).get(str(p.relative_to(root)),'0:0')
   print(f'{p.stat().st_mode & 0o7777:o}:{owner}')
  elif name=='am':
+  if args[:1]==['broadcast']:s['afterBroadcast']=True;save(s)
   if args[:2]==['force-stop',s.get('failForceStop')]:return 1
   if args[:1]==['broadcast'] and s.pop('restartSystemServerOnBroadcast',False):
    s['systemServerPid']='202';save(s);return 224

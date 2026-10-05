@@ -36,6 +36,7 @@ public interface SharedPreferences {
         Editor putBoolean(String k,boolean v);
         Editor putInt(String k,int v);
         Editor putLong(String k,long v);
+        Editor remove(String k);
         boolean commit();
     }
 }
@@ -60,11 +61,12 @@ public final class AccPreferencesHarness {
         public long getLong(String k,long d){return (Long)disk.getOrDefault(k,d);}
         public Editor edit(){return new Editor(){
             final Map<String,Object> pending=new HashMap<>();
+            public Editor remove(String k){pending.put(k,null);return this;}
             public Editor putString(String k,String v){pending.put(k,v);return this;}
             public Editor putBoolean(String k,boolean v){pending.put(k,v);return this;}
             public Editor putInt(String k,int v){pending.put(k,v);return this;}
             public Editor putLong(String k,long v){pending.put(k,v);return this;}
-            public boolean commit(){if(commitFails)return false;disk.putAll(pending);return true;}
+            public boolean commit(){if(commitFails)return false;disk.putAll(pending);disk.values().removeIf(java.util.Objects::isNull);return true;}
         };}
     }
     static void equal(Object expected,Object actual){
@@ -138,6 +140,16 @@ public final class AccPreferencesHarness {
             b.putBoolean("accepted",true);action(p,"complete",b,1);
             equal("selected",action(p,"snapshot",null,1).getString("startup"));
             equal(false,action(p,"claim",b,1).getBoolean("claimed"));
+        });
+        scenario("recuperation remembers explicit intent and respects pinned opt-out",()->{
+            for(boolean remember:new boolean[]{true,false}){
+                Memory p=new Memory();p.disk.put("recycle","LOW");p.disk.put("recycleRememberLast",remember);
+                p.disk.put("recycleEnabled",true);acc(p,2,1);
+                Bundle chosen=new Bundle();chosen.putString("recycle","HIGH");action(p,"user",chosen,1);
+                equal("HIGH",DriveSelectionPreferences.recycle(new Memory(new HashMap<>(p.disk))));
+                next(p);equal(remember ? "HIGH" : "LOW",DriveSelectionPreferences.recycle(p));
+                equal(false,DriveSelectionPreferences.selectRecycle(p,"INVALID"));
+            }
         });
         scenario("forced EV preserves ordinary engine target across ACC",()->{
             Memory p=new Memory();p.disk.put("energy","SREV");acc(p,2,1);

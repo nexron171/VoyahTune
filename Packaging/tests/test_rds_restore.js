@@ -16,7 +16,7 @@ function test(name, fn) { fn(); count++; console.log("OK " + name); }
 
 function fixture(saved = original) {
     const f = {time: 0, current: reset, ready: true, timers: [], writes: [], tunes: [],
-        focus: true, plays: 0, fallbacks: 0, logs: [], owned: null, diskFail: false};
+        focus: true, focusRequests: 0, staged: [], playing: false, plays: 0, fallbacks: 0, logs: [], owned: null, diskFail: false};
     f.tick = duration => {
         const end = f.time + duration;
         while (f.timers.some(t => t.at <= end)) {
@@ -27,7 +27,8 @@ function fixture(saved = original) {
     };
     f.controller = context.createRdsRestoreController({
         now: () => f.time, current: () => f.current, ready: () => f.ready,
-        acquireFocus: () => f.focus, hasFocus: () => f.focus,
+        acquireFocus: () => { f.focusRequests++; return f.focus; }, hasFocus: () => f.focus,
+        isPlaying: () => f.playing, stageSelected: s => f.staged.push(plain(s)), clearSelected: () => {},
         later: (fn, delay) => f.timers.push({fn, at: f.time + delay}),
         save: s => { if (f.diskFail) return false; f.writes.push(plain(s)); return true; },
         tune: s => { f.owned = plain(s); f.tunes.push(plain(s)); if (f.onTune) f.onTune(); },
@@ -151,7 +152,7 @@ test("close invalidates every delayed task", () => {
 function adapterFixture(options = {}) {
     const f = {current: options.current ?? reset, prefs: options.raw ?? JSON.stringify({schema: 1, station: original}),
         timers: [], time: 0, ready: true, calls: [], logs: [], writes: [], methods: [], fields: {}, nextId: 1,
-        mainTasks: []};
+        mainTasks: [], focusRequests: 0, playing: options.playing, cycle: options.cycle ?? 1, acc: options.acc ?? 2, displays: []};
     function method(name, fn) {
         const m = {implementation: null, overload() { return m; },
             call(self, ...args) { return fn.apply(self, args); },
@@ -180,7 +181,7 @@ function adapterFixture(options = {}) {
     };
     const Rds = {
         getInstance: () => mgr,
-        requestAudioFocus: method("focus", () => true),
+        requestAudioFocus: method("focus", () => { f.focusRequests++; return true; }),
         playStation: method("playStation", function (s) {
             f.calls.push(["tune", {...s.value}]);
             // Reproduce the OEM AM typo; the hook must correct it only for restore calls.
@@ -196,12 +197,26 @@ function adapterFixture(options = {}) {
         switchRadioSource: method("switch", band => f.calls.push(["band", band])),
         initData: method("init", () => {})
     };
-    const Model = {play: method("modelPlay", function () { Rds.playStation.invoke(mgr, station(f.current)); })};
+    const modelListener = {};
+    const Model = {
+        getInstance: () => ({rdsInfoListener: {value: modelListener}}),
+        getCurRadioStation: method("modelCurrent", () => station(f.current)),
+        getCurStation: method("modelPrivateCurrent", () => station(f.current)),
+        play: method("modelPlay", function () { Rds.playStation.invoke(mgr, station(f.current)); })};
     const Info = {
         onCurrentStationUpdate: method("update", s => { f.current = {...s.value}; }),
         onFreqSeekStateChanged: method("scanState", () => {})
     };
     const classes = {
+        "android.net.Uri": {parse: s => s},
+        "android.content.ContentResolver": {call: method("provider", () => ({
+            getInt: k => k === "protocol" ? 2 : f.acc, getLong: () => f.cycle}))},
+        "android.content.BroadcastReceiver": {},
+        "android.content.IntentFilter": {$new: action => ({action})},
+        "android.os.Handler": {$new: () => ({})},
+        "android.os.Looper": {getMainLooper: () => ({})},
+        "com.pateo.rdsapp.main.model.RdsDataModel$1": {onCurrentStationUpdate:
+            method("modelUpdate", s => f.displays.push({...s.value}))},
         "android.util.Log": {i: (tag, text) => f.logs.push(text)},
         "com.pateo.overSideRadio.base.dab.RdsManager": Rds,
         "com.pateo.rdsapp.main.model.RdsDataModel": Model,
@@ -213,7 +228,13 @@ function adapterFixture(options = {}) {
         "com.qinggan.media.helper.AudioPolicyHelper": {getInstance: () => ({isCall: () => false, isCurMediaFocus: () => true})},
         "com.qinggan.media.helper.MediaEnum": {RDS: {value: "RDS"}}
     };
-    const app = {getSharedPreferences: () => ({
+    const app = {
+        getContentResolver: () => ({}),
+        registerReceiver: {overload: () => ({call: (app, receiver, filter, permission) => {
+            f.receiver = receiver; f.receiverPermission = permission; f.receiverAction = filter.action;
+        }})},
+        unregisterReceiver: () => { f.receiver = null; },
+        getSharedPreferences: () => ({
         getString: () => f.prefs,
         edit: () => ({putString(key, value) { this.value = value; return this; },
             commit() { f.prefs = this.value; f.writes.push(JSON.parse(this.value)); return true; }})
@@ -225,6 +246,8 @@ function adapterFixture(options = {}) {
         setTimeout: (fn, delay) => f.timers.push({fn, at: f.time + delay}),
         Java: {
             perform: fn => { if (!loading) fn(); },
+            cast: x => x,
+            registerClass: def => ({$new: () => ({receive: def.methods.onReceive[0].implementation})}),
             scheduleOnMainThread: fn => options.deferredBootstrap ? f.mainTasks.push(fn) : fn(), retain: x => x,
             use: name => { if (name === options.missing) throw Error("ClassNotFoundException");
                 if (!classes[name]) throw Error("unexpected class " + name); return classes[name]; }
@@ -248,6 +271,7 @@ function adapterFixture(options = {}) {
     f.update = s => f.invoke("update", station(s));
     f.choose = s => f.invoke("playStation", station(s));
     f.manager = mgr;
+    f.restoreAcc = () => f.receiver.receive();
     return f;
 }
 
@@ -392,3 +416,44 @@ test("a new request after suspend does not wait for an overdue timer", () => {
     }
     console.log("RDS restore: " + count + " tests passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+test("silent ACC stages the choice without focus, playback, tuner writes or false feedback", () => {
+    const f = fixture(); assert.equal(f.controller.restoreSilent(1), true);
+    assert.deepEqual(f.staged, [original]); assert.deepEqual(f.current, reset);
+    f.tick(15000);
+    assert.equal(f.focusRequests, 0); assert.equal(f.plays, 0); assert.equal(f.tunes.length, 0);
+    assert.equal(f.writes.length, 0);
+    f.controller.restoreSilent(1); assert.equal(f.staged.length, 1);
+    f.resume(); assert.deepEqual(f.tunes, [original]);
+});
+test("Native follow-up cannot overwrite a choice made after early ACC", () => {
+    const f = fixture(); f.controller.restoreSilent(1);
+    f.controller.select(fm(9870)); f.observe(fm(9870)); f.tick(750);
+    f.controller.restoreSilent(1); assert.equal(f.staged.length, 1);
+    f.controller.restoreSilent(2); assert.deepEqual(f.staged[1], fm(9870));
+});
+test("silent restore leaves active playback, scans and pending user selections alone", () => {
+    for (const busy of [f => {f.playing = true;}, f => f.controller.scan(),
+            f => f.controller.select(fm(9990)), f => f.resume()]) {
+        const f = fixture(); busy(f); f.controller.restoreSilent(1);
+        assert.equal(f.staged.length, 0);
+    }
+});
+test("adapter late attach and Native broadcast silently restore the display once per ACC", () => {
+    const f = adapterFixture({playing: false});
+    assert.equal(f.receiverPermission, "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE");
+    assert.equal(f.receiverAction, "ru.big.town.anative.RESTORE_RADIO_SELECTION");
+    assert.equal(f.calls.length, 0); assert.equal(f.focusRequests, 0); assert.equal(f.current.freq, reset.freq);
+    assert.equal(f.invoke("modelCurrent").value.freq, original.freq);
+    assert.equal(f.displays.length, 1); f.restoreAcc(); assert.equal(f.displays.length, 1);
+    f.update(reset); assert.equal(f.displays.length, 1); assert.equal(f.writes.length, 0);
+    f.invoke("modelPlay"); assert.equal(f.calls.filter(c => c[0] === "tune").length, 1);
+});
+test("adapter sleep does not stage and later ACC preserves a fresh manual choice", () => {
+    const f = adapterFixture({playing: false, acc: 0}); assert.equal(f.displays.length, 0);
+    f.acc = 2; f.cycle++; f.restoreAcc(); assert.equal(f.displays.length, 1);
+    f.choose(fm(9900)); f.update(fm(9900)); f.tick(750); f.restoreAcc();
+    assert.equal(f.invoke("modelCurrent").value.freq, 9900);
+    assert.equal(f.calls.filter(c => c[0] === "tune").length, 1);
+});
+console.log("PASS: " + count + " RDS restore scenarios");
