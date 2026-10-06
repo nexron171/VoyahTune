@@ -70,7 +70,7 @@ public class SetModesService extends Service {
     static final int MSG_FLOATING_BACK              = 24; // плавающие Назад/Home (arg1: 1=вкл)
     static final int MSG_FLOATING_BACK_SIDE         = 25; // сторона блока (arg1: 0 лево, 1 верх, 2 право)
     static final int MSG_GRANT_INSTALL              = 26; // выдать app-op установки из неизв. источников (data: "pkg")
-    static final int MSG_CLOSE_ALL                  = 27; // закрыть все сторонние приложения (forceStopPackage)
+    static final int MSG_CLOSE_ALL                  = ru.big.town.common.SystemWidgetProtocol.CLEAR; // закрыть все сторонние приложения (forceStopPackage)
     static final int MSG_SET_THEME                  = 28; // тема системы/приложений (arg1: 0 авто, 1 светлая, 2 тёмная)
     static final int MSG_LOGGING_ENABLE             = 32; // вкл/выкл захват логов в файл (arg1: 1=вкл)
     static final int MSG_LOGGING_SHARE              = 33; // «Выгрузить логи» → share лог-файла
@@ -107,6 +107,7 @@ public class SetModesService extends Service {
 
     private SuspensionWidgetController suspensionWidget;
     private EnergyWidgetController energyWidgets;
+    private ClearAppsController clearApps;
 
     class IncomingHandler extends Handler {
         @Override
@@ -207,7 +208,7 @@ public class SetModesService extends Service {
 
                 case MSG_CLOSE_ALL:
                     Log.i(TAG, "handleMessage() MSG_CLOSE_ALL");
-                    closeAllApps();
+                    if (clearApps != null) clearApps.handle(msg);
                     break;
 
                 case MSG_APPLY_PEDESTRIAN:
@@ -524,6 +525,13 @@ public class SetModesService extends Service {
      * исключаем свои/лаунчер/вендорские, чтобы не уронить оболочку головы.
      */
     private void closeAllApps() {
+        if (clearApps != null) clearApps.handle(
+                Message.obtain(null, ru.big.town.common.SystemWidgetProtocol.CLEAR));
+    }
+
+    private android.os.Bundle performCloseAllApps() {
+        android.os.Bundle result = new android.os.Bundle();
+        int count = 0, failed = 0;
         try {
             android.app.ActivityManager am =
                     (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
@@ -537,26 +545,29 @@ public class SetModesService extends Service {
             java.lang.reflect.Method forceStop =
                     android.app.ActivityManager.class.getMethod("forceStopPackage", String.class);
 
-            int count = 0;
             for (android.content.pm.ApplicationInfo ai : pm.getInstalledApplications(0)) {
                 String pkg = ai.packageName;
-                if ((ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) continue; // только сторонние
-                if (pkg.equals("ru.big.town.restoremode") || pkg.equals("ru.big.town.anative")) continue;
-                if (pkg.equals(home)) continue;
-                if (pkg.startsWith("com.qinggan") || pkg.startsWith("com.android.car")) continue;
+                boolean system = (ai.flags & (android.content.pm.ApplicationInfo.FLAG_SYSTEM
+                        | android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
+                if (!CloseAppsPolicy.canStop(pkg, system, home)) continue;
                 try {
                     forceStop.invoke(am, pkg);
                     count++;
                 } catch (Exception e) {
                     Throwable c = (e instanceof java.lang.reflect.InvocationTargetException
                             && e.getCause() != null) ? e.getCause() : e;
+                    failed++;
                     Log.e(TAG, "forceStop failed " + pkg + ": " + c);
                 }
             }
-            Log.i(TAG, "closeAllApps: остановлено " + count + " сторонних приложений");
+            Log.i(TAG, "closeAllApps: force-stop accepted=" + count + ", failed=" + failed);
         } catch (Exception e) {
             Log.e(TAG, "closeAllApps failed: " + e.getMessage());
+            result.putString(ru.big.town.common.SystemWidgetProtocol.ERROR, "Не удалось закрыть приложения");
         }
+        result.putInt(ru.big.town.common.SystemWidgetProtocol.SUCCEEDED, count);
+        result.putInt(ru.big.town.common.SystemWidgetProtocol.FAILED, failed);
+        return result;
     }
 
     /**
@@ -1183,6 +1194,7 @@ public class SetModesService extends Service {
         Log.i(TAG, "onCreate()");
         super.onCreate();
         energyWidgets = new EnergyWidgetController(this);
+        clearApps = new ClearAppsController(this::performCloseAllApps);
         ApplyEngine.activateWake("service create");
         // A stale file from an earlier boot is fail-closed and removed on first service creation.
         ApolloSettingsRuntimeState.isEnabled(this);
@@ -1616,6 +1628,7 @@ public class SetModesService extends Service {
         Log.i(TAG, "onDestroy()");
         if (suspensionWidget != null) suspensionWidget.close();
         if (energyWidgets != null) energyWidgets.close();
+        if (clearApps != null) clearApps.close();
         voiceCommands.close();
         serviceDestroyed = true;
         ApplyEngine.stopEarlyDriveRestore("service destroyed");

@@ -192,6 +192,7 @@ public class MainActivity extends AppCompatActivity {
     private TileDragController tileDragController;
     private final java.util.List<EnergyWidgetView> energyWidgetViews = new java.util.ArrayList<>();
     private Bundle energyWidgetState = new Bundle();
+    private final SystemWidgetDashboard systemWidgets = new SystemWidgetDashboard(this, this::showSnack);
     private boolean tripTimerReceived;
     private final Messenger energyWidgetClient = new Messenger(new Handler(android.os.Looper.getMainLooper(), msg -> {
         if (msg.what != ru.big.town.common.EnergyWidgetProtocol.STATE) return false;
@@ -393,7 +394,7 @@ public class MainActivity extends AppCompatActivity {
         long ms = tripAccumMs;
         if (tripActive && tripInDrive) ms += SystemClock.elapsedRealtime() - tripDriveStartElapsed;
         for (EnergyWidgetView view : energyWidgetViews) {
-            view.timer(tripTimerReceived ? Math.max(0, ms) : -1, tripInDrive);
+            view.timer(tripTimerReceived ? Math.max(0, ms) : -1);
             view.invalidate(); // expire a silent/stalled Native connection even without messages
         }
         if (tripTimer != null) tripTimer.setText(fmtDuration(ms));
@@ -677,6 +678,7 @@ public class MainActivity extends AppCompatActivity {
         if (!connectionReported) return;
         connectionReported = false;
         GlobalVars.clientDisconnected();
+        systemWidgets.disconnected();
     }
 
     private void restartMessengerBinding(String reason) {
@@ -1185,7 +1187,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isWidgetVisible(String widgetId) {
-        if (EnergyWidgetView.isWidget(widgetId)) return sharedPreferences.getBoolean("show_" + widgetId, false);
+        if (EnergyWidgetView.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId))
+            return sharedPreferences.getBoolean("show_" + widgetId, false);
         switch (widgetId) {
             case "suspensionWidget": return sharedPreferences.getBoolean("showSuspensionWidget", false);
             case "tripCard":         return sharedPreferences.getBoolean("showTripTimer", true);
@@ -1249,6 +1252,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (SystemWidgetLayout.isWidget(widgetId))
+            return TileSizeStore.dimensions(sharedPreferences, widgetId, 1, 1);
         if (EnergyWidgetView.isWidget(widgetId)) {
             int[] size = EnergyWidgetView.size(widgetId);
             return TileSizeStore.dimensions(sharedPreferences, widgetId, size[0], size[1]);
@@ -1282,6 +1287,7 @@ public class MainActivity extends AppCompatActivity {
         splitTilesGrid.removeAllViews();
         suspensionWidgetView = null;
         energyWidgetViews.clear();
+        systemWidgets.resetViews();
         watchSuspension();
         watchEnergyWidgets();
         appWidgetTileViews.clear();
@@ -1377,7 +1383,13 @@ public class MainActivity extends AppCompatActivity {
                 // ===== Это виджет =====
                 View widgetView = null;
                 
+                if (SystemWidgetLayout.isWidget(tile.id) && !isWidgetVisible(tile.id)) continue;
                 switch(tile.id) {
+                    case SystemWidgetLayout.CPU:
+                    case SystemWidgetLayout.RAM:
+                    case SystemWidgetLayout.CLEAR:
+                        widgetView = systemWidgets.create(tile.id, splitTilesGrid);
+                        break;
                     case EnergyWidgetView.ENERGY:
                     case EnergyWidgetView.CONSUMPTION:
                     case EnergyWidgetView.TRIP:
@@ -1614,6 +1626,7 @@ public class MainActivity extends AppCompatActivity {
                 tileDragController.add(tileView, tilePos, 1, 1);
             }
         }
+        systemWidgets.setResumed(suspensionScreenResumed);
     }
 
     /**
@@ -2359,6 +2372,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         suspensionScreenResumed = false;
+        systemWidgets.setResumed(false);
         watchSuspension();
         watchEnergyWidgets();
         energyWidgetState = new Bundle();
@@ -2384,6 +2398,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        systemWidgets.close();
         if (tileDragController != null) tileDragController.cancel();
         uiHandler.removeCallbacks(suspensionUnavailable);
         uiHandler.removeCallbacks(tripTick);

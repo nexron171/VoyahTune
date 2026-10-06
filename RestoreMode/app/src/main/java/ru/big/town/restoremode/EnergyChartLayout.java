@@ -19,7 +19,7 @@ final class EnergyChartLayout {
         remainingLabel=vertical?readingValue+28*f:readingLabel;
         remainingValue=remainingLabel+46*f;
         levelsTitle=Math.max(readingValue,remainingValue)+30*f;
-        split=right=width-pad;left=pad+52*f;
+        split=width-pad;left=pad+52*f;right=split-52*f;
         periodNote=height-18*f;periodValue=periodNote-24*f;
         periodUnits=periodValue-46*f;periodLabel=periodUnits-26*f;
         axis=periodLabel-28*f;top=levelsTitle+18*f;bottom=Math.max(top,axis-24*f);

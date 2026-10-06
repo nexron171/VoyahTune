@@ -139,7 +139,7 @@ public class TileOrderStore {
 
     /** Проверить, это известный виджет. */
     static boolean isKnownWidget(String widgetId) {
-        if (EnergyWidgetView.isWidget(widgetId)) return true;
+        if (EnergyWidgetView.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) return true;
         // Список всех известных виджетов на главном экране
          return widgetId.equals("suspensionWidget") || widgetId.equals("tripCard") ||
                widgetId.equals("cardPowerHold") ||
@@ -215,7 +215,7 @@ public class TileOrderStore {
         }
         
         // Добавить известные виджеты, которые ещё не в списке
-        String[] knownWidgets = {"energyWidget", "energyConsumptionWidget", "energyTripWidget", "tirePressureWidget", "odometerWidget", "tripCard", "cardPowerHold", "cardWashMode", "cardAutoLight",
+        String[] knownWidgets = {SystemWidgetLayout.CPU, SystemWidgetLayout.RAM, SystemWidgetLayout.CLEAR, "energyWidget", "energyConsumptionWidget", "energyTripWidget", "tirePressureWidget", "odometerWidget", "tripCard", "cardPowerHold", "cardWashMode", "cardAutoLight",
                  "cardPedestrian", "cardForcedEv", "cardSuspensionMaintenance", "cardBatteryHeat", "suspensionWidget",
                      "cardSettings", "cardAndroidSettings", "cardVoiceCommand",
                      "launchAppsWidget"};
