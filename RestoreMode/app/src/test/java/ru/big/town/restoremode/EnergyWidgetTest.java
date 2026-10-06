@@ -57,14 +57,15 @@ public class EnergyWidgetTest {
         saved.remove("tileWidth_energyWidget");
         assertArrayEquals(new int[]{8,4},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
     }
-    @Test public void bothThreeColumnEnergyHeightsAndAllFourShortChartSizesPersist() {
+    @Test public void bothThreeColumnEnergyHeightsAndAllFiveShortChartSizesPersist() {
         Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
         TileSizeStore.setWidth(prefs,"energyWidget",3);
         for(int rows:new int[]{4,5}) {
             TileSizeStore.setHeight(prefs,"energyWidget",rows);
             assertArrayEquals(new int[]{3,rows},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,4));
         }
-        for(int columns:new int[]{2,3})for(int rows:new int[]{1,2}) {
+        for(int[] size:new int[][]{{1,1},{2,1},{2,2},{3,1},{3,2}}) {
+            int columns=size[0],rows=size[1];
             TileSizeStore.setWidth(prefs,"energyConsumptionWidget",columns);
             TileSizeStore.setHeight(prefs,"energyConsumptionWidget",rows);
             assertArrayEquals(new int[]{columns,rows},TileSizeStore.dimensions(prefs(saved),"energyConsumptionWidget",2,2));
@@ -79,34 +80,40 @@ public class EnergyWidgetTest {
         assertArrayEquals(new int[]{2,4},TileSizeStore.dimensions(prefs(saved),"tirePressureWidget",4,4));
         assertArrayEquals(new int[]{2,1},TileSizeStore.dimensions(prefs(saved),"odometerWidget",4,1));
     }
-    @Test public void narrowTripKeepsFiveRowsForLegibleNumbers() {
+    @Test public void narrowTripSupportsFourAndFiveRows() {
         Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
         for(int columns:new int[]{3}) {
             TileSizeStore.setWidth(prefs,"energyTripWidget",columns);
-            assertArrayEquals(new int[]{columns,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+            assertArrayEquals(new int[]{columns,4},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
             TileSizeStore.setHeight(prefs,"energyTripWidget",5);
             TileSizeStore.setWidth(prefs,"energyTripWidget",columns==2?3:2);
             assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
             TileSizeStore.setHeight(prefs,"energyTripWidget",3);
-            assertEquals(5,TileSizeStore.height(prefs(saved),"energyTripWidget",2));
+            assertEquals(4,TileSizeStore.height(prefs(saved),"energyTripWidget",2));
             TileSizeStore.setHeight(prefs,"energyTripWidget",8);
             assertEquals(5,TileSizeStore.height(prefs(saved),"energyTripWidget",2));
             TileSizeStore.setWidth(prefs,"energyTripWidget",6);
-            assertArrayEquals(new int[]{6,3},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+            assertArrayEquals(new int[]{6,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
         }
     }
     @Test public void storedTripHeightIsConstrainedByWidthWithoutLosingValidFiveRows() {
         Map<String,Object> saved=new HashMap<>();
         saved.put("tileWidth_energyTripWidget",2);saved.put("tileHeight_energyTripWidget",2);
-        assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        assertArrayEquals(new int[]{3,4},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
         saved.put("tileHeight_energyTripWidget",5);
         assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
         saved.put("tileWidth_energyTripWidget",3);
         assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
         saved.put("tileWidth_energyTripWidget",8);
-        assertArrayEquals(new int[]{8,2},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        assertArrayEquals(new int[]{8,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
     }
     @Test public void tripDrawingHeightMatchesSelectedRows() {
+        Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
+        for(int columns=3;columns<=8;columns++)for(int rows:new int[]{4,5}) {
+            TileSizeStore.setWidth(prefs,"energyTripWidget",columns);
+            TileSizeStore.setHeight(prefs,"energyTripWidget",rows);
+            assertArrayEquals(new int[]{columns,rows},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        }
         assertEquals(245,EnergyWidgetLayout.pixelsHigh("energyTripWidget",2));
         assertEquals(500,EnergyWidgetLayout.pixelsHigh("energyTripWidget",4));
         assertEquals(627,EnergyWidgetLayout.pixelsHigh("energyTripWidget",5));
@@ -141,10 +148,10 @@ public class EnergyWidgetTest {
     }
     @Test public void shortHistoryStaysOnRightWithoutInventingOdometer() {
         EnergyChartAxis axis=new EnergyChartAxis(5,25,15417);
-        assertEquals(.8,axis.position(0),.00001);
+        assertEquals(.9,axis.position(0),.00001);
         assertEquals(1,axis.position(5),.00001);
         assertEquals(15412,axis.odometerAt(0),.001);
-        assertEquals(-20,axis.distanceAt(0),.001);
+        assertEquals(-45,axis.distanceAt(0),.001);
         for(float unavailable:new float[]{Float.NaN,Float.POSITIVE_INFINITY,0,-1})
             assertTrue(Double.isNaN(new EnergyChartAxis(5,25,unavailable).tick(0)));
         assertTrue(Double.isNaN(new EnergyChartAxis(0,25,10).tick(5)));

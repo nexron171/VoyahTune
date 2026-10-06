@@ -9,7 +9,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.ServiceConnection;
-import android.app.ActivityManager;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.hardware.Sensor;
@@ -89,15 +88,12 @@ public class AdvanceActivity extends AppCompatActivity {
     private int currentSection;
 
     // Диагностика ресурсов — только пока Activity RESUMED и открыт раздел «Другое».
-    private static final long SYSTEM_METRICS_INTERVAL_MS = 5_000L;
+    private static final long SYSTEM_METRICS_INTERVAL_MS = SystemMetricsReader.INTERVAL_MS;
     private TextView textRamStatus, textCpuStatus, textHookStatus;
     private boolean activityResumed;
     private volatile boolean systemMetricsActive;
     private volatile long systemMetricsGeneration;
-    private final Object cpuSampleLock = new Object();
-    private long cpuBaselineGeneration = -1L;
-    private long previousCpuTotal = -1L;
-    private long previousCpuIdle = -1L;
+    private final SystemMetricsReader systemMetricsReader = new SystemMetricsReader(this);
     private final ExecutorService systemMetricsExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "VoyahTune-system-metrics");
         thread.setPriority(Thread.MIN_PRIORITY);
@@ -559,6 +555,11 @@ public class AdvanceActivity extends AppCompatActivity {
         bindTileSizeSpinners(R.id.suspensionSettingWidth, R.id.suspensionSettingHeight,
                 TileSizeStore.SUSPENSION_WIDGET_ID,
                 TileSizeStore.SUSPENSION_DEFAULT_WIDTH, TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
+        bindShowSwitch(R.id.switchShowCpu, "show_cpuWidget", false, R.id.CpuSizeRow);
+        bindTileSizeSpinners(R.id.CpuSettingWidth, R.id.CpuSettingHeight, SystemWidgetLayout.CPU, 1, 1);
+        bindShowSwitch(R.id.switchShowRam, "show_ramWidget", false, R.id.RamSizeRow);
+        bindTileSizeSpinners(R.id.RamSettingWidth, R.id.RamSettingHeight, SystemWidgetLayout.RAM, 1, 1);
+        bindShowSwitch(R.id.switchShowClearMemory, "show_clearMemoryWidget", false, 0);
         bindShowSwitch(R.id.switchShowEnergy, "show_energyWidget", false, R.id.EnergySizeRow);
         bindTileSizeSpinners(R.id.EnergySettingWidth, R.id.EnergySettingHeight, "energyWidget", 8, 4);
         bindShowSwitch(R.id.switchShowEnergyConsumption, "show_energyConsumptionWidget", false, R.id.EnergyConsumptionSizeRow);
@@ -943,6 +944,12 @@ public class AdvanceActivity extends AppCompatActivity {
         android.widget.Spinner widthSpinner = findViewById(widthSpinnerId);
         android.widget.Spinner heightSpinner = findViewById(heightSpinnerId);
         if (widthSpinner == null || heightSpinner == null) return;
+        if (SystemWidgetLayout.isWidget(widgetId)) {
+            bindEnergySize(widthSpinner, widgetId, true, 1, 1, 2, null);
+            bindEnergySize(heightSpinner, widgetId, false, 1, 1, 1, null);
+            heightSpinner.setEnabled(false);
+            return;
+        }
         if (EnergyWidgetLayout.isWidget(widgetId)) {
             Runnable bindHeight = () -> {
                 int columns = TileSizeStore.width(prefs, widgetId, defaultWidth);
@@ -1133,7 +1140,7 @@ public class AdvanceActivity extends AppCompatActivity {
                     }
                     com.google.android.material.snackbar.Snackbar.make(
                             findViewById(R.id.main),
-                            ok ? "Приложения закрыты" : "Сервис не готов",
+                            ok ? "Команда закрытия отправлена" : "Сервис не готов",
                             com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
                     Log.i("$$$ Advance closeAll $$$", "MSG_CLOSE_ALL sent=" + ok);
                 })
@@ -1951,13 +1958,8 @@ public class AdvanceActivity extends AppCompatActivity {
         boolean shouldRun = activityResumed && currentSection == 6 && !isFinishing();
         if (shouldRun == systemMetricsActive) return;
         systemMetricsActive = shouldRun;
-        long generation = ++systemMetricsGeneration;
+        ++systemMetricsGeneration;
         uiHandler.removeCallbacks(systemMetricsTick);
-        synchronized (cpuSampleLock) {
-            cpuBaselineGeneration = -1L;
-            previousCpuTotal = -1L;
-            previousCpuIdle = -1L;
-        }
         if (shouldRun) {
             if (textRamStatus != null) textRamStatus.setText("Используется: …\nДоступно: …");
             if (textCpuStatus != null) textCpuStatus.setText("Измерение…");
@@ -1971,12 +1973,16 @@ public class AdvanceActivity extends AppCompatActivity {
         final long generation = systemMetricsGeneration;
         try {
             systemMetricsExecutor.execute(() -> {
-                final SystemMetricsSnapshot snapshot = readSystemMetrics(generation);
+                final SystemMetricsReader.Snapshot snapshot = systemMetricsReader.read(generation);
+                String hookPayload = getSharedPreferences(
+                        HookStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
+                        .getString(HookStatusContract.PAYLOAD_KEY, null);
+                final String hookStatus = HookStatusContract.renderForUi(hookPayload);
                 uiHandler.post(() -> {
                     if (!systemMetricsActive || currentSection != 6
                             || generation != systemMetricsGeneration) return;
                     if (textRamStatus != null) {
-                        textRamStatus.setText("Используется: " + android.text.format.Formatter
+                        textRamStatus.setText(!Float.isFinite(snapshot.ramPercent) ? "Недоступно" : "Используется: " + android.text.format.Formatter
                                 .formatFileSize(this, snapshot.usedMemoryBytes)
                                 + " из " + android.text.format.Formatter
                                 .formatFileSize(this, snapshot.totalMemoryBytes)
@@ -1984,106 +1990,18 @@ public class AdvanceActivity extends AppCompatActivity {
                                 .formatFileSize(this, snapshot.availableMemoryBytes));
                     }
                     if (textCpuStatus != null) {
-                        textCpuStatus.setText(Double.isNaN(snapshot.cpuPercent)
-                                ? "Измерение…"
-                                : (snapshot.cpuPercent >= 0.0
-                                    ? String.format(Locale.getDefault(), "%.0f%%", snapshot.cpuPercent)
-                                    : "Недоступно"));
+                        textCpuStatus.setText(!snapshot.cpuReadable ? "Недоступно"
+                                : Float.isNaN(snapshot.cpuPercent) ? "Измерение…"
+                                : String.format(Locale.getDefault(), "%.0f%%", snapshot.cpuPercent));
                     }
                     if (textHookStatus != null) {
-                        textHookStatus.setText(snapshot.hookStatusText);
+                        textHookStatus.setText(hookStatus);
                     }
                     uiHandler.postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS);
                 });
             });
         } catch (RejectedExecutionException ignored) {
             // Activity уже уничтожена; никаких retry/timer после shutdown не создаём.
-        }
-    }
-
-    private SystemMetricsSnapshot readSystemMetrics(long generation) {
-        long total = 0L;
-        long available = 0L;
-        try {
-            ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
-            ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
-            if (manager != null) {
-                manager.getMemoryInfo(info);
-                total = Math.max(0L, info.totalMem);
-                available = Math.max(0L, Math.min(total, info.availMem));
-            }
-        } catch (RuntimeException e) {
-            Log.w("SystemMetrics", "RAM read failed: " + e.getMessage());
-        }
-        double cpu = readCpuPercent(generation);
-        String hookPayload = getSharedPreferences(
-                HookStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
-                .getString(HookStatusContract.PAYLOAD_KEY, null);
-        String hookStatus = HookStatusContract.renderForUi(hookPayload);
-        return new SystemMetricsSnapshot(total, Math.max(0L, total - available), available, cpu,
-                hookStatus);
-    }
-
-    /** `/proc/stat` хранит cumulative jiffies; процент — дельта busy/total между измерениями. */
-    private double readCpuPercent(long generation) {
-        CpuTimes current = readCpuTimes();
-        if (current == null) return -1.0;
-        synchronized (cpuSampleLock) {
-            if (!systemMetricsActive || generation != systemMetricsGeneration) return -1.0;
-            if (cpuBaselineGeneration != generation || previousCpuTotal < 0L) {
-                cpuBaselineGeneration = generation;
-                previousCpuTotal = current.total;
-                previousCpuIdle = current.idle;
-                return Double.NaN;
-            }
-            long totalDelta = current.total - previousCpuTotal;
-            long idleDelta = current.idle - previousCpuIdle;
-            previousCpuTotal = current.total;
-            previousCpuIdle = current.idle;
-            if (totalDelta <= 0L) return -1.0;
-            double percent = 100.0 * (totalDelta - Math.max(0L, idleDelta)) / totalDelta;
-            return Math.max(0.0, Math.min(100.0, percent));
-        }
-    }
-
-    private static CpuTimes readCpuTimes() {
-        try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                new java.io.FileReader("/proc/stat"))) {
-            String line = reader.readLine();
-            if (line == null || !line.startsWith("cpu ")) return null;
-            String[] fields = line.trim().split("\\s+");
-            if (fields.length < 5) return null;
-            long total = 0L;
-            // user,nice,system,idle,iowait,irq,softirq,steal; guest уже включён в user/nice.
-            for (int i = 1; i < fields.length && i <= 8; i++) total += Long.parseLong(fields[i]);
-            long idle = Long.parseLong(fields[4]);
-            if (fields.length > 5) idle += Long.parseLong(fields[5]);
-            return new CpuTimes(total, idle);
-        } catch (Exception e) {
-            Log.w("SystemMetrics", "CPU read failed: " + e.getMessage());
-            return null;
-        }
-    }
-
-    private static final class CpuTimes {
-        final long total;
-        final long idle;
-        CpuTimes(long total, long idle) { this.total = total; this.idle = idle; }
-    }
-
-    private static final class SystemMetricsSnapshot {
-        final long totalMemoryBytes;
-        final long usedMemoryBytes;
-        final long availableMemoryBytes;
-        final double cpuPercent;
-        final String hookStatusText;
-        SystemMetricsSnapshot(long total, long used, long available, double cpu,
-                              String hookStatusText) {
-            totalMemoryBytes = total;
-            usedMemoryBytes = used;
-            availableMemoryBytes = available;
-            cpuPercent = cpu;
-            this.hookStatusText = hookStatusText;
         }
     }
 

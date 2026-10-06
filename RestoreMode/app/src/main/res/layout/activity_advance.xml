@@ -638,6 +638,55 @@
                 android:textColor="#AAAAAA" android:textSize="20px" />
 
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="24dp" android:text="Система"
+                android:textColor="#FFFFFF" android:textSize="28px" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="CPU" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowCpu" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:contentDescription="CPU"
+                    android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/CpuSizeRow" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Ширина" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/CpuSettingWidth" android:layout_width="120dp" android:layout_height="60dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="24dp" android:text="Высота" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/CpuSettingHeight" android:layout_width="120dp" android:layout_height="60dp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="RAM" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowRam" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:contentDescription="RAM"
+                    android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/RamSizeRow" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Ширина" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/RamSettingWidth" android:layout_width="120dp" android:layout_height="60dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="24dp" android:text="Высота" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/RamSettingHeight" android:layout_width="120dp" android:layout_height="60dp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="Очистить память" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowClearMemory" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:contentDescription="Очистить память"
+                    android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="CPU и RAM: последние 2 минуты, обновление каждые 5 секунд. Очистка памяти: закрытие сторонних приложений, размер 1×1."
+                android:textColor="#AAAAAA" android:textSize="20px" />
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="24dp" android:text="Энергия и автомобиль"
                 android:textColor="#FFFFFF" android:textSize="28px" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"

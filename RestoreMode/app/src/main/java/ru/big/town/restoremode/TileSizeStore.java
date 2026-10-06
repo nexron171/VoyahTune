@@ -32,11 +32,13 @@ class TileSizeStore {
     static int width(SharedPreferences prefs, String widgetId, int defaultValue) {
         if (prefs == null || widgetId == null) return defaultValue;
         int value=prefs.getInt(WIDTH_KEY_PREFIX + widgetId, defaultValue);
+        if (SystemWidgetLayout.isWidget(widgetId)) return SystemWidgetLayout.width(widgetId, value);
         return EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.width(widgetId,value):AppWidgetStore.clampWidth(value);
     }
 
     static int height(SharedPreferences prefs, String widgetId, int defaultValue) {
         if (prefs == null || widgetId == null) return defaultValue;
+        if (SystemWidgetLayout.isWidget(widgetId)) return 1;
         int value=prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue);
         return EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.height(widgetId,
                 width(prefs,widgetId,8),value):AppWidgetStore.clampHeight(value);
@@ -44,6 +46,11 @@ class TileSizeStore {
 
     static void setWidth(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) return;
+        if (SystemWidgetLayout.isWidget(widgetId)) {
+            prefs.edit().putInt(WIDTH_KEY_PREFIX + widgetId, SystemWidgetLayout.width(widgetId, value))
+                    .putInt(HEIGHT_KEY_PREFIX + widgetId, 1).apply();
+            return;
+        }
         int columns=EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.width(widgetId,value):AppWidgetStore.clampWidth(value);
         SharedPreferences.Editor editor=prefs.edit().putInt(WIDTH_KEY_PREFIX + widgetId,columns);
         if (EnergyWidgetLayout.isWidget(widgetId)) {
@@ -56,7 +63,7 @@ class TileSizeStore {
     static void setHeight(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) return;
         prefs.edit().putInt(HEIGHT_KEY_PREFIX + widgetId,
-                EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.height(widgetId,
+                SystemWidgetLayout.isWidget(widgetId) ? 1 : EnergyWidgetLayout.isWidget(widgetId)?EnergyWidgetLayout.height(widgetId,
                         width(prefs,widgetId,8),value):AppWidgetStore.clampHeight(value)).apply();
     }
 }
