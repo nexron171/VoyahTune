@@ -2,9 +2,9 @@ package ru.big.town.anative;
 
 /** Fixed primitive layouts verified against H97X CanBusService; no OEM classes are loaded. */
 final class EnergyTelemetrySample {
-    static final int SOC = 0, TRIP = 1, TIRES = 2, ODOMETER = 3, FUEL = 4, COUNT = 5;
-    static final int[] TRANSACTIONS = {71, 80, 70, 1, 9};
-    static final int[] WORD_COUNTS = {1, 20, 11, 10, 7};
+    static final int SOC = 0, TRIP = 1, TIRES = 2, ODOMETER = 3, FUEL = 4, PRECISE_ODOMETER = 5, COUNT = 6;
+    static final int[] TRANSACTIONS = {71, 80, 70, 1, 9, 56};
+    static final int[] WORD_COUNTS = {1, 20, 11, 10, 7, 8};
     final int kind;
     final float[] values;
     final int tripCounter;
@@ -30,6 +30,12 @@ final class EnergyTelemetrySample {
         if (kind < 0 || kind >= WORD_COUNTS.length) throw new IllegalArgumentException("kind");
         if (words == null || words.length < WORD_COUNTS[kind]) return unavailable(kind);
         switch (kind) {
+            case PRECISE_ODOMETER:
+                // H97C/H97X raw 0x2FE, observed against the whole-km odometer on H97X.
+                // Keep 100 m ticks as an exact integer float; consumers validate against ODOMETER.
+                for (int b : words) if (b < 0 || b > 255) return unavailable(kind);
+                int ticks = words[0] | (words[1] << 8) | (words[2] << 16);
+                return new EnergyTelemetrySample(kind, ticks > 0 && ticks < 0xffffff ? ticks : Float.NaN);
             case SOC:
                 return new EnergyTelemetrySample(kind, value(words[0], 0, 100));
             case FUEL:

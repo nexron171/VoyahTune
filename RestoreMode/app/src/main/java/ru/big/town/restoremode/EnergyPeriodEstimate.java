@@ -2,11 +2,15 @@ package ru.big.town.restoremode;
 
 import ru.big.town.common.EnergyWidgetSettings;
 
-/** Differences of cumulative downward steps, not net differences of the displayed levels. */
+/** Differences of cumulative use: battery includes bounded recovery, fuel only downward steps. */
 final class EnergyPeriodEstimate {
     final float battery,fuel,batteryKm,fuelKm;
     private EnergyPeriodEstimate(float battery,float fuel,float batteryKm,float fuelKm) {
         this.battery=battery;this.fuel=fuel;this.batteryKm=batteryKm;this.fuelKm=fuelKm;
+    }
+    static EnergyPeriodEstimate recent(float[] x,double[] evDrop,double[] fuelDrop,double[] evKm,double[] fuelKm,
+                                       float battery,float tank,double[]... baselines) {
+        return calculate(EnergyWidgetSettings.AVERAGE_WINDOW_KM,x,evDrop,fuelDrop,evKm,fuelKm,battery,tank,baselines);
     }
     static EnergyPeriodEstimate calculate(int window,float[] x,double[] evDrop,double[] fuelDrop,
                                          double[] evKm,double[] fuelKm,float battery,float tank,double[]... baselines) {
@@ -18,7 +22,7 @@ final class EnergyPeriodEstimate {
         if(start==end)return unavailable();
         double evDistance=evKm[end]-(baselines.length==0?evKm:baselines[2])[start];
         double fuelDistance=fuelKm[end]-(baselines.length==0?fuelKm:baselines[3])[start];
-        return new EnergyPeriodEstimate(EnergyWidgetSettings.average(evDrop[end]-(baselines.length==0?evDrop:baselines[0])[start],evDistance,battery),
+        return new EnergyPeriodEstimate(EnergyWidgetSettings.electricityAverage(evDrop[end]-(baselines.length==0?evDrop:baselines[0])[start],evDistance,battery),
                 EnergyWidgetSettings.average(fuelDrop[end]-(baselines.length==0?fuelDrop:baselines[1])[start],fuelDistance,tank),
                 validDistance(evDistance),validDistance(fuelDistance));
     }

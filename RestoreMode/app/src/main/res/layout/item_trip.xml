@@ -1,42 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginBottom="8dp"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:background="@drawable/layout_category_bg"
-    android:paddingHorizontal="16dp"
-    android:paddingVertical="12dp">
-
-    <TextView
-        android:id="@+id/tripDate"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:text=""
-        android:textColor="#cccccc"
-        android:textSize="26px" />
-
-    <TextView
-        android:id="@+id/tripDuration"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text=""
-        android:textColor="#FFFFFF"
-        android:textStyle="bold"
-        android:textSize="30px" />
-
-    <!-- Удалить поездку из истории -->
-    <ImageButton
-        android:id="@+id/tripDelete"
-        android:layout_width="52dp"
-        android:layout_height="52dp"
-        android:layout_marginStart="16dp"
-        android:padding="13dp"
-        android:background="@drawable/nav_back_circle_bg"
-        android:scaleType="fitCenter"
-        android:src="@drawable/ic_delete"
-        android:contentDescription="Удалить поездку" />
-
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:layout_marginBottom="12dp" android:orientation="vertical"
+    android:background="@drawable/layout_category_bg" android:padding="16dp">
+    <LinearLayout android:id="@+id/tripHeader" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="56dp" android:orientation="horizontal" android:gravity="center_vertical"
+        android:clickable="true" android:focusable="true" android:foreground="?android:attr/selectableItemBackground">
+        <TextView android:id="@+id/tripTitle" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:textAppearance="@style/EnergyTitleText"
+            android:maxLines="1" android:ellipsize="end" />
+        <ImageButton android:id="@+id/tripDelete" android:layout_width="52dp" android:layout_height="52dp"
+            android:layout_marginStart="16dp" android:padding="13dp" android:background="@drawable/nav_back_circle_bg"
+            android:scaleType="fitCenter" android:src="@drawable/ic_delete" android:contentDescription="Удалить поездку" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/tripBody" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:orientation="horizontal" android:baselineAligned="false"
+        android:visibility="gone">
+        <LinearLayout android:id="@+id/tripContent" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical">
+            <TextView android:id="@+id/tripSummary" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textAppearance="@style/EnergyLabelText" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:orientation="horizontal" android:baselineAligned="false">
+                <LinearLayout android:id="@+id/tripMetrics" android:layout_width="200dp" android:layout_height="wrap_content"
+                    android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="Электричество · на 100 км" android:textColor="#AAB3C4" android:textAppearance="@style/EnergyLabelText" />
+                    <TextView android:id="@+id/tripElectricityPer100" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp" android:fontFamily="sans-serif" android:textAppearance="@style/EnergyValueText" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:text="Бензин · на 100 км" android:textColor="#AAB3C4" android:textAppearance="@style/EnergyLabelText" />
+                    <TextView android:id="@+id/tripFuelPer100" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp" android:fontFamily="sans-serif" android:textAppearance="@style/EnergyValueText" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:text="Электричество" android:textColor="#AAB3C4" android:textAppearance="@style/EnergyLabelText" />
+                    <TextView android:id="@+id/tripElectricity" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp" android:fontFamily="sans-serif" android:textAppearance="@style/EnergyValueText" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:text="Бензин" android:textColor="#AAB3C4" android:textAppearance="@style/EnergyLabelText" />
+                    <TextView android:id="@+id/tripFuel" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp" android:fontFamily="sans-serif" android:textAppearance="@style/EnergyValueText" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:text="Расход за поездку по снижению уровней"
+                        android:textColor="#AAB3C4" android:textAppearance="@style/EnergyCaptionText" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/tripDetails" android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:layout_marginStart="24dp" android:orientation="vertical" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/tripRoute" android:layout_width="400dp" android:layout_height="wrap_content"
+            android:layout_marginStart="24dp" android:layout_marginTop="32dp"
+            android:orientation="vertical" android:visibility="gone" />
+    </LinearLayout>
 </LinearLayout>

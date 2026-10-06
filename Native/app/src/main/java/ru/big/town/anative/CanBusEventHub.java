@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
@@ -39,6 +40,7 @@ final class CanBusEventHub {
     private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
 
     private static final int TX_GET_DOOR_STATUS = 2;
+    private static final int TX_GET_GEAR_STATUS = 6;
     private static final int TX_QUERY_VEHICLE_STATE = 20;
     private static final int TX_ADD_CALLBACK = 28;
     private static final int TX_REMOVE_CALLBACK = 29;
@@ -89,6 +91,11 @@ final class CanBusEventHub {
     private final Handler vehicleQueryHandler;
     private final Handler telemetryQueryHandler;
     private final AtomicBoolean telemetryQueryPending = new AtomicBoolean();
+    private final Handler gearQueryHandler;
+    private final AtomicBoolean gearQueryPending = new AtomicBoolean();
+    private long gearRevision; // eventLock
+    private float preciseTicks = Float.NaN;
+    private long precisePublished = -1;
     private final long[] telemetryRevision = new long[EnergyTelemetrySample.COUNT]; // guarded by eventLock
     private final Executor ioExecutor;
     private final CanBusEventRouter router = new CanBusEventRouter();
@@ -138,6 +145,8 @@ final class CanBusEventHub {
         HandlerThread telemetryThread = new HandlerThread("CanBusTelemetryQuery");
         telemetryThread.start();
         telemetryQueryHandler = new Handler(telemetryThread.getLooper());
+        HandlerThread gearThread = new HandlerThread("CanBusGearQuery");
+        gearThread.start(); gearQueryHandler = new Handler(gearThread.getLooper());
         ioExecutor = command -> {
             if (!ioHandler.post(command)) {
                 throw new RejectedExecutionException("CanBusEventHubIo stopped");
@@ -181,6 +190,33 @@ final class CanBusEventHub {
         }
     }
 
+    /** A fresh TX6 sample is required after restoring a trip; a cached D cannot prove current gear. */
+    void requestGearSnapshot() {
+        if (!gearQueryPending.compareAndSet(false, true)) return;
+        gearQueryHandler.post(() -> {
+            IBinder binder; long epoch, revision;
+            synchronized (eventLock) { binder = remote; epoch = activeEpoch; revision = gearRevision; }
+            Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+            try {
+                if (binder == null || epoch == 0) return;
+                data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                if (!binder.transact(TX_GET_GEAR_STATUS, data, reply, 0)) return;
+                reply.readException();
+                if (reply.readInt() == 0) return;
+                reply.readInt(); int value = reply.readInt(); // ordinal, stable GearState value
+                if (value < 0 || value > 4) return;
+                synchronized (eventLock) {
+                    if (epoch == activeEpoch && readyEpoch == epoch && binder == remote && revision == gearRevision) {
+                        gearRevision++;
+                        router.dispatch(CanBusEvent.gear(CanBusEvent.Origin.SEED, epoch,
+                                ++nextSequence, SystemClock.elapsedRealtime(), value));
+                    }
+                }
+            } catch (RemoteException | RuntimeException e) { Log.w(TAG, "Gear snapshot unavailable", e); }
+            finally { data.recycle(); reply.recycle(); gearQueryPending.set(false); }
+        });
+    }
+
     /** Reads existing Binder getters on one bounded query worker, never on the hub/UI thread. */
     void requestEnergySnapshot() {
         if (!router.hasInterest(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY)
@@ -218,8 +254,11 @@ final class CanBusEventHub {
         Parcel data = Parcel.obtain(), reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+            if (kind == EnergyTelemetrySample.PRECISE_ODOMETER) data.writeInt(0x2FE);
             if (!binder.transact(EnergyTelemetrySample.TRANSACTIONS[kind], data, reply, 0)) return null;
             reply.readException();
+            if (kind == EnergyTelemetrySample.PRECISE_ODOMETER)
+                return EnergyTelemetrySample.decode(kind, reply.createIntArray());
             return decodeEnergyParcel(reply, kind);
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "Telemetry getter " + kind + ": " + e.getMessage());
@@ -243,6 +282,11 @@ final class CanBusEventHub {
     private void routeEnergy(long epoch, EnergyTelemetrySample sample) {
         synchronized (eventLock) {
             if (epoch != activeEpoch) return;
+            if (sample.kind == EnergyTelemetrySample.PRECISE_ODOMETER) {
+                long now = SystemClock.elapsedRealtime();
+                if (Float.compare(preciseTicks, sample.values[0]) == 0 && precisePublished >= 0 && now - precisePublished < 1000) return;
+                preciseTicks = sample.values[0]; precisePublished = now;
+            }
             telemetryRevision[sample.kind]++;
             routeLocked(CanBusEvent.telemetry(CanBusEvent.Origin.LIVE, epoch,
                     ++nextSequence, SystemClock.elapsedRealtime(), sample));
@@ -659,6 +703,7 @@ final class CanBusEventHub {
     private void routeGear(long epoch, int value) {
         synchronized (eventLock) {
             if (epoch != activeEpoch) return;
+            gearRevision++;
             routeLocked(CanBusEvent.gear(CanBusEvent.Origin.LIVE, epoch,
                     ++nextSequence, SystemClock.elapsedRealtime(), value));
         }
@@ -724,6 +769,16 @@ final class CanBusEventHub {
                 throws RemoteException {
             try {
                 switch (code) {
+                    case 51: { // onCanRawDataChanged(int, Bundle), existing shared CAN callback
+                        if (!router.hasInterest(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY)) return true;
+                        data.enforceInterface(CALLBACK_DESCRIPTOR);
+                        int canId = data.readInt();
+                        if (canId != 0x2FE || data.readInt() == 0) return true;
+                        Bundle raw = Bundle.CREATOR.createFromParcel(data);
+                        routeEnergy(epoch, EnergyTelemetrySample.decode(EnergyTelemetrySample.PRECISE_ODOMETER,
+                                raw.getIntArray(Integer.toString(canId))));
+                        return true;
+                    }
                     case 46: // onBatteryRemainingCapacityChanged: scalar float
                     case 17: // onFuelLevelChanged: FuelLevel Parcelable
                     case 60: // onEnergyConsumptionInfoChanged

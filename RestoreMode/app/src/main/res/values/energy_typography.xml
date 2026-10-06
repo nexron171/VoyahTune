@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="energy_value_text_size">44sp</dimen>
+    <dimen name="energy_title_text_size">26sp</dimen>
+    <dimen name="energy_label_text_size">20sp</dimen>
+    <dimen name="energy_unit_text_size">20sp</dimen>
+    <dimen name="energy_caption_text_size">18sp</dimen>
+    <dimen name="energy_control_text_size">22sp</dimen>
+
+    <style name="EnergyValueText">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textSize">@dimen/energy_value_text_size</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">#EEF1F6</item>
+    </style>
+    <style name="EnergyLabelText">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textSize">@dimen/energy_label_text_size</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">#AAB3C4</item>
+    </style>
+    <style name="EnergyTitleText">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">@dimen/energy_title_text_size</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">#EEF1F6</item>
+    </style>
+    <style name="EnergyCaptionText" parent="EnergyLabelText">
+        <item name="android:textSize">@dimen/energy_caption_text_size</item>
+    </style>
+</resources>

@@ -28,7 +28,7 @@ final class EnergyHistory {
         }
     }
     private final ArrayList<Point> points = new ArrayList<>();
-    private final LevelConsumption battery = new LevelConsumption(), fuelUse = new LevelConsumption();
+    private final LevelConsumption battery = new LevelConsumption(true), fuelUse = new LevelConsumption();
     private boolean gap = true;
     private long lastTime = -1;
 
@@ -76,10 +76,10 @@ final class EnergyHistory {
     void restore(List<Point> saved) {
         clear();
         for (Point p:saved) {
-            if (!Float.isFinite(p.km)||p.km<0 || !total(p.evDrop)||!total(p.fuelDrop)||!total(p.evKm)||!total(p.fuelKm)) { clear(); return; }
+            if (!Float.isFinite(p.km)||p.km<0 || !Double.isFinite(p.evDrop)||!total(p.fuelDrop)||!total(p.evKm)||!total(p.fuelKm)) { clear(); return; }
             if (!points.isEmpty()) {
                 Point old=points.get(points.size()-1);
-                if (p.km<=old.km || p.evDrop<old.evDrop || p.fuelDrop<old.fuelDrop
+                if (p.km<=old.km || p.fuelDrop<old.fuelDrop
                         || p.evKm<old.evKm || p.fuelKm<old.fuelKm) { clear(); return; }
             }
             points.add(new Point(p.km,level(p.ev),level(p.fuel),p.gap,p.evDrop,p.fuelDrop,p.evKm,p.fuelKm,

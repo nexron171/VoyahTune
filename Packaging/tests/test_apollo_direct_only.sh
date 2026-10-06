@@ -94,13 +94,20 @@ require_fixed "$PROVIDER" 'ApolloSettings.GREEN_SOUND, // 26'
 require_fixed "$PROVIDER" 'ApolloSettings.TRAFFIC_SIGNS,// 27'
 for SYMBOL in MSG_APOLLO_TLC_QUERY ACTION_APOLLO_TLC_UPDATE APOLLO_DEMAND_OWNER \
         requestQuery releaseApolloDemand ApolloTlcService ApolloCanBusDemandGate \
-        ApolloTlcPolicy TX_GET_GEAR_STATUS; do
+        ApolloTlcPolicy; do
     if grep -R -Fq --exclude-dir=build --exclude-dir=.gradle \
+            --include='*.java' --include='*.xml' \
             --exclude=test_apollo_direct_only.sh \
             "$SYMBOL" "$REPO_ROOT/Native" "$REPO_ROOT/RestoreMode"; then
         fail "obsolete read-only Apollo symbol remains: $SYMBOL"
     fi
 done
+# TX6 is owned by the shared CAN hub to recover the current trip's gear after a restart.
+# It must not return as a separate Apollo getter or a second transport in a consumer.
+if grep -R -Fq --include='*.java' --include='*.xml' --exclude=CanBusEventHub.java \
+        'TX_GET_GEAR_STATUS' "$REPO_ROOT/Native/app/src" "$REPO_ROOT/RestoreMode/app/src"; then
+    fail "gear snapshot transport must remain in the shared CanBusEventHub"
+fi
 # TX57 is now a shared transport capability for the unrelated Power Hold one-shot SOC/status
 # checks. Apollo itself must remain write-only and must not read current VehicleState.
 forbid_fixed "$RESTORE_POLICY" 'readVehicleState'

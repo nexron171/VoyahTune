@@ -560,7 +560,9 @@ public class AdvanceActivity extends AppCompatActivity {
                 TileSizeStore.SUSPENSION_WIDGET_ID,
                 TileSizeStore.SUSPENSION_DEFAULT_WIDTH, TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
         bindShowSwitch(R.id.switchShowEnergy, "show_energyWidget", false, R.id.EnergySizeRow);
-        bindTileSizeSpinners(R.id.EnergySettingWidth, R.id.EnergySettingHeight, "energyWidget", 8, 3);
+        bindTileSizeSpinners(R.id.EnergySettingWidth, R.id.EnergySettingHeight, "energyWidget", 8, 4);
+        bindShowSwitch(R.id.switchShowEnergyConsumption, "show_energyConsumptionWidget", false, R.id.EnergyConsumptionSizeRow);
+        bindTileSizeSpinners(R.id.EnergyConsumptionSettingWidth, R.id.EnergyConsumptionSettingHeight, "energyConsumptionWidget", 2, 2);
         bindShowSwitch(R.id.switchShowEnergyTrip, "show_energyTripWidget", false, R.id.EnergyTripSizeRow);
         bindTileSizeSpinners(R.id.EnergyTripSettingWidth, R.id.EnergyTripSettingHeight, "energyTripWidget", 8, 2);
         bindShowSwitch(R.id.switchShowTirePressure, "show_tirePressureWidget", false, R.id.TirePressureSizeRow);
@@ -771,6 +773,10 @@ public class AdvanceActivity extends AppCompatActivity {
         }
 
         // Раздел «Другое»: пароль инженерного меню на сегодня.
+        findViewById(R.id.buttonTripLocationPermission).setOnClickListener(v -> TripLocationPermission.openSettings(this));
+        findViewById(R.id.buttonRequestTripLocation).setOnClickListener(v -> TripLocationPermission.request(this));
+        findViewById(R.id.buttonDisableTripLocation).setOnClickListener(v -> TripLocationPermission.disable(this));
+        TripLocationPermission.refresh(this);
         showEngineeringPassword();
 
         // Положение плавающей кнопки: 0 лево, 1 верх, 2 право
@@ -2785,12 +2791,15 @@ public class AdvanceActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
         super.onRequestPermissionsResult(request, permissions, grants);
+        TripLocationPermission.result(this, request);
         if (voiceSettings != null) voiceSettings.onPermissionResult(request, grants);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        TripLocationPermission.refresh(this);
+        TripLocationPermission.sync(this);
         activityResumed = true;
         refreshSteerActions();
         if (currentSection == SECTION_VOICE && voiceSettings != null) voiceSettings.refresh();

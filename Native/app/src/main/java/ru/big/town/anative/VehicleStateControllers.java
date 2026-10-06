@@ -8,9 +8,9 @@ import android.util.Log;
 /**
  * Composition root for shared vehicle state.
  *
- * <p>This is the only subscription to {@link CanBusEventHub} for drive mode, gear and driver-door
- * events. Domain consumers subscribe to the typed controllers instead of depending on CAN event
- * kinds, IDs or snapshot mechanics.</p>
+ * <p>This routes drive mode, gear and driver-door events from {@link CanBusEventHub} to typed
+ * controllers. Trip recording also consumes gear with connection and energy telemetry in one
+ * ordered hub mailbox. Other domain consumers use the typed controllers.</p>
  */
 final class VehicleStateControllers {
     private static final String TAG = "VehicleStateControllers";
@@ -114,7 +114,7 @@ final class VehicleStateControllers {
                                 : DriverDoorStateController.Source.SNAPSHOT);
                 break;
             case GEAR:
-                if (!accHooks) {
+                if (!accHooks && event.origin == CanBusEvent.Origin.LIVE) {
                     if (event.first == 3) ApplyEngine.stopEarlyDriveRestore("gear Drive");
                     if (restoreTriggers.onGear(event.first)) ApplyEngine.scheduleNativeApply("gear Drive");
                     ApplyEngine.noteGear(event.first);

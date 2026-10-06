@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>VoyahTune — история поездок</title>
+  <style>
+    :root {
+      --background: #22252f; --text: #eef1f6; --muted: #aab3c4;
+      --border: #373f4a; --electricity: #66d3ad; --fuel: #79b5f1;
+    }
+    * { box-sizing: border-box; }
+    /* Android mdpi: 160 dpi means one dp/sp per logical CSS pixel (font scale 1). */
+    body { margin: 0; height: 100dvh; overflow: hidden; display: grid; place-items: center; background: #141720; color: var(--text); font-family: Roboto, Arial, sans-serif; }
+    button { font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, .map:focus-visible { outline: 2px solid var(--fuel); outline-offset: 4px; }
+    [hidden] { display: none !important; }
+    .device-preview { position: relative; width: calc(1920px * var(--preview-scale, 1)); height: calc(720px * var(--preview-scale, 1)); overflow: hidden; }
+    .screen { position: absolute; inset: 0 auto auto 0; width: 1920px; height: 720px; padding: 20px 28px 20px 173px; display: flex; flex-direction: column; overflow: hidden; background: var(--background); transform: scale(var(--preview-scale, 1)); transform-origin: top left; }
+    /* Same 145 dp dock reservation and 28 dp horizontal padding as TripHistoryActivity. */
+    .screen-header { display: flex; flex: none; align-items: center; gap: 20px; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 44px; font-weight: 700; line-height: 1.2; }
+    .round-button { display: grid; place-items: center; flex: none; border: 0; border-radius: 50%; background: var(--border); }
+    .round-button:hover { background: #475162; }
+    .round-button svg { width: 26px; height: 26px; }
+    .back { width: 72px; height: 72px; }
+    .delete { width: 52px; height: 52px; }
+    .clear-all { margin-left: auto; height: 52px; padding: 0 24px; border: 0; border-radius: 26px; background: var(--border); font-size: 20px; white-space: nowrap; }
+    .clear-all:hover { background: #475162; }
+    .clear-all:disabled { opacity: .45; cursor: default; }
+    .trip-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; }
+    .trip-scroll::-webkit-scrollbar { display: none; }
+    .trip-list { display: grid; gap: 12px; }
+    .trip { border: 1px solid var(--border); border-radius: 20px; padding: 16px; min-width: 0; }
+    .trip-heading { display: flex; align-items: center; gap: 16px; min-height: 56px; }
+    .trip-toggle { border: 0; background: transparent; text-align: left; padding: 12px 0; flex: 1; min-width: 0; color: #fff; font-size: 26px; }
+    .trip-toggle:hover { color: var(--fuel); }
+    .trip-toggle span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .trip-body { display: grid; grid-template-columns: minmax(0, 1fr) min(47.5%, 500px); gap: 24px; padding-top: 12px; }
+    .trip-body.no-route { grid-template-columns: minmax(0, 1fr); }
+    .content { min-width: 0; }
+    .summary { display: flex; flex-wrap: wrap; column-gap: 24px; row-gap: 6px; font-size: 24px; line-height: 1.3; color: #ccc; }
+    .stats-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; margin-top: 12px; }
+    .consumption-values { grid-row: 1 / span 2; }
+    .consumption-values .metric:first-child { margin-top: 0; }
+    .chart-group { grid-column: 2; min-width: 0; margin: 0; }
+    .metric { margin-top: 12px; }
+    .metric-label { font-size: 20px; color: var(--muted); }
+    .metric-value { margin-top: 4px; font-size: 43px; font-weight: 400; line-height: 1.25; font-variant-numeric: tabular-nums; }
+    .metric-value small { margin-left: 10px; font-size: 17px; }
+    .electric { color: var(--electricity); }
+    .fuel { color: var(--fuel); }
+    .muted { color: var(--muted); }
+    .estimate-note { margin: 8px 0 12px; font-size: 14px; color: var(--muted); }
+    .chart { display: block; width: 100%; height: 160px; overflow: visible; }
+    .chart-legend { display: flex; gap: 24px; margin: 10px 0 6px; font-size: 14px; }
+    .axis-note { margin: 0; font-size: 14px; color: #ccc; }
+    .route { min-width: 0; margin-top: 32px; }
+    .map { position: relative; width: 100%; aspect-ratio: 1; border-radius: 20px; overflow: hidden; background: #242e3c; touch-action: none; cursor: grab; user-select: none; }
+    .map:active { cursor: grabbing; }
+    .map-svg { display: block; width: 100%; height: 100%; }
+    .map-hud { position: absolute; top: 0; left: 0; right: 0; padding: 10px 12px 18px; font-size: 13px; line-height: 1.4; pointer-events: none; background: linear-gradient(#18202ce6, #18202c00); }
+    .map-caption { position: absolute; bottom: 0; left: 0; right: 0; padding: 7px 10px; font-size: 12px; background: #18202ccc; pointer-events: none; }
+    .route-title { margin: 12px 0 8px; font-size: 14px; color: #ccc; }
+    .speed-legend { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; font-size: 14px; }
+    .speed-legend span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .speed-legend i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--speed); }
+    .prototype-note { position: fixed; bottom: 12px; left: 16px; right: 16px; margin: 0; text-align: center; font-size: 13px; color: var(--muted); }
+    .empty { padding: 24px 0; font-size: 24px; }
+    dialog { position: fixed; top: 50%; left: 50%; margin: 0; color: var(--text); background: var(--background); border: 1px solid var(--border); border-radius: 20px; padding: 24px; width: 440px; max-width: none; transform: translate(-50%, -50%) scale(var(--preview-scale, 1)); }
+    dialog::backdrop { background: #0009; }
+    dialog h2 { margin: 0 0 12px; font-size: 24px; }
+    dialog p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+    .dialog-actions button { border: 1px solid var(--border); border-radius: 24px; background: var(--border); padding: 12px 20px; }
+    .dialog-actions .confirm-delete { color: #ff8a8a; }
+    .status { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); border-radius: 12px; background: #373f4a; padding: 12px 20px; font-size: 14px; z-index: 3; }
+  </style>
+</head>
+<body>
+  <div class="device-preview" aria-label="Экран головного устройства 1920 на 720, плотность 160 dpi">
+  <main class="screen">
+    <header class="screen-header">
+      <button class="round-button back" id="back" aria-label="Назад к свёрнутому списку поездок" title="Назад к списку">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <h1>История поездок</h1>
+      <button class="clear-all" id="clear-all">Удалить все записи</button>
+    </header>
+    <div class="trip-scroll" id="trip-scroll">
+      <section class="trip-list" id="trip-list" aria-label="Сохранённые поездки"></section>
+      <p class="empty" id="empty" hidden>Поездок пока нет</p>
+    </div>
+    <div class="status" id="status" role="status" hidden></div>
+  </main>
+  </div>
+  <p class="prototype-note" id="prototype-note">1920×720 · 160 dpi · Все поездки и подложки карт тестовые.</p>
+  <dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-description">
+    <h2 id="delete-title">Удалить поездку?</h2>
+    <p id="delete-description">Будут удалены тестовая запись, графики и маршрут. Перезагрузка страницы вернёт все примеры.</p>
+    <div class="dialog-actions">
+      <button id="cancel-delete" autofocus>Отмена</button>
+      <button class="confirm-delete" id="confirm-delete">Удалить</button>
+    </div>
+  </dialog>
+  <script>
+    'use strict';
+    // Standalone preview: synthetic fixtures only, with no Android, location or network access.
+    const COLORS = { electric: '#66d3ad', fuel: '#79b5f1', muted: '#aab3c4', border: '#373f4a' };
+    const SPEED_COLORS = ['#64d8ff', '#2979ff', '#ffdf38', '#ff922e', '#f04444'];
+    const SPEED_BANDS = ['0–25', '26–59', '60–79', '80–129', '130+'];
+    const NS = 'http://www.w3.org/2000/svg';
+    const number = (value, digits = 1) => value.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    const speedColor = value => SPEED_COLORS[value < 26 ? 0 : value < 60 ? 1 : value < 80 ? 2 : value < 130 ? 3 : 4];
+    function fixture(id, label, start, end, steps, soc, socDrop, fuel, fuelDrop, speeds, gps) {
+      const energy = [], track = [];
+      let previousSoc = soc, previousFuel = fuel, electricDrop = 0, petrolDrop = 0;
+      for (let i = 0; i <= steps; i++) {
+        const gap = !gps && i >= 12 && i < 17;
+        const level = soc - socDrop * i / steps + .05 * Math.sin(i / 4);
+        const petrol = fuel - fuelDrop * i / steps;
+        const validInterval = i > 0 && !gap && (!energy.length || energy.at(-1).soc !== null);
+        const deltaSoc = validInterval ? Math.max(0, previousSoc - level) : null;
+        const deltaFuel = i > 0 ? Math.max(0, previousFuel - petrol) : null;
+        electricDrop += deltaSoc || 0; petrolDrop += deltaFuel || 0;
+        energy.push({ km: i / 10, soc: gap ? null : level, fuel: petrol,
+          electricRate: deltaSoc === null ? null : deltaSoc * 43 / .1,
+          fuelRate: deltaFuel === null ? null : deltaFuel * 56 / .1 });
+        previousSoc = level; previousFuel = petrol;
+        if (gps) {
+          const speed = speeds[Math.floor(i / 3) % speeds.length];
+          track.push({ x: 250 + Math.sin(i / 9) * 12, y: 440 - i / steps * 360,
+            km: i / 10, speed, meters: i ? 100 : 0, seconds: i ? 360 / speed : 0 });
+        }
+      }
+      return { id, label, start, end, distance: steps / 10, soc, fuel,
+        endSoc: energy.at(-1).soc, endFuel: energy.at(-1).fuel,
+        electricity: electricDrop * .43, petrol: petrolDrop * .56, energy, track };
+    }
+    const trips = [
+      fixture('city', 'Городская', '05.10.2026 14:24', '05.10.2026 14:36', 60, 80, 2.4, 65, .6, [20,35,45,55,35,25], true),
+      fixture('highway', 'Трасса', '05.10.2026 10:24', '05.10.2026 10:42', 180, 89, 9, 82, .8, [20,45,70,95,125,138,145,105], true),
+      fixture('no-gps', 'Без GPS', '04.10.2026 14:24', '04.10.2026 14:30', 32, 60, .4, 50, .5, [25,35,45,35], false)
+    ];
+    const durations = { city: '11 мин', highway: '17 мин', 'no-gps': '5 мин' };
+    const maps = new Map();
+    const cardObservers = new WeakMap();
+    const list = document.getElementById('trip-list');
+    const tripScroll = document.getElementById('trip-scroll');
+    const clearAllButton = document.getElementById('clear-all');
+    const deleteDialog = document.getElementById('delete-dialog');
+    let pendingDelete = null, statusTimer;
+
+    function fitPreview() {
+      const scale = Math.min(1, window.innerWidth / 1920, window.innerHeight / 720);
+      document.documentElement.style.setProperty('--preview-scale', String(scale));
+      // Keep the note outside the simulated display, only where letterboxing leaves room.
+      document.getElementById('prototype-note').hidden = (window.innerHeight - 720 * scale) / 2 < 40;
+    }
+    fitPreview();
+    window.addEventListener('resize', fitPreview);
+
+    function openDeleteDialog(request) {
+      pendingDelete = request;
+      document.getElementById('delete-title').textContent = request.all ? 'Удалить все записи?' : 'Удалить поездку?';
+      document.getElementById('delete-description').textContent = request.all
+        ? 'Будут удалены все тестовые поездки, графики и маршруты. Перезагрузка страницы вернёт все примеры.'
+        : 'Будут удалены тестовая запись, графики и маршрут. Перезагрузка страницы вернёт все примеры.';
+      deleteDialog.showModal();
+      document.getElementById('cancel-delete').focus();
+    }
+
+    function svgElement(tag, attributes = {}, text) {
+      const node = document.createElementNS(NS, tag);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+    function chart(svg, trip, consumption) {
+      // Use layout pixels, unaffected by the outer preview's fit-to-window transform.
+      const width = svg.clientWidth;
+      if (width < 1) return;
+      svg.setAttribute('viewBox', `0 0 ${width} 160`);
+      svg.replaceChildren();
+      const left = 58, right = width - (consumption ? 48 : 20), top = consumption ? 52 : 38, bottom = 128;
+      const maxElectric = consumption ? Math.max(5, Math.ceil(Math.max(...trip.energy.map(p => p.electricRate || 0)) / 5) * 5) : 100;
+      const maxFuel = consumption ? Math.max(5, Math.ceil(Math.max(...trip.energy.map(p => p.fuelRate || 0)) / 5) * 5) : 100;
+      const text = (label, x, y, fill = COLORS.muted, anchor = 'start', size = 12) => svg.append(svgElement('text', { x, y, fill, 'font-size': size, 'text-anchor': anchor }, label));
+      text(consumption ? 'Расход' : 'Уровни, %', left, 23, COLORS.muted, 'start', 14);
+      if (consumption) {
+        text('кВт·ч/100 км', left, 41, COLORS.electric);
+        text('л/100 км', right, 41, COLORS.fuel, 'end');
+      }
+      for (let i = 0; i <= 4; i++) {
+        const fraction = i / 4, y = bottom - (bottom - top) * fraction;
+        svg.append(svgElement('line', { x1: left, x2: right, y1: y, y2: y, stroke: COLORS.border }));
+        const value = maxElectric * fraction;
+        text(consumption ? number(value, Number.isInteger(value) ? 0 : 1) : `${value}%`, left - 8, y + 4, consumption ? COLORS.electric : COLORS.muted, 'end');
+        if (consumption) text(number(maxFuel * fraction, 1), right + 8, y + 4, COLORS.fuel);
+        text(number(trip.distance * fraction, 1), left + (right - left) * fraction, 150, COLORS.muted, 'middle');
+      }
+      for (const [key, color, maximum] of consumption
+        ? [['electricRate', COLORS.electric, maxElectric], ['fuelRate', COLORS.fuel, maxFuel]]
+        : [['soc', COLORS.electric, 100], ['fuel', COLORS.fuel, 100]]) {
+        let path = '', previous = null, endpoint = null;
+        for (const sample of trip.energy) {
+          if (sample[key] === null) { previous = null; continue; }
+          const x = left + (right - left) * sample.km / trip.distance;
+          const y = bottom - (bottom - top) * sample[key] / maximum;
+          if (!previous) path += `M${x},${y}`;
+          else {
+            const middle = (x + previous.x) / 2;
+            path += `C${middle},${previous.y} ${middle},${y} ${x},${y}`;
+          }
+          previous = endpoint = { x, y };
+        }
+        svg.append(svgElement('path', { d: path, fill: 'none', stroke: color, 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+        if (endpoint) svg.append(svgElement('circle', { cx: endpoint.x, cy: endpoint.y, r: 2.5, fill: color }));
+      }
+    }
+
+    function basemap(id) {
+      // Illustrative city plan, deliberately local; these are not provider tiles or GPS data.
+      let streets = '';
+      for (let i = -5; i <= 14; i++) {
+        const x = i * 56;
+        streets += `<path d="M${x},-300 l500,1100 M-300,${x} l1100,180"/>`;
+      }
+      return `<defs><pattern id="blocks-${id}" width="42" height="48" patternTransform="rotate(-12)" patternUnits="userSpaceOnUse"><rect x="7" y="7" width="27" height="31" rx="3" fill="#2d3743" stroke="#35404c" stroke-width="1"/></pattern></defs>
+        <rect x="-1000" y="-1000" width="2500" height="2500" fill="#242e3a"/>
+        <rect x="-500" y="-500" width="1500" height="1500" fill="url(#blocks-${id})"/>
+        <path d="M350 10c-70 70-18 126 39 156s36 99-27 134-9 91 70 160" fill="none" stroke="#263f4a" stroke-width="28"/>
+        <path d="M44 75l100-38 50 73-70 72-70-29z M76 345l67-22 38 67-65 46z M380 220l86-29 22 76-68 31z" fill="#293e39"/>
+        <g stroke="#414c59" stroke-width="2" fill="none">${streets}</g>
+        <g fill="none" stroke="#1c2632" stroke-width="12"><ellipse cx="264" cy="274" rx="120" ry="141"/><ellipse cx="264" cy="274" rx="222" ry="224"/><path d="M40 510 168 340 226 247 318 121 393-30 M-40 255 165 251 300 271 560 205"/></g>
+        <g fill="none" stroke="#667180" stroke-width="5"><ellipse cx="264" cy="274" rx="120" ry="141"/><ellipse cx="264" cy="274" rx="222" ry="224"/><path d="M40 510 168 340 226 247 318 121 393-30 M-40 255 165 251 300 271 560 205"/></g>
+        <g fill="#a2adba" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">
+          <text x="289" y="281" font-size="19" fill="#c4cdd7">Москва</text><text x="265" y="172">Тверской</text>
+          <text x="121" y="224">Пресненский</text><text x="191" y="311">Арбат</text>
+          <text x="358" y="360">Замоскворечье</text><text x="103" y="369">Дорогомилово</text>
+          <text x="125" y="91">Беговой</text><text x="411" y="125">Красносельский</text>
+        </g>`;
+    }
+    function createMap(container, trip) {
+      const svg = svgElement('svg', { class: 'map-svg', viewBox: '0 0 500 500', 'aria-hidden': 'true' });
+      const camera = svgElement('g', { class: 'map-camera' });
+      camera.innerHTML = basemap(trip.id);
+      for (const outline of [true, false]) for (let i = 1; i < trip.track.length; i++) {
+        const a = trip.track[i - 1], b = trip.track[i];
+        camera.append(svgElement('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+          stroke: outline ? '#22252b' : speedColor(b.speed), 'stroke-width': outline ? 8 : 5,
+          'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }));
+      }
+      for (const [point, color] of [[trip.track[0], SPEED_COLORS[0]], [trip.track.at(-1), SPEED_COLORS[4]]]) {
+        camera.append(svgElement('circle', { cx: point.x, cy: point.y, r: 6, fill: color, stroke: '#22252b', 'stroke-width': 2 }));
+      }
+      svg.append(camera);
+      container.prepend(svg);
+      const hud = container.querySelector('.map-hud');
+      const state = { scale: 1, x: 0, y: 0, pointers: new Map(), previous: null, start: null, moved: false };
+      const render = () => camera.setAttribute('transform', `translate(${state.x} ${state.y}) scale(${state.scale})`);
+      const local = e => {
+        const rect = container.getBoundingClientRect();
+        return { x: (e.clientX - rect.left) * 500 / rect.width, y: (e.clientY - rect.top) * 500 / rect.height };
+      };
+      const frame = () => {
+        const points = [...state.pointers.values()];
+        if (points.length >= 2) return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2,
+          span: Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) };
+        return points.length ? { ...points[0], span: 0 } : null;
+      };
+      function scaleAt(factor, before, after = before) {
+        const scale = Math.max(.7, Math.min(8, state.scale * factor)), applied = scale / state.scale;
+        state.x = after.x - (before.x - state.x) * applied;
+        state.y = after.y - (before.y - state.y) * applied;
+        state.scale = scale;
+        render();
+      }
+      function select(position) {
+        const x = (position.x - state.x) / state.scale, y = (position.y - state.y) / state.scale;
+        let best = 25 / state.scale, selected = null;
+        for (let i = 1; i < trip.track.length; i++) {
+          const a = trip.track[i - 1], b = trip.track[i], dx = b.x - a.x, dy = b.y - a.y;
+          const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy)));
+          const distance = Math.hypot(x - a.x - t * dx, y - a.y - t * dy);
+          if (distance < best) { best = distance; selected = b; }
+        }
+        if (selected) hud.textContent = `${selected.meters} м · ${number(selected.seconds)} с · ${number(selected.speed)} км/ч`;
+      }
+      container.addEventListener('pointerdown', e => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        container.setPointerCapture(e.pointerId);
+        const position = local(e);
+        if (!state.pointers.size) { state.start = position; state.moved = false; }
+        state.pointers.set(e.pointerId, position);
+        if (state.pointers.size > 1) state.moved = true;
+        state.previous = frame();
+      });
+      container.addEventListener('pointermove', e => {
+        if (!state.pointers.has(e.pointerId)) return;
+        state.pointers.set(e.pointerId, local(e));
+        const current = frame(), previous = state.previous;
+        if (current.span > 0 && previous.span > 0) scaleAt(current.span / previous.span, previous, current);
+        else {
+          state.x += current.x - previous.x; state.y += current.y - previous.y;
+          if (state.start && Math.hypot(current.x - state.start.x, current.y - state.start.y) > 4) state.moved = true;
+          render();
+        }
+        state.previous = current;
+      });
+      const release = e => {
+        if (!state.pointers.has(e.pointerId)) return;
+        if (e.type === 'pointerup' && state.pointers.size === 1 && !state.moved) select(local(e));
+        state.pointers.delete(e.pointerId);
+        state.previous = frame();
+      };
+      container.addEventListener('pointerup', release);
+      container.addEventListener('pointercancel', release);
+      container.addEventListener('lostpointercapture', release);
+      container.addEventListener('wheel', e => {
+        e.preventDefault();
+        const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 500 : 1);
+        scaleAt(Math.exp(-delta * .002), local(e));
+      }, { passive: false });
+      container.addEventListener('keydown', e => {
+        const directions = { ArrowLeft: [24, 0], ArrowRight: [-24, 0], ArrowUp: [0, 24], ArrowDown: [0, -24] };
+        if (directions[e.key]) { e.preventDefault(); state.x += directions[e.key][0]; state.y += directions[e.key][1]; render(); }
+        else if (e.key === '+' || e.key === '=' || e.key === '-') { e.preventDefault(); scaleAt(e.key === '-' ? .8 : 1.25, { x: 250, y: 250 }); }
+        else if (e.key === 'Home') { e.preventDefault(); state.scale = 1; state.x = state.y = 0; render(); }
+      });
+      maps.set(trip.id, { reset: () => { state.scale = 1; state.x = state.y = 0; render(); } });
+      render();
+    }
+
+    function renderTrip(trip) {
+      const card = document.createElement('article');
+      card.className = 'trip'; card.dataset.trip = trip.id;
+      const heading = `Тестовая · ${trip.label} · Поездка ${trip.start} — ${trip.end} · ${durations[trip.id]} · ${number(trip.distance, Number.isInteger(trip.distance) ? 0 : 1)} км`;
+      const per100 = amount => trip.distance > 0 ? `~${number(amount * 100 / trip.distance)}` : '—';
+      card.innerHTML = `
+        <div class="trip-heading">
+          <button class="trip-toggle" aria-expanded="false" aria-controls="body-${trip.id}" title="${heading}"><span>${heading}</span></button>
+          <button class="round-button delete" aria-label="Удалить поездку: ${trip.label}" title="Удалить поездку">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M9 6V4h6v2M6 6l1 14h10l1-14M10 10v6M14 10v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="trip-body ${trip.track.length ? '' : 'no-route'}" id="body-${trip.id}" hidden>
+          <div class="content">
+            <div class="summary"><span>Заряд: ${number(trip.soc)} % → ${number(trip.endSoc)} %</span><span>Бензин: ${number(trip.fuel)} % → ${number(trip.endFuel)} %</span></div>
+            <div class="stats-row">
+              <div class="consumption-values">
+                <div class="metric"><div class="metric-label">Электричество · на 100 км</div><div class="metric-value electric">${per100(trip.electricity)}<small>кВт·ч</small></div></div>
+                <div class="metric"><div class="metric-label">Бензин · на 100 км</div><div class="metric-value fuel">${per100(trip.petrol)}<small>л</small></div></div>
+                <div class="metric"><div class="metric-label">Электричество</div><div class="metric-value electric">~${number(trip.electricity)}<small>кВт·ч</small></div></div>
+                <div class="metric"><div class="metric-label">Бензин</div><div class="metric-value fuel">~${number(trip.petrol)}<small>л</small></div></div>
+                <p class="estimate-note">Расход за поездку по снижению уровней</p>
+              </div>
+              <figure class="chart-group">
+                <svg class="chart levels-chart" role="img" aria-label="Уровни заряда и бензина за поездку"></svg>
+                <figcaption>
+                  <div class="chart-legend"><span class="electric">● Электричество</span><span class="fuel">● Бензин</span></div>
+                  <p class="axis-note">Ось X · пробег, км.</p>
+                </figcaption>
+              </figure>
+              <figure class="chart-group">
+                <svg class="chart consumption-chart" role="img" aria-label="Расход электричества и бензина на 100 км"></svg>
+                <figcaption>
+                  <div class="chart-legend"><span class="electric">● Электричество</span><span class="fuel">● Бензин</span></div>
+                  <p class="axis-note">Ось X · пробег, км.</p>
+                </figcaption>
+              </figure>
+            </div>
+          </div>
+          ${trip.track.length ? `<div class="route">
+            <div class="map" tabindex="0" role="region" aria-label="Карта маршрута: ${trip.label}. Перемещение пальцем или мышью, масштабирование двумя пальцами или колесом; клавиши стрелок и плюс/минус, Home — вернуть вид.">
+              <div class="map-hud" aria-live="polite">Нажмите на участок: скорость и время</div><div class="map-caption">Карта · демотрек</div>
+            </div>
+            <p class="route-title">Средняя скорость · км/ч</p>
+            <div class="speed-legend">${SPEED_BANDS.map((label, i) => `<span><i style="--speed:${SPEED_COLORS[i]}"></i>${label}</span>`).join('')}</div>
+          </div>` : ''}
+        </div>`;
+      const toggle = card.querySelector('.trip-toggle'), body = card.querySelector('.trip-body');
+      let mapReady = false;
+      function drawCharts() {
+        if (!body.hidden) { chart(card.querySelector('.levels-chart'), trip, false); chart(card.querySelector('.consumption-chart'), trip, true); }
+      }
+      const observer = new ResizeObserver(drawCharts);
+      observer.observe(card.querySelector('.content'));
+      cardObservers.set(card, observer);
+      toggle.addEventListener('click', () => {
+        body.hidden = !body.hidden;
+        toggle.setAttribute('aria-expanded', String(!body.hidden));
+        if (!body.hidden) {
+          drawCharts();
+          if (trip.track.length && !mapReady) { createMap(card.querySelector('.map'), trip); mapReady = true; }
+        }
+      });
+      card.querySelector('.delete').addEventListener('click', () => {
+        openDeleteDialog({ card, observer, trip });
+      });
+      list.append(card);
+    }
+    trips.forEach(renderTrip);
+    document.getElementById('back').addEventListener('click', () => {
+      for (const card of list.children) {
+        card.querySelector('.trip-body').hidden = true;
+        card.querySelector('.trip-toggle').setAttribute('aria-expanded', 'false');
+      }
+      tripScroll.scrollTo({ top: 0, behavior: 'smooth' });
+      list.querySelector('.trip-toggle')?.focus({ preventScroll: true });
+    });
+    clearAllButton.addEventListener('click', () => openDeleteDialog({ all: true }));
+    document.getElementById('cancel-delete').addEventListener('click', () => deleteDialog.close());
+    document.getElementById('confirm-delete').addEventListener('click', () => {
+      if (!pendingDelete) return;
+      const all = pendingDelete.all === true;
+      let focus = null;
+      if (all) {
+        for (const card of list.children) cardObservers.get(card)?.disconnect();
+        list.replaceChildren();
+        maps.clear();
+      } else {
+        pendingDelete.observer.disconnect();
+        const card = pendingDelete.card;
+        focus = card.nextElementSibling || card.previousElementSibling;
+        card.remove(); maps.delete(pendingDelete.trip.id);
+      }
+      document.getElementById('empty').hidden = Boolean(list.children.length);
+      clearAllButton.disabled = !list.children.length;
+      deleteDialog.close();
+      (focus?.querySelector('.trip-toggle') || document.getElementById('back')).focus({ preventScroll: true });
+      const status = document.getElementById('status');
+      status.textContent = all ? 'Все тестовые поездки удалены' : 'Тестовая поездка удалена'; status.hidden = false;
+      clearTimeout(statusTimer); statusTimer = setTimeout(() => { status.hidden = true; }, 2500);
+    });
+    deleteDialog.addEventListener('close', () => { pendingDelete = null; });
+  </script>
+</body>
+</html>

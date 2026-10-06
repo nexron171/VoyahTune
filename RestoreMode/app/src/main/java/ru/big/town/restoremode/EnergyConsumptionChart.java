@@ -2,10 +2,11 @@ package ru.big.town.restoremode;
 
 import java.util.ArrayList;
 import java.util.List;
+import ru.big.town.common.EnergyWidgetProtocol;
 
-/** Validated view of the last 10 km; no synthetic samples and no per-100-km conversion. */
+/** Validated view of the last 2.5 km; no synthetic samples and no per-100-km conversion. */
 final class EnergyConsumptionChart {
-    static final double WINDOW=10,EPS=.0001;
+    static final double WINDOW=EnergyWidgetProtocol.CONSUMPTION_WINDOW_KM,EPS=.0001;
     final double cursor;
     final double[] start,end;
     final float[] position,battery,fuel;
@@ -16,11 +17,13 @@ final class EnergyConsumptionChart {
         int n=starts==null||ends==null||ev==null||petrol==null?0:Math.min(Math.min(starts.length,ends.length),Math.min(ev.length,petrol.length));
         List<Integer> visible=new ArrayList<>();double previous=Double.NEGATIVE_INFINITY;
         for(int i=0;i<n;i++) {
-            if(!Double.isFinite(starts[i])||!Double.isFinite(ends[i])||starts[i]<0||ends[i]<=starts[i]
+            if(!Double.isFinite(starts[i])||!Double.isFinite(ends[i])||starts[i]<0
+                    ||ends[i]-starts[i]+EPS<EnergyWidgetProtocol.CONSUMPTION_STEP_KM
                     ||starts[i]<this.cursor-WINDOW-EPS||ends[i]>this.cursor+EPS||starts[i]<previous-EPS)continue;
             visible.add(i);previous=ends[i];
         }
-        if(visible.size()>40)visible=visible.subList(visible.size()-40,visible.size());
+        int limit=EnergyWidgetProtocol.CONSUMPTION_MAX_POINTS;
+        if(visible.size()>limit)visible=visible.subList(visible.size()-limit,visible.size());
         n=visible.size();start=new double[n];end=new double[n];position=new float[n];battery=new float[n];fuel=new float[n];gaps=new boolean[n];
         double high=0,low=0,gas=0;
         for(int j=0;j<n;j++) {

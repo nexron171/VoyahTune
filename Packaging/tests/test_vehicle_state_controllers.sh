@@ -20,7 +20,7 @@ require_fixed() {
     grep -Fq -- "$2" "$1" || fail "$1 does not contain: $2"
 }
 
-# One composition root owns the shared CAN subscription and routes typed domain state.
+# One composition root routes typed domain state from the shared CAN hub.
 [ "$(grep -F -c 'CanBusEventHub.get(' "$COMPOSITION")" -eq 1 ] \
     || fail "VehicleStateControllers must have one CanBusEventHub acquisition"
 require_fixed "$COMPOSITION" 'CanBusEventRouter.INTEREST_DOOR'
@@ -33,12 +33,21 @@ require_fixed "$COMPOSITION" 'InfrastructureProfile.read(context).usesAccHooks()
 # PI's native restore observes the same typed transport; OD is driven only by ACC hooks.
 # Check each branch separately so moving a trigger outside its profile guard fails.
 for event in DOOR GEAR; do
-    awk -v event="$event" '
+    guard='if (!accHooks)'
+    if [ "$event" = GEAR ]; then
+        guard='if (!accHooks && event.origin == CanBusEvent.Origin.LIVE)'
+    fi
+    awk -v event="$event" -v guard="$guard" '
         $0 ~ "case " event ":" { inside = 1; next }
-        inside && /if \(!accHooks\)/ { guarded = 1 }
+        inside && index($0, guard) { guardDepth = depth + 1 }
         inside && /ApplyEngine\.(noteDriverDoorOpened|noteGear|scheduleNativeApply)/ {
-            if (!guarded) exit 1
+            if (!guardDepth || depth < guardDepth) exit 1
             found = 1
+        }
+        inside {
+            line = $0
+            depth += gsub(/\{/, "{", line) - gsub(/\}/, "}", line)
+            if (depth < guardDepth) guardDepth = 0
         }
         inside && /break;/ { exit(found ? 0 : 1) }
         END { if (!found) exit 1 }
@@ -54,19 +63,29 @@ if grep -Eq 'CanBusEvent|CanBusEventHub|INTEREST_' "$GEAR" "$DOOR"; then
     fail "typed gear/door controllers depend on CAN transport"
 fi
 
-# Consumers depend only on typed controllers. None owns a door/gear CAN subscription anymore.
-require_fixed "$TRIPS" 'vehicleState.gear().subscribe(timerHandler, this::onGear)'
-require_fixed "$TRIPS" 'vehicleState.driverDoor().subscribe(timerHandler, state -> {'
+# Trips consume connection, gear and energy in one ordered hub mailbox so reconnects cannot
+# overtake delayed gear callbacks. Driver-door edges still come from the typed controller.
+require_fixed "$TRIPS" 'v.driverDoor().subscribe(timerHandler, this::onDoor)'
+require_fixed "$TRIPS" 'CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_ENERGY_TELEMETRY | CanBusEventRouter.INTEREST_GEAR'
+require_fixed "$TRIPS" 'null, timerHandler, this::onTelemetry);'
+require_fixed "$TRIPS" 'if (e.kind == CanBusEvent.Kind.GEAR) { gearEventLive = e.origin == CanBusEvent.Origin.LIVE; onGear(e.first); }'
+[ "$(grep -F -c 'CanBusEventHub.get(' "$TRIPS")" -eq 1 ] \
+    || fail "TripStatsService must use the shared CanBusEventHub"
+[ "$(grep -F -c 'hub.subscribe(' "$TRIPS")" -eq 1 ] \
+    || fail "TripStatsService must have one ordered telemetry subscription"
+if grep -Eq 'INTEREST_DOOR|INTEREST_VEHICLE_STATE|gear\(\)\.subscribe' "$TRIPS"; then
+    fail "TripStatsService duplicates typed door/mode state or its ordered gear delivery"
+fi
+
+# Wipers and automatic light remain consumers of the typed gear/door controllers.
 require_fixed "$WIPERS" 'vehicleState.gear().subscribe(timerHandler, this::onGearState)'
 require_fixed "$WIPERS" 'vehicleState.driverDoor().subscribe('
 require_fixed "$LIGHT" 'VehicleStateControllers.get(this).gear().subscribe('
-for consumer in "$TRIPS" "$WIPERS"; do
-    if grep -Eq 'CanBusEvent|CanBusEventHub|INTEREST_' "$consumer"; then
-        fail "$consumer directly depends on CAN transport"
-    fi
-done
+if grep -Eq 'CanBusEvent|CanBusEventHub|INTEREST_' "$WIPERS"; then
+    fail "WiperColdService directly depends on CAN transport"
+fi
 if grep -Fq 'CanBusEventRouter.INTEREST_GEAR' "$LIGHT"; then
     fail "LightSensorService still owns a direct gear CAN subscription"
 fi
 
-echo "PASS: gear and driver-door state are centralized behind typed controllers"
+echo "PASS: typed vehicle controllers and ordered trip telemetry use the shared CAN hub"

@@ -39,6 +39,7 @@ import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
@@ -64,6 +65,7 @@ import java.util.Locale;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import ru.big.town.common.TripProtocol;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -117,7 +119,7 @@ public class MainActivity extends AppCompatActivity {
     // -------- Виджет статистики поездки --------
     static final String ACTION_TRIP_UPDATE = "ru.big.town.anative.TRIP_UPDATE";
     static final String ACTION_REQUEST_TRIP_UPDATE = "ru.big.town.anative.REQUEST_TRIP_UPDATE";
-    static final String ACTION_TRIP_RESET = "ru.big.town.anative.TRIP_RESET";
+    static final String ACTION_TRIP_STOP = TripProtocol.STOP;
     private static final DateTimeFormatter TRIP_DATE_FORMAT =
             DateTimeFormatter.ofPattern("dd.MM.yyyy, EEEE", Locale.forLanguageTag("ru"));
     private TextView tripDate, tripTimer, tripStatus;
@@ -125,7 +127,9 @@ public class MainActivity extends AppCompatActivity {
     private View tripCard, cardPowerHold, cardWashMode, cardAutoLight, cardPedestrian, cardForcedEv, cardSuspensionMaintenance;
     // Native-виджеты
     private View launchAppsWidget;
-    private boolean tripActive = false, tripInDrive = false;
+    private boolean tripActive = false, tripInDrive = false, tripWaitingForMovement = false;
+    private View tripStop;
+    private long tripStartWall;
     private long tripAccumMs = 0L, tripDriveStartElapsed = 0L;
     private String lastTripsJson = "[]"; // снимок лога для экрана истории
 
@@ -249,8 +253,10 @@ public class MainActivity extends AppCompatActivity {
             tripTimerReceived = true;
             tripActive = intent.getBooleanExtra("tripActive", false);
             tripInDrive = intent.getBooleanExtra("inDrive", false);
+            tripWaitingForMovement = intent.getBooleanExtra(TripProtocol.WAITING_FOR_MOVEMENT, false);
             tripAccumMs = intent.getLongExtra("accumMs", 0L);
             tripDriveStartElapsed = intent.getLongExtra("driveStartElapsed", 0L);
+            tripStartWall = intent.getLongExtra("tripStartWall", 0L);
             String tj = intent.getStringExtra("tripsJson");
             if (tj != null) lastTripsJson = tj;
             updateTripTimer();
@@ -380,7 +386,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateTripTimer() {
         if (tripDate != null) {
-            String date = LocalDate.now().format(TRIP_DATE_FORMAT);
+            String date = (tripStartWall > 0 ? java.time.Instant.ofEpochMilli(tripStartWall)
+                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate() : LocalDate.now()).format(TRIP_DATE_FORMAT);
             if (!date.contentEquals(tripDate.getText())) tripDate.setText(date);
         }
         long ms = tripAccumMs;
@@ -390,8 +397,9 @@ public class MainActivity extends AppCompatActivity {
             view.invalidate(); // expire a silent/stalled Native connection even without messages
         }
         if (tripTimer != null) tripTimer.setText(fmtDuration(ms));
+        if (tripStop != null) tripStop.setEnabled(tripTimerReceived && tripActive);
         if (tripStatus != null) {
-            tripStatus.setText(!tripActive ? "нет активной поездки"
+            tripStatus.setText(!tripActive ? (tripWaitingForMovement ? "остановлена · ожидание движения" : "нет активной поездки")
                     : (tripInDrive ? "в пути" : "на паузе (не Drive)"));
         }
     }
@@ -554,16 +562,15 @@ public class MainActivity extends AppCompatActivity {
         startActivity(i);
     }
 
-    /** Сброс таймера текущей поездки в 0 (с подтверждением, чтобы исключить случайное нажатие). */
-    public void onButtonTripReset(View v) {
+    /** Ручное завершение текущей поездки с сохранением её истории и маршрута. */
+    public void onButtonTripStop(View v) {
         new MaterialAlertDialogBuilder(this, R.style.DarkDialog)
-                .setTitle("Сбросить таймер")
-                .setMessage("Обнулить время текущей поездки? Действие не пишется в историю.")
-                .setPositiveButton("Сбросить", (d, w) -> {
-                    Intent i = new Intent(ACTION_TRIP_RESET);
-                    i.setPackage("ru.big.town.anative");
-                    sendBroadcast(i);
-                    Log.i(TAG, "TRIP_RESET отправлен");
+                .setTitle("Остановить поездку")
+                .setMessage("Завершить текущую поездку и остановить таймер и запись маршрута? При включённой истории поездка будет сохранена.")
+                .setPositiveButton("Стоп", (d, w) -> {
+                    Intent i = new Intent(ACTION_TRIP_STOP).setPackage(TripProtocol.NATIVE);
+                    sendBroadcast(i, TripProtocol.PERMISSION);
+                    Log.i(TAG, "TRIP_STOP отправлен");
                 })
                 .setNegativeButton("Отмена", null)
                 .show();
@@ -1120,10 +1127,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
+        super.onRequestPermissionsResult(request, permissions, grants);
+        TripLocationPermission.result(this, request);
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        TripLocationPermission.atStartup(this);
+        TripLocationPermission.refresh(this);
+        TripLocationPermission.sync(this);
         suspensionScreenResumed = true;
-        registerReceiver(tripReceiver, new IntentFilter(ACTION_TRIP_UPDATE), RECEIVER_EXPORTED);
+        registerReceiver(tripReceiver, new IntentFilter(ACTION_TRIP_UPDATE), BIND_SET_MODES_PERMISSION, null, RECEIVER_EXPORTED);
         Intent req = new Intent(ACTION_REQUEST_TRIP_UPDATE);
         req.setPackage("ru.big.town.anative");
         sendBroadcast(req);
@@ -1209,11 +1225,17 @@ public class MainActivity extends AppCompatActivity {
             launchAppsWidget.setVisibility(show ? View.VISIBLE : View.GONE);
             if (show) populateLaunchAppsWidget();
         }
-        // Кнопка «История поездок» в виджете — только если история включена.
-        View histBtn = findViewById(R.id.buttonTripHistory);
-        if (histBtn != null) {
-            histBtn.setVisibility(
-                    sharedPreferences.getBoolean("saveTripHistory", true) ? View.VISIBLE : View.GONE);
+        applyTripHistoryVisibility(splitTilesGrid);
+        for (EnergyWidgetView view : energyWidgetViews)
+            view.showTripHistory(sharedPreferences.getBoolean("saveTripHistory", true));
+    }
+
+    private void applyTripHistoryVisibility(View root) {
+        if (root == null) return;
+        boolean enabled = sharedPreferences.getBoolean("saveTripHistory", true);
+        for (int id : new int[]{R.id.buttonTripHistory, R.id.buttonCurrentTripHistory}) {
+            View button = root.findViewById(id);
+            if (button != null) button.setVisibility(enabled ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -1357,6 +1379,7 @@ public class MainActivity extends AppCompatActivity {
                 
                 switch(tile.id) {
                     case EnergyWidgetView.ENERGY:
+                    case EnergyWidgetView.CONSUMPTION:
                     case EnergyWidgetView.TRIP:
                     case EnergyWidgetView.TIRES:
                     case EnergyWidgetView.ODO:
@@ -1366,7 +1389,14 @@ public class MainActivity extends AppCompatActivity {
                         energyView.update(energyWidgetState);
                         energyWidgetViews.add(energyView);
                         updateTripTimer();
-                        widgetView = energyView;
+                        if (EnergyWidgetView.TRIP.equals(tile.id)) {
+                            FrameLayout tripWidget = (FrameLayout) inf.inflate(R.layout.tile_current_trip, splitTilesGrid, false);
+                            tripWidget.addView(energyView, 0, new FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                            energyView.showTripHistory(sharedPreferences.getBoolean("saveTripHistory", true));
+                            energyView.setOnLongClickListener(v -> tripWidget.performLongClick());
+                            widgetView = tripWidget;
+                        } else widgetView = energyView;
                         break;
                     case "suspensionWidget":
                         suspensionWidgetView = new SuspensionWidgetView(this, level -> {
@@ -1392,6 +1422,7 @@ public class MainActivity extends AppCompatActivity {
                     case "launchAppsWidget": widgetView = inf.inflate(R.layout.tile_launch_apps, splitTilesGrid, false); break;
                 }
                 if (widgetView == null) continue;
+                applyTripHistoryVisibility(widgetView);
                 // Отключённые карточки не должны занимать место в smart-grid. Настройку читаем
                 // именно здесь: сетка пересобирается на каждом рендере, поэтому «скрыть» уже
                 // созданную вьюху бесполезно — на её место приходит новая, по умолчанию видимая.
@@ -1407,6 +1438,7 @@ public class MainActivity extends AppCompatActivity {
                     tripDate   = widgetView.findViewById(R.id.tripDate);
                     tripTimer  = widgetView.findViewById(R.id.tripTimer);
                     tripStatus = widgetView.findViewById(R.id.tripStatus);
+                    tripStop   = widgetView.findViewById(R.id.buttonTripStop);
                     tripCard   = widgetView;
                     updateTripTimer();
                 } else if (tile.id.equals("cardPowerHold") || tile.id.equals("cardLeaveCar")) {

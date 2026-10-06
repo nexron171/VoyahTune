@@ -6,6 +6,20 @@ import java.io.IOException;
 import java.util.Base64;
 
 public class EnergyHistoryStateTest {
+    private String version(String snapshot, int version) {
+        byte[] bytes = Base64.getDecoder().decode(snapshot);
+        java.nio.ByteBuffer.wrap(bytes).putInt(version);
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32(); crc.update(bytes, 0, bytes.length - 8);
+        java.nio.ByteBuffer.wrap(bytes).putLong(bytes.length - 8, crc.getValue());
+        return Base64.getEncoder().encodeToString(bytes);
+    }
+    @Test public void rollingHistoryNoLongerNeedsIndependentTripTotalsToPersist() throws Exception {
+        EnergyHistoryState s = new EnergyHistoryState(); s.distance = new double[]{0,0,-1};
+        s.points = new java.util.ArrayList<>();
+        EnergyHistoryState decoded = EnergyHistoryState.decode(s.encode());
+        assertArrayEquals(new double[]{0,0}, decoded.tripBattery, 0);
+        assertArrayEquals(new double[]{0,0}, decoded.tripFuel, 0);
+    }
     private EnergyHistoryState state() {
         EnergyHistory h=new EnergyHistory();
         for(int i=0;i<=1600;i++)h.sample(i/10d,80-i/100f,50,i*1000L,i*1000L,i*1000L,i*1000L);
@@ -58,5 +72,33 @@ public class EnergyHistoryStateTest {
         EnergyHistoryState s=state();s.points=h.points();s.distance=new double[]{0,0,3};
         EnergyHistory restored=new EnergyHistory();restored.restore(EnergyHistoryState.decode(s.encode()).points);
         assertEquals(0,restored.points().get(0).startEvDrop,0);assertEquals(1,restored.points().get(0).evDrop,0);
+    }
+    @Test public void recoveryPersistsNegativeAndDecreasingElectricTotalsAndFirstBucketBaseline() throws Exception {
+        EnergyHistory h = new EnergyHistory(); h.sample(0, 80, 50, 0, 0, 0, 0);
+        h.sample(0, 80.5f, 50, 1000, 1000, 1000, 1000);
+        h.sample(.1, 80.8f, 50, 2000, 2000, 2000, 2000);
+        EnergyHistoryState s = new EnergyHistoryState(); s.points = h.points(); s.distance = new double[]{.1, .1, 2};
+        EnergyHistoryState saved = EnergyHistoryState.decode(s.encode());
+        assertEquals(0, saved.points.get(0).startEvDrop, 0);
+        assertEquals(-.5, saved.points.get(0).evDrop, .00001);
+        assertEquals(-.8, saved.points.get(1).evDrop, .00001);
+        EnergyHistory restored = new EnergyHistory(); restored.restore(saved.points);
+        restored.sample(.2, 70, 50, 3000, 3000, 3000, 3000);
+        assertEquals(-.8, restored.points().get(2).evDrop, .00001); // Unknown SOC interval is excluded.
+        restored.sample(.3, 69, 50, 4000, 4000, 4000, 4000);
+        assertEquals(.2, restored.points().get(3).evDrop, .00001);
+    }
+    @Test public void versionThreeGrossHistoryIsRetainedAndOldNegativeTotalsRemainInvalid() throws Exception {
+        EnergyHistoryState s = state();
+        EnergyHistoryState old = EnergyHistoryState.decode(version(s.encode(), 3));
+        assertEquals(s.points.get(1500).evDrop, old.points.get(1500).evDrop, 0);
+        s.points = java.util.Arrays.asList(new EnergyHistory.Point(0, 80, 50, true, -.5, 0, 0, 0));
+        s.distance = new double[]{0, 0, 0};
+        assertEquals(-.5, EnergyHistoryState.decode(s.encode()).points.get(0).evDrop, 0);
+        try { EnergyHistoryState.decode(version(s.encode(), 3)); fail(); } catch (IOException expected) { }
+        s.points = java.util.Arrays.asList(new EnergyHistory.Point(0, 80, 50, true, Double.NaN, 0, 0, 0));
+        try { EnergyHistoryState.decode(s.encode()); fail(); } catch (IOException expected) { }
+        s.points = java.util.Arrays.asList(new EnergyHistory.Point(0, 80, 50, true, 0, -1, 0, 0));
+        try { EnergyHistoryState.decode(s.encode()); fail(); } catch (IOException expected) { }
     }
 }

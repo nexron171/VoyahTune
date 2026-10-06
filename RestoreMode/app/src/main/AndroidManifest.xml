@@ -4,6 +4,11 @@
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -14,6 +19,7 @@
         tools:ignore="QueryAllPackagesPermission" />
 
     <queries>
+        <provider android:authorities="ru.big.town.anative.trips" />
         <package android:name="ru.big.town.restoremode" />
         <!-- Нужно для bindService к SetModesService (видимость пакетов, API 30+) -->
         <package android:name="ru.big.town.anative" />
@@ -31,6 +37,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RestoreMode"
         tools:targetApi="31">
+        <service android:name=".TripLocationService"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE"
+            android:stopWithTask="false"
+            android:foregroundServiceType="location" />
         <service android:name=".VoiceWarmupService"
             android:exported="false"
             android:stopWithTask="false"

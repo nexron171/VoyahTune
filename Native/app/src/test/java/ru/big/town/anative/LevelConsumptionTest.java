@@ -44,4 +44,48 @@ public class LevelConsumptionTest {
         assertEquals(50.5,EnergyWidgetSettings.parseCapacity("50,5"),0);
         for(String s:new String[]{"0","-1","","x","NaN","43.25"})assertTrue(Float.isNaN(EnergyWidgetSettings.parseCapacity(s)));
     }
+    @Test public void electricityAverageSubtractsSmallRecoveryWithoutChangingObservedDistance() {
+        LevelConsumption c = new LevelConsumption(true);
+        drive(c, 0, 10, 80, 79);
+        c.observe(10, 79.5f);
+        assertEquals(.5, c.decrease(), .00001);
+        assertEquals(10, c.distance(), .00001);
+        assertEquals(2.15, c.average(43), .00001);
+        drive(c, 10, 20, 79.5f, 78.5f);
+        assertEquals(1.5, c.decrease(), .00001);
+        assertEquals(3.225, c.average(43), .00001);
+    }
+    @Test public void electricityRecoveryTotalsPersistSignedButOldLevelsNeverBridgeRestart() {
+        LevelConsumption c = new LevelConsumption(true);
+        drive(c, 0, 10, 80, 80.5f);
+        assertEquals(-2.15, c.average(43), .00001);
+        LevelConsumption restored = new LevelConsumption(true); restored.restore(c.snapshot());
+        assertEquals(-.5, restored.decrease(), .00001);
+        drive(restored, 20, 30, 90, 89);
+        assertEquals(.5, restored.decrease(), .00001);
+        assertEquals(20, restored.distance(), .00001);
+        assertEquals(1.075, restored.average(43), .00001);
+        assertTrue(Float.isNaN(EnergyWidgetSettings.average(-.5, 10, 56))); // Fuel remains unsigned.
+    }
+    @Test public void twentyTwoKmAndTenPercentNetUseIsNineteenPointFiveDespiteSmallLevelCycles() {
+        for (boolean fluctuations : new boolean[]{false, true}) {
+            LevelConsumption net = new LevelConsumption(true), gross = new LevelConsumption();
+            net.observe(0, 80); gross.observe(0, 80);
+            for (int i = 1; i <= 220; i++) {
+                double km = i / 10d; float soc = 80 - 10 * i / 220f;
+                net.observe(km, soc); gross.observe(km, soc);
+                if (fluctuations && i % 20 == 0 && i <= 200) {
+                    for (float value : new float[]{soc + .5f, soc + .5f, soc}) {
+                        // SOC can arrive while the odometer is unchanged; getter repeats add no distance.
+                        net.observe(km, value); gross.observe(km, value);
+                    }
+                }
+            }
+            assertEquals(22, net.distance(), .00001); assertEquals(22, gross.distance(), .00001);
+            assertEquals(10, net.decrease(), .00001);
+            assertEquals(19.54545, net.average(43), .0001);
+            assertEquals(fluctuations ? 15 : 10, gross.decrease(), .00001);
+            assertEquals(fluctuations ? 29.31818 : 19.54545, gross.average(43), .0001);
+        }
+    }
 }

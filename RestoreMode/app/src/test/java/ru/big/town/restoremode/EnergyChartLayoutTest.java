@@ -4,54 +4,38 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class EnergyChartLayoutTest {
-    @Test public void narrowChartsOccupySeparateHalvesAndRemainTouchable() {
-        for(int columns:new int[]{2,3}) {
-            float width=EnergyWidgetLayout.pixelsWide(columns),height=EnergyWidgetLayout.pixelsHigh("energyWidget",5);
-            EnergyChartLayout layout=new EnergyChartLayout(width,height,true,true);
-            assertEquals(100,layout.bottom-layout.top,0);
-            assertEquals(layout.bottom-layout.top,layout.shortBottom-layout.shortTop,0);
-            assertTrue(layout.axis<layout.splitY);
-            assertTrue(layout.shortTop>layout.splitY);
-            assertTrue(layout.shortTop>height/2);
-            assertTrue(layout.shortTop<layout.shortBottom);
-            assertTrue(layout.shortAxis<height);
-            assertTrue(layout.right-layout.left>150);
-            assertTrue(layout.shortRight-layout.shortLeft>150);
-            assertTrue(layout.containsHistory(150,215));
-            assertFalse(layout.containsConsumption(150,215));
-            assertTrue(layout.containsConsumption(150,450));
-            assertFalse(layout.containsHistory(150,450));
-            assertFalse(layout.containsHistory(150,layout.splitY));
-            assertFalse(layout.containsConsumption(150,layout.splitY));
+    @Test public void levelsFillTheAvailableWidthAndHeightInAllApprovedSizes() {
+        for(int[] size:new int[][]{{3,4},{3,5},{4,5},{5,5},{6,5},{7,4},{8,4}}) {
+            float width=EnergyWidgetLayout.pixelsWide(size[0]),height=EnergyWidgetLayout.pixelsHigh("energyWidget",size[1]);
+            EnergyChartLayout g=new EnergyChartLayout(width,height,size[0]==3);
+            assertTrue(g.remainingValue<g.levelsTitle);assertTrue(g.top<g.bottom);
+            assertEquals(width-g.pad,g.right,0);assertEquals(g.axis-24,g.bottom,0);
+            assertEquals(height-18,g.periodNote,0);
+            assertTrue(g.axis<g.periodLabel);assertTrue(g.periodLabel<g.periodUnits);
+            assertTrue(g.periodUnits<g.periodValue);assertTrue(g.periodValue<g.periodNote);
+            assertTrue(g.containsHistory((g.left+g.right)/2,(g.top+g.bottom)/2));
+            assertFalse(g.containsHistory(g.left,g.periodValue));
         }
     }
-    @Test public void narrowWindowButtonsFitAboveReadingsAndDoNotSelectGraphs() {
-        for(int columns:new int[]{2,3}) {
-            float width=EnergyWidgetLayout.pixelsWide(columns);
-            EnergyChartLayout layout=new EnergyChartLayout(width,627,true,true);
+    @Test public void windowButtonsRemainTouchableWithoutSelectingThePlot() {
+        for(int columns=3;columns<=8;columns++) {
+            EnergyChartLayout g=new EnergyChartLayout(EnergyWidgetLayout.pixelsWide(columns),630,columns==3);
             for(int slot=0;slot<3;slot++) {
-                float x=layout.buttonLeft+(slot+.5f)*layout.buttonWidth;
-                assertEquals(slot,layout.windowSlot(x,57));
-                assertFalse(layout.containsHistory(x,57));
-                assertFalse(layout.containsConsumption(x,57));
+                float x=g.buttonLeft+(slot+.5f)*g.buttonWidth,y=(g.buttonTop+g.buttonBottom)/2;
+                assertEquals(slot,g.windowSlot(x,y));assertFalse(g.containsHistory(x,y));
             }
-            assertEquals(-1,layout.windowSlot(150,215));
-            assertEquals(-1,layout.windowSlot(150,450));
-            assertEquals(-1,layout.windowSlot(0,57));
-            assertEquals(-1,layout.windowSlot(width,57));
+            assertEquals(-1,g.windowSlot(g.buttonLeft,g.readingValue));
         }
     }
-    @Test public void horizontalChartsKeepSideBySideTouchRegionsAndOldGeometry() {
-        for(int columns=4;columns<=8;columns++) {
-            EnergyChartLayout layout=new EnergyChartLayout(EnergyWidgetLayout.pixelsWide(columns),373,columns<=5,false);
-            assertEquals(183,layout.top,0);assertEquals(253,layout.bottom,0);assertEquals(276,layout.axis,0);
-            assertEquals(layout.top,layout.shortTop,0);assertEquals(layout.bottom,layout.shortBottom,0);
-            float historyX=(layout.left+layout.right)/2,consumptionX=(layout.shortLeft+layout.shortRight)/2;
-            assertTrue(layout.containsHistory(historyX,215));
-            assertFalse(layout.containsConsumption(historyX,215));
-            assertTrue(layout.containsConsumption(consumptionX,215));
-            assertFalse(layout.containsHistory(consumptionX,215));
-            assertEquals(0,layout.windowSlot(layout.buttonLeft+layout.buttonWidth/2,52));
+    @Test public void separateShortChartFitsItsFourSizesAndOmitsVerticalLabelsOnlyInOneRow() {
+        for(int columns=2;columns<=3;columns++)for(int rows=1;rows<=2;rows++) {
+            float width=EnergyWidgetLayout.pixelsWide(columns),height=EnergyWidgetLayout.pixelsHigh("energyConsumptionWidget",rows);
+            EnergyConsumptionLayout g=new EnergyConsumptionLayout(width,height,rows,1);
+            assertEquals(rows==2,g.axes);assertTrue(g.title<g.legend);assertTrue(g.legend<g.top);
+            assertTrue(g.top<g.bottom);assertTrue(g.bottom<g.axis);assertTrue(g.axis<height);
+            assertEquals(width-(rows==1?12:56),g.right,0);
+            assertTrue(g.contains((g.left+g.right)/2,(g.top+g.bottom)/2));
+            assertFalse(g.contains(g.left,g.title));assertFalse(g.contains(g.left,g.axis));
         }
     }
 }
