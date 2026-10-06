@@ -2604,6 +2604,125 @@
 
                 </LinearLayout>
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/layout_category_bg"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Распознавание знаков скорости"
+                            android:textColor="#FFFFFF"
+                            android:textSize="27px" />
+
+                        <Switch
+                            android:id="@+id/switchApolloSpeedSigns"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:thumb="@drawable/switch_thumb"
+                            android:track="@drawable/switch_track" />
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/apolloSpeedOptionsContainer"
+                        android:visibility="gone"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <RadioGroup
+                            android:id="@+id/apolloSpeedModeGroup"
+                            style="@style/radio_group_height_70_style"
+                            android:layout_width="match_parent"
+                            android:layout_height="70dp"
+                            android:layout_marginTop="12dp"
+                            android:background="@drawable/radio_group_height_70_bg"
+                            android:orientation="horizontal">
+
+                            <RadioButton
+                                android:id="@+id/apolloSpeedRecognition"
+                                style="@style/radio_button_height_70_style"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1"
+                                android:background="@drawable/radio_group_button_70_bg"
+                                android:maxLines="2"
+                                android:paddingHorizontal="8dp"
+                                android:text="Только распознавание"
+                                android:textSize="24px"
+                                android:textColor="@color/radio_button_text_color_selector" />
+
+                            <RadioButton
+                                android:id="@+id/apolloSpeedConfirm"
+                                style="@style/radio_button_height_70_style"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1"
+                                android:background="@drawable/radio_group_button_70_bg"
+                                android:maxLines="2"
+                                android:paddingHorizontal="8dp"
+                                android:text="Коррекция с подтверждением"
+                                android:textSize="24px"
+                                android:textColor="@color/radio_button_text_color_selector" />
+
+                            <RadioButton
+                                android:id="@+id/apolloSpeedAutomatic"
+                                style="@style/radio_button_height_70_style"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_weight="1"
+                                android:background="@drawable/radio_group_button_70_bg"
+                                android:maxLines="2"
+                                android:paddingHorizontal="8dp"
+                                android:text="Автоматическая коррекция"
+                                android:textSize="24px"
+                                android:textColor="@color/radio_button_text_color_selector" />
+
+                        </RadioGroup>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Предупреждение о превышении скорости"
+                                android:textColor="#FFFFFF"
+                                android:textSize="24px" />
+
+                            <Switch
+                                android:id="@+id/switchApolloSpeedWarning"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="16dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
             </LinearLayout>
 
             <TextView

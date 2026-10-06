@@ -182,7 +182,10 @@ public class AdvanceActivity extends AppCompatActivity {
     private static final String EXTRA_REMEMBER_LAST = "rememberLast";
 
     // Apollo Tech keeps only the individual feature targets.
-    private Switch switchApolloTlc, switchApolloTrafficLights, switchApolloTrafficSigns;
+    private Switch switchApolloTlc, switchApolloTrafficLights, switchApolloTrafficSigns,
+            switchApolloSpeedSigns, switchApolloSpeedWarning;
+    private RadioGroup apolloSpeedModeGroup;
+    private View apolloSpeedOptionsContainer;
     private RadioGroup apolloGreenSoundGroup;
     private View apolloGreenSoundContainer;
 
@@ -2015,11 +2018,36 @@ public class AdvanceActivity extends AppCompatActivity {
         switchApolloTlc = findViewById(R.id.switchApolloTlc);
         switchApolloTrafficLights = findViewById(R.id.switchApolloTrafficLights);
         switchApolloTrafficSigns = findViewById(R.id.switchApolloTrafficSigns);
+        switchApolloSpeedSigns = findViewById(R.id.switchApolloSpeedSigns);
+        boolean od = ru.big.town.common.InfrastructureProfile.read(this).usesAccHooks();
+        apolloSpeedOptionsContainer = findViewById(R.id.apolloSpeedOptionsContainer);
+        apolloSpeedOptionsContainer.setVisibility(od ? View.VISIBLE : View.GONE);
+        apolloSpeedModeGroup = findViewById(R.id.apolloSpeedModeGroup);
+        switchApolloSpeedWarning = findViewById(R.id.switchApolloSpeedWarning);
+        if (od) {
+            int mode = ApolloSettings.speedMode(prefs);
+            apolloSpeedModeGroup.check(mode == ApolloSettings.AUTO_CORRECTION
+                    ? R.id.apolloSpeedAutomatic : mode == ApolloSettings.CONFIRM_CORRECTION
+                    ? R.id.apolloSpeedConfirm : R.id.apolloSpeedRecognition);
+            apolloSpeedModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
+                if (!switchApolloSpeedSigns.isChecked()) return;
+                int selected;
+                if (checkedId == R.id.apolloSpeedAutomatic) selected = ApolloSettings.AUTO_CORRECTION;
+                else if (checkedId == R.id.apolloSpeedConfirm) selected = ApolloSettings.CONFIRM_CORRECTION;
+                else if (checkedId == R.id.apolloSpeedRecognition) selected = ApolloSettings.RECOGNITION_ONLY;
+                else return;
+                prefs.edit().putInt(ApolloSettings.SPEED_MODE, selected)
+                        .remove(ApolloSettings.CRUISE_SPEED_ADJUSTMENT).apply();
+                applyApolloTargets();
+            });
+            bindApolloSwitch(switchApolloSpeedWarning, ApolloSettings.SPEED_WARNING);
+        }
         apolloGreenSoundGroup = findViewById(R.id.apolloGreenSoundGroup);
         apolloGreenSoundContainer = findViewById(R.id.apolloGreenSoundContainer);
         textApolloStatus = findViewById(R.id.textApolloStatus);
         bindApolloSwitch(switchApolloTlc, ApolloSettings.TLC);
         bindApolloSwitch(switchApolloTrafficSigns, ApolloSettings.TRAFFIC_SIGNS);
+        bindApolloSwitch(switchApolloSpeedSigns, ApolloSettings.SPEED_SIGNS);
         bindApolloSwitch(switchApolloTrafficLights, ApolloSettings.TRAFFIC_LIGHTS);
 
         boolean greenSound = prefs.getBoolean(
@@ -2045,7 +2073,8 @@ public class AdvanceActivity extends AppCompatActivity {
         target.setOnCheckedChangeListener((button, checked) -> {
             prefs.edit().putBoolean(preference, checked).apply();
             applyApolloTargets();
-            if (ApolloSettings.TRAFFIC_LIGHTS.equals(preference)) updateApolloUi();
+            if (ApolloSettings.TRAFFIC_LIGHTS.equals(preference)
+                    || ApolloSettings.SPEED_SIGNS.equals(preference)) updateApolloUi();
         });
     }
 
@@ -2060,6 +2089,17 @@ public class AdvanceActivity extends AppCompatActivity {
     }
 
     private void updateApolloUi() {
+        boolean speedSignsEnabled = switchApolloSpeedSigns != null && switchApolloSpeedSigns.isChecked();
+        if (apolloSpeedOptionsContainer != null) {
+            apolloSpeedOptionsContainer.setAlpha(speedSignsEnabled ? 1f : 0.45f);
+        }
+        if (apolloSpeedModeGroup != null) {
+            apolloSpeedModeGroup.setEnabled(speedSignsEnabled);
+            for (int i = 0; i < apolloSpeedModeGroup.getChildCount(); i++) {
+                apolloSpeedModeGroup.getChildAt(i).setEnabled(speedSignsEnabled);
+            }
+        }
+        if (switchApolloSpeedWarning != null) switchApolloSpeedWarning.setEnabled(speedSignsEnabled);
         boolean trafficLightsEnabled = switchApolloTrafficLights != null
                 && switchApolloTrafficLights.isChecked();
         if (apolloGreenSoundGroup != null) apolloGreenSoundGroup.setEnabled(trafficLightsEnabled);

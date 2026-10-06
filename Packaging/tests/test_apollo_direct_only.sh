@@ -77,8 +77,8 @@ forbid_fixed "$ADVANCE" 'MSG_APOLLO_SETTINGS_STATE'
 forbid_fixed "$SET_MODES" 'MSG_APOLLO_SETTINGS_SET'
 forbid_fixed "$SET_MODES" 'MSG_APOLLO_SETTINGS_STATE'
 
-# Only the four individual feature targets remain selectable; STOCK_UI is migration-only.
-for KEY in STOCK_UI TLC TRAFFIC_LIGHTS GREEN_SOUND TRAFFIC_SIGNS; do
+# Only the individual feature targets remain selectable; STOCK_UI is migration-only.
+for KEY in STOCK_UI TLC TRAFFIC_LIGHTS GREEN_SOUND TRAFFIC_SIGNS SPEED_SIGNS CRUISE_SPEED_ADJUSTMENT SPEED_MODE SPEED_WARNING; do
     require_fixed "$APOLLO_SETTINGS" "static final String $KEY"
 done
 require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloTlc, ApolloSettings.TLC);'
@@ -114,7 +114,7 @@ forbid_fixed "$RESTORE_POLICY" 'readVehicleState'
 forbid_fixed "$RESTORE_POLICY" 'TX_GET_VEHICLE_STATE'
 forbid_fixed "$NATIVE_MANIFEST" 'android:process=":apollo"'
 
-# The existing wake restore sends capability values first and switches second through ordered OEM
+# The existing wake restore sends capabilities, optional ISA mode, then switches through ordered OEM
 # TX77 bundles. Disabled values are explicit too, so a target can actually be turned back off.
 for ENTRY in PLC_SWITCH GLA_SWITCH GLA_LIGHT_CHANGE_SWITCH TSR_SWITCH \
         RPA_FUNC_ENABLE HPP_FUNC_ENABLE GLC_FUNC_ENABLE ISLC_FUNC_ENABLE TLC_FUNC_ENABLE \
@@ -124,8 +124,7 @@ for ENTRY in PLC_SWITCH GLA_SWITCH GLA_LIGHT_CHANGE_SWITCH TSR_SWITCH \
         TLA_FUNC_ENABLE_SA; do
     require_fixed "$RESTORE_POLICY" "static final String $ENTRY"
 done
-require_fixed "$RESTORE_POLICY" 'if (tlc || trafficLights || trafficSigns) {'
-require_fixed "$RESTORE_POLICY" 'putAllEntitlements(entitlements, ENABLED);'
+require_fixed "$RESTORE_POLICY" 'putAllEntitlements(entitlements, state(tlc || trafficLights || trafficSigns || speedSigns));'
 require_fixed "$RESTORE_POLICY" 'target.put(RPA_FUNC_ENABLE, value);'
 require_fixed "$RESTORE_POLICY" 'target.put(TLA_FUNC_ENABLE_SA, value);'
 require_fixed "$RESTORE_POLICY" 'switches.put(PLC_SWITCH, state(tlc));'
@@ -133,7 +132,7 @@ require_fixed "$RESTORE_POLICY" 'switches.put(GLA_LIGHT_CHANGE_SWITCH, state(tra
 require_fixed "$RESTORE_POLICY" 'switches.put(TSR_SWITCH, trafficSigns ? 1 : 2);'
 require_fixed "$MAIN" 'ApolloRestorePolicy.appendPlan(plan,'
 require_fixed "$MAIN" 'OemVehicleStateTransport.sendRestoreSequence('
-require_fixed "$MAIN" 'Apollo capabilities then PLC/GLA/TSR'
+require_fixed "$MAIN" 'Apollo capabilities then ISA mode then PLC/GLA/TSR/ISA'
 require_fixed "$ADVANCE" 'applyApolloTargets();'
 require_fixed "$SET_MODES" 'ApplyEngine.applyApolloTargets(this);'
 forbid_fixed "$RESTORE_POLICY" 'getVehicleState'
@@ -146,5 +145,36 @@ require_fixed "$README" 'включить, так и выключить функ
 require_fixed "$README" '97X-строки и не вводя отдельные CAN subscriptions'
 require_fixed "$README" 'Автоматическое'
 require_fixed "$README" 'восстановление OD выполняется один раз в ACC-цикле'
+
+
+# ISA is a separate opt-in target; provider columns 0..36 stay compatible.
+require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloSpeedSigns, ApolloSettings.SPEED_SIGNS);'
+require_fixed "$LAYOUT" 'android:id="@+id/switchApolloSpeedSigns"'
+require_fixed "$PROVIDER" 'ApolloSettings.SPEED_SIGNS, // 37'
+require_fixed "$PROVIDER" 'apolloSpeedSignsEnabled ? 1 : 0,'
+require_fixed "$MAIN" 'apolloSpeedSignsEnabled = cursor.getColumnCount() > 37 && cursor.getInt(37) == 1;'
+require_fixed "$MAIN" '.putBoolean("cacheApolloSpeedSignsEnabled", apolloSpeedSignsEnabled)'
+require_fixed "$MAIN" 'apolloSpeedSignsEnabled = p.getBoolean("cacheApolloSpeedSignsEnabled", false);'
+require_fixed "$RESTORE_POLICY" 'modes.put(ISA_ISLC_MODE, speedSigns ? normalizeSpeedMode(speedMode) : 4);'
+require_fixed "$RESTORE_POLICY" 'switches.put(ISA_ISLC_SWITCH, speedSigns ? 1 : 2);'
+
+# The OD master switch gates correction and warning; PI retains its legacy appendTo call.
+require_fixed "$PROVIDER" 'ApolloSettings.CRUISE_SPEED_ADJUSTMENT, // 38'
+require_fixed "$PROVIDER" 'ApolloSettings.SPEED_MODE, // 39'
+require_fixed "$PROVIDER" 'ApolloSettings.SPEED_WARNING, // 40'
+require_fixed "$PROVIDER" 'apolloSpeedSignsEnabled && apolloSpeedMode == ApolloSettings.AUTO_CORRECTION ? 1 : 0,'
+require_fixed "$MAIN" 'cursor.getColumnCount() > 39 ? cursor.getInt(39)'
+require_fixed "$MAIN" 'apolloSpeedWarningEnabled = cursor.getColumnCount() > 40 && cursor.getInt(40) == 1;'
+require_fixed "$MAIN" 'if (!InfrastructureProfile.read(context).usesAccHooks()) return;'
+require_fixed "$MAIN" 'apolloSpeedMode, apolloSpeedWarningEnabled,'
+require_fixed "$MAIN" '.putInt("cacheApolloSpeedMode", apolloSpeedMode)'
+require_fixed "$MAIN" '.putBoolean("cacheApolloSpeedWarningEnabled", apolloSpeedWarningEnabled)'
+require_fixed "$ADVANCE" 'apolloSpeedModeGroup.setOnCheckedChangeListener('
+require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloSpeedWarning, ApolloSettings.SPEED_WARNING);'
+require_fixed "$RESTORE_POLICY" 'switches.put(ISA_ISLC_OVER_SPEED_WARNING_SWITCH, state(speedSigns && speedWarning));'
+forbid_fixed "$LAYOUT" 'android:id="@+id/switchApolloCruiseSpeedAdjustment"'
+for ENTRY in apolloSpeedRecognition apolloSpeedConfirm apolloSpeedAutomatic switchApolloSpeedWarning; do
+    require_fixed "$LAYOUT" "android:id=\"@+id/$ENTRY\""
+done
 
 echo "PASS: Apollo UI and functions use persisted event-driven restore targets"

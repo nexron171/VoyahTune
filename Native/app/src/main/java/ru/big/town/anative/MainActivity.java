@@ -48,6 +48,9 @@ public class MainActivity extends AppCompatActivity {
     private static boolean apolloTrafficLightsEnabled = false;
     private static boolean apolloGreenSoundEnabled = false;
     private static boolean apolloTrafficSignsEnabled = false;
+    private static boolean apolloSpeedSignsEnabled = false;
+    private static int apolloSpeedMode = 4;
+    private static boolean apolloSpeedWarningEnabled = false;
 
     //-------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
@@ -341,6 +344,11 @@ public class MainActivity extends AppCompatActivity {
                         && cursor.getInt(26) == 1;
                 apolloTrafficSignsEnabled = cursor.getColumnCount() > 27
                         && cursor.getInt(27) == 1;
+                apolloSpeedSignsEnabled = cursor.getColumnCount() > 37 && cursor.getInt(37) == 1;
+                apolloSpeedMode = ApolloRestorePolicy.normalizeSpeedMode(
+                        cursor.getColumnCount() > 39 ? cursor.getInt(39)
+                                : cursor.getColumnCount() > 38 && cursor.getInt(38) == 1 ? 2 : 4);
+                apolloSpeedWarningEnabled = cursor.getColumnCount() > 40 && cursor.getInt(40) == 1;
                 // cols 29..31 — opt-out remember-last flags. Older providers and SQL-style NULL
                 // both mean true, so an update never silently changes historical behaviour.
                 driveRememberLast = cursorBooleanDefaultTrue(cursor, 29);
@@ -369,6 +377,7 @@ public class MainActivity extends AppCompatActivity {
                         + "/" + fragranceIntensity
                         + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
                         + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
+                        + "/" + apolloSpeedSignsEnabled + "/" + apolloSpeedMode + "/" + apolloSpeedWarningEnabled
                         + " wiperColdMode=" + wiperColdMode
                         + " pauseMediaOnDoor=" + pauseMediaOnDoor);
                 return 2;
@@ -448,6 +457,10 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean("cacheApolloTrafficLightsEnabled", apolloTrafficLightsEnabled)
                 .putBoolean("cacheApolloGreenSoundEnabled", apolloGreenSoundEnabled)
                 .putBoolean("cacheApolloTrafficSignsEnabled", apolloTrafficSignsEnabled)
+                .putBoolean("cacheApolloSpeedSignsEnabled", apolloSpeedSignsEnabled)
+                .putInt("cacheApolloSpeedMode", apolloSpeedMode)
+                .putBoolean("cacheApolloSpeedWarningEnabled", apolloSpeedWarningEnabled)
+                .remove("cacheApolloCruiseSpeedAdjustmentEnabled")
                 .remove("cacheApolloStockUiEnabled")
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
@@ -488,6 +501,10 @@ public class MainActivity extends AppCompatActivity {
         apolloTrafficLightsEnabled = p.getBoolean("cacheApolloTrafficLightsEnabled", false);
         apolloGreenSoundEnabled = p.getBoolean("cacheApolloGreenSoundEnabled", false);
         apolloTrafficSignsEnabled = p.getBoolean("cacheApolloTrafficSignsEnabled", false);
+        apolloSpeedSignsEnabled = p.getBoolean("cacheApolloSpeedSignsEnabled", false);
+        apolloSpeedMode = ApolloRestorePolicy.normalizeSpeedMode(p.getInt("cacheApolloSpeedMode",
+                p.getBoolean("cacheApolloCruiseSpeedAdjustmentEnabled", false) ? 2 : 4));
+        apolloSpeedWarningEnabled = p.getBoolean("cacheApolloSpeedWarningEnabled", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
         applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor);
@@ -505,6 +522,7 @@ public class MainActivity extends AppCompatActivity {
                 + "/" + fragranceIntensity
                 + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
                 + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
+                + "/" + apolloSpeedSignsEnabled + "/" + apolloSpeedMode + "/" + apolloSpeedWarningEnabled
                 + " wiperColdMode=" + wiperColdMode
                 + " pauseMediaOnDoor=" + pauseMediaOnDoor);
         return true;
@@ -584,11 +602,13 @@ public class MainActivity extends AppCompatActivity {
     static CanRestorePlan createCanRestorePlan() { return createCanRestorePlan(true); }
 
     static void appendApolloRestore(CanRestorePlan.Builder plan, Context context) {
+        if (!InfrastructureProfile.read(context).usesAccHooks()) return;
         ApolloRestorePolicy.appendPlan(plan, apolloTlcEnabled, apolloTrafficLightsEnabled,
-                apolloGreenSoundEnabled, apolloTrafficSignsEnabled,
-                (capabilities, switches) -> OemVehicleStateTransport.sendRestoreSequence(
-                        context, null, capabilities, switches, ApolloRestorePolicy.stableIds(),
-                        "Apollo capabilities then PLC/GLA/TSR").accepted());
+                apolloGreenSoundEnabled, apolloTrafficSignsEnabled, apolloSpeedSignsEnabled,
+                apolloSpeedMode, apolloSpeedWarningEnabled,
+                (capabilities, modes, switches) -> OemVehicleStateTransport.sendRestoreSequence(
+                        context, null, capabilities, modes, switches, ApolloRestorePolicy.stableIds(),
+                        "Apollo capabilities then ISA mode then PLC/GLA/TSR/ISA").accepted());
     }
 
     static CanRestorePlan createCanRestorePlan(boolean includeModes) {
@@ -597,7 +617,8 @@ public class MainActivity extends AppCompatActivity {
                 + " disablePedestrianSound=" + disablePedestrianSound
                 + " fragranceEnabled=" + fragranceEnabled
                 + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
-                + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled);
+                + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
+                + "/" + apolloSpeedSignsEnabled + "/" + apolloSpeedMode + "/" + apolloSpeedWarningEnabled);
         CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
         final Context context = GlobalVars.SAVE_CONTEXT;
         final boolean accHooks = InfrastructureProfile.read(context).usesAccHooks();
@@ -612,6 +633,7 @@ public class MainActivity extends AppCompatActivity {
         });
         final Map<String, Integer> primaryValues = new LinkedHashMap<>();
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
+        final Map<String, Integer> apolloModes = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
         plan.addOnce("Apollo stock subscription/exam UI", () -> {
@@ -643,10 +665,10 @@ public class MainActivity extends AppCompatActivity {
             // OD applies Apollo independently of drive/fragrance support.
             appendApolloRestore(plan, context);
         } else {
-            // PI retains the primary entitlement task followed by switches.
-            ApolloRestorePolicy.appendTo(primaryValues, trailingValues,
+            // PI orders entitlements, ISA mode preparation, then switches.
+            ApolloRestorePolicy.appendTo(primaryValues, apolloModes, trailingValues,
                     apolloTlcEnabled, apolloTrafficLightsEnabled,
-                    apolloGreenSoundEnabled, apolloTrafficSignsEnabled);
+                    apolloGreenSoundEnabled, apolloTrafficSignsEnabled, apolloSpeedSignsEnabled);
             stableIds.putAll(ApolloRestorePolicy.stableIds());
         }
 
@@ -671,9 +693,9 @@ public class MainActivity extends AppCompatActivity {
                     && VehicleRestorePolicy.allowsRecuperationRestore(driveMode) ? recycle : null;
             plan.addOnce("OEM vehicle restore snapshot", () -> {
                 boolean accepted = OemVehicleStateTransport.sendRestoreSequence(
-                        context, firstState, primaryValues, trailingValues, stableIds,
+                        context, firstState, primaryValues, apolloModes, trailingValues, stableIds,
                         accHooks ? "drive/energy/fragrance then recuperation"
-                                : "drive/energy/fragrance/Apollo entitlements then switches/recuperation")
+                                : "drive/energy/fragrance/Apollo entitlements then ISA mode then switches/recuperation")
                         .accepted();
                 if (!accepted) return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
                 // These are current vehicle targets, never writes to the pinned menu selection.
