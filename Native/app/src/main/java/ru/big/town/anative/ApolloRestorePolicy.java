@@ -14,6 +14,13 @@ final class ApolloRestorePolicy {
     static final int GLA_LIGHT_CHANGE_SWITCH_ID = 1150;
     static final String TSR_SWITCH = "TSR_SWITCH";
     static final int TSR_SWITCH_ID = 277;
+    static final String ISA_ISLC_SWITCH = "ISA_ISLC_SWITCH";
+    static final int ISA_ISLC_SWITCH_ID = 1141;
+    static final String ISA_ISLC_MODE = "ISA_ISLC_MODE";
+    static final int ISA_ISLC_MODE_ID = 1142;
+
+    static final String ISA_ISLC_OVER_SPEED_WARNING_SWITCH = "ISA_ISLC_OVER_SPEED_WARNING_SWITCH";
+    static final int ISA_ISLC_OVER_SPEED_WARNING_SWITCH_ID = 1143;
 
     static final String RPA_FUNC_ENABLE = "RPA_FUNC_ENABLE";
     static final int RPA_FUNC_ENABLE_ID = 1166;
@@ -59,25 +66,49 @@ final class ApolloRestorePolicy {
     }
 
     /**
-     * Entitlements are submitted first. The following OEM task then applies the user switches, so
-     * enabling a previously unavailable function cannot race ahead of its ADCU capability frame.
+     * Entitlements are submitted first, then the selected ISA mode, then user switches. Separate
+     * OEM tasks keep feature activation behind both the capability frame and mode selection.
      */
     static void appendTo(Map<String, Integer> entitlements,
+                         Map<String, Integer> modes,
                          Map<String, Integer> switches,
                          boolean tlc, boolean trafficLights,
-                         boolean greenSound, boolean trafficSigns) {
+                         boolean greenSound, boolean trafficSigns, boolean speedSigns) {
+        // Existing PI callers retain recognition-only behaviour.
+        appendBase(entitlements, switches, tlc, trafficLights, greenSound, trafficSigns, speedSigns);
+        if (speedSigns) modes.put(ISA_ISLC_MODE, 4);
+    }
+
+    static void appendTo(Map<String, Integer> entitlements,
+                         Map<String, Integer> modes,
+                         Map<String, Integer> switches,
+                         boolean tlc, boolean trafficLights,
+                         boolean greenSound, boolean trafficSigns, boolean speedSigns,
+                         int speedMode, boolean speedWarning) {
+        appendBase(entitlements, switches, tlc, trafficLights, greenSound, trafficSigns, speedSigns);
+        // Separate mode task precedes enablement. Off also clears any active correction mode.
+        modes.put(ISA_ISLC_MODE, speedSigns ? normalizeSpeedMode(speedMode) : 4);
+        switches.put(ISA_ISLC_OVER_SPEED_WARNING_SWITCH, state(speedSigns && speedWarning));
+    }
+
+    static int normalizeSpeedMode(int mode) {
+        return mode == 2 || mode == 3 ? mode : 4;
+    }
+
+    private static void appendBase(Map<String, Integer> entitlements,
+                                   Map<String, Integer> switches,
+                                   boolean tlc, boolean trafficLights, boolean greenSound,
+                                   boolean trafficSigns, boolean speedSigns) {
         if (entitlements == null || switches == null) {
             throw new IllegalArgumentException("Apollo target maps are null");
         }
 
         // H97X serializes these values into one zero-initialized 0x40A frame. Therefore the
-        // capability snapshot must contain all 18 bits: a partial bundle would silently disable
-        // unrelated ACC/ICA/NOA capabilities. The stock subscription manager uses the same full
-        // vector. We publish all-on only when at least one Apollo target is active and never emit
-        // an all-off capability frame; individual user choices are applied by the switches below.
-        if (tlc || trafficLights || trafficSigns) {
-            putAllEntitlements(entitlements, ENABLED);
-        }
+        // capability snapshot must contain all 18 bits. Match the stock subscription manager:
+        // enable the subscription while any effective Apollo feature is selected, and explicitly
+        // disable it when the last feature is turned off. This shared vector also includes the
+        // ACC/ICA/NOA entitlements. Green sound alone is inactive without traffic-light detection.
+        putAllEntitlements(entitlements, state(tlc || trafficLights || trafficSigns || speedSigns));
         switches.put(PLC_SWITCH, state(tlc));
 
         switches.put(GLA_SWITCH, state(trafficLights));
@@ -86,18 +117,23 @@ final class ApolloRestorePolicy {
 
         // TSR uses inverse OEM encoding: 1=enabled, 2=disabled.
         switches.put(TSR_SWITCH, trafficSigns ? 1 : 2);
+        switches.put(ISA_ISLC_SWITCH, speedSigns ? 1 : 2);
     }
 
     interface Sender {
-        boolean send(Map<String, Integer> capabilities, Map<String, Integer> switches);
+        boolean send(Map<String, Integer> capabilities, Map<String, Integer> modes,
+                     Map<String, Integer> switches);
     }
 
     static void appendPlan(CanRestorePlan.Builder plan, boolean tlc, boolean lights,
-                           boolean sound, boolean signs, Sender sender) {
+                           boolean sound, boolean signs, boolean speedSigns,
+                           int speedMode, boolean speedWarning, Sender sender) {
         Map<String, Integer> capabilities = new LinkedHashMap<>();
+        Map<String, Integer> modes = new LinkedHashMap<>();
         Map<String, Integer> switches = new LinkedHashMap<>();
-        appendTo(capabilities, switches, tlc, lights, sound, signs);
-        plan.addOnce("Apollo individual targets", () -> sender.send(capabilities, switches)
+        appendTo(capabilities, modes, switches, tlc, lights, sound, signs, speedSigns,
+                speedMode, speedWarning);
+        plan.addOnce("Apollo individual targets", () -> sender.send(capabilities, modes, switches)
                 ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
                 : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
     }
@@ -129,6 +165,9 @@ final class ApolloRestorePolicy {
         ids.put(GLA_SWITCH, GLA_SWITCH_ID);
         ids.put(GLA_LIGHT_CHANGE_SWITCH, GLA_LIGHT_CHANGE_SWITCH_ID);
         ids.put(TSR_SWITCH, TSR_SWITCH_ID);
+        ids.put(ISA_ISLC_SWITCH, ISA_ISLC_SWITCH_ID);
+        ids.put(ISA_ISLC_MODE, ISA_ISLC_MODE_ID);
+        ids.put(ISA_ISLC_OVER_SPEED_WARNING_SWITCH, ISA_ISLC_OVER_SPEED_WARNING_SWITCH_ID);
         ids.put(RPA_FUNC_ENABLE, RPA_FUNC_ENABLE_ID);
         ids.put(HPP_FUNC_ENABLE, HPP_FUNC_ENABLE_ID);
         ids.put(GLC_FUNC_ENABLE, GLC_FUNC_ENABLE_ID);

@@ -291,9 +291,19 @@ final class OemVehicleStateTransport {
             Context context, StateValue first,
             Map<String, Integer> primaryValues, Map<String, Integer> trailingValues,
             Map<String, Integer> stableIds, String label) {
+        return sendRestoreSequence(context, first, primaryValues, null, trailingValues,
+                stableIds, label);
+    }
+
+    /** Optional mode preparation is a separate OEM task, ordered before feature enablement. */
+    static Result sendRestoreSequence(
+            Context context, StateValue first,
+            Map<String, Integer> primaryValues, Map<String, Integer> preparationValues,
+            Map<String, Integer> trailingValues, Map<String, Integer> stableIds, String label) {
         return INSTANCE.sendRestoreSequenceInternal(
                 context, first,
                 keyedValuesOptional(primaryValues, stableIds),
+                keyedValuesOptional(preparationValues, stableIds),
                 keyedValuesOptional(trailingValues, stableIds), label);
     }
 
@@ -429,16 +439,18 @@ final class OemVehicleStateTransport {
     private Result sendSequenceInternal(Context context, StateValue first,
                                         LinkedHashMap<StateKey, Integer> values, String label) {
         return sendRestoreSequenceInternal(
-                context, first, values, new LinkedHashMap<>(), label);
+                context, first, values, new LinkedHashMap<>(), new LinkedHashMap<>(), label);
     }
 
     private Result sendRestoreSequenceInternal(
             Context context, StateValue first,
             LinkedHashMap<StateKey, Integer> primaryValues,
+            LinkedHashMap<StateKey, Integer> preparationValues,
             LinkedHashMap<StateKey, Integer> trailingValues, String label) {
         Context app = applicationContext(context);
         if (app == null) return Result.TRANSIENT_FAILURE;
         LinkedHashMap<StateKey, Integer> all = new LinkedHashMap<>(primaryValues);
+        all.putAll(preparationValues);
         all.putAll(trailingValues);
         if (first != null) all.put(first.key, first.value);
         if (all.isEmpty()) {
@@ -450,23 +462,40 @@ final class OemVehicleStateTransport {
         if (binder == null) return Result.TRANSIENT_FAILURE;
         synchronized (transactionLock) {
             return transactRestoreSequence(
-                    binder, first, primaryValues, trailingValues, label);
+                    binder, first, primaryValues, preparationValues, trailingValues, label);
         }
     }
 
     private Result transactRestoreSequence(
             IBinder binder, StateValue first, Map<StateKey, Integer> primaryValues,
+            Map<StateKey, Integer> preparationValues,
             Map<StateKey, Integer> trailingValues, String label) {
         if (first != null) {
             Result result = transactSingle(binder, first, label + " first");
             if (!result.accepted()) return result;
         }
+        return sendOrderedBundles(primaryValues, preparationValues, trailingValues,
+                (values, stage) -> transactBundle(binder, values, label + " " + stage));
+    }
+
+    interface BundleSender {
+        Result send(Map<StateKey, Integer> values, String stage);
+    }
+
+    /** Stop on an unaccepted phase: never enable a feature before its mode was submitted. */
+    static Result sendOrderedBundles(Map<StateKey, Integer> primaryValues,
+                                     Map<StateKey, Integer> preparationValues,
+                                     Map<StateKey, Integer> trailingValues, BundleSender sender) {
         if (!primaryValues.isEmpty()) {
-            Result result = transactBundle(binder, primaryValues, label + " primary");
+            Result result = sender.send(primaryValues, "primary");
+            if (!result.accepted()) return result;
+        }
+        if (!preparationValues.isEmpty()) {
+            Result result = sender.send(preparationValues, "preparation");
             if (!result.accepted()) return result;
         }
         if (!trailingValues.isEmpty()) {
-            return transactBundle(binder, trailingValues, label + " trailing");
+            return sender.send(trailingValues, "trailing");
         }
         return Result.ACCEPTED_UNCONFIRMED;
     }

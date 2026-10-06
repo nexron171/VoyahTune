@@ -45,6 +45,9 @@ public class RestoreModeContentProvider extends ContentProvider {
     private boolean apolloTrafficLightsEnabled=ApolloSettings.DEFAULT_ENABLED;
     private boolean apolloGreenSoundEnabled=ApolloSettings.DEFAULT_ENABLED;
     private boolean apolloTrafficSignsEnabled=ApolloSettings.DEFAULT_ENABLED;
+    private boolean apolloSpeedSignsEnabled=ApolloSettings.DEFAULT_ENABLED;
+    private int apolloSpeedMode=ApolloSettings.RECOGNITION_ONLY;
+    private boolean apolloSpeedWarningEnabled=ApolloSettings.DEFAULT_ENABLED;
     public RestoreModeContentProvider() {
     }
 
@@ -224,6 +227,13 @@ public class RestoreModeContentProvider extends ContentProvider {
         apolloTrafficSignsEnabled = sharedPreferences.getBoolean(
                 ApolloSettings.TRAFFIC_SIGNS, ApolloSettings.DEFAULT_ENABLED);
 
+        apolloSpeedSignsEnabled = sharedPreferences.getBoolean(
+                ApolloSettings.SPEED_SIGNS, ApolloSettings.DEFAULT_ENABLED);
+
+        apolloSpeedMode = ApolloSettings.speedMode(sharedPreferences);
+        apolloSpeedWarningEnabled = sharedPreferences.getBoolean(
+                ApolloSettings.SPEED_WARNING, ApolloSettings.DEFAULT_ENABLED);
+
         MatrixCursor cursor = new MatrixCursor(new String[]{
                 "driveMode",               // 0
                 "energy",                  // 1
@@ -262,6 +272,10 @@ public class RestoreModeContentProvider extends ContentProvider {
                 DriveSelectionPolicy.MEDIUM,   // 34
                 DriveSelectionPolicy.CONFIGURED, // 35
                 DriveSelectionPolicy.CURRENT, // 36
+                ApolloSettings.SPEED_SIGNS, // 37 — распознавание ограничений скорости
+                ApolloSettings.CRUISE_SPEED_ADJUSTMENT, // 38 — совместимость со старым Native
+                ApolloSettings.SPEED_MODE, // 39 — режим ISA/ISLC (OD)
+                ApolloSettings.SPEED_WARNING, // 40 — предупреждение о превышении (OD)
         });
 
         cursor.addRow(new Object[]{
@@ -295,6 +309,10 @@ public class RestoreModeContentProvider extends ContentProvider {
                 recycleRememberLast ? 1 : 0,
                 suspensionMaintenance ? 1 : 0,
                 driveSelection.override, driveSelection.medium, driveSelection.configured, driveSelection.current,
+                apolloSpeedSignsEnabled ? 1 : 0,
+                apolloSpeedSignsEnabled && apolloSpeedMode == ApolloSettings.AUTO_CORRECTION ? 1 : 0,
+                apolloSpeedMode,
+                apolloSpeedWarningEnabled ? 1 : 0,
         });
        return cursor;
 
