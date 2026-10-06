@@ -965,7 +965,7 @@ public class SetModesService extends Service {
                 + " active=" + active + ")");
     }
 
-    /** Форвардит STATE_ON в TripStatsService (граница новой поездки). */
+    /** Wake keeps the persistent trip collector running; it does not close the trip. */
     private void forwardPowerOnToTripStats() {
         Intent intent = new Intent(this, TripStatsService.class);
         intent.setAction(TripStatsService.ACTION_POWER_ON);

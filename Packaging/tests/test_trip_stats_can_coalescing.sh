@@ -14,8 +14,8 @@ require_fixed() {
     grep -Fq -- "$2" "$1" || fail "$1 does not contain: $2"
 }
 
-# Every Gear transition still reaches the in-memory state machine. Only the expensive disk/global
-# publication is delayed and coalesced; this is not a poll and it never self-rearms.
+# Every Gear transition reaches the policy on the dedicated worker. Frequent CAN publications
+# are coalesced; the independent checkpoint bounds loss if Android kills the process.
 require_fixed "$SERVICE" 'CAN_STATE_PUBLISH_COALESCE_MS = 250L'
 require_fixed "$SERVICE" 'private void onGear(int gearVal)'
 require_fixed "$SERVICE" 'scheduleCanStatePublish();'
@@ -32,15 +32,14 @@ ON_GEAR=$(awk '
 printf '%s\n' "$ON_GEAR" | grep -Fq 'scheduleCanStatePublish();' \
     || fail "Gear callback must schedule one coalesced latest-state publication"
 if printf '%s\n' "$ON_GEAR" | grep -Eq 'prefs\(\)|sendBroadcast|persistAndBroadcast'; then
-    fail "Gear callback must not write preferences or broadcast inline"
+    fail "Regular Gear publication must remain coalesced"
 fi
 
 [ "$(grep -F -c 'postDelayed(canStatePublishRunnable, CAN_STATE_PUBLISH_COALESCE_MS)' \
         "$SERVICE")" -eq 1 ] \
     || fail "Trip state publisher must have exactly one delayed scheduling site"
-if grep -Fq 'postDelayed(this' "$SERVICE"; then
-    fail "TripStatsService must not create a self-rearming poll"
-fi
+require_fixed "$SERVICE" 'private static final long CHECKPOINT_MS = 5_000L'
+require_fixed "$SERVICE" 'new HandlerThread("TripStats")'
 
 # Trip history must not own vehicle-mode subscriptions or remember-last settings.
 if grep -Eq 'ModeFeedback|MODE_REMEMBER|persistModeFeedback|INTEREST_VEHICLE_STATE' "$SERVICE"; then

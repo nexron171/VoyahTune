@@ -143,6 +143,10 @@
         android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.Native"
         tools:targetApi="31">
+        <provider android:name=".TripHistoryProvider"
+            android:authorities="ru.big.town.anative.trips"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
         <receiver
             android:name=".SetModesReceiverDynamic"
             android:enabled="true"

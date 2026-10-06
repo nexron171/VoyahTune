@@ -5,11 +5,13 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import ru.big.town.common.EnergyWidgetProtocol;
 
-/** Absolute quantities on a separate 250 m cadence, collected BEFORE level-history decimation. */
+/** Absolute quantities on a separate 100 m cadence, collected BEFORE level-history decimation. */
 final class EnergyConsumptionHistory {
-    static final double STEP_KM=.25,WINDOW_KM=10,EPS=.0001,MAX_INTERVAL_KM=.35;
-    static final int MAX_POINTS=40,EV_INVALID=1,FUEL_INVALID=2;
+    static final double STEP_KM=EnergyWidgetProtocol.CONSUMPTION_STEP_KM,
+            WINDOW_KM=EnergyWidgetProtocol.CONSUMPTION_WINDOW_KM,EPS=.0001,MAX_INTERVAL_KM=STEP_KM+.1;
+    static final int MAX_POINTS=EnergyWidgetProtocol.CONSUMPTION_MAX_POINTS,EV_INVALID=1,FUEL_INVALID=2;
     static final class Point {
         final double start,end,evDrop,evRise,fuelDrop,fuelRise;
         final int invalid;
@@ -33,30 +35,56 @@ final class EnergyConsumptionHistory {
             for(Point p:points){out.writeDouble(p.start);out.writeDouble(p.end);out.writeDouble(p.evDrop);
                 out.writeDouble(p.evRise);out.writeDouble(p.fuelDrop);out.writeDouble(p.fuelRise);out.writeInt(p.invalid);out.writeBoolean(p.gap);}
         }
-        static State read(DataInputStream in)throws IOException {
+        static State read(DataInputStream in,int version)throws IOException {
             State s=new State();s.cursor=in.readDouble();s.pending=in.readBoolean();s.nextGap=in.readBoolean();
             s.start=in.readDouble();s.target=in.readDouble();s.evDrop=in.readDouble();s.evRise=in.readDouble();
             s.fuelDrop=in.readDouble();s.fuelRise=in.readDouble();s.invalid=in.readInt();
-            int n=in.readInt();if(n<0||n>MAX_POINTS)throw new IOException("Invalid consumption count");
+            int n=in.readInt();if(n<0||n>limit(version))throw new IOException("Invalid consumption count");
             for(int i=0;i<n;i++)s.points.add(new Point(in.readDouble(),in.readDouble(),in.readDouble(),
                     in.readDouble(),in.readDouble(),in.readDouble(),in.readInt(),in.readBoolean()));
             return s;
         }
-        void validate(double axis)throws IOException {
+        private static int limit(int version){return version<5?40:version==5?50:MAX_POINTS;}
+        void validate(double axis,int version)throws IOException {
+            double step=version<5?.25:version==5?.05:STEP_KM,window=version<5?10:WINDOW_KM,
+                    maxInterval=version<5?.35:version==5?.15:MAX_INTERVAL_KM;
+            int limit=limit(version);
             if((!nonnegative(cursor)&&!(Double.isNaN(cursor)&&!pending&&points.isEmpty()))||cursor>axis+EPS
-                    ||!totals(evDrop,evRise,fuelDrop,fuelRise)||invalid<0||invalid>3||points.size()>MAX_POINTS)
+                    ||!totals(evDrop,evRise,fuelDrop,fuelRise)||invalid<0||invalid>3||points.size()>limit)
                 throw new IOException("Invalid consumption state");
             if(pending&&(!nonnegative(start)||!Double.isFinite(target)||start>cursor||target<=cursor
-                    ||target>start+STEP_KM+EPS))throw new IOException("Invalid consumption interval");
+                    ||target>start+step+EPS))throw new IOException("Invalid consumption interval");
             Point previous=null;
             for(Point p:points) {
-                if(!nonnegative(p.start)||!Double.isFinite(p.end)||p.end<=p.start||p.end-p.start>MAX_INTERVAL_KM+EPS
-                        ||p.end>cursor+EPS||p.start<cursor-WINDOW_KM-EPS||!totals(p.evDrop,p.evRise,p.fuelDrop,p.fuelRise)
+                if(!nonnegative(p.start)||!Double.isFinite(p.end)||p.end<=p.start||p.end-p.start>maxInterval+EPS
+                        ||(version>=6&&p.end-p.start+EPS<step)
+                        ||p.end>cursor+EPS||p.start<cursor-window-EPS||!totals(p.evDrop,p.evRise,p.fuelDrop,p.fuelRise)
                         ||p.invalid<0||p.invalid>3||(previous!=null&&p.start<previous.end-EPS))
                     throw new IOException("Invalid consumption point");
                 previous=p;
             }
             if(pending&&previous!=null&&start<previous.end-EPS)throw new IOException("Overlapping consumption interval");
+        }
+        State hundredMeterIntervals() {
+            State migrated=new State();migrated.cursor=cursor;
+            Point group=null;boolean gap=true;double previousEnd=Double.NaN;
+            for(Point p:points) {
+                if(p.gap||(Double.isFinite(previousEnd)&&p.start>previousEnd+EPS)
+                        ||(group!=null&&p.end-group.start>MAX_INTERVAL_KM+EPS)) {
+                    group=null;gap=true;
+                }
+                previousEnd=p.end;
+                group=group==null?new Point(p.start,p.end,p.evDrop,p.evRise,p.fuelDrop,p.fuelRise,p.invalid,gap||p.gap)
+                        :new Point(group.start,p.end,group.evDrop+p.evDrop,group.evRise+p.evRise,
+                                group.fuelDrop+p.fuelDrop,group.fuelRise+p.fuelRise,group.invalid|p.invalid,group.gap);
+                if(group.end-group.start+EPS>=STEP_KM) {
+                    migrated.points.add(group);group=null;gap=false;
+                }
+            }
+            while(!migrated.points.isEmpty()&&(migrated.points.size()>MAX_POINTS
+                    ||migrated.points.get(0).start<cursor-WINDOW_KM-EPS))migrated.points.remove(0);
+            // Unfinished old measurements have no fresh sensor baseline after an upgrade.
+            return migrated;
         }
     }
     private State state=new State();
@@ -107,8 +135,8 @@ final class EnergyConsumptionHistory {
         if(km+EPS>=state.target) {
             state.points.add(new Point(state.start,km,state.evDrop,state.evRise,state.fuelDrop,state.fuelRise,state.invalid,state.nextGap));
             state.nextGap=false;
-            // Keep the nominal cadence even when an OEM 100 m step crosses the 250 m threshold.
-            anchor(km,ev,fuel,state.target+STEP_KM);changed=true;
+            // Measure at least another 100 m from the actual endpoint, including after an overshoot.
+            anchor(km,ev,fuel,km+STEP_KM);changed=true;
         }
         trim();return changed;
     }

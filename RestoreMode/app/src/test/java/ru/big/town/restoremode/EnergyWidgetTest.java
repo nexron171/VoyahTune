@@ -19,7 +19,7 @@ public class EnergyWidgetTest {
     }
     @Test public void approvedSizesClampLegacySettingsAndSurviveRecreation() {
         Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
-        for(String id:new String[]{"energyWidget","energyTripWidget","tirePressureWidget","odometerWidget"}) {
+        for(String id:new String[]{"energyWidget","energyConsumptionWidget","energyTripWidget","tirePressureWidget","odometerWidget"}) {
             TileSizeStore.setWidth(prefs,id,1);TileSizeStore.setHeight(prefs,id,1);
             assertEquals(EnergyWidgetLayout.minWidth(id),TileSizeStore.width(prefs(saved),id,1));
             assertEquals(EnergyWidgetLayout.minHeight(id,EnergyWidgetLayout.minWidth(id)),TileSizeStore.height(prefs(saved),id,1));
@@ -30,18 +30,18 @@ public class EnergyWidgetTest {
         assertEquals(286,EnergyWidgetLayout.pixelsWide(2));assertEquals(580,EnergyWidgetLayout.pixelsWide(4));
         assertEquals(1168,EnergyWidgetLayout.pixelsWide(8));assertEquals(373,EnergyWidgetLayout.pixelsHigh("tirePressureWidget",3));
     }
-    @Test public void narrowEnergyWidthsForceFiveRowsAndResetWhenWidened() {
+    @Test public void energyWidthsReserveSpaceForLegibleNumbers() {
         Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
-        for(int columns:new int[]{2,3}) {
+        for(int columns:new int[]{3}) {
             TileSizeStore.setWidth(prefs,"energyWidget",columns);
-            assertEquals(5,saved.get("tileHeight_energyWidget"));
-            assertArrayEquals(new int[]{columns,5},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+            assertEquals(4,saved.get("tileHeight_energyWidget"));
+            assertArrayEquals(new int[]{columns,4},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
             TileSizeStore.setHeight(prefs,"energyWidget",3);
-            assertEquals(5,TileSizeStore.height(prefs(saved),"energyWidget",3));
+            assertEquals(4,TileSizeStore.height(prefs(saved),"energyWidget",3));
             for(int wide=4;wide<=8;wide++) {
                 TileSizeStore.setWidth(prefs,"energyWidget",wide);
-                assertArrayEquals(new int[]{wide,3},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
-                assertEquals(3,saved.get("tileHeight_energyWidget"));
+                assertArrayEquals(new int[]{wide,wide<=6?5:4},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+                assertEquals(wide<=6?5:4,saved.get("tileHeight_energyWidget"));
             }
         }
         assertEquals(627,EnergyWidgetLayout.pixelsHigh("energyWidget",5));
@@ -49,13 +49,27 @@ public class EnergyWidgetTest {
     @Test public void staleEnergyHeightIsNormalizedFromStoredWidth() {
         Map<String,Object> saved=new HashMap<>();
         saved.put("tileWidth_energyWidget",2);saved.put("tileHeight_energyWidget",3);
-        assertArrayEquals(new int[]{2,5},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+        assertArrayEquals(new int[]{3,4},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
         saved.put("tileWidth_energyWidget",3);saved.put("tileHeight_energyWidget",1);
-        assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+        assertArrayEquals(new int[]{3,4},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
         saved.put("tileWidth_energyWidget",6);saved.put("tileHeight_energyWidget",5);
-        assertArrayEquals(new int[]{6,3},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+        assertArrayEquals(new int[]{6,5},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
         saved.remove("tileWidth_energyWidget");
-        assertArrayEquals(new int[]{8,3},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+        assertArrayEquals(new int[]{8,4},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,3));
+    }
+    @Test public void bothThreeColumnEnergyHeightsAndAllFourShortChartSizesPersist() {
+        Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
+        TileSizeStore.setWidth(prefs,"energyWidget",3);
+        for(int rows:new int[]{4,5}) {
+            TileSizeStore.setHeight(prefs,"energyWidget",rows);
+            assertArrayEquals(new int[]{3,rows},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,4));
+        }
+        for(int columns:new int[]{2,3})for(int rows:new int[]{1,2}) {
+            TileSizeStore.setWidth(prefs,"energyConsumptionWidget",columns);
+            TileSizeStore.setHeight(prefs,"energyConsumptionWidget",rows);
+            assertArrayEquals(new int[]{columns,rows},TileSizeStore.dimensions(prefs(saved),"energyConsumptionWidget",2,2));
+            assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyWidget",8,4));
+        }
     }
     @Test public void narrowEnergyRulesDoNotChangeTireOrOdometerSizes() {
         Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
@@ -65,28 +79,28 @@ public class EnergyWidgetTest {
         assertArrayEquals(new int[]{2,4},TileSizeStore.dimensions(prefs(saved),"tirePressureWidget",4,4));
         assertArrayEquals(new int[]{2,1},TileSizeStore.dimensions(prefs(saved),"odometerWidget",4,1));
     }
-    @Test public void narrowTripAllowsFourOrFiveRowsAndKeepsChoiceAcrossWidths() {
+    @Test public void narrowTripKeepsFiveRowsForLegibleNumbers() {
         Map<String,Object> saved=new HashMap<>();SharedPreferences prefs=prefs(saved);
-        for(int columns:new int[]{2,3}) {
+        for(int columns:new int[]{3}) {
             TileSizeStore.setWidth(prefs,"energyTripWidget",columns);
-            assertArrayEquals(new int[]{columns,4},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+            assertArrayEquals(new int[]{columns,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
             TileSizeStore.setHeight(prefs,"energyTripWidget",5);
             TileSizeStore.setWidth(prefs,"energyTripWidget",columns==2?3:2);
-            assertArrayEquals(new int[]{columns==2?3:2,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+            assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
             TileSizeStore.setHeight(prefs,"energyTripWidget",3);
-            assertEquals(4,TileSizeStore.height(prefs(saved),"energyTripWidget",2));
+            assertEquals(5,TileSizeStore.height(prefs(saved),"energyTripWidget",2));
             TileSizeStore.setHeight(prefs,"energyTripWidget",8);
             assertEquals(5,TileSizeStore.height(prefs(saved),"energyTripWidget",2));
             TileSizeStore.setWidth(prefs,"energyTripWidget",6);
-            assertArrayEquals(new int[]{6,2},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+            assertArrayEquals(new int[]{6,3},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
         }
     }
     @Test public void storedTripHeightIsConstrainedByWidthWithoutLosingValidFiveRows() {
         Map<String,Object> saved=new HashMap<>();
         saved.put("tileWidth_energyTripWidget",2);saved.put("tileHeight_energyTripWidget",2);
-        assertArrayEquals(new int[]{2,4},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
         saved.put("tileHeight_energyTripWidget",5);
-        assertArrayEquals(new int[]{2,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
+        assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
         saved.put("tileWidth_energyTripWidget",3);
         assertArrayEquals(new int[]{3,5},TileSizeStore.dimensions(prefs(saved),"energyTripWidget",8,2));
         saved.put("tileWidth_energyTripWidget",8);
@@ -111,12 +125,13 @@ public class EnergyWidgetTest {
         for(String s:new String[]{"0","-43","NaN","","2.55"})assertTrue(Float.isNaN(EnergyWidgetSettings.parseCapacity(s)));
     }
     @Test public void scaleMigrationAndDefaultAreDefined() {
-        assertEquals(25,EnergyWidgetSettings.window(5));assertEquals(75,EnergyWidgetSettings.window(15));
-        assertEquals(150,EnergyWidgetSettings.window(30));assertEquals(75,EnergyWidgetSettings.window(-1));
-        for(int w:new int[]{25,75,150})assertEquals(w,EnergyWidgetSettings.window(w));
+        assertEquals(50,EnergyWidgetSettings.window(5));assertEquals(100,EnergyWidgetSettings.window(15));
+        assertEquals(150,EnergyWidgetSettings.window(30));assertEquals(100,EnergyWidgetSettings.window(-1));
+        assertEquals(50,EnergyWidgetSettings.window(25));assertEquals(100,EnergyWidgetSettings.window(75));
+        for(int w:new int[]{50,100,150})assertEquals(w,EnergyWidgetSettings.window(w));
     }
     @Test public void odometerAxisCountsBackwardsInWholeKilometersAtEveryScale() {
-        for(int window:new int[]{25,75,150}) {
+        for(int window:new int[]{50,100,150}) {
             EnergyChartAxis axis=new EnergyChartAxis(180,window,15417.6f);
             for(int i=0;i<=5;i++)assertEquals(15418-window*i/5d,axis.tick(i),.001);
             assertEquals(1,axis.position(180),.00001);
@@ -146,6 +161,16 @@ public class EnergyWidgetTest {
         double[] observed={0,40,80,100};
         assertEquals(4*56f/20,EnergyPeriodEstimate.calculate(75,x,drop,drop,observed,observed,43,56).fuel,.001);
     }
+    @Test public void windowAveragesSubtractRecoveryAndKeepSignedResultsForElectricityOnly() {
+        float[] x = {0, 25, 50}; double[] ev = {0, 1, .5}, fuel = {0, 1, 2}, km = {0, 25, 50};
+        EnergyPeriodEstimate all = EnergyPeriodEstimate.calculate(75, x, ev, fuel, km, km, 43, 56);
+        assertEquals(.43, all.battery, .00001); assertEquals(2.24, all.fuel, .00001);
+        EnergyPeriodEstimate recovery = EnergyPeriodEstimate.calculate(25, x, ev, fuel, km, km, 43, 56);
+        assertEquals(-.86, recovery.battery, .00001); assertEquals(2.24, recovery.fuel, .00001);
+        assertEquals(-2.15, EnergyWidgetSettings.electricityAverage(-.5, 10, 43), .00001);
+        assertTrue(Float.isNaN(EnergyWidgetSettings.electricityAverage(-.5, .5, 43)));
+        assertTrue(Float.isNaN(EnergyWidgetSettings.average(-.5, 10, 56)));
+    }
     @Test public void unavailableShortAndMalformedHistoryDoesNotBecomeZero() {
         float[] x={0,.5f};double[] drops={0,1},km={0,.5};
         assertTrue(Float.isNaN(EnergyPeriodEstimate.calculate(25,x,drops,drops,km,km,43,56).battery));
@@ -156,5 +181,41 @@ public class EnergyWidgetTest {
         float[] x={0,10};double[] drops={1,2},km={0,10},startDrops={0,2};
         EnergyPeriodEstimate result=EnergyPeriodEstimate.calculate(25,x,drops,drops,km,km,43,56,startDrops,startDrops,km,km);
         assertEquals(8.6,result.battery,.001);assertEquals(11.2,result.fuel,.001);
+    }
+    @Test public void twentyTwoKmAndTenPercentUseAgreesBetweenTripAndWindowAverages() {
+        float trip = EnergyWidgetSettings.electricityAverage(10, 22, 43);
+        float[] x = {0, 22}; double[] ev = {0, 10}, fuel = {0, 0}, km = {0, 22};
+        for (int window : EnergyWidgetSettings.WINDOWS) {
+            EnergyPeriodEstimate period = EnergyPeriodEstimate.calculate(window, x, ev, fuel, km, km, 43, 56);
+            assertEquals(19.54545, period.battery, .0001); assertEquals(trip, period.battery, 0);
+            assertEquals(22, period.batteryKm, 0); assertEquals(0, period.fuel, 0);
+        }
+    }
+    @Test public void olderWindowConsumptionCanExceedThisTripWithoutChangingItsAverage() {
+        float[] x = {0, 53, 75}; double[] ev = {0, 45, 55}, fuel = {0, 0, 0}, km = {0, 53, 75};
+        EnergyPeriodEstimate lastTrip = EnergyPeriodEstimate.calculate(25, x, ev, fuel, km, km, 43, 56);
+        EnergyPeriodEstimate fullWindow = EnergyPeriodEstimate.calculate(75, x, ev, fuel, km, km, 43, 56);
+        assertEquals(19.54545, lastTrip.battery, .0001); assertEquals(22, lastTrip.batteryKm, 0);
+        assertEquals(31.53333, fullWindow.battery, .0001); assertEquals(75, fullWindow.batteryKm, 0);
+    }
+    @Test public void averageUsesTheDistanceObservedForEachSensorRatherThanTripOrWindowLength() {
+        float[] x = {0, 22}; double[] ev = {0, 10}, fuel = {0, 2};
+        double[] evKm = {0, 15}, fuelKm = {0, 22};
+        EnergyPeriodEstimate period = EnergyPeriodEstimate.calculate(25, x, ev, fuel, evKm, fuelKm, 43, 56);
+        assertEquals(28.66667, period.battery, .0001); assertEquals(15, period.batteryKm, 0);
+        assertEquals(5.09091, period.fuel, .0001); assertEquals(22, period.fuelKm, 0);
+        assertEquals(EnergyWidgetSettings.electricityAverage(10, 15, 43), period.battery, 0);
+    }
+
+    @Test public void fixedAverageUsesTheLastHundredKmRegardlessOfTheLevelsScale() {
+        float[] x={0,50,100,150};double[] ev={0,10,15,17},fuel={0,1,2,4},km={0,50,100,150};
+        EnergyPeriodEstimate average=EnergyPeriodEstimate.recent(x,ev,fuel,km,km,43,56);
+        assertEquals(100,average.batteryKm,0);assertEquals(100,average.fuelKm,0);
+        assertEquals(3.01,average.battery,.00001);assertEquals(1.68,average.fuel,.00001);
+        assertTrue(Math.abs(average.battery-EnergyPeriodEstimate.calculate(50,x,ev,fuel,km,km,43,56).battery)>.1);
+        assertTrue(Math.abs(average.battery-EnergyPeriodEstimate.calculate(150,x,ev,fuel,km,km,43,56).battery)>.1);
+        float[] partialX={0,22};double[] partialDrop={0,10},partialKm={0,22};
+        EnergyPeriodEstimate partial=EnergyPeriodEstimate.recent(partialX,partialDrop,partialDrop,partialKm,partialKm,43,56);
+        assertEquals(22,partial.batteryKm,0);assertEquals(19.54545,partial.battery,.0001);
     }
 }

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/tripHistoryRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -8,7 +9,7 @@
     android:paddingHorizontal="28dp"
     android:paddingVertical="20dp">
 
-    <!-- Верхняя панель: назад + заголовок -->
+    <!-- Закреплённая панель: назад, заголовок, очистка истории. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -28,13 +29,34 @@
             android:contentDescription="Назад" />
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:layout_marginStart="20dp"
             android:text="История поездок"
             android:textColor="#FFFFFF"
             android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:textSize="44px" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tripDeleteAll"
+            android:layout_width="wrap_content"
+            android:layout_height="52dp"
+            android:layout_marginStart="24dp"
+            android:paddingHorizontal="24dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="Удалить все записи"
+            android:textAllCaps="false"
+            android:textColor="#EEF1F6"
+            android:textSize="20sp"
+            android:enabled="false"
+            app:backgroundTint="#373F4A"
+            app:cornerRadius="26dp" />
 
     </LinearLayout>
 

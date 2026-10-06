@@ -658,6 +658,21 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
                 <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="Расход за 2,5 км" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowEnergyConsumption" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/EnergyConsumptionSizeRow" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical"
+                android:padding="10dp" android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ширина" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/EnergyConsumptionSettingWidth" android:layout_width="120dp" android:layout_height="60dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Высота" android:textColor="#E0E0E0" android:textSize="24px" />
+                <Spinner android:id="@+id/EnergyConsumptionSettingHeight" android:layout_width="120dp" android:layout_height="60dp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                     android:text="Текущая поездка" android:textColor="#FFFFFF" android:textSize="26px" />
                 <Switch android:id="@+id/switchShowEnergyTrip" android:layout_width="wrap_content"
                     android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
@@ -2616,6 +2631,28 @@
             android:text="Обновления VoyahTune" />
 
         <!-- Диагностика ресурсов существует только пока открыт раздел «Другое». -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:orientation="vertical"
+            android:background="@drawable/layout_category_bg"
+            android:padding="16dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Маршрут поездки · геолокация" android:textColor="#FFFFFF" android:textSize="26px" />
+            <TextView android:id="@+id/tripLocationPermissionStatus"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:textColor="#CCCCCC" android:textSize="22px" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:textColor="#AAAAAA" android:textSize="20px"
+                android:text="Точная геолокация с доступом «Разрешать всегда» нужна для записи GPS-трека, пока открыта навигация или другое приложение. Без разрешения поездки сохраняются без карты. Маршруты хранятся на устройстве." />
+            <Button android:id="@+id/buttonRequestTripLocation" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="Разрешить запись в фоне" />
+            <Button android:id="@+id/buttonTripLocationPermission" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="Разрешение геолокации в настройках Android" />
+            <Button android:id="@+id/buttonDisableTripLocation" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="Не записывать маршруты" />
+        </LinearLayout>
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

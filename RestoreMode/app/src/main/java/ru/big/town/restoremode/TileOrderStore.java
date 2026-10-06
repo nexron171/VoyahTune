@@ -215,7 +215,7 @@ public class TileOrderStore {
         }
         
         // Добавить известные виджеты, которые ещё не в списке
-        String[] knownWidgets = {"energyWidget", "energyTripWidget", "tirePressureWidget", "odometerWidget", "tripCard", "cardPowerHold", "cardWashMode", "cardAutoLight",
+        String[] knownWidgets = {"energyWidget", "energyConsumptionWidget", "energyTripWidget", "tirePressureWidget", "odometerWidget", "tripCard", "cardPowerHold", "cardWashMode", "cardAutoLight",
                  "cardPedestrian", "cardForcedEv", "cardSuspensionMaintenance", "cardBatteryHeat", "suspensionWidget",
                      "cardSettings", "cardAndroidSettings", "cardVoiceCommand",
                      "launchAppsWidget"};

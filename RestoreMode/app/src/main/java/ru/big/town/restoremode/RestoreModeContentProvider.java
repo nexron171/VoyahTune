@@ -95,6 +95,10 @@ public class RestoreModeContentProvider extends ContentProvider {
      */
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
+        if (ru.big.town.common.TripProtocol.LOCATION_PERMISSION_STATE.equals(method)) {
+            getContext().enforceCallingOrSelfPermission(ru.big.town.common.TripProtocol.PERMISSION, "Trip location consent");
+            Bundle result = new Bundle(); result.putBoolean("allowed", TripLocationPermission.allowed(getContext())); return result;
+        }
         if ("driveHookV2".equals(method)) {
             boolean accHooks = ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks();
             if ("nativeRestore".equals(arg) && accHooks) {

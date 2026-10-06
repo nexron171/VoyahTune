@@ -28,10 +28,9 @@ final class EnergyWidgetController {
     private final EnergyHistory history=new EnergyHistory();
     private final EnergyConsumptionHistory consumption=new EnergyConsumptionHistory();
     private final EnergyDistanceTracker distance=new EnergyDistanceTracker();
-    private final LevelConsumption tripBattery=new LevelConsumption(),tripFuel=new LevelConsumption();
     private float batteryKwh=43,tankLiters=56;
     private final float[][] values=new float[EnergyTelemetrySample.COUNT][];
-    private final long[] received={-1,-1,-1,-1,-1};
+    private final long[] received=new long[EnergyTelemetrySample.COUNT];
     private Messenger client;
     private boolean connected,dirty,closed;
     private long nextQuery,lastSave,lastCollect=-1;
@@ -47,6 +46,7 @@ final class EnergyWidgetController {
     };
     EnergyWidgetController(Context context) {
         prefs=context.getSharedPreferences("EnergyWidgetHistory",Context.MODE_PRIVATE);
+        Arrays.fill(received,-1);
         hub=CanBusEventHub.get(context);
         thread.start();worker=new Handler(thread.getLooper());
         for(int i=0;i<EnergyTelemetrySample.COUNT;i++)values[i]=EnergyTelemetrySample.unavailable(i).values;
@@ -75,7 +75,7 @@ final class EnergyWidgetController {
         });
     }
     private void breakObservation() {
-        history.breakSegment();tripBattery.breakSegment();tripFuel.breakSegment();
+        history.breakSegment();
         dirty|=consumption.breakSegment();
     }
     private void onEvent(CanBusEvent event) {
@@ -87,13 +87,14 @@ final class EnergyWidgetController {
             publish(SystemClock.elapsedRealtime());
         } else if(event.telemetry!=null) {
             int kind=event.telemetry.kind;
+            if(kind==EnergyTelemetrySample.PRECISE_ODOMETER)return;
             values[kind]=event.telemetry.values.clone();
             if(kind==EnergyTelemetrySample.TRIP) {
                 if(!EnergyHistory.fresh(event.elapsedRealtime,received[kind])) {
                     distance.breakSegment();breakObservation();
                 }
                 if(distance.observe(values[kind][0],event.telemetry.tripCounter)) {
-                    tripBattery.clear();tripFuel.clear();history.breakSegment();
+                    history.breakSegment();
                     dirty|=consumption.breakSegment();
                     // New-trip sensor levels must not be taken from the previous trip snapshot.
                     received[EnergyTelemetrySample.SOC]=received[EnergyTelemetrySample.FUEL]=-1;
@@ -121,9 +122,6 @@ final class EnergyWidgetController {
                 received[EnergyTelemetrySample.SOC],received[EnergyTelemetrySample.FUEL]);
         dirty|=consumption.sample(km,soc,fuel,now,received[EnergyTelemetrySample.TRIP],
                 received[EnergyTelemetrySample.SOC],received[EnergyTelemetrySample.FUEL]);
-        double beforeEv=tripBattery.decrease()+tripBattery.distance(),beforeFuel=tripFuel.decrease()+tripFuel.distance();
-        tripBattery.observe(km,soc);tripFuel.observe(km,fuel);
-        dirty|=beforeEv!=tripBattery.decrease()+tripBattery.distance()||beforeFuel!=tripFuel.decrease()+tripFuel.distance();
     }
     private void publish(long now) {
         if(client==null)return;
@@ -132,11 +130,11 @@ final class EnergyWidgetController {
         b.putBoolean(EnergyWidgetProtocol.CONNECTED,connected);b.putLong(EnergyWidgetProtocol.UPDATED,now);
         b.putFloat(EnergyWidgetProtocol.BATTERY_KWH,batteryKwh);b.putFloat(EnergyWidgetProtocol.TANK_LITERS,tankLiters);
         b.putFloatArray(EnergyWidgetProtocol.LEVELS,new float[]{current(EnergyTelemetrySample.SOC,0,now),current(EnergyTelemetrySample.FUEL,0,now)});
-        boolean tripReady=Float.isFinite(current(EnergyTelemetrySample.TRIP,0,now));
-        b.putFloatArray(EnergyWidgetProtocol.TRIP,new float[]{current(EnergyTelemetrySample.TRIP,0,now),
-                tripReady&&Float.isFinite(current(EnergyTelemetrySample.SOC,0,now))?tripBattery.average(batteryKwh):Float.NaN,
-                tripReady&&Float.isFinite(current(EnergyTelemetrySample.FUEL,0,now))?tripFuel.average(tankLiters):Float.NaN});
-        b.putFloatArray(EnergyWidgetProtocol.TRIP_OBSERVED_KM,new float[]{(float)tripBattery.distance(),(float)tripFuel.distance()});
+        double[] trip=TripStatsService.currentEnergy();
+        b.putFloatArray(EnergyWidgetProtocol.TRIP,new float[]{(float)trip[0],
+                EnergyWidgetSettings.electricityAverage(trip[1],trip[3],batteryKwh),
+                EnergyWidgetSettings.average(trip[2],trip[4],tankLiters)});
+        b.putFloatArray(EnergyWidgetProtocol.TRIP_OBSERVED_KM,new float[]{(float)trip[3],(float)trip[4]});
         b.putFloatArray(EnergyWidgetProtocol.TIRES,fresh(EnergyTelemetrySample.TIRES,now)?values[EnergyTelemetrySample.TIRES].clone():EnergyTelemetrySample.unavailable(EnergyTelemetrySample.TIRES).values);
         b.putFloatArray(EnergyWidgetProtocol.ODOMETER,new float[]{current(EnergyTelemetrySample.ODOMETER,0,now)});
         List<EnergyHistory.Point> points=history.points();int n=points.size();
@@ -167,9 +165,8 @@ final class EnergyWidgetController {
     private void save(long now) {
         try {
             EnergyHistoryState state=new EnergyHistoryState();state.points=history.points();state.distance=distance.snapshot();
-            state.tripBattery=tripBattery.snapshot();state.tripFuel=tripFuel.snapshot();
             state.consumption=consumption.snapshot();
-            // commit runs only on EnergyWidgets, and atomically writes history and trip totals together.
+            // The legacy trip fields remain zero for format compatibility; TripStore owns the trip.
             if(prefs.edit().putString("levelsV2",state.encode())
                     .putFloat(EnergyWidgetSettings.BATTERY_KEY,batteryKwh).putFloat(EnergyWidgetSettings.TANK_KEY,tankLiters)
                     .remove("levelsV1").remove("fuelEstimateV1").commit())dirty=false;
@@ -183,7 +180,6 @@ final class EnergyWidgetController {
             if(prefs.contains("levelsV2")) {
                 EnergyHistoryState state=EnergyHistoryState.decode(prefs.getString("levelsV2",""));
                 history.restore(state.points);distance.restore(state.distance);
-                tripBattery.restore(state.tripBattery);tripFuel.restore(state.tripFuel);
                 consumption.restore(state.consumption);
             } else {
                 // Only prior level history is migrated. pointsV1/V2 and old net fuel totals are different units/semantics.

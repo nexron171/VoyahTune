@@ -11,7 +11,7 @@ public class EnergyTelemetryTest {
                 new int[]{0x42406666}).values[0], .0001f);
         int[] fuel = {52, 0, f(30), 0, f(9), f(5), f(6)};
         assertEquals(30, EnergyTelemetrySample.decode(EnergyTelemetrySample.FUEL, fuel).values[0], 0);
-        assertArrayEquals(new int[]{71,80,70,1,9}, EnergyTelemetrySample.TRANSACTIONS);
+        assertArrayEquals(new int[]{71,80,70,1,9,56}, EnergyTelemetrySample.TRANSACTIONS);
     }
 
     @Test public void preservesElectricAverageAndTripCounterWithoutUsingOemFuelAverage() {
@@ -95,5 +95,27 @@ public class EnergyTelemetryTest {
         assertEquals(3,out.size());
         r.invalidateThrough(1);
         r.dispatch(CanBusEvent.telemetry(CanBusEvent.Origin.LIVE,1,4,4000,s));assertEquals(3,out.size());
+    }
+    @Test public void rollingCountersKeepTenPercentNetUseOverTwentyTwoKmWithSocBeforeDistance() {
+        EnergyHistory h = new EnergyHistory(); h.sample(0, 80, 50, 0, 0, 0, 0);
+        for (int i = 1; i <= 220; i++) {
+            double km = i / 10d; float soc = 80 - 10 * i / 220f; long now = i * 6000L;
+            // Independent callbacks can report SOC first, then the new trip distance at that SOC.
+            h.sample((i - 1) / 10d, soc, 50, now - 1, now - 1, now - 1, now - 1);
+            h.sample(km, soc, 50, now, now, now, now);
+            if (i % 20 == 0 && i <= 200) {
+                float[] values = {soc + .5f, soc + .5f, soc};
+                for (int j = 0; j < values.length; j++) {
+                    long at = now + j + 1;
+                    h.sample(km, values[j], 50, at, at, at, at);
+                }
+            }
+        }
+        java.util.List<EnergyHistory.Point> points = h.points();
+        assertEquals(221, points.size()); assertEquals(0, points.get(0).startEvDrop, 0);
+        EnergyHistory.Point end = points.get(points.size() - 1);
+        assertEquals(22, end.km, 0); assertEquals(70, end.ev, 0);
+        assertEquals(10, end.evDrop, .00001); assertEquals(22, end.evKm, .00001);
+        assertEquals(19.54545, ru.big.town.common.EnergyWidgetSettings.electricityAverage(end.evDrop, end.evKm, 43), .0001);
     }
 }
