@@ -47,7 +47,7 @@ final class VoiceCommandController {
             // cancel a queued write, roll it back or cause a retry; only its reply is session-bound.
             String[] error = {"Не удалось отправить команду автомобилю"};
             ApplyEngine.postIndependentUserCommand("voice " + action,
-                    () -> error[0] = OemCommandSender.send(action, deadline, VoiceOemTransport.get(service)),
+                    () -> error[0] = OemCommandSender.send(action, deadline, service.voiceTransport()),
                     () -> {
                         if (gate.active(token)) respond(reply, error[0] == null, error[0]);
                     });

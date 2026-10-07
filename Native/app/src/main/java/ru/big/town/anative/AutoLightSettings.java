@@ -36,6 +36,12 @@ final class AutoLightSettings {
         runtime.apply(enabled);
     }
 
+    /** Reconcile scenario sensor demand without querying or changing RestoreMode preferences. */
+    static synchronized void refreshObservation(Context context) {
+        Runtime runtime = runtime(context);
+        runtime.apply(runtime.cached());
+    }
+
     private static Runtime runtime(Context context) {
         return new Runtime() {
             @Override public Boolean saved() {
@@ -61,8 +67,13 @@ final class AutoLightSettings {
             }
 
             @Override public void apply(boolean enabled) {
+                boolean scenarioNeedsLight = false;
+                for (ScenarioDefinition scenario : ScenarioDefinition.parse(ScenarioConfigReceiver.loadPersisted(context))) {
+                    if (scenario.enabled && scenario.usesLight()) { scenarioNeedsLight = true; break; }
+                }
+                LightSensorService.setObserveOnly(context, !enabled && scenarioNeedsLight);
                 Intent service = new Intent(context, LightSensorService.class);
-                if (enabled) {
+                if (enabled || scenarioNeedsLight) {
                     if (context.startForegroundService(service) == null) {
                         throw new IllegalStateException("Auto light service start was not accepted");
                     }

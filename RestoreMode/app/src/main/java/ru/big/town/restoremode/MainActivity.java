@@ -664,16 +664,16 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    protected Intent nativeServiceIntent() {
+        return new Intent().setComponent(new ComponentName("ru.big.town.anative", "ru.big.town.anative.SetModesService"));
+    }
+
     private void bindToMessengerService() {
         if (destroyed || bindingRequested) return;
         uiHandler.removeCallbacks(messengerRebindRunnable);
         Log.i(TAG, "bindToMessengerService() begin");
 
-        Intent intent = new Intent();
-        intent.setComponent(new ComponentName(
-                "ru.big.town.anative",
-                "ru.big.town.anative.SetModesService"
-        ));
+        Intent intent = nativeServiceIntent();
         try {
             bindingRequested = bindService(intent, connection, Context.BIND_AUTO_CREATE);
             Log.i(TAG, "bindToMessengerService() end, requested=" + bindingRequested);

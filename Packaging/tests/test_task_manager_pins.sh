@@ -35,7 +35,8 @@ require_fixed "$POLICY" 'static String setPinned(String csv, String pkg, boolean
 # Оба пути «Закрыть все» щадят зафиксированные приложения.
 require_fixed "$SERVICE" 'if (WidgetSupport.isPinned(this, pkg)) { pinned++; continue; }'
 require_fixed "$WIDGETS" 'if ((info.flags & ApplicationInfo.FLAG_SYSTEM) == 0 && !isPinned(context, info.packageName)) {'
-require_fixed "$SERVICE" 'WidgetSupport.setPinned(SetModesService.this, pkg, pinned);'
+require_fixed "$SERVICE" 'pinTaskApp(pkg, pinned);'
+require_fixed "$SERVICE" 'WidgetSupport.setPinned(this, pkg, pinned);'
 
 # Диалог «Закрыть приложения» предупреждает, что зафиксированные останутся открытыми.
 require_fixed "$DIALOG" 'зафиксированные в «Диспетчере задач», останутся открытыми'
@@ -55,10 +56,11 @@ TASK_POLICY="$ROOT/Native/app/src/main/java/ru/big/town/anative/TaskListPolicy.j
 require_fixed "$PROTOCOL" 'public static final String WIDGETS = "widgets";'
 require_fixed "$SERVICE" 'data.putBooleanArray(ru.big.town.common.TaskManagerProtocol.WIDGETS, widget);'
 require_fixed "$SERVICE" 'WidgetSupport.runningApps(this, widgetDisplayIds());'
-require_fixed "$SERVICE" 'WidgetSupport.isWidgetOnly(SetModesService.this, pkg, widgetDisplayIds(),'
+require_fixed "$SERVICE" 'isWidgetOnlyTask(pkg)'
+require_fixed "$SERVICE" 'WidgetSupport.isWidgetOnly(this, pkg, widgetDisplayIds(),'
 require_fixed "$WIDGETS" 'static boolean isWidgetOnly(Context context, String packageName, Set<Integer> widgetDisplays,'
 require_fixed "$TASK_POLICY" 'static List<SelectedApp> select(List<TaskCandidate> tasks, Set<Integer> widgetDisplays) {'
 require_fixed "$CARD" 'android:id="@+id/taskCardWidget"'
-require_fixed "$ACTIVITY" 'card.findViewById(R.id.taskCardWidget).setVisibility(widget ? View.VISIBLE : View.GONE);'
+require_fixed "$ACTIVITY" 'card.findViewById(R.id.taskCardWidget).setVisibility(widget ? View.VISIBLE : View.INVISIBLE);'
 
 echo "task manager pins contract test passed"

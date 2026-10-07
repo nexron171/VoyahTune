@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service android:name=".NativeContractService"
+            android:exported="true" android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+    </application>
+</manifest>

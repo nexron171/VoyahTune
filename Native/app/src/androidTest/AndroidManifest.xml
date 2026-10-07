@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+    <application>
+        <provider android:name="ru.big.town.anative.MockRestoreProvider" android:authorities="ru.big.town.anative.test.restore" android:process=":mock_restore" android:exported="true" android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+        <service android:name="ru.big.town.anative.MockRestoreService" android:exported="true" android:process=":mock_restore" />
+    </application>
+</manifest>

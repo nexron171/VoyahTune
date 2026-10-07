@@ -92,7 +92,7 @@ final class ScenarioActionExecutor {
         String[] error = {null};
         ApplyEngine.postIndependentUserCommand("scenario " + action,
                 () -> error[0] = OemCommandSender.send(action,
-                        SystemClock.elapsedRealtime() + DEADLINE_MS, VoiceOemTransport.get(service)),
+                        SystemClock.elapsedRealtime() + DEADLINE_MS, service.voiceTransport()),
                 () -> completion.onFinished(error[0] == null,
                         error[0] == null ? null : "Не удалось отправить команду автомобилю"));
     }
