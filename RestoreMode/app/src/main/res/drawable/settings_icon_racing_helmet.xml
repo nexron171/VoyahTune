@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp"
+    android:height="28dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:name="helmet_shell"
+        android:pathData="M3.5,20 V11.8 C3.5,6.7 7.4,3 12.6,3 C17.6,3 21,6.8 21,11.6 V19.5 Q21,21 19.5,21 H4.5 Q3.5,21 3.5,20 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="visor"
+        android:pathData="M11.4,10 H20.8 V15.2 H14 Z"
+        android:fillColor="#B9D5FF"
+        android:fillAlpha="0.12"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="chin_vent"
+        android:pathData="M14.5,18 H18"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round" />
+</vector>

@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp"
+    android:height="28dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:name="mountain_peaks"
+        android:pathData="M2,20 L10,5 L18,20 Z M13.2,11 L16.5,6.5 L22,20 H18"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="snow_caps"
+        android:pathData="M7.2,10.2 L9,11.4 L10.5,10 L12.8,10.2 M15,8.5 L16.5,10 L17.5,9"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

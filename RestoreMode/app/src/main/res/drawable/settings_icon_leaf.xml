@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp"
+    android:height="28dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:name="leaf"
+        android:pathData="M20.5,3.5 C20.8,8 19.8,13.5 15.8,17.1 C12.6,20 8.4,19.4 5.6,16.5 C2.9,13.6 3.8,9.8 7.2,7.2 C11,4.4 16,5.5 20.5,3.5 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="stem_and_veins"
+        android:pathData="M3,21 L16,8 M8,16 V11 M8,16 H13"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

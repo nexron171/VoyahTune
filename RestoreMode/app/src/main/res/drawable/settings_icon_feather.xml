@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp"
+    android:height="28dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:name="feather"
+        android:pathData="M5.5,18.5 Q3.5,15 6,11.5 L13,4.5 C15.8,1.7 19.8,2.1 21,4.7 C22.2,7.5 20.4,10 18,12.4 L12.1,18 C10.4,19.6 7.8,19.5 5.5,18.5 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="shaft_and_barbs"
+        android:pathData="M2.8,21.2 L17.5,6.3 M7.6,16.3 H12.4 M10.9,13 H17.3"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
