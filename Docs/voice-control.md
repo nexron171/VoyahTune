@@ -452,8 +452,8 @@ DeepFilterNet3 встроен в native-библиотеку, Python/PyTorch н�
 Инструментальная проверка на Android:
 
 ```sh
-./gradlew :app:connectedFullDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.big.town.restoremode.VoicePipelineNativeTest
+./gradlew :app:connectedDebugAndroidTest -PvoyahMinifyDebug=false \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.big.town.restoremode.voice.audio.VoicePipelineNativeTest
 ```
 
 Тест прогоняет синтезированные русские команду, отрицание и постороннюю фразу через

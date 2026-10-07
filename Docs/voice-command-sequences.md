@@ -115,9 +115,9 @@
 
 ## Реализация
 
-- `RestoreMode/app/src/main/java/ru/big/town/restoremode/VoiceCommandSequence.java` — деление фразы,
+- `RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceCommandSequence.java` — деление фразы,
   классификация сегментов, причины отказа, признак навигации, образец для предпросмотра.
-- `VoiceActivity.java` — `recognized`, `recognizedSequence`, `stepSequence`, `completeStep`,
+- `voice/ui/VoiceAssistantActivity.java` — `recognized`, `recognizedSequence`, `stepSequence`, `completeStep`,
   `noteFor`, `finishSequence`, `showRows`/`clearRows`, список строк результата и тайминги.
 - `VoiceCommandMessage.java` — перегрузка `create` с `index`/`count`.
 - `Native/.../VoiceSessionGate.java` — порядковые номера сегментов.
