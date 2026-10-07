@@ -1,5 +1,6 @@
 //! Release catalog, verified downloads and offline cache. No vehicle commands here.
 mod download;
+mod settings;
 use crate::{
     compatibility::INSTALLER_VERSION,
     payload::{self, Payload},
@@ -7,6 +8,7 @@ use crate::{
 };
 use fs2::FileExt;
 use serde::Serialize;
+pub use settings::CatalogSettings;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
@@ -141,7 +143,7 @@ impl Cache {
         refresh: bool,
     ) -> Result<CatalogState> {
         let _lock = self.lock()?;
-        let stored = self.root.join("ota-catalog.json");
+        let stored = self.catalog_path()?;
         let mut warning = None;
         let mut catalog = None;
         if refresh {
@@ -172,7 +174,7 @@ impl Cache {
         })
     }
     fn fetch_catalog(&self) -> Result<Catalog> {
-        fetch_catalog(&agent(15), CATALOG_URL)
+        fetch_catalog(&agent(15), &self.catalog_settings()?.catalog_url)
     }
     pub fn list(&self) -> Result<Vec<CachedPayload>> {
         let folder = self.root.join("payloads");
@@ -244,6 +246,7 @@ impl Cache {
         progress: ProgressCallback,
     ) -> Result<Payload> {
         cancelled(cancel)?;
+        release.require_installer_version(INSTALLER_VERSION)?;
         payload::validate_schema(release.payload.manifest_schema)?;
         release.requirements.validate()?;
         https_url(&release.payload.url)?;
@@ -497,6 +500,8 @@ mod tests {
                 .releases
                 .iter()
                 .map(|r| UpdateRelease {
+                    minimum_installer_version: r.minimum_installer_version.clone(),
+                    minimum_ota_version: r.minimum_ota_version.clone(),
                     version: r.version.clone(),
                     url: r.payload.url.clone(),
                     size: r.payload.size,
@@ -534,6 +539,8 @@ mod tests {
             .new_agent();
         let mut a = Catalog::empty();
         a.releases.push(Release {
+            minimum_installer_version: None,
+            minimum_ota_version: None,
             version: "3.13.0".into(),
             published_at: "2026-09-27".into(),
             channel: "stable".into(),
@@ -688,6 +695,8 @@ mod tests {
             "requirements":requirements,"artifacts":[]
         })).unwrap()};
         let release = Release {
+            minimum_installer_version: None,
+            minimum_ota_version: None,
             version: "3.13.0".into(),
             published_at: String::new(),
             channel: "stable".into(),
@@ -740,6 +749,8 @@ mod tests {
     #[test]
     fn future_release_remains_visible_and_semver_is_numeric() {
         let release = |version: &str| Release {
+            minimum_installer_version: None,
+            minimum_ota_version: None,
             version: version.into(),
             published_at: "2026-09-26".into(),
             channel: "stable".into(),
@@ -790,5 +801,30 @@ mod tests {
             fs::create_dir(&dest).unwrap();
             assert!(extract(&path, &dest, &AtomicBool::new(false), &|_| {}).is_err());
         }
+    }
+    #[test]
+    fn installer_minimum_is_checked_before_cache_or_network_access() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Cache {
+            root: directory.path().join("downloads"),
+        };
+        let release = UpdateRelease {
+            version: "4.0.0-od".into(),
+            url: "https://example.org/payload.zip".into(),
+            size: 1,
+            sha256: "a".repeat(64),
+            minimum_installer_version: Some("99.0.0".into()),
+            minimum_ota_version: Some("4.0.0".into()),
+        }
+        .into_release();
+        let error = cache
+            .download(&release, &AtomicBool::new(false), &|_| {
+                panic!("download started")
+            })
+            .err()
+            .unwrap();
+        assert_eq!(error.code, "INSTALLER_UPDATE_REQUIRED");
+        assert!(error.message.contains("99.0.0"));
+        assert!(!cache.root.exists());
     }
 }

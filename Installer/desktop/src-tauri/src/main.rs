@@ -2,7 +2,7 @@
 use installer_core::{
     adb::Adb,
     canbus::RemovalConsent,
-    catalog::{Cache, Catalog},
+    catalog::{Cache, Catalog, CatalogSettings},
     engine::{default_adb, Engine},
     engineering_menu,
     events::{Event, Events},
@@ -100,6 +100,14 @@ fn operation_payload(app: &tauri::AppHandle, serial: &str, action: Action) -> Re
 fn select_payload(app: &tauri::AppHandle, payload: Payload) -> Result<Value> {
     let runtime = app.state::<Runtime>();
     let mut state = runtime.0.lock().unwrap();
+    if let Some(release) = state.catalog.as_ref().and_then(|catalog| {
+        catalog
+            .releases
+            .iter()
+            .find(|release| release.version == payload.manifest.release_version)
+    }) {
+        release.require_installer_version(env!("CARGO_PKG_VERSION"))?;
+    }
     state.payload = Some(payload.root.clone());
     state.prepared = None;
     Ok(
@@ -175,6 +183,22 @@ async fn release_info(app: tauri::AppHandle, path: Option<String>) -> Result<Val
     result
 }
 #[tauri::command]
+fn catalog_settings() -> Result<CatalogSettings> {
+    Cache::user()?.catalog_settings()
+}
+
+#[tauri::command]
+fn save_catalog_url(runtime: State<Runtime>, url: String) -> Result<CatalogSettings> {
+    reserve(&runtime)?;
+    let result = Cache::user().and_then(|cache| cache.save_catalog_url(&url));
+    if result.is_ok() {
+        runtime.0.lock().unwrap().catalog = None;
+    }
+    release(&runtime);
+    result
+}
+
+#[tauri::command]
 async fn release_catalog(app: tauri::AppHandle, refresh: bool) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
@@ -188,9 +212,17 @@ async fn release_catalog(app: tauri::AppHandle, refresh: bool) -> Result<Value> 
                 .unwrap()
                 .push(json!({"version":embedded.manifest.release_version,"path":embedded.root}));
         }
-        // The public catalog only describes the archive. Compatibility is checked
-        // from its verified manifest after download, before selecting/installing it.
-
+        for (release, entry) in state
+            .catalog
+            .releases
+            .iter()
+            .zip(value["catalog"]["releases"].as_array_mut().unwrap())
+        {
+            if let Err(error) = release.require_installer_version(env!("CARGO_PKG_VERSION")) {
+                entry["compatible"] = json!(false);
+                entry["incompatibility"] = json!(error.message);
+            }
+        }
         Ok(value)
     })
     .await
@@ -517,6 +549,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             engineering_code,
             release_catalog,
+            catalog_settings,
+            save_catalog_url,
             download_payload,
             delete_payload,
             open_release_link,

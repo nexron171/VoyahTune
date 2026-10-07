@@ -4,6 +4,7 @@ use crate::{
     state::{self, State},
 };
 use release_core::{catalog::Release, ota, payload::Payload};
+mod catalog_selection;
 use std::{
     fs, io,
     path::Path,
@@ -232,6 +233,12 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
     }
     ota::compatible(&c, &s.installed_version, s.same_version)
         .map_err(|e| invalid(&e.to_string()))?;
+    catalog_selection::require_ota_version(
+        &r,
+        &s.installed_version,
+        release_core::infrastructure::Infrastructure::compiled(),
+    )
+    .map_err(|e| invalid(&e.to_string()))?;
     if device::prop("ro.build.fingerprint")? != s.fingerprint {
         return Err(invalid(
             "Прошивка ГУ изменилась: установите VoyahTune через USB",
@@ -264,28 +271,15 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     release_core::infrastructure::Infrastructure::from_version(&current.installed_version)
         .and_then(|i| i.require(release_core::infrastructure::Infrastructure::compiled()))
         .map_err(|e| invalid(&e.to_string()))?;
-    let mut chosen = None;
     let mut rejected = None;
-    for r in catalog
-        .ota_releases()
-        .filter(|r| {
-            release_core::infrastructure::Infrastructure::from_version(&r.version)
-                .is_ok_and(|i| i == release_core::infrastructure::Infrastructure::compiled())
-        })
-        .filter(|r| r.channel == "stable" && (!same || r.version == current.installed_version))
-    {
-        let result =
-            ota::verify(r).and_then(|c| ota::compatible(&c, &current.installed_version, same));
-        match result {
-            Ok(()) => {
-                chosen = Some(r.clone());
-                break;
-            }
-            Err(e) => {
-                rejected = Some(e.to_string());
-            }
-        }
-    }
+    let selection = catalog_selection::choose(
+        &catalog,
+        &current.installed_version,
+        same,
+        release_core::infrastructure::Infrastructure::compiled(),
+        |error| rejected = Some(error.to_string()),
+    );
+    let selection_error = selection.as_ref().err().map(ToString::to_string);
     let mut rt = shared.lock().unwrap();
     if rt
         .config
@@ -298,7 +292,7 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     }
     rt.state.source_generation = generation;
     rt.state.same_version = same;
-    rt.state.selected = chosen;
+    rt.state.selected = selection.ok().flatten();
     rt.state.phase = "idle".into();
     rt.state.error = None;
     rt.state.step = if rt.state.selected.is_some() {
@@ -317,8 +311,11 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     }
     state::save(root(), "state.json", &rt.state)?;
     drop(rt);
-    if let Some(e) = rejected {
-        crate::log(root(), &format!("catalog_release_skipped {e}"))?;
+    if let Some(error) = rejected {
+        crate::log(root(), &format!("catalog_release_skipped {error}"))?;
+    }
+    if let Some(error) = selection_error {
+        return Err(invalid(&error));
     }
     Ok(())
 }

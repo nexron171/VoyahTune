@@ -184,6 +184,8 @@ mod tests {
         s.phase = "preparing".into();
         s.same_version = true;
         s.selected = Some(Release {
+            minimum_installer_version: None,
+            minimum_ota_version: None,
             version: "3.15.0".into(),
             published_at: String::new(),
             channel: "stable".into(),

@@ -2,6 +2,7 @@
 use crate::{compatibility::Requirements, Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+mod minimum_versions;
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 pub const CATALOG_URL: &str = env!("VOYAH_CATALOG_URL");
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +22,10 @@ pub struct Release {
     pub notes_url: String,
     pub payload: Archive,
     pub requirements: Requirements,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_installer_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_ota_version: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -80,6 +85,7 @@ impl Catalog {
         }
         let mut versions = BTreeSet::new();
         for r in &self.releases {
+            r.validate_minimum_versions()?;
             let version = crate::infrastructure::release_version(&r.version)?;
             if !versions.insert(&r.version)
                 || !["stable", "prerelease"].contains(&r.channel.as_str())
@@ -141,12 +147,16 @@ pub struct UpdateCatalog {
     pub releases: Vec<UpdateRelease>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateRelease {
     pub version: String,
     pub url: String,
     pub size: u64,
     pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_installer_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_ota_version: Option<String>,
 }
 impl UpdateRelease {
     pub fn into_release(self) -> Release {
@@ -168,6 +178,8 @@ impl UpdateRelease {
                 manifest_schema: 4,
             },
             requirements: Requirements::default(),
+            minimum_installer_version: self.minimum_installer_version,
+            minimum_ota_version: self.minimum_ota_version,
         }
     }
 }
@@ -195,6 +207,8 @@ mod update_tests {
             releases: ["3.22.0-pi", "3.22.0-od", "3.23.0-beta.1-pi", "3.21.0"]
                 .into_iter()
                 .map(|version| UpdateRelease {
+                    minimum_installer_version: None,
+                    minimum_ota_version: None,
                     version: version.into(),
                     url: "https://example.org/payload.zip".into(),
                     size: 1,
@@ -227,6 +241,8 @@ mod update_tests {
     #[test]
     fn simple_catalog_validates_identity_urls_and_duplicates() {
         let entry = UpdateRelease {
+            minimum_installer_version: None,
+            minimum_ota_version: None,
             version: "3.15.0".into(),
             url: "https://example.org/payload.zip".into(),
             size: 149407190,

@@ -96,6 +96,7 @@ CONTEXT.md
 /Releases/ota/*
 !/Releases/ota/index.json
 !/Releases/ota/index-beta.json
+!/Releases/ota/index-v4.json
 
 # Compiled installers and validators must never be committed.
 /Packaging/installer-tools/*
