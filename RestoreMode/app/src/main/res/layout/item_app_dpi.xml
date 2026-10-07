@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ru.big.town.restoremode.SettingsRow xmlns:android="http://schemas.android.com/apk/res/android"
+<ru.big.town.restoremode.settings.ui.layout.SettingsRow xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
@@ -36,4 +36,4 @@
         android:layout_width="280dp"
         android:layout_height="52dp"
         android:popupBackground="@color/settings_inset" />
-</ru.big.town.restoremode.SettingsRow>
+</ru.big.town.restoremode.settings.ui.layout.SettingsRow>

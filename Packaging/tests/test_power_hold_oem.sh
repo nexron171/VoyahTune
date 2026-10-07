@@ -9,7 +9,7 @@ POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/PowerHoldPolicy.
 CONTROLLER="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/PowerHoldController.java"
 SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 NATIVE_MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
-RESTORE_MAIN="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/MainActivity.java"
+RESTORE_MAIN="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java"
 RESTORE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/tile_power_hold.xml"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }

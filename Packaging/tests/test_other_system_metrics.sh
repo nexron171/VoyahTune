@@ -2,8 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
-READER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/SystemMetricsReader.java"
+ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/other/OtherSettingsFragment.java"
+READER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/diagnostics/metrics/SystemMetricsReader.java"
 LAYOUT="$ROOT/RestoreMode/app/src/main/res/layout/settings_other_metrics.xml"
 
 fail() {
@@ -16,10 +16,10 @@ grep -Fq 'android:id="@+id/textCpuStatus"' "$LAYOUT" || fail "CPU value is absen
 # The interval and sampling live in the reader shared with dashboard widgets.
 grep -Fq 'SYSTEM_METRICS_INTERVAL_MS = SystemMetricsReader.INTERVAL_MS;' "$ACTIVITY" \
     || fail "Other does not use the shared metrics interval"
-grep -Eq '^[[:space:]]*static[[:space:]]+final[[:space:]]+long[[:space:]]+INTERVAL_MS[[:space:]]*=[[:space:]]*5_?000[Ll]?[[:space:]]*;' "$READER" \
+grep -Eq '^[[:space:]]*(public[[:space:]]+)?static[[:space:]]+final[[:space:]]+long[[:space:]]+INTERVAL_MS[[:space:]]*=[[:space:]]*5_?000[Ll]?[[:space:]]*;' "$READER" \
     || fail "metrics interval is not 5 seconds"
 python3 "$ROOT/Packaging/tests/assert_java_source.py" "$ACTIVITY" \
-    'activityResumed && currentSection == SettingsSection.OTHER && textRamStatus != null && textRamStatus.isShown()' \
+    'sectionResumed && textRamStatus != null && textRamStatus.isShown()' \
     || fail "poll is not gated by the visible metrics row"
 grep -Fq 'systemMetricsReader.read(generation)' "$ACTIVITY" || fail "Other does not sample the shared metrics reader"
 grep -Fq 'manager.getMemoryInfo(info)' "$READER" || fail "RAM does not use ActivityManager.MemoryInfo"
@@ -28,14 +28,14 @@ python3 "$ROOT/Packaging/tests/assert_java_source.py" "$ACTIVITY" \
     'uiHandler.postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS)'  \
     || fail "5-second update is not self-scheduled after a completed visible sample"
 grep -Fq 'uiHandler.removeCallbacks(systemMetricsTick)' "$ACTIVITY" || fail "metrics callback is not cancellable"
-grep -Fq 'systemMetricsExecutor.shutdownNow()' "$ACTIVITY" || fail "metrics worker survives Activity destruction"
+grep -Fq 'systemMetricsExecutor.shutdownNow()' "$ACTIVITY" || fail "metrics worker survives Fragment destruction"
 
 awk '
-    /protected void onPause\(\)/ { in_pause = 1 }
-    in_pause && /activityResumed = false;/ { stopped = 1 }
-    in_pause && /updateSystemMetricsPolling\(\);/ { updated = 1 }
+    /public void onPause\(\)/ { in_pause = 1 }
+    in_pause && /sectionResumed = false;/ { stopped = 1 }
+    in_pause && /onRowsVisibilityChanged\(\);/ { updated = 1 }
     in_pause && /^    }/ { exit(stopped && updated ? 0 : 1) }
     END { if (!(stopped && updated)) exit 1 }
-' "$ACTIVITY" || fail "leaving the Activity does not stop metrics"
+' "$ACTIVITY" || fail "leaving the section does not stop metrics"
 
 echo "PASS: RAM/CPU update every 5s only while Other is visible"

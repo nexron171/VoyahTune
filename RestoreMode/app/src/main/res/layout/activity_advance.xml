@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
@@ -9,154 +8,10 @@
     android:background="@color/settings_background"
     android:orientation="horizontal"
     tools:context=".AdvanceActivity">
-    <LinearLayout
+    <ru.big.town.restoremode.settings.shell.SettingsNavigationRail
+        android:id="@+id/settingsNavigationRail"
         android:layout_width="300dp"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:paddingHorizontal="20dp"
-        android:paddingVertical="20dp"
-        android:gravity="top">
-        <ImageButton
-            android:id="@+id/buttonBack"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:padding="20dp"
-            android:background="@drawable/settings_back"
-            android:scaleType="fitCenter"
-            android:src="@drawable/settings_icon_back"
-            android:onClick="onButtonClickFinish"
-            android:contentDescription="Назад" />
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginTop="24dp"
-            android:scrollbars="none"
-            android:fillViewport="true">
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-                <TextView
-                    android:id="@+id/navMainScreen"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Главный экран"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-                <TextView
-                    android:id="@+id/navDriveModes"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Настройки автомобиля"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-                <TextView
-                    android:id="@+id/navSplitScreen"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Приложения и разделение экрана"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-                <TextView
-                    android:id="@+id/navApolloTech"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Apollo Tech"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-                <TextView
-                    android:id="@+id/navSteeringButtons"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Кнопки на руле"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-                <TextView
-                    android:id="@+id/navVoiceControl"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Голосовое управление"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-                <TextView
-                    android:id="@+id/navScenarios"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Сценарии"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-                <TextView
-                    android:id="@+id/navOther"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Другое"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-                <TextView
-                    android:id="@+id/navCustomCommands"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/nav_rail_item_bg"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="14dp"
-                    android:text="Собственные команды"
-                    android:textColor="@color/settings_text"
-                    android:textSize="23sp"
-                    android:visibility="gone"
-                    android:includeFontPadding="false"
-                    android:lineSpacingMultiplier="1.18" />
-            </LinearLayout>
-        </ScrollView>
-    </LinearLayout>
+        android:layout_height="match_parent" />
     <View
         android:layout_width="2dp"
         android:layout_height="match_parent"
@@ -166,86 +21,13 @@
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1">
-        <FrameLayout
+        <androidx.fragment.app.FragmentContainerView
+            android:id="@+id/settingsSectionContainer"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
-            <ru.big.town.restoremode.SettingsList
-                android:id="@+id/settingsList"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:clipToPadding="false"
-                android:paddingHorizontal="28dp"
-                android:paddingTop="132dp"
-                android:paddingBottom="32dp"
-                android:scrollbars="none"
-                android:focusableInTouchMode="true"
-                android:descendantFocusability="beforeDescendants" />
-        </FrameLayout>
-        <LinearLayout
+            android:layout_height="match_parent" />
+        <ru.big.town.restoremode.settings.shell.SettingsHeaderView
+            android:id="@+id/settingsHeader"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingHorizontal="28dp"
-            android:paddingTop="24dp"
-            android:background="@drawable/settings_header"
-            android:paddingBottom="24dp"
-            android:minHeight="112dp">
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_weight="1">
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="ПЕРСОНАЛИЗАЦИЯ"
-                    android:textSize="12sp"
-                    android:textColor="#8298b6"
-                    android:includeFontPadding="false"
-                    android:id="@+id/settingsEyebrow"
-                    android:letterSpacing="0.208"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="8dp" />
-                <TextView
-                    android:id="@+id/sectionTitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="16dp"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:text="Режимы вождения и безопасность"
-                    android:textColor="@color/settings_text"
-                    android:textStyle="normal"
-                    android:textSize="36sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:includeFontPadding="false"
-                    android:letterSpacing="-0.028" />
-            </LinearLayout>
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-                <Button
-                    android:id="@+id/buttonApplyAdvance"
-                    android:layout_width="200dp"
-                    android:layout_height="64dp"
-                    android:layout_marginTop="1dp"
-                    android:onClick="onButtonClickApply"
-                    android:text="Применить"
-                    android:textColor="@color/settings_text"
-                    android:textSize="@dimen/settings_body_size"
-                    android:singleLine="true"
-                    app:cornerRadius="20dp" />
-                <ProgressBar
-                    android:id="@+id/applyProgressAdvance"
-                    style="?android:attr/progressBarStyleHorizontal"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:indeterminate="true"
-                    android:visibility="gone" />
-            </LinearLayout>
-        </LinearLayout>
+            android:layout_height="wrap_content" />
     </FrameLayout>
 </LinearLayout>

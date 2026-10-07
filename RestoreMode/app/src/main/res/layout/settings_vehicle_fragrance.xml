@@ -29,7 +29,7 @@
             android:textColor="#f3f5fa"
             android:includeFontPadding="false"
             android:layout_weight="1" />
-        <ru.big.town.restoremode.SettingsToggle
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
             android:id="@+id/switchFragrance"
             android:layout_width="58dp"
             android:layout_height="32dp"
@@ -44,7 +44,7 @@
         android:textColor="#97a6bc"
         android:includeFontPadding="false"
         android:layout_marginBottom="18dp" />
-    <ru.big.town.restoremode.SettingsGrid
+    <ru.big.town.restoremode.settings.ui.layout.SettingsGrid
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
@@ -62,7 +62,7 @@
                 android:includeFontPadding="false"
                 android:layout_marginTop="18dp"
                 android:layout_marginBottom="10dp" />
-            <ru.big.town.restoremode.SettingsChoiceGroup
+            <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
                 android:id="@+id/fragranceTasteGroup"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -98,7 +98,7 @@
                     android:textColor="@color/radio_button_text_color_selector"
                     android:layout_weight="0"
                     android:maxLines="3" />
-            </ru.big.town.restoremode.SettingsChoiceGroup>
+            </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
         </LinearLayout>
         <LinearLayout
             android:layout_width="match_parent"
@@ -113,7 +113,7 @@
                 android:includeFontPadding="false"
                 android:layout_marginTop="18dp"
                 android:layout_marginBottom="10dp" />
-            <ru.big.town.restoremode.SettingsChoiceGroup
+            <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
                 android:id="@+id/fragranceDurationGroup"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -149,7 +149,7 @@
                     android:textColor="@color/radio_button_text_color_selector"
                     android:layout_weight="0"
                     android:maxLines="3" />
-            </ru.big.town.restoremode.SettingsChoiceGroup>
+            </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
         </LinearLayout>
         <LinearLayout
             android:layout_width="match_parent"
@@ -164,7 +164,7 @@
                 android:includeFontPadding="false"
                 android:layout_marginTop="18dp"
                 android:layout_marginBottom="10dp" />
-            <ru.big.town.restoremode.SettingsChoiceGroup
+            <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
                 android:id="@+id/fragranceIntensityGroup"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -200,7 +200,7 @@
                     android:textColor="@color/radio_button_text_color_selector"
                     android:layout_weight="0"
                     android:maxLines="3" />
-            </ru.big.town.restoremode.SettingsChoiceGroup>
+            </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
         </LinearLayout>
-    </ru.big.town.restoremode.SettingsGrid>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsGrid>
 </LinearLayout>

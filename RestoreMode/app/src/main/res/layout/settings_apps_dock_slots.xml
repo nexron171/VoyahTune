@@ -8,7 +8,7 @@
     android:background="@drawable/settings_card"
     android:padding="25dp"
     android:id="@+id/dockOverrideBlock">
-    <ru.big.town.restoremode.SettingsGrid
+    <ru.big.town.restoremode.settings.ui.layout.SettingsGrid
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
@@ -49,7 +49,6 @@
                 android:id="@+id/buttonDockApp1"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:onClick="onPickDockApp1"
                 android:text="Приложение 1: не выбрано"
                 android:textColor="@color/settings_text"
                 android:textSize="@dimen/settings_caption_size"
@@ -70,7 +69,6 @@
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:layout_marginStart="24dp"
-                android:onClick="onPickDockSplit1"
                 android:text="Долгое нажатие: не назначено"
                 android:textColor="@color/settings_muted"
                 android:textSize="@dimen/settings_caption_size"
@@ -130,7 +128,6 @@
                 android:id="@+id/buttonDockApp2"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:onClick="onPickDockApp2"
                 android:text="Приложение 2: не выбрано"
                 android:textColor="@color/settings_text"
                 android:textSize="@dimen/settings_caption_size"
@@ -151,7 +148,6 @@
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:layout_marginStart="24dp"
-                android:onClick="onPickDockSplit2"
                 android:text="Долгое нажатие: не назначено"
                 android:textColor="@color/settings_muted"
                 android:textSize="@dimen/settings_caption_size"
@@ -175,7 +171,7 @@
                 android:tag="settings.action"
                 android:layout_marginTop="18dp" />
         </LinearLayout>
-    </ru.big.town.restoremode.SettingsGrid>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsGrid>
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

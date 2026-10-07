@@ -5,9 +5,9 @@ REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 HOOK="$REPO_ROOT/Packaging/od/inject/apollo_tech.js"
 LOAD_BIN="$REPO_ROOT/Packaging/od/system/load.bin"
 README="$REPO_ROOT/Packaging/README.md"
-ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
-APOLLO_SETTINGS="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/ApolloSettings.java"
-PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
+ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/apollo/ApolloSettingsFragment.java"
+APOLLO_SETTINGS="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/ApolloSettings.java"
+PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SettingsContentProvider.java"
 LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout"
 SET_MODES="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
@@ -22,7 +22,7 @@ fail() {
     exit 1
 }
 require_fixed() {
-    if [ "$1" = "$ADVANCE" ]; then
+    if [ "$1" = "$ADVANCE" ] || [ "$1" = "$PROVIDER" ]; then
         python3 "$REPO_ROOT/Packaging/tests/assert_java_source.py" "$1" "$2"
     else
         grep -RFq -- "$2" "$1" || fail "missing '$2' in $1"

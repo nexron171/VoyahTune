@@ -42,7 +42,7 @@ public interface SharedPreferences {
 }
 """
 HARNESS = r"""
-package ru.big.town.restoremode;
+package ru.big.town.restoremode.vehicle;
 import android.os.Bundle;
 import android.content.SharedPreferences;
 import java.util.HashMap;
@@ -172,15 +172,15 @@ def main():
         sources = []
         for name, contents in {"android/os/Bundle.java": BUNDLE,
                                "android/content/SharedPreferences.java": PREFERENCES,
-                               "ru/big/town/restoremode/AccPreferencesHarness.java": HARNESS}.items():
+                               "ru/big/town/restoremode/vehicle/AccPreferencesHarness.java": HARNESS}.items():
             path = temp / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(contents)
             sources.append(str(path))
-        sources += [str(ROOT / "RestoreMode/app/src/main/java/ru/big/town/restoremode/DriveSelectionPreferences.java"),
+        sources += [str(ROOT / "RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/DriveSelectionPreferences.java"),
                     str(ROOT / "SharedAndroid/src/main/java/ru/big/town/common/DriveSelectionPolicy.java")]
         subprocess.run([javac, "--release", "11", "-d", str(temp), *sources], check=True)
-        subprocess.run([java, "-cp", str(temp), "ru.big.town.restoremode.AccPreferencesHarness"], check=True)
+        subprocess.run([java, "-cp", str(temp), "ru.big.town.restoremode.vehicle.AccPreferencesHarness"], check=True)
 
 if __name__ == "__main__":
     main()

@@ -8,6 +8,8 @@ import android.widget.TextView;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.test.platform.app.InstrumentationRegistry;
 
+import ru.big.town.restoremode.settings.ui.list.SettingsList;
+
 import java.util.function.Predicate;
 
 final class SettingsTestNavigator {

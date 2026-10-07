@@ -8,10 +8,10 @@ PROTOCOL="$ROOT/SharedAndroid/src/main/java/ru/big/town/common/TaskManagerProtoc
 WIDGETS="$ROOT/Native/app/src/main/java/ru/big/town/anative/WidgetSupport.java"
 SERVICE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 POLICY="$ROOT/Native/app/src/main/java/ru/big/town/anative/PinnedAppsPolicy.java"
-ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/TaskManagerActivity.java"
+ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/taskmanager/TaskManagerScreenActivity.java"
 CARD="$ROOT/RestoreMode/app/src/main/res/layout/item_task_card.xml"
 PIN_ICON="$ROOT/RestoreMode/app/src/main/res/drawable/ic_pin.xml"
-DIALOG="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
+DIALOG="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/other/OtherSettingsFragment.java"
 
 fail() {
     echo "task manager pins contract test failed: $*" >&2
@@ -19,7 +19,11 @@ fail() {
 }
 
 require_fixed() {
-    grep -Fq "$2" "$1" || fail "$1 does not contain: $2"
+    if [ "$1" = "$ACTIVITY" ]; then
+        python3 "$ROOT/Packaging/tests/assert_java_source.py" "$1" "$2"
+    else
+        grep -Fq "$2" "$1" || fail "$1 does not contain: $2"
+    fi
 }
 
 # Pinning has its own message and task-list response flag.

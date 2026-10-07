@@ -67,7 +67,7 @@
             android:id="@+id/settingsCanStatus"
             android:layout_marginTop="14dp"
             android:minHeight="26dp" />
-        <ru.big.town.restoremode.SettingsRow
+        <ru.big.town.restoremode.settings.ui.layout.SettingsRow
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
@@ -95,11 +95,11 @@
                     android:layout_marginTop="7dp"
                     android:lineSpacingMultiplier="1.45" />
             </LinearLayout>
-            <ru.big.town.restoremode.SettingsNumberPicker
+            <ru.big.town.restoremode.settings.ui.controls.SettingsNumberPicker
                 android:id="@+id/pickerCustomCommandCount"
                 android:layout_width="115dp"
                 android:layout_height="52dp" />
-        </ru.big.town.restoremode.SettingsRow>
+        </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -117,7 +117,6 @@
                 android:id="@+id/buttonClean"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:onClick="onButtonClickClean"
                 android:text="Очистить"
                 android:textColor="@color/settings_text"
                 android:textSize="@dimen/settings_heading_size"

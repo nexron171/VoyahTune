@@ -6,7 +6,7 @@
     android:orientation="vertical"
     android:background="@drawable/settings_card"
     android:padding="25dp">
-    <ru.big.town.restoremode.SettingsRow
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -34,11 +34,11 @@
                 android:layout_marginTop="7dp"
                 android:lineSpacingMultiplier="1.45" />
         </LinearLayout>
-        <ru.big.town.restoremode.SettingsToggle
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
             android:id="@+id/switchSaveTripHistory"
             android:layout_width="58dp"
             android:layout_height="32dp"
             android:thumb="@drawable/switch_thumb"
             android:track="@drawable/switch_track" />
-    </ru.big.town.restoremode.SettingsRow>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
 </LinearLayout>

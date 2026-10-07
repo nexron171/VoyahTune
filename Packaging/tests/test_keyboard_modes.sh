@@ -2,8 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-UI="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
-SYNC="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/SplitConfigSync.java"
+UI="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/other/OtherSettingsFragment.java"
+SYNC="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java"
 LAYOUT="$ROOT/RestoreMode/app/src/main/res/layout/settings_other_keyboard.xml"
 NATIVE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesConfigReceiver.java"
 LOADER="$ROOT/Packaging/od/system/load.bin"

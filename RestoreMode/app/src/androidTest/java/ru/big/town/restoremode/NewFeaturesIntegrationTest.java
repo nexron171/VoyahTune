@@ -26,6 +26,10 @@ import org.junit.*;
 import org.junit.runner.RunWith;
 
 import ru.big.town.common.*;
+import ru.big.town.restoremode.integration.config.SplitConfigSync;
+import ru.big.town.restoremode.scenarios.ScenarioStore;
+import ru.big.town.restoremode.settings.ui.list.SettingsList;
+import ru.big.town.restoremode.voice.commands.VoiceCommands;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -353,7 +357,8 @@ public class NewFeaturesIntegrationTest {
             received.removeIf(
                     message -> message.what == 9001 && message.getData().getInt("what") == 1);
         }
-        instrumentation.runOnMainSync(() -> settings.onButtonClickApply(null));
+        instrumentation.runOnMainSync(
+                () -> settings.findViewById(R.id.buttonApplyAdvance).performClick());
         Thread.sleep(150);
         synchronized (received) {
             assertFalse(

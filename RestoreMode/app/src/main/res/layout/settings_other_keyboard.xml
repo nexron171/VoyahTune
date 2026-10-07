@@ -29,21 +29,21 @@
             android:includeFontPadding="false"
             android:layout_weight="1" />
     </LinearLayout>
-    <ru.big.town.restoremode.SettingsToggle
+    <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
         android:id="@+id/switchKeyboardEnglish"
         android:layout_width="58dp"
         android:layout_height="32dp"
         android:thumb="@drawable/switch_thumb"
         android:track="@drawable/switch_track"
         android:visibility="gone" />
-    <ru.big.town.restoremode.SettingsToggle
+    <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
         android:id="@+id/switchKeyboardRussian"
         android:layout_width="58dp"
         android:layout_height="32dp"
         android:thumb="@drawable/switch_thumb"
         android:track="@drawable/switch_track"
         android:visibility="gone" />
-    <ru.big.town.restoremode.SettingsChoiceGroup
+    <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:id="@+id/settingsKeyboardChoices">
@@ -62,8 +62,8 @@
             android:layout_height="wrap_content"
             android:id="@+id/settingsKeyboardRussian"
             android:text="EN ↔ RU" />
-    </ru.big.town.restoremode.SettingsChoiceGroup>
-    <ru.big.town.restoremode.SettingsIllustration
+    </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
+    <ru.big.town.restoremode.settings.ui.preview.SettingsIllustration
         android:layout_width="match_parent"
         android:layout_height="35dp"
         android:layout_marginTop="15dp"

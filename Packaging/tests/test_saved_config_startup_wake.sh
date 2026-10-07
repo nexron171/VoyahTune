@@ -3,9 +3,9 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 SERVICE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
-RECEIVER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/SavedConfigSyncReceiver.java"
-SYNC="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/SplitConfigSync.java"
-ADVANCE="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
+RECEIVER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SavedSettingsSyncReceiver.java"
+SYNC="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java"
+ADVANCE="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/apps/AppsSettingsFragment.java"
 NATIVE_CONFIG="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesConfigReceiver.java"
 NATIVE_BRIDGE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java"
 MANIFEST="$ROOT/RestoreMode/app/src/main/AndroidManifest.xml"
@@ -49,7 +49,7 @@ grep -q 'voyahtune_fullscreen_apps' "$NATIVE_BRIDGE" || fail "fullscreen package
 grep -q 'ru.big.town.anative.APP_DPI_CONFIG' "$SYNC" || fail "app DPI config action missing"
 grep -q 'appDpiJson' "$SYNC" || fail "authoritative app DPI JSON is not published"
 python3 "$ROOT/Packaging/tests/assert_java_source.py" "$ADVANCE" \
-    'SplitConfigSync.pushAppDpi(AdvanceActivity.this, preferences, targetPackageName, dpi)'  \
+    'SplitConfigSync.pushAppDpi(requireContext(), preferences, targetPackageName, dpi)'  \
     || fail "DPI changes are not published immediately"
 grep -q 'mirrorAppDpi(context, intent)' "$NATIVE_CONFIG" || fail "Native does not receive app DPI config"
 if grep -q 'mirrorPassengerDock' "$NATIVE_CONFIG" "$NATIVE_BRIDGE"; then

@@ -28,7 +28,7 @@
             android:textColor="#f3f5fa"
             android:includeFontPadding="false"
             android:layout_weight="1" />
-        <ru.big.town.restoremode.SettingsToggle
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
             android:id="@+id/switchApolloSpeedSigns"
             android:layout_width="58dp"
             android:layout_height="32dp"
@@ -40,7 +40,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical">
-        <ru.big.town.restoremode.SettingsChoiceGroup
+        <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
             android:id="@+id/apolloSpeedModeGroup"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -78,8 +78,8 @@
                 android:textSize="@dimen/settings_body_size"
                 android:textColor="@color/radio_button_text_color_selector"
                 android:layout_weight="0" />
-        </ru.big.town.restoremode.SettingsChoiceGroup>
-        <ru.big.town.restoremode.SettingsRow
+        </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
+        <ru.big.town.restoremode.settings.ui.layout.SettingsRow
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
@@ -107,12 +107,12 @@
                     android:layout_marginTop="7dp"
                     android:lineSpacingMultiplier="1.45" />
             </LinearLayout>
-            <ru.big.town.restoremode.SettingsToggle
+            <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
                 android:id="@+id/switchApolloSpeedWarning"
                 android:layout_width="58dp"
                 android:layout_height="32dp"
                 android:thumb="@drawable/switch_thumb"
                 android:track="@drawable/switch_track" />
-        </ru.big.town.restoremode.SettingsRow>
+        </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
     </LinearLayout>
 </LinearLayout>

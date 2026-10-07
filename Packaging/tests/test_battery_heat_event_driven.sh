@@ -7,7 +7,7 @@ SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/BatteryHeatServ
 POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/BatteryHeatAutoPolicy.java"
 GATE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/BatteryHeatRefreshGate.java"
 SET_MODES="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
-ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
+ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/vehicle/VehicleSettingsFragment.java"
 
 fail() {
     echo "FAIL: $*" >&2

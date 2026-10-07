@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ru.big.town.restoremode.SettingsGrid
+<ru.big.town.restoremode.settings.ui.layout.SettingsGrid
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -7,7 +7,7 @@
     android:orientation="vertical"
     app:settingsColumns="2"
     android:layout_marginBottom="16dp">
-    <ru.big.town.restoremode.SettingsWidgetCard
+    <ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
@@ -52,7 +52,7 @@
                     android:layout_marginTop="7dp"
                     android:lineSpacingMultiplier="1.45" />
             </LinearLayout>
-            <ru.big.town.restoremode.SettingsToggle
+            <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
                 android:id="@+id/switchShowCpu"
                 android:layout_width="58dp"
                 android:layout_height="32dp"
@@ -68,7 +68,7 @@
             android:paddingHorizontal="24dp"
             android:paddingVertical="22dp"
             android:background="@color/settings_inset">
-            <ru.big.town.restoremode.SettingsWidgetPreview
+            <ru.big.town.restoremode.settings.ui.preview.SettingsWidgetPreview
                 android:layout_width="188dp"
                 android:layout_height="110dp"
                 android:orientation="vertical"
@@ -142,7 +142,7 @@
                                 android:background="@drawable/settings_field" />
                         </LinearLayout>
                     </LinearLayout>
-                    <ru.big.town.restoremode.SettingsPreviewView
+                    <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="16dp"
@@ -163,8 +163,8 @@
                     android:tag="settings.off-note" />
             </LinearLayout>
         </LinearLayout>
-    </ru.big.town.restoremode.SettingsWidgetCard>
-    <ru.big.town.restoremode.SettingsWidgetCard
+    </ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
@@ -209,7 +209,7 @@
                     android:layout_marginTop="7dp"
                     android:lineSpacingMultiplier="1.45" />
             </LinearLayout>
-            <ru.big.town.restoremode.SettingsToggle
+            <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
                 android:id="@+id/switchShowRam"
                 android:layout_width="58dp"
                 android:layout_height="32dp"
@@ -225,7 +225,7 @@
             android:paddingHorizontal="24dp"
             android:paddingVertical="22dp"
             android:background="@color/settings_inset">
-            <ru.big.town.restoremode.SettingsWidgetPreview
+            <ru.big.town.restoremode.settings.ui.preview.SettingsWidgetPreview
                 android:layout_width="188dp"
                 android:layout_height="110dp"
                 android:orientation="vertical"
@@ -299,7 +299,7 @@
                                 android:background="@drawable/settings_field" />
                         </LinearLayout>
                     </LinearLayout>
-                    <ru.big.town.restoremode.SettingsPreviewView
+                    <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="16dp"
@@ -320,5 +320,5 @@
                     android:tag="settings.off-note" />
             </LinearLayout>
         </LinearLayout>
-    </ru.big.town.restoremode.SettingsWidgetCard>
-</ru.big.town.restoremode.SettingsGrid>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard>
+</ru.big.town.restoremode.settings.ui.layout.SettingsGrid>

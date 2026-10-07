@@ -7,7 +7,7 @@
     android:orientation="vertical"
     android:background="@drawable/settings_card"
     android:padding="25dp">
-    <ru.big.town.restoremode.SettingsGrid
+    <ru.big.town.restoremode.settings.ui.layout.SettingsGrid
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
@@ -29,7 +29,7 @@
                 android:layout_height="48dp"
                 android:popupBackground="@color/settings_inset"
                 android:visibility="gone" />
-            <ru.big.town.restoremode.SettingsColorPalette
+            <ru.big.town.restoremode.settings.ui.controls.SettingsColorPalette
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp" />
@@ -103,7 +103,7 @@
                 android:includeFontPadding="false"
                 android:layout_marginTop="18dp" />
         </LinearLayout>
-    </ru.big.town.restoremode.SettingsGrid>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsGrid>
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

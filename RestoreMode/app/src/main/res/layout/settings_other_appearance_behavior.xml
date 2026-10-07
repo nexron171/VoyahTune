@@ -6,7 +6,7 @@
     android:orientation="vertical"
     android:background="@drawable/settings_card"
     android:padding="25dp">
-    <ru.big.town.restoremode.SettingsRow
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -34,14 +34,14 @@
                 android:layout_marginTop="7dp"
                 android:lineSpacingMultiplier="1.45" />
         </LinearLayout>
-        <ru.big.town.restoremode.SettingsToggle
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
             android:id="@+id/switchAutoLaunch"
             android:layout_width="58dp"
             android:layout_height="32dp"
             android:thumb="@drawable/switch_thumb"
             android:track="@drawable/switch_track" />
-    </ru.big.town.restoremode.SettingsRow>
-    <ru.big.town.restoremode.SettingsRow
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -69,7 +69,7 @@
                 android:layout_marginTop="7dp"
                 android:lineSpacingMultiplier="1.45" />
         </LinearLayout>
-        <ru.big.town.restoremode.SettingsChoiceGroup
+        <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
             android:id="@+id/themeOverrideGroup"
             android:layout_width="500dp"
             android:layout_height="wrap_content"
@@ -104,9 +104,9 @@
                 android:textColor="@color/radio_button_text_color_selector"
                 android:layout_weight="0"
                 android:maxLines="3" />
-        </ru.big.town.restoremode.SettingsChoiceGroup>
-    </ru.big.town.restoremode.SettingsRow>
-    <ru.big.town.restoremode.SettingsRow
+        </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -134,14 +134,14 @@
                 android:layout_marginTop="7dp"
                 android:lineSpacingMultiplier="1.45" />
         </LinearLayout>
-        <ru.big.town.restoremode.SettingsToggle
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
             android:id="@+id/switchFloatingBack"
             android:layout_width="58dp"
             android:layout_height="32dp"
             android:thumb="@drawable/switch_thumb"
             android:track="@drawable/switch_track" />
-    </ru.big.town.restoremode.SettingsRow>
-    <ru.big.town.restoremode.SettingsRow
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -169,7 +169,7 @@
                 android:layout_marginTop="7dp"
                 android:lineSpacingMultiplier="1.45" />
         </LinearLayout>
-        <ru.big.town.restoremode.SettingsChoiceGroup
+        <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
             android:id="@+id/floatingBackSideGroup"
             android:layout_width="500dp"
             android:layout_height="wrap_content"
@@ -204,9 +204,9 @@
                 android:textColor="@color/radio_button_text_color_selector"
                 android:layout_weight="0"
                 android:maxLines="3" />
-        </ru.big.town.restoremode.SettingsChoiceGroup>
-    </ru.big.town.restoremode.SettingsRow>
-    <ru.big.town.restoremode.SettingsRow
+        </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -234,11 +234,11 @@
                 android:layout_marginTop="7dp"
                 android:lineSpacingMultiplier="1.45" />
         </LinearLayout>
-        <ru.big.town.restoremode.SettingsToggle
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
             android:id="@+id/switchShowCustomCommands"
             android:layout_width="58dp"
             android:layout_height="32dp"
             android:thumb="@drawable/switch_thumb"
             android:track="@drawable/switch_track" />
-    </ru.big.town.restoremode.SettingsRow>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
 </LinearLayout>

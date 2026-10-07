@@ -7,7 +7,7 @@
     android:background="@drawable/settings_card"
     android:padding="25dp"
     android:layout_marginTop="16dp">
-    <ru.big.town.restoremode.SettingsRow
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -39,10 +39,9 @@
             android:id="@+id/checkBox34"
             android:layout_width="wrap_content"
             android:layout_height="48dp"
-            android:onClick="onCheckBox34Click"
             android:text="3 кнопки"
             android:textColor="@color/settings_muted"
             android:textSize="@dimen/settings_body_size"
             android:contentDescription="Изменить раскладку кнопок энергии" />
-    </ru.big.town.restoremode.SettingsRow>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
 </LinearLayout>

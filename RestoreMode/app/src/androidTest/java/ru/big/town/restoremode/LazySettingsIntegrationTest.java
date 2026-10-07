@@ -15,6 +15,8 @@ import android.widget.EditText;
 import android.widget.RadioButton;
 import android.widget.TextView;
 
+import androidx.fragment.app.Fragment;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -25,6 +27,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import ru.big.town.common.ScenarioProtocol;
+import ru.big.town.restoremode.apps.FullscreenAppStore;
+import ru.big.town.restoremode.integration.GlobalVars;
+import ru.big.town.restoremode.scenarios.ScenarioStore;
+import ru.big.town.restoremode.settings.core.SettingsSection;
+import ru.big.town.restoremode.settings.state.SettingsSectionViewModel;
+import ru.big.town.restoremode.settings.ui.layout.SettingsFlow;
+import ru.big.town.restoremode.settings.ui.list.SettingsList;
+import ru.big.town.restoremode.vehicle.steering.SteeringActionStore;
+import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
+import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,6 +47,7 @@ public class LazySettingsIntegrationTest {
     private SharedPreferences preferences;
     private ActivityScenario<AdvanceActivity> scenario;
     private AdvanceActivity activity;
+    private Messenger applyReply;
     private final List<Integer> commands = new ArrayList<>();
 
     @Before
@@ -51,6 +64,9 @@ public class LazySettingsIntegrationTest {
                                 Looper.getMainLooper(),
                                 message -> {
                                     commands.add(message.what);
+                                    if (message.what == 1) {
+                                        applyReply = message.replyTo;
+                                    }
                                     return true;
                                 }));
     }
@@ -281,13 +297,23 @@ public class LazySettingsIntegrationTest {
     }
 
     @Test
-    public void appProfilesAndSteeringActionsAreBoundedByTheirViewports() {
-        AppWidgetStore.Entry widget =
-                new AppWidgetStore.Entry("many-profiles", context.getPackageName());
+    public void appProfilesAndSteeringActionsAreBoundedByTheirViewports() throws Exception {
+        org.json.JSONArray profiles = new org.json.JSONArray();
         for (int index = 0; index < 80; index++) {
-            widget.profiles.add(new AppWidgetStore.Profile("mock.profile." + index, 0));
+            profiles.put(
+                    new org.json.JSONObject()
+                            .put("package", "mock.profile." + index)
+                            .put("dpi", 0));
         }
-        AppWidgetStore.save(preferences, java.util.Collections.singletonList(widget));
+        org.json.JSONObject widget =
+                new org.json.JSONObject()
+                        .put("id", "many-profiles")
+                        .put("package", context.getPackageName())
+                        .put("apps", profiles);
+        preferences
+                .edit()
+                .putString("appWidgets", new org.json.JSONArray().put(widget).toString())
+                .commit();
         List<String> actions = new ArrayList<>();
         for (int index = 0; index < 80; index++) {
             actions.add("toggle_forced_ev");
@@ -375,5 +401,160 @@ public class LazySettingsIntegrationTest {
                 current ->
                         assertEquals("Не сохранено", ((EditText) restored).getText().toString()));
         assertEquals("Много шагов", ScenarioStore.find(preferences, automation.id).name);
+    }
+
+    @Test
+    public void switchingDetachesViewsButKeepsSectionModelsDraftsAndScroll() {
+        List<DialWidgetStore.Entry> entries = new ArrayList<>();
+        for (int index = 0; index < 40; index++) {
+            DialWidgetStore.Entry entry = new DialWidgetStore.Entry();
+            entry.name = "Контакт " + index;
+            entries.add(entry);
+        }
+        DialWidgetStore.save(preferences, entries);
+        open(SettingsSection.MAIN);
+        Fragment[] main = {null};
+        SettingsSectionViewModel[] model = {null};
+        SettingsList[] originalList = {null};
+        scroll("dial:" + entries.get(20).id);
+        scenario.onActivity(
+                current -> {
+                    main[0] =
+                            current.getSupportFragmentManager().findFragmentByTag("settings:MAIN");
+                    assertEquals(1, current.getSupportFragmentManager().getFragments().size());
+                    model[0] = new ViewModelProvider(main[0]).get(SettingsSectionViewModel.class);
+                    originalList[0] = list();
+                    ((EditText) current.findViewById(R.id.dialSettingName))
+                            .setText("Несохранённый контакт");
+                });
+        select(SettingsSection.OTHER);
+        scenario.onActivity(
+                current -> {
+                    assertTrue(main[0].isDetached());
+                    assertNull(main[0].getView());
+                    assertNull(originalList[0].getAdapter());
+                    assertNull(current.findViewById(R.id.dialSettingName));
+                });
+        scenario.recreate();
+        scenario.onActivity(current -> activity = current);
+        select(SettingsSection.MAIN);
+        scenario.onActivity(
+                current -> {
+                    Fragment recreated =
+                            current.getSupportFragmentManager().findFragmentByTag("settings:MAIN");
+                    assertSame(
+                            model[0],
+                            new ViewModelProvider(recreated).get(SettingsSectionViewModel.class));
+                    assertNotSame(originalList[0], list());
+                    assertEquals(
+                            "Несохранённый контакт",
+                            ((EditText) current.findViewById(R.id.dialSettingName))
+                                    .getText()
+                                    .toString());
+                });
+        assertEquals("Контакт 20", DialWidgetStore.load(preferences).get(20).name);
+    }
+
+    @Test
+    public void applyWaitsForOriginalNativeReplyAfterActivityRecreation() throws Exception {
+        open(SettingsSection.VEHICLE);
+        scenario.onActivity(
+                current -> current.findViewById(R.id.buttonApplyAdvance).performClick());
+        idle();
+        assertNotNull(applyReply);
+        scenario.recreate();
+        scenario.onActivity(
+                current -> {
+                    activity = current;
+                    assertFalse(current.findViewById(R.id.buttonApplyAdvance).isEnabled());
+                });
+        applyReply.send(android.os.Message.obtain(null, 4));
+        idle();
+        scenario.onActivity(
+                current -> assertTrue(current.findViewById(R.id.buttonApplyAdvance).isEnabled()));
+        assertEquals(1, java.util.Collections.frequency(commands, 1));
+    }
+
+    @Test
+    public void savedStateRestoresDraftsIntoFreshViewModelInstances() {
+        InstrumentationRegistry.getInstrumentation()
+                .runOnMainSync(
+                        () -> {
+                            SavedStateOwner first = new SavedStateOwner(null);
+                            androidx.lifecycle.ViewModelProvider provider = first.provider(context);
+                            SettingsSectionViewModel section =
+                                    provider.get(SettingsSectionViewModel.class);
+                            android.os.Bundle draft = new android.os.Bundle();
+                            draft.putString("editor", "Не сохранено в настройках");
+                            section.save(draft);
+                            ru.big.town.restoremode.settings.sections.can.CanCommandsViewModel can =
+                                    provider.get(
+                                            ru.big.town.restoremode.settings.sections.can
+                                                    .CanCommandsViewModel.class);
+                            can.initialize("64 08 80 00 00 00 00 00 00 03", 3);
+                            android.os.Bundle saved = new android.os.Bundle();
+                            first.registry.performSave(saved);
+                            first.lifecycle.handleLifecycleEvent(
+                                    androidx.lifecycle.Lifecycle.Event.ON_DESTROY);
+                            first.store.clear();
+                            SavedStateOwner restored = new SavedStateOwner(saved);
+                            SettingsSectionViewModel restoredSection =
+                                    restored.provider(context).get(SettingsSectionViewModel.class);
+                            assertNotSame(section, restoredSection);
+                            assertEquals(
+                                    "Не сохранено в настройках",
+                                    restoredSection.state().getString("editor"));
+                            ru.big.town.restoremode.settings.sections.can.CanCommandsViewModel
+                                    restoredCan =
+                                            restored.provider(context)
+                                                    .get(
+                                                            ru.big.town.restoremode.settings
+                                                                    .sections.can
+                                                                    .CanCommandsViewModel.class);
+                            restoredCan.initialize("", 1);
+                            assertEquals("64 08 80 00 00 00 00 00 00 03", restoredCan.text());
+                            assertEquals(3, restoredCan.count());
+                            restored.lifecycle.handleLifecycleEvent(
+                                    androidx.lifecycle.Lifecycle.Event.ON_DESTROY);
+                            restored.store.clear();
+                        });
+    }
+
+    private static final class SavedStateOwner
+            implements androidx.savedstate.SavedStateRegistryOwner,
+                    androidx.lifecycle.ViewModelStoreOwner {
+        final androidx.lifecycle.LifecycleRegistry lifecycle =
+                new androidx.lifecycle.LifecycleRegistry(this);
+        final androidx.lifecycle.ViewModelStore store = new androidx.lifecycle.ViewModelStore();
+        final androidx.savedstate.SavedStateRegistryController registry =
+                androidx.savedstate.SavedStateRegistryController.create(this);
+
+        SavedStateOwner(android.os.Bundle state) {
+            registry.performAttach();
+            registry.performRestore(state);
+            lifecycle.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_CREATE);
+        }
+
+        androidx.lifecycle.ViewModelProvider provider(Context context) {
+            return new androidx.lifecycle.ViewModelProvider(
+                    this,
+                    new androidx.lifecycle.SavedStateViewModelFactory(
+                            (android.app.Application) context.getApplicationContext(), this, null));
+        }
+
+        @Override
+        public androidx.lifecycle.Lifecycle getLifecycle() {
+            return lifecycle;
+        }
+
+        @Override
+        public androidx.lifecycle.ViewModelStore getViewModelStore() {
+            return store;
+        }
+
+        @Override
+        public androidx.savedstate.SavedStateRegistry getSavedStateRegistry() {
+            return registry.getSavedStateRegistry();
+        }
     }
 }

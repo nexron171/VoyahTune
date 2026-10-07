@@ -6,7 +6,6 @@
     android:layout_marginTop="16dp"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:onClick="onAddSplitPreset"
     android:text="＋ Добавить сплит"
     android:textColor="@color/settings_text"
     android:textSize="@dimen/settings_body_size"

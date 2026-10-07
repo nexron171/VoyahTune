@@ -32,7 +32,7 @@ sh -n "$FULL_INSTALL"
 sh -n "$FULL_REMOVE"
 
 # Both ACC stages notify the same silent radio receiver. No activity/service playback launch.
-for FILE in "$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"         "$ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"; do
+for FILE in "$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SettingsContentProvider.java"         "$ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"; do
     require "$FILE" 'ru.big.town.anative.RESTORE_RADIO_SELECTION'
     require "$FILE" '.setPackage("com.pateo.rdsapp")'
 done

@@ -3,11 +3,11 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 LOADER="$ROOT/Packaging/od/system/load.bin"
-PROVIDER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
-CONTRACT="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/HookStatusContract.java"
+PROVIDER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SettingsContentProvider.java"
+CONTRACT="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/hooks/HookStatusContract.java"
 APP_MANIFEST="$ROOT/RestoreMode/app/src/main/AndroidManifest.xml"
-ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
-READER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/SystemMetricsReader.java"
+ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/other/OtherSettingsFragment.java"
+READER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/diagnostics/metrics/SystemMetricsReader.java"
 LAYOUT="$ROOT/RestoreMode/app/src/main/res/layout/settings_other_metrics.xml"
 FULL_INSTALL="$ROOT/Packaging/od/installer/device/install.sh"
 FULL_INSTALL_BAT="$ROOT/Packaging/od/installer/device/install.bat"
@@ -65,10 +65,10 @@ require "$APP_MANIFEST" 'android:authorities="ru.big.town.restoremode.restoremod
 require "$LAYOUT" 'android:id="@+id/textHookStatus"'
 require "$ACTIVITY" 'HookStatusContract.renderForUi(hookPayload)'
 python3 "$ROOT/Packaging/tests/assert_java_source.py" "$ACTIVITY" \
-    'activityResumed && currentSection == SettingsSection.OTHER && textRamStatus != null && textRamStatus.isShown()' \
+    'sectionResumed && textRamStatus != null && textRamStatus.isShown()' \
     || fail "poll is not gated by the visible metrics row"
 require "$ACTIVITY" 'SYSTEM_METRICS_INTERVAL_MS = SystemMetricsReader.INTERVAL_MS;'
-grep -Eq '^[[:space:]]*static[[:space:]]+final[[:space:]]+long[[:space:]]+INTERVAL_MS[[:space:]]*=[[:space:]]*5_?000[Ll]?[[:space:]]*;' "$READER" \
+grep -Eq '^[[:space:]]*(public[[:space:]]+)?static[[:space:]]+final[[:space:]]+long[[:space:]]+INTERVAL_MS[[:space:]]*=[[:space:]]*5_?000[Ll]?[[:space:]]*;' "$READER" \
     || fail "hook diagnostics interval is not 5 seconds"
 python3 "$ROOT/Packaging/tests/assert_java_source.py" --count 1 "$ACTIVITY" \
     'postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS)'  \

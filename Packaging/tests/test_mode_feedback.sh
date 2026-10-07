@@ -11,8 +11,8 @@ TRIPS="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/TripStatsService.
 MODE_POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ModeSyncPolicy.java"
 APPLY_ENGINE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApplyEngine.java"
 NATIVE_MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
-ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
-PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
+ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/vehicle/VehicleSettingsFragment.java"
+PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SettingsContentProvider.java"
 ADVANCE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/settings_vehicle_drive_energy_modes.xml"
 BRIDGE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java"
 
@@ -80,7 +80,7 @@ for switch_id in ('switchDriveRememberLast', 'switchEnergyRememberLast', 'switch
     controls = [view for view in layout.iter() if view.get(android + 'id') == '@+id/' + switch_id]
     assert len(controls) == 1, f'{switch_id} must be shown once for its mode'
     control = controls[0]
-    assert control.tag in ('Switch', 'android.widget.Switch', 'ru.big.town.restoremode.SettingsToggle'), f'{switch_id} must be a switch'
+    assert control.tag in ('Switch', 'android.widget.Switch', 'ru.big.town.restoremode.settings.ui.controls.SettingsToggle'), f'{switch_id} must be a switch'
     assert control.get(android + 'visibility', 'visible') == 'visible', f'{switch_id} must be visible'
     assert control.get(android + 'checked') == 'true', f'{switch_id} must default to remembering the last selection'
 PY_CHECK

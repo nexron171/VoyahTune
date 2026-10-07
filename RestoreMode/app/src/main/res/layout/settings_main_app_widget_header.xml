@@ -114,7 +114,7 @@
                 android:textColor="#f3f5fa"
                 android:includeFontPadding="false" />
         </LinearLayout>
-        <ru.big.town.restoremode.SettingsToggle
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
             android:id="@+id/appWidgetSettingAutoStart"
             android:layout_width="58dp"
             android:layout_height="32dp"
