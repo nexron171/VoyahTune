@@ -8,7 +8,7 @@ CONTROLLER="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/WashModeCont
 LEASE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/WashModeRequestLease.java"
 SET_MODES="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 NATIVE_MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
-RESTORE_MAIN="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/MainActivity.java"
+RESTORE_MAIN="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java"
 STRINGS="$REPO_ROOT/RestoreMode/app/src/main/res/values/strings.xml"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -59,7 +59,8 @@ require_fixed "$SET_MODES" 'requestWashModeCleanup("SCREEN_OFF")'
 require_fixed "$SET_MODES" 'requestWashModeCleanup("SCREEN_ON")'
 require_fixed "$SET_MODES" 'requestWashModeCleanup("power state " + powerStateName(state))'
 require_fixed "$RESTORE_MAIN" '.setMessage(R.string.wash_mode_confirmation)'
-require_fixed "$RESTORE_MAIN" 'if (!ok) showSnack(getString(R.string.service_not_ready));'
+python3 "$REPO_ROOT/Packaging/tests/assert_java_source.py" "$RESTORE_MAIN" \
+    'if (!ok) { showSnack(getString(R.string.service_not_ready)); }'
 require_fixed "$STRINGS" 'Автомобиль немедленно выключится.'
 require_fixed "$STRINGS" 'Для выхода из режима нажмите педаль тормоза.'
 

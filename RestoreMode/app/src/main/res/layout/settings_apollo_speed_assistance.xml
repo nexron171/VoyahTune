@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="20dp">
+        <ImageView
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:padding="9dp"
+            android:src="@drawable/settings_icon_speed_limit_60"
+            android:background="@drawable/settings_icon"
+            android:importantForAccessibility="no"
+            android:layout_marginEnd="16dp" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Распознавание знаков скорости"
+            android:textSize="24sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false"
+            android:layout_weight="1" />
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchApolloSpeedSigns"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </LinearLayout>
+    <LinearLayout
+        android:id="@+id/apolloSpeedOptionsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+        <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
+            android:id="@+id/apolloSpeedModeGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <RadioButton
+                android:id="@+id/apolloSpeedRecognition"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:maxLines="3"
+                android:paddingHorizontal="8dp"
+                android:text="Только распознавание"
+                android:textSize="@dimen/settings_body_size"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0" />
+            <RadioButton
+                android:id="@+id/apolloSpeedConfirm"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:maxLines="3"
+                android:paddingHorizontal="8dp"
+                android:text="Коррекция с подтверждением"
+                android:textSize="@dimen/settings_body_size"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0" />
+            <RadioButton
+                android:id="@+id/apolloSpeedAutomatic"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:maxLines="3"
+                android:paddingHorizontal="8dp"
+                android:text="Автоматическая коррекция"
+                android:textSize="@dimen/settings_body_size"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0" />
+        </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
+        <ru.big.town.restoremode.settings.ui.layout.SettingsRow
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="18dp">
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Предупреждение о превышении скорости"
+                    android:textSize="22sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Звуковое предупреждение при превышении ограничения."
+                    android:textSize="17sp"
+                    android:textColor="#9aaac0"
+                    android:includeFontPadding="false"
+                    android:layout_marginTop="7dp"
+                    android:lineSpacingMultiplier="1.45" />
+            </LinearLayout>
+            <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+                android:id="@+id/switchApolloSpeedWarning"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    </LinearLayout>
+</LinearLayout>

@@ -575,7 +575,7 @@ H97C не переопределяет этот getter. Следовательн
 После подтверждения пользователя создан локальный HTML-прототип в `tmp/energy-widget/`
 на основе доступных показателей, со снимком автомобиля и отдельным демонстрационным
 сценарием. Он не хранится в Git. Экран 1920×720; геометрия взята из
-[MainActivity](../RestoreMode/app/src/main/java/ru/big/town/restoremode/MainActivity.java)
+[DashboardActivity](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java)
 и [activity_main.xml](../RestoreMode/app/src/main/res/layout/activity_main.xml),
 с учётом [описания сетки](dashboard-grid.md):
 

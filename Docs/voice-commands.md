@@ -238,8 +238,8 @@ Individual можно выбрать словами «индивидуальны
 
 Источники в проекте:
 
-- [Основной каталог](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoiceCommandCatalog.java).
-- [Сиденья](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoiceSeatCommands.java), [окна и крыша](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoiceWindowCommands.java), [числовая команда «топливо»](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoiceFuelCommand.java).
-- [Загрузка приложений, сплитов, контактов и CAN-команд](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoiceCommands.java), [встроенные CAN-примеры](../RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java).
-- [Словоформы](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoiceCommandRepair.java), [ограниченное нечёткое сопоставление](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoiceFuzzyMatcher.java).
+- [Основной каталог](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceCommandCatalog.java).
+- [Сиденья](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSeatCommands.java), [окна и крыша](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceWindowCommands.java), [числовая команда «топливо»](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceFuelCommand.java).
+- [Загрузка приложений, сплитов, контактов и CAN-команд](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceCommands.java), [встроенные CAN-примеры](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/can/CanCommandExamples.java).
+- [Словоформы](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceCommandRepair.java), [ограниченное нечёткое сопоставление](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceFuzzyMatcher.java).
 - [Общая документация голосового управления](voice-control.md).

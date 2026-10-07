@@ -2,8 +2,10 @@ mod config;
 mod device;
 mod dns;
 mod install;
+mod install_tail;
 mod network;
 mod protocol;
+mod restore_ui;
 mod state;
 mod ui_update;
 mod workflow;
@@ -101,6 +103,9 @@ fn peer_uid(_: &UnixStream) -> io::Result<u32> {
 
 fn authorize(stream: &UnixStream) -> io::Result<()> {
     let uid = peer_uid(stream)?;
+    if restore_ui::enabled() {
+        return restore_ui::authorize(uid);
+    }
     // Only the separately installed system UI can use the control channel.
     let apk = fs::symlink_metadata(UI_APK)?;
     if !apk.is_file() || apk.uid() != 0 || apk.permissions().mode() & 0o022 != 0 {
@@ -173,7 +178,7 @@ fn run() -> io::Result<()> {
                 let rt = shared.lock().unwrap();
                 Ok(
                     json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),
-                        "capabilities":["install-step-progress","dns-settings"],"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok(),
+                        "capabilities":restore_ui::capabilities(),"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok(),
                         "settingsError":rt.config.as_ref().err()}),
                 )
             }
@@ -271,7 +276,7 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!(
             "{}",
-            json!({"version":env!("CARGO_PKG_VERSION"),"ipcSchema":1,"infrastructure":release_core::infrastructure::Infrastructure::compiled()})
+            json!({"version":env!("CARGO_PKG_VERSION"),"ipcSchema":1,"capabilities":restore_ui::capabilities(),"infrastructure":release_core::infrastructure::Infrastructure::compiled()})
         );
         return;
     }

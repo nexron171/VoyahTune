@@ -118,3 +118,5 @@ CONTEXT.md
 /Updater/daemon/target/
 /Updater/__pycache__/
 Installer/scripts/__pycache__
+Packaging/tests/__pycache__
+Utils/__pycache__

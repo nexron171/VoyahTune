@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
     <application>
+        <service android:name="ru.big.town.restoremode.MockNativeService" android:exported="true" android:process=":mock_native" android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
         <service
             android:name="ru.big.town.restoremode.VoiceReplyTestService"
             android:exported="true"

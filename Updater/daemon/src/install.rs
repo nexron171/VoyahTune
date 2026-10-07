@@ -48,6 +48,9 @@ mod tests {
             }))
             .unwrap(),
         };
+        if crate::restore_ui::enabled() {
+            p.manifest.requirements = Some(release_core::compatibility::Requirements::restoremode_ota());
+        }
         for name in STABLE.iter().copied().chain(["voyahtune.load.rc"]) {
             let installed = root.join(name);
             let archived = root.join(format!("archive-{name}"));
@@ -72,6 +75,16 @@ mod tests {
             });
         }
         p
+    }
+
+    #[test]
+    fn embedded_daemon_rejects_releases_that_remove_its_ui() {
+        if !crate::restore_ui::enabled() { return; }
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = compatibility_fixture(dir.path());
+        compatible(&p).unwrap();
+        p.manifest.requirements = Some(release_core::compatibility::Requirements::infrastructure());
+        assert!(compatible(&p).unwrap_err().to_string().contains("не содержит встроенный экран OTA"));
     }
 
     #[test]
@@ -197,6 +210,9 @@ mod tests {
 pub fn compatible(p: &Payload) -> io::Result<()> {
     p.require_infrastructure(release_core::infrastructure::Infrastructure::compiled())
         .map_err(error)?;
+    if crate::restore_ui::enabled() && !p.restoremode_ota() {
+        return Err(invalid("Этот релиз не содержит встроенный экран OTA. Установите его через USB"));
+    }
     for f in &p.manifest.recipe.files {
         // STABLE files are never installed by OTA, so their archive bytes may differ.
         // The loader init contract is applied and still requires an exact match.
@@ -373,6 +389,14 @@ impl Drop for OperationLock {
         let _ = fs::remove_dir(LOCK);
     }
 }
+fn install_apk(p: &Payload, package: &str, artifact: &str, apk: &Path) -> io::Result<()> {
+    let output = command("/system/bin/pm", &["install", "-r", "--user", "0", apk.to_str().ok_or_else(|| invalid("Invalid APK path"))?], 180)?;
+    if !output.lines().any(|s| s.trim() == "Success") {
+        return Err(invalid(&format!("PackageManager: {output}")));
+    }
+    check_active_apk(p, artifact, Path::new(&package_path(package)?))
+}
+
 pub fn apply(shared: &Shared) -> io::Result<()> {
     let _lock = OperationLock::acquire()?;
     let (p, claims) = workflow::verified(shared)?;
@@ -426,6 +450,10 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
         return Err(invalid("Загрузчик hooks не остановился"));
     }
     for package in [payload::NATIVE, payload::RESTORE] {
+        if crate::restore_ui::enabled() && package == payload::RESTORE {
+            crate::restore_ui::stop_runtime()?;
+            continue;
+        }
         command(
             "/system/bin/am",
             &["force-stop", "--user", "0", package],
@@ -501,81 +529,61 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     workflow::update(shared, |s| s.completed_steps = 4)?;
     let restore = Path::new("/data/local/tmp/voyahtune-restore-ota.apk");
     device::atomic_copy(&p.file("restore_mode.apk").map_err(error)?, restore, 0o644)?;
-    for (index, apk) in [payload::NATIVE_PATH, restore.to_str().unwrap()]
-        .iter()
-        .enumerate()
-    {
-        workflow::phase(
-            shared,
-            "applying",
-            if index == 0 {
-                "Установка Native"
-            } else {
-                "Установка RestoreMode"
-            },
-        )?;
-        let output = command(
-            "/system/bin/pm",
-            &["install", "-r", "--user", "0", apk],
-            180,
-        )?;
-        if !output.lines().any(|s| s.trim() == "Success") {
-            return Err(invalid(&format!("PackageManager: {output}")));
+    use crate::install_tail::Step;
+    crate::install_tail::execute(crate::restore_ui::enabled(),
+        p.manifest.recipe.packages.iter().any(|package| package.package == payload::RUNYN), |step| {
+        match step {
+            Step::Native => {
+                workflow::phase(shared, "applying", "Установка Native")?;
+                install_apk(&p, payload::NATIVE, "native.apk", Path::new(payload::NATIVE_PATH))?;
+                workflow::update(shared, |s| s.completed_steps = 5)?;
+            }
+            Step::Restore => {
+                if crate::restore_ui::enabled() {
+                    workflow::update(shared, |s| s.completed_steps = 7)?;
+                    workflow::phase(shared, "applying", "Завершение установки. Экран закроется перед перезагрузкой")?;
+                } else {
+                    workflow::phase(shared, "applying", "Установка RestoreMode")?;
+                }
+                install_apk(&p, payload::RESTORE, "restore_mode.apk", restore)?;
+                fs::remove_file(restore)?;
+                if !crate::restore_ui::enabled() { workflow::update(shared, |s| s.completed_steps = 6)?; }
+            }
+            Step::Runyn => {
+                for package in p.manifest.recipe.packages.iter().filter(|package| package.package == payload::RUNYN) {
+                    workflow::phase(shared, "applying", "Установка RunYN")?;
+                    let path = Path::new("/data/local/tmp/voyahtune-runyn-ota.apk");
+                    device::atomic_copy(&p.file(&package.artifact).map_err(error)?, path, 0o644)?;
+                    install_apk(&p, payload::RUNYN, &package.artifact, path)?;
+                    fs::remove_file(path)?;
+                }
+            }
+            Step::Dns => {
+                workflow::phase(shared, "applying", crate::dns::title(dns_action))?;
+                crate::dns::apply(&p, dns_action)?;
+                workflow::update(shared, |s| s.completed_steps = if crate::restore_ui::enabled() { 6 } else { 7 })?;
+            }
+            Step::Sync => {
+                workflow::phase(shared, "applying", "Синхронизация перед перезагрузкой")?;
+                command("/system/bin/sync", &[], 30)?;
+            }
+            Step::Reboot => {
+                workflow::update(shared, |s| s.completed_steps = 8)?;
+                // Persist reboot intent only after every file and APK operation succeeded.
+                workflow::update(shared, |s| {
+                    s.phase = "reboot-pending".into();
+                    s.step = "Перезагрузка ГУ".into();
+                    s.apply_boot = device::boot();
+                })?;
+                crate::log(root(), &format!("reboot_pending version={}", claims.version))?;
+                fs::remove_file(BLOCK)?;
+                fs::File::open("/data/local/bin")?.sync_all()?;
+                command("/system/bin/sync", &[], 30)?;
+                command("/system/bin/reboot", &[], 15)?;
+            }
         }
-        let (package, artifact) = if index == 0 {
-            (payload::NATIVE, "native.apk")
-        } else {
-            (payload::RESTORE, "restore_mode.apk")
-        };
-        check_active_apk(&p, artifact, Path::new(&package_path(package)?))?;
-        workflow::update(shared, |s| s.completed_steps = 5 + index as u32)?;
-    }
-    fs::remove_file(restore)?;
-    for package in p
-        .manifest
-        .recipe
-        .packages
-        .iter()
-        .filter(|p| p.package == payload::RUNYN)
-    {
-        workflow::phase(shared, "applying", "Установка RunYN")?;
-        let path = Path::new("/data/local/tmp/voyahtune-runyn-ota.apk");
-        device::atomic_copy(&p.file(&package.artifact).map_err(error)?, path, 0o644)?;
-        let output = command(
-            "/system/bin/pm",
-            &["install", "-r", "--user", "0", path.to_str().unwrap()],
-            180,
-        )?;
-        if !output.lines().any(|s| s.trim() == "Success") {
-            return Err(invalid(&format!("RunYN PackageManager: {output}")));
-        }
-        check_active_apk(
-            &p,
-            &package.artifact,
-            Path::new(&package_path(payload::RUNYN)?),
-        )?;
-        fs::remove_file(path)?;
-    }
-    workflow::phase(shared, "applying", crate::dns::title(dns_action))?;
-    crate::dns::apply(&p, dns_action)?;
-    workflow::update(shared, |s| s.completed_steps = 7)?;
-    workflow::phase(shared, "applying", "Синхронизация перед перезагрузкой")?;
-    command("/system/bin/sync", &[], 30)?;
-    workflow::update(shared, |s| s.completed_steps = 8)?;
-    // Persist reboot intent only after every file and APK operation succeeded.
-    workflow::update(shared, |s| {
-        s.phase = "reboot-pending".into();
-        s.step = "Перезагрузка ГУ".into();
-        s.apply_boot = device::boot();
+        Ok(())
     })?;
-    crate::log(
-        root(),
-        &format!("reboot_pending version={}", claims.version),
-    )?;
-    fs::remove_file(BLOCK)?;
-    fs::File::open("/data/local/bin")?.sync_all()?;
-    command("/system/bin/sync", &[], 30)?;
-    command("/system/bin/reboot", &[], 15)?;
     // A failed reboot must not leave a permanently busy UI or report success.
     thread::sleep(Duration::from_secs(30));
     Err(invalid("ГУ не перезагрузилось после команды reboot"))

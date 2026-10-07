@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp"
+    android:height="28dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:name="housing"
+        android:pathData="M9.5,2 H14.5 A3,3 0,0 1,17.5,5 V19 A3,3 0,0 1,14.5,22 H9.5 A3,3 0,0 1,6.5,19 V5 A3,3 0,0 1,9.5,2 Z"
+        android:fillColor="#182437"
+        android:strokeColor="#B9D5FF"
+        android:strokeWidth="1.7"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="red_signal"
+        android:pathData="M14.25,6.5 A2.25,2.25 0,1 1,9.75,6.5 A2.25,2.25 0,1 1,14.25,6.5 Z"
+        android:fillColor="#DD828C" />
+    <path
+        android:name="yellow_signal"
+        android:pathData="M14.25,12 A2.25,2.25 0,1 1,9.75,12 A2.25,2.25 0,1 1,14.25,12 Z"
+        android:fillColor="#EFCB7E" />
+    <path
+        android:name="green_signal"
+        android:pathData="M14.25,17.5 A2.25,2.25 0,1 1,9.75,17.5 A2.25,2.25 0,1 1,14.25,17.5 Z"
+        android:fillColor="#9BC9B3" />
+</vector>

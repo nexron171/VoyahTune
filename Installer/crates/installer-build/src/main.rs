@@ -156,22 +156,24 @@ fn run(args: Args) -> Result<()> {
                 "Не удалось собрать root-службу",
             ));
         }
-        let status = Command::new(root.join("Updater/gradlew"))
-            .current_dir(root.join("Updater"))
-            .args(["--offline", "assembleRelease"])
-            .status()?;
-        if !status.success() {
-            return Err(Error::new(
-                "UPDATER_BUILD",
-                "Не удалось собрать интерфейс обновления",
-            ));
+        if args.infrastructure == Infrastructure::Pi {
+            let status = Command::new(root.join("Updater/gradlew"))
+                .current_dir(root.join("Updater"))
+                .args(["--offline", "assembleRelease"])
+                .status()?;
+            if !status.success() {
+                return Err(Error::new(
+                    "UPDATER_BUILD",
+                    "Не удалось собрать интерфейс обновления",
+                ));
+            }
+            // Gradle maps a canonical source path to one signed artifact name.
+            // Keep delivery and stable roles as separate files, even when bytes match.
+            fs::copy(
+                root.join("Updater/app/build/outputs/apk/release/app-release.apk"),
+                root.join("Updater/build/ui-next.apk"),
+            )?;
         }
-        // Gradle maps a canonical source path to one signed artifact name.
-        // Keep delivery and stable roles as separate files, even when bytes match.
-        fs::copy(
-            root.join("Updater/app/build/outputs/apk/release/app-release.apk"),
-            root.join("Updater/build/ui-next.apk"),
-        )?;
         let projects = if args.infrastructure == Infrastructure::Pi {
             vec!["RunYN", "Native", "RestoreMode"]
         } else {
@@ -223,7 +225,9 @@ fn run(args: Args) -> Result<()> {
             infrastructure: args.infrastructure,
             schema: 4,
             removal_only: false,
-            requirements: Some(installer_core::compatibility::Requirements::infrastructure()),
+            requirements: Some(if args.infrastructure == Infrastructure::Od {
+                installer_core::compatibility::Requirements::restoremode_ota()
+            } else { installer_core::compatibility::Requirements::infrastructure() }),
             recipe,
             product: "VoyahTune".into(),
             release_version: args.version,
@@ -312,7 +316,13 @@ fn discover(
     let spec = root.join("Packaging/installer/payload-spec.json");
     let mut recipe: Recipe = serde_json::from_slice(&fs::read(spec)?)?;
     let profile = format!("Packaging/{}", infrastructure.as_str());
-    // Both profiles use one installation contract; only their selected source files are packaged.
+    // OD embeds the OTA Activity in RestoreMode; PI keeps its existing UI delivery.
+    if infrastructure == Infrastructure::Od {
+        recipe.files.retain(|file| {
+            !["voyahtune-updater.apk", "voyahtune-ui-maintenance", "voyahtune-ui-next.apk"]
+                .contains(&file.artifact.as_str())
+        });
+    }
     if infrastructure == Infrastructure::Pi {
         for file in &mut recipe.files {
             if file.artifact == "load.bin" {
@@ -402,6 +412,7 @@ fn discover(
                 "Updater/app/build/outputs/apk/release/app-release.apk".into()
             }
             "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json".into(),
+            "voyahtune.updater.rc" if infrastructure == Infrastructure::Od => format!("Packaging/od/system/{name}"),
             "voyahtune.updater.rc" => format!("Packaging/system/{name}"),
             "whitelist.xml" => {
                 "Packaging/system/privapp-permissions-ru.big.town.anative.xml".into()
@@ -502,25 +513,9 @@ mod tests {
     fn checkout_payload_contains_every_required_runtime_file() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let (recipe, sources) = discover(&root, Infrastructure::Od).unwrap();
-        for (name, source) in [
-            (
-                "voyahtune-ui-maintenance",
-                "Updater/build/daemon/arm64-v8a/voyahtune-ui-maintenance",
-            ),
-            ("voyahtune-ui-next.apk", "Updater/build/ui-next.apk"),
-        ] {
-            assert!(recipe.files.iter().any(|f| f.artifact == name
-                && f.destination == format!("/data/local/bin/{name}")
-                && f.phase == installer_core::recipe::Phase::Files));
-            assert!(recipe.runtime().any(|f| f.artifact == name));
-            assert!(sources["artifacts"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|a| a["name"] == name && a["source"] == source));
-            assert!(recipe
-                .cleanup_files()
-                .contains(&format!("/data/local/bin/{name}")));
+        for name in ["voyahtune-updater.apk", "voyahtune-ui-maintenance", "voyahtune-ui-next.apk"] {
+            assert!(!recipe.files.iter().any(|f| f.artifact == name));
+            assert!(!sources["artifacts"].as_array().unwrap().iter().any(|a| a["name"] == name));
         }
         recipe.validate().unwrap();
         for name in payload::RUNTIME_NAMES.iter().filter(|name| {

@@ -19,11 +19,17 @@ final class ScenarioRunner {
         void onFinished(String scenarioId);
     }
 
-    private final ScenarioActionExecutor executor;
+    private final ScenarioEnvironment environment;
+    private volatile boolean closed;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    ScenarioRunner(SetModesService service) {
-        this.executor = new ScenarioActionExecutor(service);
+    ScenarioRunner(ScenarioEnvironment environment) {
+        this.environment = environment;
+    }
+
+    void close() {
+        closed = true;
+        handler.removeCallbacksAndMessages(null);
     }
 
     void run(ScenarioDefinition scenario, Listener listener) {
@@ -32,6 +38,7 @@ final class ScenarioRunner {
     }
 
     private void runStep(ScenarioDefinition scenario, int index, Listener listener) {
+        if (closed) return;
         if (index >= scenario.steps.size()) {
             Log.i(TAG, "Сценарий «" + scenario.name + "» завершён");
             listener.onFinished(scenario.id);
@@ -54,7 +61,7 @@ final class ScenarioRunner {
         // Ровно одно продвижение на шаг: если асинхронное действие сообщит о завершении дважды,
         // сценарий иначе перескочит следующий шаг (в том числе паузу).
         final AtomicBoolean advanced = new AtomicBoolean();
-        executor.execute(step.value, (accepted, error) -> {
+        environment.execute(step.value, (accepted, error) -> {
             if (!advanced.compareAndSet(false, true)) return;
             if (!accepted && error != null) {
                 Log.w(TAG, "Сценарий «" + scenario.name + "»: " + step.value + " — " + error);

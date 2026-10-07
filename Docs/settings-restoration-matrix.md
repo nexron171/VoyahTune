@@ -36,7 +36,7 @@
 
 Источники: [ACC-агент](../Packaging/od/inject/voyahtune_acc_restore.js),
 [drive-reset-агент](../Packaging/od/inject/voyahtune_drive_reset.js),
-[состояние цикла](../RestoreMode/app/src/main/java/ru/big/town/restoremode/DriveSelectionPreferences.java),
+[состояние цикла](../RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/DriveSelectionPreferences.java),
 [ApplyEngine](../Native/app/src/main/java/ru/big/town/anative/ApplyEngine.java),
 [SetModesService](../Native/app/src/main/java/ru/big/town/anative/SetModesService.java).
 
@@ -205,11 +205,11 @@ RGB сверены по `Constants.colorNum`, `Constants.colorArraysNew` и `res
 [BatteryHeatService](../Native/app/src/main/java/ru/big/town/anative/BatteryHeatService.java),
 [WiperColdService](../Native/app/src/main/java/ru/big/town/anative/WiperColdService.java),
 [RDS-контроллер](../Packaging/od/inject/app_client.js), [проверки радио на ГУ](rds-radio-station.md),
-[SavedConfigSyncReceiver](../RestoreMode/app/src/main/java/ru/big/town/restoremode/SavedConfigSyncReceiver.java),
-[SplitConfigSync](../RestoreMode/app/src/main/java/ru/big/town/restoremode/SplitConfigSync.java),
+[SavedSettingsSyncReceiver](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SavedSettingsSyncReceiver.java),
+[SplitConfigSync](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java),
 [геометрия](system-server-geometry.md),
 [ScreenLiftTaskRestorer](../Native/app/src/main/java/ru/big/town/anative/ScreenLiftTaskRestorer.java),
-[MainActivity RestoreMode](../RestoreMode/app/src/main/java/ru/big/town/restoremode/MainActivity.java).
+[DashboardActivity](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java).
 
 ## Что отдельно не восстанавливается VoyahTune
 
@@ -233,8 +233,8 @@ RGB сверены по `Constants.colorNum`, `Constants.colorArraysNew` и `res
 [VoiceCommandController](../Native/app/src/main/java/ru/big/town/anative/VoiceCommandController.java),
 [WashModeController](../Native/app/src/main/java/ru/big/town/anative/WashModeController.java),
 [PowerHoldController](../Native/app/src/main/java/ru/big/town/anative/PowerHoldController.java),
-[AdvanceActivity](../RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java),
-[provider](../RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java).
+[SettingsActivity](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/shell/SettingsActivity.java),
+[provider](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SettingsContentProvider.java).
 
 ## Результаты аудита и проверок
 

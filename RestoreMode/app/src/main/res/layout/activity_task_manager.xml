@@ -1,72 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- «Диспетчер задач»: ряд карточек запущенных приложений + карточка «Закрыть все приложения».
-     Слева остаётся полоса родного дока: отступ задаётся в TaskManagerActivity (как в MainActivity). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/taskManagerRoot"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#000000">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="12dp"
-            android:paddingTop="6dp"
-            android:paddingEnd="12dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Диспетчер задач"
-                android:textColor="#FFFFFF"
-                android:textSize="26px" />
-
-            <ImageButton
-                android:id="@+id/taskManagerClose"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:background="@drawable/nav_back_circle_bg"
-                android:contentDescription="Закрыть"
-                android:padding="12dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_close" />
+    android:id="@+id/taskManagerRoot" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/settings_background">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:paddingHorizontal="28dp" android:paddingTop="132dp" android:paddingBottom="28dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="90dp"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="24dp"
+            android:background="@drawable/settings_intro" android:layout_marginBottom="20dp">
+            <ImageView android:layout_width="52dp" android:layout_height="52dp" android:padding="12dp"
+                android:background="@drawable/settings_icon" android:src="@drawable/settings_icon_apps"
+                android:layout_marginEnd="18dp" android:importantForAccessibility="no" />
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Приложения под контролем"
+                    android:textSize="24sp" android:textColor="@color/settings_text" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp"
+                    android:text="Закрепите нужные приложения — они останутся открытыми при общей очистке."
+                    android:textSize="17sp" android:textColor="@color/settings_muted" />
+            </LinearLayout>
+            <TextView android:id="@+id/taskManagerCount" android:layout_width="wrap_content" android:layout_height="44dp"
+                android:paddingHorizontal="18dp" android:gravity="center" android:background="@drawable/settings_pill"
+                android:text="Подключение…" android:textSize="18sp" android:textColor="@color/settings_accent" />
         </LinearLayout>
-
-        <HorizontalScrollView
-            android:id="@+id/taskManagerScroll"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:fillViewport="true"
-            android:overScrollMode="never"
-            android:paddingHorizontal="6dp"
-            android:paddingVertical="6dp"
-            android:scrollbars="none">
-
-            <LinearLayout
-                android:id="@+id/taskManagerCards"
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:orientation="horizontal" />
+        <HorizontalScrollView android:id="@+id/taskManagerScroll" android:layout_width="match_parent"
+            android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true"
+            android:overScrollMode="never" android:scrollbars="none">
+            <LinearLayout android:id="@+id/taskManagerCards" android:layout_width="wrap_content"
+                android:layout_height="match_parent" android:orientation="horizontal" />
         </HorizontalScrollView>
-
-        <TextView
-            android:id="@+id/taskManagerEmpty"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="Нет запущенных приложений"
-            android:textColor="#AAAAAA"
-            android:textSize="30px"
-            android:visibility="gone" />
+        <TextView android:id="@+id/taskManagerEmpty" android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_weight="1" android:gravity="center" android:background="@drawable/settings_card"
+            android:text="Загрузка…" android:textColor="@color/settings_muted" android:textSize="24sp" android:visibility="gone" />
     </LinearLayout>
+    <FrameLayout android:id="@+id/taskManagerHeader" android:layout_width="match_parent" android:layout_height="113dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="28dp" android:paddingTop="25dp">
+            <ImageButton android:id="@+id/taskManagerClose" android:layout_width="64dp" android:layout_height="64dp"
+                android:background="@drawable/settings_back" android:contentDescription="Назад" android:padding="18dp"
+                android:scaleType="fitCenter" android:src="@drawable/settings_icon_back" android:layout_marginEnd="24dp" />
+            <TextView android:id="@+id/sectionTitle" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:layout_gravity="bottom" android:text="Диспетчер задач" android:textColor="@color/settings_text" android:textSize="36sp" />
+        </LinearLayout>
+    </FrameLayout>
 </FrameLayout>

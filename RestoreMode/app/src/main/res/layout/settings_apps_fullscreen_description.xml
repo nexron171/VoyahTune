@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="Открываются на всю ширину физического экрана, ниже статус-бара. Док скрывается, плавающие кнопки «Назад» и Home появляются автоматически."
+    android:textSize="17sp"
+    android:textColor="#97a6bc"
+    android:includeFontPadding="false" />

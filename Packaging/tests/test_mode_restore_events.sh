@@ -3,7 +3,7 @@ set -eu
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 SRC="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative"
 ENGINE="$SRC/ApplyEngine.java"
-PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/DriveSelectionPreferences.java"
+PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/DriveSelectionPreferences.java"
 HOOK="$REPO_ROOT/Packaging/od/inject/voyahtune_acc_restore.js"
 # OD starts the automatic Native pass only from ACC; PI retains door/gear restoration.
 ! grep -Rq 'ApplyEngine.scheduleApply(' "$SRC"

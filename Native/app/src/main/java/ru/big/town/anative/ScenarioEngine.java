@@ -5,10 +5,8 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
-import android.widget.Toast;
 
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -18,7 +16,6 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import ru.big.town.common.ScenarioProtocol;
 
 /**
  * Движок пользовательских сценариев: событийные триггеры (селектор, двери, освещённость),
@@ -33,11 +30,7 @@ final class ScenarioEngine {
     /** Антидребезг повторного запуска одного сценария. */
     private static final long MIN_RUN_INTERVAL_MS = 5_000L;
 
-    private static final OemVehicleStateTransport.StateKey SOC_KEY =
-            new OemVehicleStateTransport.StateKey(
-                    PowerHoldPolicy.BMS_SOC_DISPLAY, PowerHoldPolicy.BMS_SOC_DISPLAY_ID);
-
-    private final SetModesService service;
+    private final ScenarioEnvironment environment;
     private final ScenarioRunner runner;
     private final HandlerThread thread;
     private final Handler handler;
@@ -49,7 +42,8 @@ final class ScenarioEngine {
     });
 
     private volatile List<ScenarioDefinition> scenarios = Collections.emptyList();
-    private volatile boolean lightListening;
+    private ScenarioEnvironment.Subscription lightSubscription;
+    private volatile boolean closed;
 
     /* Поля ниже читаются и пишутся только на handler движка. */
     private final Set<String> running = new HashSet<>();
@@ -58,22 +52,28 @@ final class ScenarioEngine {
     private boolean doorSnapshotSeen;
     private ScenarioPolicy.LightState lastLight = ScenarioPolicy.LightState.HOLD;
 
-    private final GearStateController.Subscription gearSubscription;
-    private final DoorsStateController.Subscription doorSubscription;
-    private final LightSensorService.LevelListener levelListener = this::onLightLevel;
+    private final ScenarioEnvironment.Subscription gearSubscription;
+    private final ScenarioEnvironment.Subscription doorSubscription;
 
     ScenarioEngine(SetModesService service) {
-        this.service = service;
-        this.runner = new ScenarioRunner(service);
+        this(ScenarioEnvironment.oem(service));
+    }
+
+    ScenarioEngine(ScenarioEnvironment environment) {
+        this.environment = environment;
+        this.runner = new ScenarioRunner(environment);
         thread = new HandlerThread("ScenarioEngine");
         thread.start();
         handler = new Handler(thread.getLooper());
-        VehicleStateControllers states = VehicleStateControllers.get(service);
-        gearSubscription = states.gear().subscribe(handler, this::onGear);
-        doorSubscription = states.doors().subscribe(handler, this::onDoors);
+        gearSubscription = environment.gear(handler, this::onGear);
+        doorSubscription = environment.doors(handler, this::onDoors);
     }
 
     void close() {
+        closed = true;
+        runner.close();
+        main.removeCallbacksAndMessages(null);
+        handler.removeCallbacksAndMessages(null);
         gearSubscription.close();
         doorSubscription.close();
         stopLightListening();
@@ -187,7 +187,7 @@ final class ScenarioEngine {
             return;
         }
         conditionExecutor.execute(() -> {
-            ScenarioPolicy.Snapshot snapshot = captureSnapshot(scenario);
+            ScenarioPolicy.Snapshot snapshot = environment.snapshot(scenario);
             String failure = ScenarioPolicy.firstFailingCondition(scenario, snapshot);
             handler.post(() -> {
                 if (failure == null) {
@@ -201,12 +201,12 @@ final class ScenarioEngine {
     }
 
     private void toast(String text) {
-        main.post(() -> Toast.makeText(service, text, Toast.LENGTH_LONG).show());
+        main.post(() -> { if (!closed) environment.notifyUser(text); });
     }
 
     /** Только handler движка: держит running/lastRunElapsed без блокировок. */
     private void start(ScenarioDefinition scenario, String reason, boolean test) {
-        if (running.contains(scenario.id)) return;
+        if (closed || running.contains(scenario.id)) return;
         long now = SystemClock.elapsedRealtime();
         Long last = lastRunElapsed.get(scenario.id);
         if (!test && last != null && now - last < MIN_RUN_INTERVAL_MS) return;
@@ -219,46 +219,6 @@ final class ScenarioEngine {
         }));
     }
 
-    /** Снимок для условий; вызывается на фоновом потоке (чтение SOC — блокирующий Binder). */
-    private ScenarioPolicy.Snapshot captureSnapshot(ScenarioDefinition scenario) {
-        VehicleStateControllers states = VehicleStateControllers.get(service);
-        boolean needLight = ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_LIGHT);
-        boolean needTemperature = ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_TEMP_OUT);
-        String driveMode = null;
-        if (ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_DRIVE_MODE)) {
-            ModeFeedbackDecoder.Feedback feedback = ModeFeedbackDecoder.decode(
-                    ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID, states.latestDriveModeValue());
-            if (feedback != null) driveMode = feedback.mode;
-        }
-        Integer soc = ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_SOC)
-                ? readSoc() : null;
-        int temperature = needTemperature
-                ? states.latestAmbientTemperature()
-                : VehicleStateControllers.NO_AMBIENT_TEMPERATURE;
-        Calendar calendar = Calendar.getInstance();
-        int minutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE);
-        // ISO: понедельник 1 … воскресенье 7.
-        int day = ((calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1;
-        return new ScenarioPolicy.Snapshot(
-                needLight ? LightSensorService.lastKnownLevel() : -1,
-                temperature == VehicleStateControllers.NO_AMBIENT_TEMPERATURE
-                        ? ScenarioPolicy.Snapshot.UNKNOWN : temperature,
-                soc == null ? -1 : soc,
-                driveMode, minutes, day);
-    }
-
-    private Integer readSoc() {
-        try {
-            Map<OemVehicleStateTransport.StateKey, Integer> values =
-                    OemVehicleStateTransport.readVehicleStates(
-                            service, Collections.singletonList(SOC_KEY));
-            return values == null ? null : values.get(SOC_KEY);
-        } catch (RuntimeException e) {
-            Log.w(TAG, "Чтение заряда не удалось: " + e.getMessage());
-            return null;
-        }
-    }
-
     private List<ScenarioDefinition> enabledScenarios() {
         List<ScenarioDefinition> result = new ArrayList<>();
         for (ScenarioDefinition scenario : scenarios) {
@@ -269,18 +229,17 @@ final class ScenarioEngine {
 
     private void updateLightListening() {
         boolean needed = usesLightLevel();
-        if (needed && !lightListening) {
-            LightSensorService.addLevelListener(levelListener);
-            lightListening = true;
-        } else if (!needed && lightListening) {
+        if (needed && lightSubscription == null) {
+            lightSubscription = environment.light(this::onLightLevel);
+        } else if (!needed && lightSubscription != null) {
             stopLightListening();
         }
     }
 
     private void stopLightListening() {
-        if (!lightListening) return;
-        LightSensorService.removeLevelListener(levelListener);
-        lightListening = false;
+        if (lightSubscription == null) return;
+        lightSubscription.close();
+        lightSubscription = null;
         handler.post(() -> lastLight = ScenarioPolicy.LightState.HOLD);
     }
 }

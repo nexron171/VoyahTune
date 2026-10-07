@@ -100,6 +100,13 @@ pub struct Payload {
     pub manifest: Manifest,
 }
 impl Payload {
+    pub fn restoremode_ota(&self) -> bool {
+        self.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+            && self.manifest.requirements.as_ref().is_some_and(|r| {
+                r.required_capabilities.iter().any(|c| c == "restoremode-ota-ui-v1")
+            })
+    }
+
     pub fn require_infrastructure(
         &self,
         expected: crate::infrastructure::Infrastructure,

@@ -7,3 +7,6 @@ dependencyResolutionManagement {
 }
 rootProject.name = "VoyahTuneUpdater"
 include(":app")
+
+include(":updater-ui")
+project(":updater-ui").projectDir = file("ui")

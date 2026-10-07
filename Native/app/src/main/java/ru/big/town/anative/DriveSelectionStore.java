@@ -22,8 +22,9 @@ final class DriveSelectionStore {
             context.getContentResolver().call(URI, "driveHookV2", "nativeRestore", null);
         } catch (RuntimeException e) { Log.w("DriveSelection", "Native restore state unavailable", e); }
     }
-    static DriveSelectionPolicy read(Context context) {
-        try (Cursor c = context.getContentResolver().query(URI, null, null, null, null)) {
+    static DriveSelectionPolicy read(Context context) { return read(context, URI); }
+    static DriveSelectionPolicy read(Context context, Uri endpoint) {
+        try (Cursor c = context.getContentResolver().query(endpoint, null, null, null, null)) {
             if (c != null && c.moveToFirst()) {
                 int configured = c.getColumnIndex(DriveSelectionPolicy.CONFIGURED);
                 int override = c.getColumnIndex(DriveSelectionPolicy.OVERRIDE);
@@ -37,18 +38,19 @@ final class DriveSelectionStore {
         return null;
     }
 
-    static boolean record(Context context, String mode, String source) {
+    static boolean record(Context context, String mode, String source) { return record(context, URI, mode, source); }
+    static boolean record(Context context, Uri endpoint, String mode, String source) {
         if (context == null || !DriveSelectionPolicy.valid(mode)) return false;
         try {
             // Older providers do not support overrides: don't silently send a widget command
             // that will be undone at Drive. Both APKs must support this contract.
-            if (read(context) == null) return false;
+            if (read(context, endpoint) == null) return false;
             ContentValues values = new ContentValues();
             values.put(DriveSelectionPolicy.SOURCE, source);
             values.put(DriveSelectionPolicy.MODE, mode);
-            int changed = context.getContentResolver().update(URI, values, null, null);
+            int changed = context.getContentResolver().update(endpoint, values, null, null);
             if (changed == 0 && !DriveSelectionPolicy.FEEDBACK.equals(source)) return false;
-            DriveSelectionPolicy state = read(context);
+            DriveSelectionPolicy state = read(context, endpoint);
             if (state == null) return false;
             MainActivity.driveMode = state.effective();
             ApplyEngine.noteSavedMode("driveMode", state.effective());

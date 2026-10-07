@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/TextWarn"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="Команды отправляются в CAN-шину без проверок состояния автомобиля. Проверка формата проверяет только запись 10 байт и не подтверждает безопасность команды."
+    android:textColor="#d9c69d"
+    android:textSize="16sp"
+    android:background="@drawable/settings_notice"
+    android:paddingHorizontal="19dp"
+    android:paddingVertical="15dp"
+    android:lineSpacingMultiplier="1.5"
+    android:layout_marginTop="22dp"
+    android:layout_marginBottom="24dp" />

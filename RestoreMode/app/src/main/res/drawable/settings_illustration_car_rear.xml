@@ -1,0 +1,96 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="60dp"
+    android:height="48dp"
+    android:viewportWidth="60"
+    android:viewportHeight="48">
+    <path
+        android:name="tires"
+        android:pathData="M8,34 H16 V44 Q16,46 14,46 H10 Q8,46 8,44 Z M44,34 H52 V44 Q52,46 50,46 H46 Q44,46 44,44 Z"
+        android:fillColor="#142233"
+        android:strokeColor="#49657E"
+        android:strokeWidth="1.2" />
+    <path
+        android:name="side_mirrors"
+        android:pathData="M10,14 L6,14.5 Q3,15 4,19 L9,20 Z M50,14 L54,14.5 Q57,15 56,19 L51,20 Z"
+        android:fillColor="#3B5870"
+        android:strokeColor="#94B7D1"
+        android:strokeWidth="1"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="body"
+        android:pathData="M7,20 L10,10 Q11,6 16,5 Q30,3.5 44,5 Q49,6 50,10 L53,20 Q55,27 54,37 Q54,41 50,41 H10 Q6,41 6,37 Q5,27 7,20 Z"
+        android:fillColor="#7FAACB"
+        android:strokeColor="#BAD8EF"
+        android:strokeWidth="1.3"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="rear_window"
+        android:pathData="M12,11 Q13,8 17,8 H43 Q47,8 48,11 L49.5,18.5 Q30,21 10.5,18.5 Z"
+        android:fillColor="#192A3D"
+        android:strokeColor="#4B738F"
+        android:strokeWidth="1"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="window_reflection"
+        android:pathData="M15,10.5 H28 L21,18 H11.7 Z"
+        android:fillColor="#BAD8EF"
+        android:fillAlpha="0.12" />
+    <path
+        android:name="roof_spoiler"
+        android:pathData="M15,7.5 Q30,6.2 45,7.5 M23,9 H37"
+        android:fillColor="#00000000"
+        android:strokeColor="#BAD8EF"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round" />
+    <path
+        android:name="window_wiper"
+        android:pathData="M29,17 L40,17.5"
+        android:fillColor="#00000000"
+        android:strokeColor="#64849D"
+        android:strokeWidth="1.1"
+        android:strokeLineCap="round" />
+    <path
+        android:name="tail_light_housing"
+        android:pathData="M7,20.5 Q30,22.5 53,20.5 L52.5,24.5 H7.5 Z"
+        android:fillColor="#263C51"
+        android:strokeColor="#BAD8EF"
+        android:strokeWidth="0.8"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="tail_light_strip"
+        android:pathData="M8,23.2 H16 L20,22 H40 L44,23.2 H52"
+        android:fillColor="#00000000"
+        android:strokeColor="#F08B92"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="tailgate"
+        android:pathData="M10.5,25 V29.5 Q10.5,32 13.5,32 H46.5 Q49.5,32 49.5,29.5 V25"
+        android:fillColor="#00000000"
+        android:strokeColor="#466D8B"
+        android:strokeWidth="1"
+        android:strokeLineCap="round" />
+    <path
+        android:name="bumper"
+        android:pathData="M7,34 L15,33 H45 L53,34 L51,41 H9 Z"
+        android:fillColor="#2A4056"
+        android:strokeColor="#466D8B"
+        android:strokeWidth="1"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="lower_reflectors"
+        android:pathData="M9,33.5 H18 L16,35 H9 Z M42,33.5 H51 V35 H44 Z"
+        android:fillColor="#D97E89" />
+    <path
+        android:name="lower_bumper"
+        android:pathData="M20,34 H40 L44,38 L42,41 H18 L16,38 Z"
+        android:fillColor="#162537"
+        android:strokeColor="#516F86"
+        android:strokeWidth="1"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="license_plate"
+        android:pathData="M25,35 H35 V38 H25 Z"
+        android:fillColor="#ABC9DF" />
+</vector>

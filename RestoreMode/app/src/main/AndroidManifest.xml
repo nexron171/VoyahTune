@@ -63,6 +63,7 @@
             android:exported="false" />
         <activity
             android:name=".AdvanceActivity"
+            android:theme="@style/Theme.RestoreMode.Settings"
             android:exported="false" />
         <activity
             android:name=".TripHistoryActivity"
@@ -75,6 +76,7 @@
              по нижней кнопке дока), а у процесса лаунчера нет нашей signature-пермиссии. -->
         <activity
             android:name=".TaskManagerActivity"
+            android:theme="@style/Theme.RestoreMode.Settings"
             android:excludeFromRecents="true"
             android:exported="true" />
 
@@ -109,6 +111,14 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <activity
+            android:name=".OtaActivity"
+            android:process=":ota"
+            android:taskAffinity="ru.big.town.restoremode.ota"
+            android:theme="@style/ota_UpdaterTheme"
+            android:exported="true"
+            android:launchMode="singleTop" />
 
         <provider
             android:name=".RestoreModeContentProvider"

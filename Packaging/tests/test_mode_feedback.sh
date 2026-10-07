@@ -11,9 +11,9 @@ TRIPS="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/TripStatsService.
 MODE_POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ModeSyncPolicy.java"
 APPLY_ENGINE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApplyEngine.java"
 NATIVE_MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
-ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
-PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
-ADVANCE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
+ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/vehicle/VehicleSettingsFragment.java"
+PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SettingsContentProvider.java"
+ADVANCE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/settings_vehicle_drive_energy_modes.xml"
 BRIDGE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java"
 
 fail() {
@@ -65,12 +65,25 @@ assert body.index('MODE_SYNC_POLICY.observe(modeKey, observedMode);') < body.ind
 PY_CHECK
 require_fixed "$NATIVE_MAIN" '!remembersMode(context, modeKey)'
 require_fixed "$PROVIDER" 'sharedPreferences.getBoolean(rememberKey, true)'
-require_fixed "$ADVANCE" 'if (!prefs.getBoolean(rememberKey, true)) return;'
+require_fixed "$ADVANCE" 'if (!preferences.getBoolean(rememberKey, true)) {'
 
 # Remember-last is opt-out per mode. Missing provider columns, NULL values and old caches all retain
 # the historical enabled behaviour; the running controller receives UI changes immediately.
-[ "$(grep -F -c 'android:text="Запоминать последнее выбранное значение"' "$ADVANCE_LAYOUT")" -eq 3 ] \
-    || fail "remember-last switch must be shown once for each mode"
+# Labels may change with the design; check the actual controls rather than their copy.
+python3 - "$ADVANCE_LAYOUT" <<'PY_CHECK'
+import sys
+import xml.etree.ElementTree as ET
+
+android = '{http://schemas.android.com/apk/res/android}'
+layout = ET.parse(sys.argv[1]).getroot()
+for switch_id in ('switchDriveRememberLast', 'switchEnergyRememberLast', 'switchRecycleRememberLast'):
+    controls = [view for view in layout.iter() if view.get(android + 'id') == '@+id/' + switch_id]
+    assert len(controls) == 1, f'{switch_id} must be shown once for its mode'
+    control = controls[0]
+    assert control.tag in ('Switch', 'android.widget.Switch', 'ru.big.town.restoremode.settings.ui.controls.SettingsToggle'), f'{switch_id} must be a switch'
+    assert control.get(android + 'visibility', 'visible') == 'visible', f'{switch_id} must be visible'
+    assert control.get(android + 'checked') == 'true', f'{switch_id} must default to remembering the last selection'
+PY_CHECK
 for key in driveRememberLast energyRememberLast recycleRememberLast; do
     require_fixed "$PROVIDER" "sharedPreferences.getBoolean(\"$key\","
     require_fixed "$PROVIDER" "\"$key\","

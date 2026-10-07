@@ -1,32 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Последняя карточка «Диспетчера задач»: закрыть все сторонние приложения (force-stop в Native). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/taskCloseAll"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@drawable/card_dark_ripple"
-    android:clickable="true"
-    android:focusable="true"
-    android:gravity="center"
-    android:orientation="vertical"
-    android:padding="8dp">
-
-    <ImageView
-        android:layout_width="120dp"
-        android:layout_height="120dp"
-        android:background="@drawable/nav_back_circle_bg"
-        android:contentDescription="Закрыть все приложения"
-        android:padding="28dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/ic_close" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:gravity="center"
-        android:maxLines="2"
-        android:text="Закрыть все приложения"
-        android:textColor="#FFFFFF"
-        android:textSize="22px" />
+    android:id="@+id/taskCloseAll" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/settings_inset" android:foreground="?android:attr/selectableItemBackground"
+    android:clickable="true" android:focusable="true" android:gravity="center" android:orientation="vertical" android:padding="24dp">
+    <ImageView android:layout_width="80dp" android:layout_height="80dp" android:background="@drawable/settings_icon"
+        android:importantForAccessibility="no" android:padding="22dp" android:scaleType="fitCenter" android:src="@drawable/settings_icon_trash" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp"
+        android:gravity="center" android:text="Закрыть все
+приложения" android:textColor="@color/settings_text" android:textSize="23sp" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+        android:gravity="center" android:text="Закреплённые
+останутся открытыми" android:textColor="@color/settings_muted" android:textSize="16sp" />
 </LinearLayout>

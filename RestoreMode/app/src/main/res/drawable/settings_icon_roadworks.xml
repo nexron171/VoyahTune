@@ -1,0 +1,40 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp"
+    android:height="28dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:name="warning_triangle"
+        android:pathData="M24,4 L44.5,41 H3.5 Z"
+        android:fillColor="#E0E8F0"
+        android:strokeColor="#D5858D"
+        android:strokeWidth="3.2"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="worker_head"
+        android:pathData="M26.3,17.5 A2.3,2.3 0,1 1,21.7,17.5 A2.3,2.3 0,1 1,26.3,17.5 Z"
+        android:fillColor="#263B54" />
+    <path
+        android:name="worker_body"
+        android:pathData="M22,21.5 L18.5,27 L16,35.5 M18.5,27 L23,29 L24.5,35.5 M22,21.5 L26,25 L29,25.5"
+        android:fillColor="#00000000"
+        android:strokeColor="#263B54"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="shovel_handle"
+        android:pathData="M27,23 L33,34"
+        android:fillColor="#00000000"
+        android:strokeColor="#263B54"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+    <path
+        android:name="shovel_blade"
+        android:pathData="M31.5,31 L34,32.5 L33.5,35.5 L30.5,34 Z"
+        android:fillColor="#263B54" />
+    <path
+        android:name="earth_pile"
+        android:pathData="M30,37 L34.5,32.5 L39,37 Z"
+        android:fillColor="#263B54" />
+</vector>

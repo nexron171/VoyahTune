@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="20dp">
+        <ImageView
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:padding="9dp"
+            android:src="@drawable/settings_icon_satellite"
+            android:background="@drawable/settings_icon"
+            android:importantForAccessibility="no"
+            android:layout_marginEnd="16dp" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Запись GPS-трека"
+            android:textSize="24sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false"
+            android:layout_weight="1" />
+        <TextView
+            android:id="@+id/tripLocationPermissionStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:paddingHorizontal="13dp"
+            android:paddingVertical="9dp"
+            android:background="@drawable/settings_pill"
+            android:tag="settings.permission"
+            android:textColor="#b2d3fb"
+            android:textSize="16sp" />
+    </LinearLayout>
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Точная геолокация с доступом «Разрешать всегда» нужна для записи трека, пока открыта навигация или другое приложение. Без разрешения поездки сохраняются без карты. Маршруты хранятся на устройстве."
+        android:textSize="17sp"
+        android:textColor="#97a6bc"
+        android:includeFontPadding="false"
+        android:layout_marginTop="16dp" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="18dp">
+        <Button
+            android:id="@+id/buttonRequestTripLocation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Разрешить запись в фоне"
+            android:tag="settings.primary"
+            android:minHeight="48dp" />
+        <Button
+            android:id="@+id/buttonTripLocationPermission"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="Разрешение в настройках Android"
+            android:tag="settings.action"
+            android:minHeight="48dp" />
+        <Button
+            android:id="@+id/buttonDisableTripLocation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="Не записывать маршруты"
+            android:tag="settings.action"
+            android:minHeight="48dp" />
+    </LinearLayout>
+</LinearLayout>

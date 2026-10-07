@@ -6,7 +6,6 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Message;
 import android.os.Messenger;
-import android.os.RemoteException;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Map;
@@ -24,8 +23,14 @@ final class SuspensionWidgetController {
     private final Context context;
     private final HandlerThread thread = new HandlerThread("SuspensionWidget");
     private final Handler worker;
-    private CanBusEventHub.Subscription subscription;
-    private Messenger client;
+    private VehiclePort.Subscription subscription;
+    private final VehiclePort vehicle;
+    private final DriveStore driveStore;
+    private final CommandQueue commands;
+    private final long confirmationTimeoutMs;
+    interface DriveStore { DriveSelectionPolicy read(); boolean record(String mode); }
+    interface CommandQueue { void post(Runnable command, Runnable completed); }
+    private final ru.big.town.common.MessengerSubscription client = new ru.big.town.common.MessengerSubscription();
     private int height = -1, direction = -1, maintenance = -1, drive = -1, inhibit = -1, pending = -1;
     private String message = "Нет данных подвески";
     private volatile boolean closed;
@@ -35,7 +40,19 @@ final class SuspensionWidgetController {
     };
 
     SuspensionWidgetController(Context context) {
+        this(context, VehiclePort.oem(context), new DriveStore() {
+            public DriveSelectionPolicy read() { return DriveSelectionStore.read(context); }
+            public boolean record(String mode) {
+                ApplyEngine.noteVehicleMode("driveMode", mode);
+                return DriveSelectionStore.record(context, mode, DriveSelectionPolicy.WIDGET);
+            }
+        }, (command, done) -> ApplyEngine.postUserCommand("suspension widget", command, done), 45000);
+    }
+    SuspensionWidgetController(Context context, VehiclePort vehicle, DriveStore driveStore,
+                               CommandQueue commands, long confirmationTimeoutMs) {
         this.context = context.getApplicationContext();
+        this.vehicle = vehicle; this.driveStore = driveStore;
+        this.commands = commands; this.confirmationTimeoutMs = confirmationTimeoutMs;
         thread.start(); worker = new Handler(thread.getLooper());
     }
     private static OemVehicleStateTransport.StateKey key(String name, int id) {
@@ -48,13 +65,13 @@ final class SuspensionWidgetController {
         worker.post(() -> {
             if (closed) return;
             if (what == SuspensionWidgetProtocol.UNWATCH) {
-                if (client != null && client.equals(reply)) stopWatching();
+                if (client.remove(reply)) stopWatching();
                 return;
             }
             if (reply == null) return;
-            client = reply;
+            client.set(reply);
             if (subscription == null) {
-                subscription = CanBusEventHub.get(context).subscribe(
+                subscription = vehicle.subscribe(
                         CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_VEHICLE_STATE,
                         new int[]{750, 751, 711, 545, 1060}, worker, this::onEvent);
                 refresh();
@@ -84,7 +101,15 @@ final class SuspensionWidgetController {
     }
     private void refresh() {
         Map<OemVehicleStateTransport.StateKey, Integer> values =
-                OemVehicleStateTransport.readVehicleStates(context, KEYS);
+                vehicle.session(KEYS, session -> {
+                    Map<OemVehicleStateTransport.StateKey, Integer> result = new java.util.LinkedHashMap<>();
+                    for (OemVehicleStateTransport.StateKey key : KEYS) {
+                        Integer value = session.readVehicleState(key);
+                        if (value == null) return null;
+                        result.put(key, value);
+                    }
+                    return result;
+                });
         height = value(values, HEIGHT); direction = value(values, DIRECTION);
         maintenance = value(values, MAINTENANCE); drive = value(values, DRIVE);
         inhibit = value(values, INHIBIT);
@@ -104,14 +129,14 @@ final class SuspensionWidgetController {
     private void select(int selection) {
         if (pending >= 0 || commandInFlight) { publish(); return; }
         commandInFlight = true; message = "Отправляем команду…"; publish();
-        ApplyEngine.postUserCommand("suspension widget", () -> {
+        commands.post(() -> {
             String result = dispatch(selection);
             worker.post(() -> {
                 commandInFlight = false;
                 if (closed) return;
                 if (result.isEmpty()) {
                     pending = selection; message = "Команда отправлена, ожидаем высоту";
-                    worker.removeCallbacks(timeout); worker.postDelayed(timeout, 45000);
+                    worker.removeCallbacks(timeout); worker.postDelayed(timeout, confirmationTimeoutMs);
                     checkCompletion();
                 } else message = result;
                 publish();
@@ -124,16 +149,16 @@ final class SuspensionWidgetController {
     }
     private String dispatch(int selection) {
         if (closed) return "Сервис остановлен";
-        DriveSelectionPolicy saved = DriveSelectionStore.read(context);
+        DriveSelectionPolicy saved = driveStore.read();
         if (saved == null) return "Обновите RestoreMode: нет общего состояния режимов";
         int previous = DriveSelectionPolicy.value(saved.medium);
         String mode = SuspensionWidgetPolicy.driveMode(selection, previous);
         Map<OemVehicleStateTransport.StateKey, Integer> profile = mode == null ? null
-                : DriveModeCanTransport.statesFor(context, mode);
+                : vehicle.driveProfile(mode);
         if (selection != 0 && profile == null) return "Профиль движения недоступен";
         ArrayList<OemVehicleStateTransport.StateKey> keys = new ArrayList<>(KEYS);
         if (profile != null) keys.addAll(profile.keySet());
-        String result = OemVehicleStateTransport.withSession(context, keys, session -> {
+        String result = vehicle.session(keys, session -> {
             Integer observedHeight = session.readVehicleState(HEIGHT);
             Integer observedMaintenance = session.readVehicleState(MAINTENANCE);
             Integer inhibit = selection == 0 ? session.readVehicleState(INHIBIT) : 0;
@@ -155,14 +180,13 @@ final class SuspensionWidgetController {
                         observedDrive == null ? -1 : observedDrive);
                 selectedMode = observed == null ? null : observed.mode;
             }
-            ApplyEngine.noteVehicleMode("driveMode", selectedMode);
-            return DriveSelectionStore.record(context, selectedMode, DriveSelectionPolicy.WIDGET)
-                    ? "" : "Команда отправлена, но режим не сохранён";
+            return driveStore.record(selectedMode) ? "" : "Команда отправлена, но режим не сохранён";
         });
         return result == null ? "Нет связи с автомобилем" : result;
     }
     private void publish() {
-        if (client == null || closed) return;
+        if (closed) return;
+        if (!client.active()) { stopWatching(); return; }
         Bundle data = new Bundle();
         data.putInt(SuspensionWidgetProtocol.HEIGHT, height);
         data.putInt(SuspensionWidgetProtocol.DIRECTION, direction);
@@ -175,11 +199,11 @@ final class SuspensionWidgetController {
         data.putString(SuspensionWidgetProtocol.MESSAGE, message);
         Message response = Message.obtain(null, SuspensionWidgetProtocol.STATE);
         response.setData(data);
-        try { client.send(response); } catch (RemoteException e) { stopWatching(); }
+        if (!client.send(response)) stopWatching();
     }
     private void stopWatching() {
         if (subscription != null) subscription.close();
-        subscription = null; client = null;
+        subscription = null; client.clear();
         height = -1; maintenance = -1; drive = -1; inhibit = -1;
         worker.removeCallbacks(timeout); pending = -1;
     }

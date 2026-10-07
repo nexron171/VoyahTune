@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="20dp">
+        <ImageView
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:padding="9dp"
+            android:src="@drawable/settings_icon_spray"
+            android:background="@drawable/settings_icon"
+            android:importantForAccessibility="no"
+            android:layout_marginEnd="16dp" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Восстанавливать ароматизатор"
+            android:textSize="24sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false"
+            android:layout_weight="1" />
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchFragrance"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </LinearLayout>
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Выбранные параметры применяются при старте и пробуждении."
+        android:textSize="17sp"
+        android:textColor="#97a6bc"
+        android:includeFontPadding="false"
+        android:layout_marginBottom="18dp" />
+    <ru.big.town.restoremode.settings.ui.layout.SettingsGrid
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        app:settingsColumns="3">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Аромат"
+                android:textSize="16sp"
+                android:textColor="#95a8c3"
+                android:includeFontPadding="false"
+                android:layout_marginTop="18dp"
+                android:layout_marginBottom="10dp" />
+            <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
+                android:id="@+id/fragranceTasteGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                app:settingsStack="true">
+                <RadioButton
+                    android:id="@+id/fragranceTaste1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="1"
+                    android:text="1 · Бамбук"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+                <RadioButton
+                    android:id="@+id/fragranceTaste2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="2"
+                    android:text="2 · Пион"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+                <RadioButton
+                    android:id="@+id/fragranceTaste3"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="3"
+                    android:text="3 · Водяной туман"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+            </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Длительность"
+                android:textSize="16sp"
+                android:textColor="#95a8c3"
+                android:includeFontPadding="false"
+                android:layout_marginTop="18dp"
+                android:layout_marginBottom="10dp" />
+            <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
+                android:id="@+id/fragranceDurationGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                app:settingsStack="true">
+                <RadioButton
+                    android:id="@+id/fragranceDurationUnlimited"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="0"
+                    android:text="Без таймера"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+                <RadioButton
+                    android:id="@+id/fragranceDuration30"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="1"
+                    android:text="30 минут"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+                <RadioButton
+                    android:id="@+id/fragranceDuration60"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="2"
+                    android:text="60 минут"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+            </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Интенсивность"
+                android:textSize="16sp"
+                android:textColor="#95a8c3"
+                android:includeFontPadding="false"
+                android:layout_marginTop="18dp"
+                android:layout_marginBottom="10dp" />
+            <ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup
+                android:id="@+id/fragranceIntensityGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                app:settingsStack="true">
+                <RadioButton
+                    android:id="@+id/fragranceIntensityLow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="1"
+                    android:text="Низкая"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+                <RadioButton
+                    android:id="@+id/fragranceIntensityMedium"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="2"
+                    android:text="Средняя"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+                <RadioButton
+                    android:id="@+id/fragranceIntensityHigh"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/radio_group_button_70_bg"
+                    android:tag="3"
+                    android:text="Высокая"
+                    android:textColor="@color/radio_button_text_color_selector"
+                    android:layout_weight="0"
+                    android:maxLines="3" />
+            </ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup>
+        </LinearLayout>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsGrid>
+</LinearLayout>

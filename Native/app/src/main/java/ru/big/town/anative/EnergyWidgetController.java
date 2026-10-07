@@ -7,7 +7,6 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Message;
 import android.os.Messenger;
-import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
 import java.util.ArrayList;
@@ -22,8 +21,8 @@ final class EnergyWidgetController {
     private static final long STALE_MS=20_000, SAVE_MS=5_000;
     private final HandlerThread thread=new HandlerThread("EnergyWidgets");
     private final Handler worker;
-    private final CanBusEventHub hub;
-    private final CanBusEventHub.Subscription subscription;
+    private final VehiclePort hub;
+    private final VehiclePort.Subscription subscription;
     private final SharedPreferences prefs;
     private final EnergyHistory history=new EnergyHistory();
     private final EnergyConsumptionHistory consumption=new EnergyConsumptionHistory();
@@ -31,7 +30,7 @@ final class EnergyWidgetController {
     private float batteryKwh=43,tankLiters=56;
     private final float[][] values=new float[EnergyTelemetrySample.COUNT][];
     private final long[] received=new long[EnergyTelemetrySample.COUNT];
-    private Messenger client;
+    private final ru.big.town.common.MessengerSubscription client = new ru.big.town.common.MessengerSubscription();
     private boolean connected,dirty,closed;
     private long nextQuery,lastSave,lastCollect=-1;
     private final Runnable tick=new Runnable() {
@@ -44,10 +43,11 @@ final class EnergyWidgetController {
             worker.postDelayed(this,1000);
         }
     };
-    EnergyWidgetController(Context context) {
+    EnergyWidgetController(Context context) { this(context, VehiclePort.oem(context)); }
+    EnergyWidgetController(Context context, VehiclePort vehicle) {
         prefs=context.getSharedPreferences("EnergyWidgetHistory",Context.MODE_PRIVATE);
         Arrays.fill(received,-1);
-        hub=CanBusEventHub.get(context);
+        hub=vehicle;
         thread.start();worker=new Handler(thread.getLooper());
         for(int i=0;i<EnergyTelemetrySample.COUNT;i++)values[i]=EnergyTelemetrySample.unavailable(i).values;
         worker.post(this::restore);
@@ -68,9 +68,9 @@ final class EnergyWidgetController {
                 if(battery!=batteryKwh||tank!=tankLiters){batteryKwh=battery;tankLiters=tank;dirty=true;save(SystemClock.elapsedRealtime());}
                 publish(SystemClock.elapsedRealtime());
             } else if(what==EnergyWidgetProtocol.UNWATCH) {
-                if(client!=null&&client.equals(reply))client=null;
+                client.remove(reply);
             } else if(what==EnergyWidgetProtocol.WATCH&&reply!=null) {
-                client=reply;hub.requestEnergySnapshot();publish(SystemClock.elapsedRealtime());
+                client.set(reply);hub.requestEnergySnapshot();publish(SystemClock.elapsedRealtime());
             }
         });
     }
@@ -124,7 +124,7 @@ final class EnergyWidgetController {
                 received[EnergyTelemetrySample.SOC],received[EnergyTelemetrySample.FUEL]);
     }
     private void publish(long now) {
-        if(client==null)return;
+        if(!client.active())return;
         Bundle b=new Bundle();
         b.putInt(EnergyWidgetProtocol.SCHEMA,EnergyWidgetProtocol.VERSION);
         b.putBoolean(EnergyWidgetProtocol.CONNECTED,connected);b.putLong(EnergyWidgetProtocol.UPDATED,now);
@@ -160,7 +160,7 @@ final class EnergyWidgetController {
         b.putFloatArray(EnergyWidgetProtocol.CONSUMPTION_EV,usedEv);b.putFloatArray(EnergyWidgetProtocol.CONSUMPTION_FUEL,usedFuel);
         b.putBooleanArray(EnergyWidgetProtocol.CONSUMPTION_BREAK,breaks);
         Message out=Message.obtain(null,EnergyWidgetProtocol.STATE);out.setData(b);
-        try{client.send(out);}catch(RemoteException e){client=null;}
+        client.send(out);
     }
     private void save(long now) {
         try {
@@ -206,6 +206,6 @@ final class EnergyWidgetController {
     }
     void close() {
         subscription.close();worker.post(()->{closed=true;worker.removeCallbacks(tick);
-            if(dirty)save(SystemClock.elapsedRealtime());client=null;thread.quitSafely();});
+            if(dirty)save(SystemClock.elapsedRealtime());client.clear();thread.quitSafely();});
     }
 }

@@ -10,7 +10,7 @@ SERVICE="$ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java
 HOST="$ROOT/Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java"
 VD_FACTORY="$ROOT/Native/app/src/main/java/ru/big/town/anative/OemVirtualDisplay.java"
 MANIFEST="$ROOT/Native/app/src/main/AndroidManifest.xml"
-RESTORE_MAIN="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/MainActivity.java"
+RESTORE_MAIN="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java"
 
 fail() {
     echo "vd/freeform hook contract test failed: $*" >&2

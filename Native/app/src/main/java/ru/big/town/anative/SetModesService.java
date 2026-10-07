@@ -121,17 +121,16 @@ public class SetModesService extends Service {
                 case ru.big.town.common.EnergyWidgetProtocol.WATCH:
                 case ru.big.town.common.EnergyWidgetProtocol.UNWATCH:
                 case ru.big.town.common.EnergyWidgetProtocol.CONFIGURE:
-                    if (energyWidgets != null) energyWidgets.handle(msg);
+                    handleEnergyRequest(msg);
                     break;
                 case ru.big.town.common.SuspensionWidgetProtocol.WATCH:
                 case ru.big.town.common.SuspensionWidgetProtocol.UNWATCH:
                 case ru.big.town.common.SuspensionWidgetProtocol.SELECT:
-                    if (suspensionWidget == null) suspensionWidget = new SuspensionWidgetController(SetModesService.this);
-                    suspensionWidget.handle(msg);
+                    handleSuspensionRequest(msg);
                     break;
                 case 36: // Signature-protected voice session protocol.
                     try {
-                        voiceCommands.handle(msg.getData());
+                        handleVoiceRequest(msg.getData());
                     } catch (android.os.BadParcelableException e) {
                         // An older client can include its own ResultReceiver subclass.
                         // Reject the unreadable request without crashing the vehicle service.
@@ -143,58 +142,29 @@ public class SetModesService extends Service {
                     // MSG_RESULT отправим по ЗАВЕРШЕНИИ цикла применения, чтобы клиент держал
                     // кнопку «Применить» заблокированной всё время отправки.
                     final Messenger replyTo = msg.replyTo;
-                    ApplyEngine.applyNow(() -> notifyApplyDone(replyTo));
+                    applyModes(() -> notifyApplyDone(replyTo));
                     Log.i(TAG, "handleMessage() MSG_APPLY_DRIVE_MODES");
                     break;
                 case MSG_APPLY_DRIVE_MODES_STAR_BUTTON:
                     clientMessenger = msg.replyTo;
-                    worker(1, 100, MSG_APPLY_DRIVE_MODES_STAR_BUTTON, msg.arg1);
+                    applyStar(msg.arg1);
                     Log.i(TAG, "handleMessage() MSG_APPLY_DRIVE_MODES_STAR_BUTTON");
                     notifyApplyDone(msg.replyTo);
                     break;
 
                 case MSG_AUTO_LIGHT_ENABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_ENABLE");
-                    saveAutoLightState(true);
-                    updateLightSensorObservation();
+                    setAutoLightEnabled(true);
                     break;
 
                 case MSG_AUTO_LIGHT_DISABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_DISABLE");
-                    saveAutoLightState(false);
-                    updateLightSensorObservation();
+                    setAutoLightEnabled(false);
                     break;
 
-                case MSG_LEAVE_CAR:
-                    Log.i(TAG, "handleMessage() MSG_LEAVE_CAR");
-                    PowerHoldStatusTracker tracker = powerHoldStatusTracker;
-                    if (tracker == null) {
-                        Log.w(TAG, "Power Hold tracker is unavailable");
-                        break;
-                    }
-                    tracker.beginActivation(requestGeneration -> {
-                        AtomicReference<PowerHoldPolicy.Outcome> outcome =
-                                new AtomicReference<>(
-                                        PowerHoldPolicy.Outcome.TRANSPORT_FAILURE);
-                        ApplyEngine.postUserCommand("power hold", () -> {
-                            PowerHoldController controller = powerHoldController;
-                            if (controller != null) outcome.set(controller.activate());
-                            Log.i(TAG, "power hold activation outcome=" + outcome.get());
-                        }, () -> tracker.finishActivation(
-                                requestGeneration, outcome.get()));
-                    });
-                    break;
+                case MSG_LEAVE_CAR: requestPowerHold(); break;
 
-                case MSG_WASH_MODE:
-                    Log.i(TAG, "handleMessage() MSG_WASH_MODE");
-                    ApplyEngine.postUserCommand("wash mode", () -> {
-                        WashModeController controller = washModeController;
-                        WashModePolicy.Outcome outcome = controller == null
-                                ? WashModePolicy.Outcome.TRANSPORT_FAILURE
-                                : controller.activate();
-                        Log.i(TAG, "wash mode activation outcome=" + outcome);
-                    });
-                    break;
+                case MSG_WASH_MODE: requestWash(); break;
 
                 case MSG_FLOATING_BACK:
                     Log.i(TAG, "handleMessage() MSG_FLOATING_BACK arg1=" + msg.arg1);
@@ -215,30 +185,24 @@ public class SetModesService extends Service {
 
                 case MSG_CLOSE_ALL:
                     Log.i(TAG, "handleMessage() MSG_CLOSE_ALL");
-                    if (clearApps != null) clearApps.handle(msg);
+                    handleClearRequest(msg);
                     break;
 
                 case MSG_APPLY_PEDESTRIAN:
                     Log.i(TAG, "handleMessage() MSG_APPLY_PEDESTRIAN arg1=" + msg.arg1);
                     final boolean pedestrianDisabled = msg.arg1 == 1;
-                    ApplyEngine.postUserCommand("pedestrian sound",
-                            () -> MainActivity.sendPedestrianSoundCommand(pedestrianDisabled));
+                    requestPedestrian(pedestrianDisabled);
                     break;
 
                 case MSG_APPLY_SUSPENSION_MAINTENANCE:
                     final boolean maintenance = msg.arg1 == 1;
-                    ApplyEngine.postUserCommand("suspension maintenance", () -> {
-                        if (MainActivity.sendSuspensionMaintenanceCommand(SetModesService.this, maintenance)) {
-                            MainActivity.persistSavedToggle(SetModesService.this, "suspensionMaintenance", maintenance);
-                        }
-                    });
+                    requestMaintenance(maintenance);
                     break;
 
                 case MSG_APPLY_FORCED_EV:
                     Log.i(TAG, "handleMessage() MSG_APPLY_FORCED_EV arg1=" + msg.arg1);
                     final boolean forcedEvEnabled = msg.arg1 == 1;
-                    ApplyEngine.postUserCommand("forced EV",
-                            () -> MainActivity.sendForcedEvCommand(forcedEvEnabled));
+                    requestForcedEv(forcedEvEnabled);
                     break;
 
                 case MSG_REBOOT:
@@ -280,19 +244,9 @@ public class SetModesService extends Service {
                         injectEmbeddedTouch(d.getString("widgetId", ""),
                                 d.getParcelable("event"));
                     } else if (singleVd) {
-                        SplitHostActivity.launchSingle(SetModesService.this, left, lDpi, 0);
+                        launchSingleApp(left, lDpi);
                     } else if (right == null || right.isEmpty()) {
-                        boolean dpiReloaded = SetModesReceiverDynamic.ensureAppDpi(
-                                SetModesService.this, left, lDpi);
-                        Runnable launch = () -> SetModesReceiverDynamic.openFreeformApp(
-                                SetModesService.this, left, 0);
-                        if (dpiReloaded) {
-                            // WIN_RELOAD is asynchronous in system_server; let it clear the DPI cache
-                            // and reattach the config hook before ActivityRecord is first configured.
-                            mainHandler.postDelayed(launch, 300L);
-                        } else {
-                            launch.run();
-                        }
+                        launchFreeformApp(left, lDpi);
                     } else {
                         launchVirtualSplit(left, right, msg.arg1, lDpi, rDpi,
                                 resizable, split, presetIdx, presetId);
@@ -348,7 +302,7 @@ public class SetModesService extends Service {
                     // Приложение могло жить в виджетах: их снимаем, иначе следующая отрисовка
                     // главного экрана запустила бы закрытое приложение заново.
                     releaseWidgetInstances(pkg);
-                    WidgetSupport.stopApp(SetModesService.this, pkg);
+                    stopTaskApp(pkg);
                     // Задачи снимаются асинхронно: без паузы закрытое приложение вернётся в ответе.
                     final android.os.Messenger taskReplyTo = msg.replyTo;
                     mainHandler.postDelayed(() -> replyTaskList(taskReplyTo), TASK_LIST_SETTLE_MS);
@@ -358,22 +312,15 @@ public class SetModesService extends Service {
                 case ru.big.town.common.TaskManagerProtocol.SWITCH: {
                     String pkg = (msg.getData() != null)
                             ? msg.getData().getString(ru.big.town.common.TaskManagerProtocol.PACKAGE) : null;
-                    if (WidgetSupport.isWidgetOnly(SetModesService.this, pkg, widgetDisplayIds(),
-                            embeddedPackages.containsValue(pkg))) {
+                    if (isWidgetOnlyTask(pkg)) {
                         // Приложение живёт внутри виджета: moveTaskToFront поднял бы его задачу на
                         // самом VirtualDisplay, и на экране ничего бы не изменилось. Переносим запуск
                         // на водительский экран: AppDisplayLauncher снимает задачу с дисплея виджета и
                         // уведомляет хост, чтобы плитка не осталась с мёртвой поверхностью.
                         Log.i(TAG, "handleMessage() TASK_SWITCH pkg=" + pkg + " widget=1");
-                        boolean fullscreen = FullscreenPackagePolicy.contains(
-                                android.provider.Settings.Global.getString(
-                                        getContentResolver(), "voyahtune_fullscreen_apps"), pkg);
-                        AppDisplayLauncher.launch(SetModesService.this, pkg, 0, fullscreen, () -> true,
-                                () -> android.widget.Toast.makeText(SetModesService.this,
-                                        "Не удалось открыть приложение",
-                                        android.widget.Toast.LENGTH_LONG).show());
+                        launchTaskApp(pkg);
                     } else {
-                        boolean moved = WidgetSupport.moveToFront(SetModesService.this, pkg);
+                        boolean moved = moveTaskToFront(pkg);
                         Log.i(TAG, "handleMessage() TASK_SWITCH pkg=" + pkg + " moved=" + moved);
                     }
                     break;
@@ -386,7 +333,7 @@ public class SetModesService extends Service {
                     boolean pinned = pinData != null && pinData.getBoolean(
                             ru.big.town.common.TaskManagerProtocol.PINNED, false);
                     Log.i(TAG, "handleMessage() TASK_PIN pkg=" + pkg + " pinned=" + pinned);
-                    WidgetSupport.setPinned(SetModesService.this, pkg, pinned);
+                    pinTaskApp(pkg, pinned);
                     // Ответ сразу: фиксация не трогает задачи, ждать снятия задач не нужно.
                     replyTaskList(msg.replyTo);
                     break;
@@ -396,6 +343,75 @@ public class SetModesService extends Service {
                     Log.i(TAG, "handleMessage() default");
                     super.handleMessage(msg);
             }
+        }
+    }
+
+    // The Binder handler owns decoding; these operations own Android/OEM side effects.
+    protected void applyModes(Runnable completed) { ApplyEngine.applyNow(completed); }
+    protected void applyStar(int preset) { worker(1, 100, MSG_APPLY_DRIVE_MODES_STAR_BUTTON, preset); }
+    protected void handleEnergyRequest(Message request) { if (energyWidgets != null) energyWidgets.handle(request); }
+    protected void handleSuspensionRequest(Message request) {
+        if (suspensionWidget == null) suspensionWidget = new SuspensionWidgetController(this);
+        suspensionWidget.handle(request);
+    }
+    protected OemCommandSender.Transport voiceTransport() { return VoiceOemTransport.get(this); }
+    protected void handleVoiceRequest(android.os.Bundle request) { voiceCommands.handle(request); }
+    protected void handleClearRequest(Message request) { if (clearApps != null) clearApps.handle(request); }
+    protected void requestPedestrian(boolean disabled) {
+        ApplyEngine.postUserCommand("pedestrian sound", () -> MainActivity.sendPedestrianSoundCommand(disabled));
+    }
+    protected void requestForcedEv(boolean enabled) {
+        ApplyEngine.postUserCommand("forced EV", () -> MainActivity.sendForcedEvCommand(enabled));
+    }
+    protected void launchSingleApp(String packageName, int dpi) { SplitHostActivity.launchSingle(this, packageName, dpi, 0); }
+
+    protected void requestPowerHold() {
+        Log.i(TAG, "handleMessage() MSG_LEAVE_CAR");
+        PowerHoldStatusTracker tracker = powerHoldStatusTracker;
+        if (tracker == null) {
+            Log.w(TAG, "Power Hold tracker is unavailable");
+            return;
+        }
+        tracker.beginActivation(requestGeneration -> {
+            AtomicReference<PowerHoldPolicy.Outcome> outcome =
+                    new AtomicReference<>(
+                            PowerHoldPolicy.Outcome.TRANSPORT_FAILURE);
+            ApplyEngine.postUserCommand("power hold", () -> {
+                PowerHoldController controller = powerHoldController;
+                if (controller != null) outcome.set(controller.activate());
+                Log.i(TAG, "power hold activation outcome=" + outcome.get());
+            }, () -> tracker.finishActivation(
+                    requestGeneration, outcome.get()));
+        });
+    }
+    protected void requestWash() {
+        Log.i(TAG, "handleMessage() MSG_WASH_MODE");
+        ApplyEngine.postUserCommand("wash mode", () -> {
+            WashModeController controller = washModeController;
+            WashModePolicy.Outcome outcome = controller == null
+                    ? WashModePolicy.Outcome.TRANSPORT_FAILURE
+                    : controller.activate();
+            Log.i(TAG, "wash mode activation outcome=" + outcome);
+        });
+    }
+    protected void requestMaintenance(boolean maintenance) {
+        ApplyEngine.postUserCommand("suspension maintenance", () -> {
+            if (MainActivity.sendSuspensionMaintenanceCommand(SetModesService.this, maintenance)) {
+                MainActivity.persistSavedToggle(SetModesService.this, "suspensionMaintenance", maintenance);
+            }
+        });
+    }
+    protected void launchFreeformApp(String left, int lDpi) {
+        boolean dpiReloaded = SetModesReceiverDynamic.ensureAppDpi(
+                SetModesService.this, left, lDpi);
+        Runnable launch = () -> SetModesReceiverDynamic.openFreeformApp(
+                SetModesService.this, left, 0);
+        if (dpiReloaded) {
+            // WIN_RELOAD is asynchronous in system_server; let it clear the DPI cache
+            // and reattach the config hook before ActivityRecord is first configured.
+            mainHandler.postDelayed(launch, 300L);
+        } else {
+            launch.run();
         }
     }
 
@@ -434,7 +450,6 @@ public class SetModesService extends Service {
             } else if (action.equals("close_all")) closeAllApps();
             else if (action.equals("reboot")) rebootSystem();
             else if (action.startsWith("auto_light:")) {
-                updateLightSensorObservation();
                 boolean enabled = action.endsWith(":on");
                 ApplyEngine.postIndependentUserCommand("voice auto light", () -> {
                     try {
@@ -469,12 +484,12 @@ public class SetModesService extends Service {
      * Вкл/выкл плавающие кнопки Назад/Home. Сам accessibility-сервис остаётся подключённым без оверлея,
      * если он нужен системному действию, назначенному на кнопку руля.
      */
-    private void setFloatingBackEnabled(boolean enable) {
+    protected void setFloatingBackEnabled(boolean enable) {
         BackButtonService.setFloatingButtonEnabled(this, enable);
     }
 
     /** Сторона кнопки: 0 лево, 1 верх, 2 право. При смене оси (верх↔бок) сбрасываем смещение на центр. */
-    private void setFloatingBackSide(int side) {
+    protected void setFloatingBackSide(int side) {
         int old = prefs().getInt("floatingBackSide", BackButtonService.SIDE_LEFT);
         boolean axisChanged = (old == BackButtonService.SIDE_TOP) != (side == BackButtonService.SIDE_TOP);
         SharedPreferences.Editor ed = prefs().edit().putInt("floatingBackSide", side);
@@ -587,7 +602,7 @@ public class SetModesService extends Service {
      * (signature|privileged) — есть у Native как priv-app. setMode вызываем рефлексией
      * (метод @SystemApi/@hide; priv-app освобождён от hidden-api ограничений).
      */
-    private void grantInstallPermission(String pkg, int uidHint) {
+    protected void grantInstallPermission(String pkg, int uidHint) {
         if (pkg == null || pkg.isEmpty()) return;
         try {
             int uid = uidHint;
@@ -685,7 +700,7 @@ public class SetModesService extends Service {
      * Снять виджеты, в которых показывалось закрываемое приложение, и уведомить хост: плитку без
      * приложения он убирает сам, иначе виджет остался бы с мёртвой поверхностью.
      */
-    private void releaseWidgetInstances(String pkg) {
+    protected void releaseWidgetInstances(String pkg) {
         if (pkg == null || pkg.isEmpty()) return;
         boolean released = false;
         for (String widgetId : new java.util.ArrayList<>(embeddedPackages.keySet())) {
@@ -718,6 +733,24 @@ public class SetModesService extends Service {
         return false;
     }
 
+    protected java.util.List<WidgetSupport.RunningApp> queryTaskApps() {
+        return WidgetSupport.runningApps(this, widgetDisplayIds());
+    }
+    protected void stopTaskApp(String pkg) { WidgetSupport.stopApp(this, pkg); }
+    protected void pinTaskApp(String pkg, boolean pinned) { WidgetSupport.setPinned(this, pkg, pinned); }
+    protected boolean isTaskPinned(String pkg) { return WidgetSupport.isPinned(this, pkg); }
+    protected boolean isWidgetOnlyTask(String pkg) {
+        return WidgetSupport.isWidgetOnly(this, pkg, widgetDisplayIds(), embeddedPackages.containsValue(pkg));
+    }
+    protected boolean moveTaskToFront(String pkg) { return WidgetSupport.moveToFront(this, pkg); }
+    protected void launchTaskApp(String pkg) {
+        boolean fullscreen = FullscreenPackagePolicy.contains(android.provider.Settings.Global.getString(
+                getContentResolver(), "voyahtune_fullscreen_apps"), pkg);
+        AppDisplayLauncher.launch(this, pkg, 0, fullscreen, () -> true,
+                () -> android.widget.Toast.makeText(this, "Не удалось открыть приложение",
+                        android.widget.Toast.LENGTH_LONG).show());
+    }
+
     /**
      * Ответ диспетчеру задач: параллельные списки пакетов, подписей, фиксаций и признака «приложение
      * живёт внутри виджета». Пустой список — валидный ответ: UI покажет «нет запущенных приложений».
@@ -725,7 +758,7 @@ public class SetModesService extends Service {
     private void replyTaskList(android.os.Messenger replyTo) {
         if (replyTo == null) return;
         java.util.List<WidgetSupport.RunningApp> apps =
-                WidgetSupport.runningApps(this, widgetDisplayIds());
+                queryTaskApps();
         java.util.ArrayList<String> packages = new java.util.ArrayList<>(apps.size());
         java.util.ArrayList<String> labels = new java.util.ArrayList<>(apps.size());
         java.util.ArrayList<Boolean> widgetFlags = new java.util.ArrayList<>(apps.size());
@@ -747,7 +780,7 @@ public class SetModesService extends Service {
         boolean[] pinned = new boolean[packages.size()];
         boolean[] widget = new boolean[packages.size()];
         for (int i = 0; i < packages.size(); i++) {
-            pinned[i] = WidgetSupport.isPinned(this, packages.get(i));
+            pinned[i] = isTaskPinned(packages.get(i));
             widget[i] = Boolean.TRUE.equals(widgetFlags.get(i));
         }
         android.os.Message reply = android.os.Message.obtain(null,
@@ -771,12 +804,12 @@ public class SetModesService extends Service {
      * заданным DPI, живой ресайз пропорций, свап по двойному тапу. Единственный движок сплита.
      * freeform-настройки нужны, чтобы приложения на VD были resizable.
      */
-    private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi) {
+    protected void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi) {
         launchVirtualSplit(leftPkg, rightPkg, ratio, leftDpi, rightDpi, false, 0f, -1, "");
     }
 
     /** Только двухпанельный VD split. Одиночный пакет маршрутизируется в обычную physical task. */
-    private void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi,
+    protected void launchVirtualSplit(String leftPkg, String rightPkg, int ratio, int leftDpi, int rightDpi,
                                     boolean resizable, float split, int presetIdx, String presetId) {
         if (leftPkg == null || leftPkg.isEmpty() || rightPkg == null || rightPkg.isEmpty()) {
             Log.w(TAG, "launchVirtualSplit: нужны два пакета");
@@ -837,7 +870,7 @@ public class SetModesService extends Service {
         return false;
     }
 
-    private void startEmbeddedDisplay(String widgetId, String packageName, Surface surface,
+    protected void startEmbeddedDisplay(String widgetId, String packageName, Surface surface,
                                       int width, int height, int dpi) {
         if (widgetId == null || widgetId.isEmpty() || packageName == null || packageName.isEmpty()
                 || surface == null || !surface.isValid() || width <= 0 || height <= 0) return;
@@ -899,7 +932,7 @@ public class SetModesService extends Service {
         }
     }
 
-    private void releaseEmbeddedDisplay(String widgetId) {
+    protected void releaseEmbeddedDisplay(String widgetId) {
         VirtualDisplay display = embeddedDisplays.remove(widgetId);
         embeddedPackages.remove(widgetId);
         embeddedLaunched.remove(widgetId);
@@ -915,7 +948,7 @@ public class SetModesService extends Service {
      * состояния: тот же {@link VirtualDisplay} получает новый ключ и поверхность, повторного
      * запуска приложения не происходит.
      */
-    private void moveEmbeddedDisplay(android.os.Bundle d) {
+    protected void moveEmbeddedDisplay(android.os.Bundle d) {
         String fromWidgetId = d.getString("fromWidgetId", "");
         String toWidgetId = d.getString("widgetId", "");
         String packageName = d.getString("package", "");
@@ -960,7 +993,7 @@ public class SetModesService extends Service {
      * Поменять местами два работающих экземпляра: дисплеи обмениваются ключами и поверхностями,
      * приложения продолжают работать и не перезапускаются.
      */
-    private void swapEmbeddedDisplays(android.os.Bundle d) {
+    protected void swapEmbeddedDisplays(android.os.Bundle d) {
         String idA = d.getString("widgetId", "");
         String idB = d.getString("widgetId2", "");
         if (idA == null || idB == null || idA.isEmpty() || idB.isEmpty() || idA.equals(idB)) return;
@@ -1009,7 +1042,7 @@ public class SetModesService extends Service {
         }
     }
 
-    private void injectEmbeddedTouch(String widgetId, MotionEvent event) {
+    protected void injectEmbeddedTouch(String widgetId, MotionEvent event) {
         VirtualDisplay display = embeddedDisplays.get(widgetId);
         if (display == null || event == null) return;
         MotionEvent copy = null;
@@ -1032,7 +1065,7 @@ public class SetModesService extends Service {
     // -------------------------------------------------------------------------
 
     /** Вкл/выкл захват всего вывода Native в файл (persist в NativePrefs). */
-    private void setLoggingEnabled(boolean enable) {
+    protected void setLoggingEnabled(boolean enable) {
         prefs().edit().putBoolean("logging", enable).apply();
         if (enable) NativeLog.get().start(getApplicationContext());
         else NativeLog.get().stopAndDelete(getApplicationContext()); // выкл → удаляем файл
@@ -1046,7 +1079,7 @@ public class SetModesService extends Service {
     }
 
     /** «Выгрузить логи»: share лог-файла через FileProvider (LocalSend и любое приложение). */
-    private void shareLogFile() {
+    protected void shareLogFile() {
         try {
             java.io.File f = NativeLog.get().logFile(getApplicationContext());
             if (f == null || !f.exists()) {
@@ -1095,7 +1128,7 @@ public class SetModesService extends Service {
 
 
     /** Перезагрузка системы (головы). Требует REBOOT (signature|privileged) — выдаётся priv-app. */
-    private void rebootSystem() {
+    protected void rebootSystem() {
         try {
             android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
@@ -1116,7 +1149,7 @@ public class SetModesService extends Service {
      * переживёт ребут) И зовём {@code UiModeManager.setNightMode} для мгновенного применения (в try — на
      * части прошивок нужен signature-пермишен MODIFY_DAY_NIGHT_MODE; тогда применится по secure-настройке).
      */
-    private void applyTheme(int mode) {
+    protected void applyTheme(int mode) {
         if (mode < 0 || mode > 3) mode = 0;
         try {
             android.provider.Settings.Secure.putInt(getContentResolver(), "ui_night_mode", mode);
@@ -1139,11 +1172,6 @@ public class SetModesService extends Service {
         Log.i(TAG, "applyTheme mode=" + mode);
     }
 
-    private void saveAutoLightState(boolean enabled) {
-        prefs().edit().putBoolean("autoLight", enabled).apply();
-        Log.i(TAG, "saveAutoLightState: " + enabled);
-    }
-
     private void restoreAutoLightState() {
         ApplyEngine.postWakeAction("restore auto light service switch", () -> {
             AutoLightSettings.restore(this);
@@ -1151,7 +1179,7 @@ public class SetModesService extends Service {
         }, null);
     }
 
-    private void setAutoLightEnabled(boolean enabled) {
+    protected void setAutoLightEnabled(boolean enabled) {
         ApplyEngine.postIndependentUserCommand("auto light switch", () -> {
             AutoLightSettings.set(this, enabled);
         });
@@ -1162,12 +1190,21 @@ public class SetModesService extends Service {
      * В режиме наблюдения сервис публикует уровень датчика, но не отправляет команды света.
      */
     void updateLightSensorObservation() {
-        boolean autoLight = prefs().getBoolean("autoLight", false);
-        boolean scenariosNeed = scenarioEngine != null && scenarioEngine.usesLightLevel();
-        LightSensorService.setObserveOnly(this, !autoLight && scenariosNeed);
-//        if (autoLight || scenariosNeed) startLightSensorService();
-//        else stopLightSensorService();
-        Log.i(TAG, "light observation: autoLight=" + autoLight + " scenarios=" + scenariosNeed);
+        AutoLightSettings.refreshObservation(this);
+    }
+
+    protected final void initializeScenarios(ScenarioEngine engine) {
+        closeScenarios();
+        scenarioEngine = engine;
+        activeInstance = this;
+        engine.reload(ScenarioConfigReceiver.loadPersisted(this));
+    }
+
+    protected final void closeScenarios() {
+        if (activeInstance == this) activeInstance = null;
+        ScenarioEngine engine = scenarioEngine;
+        scenarioEngine = null;
+        if (engine != null) engine.close();
     }
 
     /** Живой снимок сценариев из RestoreMode; без запущенного сервиса остаётся в NativePrefs. */
@@ -1430,8 +1467,7 @@ public class SetModesService extends Service {
             Log.w(TAG, "start vehicle state controllers: " + e.getMessage());
         }
         try {
-            scenarioEngine = new ScenarioEngine(this);
-            scenarioEngine.reload(ScenarioConfigReceiver.loadPersisted(this));
+            initializeScenarios(new ScenarioEngine(this));
         } catch (RuntimeException e) {
             Log.w(TAG, "start scenario engine: " + e.getMessage());
         }
@@ -1858,9 +1894,7 @@ public class SetModesService extends Service {
         if (energyWidgets != null) energyWidgets.close();
         if (clearApps != null) clearApps.close();
         voiceCommands.close();
-        ScenarioEngine engine = scenarioEngine;
-        scenarioEngine = null;
-        if (engine != null) engine.close();
+        closeScenarios();
         serviceDestroyed = true;
         ApplyEngine.stopEarlyDriveRestore("service destroyed");
         for (VirtualDisplay display : embeddedDisplays.values()) {

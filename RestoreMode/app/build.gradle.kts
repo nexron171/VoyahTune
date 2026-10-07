@@ -77,6 +77,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":updater-ui"))
 
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation(files(layout.buildDirectory.file("voice-deps/downloads/sherpa.aar")))
@@ -85,6 +86,7 @@ dependencies {
     implementation(libs.material)
     implementation(libs.activity)
     implementation(libs.constraintlayout)
+    implementation("androidx.recyclerview:recyclerview:1.2.1")
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)

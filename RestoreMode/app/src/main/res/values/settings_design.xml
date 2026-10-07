@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="settings_text_line_multiplier" type="id" />
+    <!-- Settings-only tokens. Native transport and the home screen keep their own contract. -->
+    <color name="settings_background">#171C25</color>
+    <color name="settings_surface">#222A37</color>
+    <color name="settings_inset">#1C2531</color>
+    <color name="settings_border">#384457</color>
+    <color name="settings_text">#F3F5FA</color>
+    <color name="settings_muted">#97A6BC</color>
+    <color name="settings_accent">#A5C8FF</color>
+    <color name="settings_green">#70DFA3</color>
+    <color name="settings_cyan">#88CFFF</color>
+    <color name="settings_red">#FF818B</color>
+    <color name="settings_yellow">#F2D46D</color>
+    <color name="settings_snow">#DBE2EB</color>
+    <color name="settings_purple">#BF9BFF</color>
+    <color name="settings_peony">#65419A</color>
+    <color name="settings_orange">#FFBC69</color>
+    <color name="settings_blue">#7BA7FF</color>
+    <dimen name="settings_card_radius">22dp</dimen>
+    <dimen name="settings_control_radius">12dp</dimen>
+    <dimen name="settings_gap">16dp</dimen>
+    <dimen name="settings_card_padding">24dp</dimen>
+    <dimen name="settings_body_size">18sp</dimen>
+    <dimen name="settings_caption_size">16sp</dimen>
+    <dimen name="settings_heading_size">24sp</dimen>
+    <dimen name="settings_title_size">36sp</dimen>
+    <dimen name="settings_touch_target">48dp</dimen>
+    <declare-styleable name="SettingsModeSummary">
+        <attr name="settingsModeGroup" format="reference" />
+        <attr name="settingsRememberSwitch" format="reference" />
+        <attr name="settingsModeIcon" format="reference" />
+    </declare-styleable>
+    <declare-styleable name="SettingsWidgetCard">
+        <attr name="settingsToggleRef" format="reference" />
+    </declare-styleable>
+    <declare-styleable name="SettingsChoiceGroup">
+        <attr name="settingsStack" format="boolean" />
+    </declare-styleable>
+    <declare-styleable name="SettingsGrid">
+        <attr name="settingsLastFull" format="boolean" />
+        <attr name="settingsColumns" format="integer" />
+        <attr name="settingsEndColumnWeight" format="float" />
+    </declare-styleable>
+    <declare-styleable name="SettingsPreviewView">
+        <attr name="settingsTileKey" format="string" />
+        <attr name="settingsTileWidth" format="integer" />
+        <attr name="settingsTileHeight" format="integer" />
+        <attr name="settingsPreviewKind" format="enum">
+            <enum name="grid" value="0" />
+            <enum name="split" value="1" />
+            <enum name="dock" value="2" />
+            <enum name="fullscreen" value="3" />
+        </attr>
+    </declare-styleable>
+    <style name="SettingsCard">
+        <item name="android:background">@drawable/settings_card</item>
+        <item name="android:padding">@dimen/settings_card_padding</item>
+        <item name="android:layout_marginBottom">@dimen/settings_gap</item>
+    </style>
+    <style name="SettingsHeading">
+        <item name="android:textColor">@color/settings_text</item>
+        <item name="android:textSize">@dimen/settings_heading_size</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:layout_marginTop">16dp</item>
+        <item name="android:layout_marginBottom">16dp</item>
+    </style>
+    <style name="Theme.RestoreMode.Settings" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:fontFamily">@font/settings_arimo</item>
+        <item name="fontFamily">@font/settings_arimo</item>
+        <item name="android:windowBackground">@color/settings_background</item>
+        <item name="colorSurface">@color/settings_surface</item>
+        <item name="colorOnSurface">@color/settings_text</item>
+        <item name="colorOnSurfaceVariant">@color/settings_muted</item>
+        <item name="colorPrimary">@color/settings_accent</item>
+        <item name="colorOnPrimary">@color/settings_background</item>
+        <item name="android:colorAccent">@color/settings_accent</item>
+        <item name="android:textColorPrimary">@color/settings_text</item>
+        <item name="android:textColorSecondary">@color/settings_muted</item>
+    </style>
+    <style name="SettingsDialog" parent="DarkDialog">
+        <item name="android:fontFamily">@font/settings_arimo</item>
+        <item name="fontFamily">@font/settings_arimo</item>
+        <item name="buttonBarPositiveButtonStyle">@style/SettingsDialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/SettingsDialogButton</item>
+        <item name="colorSurface">@color/settings_surface</item>
+        <item name="colorOnSurface">@color/settings_text</item>
+        <item name="colorOnSurfaceVariant">@color/settings_muted</item>
+        <item name="colorPrimary">@color/settings_accent</item>
+        <item name="alertDialogStyle">@style/SettingsDialogSurface</item>
+    </style>
+    <style name="SettingsDialogButton" parent="DarkDialogButton">
+        <item name="android:textColor">@color/settings_accent</item>
+        <item name="android:fontFamily">@font/settings_arimo</item>
+        <item name="android:textSize">19sp</item>
+    </style>
+    <style name="SettingsDialogSurface" parent="DarkDialogStyle">
+        <item name="backgroundTint">@color/settings_surface</item>
+    </style>
+</resources>

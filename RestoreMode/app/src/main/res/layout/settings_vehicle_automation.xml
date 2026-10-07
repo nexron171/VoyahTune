@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp">
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Автоматический прогрев батареи"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="При температуре ниже +10 °C. Статус и ручное включение — в виджете главного экрана."
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchBatteryHeatAuto"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Пауза музыки при открытии двери водителя"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Плавно приглушать громкость и ставить активную медиасессию на паузу."
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchPauseMediaOnDoor"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Сервисный режим дворников в холодную погоду"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/wiper_cold_desc"
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchWiperCold"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+</LinearLayout>

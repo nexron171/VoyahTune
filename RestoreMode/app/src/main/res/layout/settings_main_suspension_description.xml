@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="Подвеска: самый низкий уровень — удобная посадка без смены режима. Остальные уровни выбирают соответствующий режим движения."
+    android:textSize="16sp"
+    android:lineSpacingMultiplier="1.5"
+    android:textColor="#97a6bc"
+    android:includeFontPadding="false"
+    android:layout_marginTop="16dp" />

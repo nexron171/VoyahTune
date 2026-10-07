@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:theme="@style/ota_UpdaterTheme">
+        <activity android:name="ru.big.town.updater.ui.TestUpdaterActivity" android:exported="true" />
+    </application>
+</manifest>

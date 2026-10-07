@@ -1,0 +1,84 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <path
+        android:name="road_edges"
+        android:pathData="M10,5 V60 M54,5 V60"
+        android:fillColor="#00000000"
+        android:strokeColor="#829AB8"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+    <path
+        android:name="lane_divider"
+        android:pathData="M32,5 V13 M32,21 V29 M32,37 V45 M32,53 V60"
+        android:fillColor="#00000000"
+        android:strokeColor="#B9D5FF"
+        android:strokeAlpha="0.7"
+        android:strokeWidth="1.6" />
+    <path
+        android:name="straight_ahead_guide"
+        android:pathData="M43,8 V10 M43,14 V16 M43,20 V22 M43,26 V28"
+        android:fillColor="#00000000"
+        android:strokeColor="#94A7BF"
+        android:strokeAlpha="0.55"
+        android:strokeWidth="1.8" />
+    <path
+        android:name="lane_change_curve"
+        android:pathData="M43,36 C43,27 38,24.5 31,22 C23.5,19.3 21,16.2 21,11"
+        android:fillColor="#00000000"
+        android:strokeColor="#8AB8FF"
+        android:strokeWidth="4.6"
+        android:strokeLineCap="round" />
+    <path
+        android:name="lane_change_arrowhead"
+        android:pathData="M21,5 L14.5,16.5 L21,13.5 L27.5,16.5 Z"
+        android:fillColor="#8AB8FF" />
+    <group
+        android:name="car_top_view"
+        android:translateX="35"
+        android:translateY="35">
+        <path
+            android:name="tires"
+            android:pathData="M1.4,6 H3 V10 H1.4 Z M13,6 H14.6 V10 H13 Z M1.4,19 H3 V23 H1.4 Z M13,19 H14.6 V23 H13 Z"
+            android:fillColor="#182437" />
+        <path
+            android:name="body"
+            android:pathData="M4,1.5 Q8,0 12,1.5 Q13.2,2.7 13.2,5 L13.5,22 Q13.5,24.5 11.5,25 H4.5 Q2.5,24.5 2.5,22 L2.8,5 Q2.8,2.7 4,1.5 Z"
+            android:fillColor="#91BADD"
+            android:strokeColor="#D0E3F5"
+            android:strokeWidth="0.9"
+            android:strokeLineJoin="round" />
+        <path
+            android:name="side_mirrors"
+            android:pathData="M2.8,7 L0.8,7.8 V9.2 H2.7 Z M13.2,7 L15.2,7.8 V9.2 H13.3 Z"
+            android:fillColor="#B9D5FF" />
+        <path
+            android:name="windshield"
+            android:pathData="M4,7 H12 L11.2,11 H4.8 Z"
+            android:fillColor="#263C51" />
+        <path
+            android:name="panoramic_roof"
+            android:pathData="M4.8,12 H11.2 V18 H4.8 Z"
+            android:fillColor="#436582" />
+        <path
+            android:name="rear_window"
+            android:pathData="M4.8,19 H11.2 L12,22 H4 Z"
+            android:fillColor="#263C51" />
+        <path
+            android:name="headlights"
+            android:pathData="M4,3.5 H5.5 M10.5,3.5 H12"
+            android:fillColor="#00000000"
+            android:strokeColor="#EDF5FF"
+            android:strokeWidth="1.1"
+            android:strokeLineCap="round" />
+        <path
+            android:name="tail_lights"
+            android:pathData="M4,23.5 H12"
+            android:fillColor="#00000000"
+            android:strokeColor="#F08B92"
+            android:strokeWidth="0.9"
+            android:strokeLineCap="round" />
+    </group>
+</vector>

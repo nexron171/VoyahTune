@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingHorizontal="29dp"
+    android:paddingVertical="25dp"
+    android:minHeight="126dp"
+    android:background="@drawable/settings_intro">
+    <ImageView
+        android:layout_width="103dp"
+        android:layout_height="76dp"
+        android:padding="0dp"
+        android:src="@drawable/settings_overview_art"
+        android:background="@android:color/transparent"
+        android:importantForAccessibility="no"
+        android:layout_marginEnd="30dp" />
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_weight="1">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Всё нужное — на главном экране"
+            android:textSize="26sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Выберите виджеты, настройте размеры и добавьте любимые приложения."
+            android:textSize="18sp"
+            android:textColor="#adbed5"
+            android:includeFontPadding="false"
+            android:layout_marginTop="8dp"
+            android:lineSpacingMultiplier="1.45" />
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginStart="30dp">
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/settings_stat"
+            android:paddingStart="30dp"
+            android:minWidth="145dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="—"
+                android:textSize="35sp"
+                android:textColor="#d8e8ff"
+                android:includeFontPadding="false"
+                android:id="@+id/settingsWidgetCount" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="виджетов включено"
+                android:textSize="16sp"
+                android:textColor="#97a6bc"
+                android:includeFontPadding="false"
+                android:layout_marginTop="6dp" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/settings_stat"
+            android:paddingStart="30dp"
+            android:minWidth="145dp"
+            android:layout_marginStart="30dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="—"
+                android:textSize="35sp"
+                android:textColor="#d8e8ff"
+                android:includeFontPadding="false"
+                android:id="@+id/settingsAppCount" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="карточек приложений"
+                android:textSize="16sp"
+                android:textColor="#97a6bc"
+                android:includeFontPadding="false"
+                android:layout_marginTop="6dp" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

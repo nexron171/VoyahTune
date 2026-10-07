@@ -5,10 +5,10 @@ REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 HOOK="$REPO_ROOT/Packaging/od/inject/apollo_tech.js"
 LOAD_BIN="$REPO_ROOT/Packaging/od/system/load.bin"
 README="$REPO_ROOT/Packaging/README.md"
-ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
-APOLLO_SETTINGS="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/ApolloSettings.java"
-PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
-LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
+ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/apollo/ApolloSettingsFragment.java"
+APOLLO_SETTINGS="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/ApolloSettings.java"
+PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SettingsContentProvider.java"
+LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout"
 SET_MODES="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
 RESTORE_POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloRestorePolicy.java"
@@ -17,10 +17,19 @@ NATIVE_MANIFEST="$REPO_ROOT/Native/app/src/main/AndroidManifest.xml"
 RUNTIME_FLAG="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloSettingsRuntimeFlag.java"
 RUNTIME_STATE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApolloSettingsRuntimeState.java"
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
-require_fixed() { grep -Fq -- "$2" "$1" || fail "missing '$2' in $1"; }
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+require_fixed() {
+    if [ "$1" = "$ADVANCE" ] || [ "$1" = "$PROVIDER" ]; then
+        python3 "$REPO_ROOT/Packaging/tests/assert_java_source.py" "$1" "$2"
+    else
+        grep -RFq -- "$2" "$1" || fail "missing '$2' in $1"
+    fi
+}
 forbid_fixed() {
-    if grep -Fq -- "$2" "$1"; then
+    if grep -RFq -- "$2" "$1"; then
         fail "forbidden '$2' remains in $1"
     fi
 }
@@ -84,7 +93,7 @@ done
 require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloTlc, ApolloSettings.TLC);'
 require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloTrafficLights, ApolloSettings.TRAFFIC_LIGHTS);'
 require_fixed "$ADVANCE" 'bindApolloSwitch(switchApolloTrafficSigns, ApolloSettings.TRAFFIC_SIGNS);'
-require_fixed "$ADVANCE" 'prefs.edit().putBoolean(ApolloSettings.GREEN_SOUND'
+require_fixed "$ADVANCE" 'preferences.edit().putBoolean(ApolloSettings.GREEN_SOUND'
 require_fixed "$LAYOUT" 'android:id="@+id/switchApolloTlc"'
 require_fixed "$LAYOUT" 'android:id="@+id/switchApolloTrafficLights"'
 require_fixed "$LAYOUT" 'android:id="@+id/switchApolloTrafficSigns"'
