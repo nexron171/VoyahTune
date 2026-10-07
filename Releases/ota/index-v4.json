@@ -1,3 +1,12 @@
 {
-  "releases": []
+  "releases": [
+    {
+      "version": "4.0.0-od",
+      "url": "https://storage.yandexcloud.net/voyahtune/v4.0.0-od/payload_4.0.0-od.zip",
+      "size": 134154313,
+      "sha256": "a6b9fffaf66dca22ffaf3a84f6f8e0ff0d362e39bdea0f83376986515c108f12",
+      "minimumInstallerVersion": "1.6.0",
+      "minimumOtaVersion": "4.0.0"
+    }
+  ]
 }
