@@ -48,7 +48,8 @@ grep -q 'mirrorFullscreenApps(context, intent)' "$NATIVE_CONFIG" || fail "Native
 grep -q 'voyahtune_fullscreen_apps' "$NATIVE_BRIDGE" || fail "fullscreen packages are not mirrored for hooks"
 grep -q 'ru.big.town.anative.APP_DPI_CONFIG' "$SYNC" || fail "app DPI config action missing"
 grep -q 'appDpiJson' "$SYNC" || fail "authoritative app DPI JSON is not published"
-grep -q 'SplitConfigSync.pushAppDpi(AdvanceActivity.this, prefs, fpkg, dpi)' "$ADVANCE" \
+python3 "$ROOT/Packaging/tests/assert_java_source.py" "$ADVANCE" \
+    'SplitConfigSync.pushAppDpi(AdvanceActivity.this, preferences, targetPackageName, dpi)'  \
     || fail "DPI changes are not published immediately"
 grep -q 'mirrorAppDpi(context, intent)' "$NATIVE_CONFIG" || fail "Native does not receive app DPI config"
 if grep -q 'mirrorPassengerDock' "$NATIVE_CONFIG" "$NATIVE_BRIDGE"; then

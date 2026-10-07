@@ -13,7 +13,7 @@ APPLY_ENGINE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/ApplyEngin
 NATIVE_MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
 ADVANCE="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
 PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreModeContentProvider.java"
-ADVANCE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
+ADVANCE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/settings_vehicle_drive_energy_modes.xml"
 BRIDGE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java"
 
 fail() {
@@ -65,7 +65,7 @@ assert body.index('MODE_SYNC_POLICY.observe(modeKey, observedMode);') < body.ind
 PY_CHECK
 require_fixed "$NATIVE_MAIN" '!remembersMode(context, modeKey)'
 require_fixed "$PROVIDER" 'sharedPreferences.getBoolean(rememberKey, true)'
-require_fixed "$ADVANCE" 'if (!prefs.getBoolean(rememberKey, true)) return;'
+require_fixed "$ADVANCE" 'if (!preferences.getBoolean(rememberKey, true)) {'
 
 # Remember-last is opt-out per mode. Missing provider columns, NULL values and old caches all retain
 # the historical enabled behaviour; the running controller receives UI changes immediately.

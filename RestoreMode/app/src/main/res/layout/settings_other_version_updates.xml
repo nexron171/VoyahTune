@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp"
+    android:layout_marginTop="22dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Версия приложения"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:id="@+id/textAppVersion"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/settings_muted"
+                android:textSize="17sp"
+                android:lineSpacingMultiplier="1.45"
+                android:layout_marginTop="7dp" />
+        </LinearLayout>
+        <Button
+            android:id="@+id/buttonOpenUpdates"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Обновления VoyahTune"
+            android:tag="settings.action"
+            android:minHeight="48dp" />
+    </LinearLayout>
+</LinearLayout>

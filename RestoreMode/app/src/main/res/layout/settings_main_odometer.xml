@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ru.big.town.restoremode.SettingsGrid
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    app:settingsColumns="2"
+    android:layout_marginBottom="0dp">
+    <ru.big.town.restoremode.SettingsWidgetCard
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        app:settingsToggleRef="@id/switchShowOdometer"
+        android:padding="1dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="22dp"
+            android:minHeight="100dp">
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:padding="12dp"
+                android:src="@drawable/settings_icon_odo"
+                android:background="@drawable/settings_icon"
+                android:importantForAccessibility="no"
+                android:layout_marginEnd="16dp" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Общий пробег"
+                    android:textSize="23sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Пробег автомобиля"
+                    android:textSize="16sp"
+                    android:textColor="#95a5bd"
+                    android:includeFontPadding="false"
+                    android:layout_marginTop="7dp"
+                    android:lineSpacingMultiplier="1.45" />
+            </LinearLayout>
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchShowOdometer"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="22dp"
+            android:background="@color/settings_inset">
+            <ru.big.town.restoremode.SettingsWidgetPreview
+                android:layout_width="188dp"
+                android:layout_height="110dp"
+                android:orientation="vertical"
+                android:layout_marginEnd="24dp"
+                android:contentDescription="Общий пробег"
+                android:tag="settings.widget-preview" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <LinearLayout
+                    android:id="@+id/OdometerSizeRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center_vertical"
+                    android:visibility="gone">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="РАЗМЕР В ЯЧЕЙКАХ"
+                        android:textSize="13sp"
+                        android:textColor="#8497b1"
+                        android:includeFontPadding="false"
+                        android:letterSpacing="0.077"
+                        android:layout_marginBottom="12dp" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="10dp">
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Ширина"
+                                android:textSize="15sp"
+                                android:textColor="#a6b5c9"
+                                android:includeFontPadding="false"
+                                android:layout_marginBottom="8dp" />
+                            <Spinner
+                                android:id="@+id/OdometerSettingWidth"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:popupBackground="@color/settings_inset"
+                                android:background="@drawable/settings_field" />
+                        </LinearLayout>
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:layout_weight="1">
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Высота"
+                                android:textSize="15sp"
+                                android:textColor="#a6b5c9"
+                                android:includeFontPadding="false"
+                                android:layout_marginBottom="8dp" />
+                            <Spinner
+                                android:id="@+id/OdometerSettingHeight"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:popupBackground="@color/settings_inset"
+                                android:background="@drawable/settings_field" />
+                        </LinearLayout>
+                    </LinearLayout>
+                    <ru.big.town.restoremode.SettingsPreviewView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:layout_marginBottom="12dp"
+                        app:settingsPreviewKind="grid"
+                        app:settingsTileKey="odometerWidget"
+                        app:settingsTileWidth="4"
+                        app:settingsTileHeight="1"
+                        android:tag="settings.cell-grid" />
+                </LinearLayout>
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Включите виджет,&#10;чтобы выбрать размер"
+                    android:textSize="16sp"
+                    android:textColor="#788ba5"
+                    android:includeFontPadding="false"
+                    android:tag="settings.off-note" />
+            </LinearLayout>
+        </LinearLayout>
+    </ru.big.town.restoremode.SettingsWidgetCard>
+</ru.big.town.restoremode.SettingsGrid>

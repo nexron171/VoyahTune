@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp">
+    <ru.big.town.restoremode.SettingsIllustration
+        android:layout_width="match_parent"
+        android:layout_height="95dp"
+        android:layout_marginBottom="22dp"
+        android:tag="settings.grid-columns" />
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Полноэкранная сетка"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Верхний ряд плиток растягивается до верхней границы экрана"
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsToggle
+            android:id="@+id/switchFullscreenGrid"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.SettingsRow>
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Колонок с растянутым верхним рядом"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Сколько левых колонок доходит до верхней границы экрана: 0–12"
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsNumberPicker
+            android:id="@+id/pickerFullscreenGridColumns"
+            android:layout_width="115dp"
+            android:layout_height="52dp" />
+    </ru.big.town.restoremode.SettingsRow>
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Расстояние между плитками"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Отступ вокруг каждой плитки, dp: 0–24 (по умолчанию 4)"
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsNumberPicker
+            android:id="@+id/pickerTileSpacing"
+            android:layout_width="115dp"
+            android:layout_height="52dp"
+            android:contentDescription="Расстояние между плитками" />
+    </ru.big.town.restoremode.SettingsRow>
+</LinearLayout>

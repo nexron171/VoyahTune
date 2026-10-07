@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ru.big.town.restoremode.SettingsGrid
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    app:settingsColumns="2"
+    app:settingsLastFull="true"
+    android:layout_marginBottom="16dp">
+    <ru.big.town.restoremode.SettingsWidgetCard
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        app:settingsToggleRef="@id/switchShowTripTimer"
+        android:padding="1dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="100dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="22dp"
+            android:minHeight="100dp">
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:padding="12dp"
+                android:src="@drawable/settings_icon_clock"
+                android:background="@drawable/settings_icon"
+                android:importantForAccessibility="no"
+                android:layout_marginEnd="16dp" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Время в пути"
+                    android:textSize="23sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Таймер текущей поездки"
+                    android:textSize="16sp"
+                    android:textColor="#95a5bd"
+                    android:includeFontPadding="false"
+                    android:layout_marginTop="7dp"
+                    android:lineSpacingMultiplier="1.45" />
+            </LinearLayout>
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchShowTripTimer"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+    </ru.big.town.restoremode.SettingsWidgetCard>
+    <ru.big.town.restoremode.SettingsWidgetCard
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        app:settingsToggleRef="@id/switchShowPowerHold"
+        android:padding="1dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="100dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="22dp"
+            android:minHeight="100dp">
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:padding="12dp"
+                android:src="@drawable/settings_icon_power"
+                android:background="@drawable/settings_icon"
+                android:importantForAccessibility="no"
+                android:layout_marginEnd="16dp" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Режим Power Hold"
+                    android:textSize="23sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Удержание заряда батареи"
+                    android:textSize="16sp"
+                    android:textColor="#95a5bd"
+                    android:includeFontPadding="false"
+                    android:layout_marginTop="7dp"
+                    android:lineSpacingMultiplier="1.45" />
+            </LinearLayout>
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchShowPowerHold"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+    </ru.big.town.restoremode.SettingsWidgetCard>
+</ru.big.town.restoremode.SettingsGrid>

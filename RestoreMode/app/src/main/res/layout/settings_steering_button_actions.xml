@@ -1,0 +1,143 @@
+<?xml version='1.0' encoding='utf-8'?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="top"
+    android:layout_marginTop="22dp">
+    <LinearLayout
+        android:layout_width="320dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="26dp"
+        android:background="@drawable/settings_visual"
+        android:layout_marginEnd="24dp"
+        android:layout_gravity="top">
+        <ImageView
+            android:id="@+id/settingsSteeringWheel"
+            android:layout_width="match_parent"
+            android:layout_height="252dp"
+            android:src="@drawable/settings_wheel_left"
+            android:scaleType="fitCenter"
+            android:contentDescription="Левый блок · звёздочка" />
+        <TextView
+            android:id="@+id/settingsSteeringCaption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Левый блок · звёздочка"
+            android:gravity="center"
+            android:textColor="@color/settings_muted"
+            android:textSize="15sp"
+            android:minHeight="38dp"
+            android:layout_marginTop="8dp" />
+        <ru.big.town.restoremode.SettingsChoiceGroup
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:id="@+id/settingsSteeringTabs"
+            app:settingsStack="true"
+            android:layout_marginTop="18dp">
+            <RadioButton
+                android:id="@+id/settingsStarTab"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Кнопка-звёздочка"
+                android:contentDescription="Звёздочка"
+                android:layout_weight="0"
+                android:maxLines="3"
+                android:gravity="start|center_vertical"
+                android:tag="settings.steering-tab"
+                android:drawableStart="@drawable/settings_icon_apps"
+                android:drawablePadding="12dp" />
+            <RadioButton
+                android:id="@+id/settingsDvrTab"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Видеорегистратор (DVR)"
+                android:contentDescription="DVR"
+                android:layout_weight="0"
+                android:maxLines="3"
+                android:gravity="start|center_vertical"
+                android:tag="settings.steering-tab"
+                android:drawableStart="@drawable/settings_icon_car"
+                android:drawablePadding="12dp" />
+            <RadioButton
+                android:id="@+id/settingsVoiceTab"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Голосовой помощник"
+                android:contentDescription="Голос"
+                android:layout_weight="0"
+                android:maxLines="3"
+                android:gravity="start|center_vertical"
+                android:tag="settings.steering-tab"
+                android:drawableStart="@drawable/settings_icon_mic"
+                android:drawablePadding="12dp" />
+            <RadioButton
+                android:id="@+id/settingsPhoneTab"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Кнопка трубки"
+                android:contentDescription="Трубка"
+                android:layout_weight="0"
+                android:maxLines="3"
+                android:gravity="start|center_vertical"
+                android:tag="settings.steering-tab"
+                android:drawableStart="@drawable/settings_icon_phone"
+                android:drawablePadding="12dp" />
+        </ru.big.town.restoremode.SettingsChoiceGroup>
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_weight="1"
+        android:layout_gravity="top">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="16dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="Кнопка-звёздочка"
+                android:textSize="27sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false"
+                android:layout_weight="1"
+                android:id="@+id/settingsSteeringSelectedTitle" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Порядок выполнения сверху вниз"
+                android:textSize="17sp"
+                android:textColor="#8292a9"
+                android:includeFontPadding="false"
+                android:layout_marginStart="20dp" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsList
+            android:id="@+id/settingsSteeringActions"
+            android:layout_width="match_parent"
+            android:layout_height="480dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/settings_card"
+            android:padding="25dp"
+            android:layout_marginTop="20dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Долгое нажатие срабатывает по удержанию, не дожидаясь отпускания. Можно сочетать переключение режимов, запуск приложений, сплитов и набор номера."
+                android:textSize="17sp"
+                android:textColor="#a2b0c5"
+                android:includeFontPadding="false" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

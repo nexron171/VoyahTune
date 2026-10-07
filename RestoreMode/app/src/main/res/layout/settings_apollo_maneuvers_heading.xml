@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:layout_marginTop="34dp"
+    android:layout_marginBottom="16dp">
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Манёвры"
+        android:textSize="27sp"
+        android:textColor="#f3f5fa"
+        android:includeFontPadding="false"
+        android:layout_weight="1" />
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="17sp"
+        android:textColor="#8292a9"
+        android:includeFontPadding="false"
+        android:layout_marginStart="20dp" />
+</LinearLayout>

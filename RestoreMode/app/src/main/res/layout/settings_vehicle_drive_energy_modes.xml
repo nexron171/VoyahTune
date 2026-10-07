@@ -1,0 +1,380 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ru.big.town.restoremode.SettingsGrid
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    app:settingsColumns="3">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        android:padding="25dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
+            <ImageView
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:padding="9dp"
+                android:src="@drawable/settings_icon_car"
+                android:background="@drawable/settings_icon"
+                android:importantForAccessibility="no"
+                android:layout_marginEnd="16dp" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="Режим вождения"
+                android:textSize="24sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false"
+                android:layout_weight="1"
+                android:id="@+id/drive_modes_text"
+                android:tag="binding_2" />
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchDriveMode"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:checked="true"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsModeSummary
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            app:settingsModeGroup="@id/drive_modes_group"
+            app:settingsRememberSwitch="@id/switchDriveRememberLast"
+            app:settingsModeIcon="@drawable/settings_icon_car" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="14dp">
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Запоминать последнее значение"
+                    android:textSize="19sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+            </LinearLayout>
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchDriveRememberLast"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:checked="true"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsChoiceGroup
+            android:id="@+id/drive_modes_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="14dp">
+            <RadioButton
+                android:id="@+id/ECO"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="ECO"
+                android:text="Eco"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/COMFORT"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="COMFORT"
+                android:text="Comf"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/SPORT"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="SPORT"
+                android:text="Sport"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/OUTING"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:animateLayoutChanges="true"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="OUTING"
+                android:text="Outing"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/SNOW"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="SNOW"
+                android:text="Snow"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/INDIVIDUAL"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="INDIVIDUAL"
+                android:text="Indiv"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+        </ru.big.town.restoremode.SettingsChoiceGroup>
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        android:padding="25dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
+            <ImageView
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:padding="9dp"
+                android:src="@drawable/settings_icon_bolt"
+                android:background="@drawable/settings_icon"
+                android:importantForAccessibility="no"
+                android:layout_marginEnd="16dp" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="Режим энергии"
+                android:textSize="24sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false"
+                android:layout_weight="1"
+                android:id="@+id/energy_text"
+                android:tag="binding_2" />
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchEnergy"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:checked="true"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsModeSummary
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            app:settingsModeGroup="@id/energy_modes_group"
+            app:settingsRememberSwitch="@id/switchEnergyRememberLast"
+            app:settingsModeIcon="@drawable/settings_icon_bolt" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="14dp">
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Запоминать последнее значение"
+                    android:textSize="19sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+            </LinearLayout>
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchEnergyRememberLast"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:checked="true"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsChoiceGroup
+            android:id="@+id/energy_modes_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="14dp">
+            <RadioButton
+                android:id="@+id/SMART"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="SMART"
+                android:text="Intelligent"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/EV"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="EV"
+                android:text="Electric"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/REV"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="REV"
+                android:text="Fuel mode"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/SREV"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="SREV"
+                android:text="Save-Mode"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+        </ru.big.town.restoremode.SettingsChoiceGroup>
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        android:padding="25dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
+            <ImageView
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:padding="9dp"
+                android:src="@drawable/settings_icon_battery"
+                android:background="@drawable/settings_icon"
+                android:importantForAccessibility="no"
+                android:layout_marginEnd="16dp" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="Рекуперация"
+                android:textSize="24sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false"
+                android:layout_weight="1"
+                android:id="@+id/recycle_text"
+                android:tag="binding_2" />
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchRecycle"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:checked="true"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsModeSummary
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            app:settingsModeGroup="@id/recycle_modes_group"
+            app:settingsRememberSwitch="@id/switchRecycleRememberLast"
+            app:settingsModeIcon="@drawable/settings_icon_battery" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="14dp">
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Запоминать последнее значение"
+                    android:textSize="19sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+            </LinearLayout>
+            <ru.big.town.restoremode.SettingsToggle
+                android:id="@+id/switchRecycleRememberLast"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:checked="true"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsChoiceGroup
+            android:id="@+id/recycle_modes_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="14dp">
+            <RadioButton
+                android:id="@+id/LOW"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="LOW"
+                android:text="Низкий"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/MEDIUM"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="MEDIUM"
+                android:text="Стандартный"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/HIGH"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="HIGH"
+                android:text="Высокий"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+        </ru.big.town.restoremode.SettingsChoiceGroup>
+    </LinearLayout>
+</ru.big.town.restoremode.SettingsGrid>

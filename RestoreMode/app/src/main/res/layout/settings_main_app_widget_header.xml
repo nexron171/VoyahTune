@@ -1,32 +1,37 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
+<?xml version='1.0' encoding='utf-8'?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:background="@drawable/settings_card"
-    android:padding="25dp">
-    <LinearLayout android:layout_width="match_parent"
+    android:padding="25dp"
+    android:paddingBottom="0dp">
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:layout_marginBottom="20dp">
-        <ImageView android:id="@+id/appWidgetSettingIcon"
+        <ImageView
+            android:id="@+id/appWidgetSettingIcon"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:layout_marginEnd="14dp"
             android:scaleType="fitCenter" />
-        <LinearLayout android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:layout_weight="1">
-            <TextView android:id="@+id/appWidgetSettingLabel"
+            <TextView
+                android:id="@+id/appWidgetSettingLabel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="@color/settings_text"
                 android:textSize="24sp" />
-            <TextView android:layout_width="match_parent"
+            <TextView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text=""
                 android:textSize="16sp"
@@ -35,7 +40,8 @@
                 android:id="@+id/settingsAppWidgetSubtitle"
                 android:layout_marginTop="5dp" />
         </LinearLayout>
-        <ImageButton android:id="@+id/appWidgetSettingDelete"
+        <ImageButton
+            android:id="@+id/appWidgetSettingDelete"
             android:layout_width="32dp"
             android:layout_height="32dp"
             android:padding="4dp"
@@ -43,62 +49,73 @@
             android:src="@drawable/settings_icon_trash"
             android:contentDescription="Убрать виджет" />
     </LinearLayout>
-    <LinearLayout android:layout_width="match_parent"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical">
-        <LinearLayout android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:layout_weight="1"
             android:layout_marginEnd="10dp">
-            <TextView android:layout_width="match_parent"
+            <TextView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Ширина"
                 android:textSize="16sp"
                 android:textColor="#91a2ba"
                 android:includeFontPadding="false"
                 android:layout_marginBottom="7dp" />
-            <Spinner android:id="@+id/appWidgetSettingWidth"
+            <Spinner
+                android:id="@+id/appWidgetSettingWidth"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:textColor="@color/settings_text" />
         </LinearLayout>
-        <LinearLayout android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:layout_weight="1">
-            <TextView android:layout_width="match_parent"
+            <TextView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Высота"
                 android:textSize="16sp"
                 android:textColor="#91a2ba"
                 android:includeFontPadding="false"
                 android:layout_marginBottom="7dp" />
-            <Spinner android:id="@+id/appWidgetSettingHeight"
+            <Spinner
+                android:id="@+id/appWidgetSettingHeight"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:textColor="@color/settings_text" />
         </LinearLayout>
     </LinearLayout>
-    <LinearLayout android:layout_width="match_parent"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingVertical="18dp"
         android:layout_marginTop="18dp">
-        <LinearLayout android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:layout_weight="1">
-            <TextView android:layout_width="match_parent"
+            <TextView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Автозапуск приложения при открытии"
                 android:textSize="22sp"
                 android:textColor="#f3f5fa"
                 android:includeFontPadding="false" />
         </LinearLayout>
-        <ru.big.town.restoremode.SettingsToggle android:id="@+id/appWidgetSettingAutoStart"
+        <ru.big.town.restoremode.SettingsToggle
+            android:id="@+id/appWidgetSettingAutoStart"
             android:layout_width="58dp"
             android:layout_height="32dp"
             android:text=""
@@ -107,23 +124,27 @@
             android:thumb="@drawable/switch_thumb"
             android:track="@drawable/switch_track" />
     </LinearLayout>
-    <LinearLayout android:id="@+id/appWidgetDelayContainer"
+    <LinearLayout
+        android:id="@+id/appWidgetDelayContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
-        <TextView android:layout_width="0dp"
+        <TextView
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="Задержка автозапуска"
             android:textColor="@color/settings_muted"
             android:textSize="18sp" />
-        <SeekBar android:id="@+id/appWidgetSettingDelay"
+        <SeekBar
+            android:id="@+id/appWidgetSettingDelay"
             android:layout_width="200dp"
             android:layout_height="wrap_content"
             android:max="59" />
-        <TextView android:id="@+id/appWidgetSettingDelayText"
+        <TextView
+            android:id="@+id/appWidgetSettingDelayText"
             android:layout_width="50dp"
             android:layout_height="wrap_content"
             android:gravity="end"
@@ -131,22 +152,4 @@
             android:textColor="@color/settings_text"
             android:textSize="18sp" />
     </LinearLayout>
-    <LinearLayout android:id="@+id/appWidgetProfiles"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:layout_marginTop="16dp" />
-    <Button android:id="@+id/appWidgetAddProfile"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Добавить приложение"
-        android:tag="settings.add"
-        android:layout_marginTop="16dp" />
-    <TextView android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="При нажатии на виджет появится выбор приложения"
-        android:textColor="@color/settings_muted"
-        android:textSize="16sp"
-        android:layout_marginTop="16dp"
-        android:lineSpacingMultiplier="1.5" />
 </LinearLayout>

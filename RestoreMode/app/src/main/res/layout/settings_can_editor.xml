@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="top">
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        android:padding="25dp"
+        android:layout_weight="1.4"
+        android:layout_marginEnd="20dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
+            <ImageView
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:padding="9dp"
+                android:src="@drawable/settings_icon_tool"
+                android:background="@drawable/settings_icon"
+                android:importantForAccessibility="no"
+                android:layout_marginEnd="16dp" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="Редактор команд"
+                android:textSize="24sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false"
+                android:layout_weight="1" />
+        </LinearLayout>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="10 байт в шестнадцатеричном виде, через пробел"
+            android:textSize="15sp"
+            android:textColor="#97a6bc"
+            android:includeFontPadding="false"
+            android:layout_marginBottom="8dp" />
+        <EditText
+            android:id="@+id/rawCanCodes"
+            android:layout_width="match_parent"
+            android:layout_height="240dp"
+            android:background="@drawable/settings_code"
+            android:fontFamily="monospace"
+            android:gravity="top"
+            android:text="1f 08 00 04 ff f8 00 01 01 7f\n"
+            android:textColor="@color/settings_text"
+            android:textSize="21sp"
+            android:hint="Выберите пример справа или введите команду"
+            android:padding="20dp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Пока нет команд"
+            android:textSize="17sp"
+            android:textColor="#a3d3bb"
+            android:includeFontPadding="false"
+            android:id="@+id/settingsCanStatus"
+            android:layout_marginTop="14dp"
+            android:minHeight="26dp" />
+        <ru.big.town.restoremode.SettingsRow
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="18dp">
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Повторы"
+                    android:textSize="22sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Количество повторений: от 1 до 10."
+                    android:textSize="17sp"
+                    android:textColor="#9aaac0"
+                    android:includeFontPadding="false"
+                    android:layout_marginTop="7dp"
+                    android:lineSpacingMultiplier="1.45" />
+            </LinearLayout>
+            <ru.big.town.restoremode.SettingsNumberPicker
+                android:id="@+id/pickerCustomCommandCount"
+                android:layout_width="115dp"
+                android:layout_height="52dp" />
+        </ru.big.town.restoremode.SettingsRow>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="18dp">
+            <Button
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:id="@+id/settingsValidateCan"
+                android:text="Проверить формат"
+                android:tag="settings.primary"
+                android:layout_marginEnd="12dp" />
+            <Button
+                android:id="@+id/buttonClean"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:onClick="onButtonClickClean"
+                android:text="Очистить"
+                android:textColor="@color/settings_text"
+                android:textSize="@dimen/settings_heading_size"
+                app:cornerRadius="20dp"
+                android:tag="settings.action"
+                android:minHeight="48dp" />
+        </LinearLayout>
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        android:padding="25dp"
+        android:layout_weight="1">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
+            <ImageView
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:padding="9dp"
+                android:src="@drawable/settings_icon_apps"
+                android:background="@drawable/settings_icon"
+                android:importantForAccessibility="no"
+                android:layout_marginEnd="16dp" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="Примеры команд"
+                android:textSize="24sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false"
+                android:layout_weight="1" />
+        </LinearLayout>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Нажмите, чтобы добавить строку в редактор."
+            android:textSize="17sp"
+            android:textColor="#97a6bc"
+            android:includeFontPadding="false"
+            android:layout_marginBottom="14dp" />
+        <LinearLayout
+            android:id="@+id/examplesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </LinearLayout>
+</LinearLayout>

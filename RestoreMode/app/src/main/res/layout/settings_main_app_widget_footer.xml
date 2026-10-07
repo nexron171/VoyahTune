@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp"
+    android:paddingTop="0dp">
+    <Button
+        android:id="@+id/appWidgetAddProfile"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Добавить приложение"
+        android:tag="settings.add"
+        android:layout_marginTop="16dp" />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="При нажатии на виджет появится выбор приложения"
+        android:textColor="@color/settings_muted"
+        android:textSize="16sp"
+        android:layout_marginTop="16dp"
+        android:lineSpacingMultiplier="1.5" />
+</LinearLayout>

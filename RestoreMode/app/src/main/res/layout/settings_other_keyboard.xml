@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="20dp">
+        <ImageView
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:padding="9dp"
+            android:src="@drawable/settings_icon_apps"
+            android:background="@drawable/settings_icon"
+            android:importantForAccessibility="no"
+            android:layout_marginEnd="16dp" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Раскладка штатной клавиатуры"
+            android:textSize="24sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false"
+            android:layout_weight="1" />
+    </LinearLayout>
+    <ru.big.town.restoremode.SettingsToggle
+        android:id="@+id/switchKeyboardEnglish"
+        android:layout_width="58dp"
+        android:layout_height="32dp"
+        android:thumb="@drawable/switch_thumb"
+        android:track="@drawable/switch_track"
+        android:visibility="gone" />
+    <ru.big.town.restoremode.SettingsToggle
+        android:id="@+id/switchKeyboardRussian"
+        android:layout_width="58dp"
+        android:layout_height="32dp"
+        android:thumb="@drawable/switch_thumb"
+        android:track="@drawable/switch_track"
+        android:visibility="gone" />
+    <ru.big.town.restoremode.SettingsChoiceGroup
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:id="@+id/settingsKeyboardChoices">
+        <RadioButton
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:id="@+id/settingsKeyboardOff"
+            android:text="Выключено" />
+        <RadioButton
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:id="@+id/settingsKeyboardEnglish"
+            android:text="Английская" />
+        <RadioButton
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:id="@+id/settingsKeyboardRussian"
+            android:text="EN ↔ RU" />
+    </ru.big.town.restoremode.SettingsChoiceGroup>
+    <ru.big.town.restoremode.SettingsIllustration
+        android:layout_width="match_parent"
+        android:layout_height="35dp"
+        android:layout_marginTop="15dp"
+        android:tag="settings.keyboard" />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Режимы взаимоисключающие. Английский форсирует английскую раскладку; EN ↔ RU добавляет переключение на ЙЦУКЕН. Изменение перезапускает только штатный процесс клавиатуры."
+        android:textSize="17sp"
+        android:textColor="#a2b0c5"
+        android:includeFontPadding="false"
+        android:layout_marginTop="16dp"
+        android:lineSpacingMultiplier="1.5" />
+</LinearLayout>

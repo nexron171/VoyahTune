@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp"
+    android:layout_marginTop="16dp">
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Раскладка кнопок энергии"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Штатный вариант панели выбора режима."
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <CheckBox
+            android:id="@+id/checkBox34"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:onClick="onCheckBox34Click"
+            android:text="3 кнопки"
+            android:textColor="@color/settings_muted"
+            android:textSize="@dimen/settings_body_size"
+            android:contentDescription="Изменить раскладку кнопок энергии" />
+    </ru.big.town.restoremode.SettingsRow>
+</LinearLayout>

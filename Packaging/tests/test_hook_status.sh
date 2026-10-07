@@ -8,12 +8,17 @@ CONTRACT="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/HookStatus
 APP_MANIFEST="$ROOT/RestoreMode/app/src/main/AndroidManifest.xml"
 ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
 READER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/SystemMetricsReader.java"
-LAYOUT="$ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
+LAYOUT="$ROOT/RestoreMode/app/src/main/res/layout/settings_other_metrics.xml"
 FULL_INSTALL="$ROOT/Packaging/od/installer/device/install.sh"
 FULL_INSTALL_BAT="$ROOT/Packaging/od/installer/device/install.bat"
 
-fail() { echo "hook status/install test failed: $*" >&2; exit 1; }
-require() { grep -Fq -- "$2" "$1" || fail "$1: missing $2"; }
+fail() {
+    echo "hook status/install test failed: $*" >&2
+    exit 1
+}
+require() {
+    grep -Fq -- "$2" "$1" || fail "$1: missing $2"
+}
 forbid() {
     if grep -Fq -- "$2" "$1"; then
         fail "$1: forbidden $2"
@@ -59,11 +64,14 @@ require "$APP_MANIFEST" 'android:authorities="ru.big.town.restoremode.restoremod
 
 require "$LAYOUT" 'android:id="@+id/textHookStatus"'
 require "$ACTIVITY" 'HookStatusContract.renderForUi(hookPayload)'
-require "$ACTIVITY" 'activityResumed && currentSection == 6'
+python3 "$ROOT/Packaging/tests/assert_java_source.py" "$ACTIVITY" \
+    'activityResumed && currentSection == SettingsSection.OTHER && textRamStatus != null && textRamStatus.isShown()' \
+    || fail "poll is not gated by the visible metrics row"
 require "$ACTIVITY" 'SYSTEM_METRICS_INTERVAL_MS = SystemMetricsReader.INTERVAL_MS;'
 grep -Eq '^[[:space:]]*static[[:space:]]+final[[:space:]]+long[[:space:]]+INTERVAL_MS[[:space:]]*=[[:space:]]*5_?000[Ll]?[[:space:]]*;' "$READER" \
     || fail "hook diagnostics interval is not 5 seconds"
-[ "$(grep -F -c 'postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS)' "$ACTIVITY")" -eq 1 ] \
+python3 "$ROOT/Packaging/tests/assert_java_source.py" --count 1 "$ACTIVITY" \
+    'postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS)'  \
     || fail "hook diagnostics must reuse the only Other timer"
 
 # Status collection/delivery owns a separate lane; Binder delays cannot block core discovery.

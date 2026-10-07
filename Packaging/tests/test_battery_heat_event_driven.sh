@@ -18,16 +18,8 @@ require_fixed() {
     grep -Fq -- "$2" "$1" || fail "$1 does not contain: $2"
 }
 
-first_line() {
-    LINE=$(grep -Fn -- "$2" "$1" | sed -n '1s/:.*//p')
-    [ -n "$LINE" ] || fail "$1 does not contain: $2"
-    echo "$LINE"
-}
-
 assert_before() {
-    BEFORE=$(first_line "$1" "$2")
-    AFTER=$(first_line "$1" "$3")
-    [ "$BEFORE" -lt "$AFTER" ] || fail "$2 must appear before $3 in $1"
+    python3 "$REPO_ROOT/Packaging/tests/assert_java_source.py" --ordered "$1" "$2" "$3"
 }
 
 # Incoming CAN callbacks must not create a permanent cadence or delayed Settings retry. One
@@ -107,7 +99,7 @@ require_fixed "$ADVANCE" 'new Intent(ACTION_BATTERY_HEAT_AUTO_CHANGED)'
 require_fixed "$ADVANCE" '.setPackage(NATIVE_PACKAGE)'
 require_fixed "$ADVANCE" '.putExtra(EXTRA_BATTERY_HEAT_AUTO_ENABLED, checked);'
 assert_before "$ADVANCE" \
-    'prefs.edit().putBoolean("batteryHeatAuto", checked).apply();' \
+    'preferences.edit().putBoolean("batteryHeatAuto", checked).apply();' \
     'Intent changed = new Intent(ACTION_BATTERY_HEAT_AUTO_CHANGED)'
 
 # Every inbound request/toggle is protected by the existing signature permission. UI snapshot

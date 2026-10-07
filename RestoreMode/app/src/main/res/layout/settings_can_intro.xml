@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingHorizontal="27dp"
+    android:paddingVertical="23dp"
+    android:minHeight="122dp"
+    android:background="@drawable/settings_intro">
+    <ImageView
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:padding="17dp"
+        android:src="@drawable/settings_icon_tool"
+        android:background="@drawable/settings_intro_icon"
+        android:importantForAccessibility="no"
+        android:layout_marginEnd="24dp" />
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_weight="1">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Собственные CAN-команды"
+            android:textSize="26sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Команды выполняются при снятии автомобиля с охраны. Одна строка — одна команда из 10 байт."
+            android:textSize="18sp"
+            android:maxWidth="900dp"
+            android:textColor="#adbed5"
+            android:includeFontPadding="false"
+            android:layout_marginTop="8dp"
+            android:lineSpacingMultiplier="1.45" />
+    </LinearLayout>
+</LinearLayout>

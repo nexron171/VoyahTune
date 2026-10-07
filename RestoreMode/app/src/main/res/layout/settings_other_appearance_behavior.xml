@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    android:padding="25dp">
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Автозапуск VoyahTune"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Открывать приложение автоматически при пробуждении системы."
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsToggle
+            android:id="@+id/switchAutoLaunch"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.SettingsRow>
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Тема оформления"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Система и приложения, которые следуют системной теме."
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsChoiceGroup
+            android:id="@+id/themeOverrideGroup"
+            android:layout_width="500dp"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <RadioButton
+                android:id="@+id/themeAuto"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="0"
+                android:text="Авто"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/themeLight"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="1"
+                android:text="Светлая"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/themeDark"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="2"
+                android:text="Тёмная"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+        </ru.big.town.restoremode.SettingsChoiceGroup>
+    </ru.big.town.restoremode.SettingsRow>
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Плавающие кнопки «Назад» и Home"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Системные действия поверх интерфейса."
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsToggle
+            android:id="@+id/switchFloatingBack"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.SettingsRow>
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Положение блока кнопок"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Положение вдоль выбранной стороны запоминается."
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsChoiceGroup
+            android:id="@+id/floatingBackSideGroup"
+            android:layout_width="500dp"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <RadioButton
+                android:id="@+id/sideLeft"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="0"
+                android:text="Слева"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/sideTop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="1"
+                android:text="Сверху"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+            <RadioButton
+                android:id="@+id/sideRight"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/radio_group_button_70_bg"
+                android:tag="2"
+                android:text="Справа"
+                android:textColor="@color/radio_button_text_color_selector"
+                android:layout_weight="0"
+                android:maxLines="3" />
+        </ru.big.town.restoremode.SettingsChoiceGroup>
+    </ru.big.town.restoremode.SettingsRow>
+    <ru.big.town.restoremode.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Собственные команды"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Показывать раздел в меню настроек."
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.SettingsToggle
+            android:id="@+id/switchShowCustomCommands"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.SettingsRow>
+</LinearLayout>
