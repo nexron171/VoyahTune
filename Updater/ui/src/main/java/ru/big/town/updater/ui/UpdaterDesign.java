@@ -1,4 +1,4 @@
-package ru.big.town.updater;
+package ru.big.town.updater.ui;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -29,12 +29,12 @@ final class UpdaterDesign {
     private static final int MUTED = 0xFF97A6BC, INK = 0xFFF3F5FA;
 
     static void install(Activity activity) {
-        applyLineHeights(activity.findViewById(R.id.root));
-        View header = activity.findViewById(R.id.header);
+        applyLineHeights(activity.findViewById(R.id.ota_root));
+        View header = activity.findViewById(R.id.ota_header);
         header.setBackground(new HeaderMask(header));
         header.setOutlineProvider(null);
-        ((ImageView) activity.findViewById(R.id.settings)).setImageTintList(ColorStateList.valueOf(BLUE));
-        for (int id : new int[]{R.id.nav0, R.id.nav1, R.id.nav2, R.id.nav3}) {
+        ((ImageView) activity.findViewById(R.id.ota_settings)).setImageTintList(ColorStateList.valueOf(BLUE));
+        for (int id : new int[]{R.id.ota_nav0, R.id.ota_nav1, R.id.ota_nav2, R.id.ota_nav3}) {
             TextView item = activity.findViewById(id);
             StateListDrawable background = new StateListDrawable();
             background.addState(new int[]{android.R.attr.state_selected}, shape(activity, 0xFF2A3D58, 0xFF4A6588, 16));
@@ -42,28 +42,28 @@ final class UpdaterDesign {
             background.addState(new int[]{}, shape(activity, Color.TRANSPARENT, Color.TRANSPARENT, 16));
             item.setBackground(background);
         }
-        styleAction(activity.findViewById(R.id.primary), true);
-        styleAction(activity.findViewById(R.id.secondary), false);
+        styleAction(activity.findViewById(R.id.ota_primary), true);
+        styleAction(activity.findViewById(R.id.ota_secondary), false);
     }
 
     static void render(Activity activity, UpdatePresentation p, boolean connected, boolean failed) {
         int tone = failed ? RED : p.success ? GREEN : BLUE;
-        TextView badge = activity.findViewById(R.id.badge);
+        TextView badge = activity.findViewById(R.id.ota_badge);
         if (!Integer.valueOf(tone).equals(badge.getTag())) {
             badge.setTag(tone);
             badge.setTextColor(tone);
             badge.setBackground(shape(activity, failed ? 0xFF3B2935 : p.success ? 0xFF223C36 : 0xFF273B57,
                     failed ? 0xFF70424B : p.success ? 0xFF427361 : 0xFF526D90, 18));
-            ((TextView) activity.findViewById(R.id.eyebrow)).setTextColor(tone);
-            ImageView hero = activity.findViewById(R.id.hero_icon);
-            hero.setImageResource(failed ? R.drawable.ic_error : p.success ? R.drawable.ic_check : R.drawable.ic_download);
+            ((TextView) activity.findViewById(R.id.ota_eyebrow)).setTextColor(tone);
+            ImageView hero = activity.findViewById(R.id.ota_hero_icon);
+            hero.setImageResource(failed ? R.drawable.ota_ic_error : p.success ? R.drawable.ota_ic_check : R.drawable.ota_ic_download);
             hero.setImageTintList(ColorStateList.valueOf(tone));
             hero.setBackground(shape(activity, failed ? 0xFF4A303E : p.success ? 0xFF2B4A41 : 0xFF354660, Color.TRANSPARENT, 15));
-            ImageView aside = activity.findViewById(R.id.aside_icon);
-            aside.setImageResource(failed ? R.drawable.ic_error : R.drawable.ic_shield);
+            ImageView aside = activity.findViewById(R.id.ota_aside_icon);
+            aside.setImageResource(failed ? R.drawable.ota_ic_error : R.drawable.ota_ic_shield);
             aside.setImageTintList(ColorStateList.valueOf(tone));
         }
-        int[] ids = {R.id.nav0, R.id.nav1, R.id.nav2, R.id.nav3};
+        int[] ids = {R.id.ota_nav0, R.id.ota_nav1, R.id.ota_nav2, R.id.ota_nav3};
         for (int i = 0; i < ids.length; i++) {
             TextView item = activity.findViewById(ids[i]);
             boolean done = connected && (i < p.nav || p.success);
@@ -73,11 +73,11 @@ final class UpdaterDesign {
             int color = active ? BLUE : done ? GREEN : MUTED;
             if (item.getCurrentTextColor() != color) item.setTextColor(color);
         }
-        setTextColor(activity.findViewById(R.id.service), connected ? MUTED : RED);
-        setTextColor(activity.findViewById(R.id.footer_note), p.success ? GREEN : MUTED);
-        activity.findViewById(R.id.primary).setAlpha(activity.findViewById(R.id.primary).isEnabled() ? 1f : .45f);
-        activity.findViewById(R.id.secondary).setAlpha(activity.findViewById(R.id.secondary).isEnabled() ? 1f : .45f);
-        activity.findViewById(R.id.settings).setAlpha(activity.findViewById(R.id.settings).isEnabled() ? 1f : .45f);
+        setTextColor(activity.findViewById(R.id.ota_service), connected ? MUTED : RED);
+        setTextColor(activity.findViewById(R.id.ota_footer_note), p.success ? GREEN : MUTED);
+        activity.findViewById(R.id.ota_primary).setAlpha(activity.findViewById(R.id.ota_primary).isEnabled() ? 1f : .45f);
+        activity.findViewById(R.id.ota_secondary).setAlpha(activity.findViewById(R.id.ota_secondary).isEnabled() ? 1f : .45f);
+        activity.findViewById(R.id.ota_settings).setAlpha(activity.findViewById(R.id.ota_settings).isEnabled() ? 1f : .45f);
     }
 
     private static void setTextColor(TextView view, int color) {
@@ -102,7 +102,7 @@ final class UpdaterDesign {
     }
 
     static void styleField(EditText field) {
-        field.setBackgroundResource(R.drawable.field);
+        field.setBackgroundResource(R.drawable.ota_field);
         field.setBackgroundTintList(null);
         field.setTextColor(INK);
         field.setTextSize(20);
@@ -113,10 +113,10 @@ final class UpdaterDesign {
     static void styleAction(Button button, boolean primary) {
         Context context = button.getContext();
         button.setAllCaps(false);
-        button.setTypeface(context.getResources().getFont(primary ? R.font.updater_arimo_bold : R.font.updater_arimo_regular));
+        button.setTypeface(context.getResources().getFont(primary ? R.font.ota_updater_arimo_bold : R.font.ota_updater_arimo_regular));
         button.setTextSize(primary ? 23 : 20);
         button.setIncludeFontPadding(false);
-        button.setBackgroundResource(primary ? R.drawable.button_primary : R.drawable.button_secondary);
+        button.setBackgroundResource(primary ? R.drawable.ota_button_primary : R.drawable.ota_button_secondary);
         button.setBackgroundTintList(null);
         button.setStateListAnimator(null);
         button.setTextColor(primary ? 0xFF102541 : INK);
@@ -132,7 +132,7 @@ final class UpdaterDesign {
         int titleId = context.getResources().getIdentifier("alertTitle", "id", "android");
         TextView title = window.findViewById(titleId);
         if (title != null) {
-            title.setTypeface(context.getResources().getFont(R.font.updater_arimo_bold));
+            title.setTypeface(context.getResources().getFont(R.font.ota_updater_arimo_bold));
             title.setTextColor(INK);
             title.setTextSize(30);
         }
@@ -151,7 +151,7 @@ final class UpdaterDesign {
             if (params instanceof LinearLayout.LayoutParams) ((LinearLayout.LayoutParams) params).setMargins(dp(context, 8), dp(context, 16), 0, 0);
             button.setLayoutParams(params);
         }
-        window.setBackgroundDrawableResource(R.drawable.card);
+        window.setBackgroundDrawableResource(R.drawable.ota_card);
         window.setDimAmount(.4f);
         window.setLayout(Math.min(dp(context, 1080), context.getResources().getDisplayMetrics().widthPixels - dp(context, 96)), ViewGroup.LayoutParams.WRAP_CONTENT);
     }
@@ -159,7 +159,7 @@ final class UpdaterDesign {
     private static void applyFont(View view) {
         if (view instanceof TextView) {
             TextView text = (TextView) view;
-            text.setTypeface(view.getResources().getFont(R.font.updater_arimo_regular));
+            text.setTypeface(view.getResources().getFont(R.font.ota_updater_arimo_regular));
             text.setIncludeFontPadding(false);
         }
         if (view instanceof ViewGroup) {
@@ -187,7 +187,7 @@ final class UpdaterDesign {
         HeaderMask(View header) { this.header = header; }
 
         @Override public void draw(Canvas canvas) {
-            View title = header.findViewById(R.id.header_title);
+            View title = header.findViewById(R.id.ota_header_title);
             int height = title.getBottom() + dp(header.getContext(), 12) + ((View) title.getParent()).getTop();
             if (height <= 0) height = getBounds().height();
             if (height != shaderHeight) {

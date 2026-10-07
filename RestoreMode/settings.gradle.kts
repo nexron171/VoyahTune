@@ -21,4 +21,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "RestoreMode"
 include(":app")
- 
+
+include(":updater-ui")
+project(":updater-ui").projectDir = file("../Updater/ui")

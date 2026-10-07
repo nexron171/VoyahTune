@@ -1,0 +1,9 @@
+<resources>
+    <color name="ota_page">#121720</color><color name="ota_surface">#171C25</color>
+    <color name="ota_sidebar">#171C25</color><color name="ota_panel">#222A37</color>
+    <color name="ota_ink">#F3F5FA</color><color name="ota_muted">#97A6BC</color>
+    <color name="ota_line">#384457</color><color name="ota_teal">#A5C8FF</color>
+    <color name="ota_teal_dark">#102541</color><color name="ota_teal_panel">#273B57</color>
+    <color name="ota_error">#FF818B</color><color name="ota_success">#70DFA3</color>
+    <color name="ota_eyebrow">#8298B6</color>
+</resources>

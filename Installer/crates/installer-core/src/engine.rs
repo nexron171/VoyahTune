@@ -420,16 +420,20 @@ impl Engine {
             })?;
 
             self.step("native", "Установка Native и разрешений", |e| e.native())?;
-            self.step(
-                "packages",
-                "Установка RestoreMode и настроек",
-                |e| e.packages(),
-            )?;
+            if !self.payload.restoremode_ota() {
+                self.step("packages", "Установка RestoreMode и настроек", |e| e.packages())?;
+            }
             self.step("dns", "Настройка DNS", |e| e.dns_choice(r.dns))?;
             self.step("updater-bootstrap", "Подготовка первого запуска OTA", |e| {
+                if e.payload.restoremode_ota() {
+                    e.shell("am force-stop --user 0 ru.big.town.updater 2>/dev/null || true\npm uninstall --user 0 ru.big.town.updater 2>/dev/null || true\nrm -rf /system/priv-app/VoyahTuneUpdater\nrm -f /data/local/bin/voyahtune-ui-maintenance /data/local/bin/voyahtune-ui-next.apk /data/local/voyahtune-updater/ui-update.json\n")?;
+                }
                 e.shell("rm -f /data/local/voyahtune-updater/state.json /data/local/voyahtune-updater/.state.json.new /data/local/bin/voyahtune-update.block && sync\n")?;
                 Ok(())
             })?;
+            if self.payload.restoremode_ota() {
+                self.step("packages", "Установка RestoreMode перед перезагрузкой", |e| e.packages())?;
+            }
             self.step(
                 "reboot",
                 "Перезагрузка автомобиля",
@@ -457,6 +461,8 @@ impl Engine {
                     )?;
                     if version["ipcSchema"] != 1
                         || version["infrastructure"] != e.payload.manifest.infrastructure.as_str()
+                        || (e.payload.restoremode_ota() && !version["capabilities"].as_array()
+                            .is_some_and(|caps| caps.iter().any(|c| c == "restoremode-ota-ui-v1")))
                     {
                         return Err(e.fail("Несовместимый IPC или инфраструктура updater", version));
                     }
@@ -1069,6 +1075,15 @@ fi
         Ok(())
     }
     fn updater_ready(&self) -> Result<()> {
+        if self.payload.restoremode_ota() {
+            self.verify_active_apk("ru.big.town.restoremode", "restore_mode.apk", None)?;
+            let resolved = self.shell("cmd package resolve-activity --brief --user 0 -n ru.big.town.restoremode/.OtaActivity\n")?;
+            if !resolved.lines().any(|line| matches!(line.trim(),
+                "ru.big.town.restoremode/.OtaActivity" | "ru.big.town.restoremode/ru.big.town.restoremode.OtaActivity")) {
+                return Err(self.fail("Встроенный экран OTA не зарегистрирован", resolved));
+            }
+            return Ok(());
+        }
         if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
             return self.updater_ready_od();
         }

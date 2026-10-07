@@ -1,4 +1,4 @@
-package ru.big.town.updater;
+package ru.big.town.updater.ui;
 
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
@@ -8,16 +8,27 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 /** Private UI-to-daemon transport. No archive, caller Intent or shell command is forwarded. */
-final class RootClient {
+final class RootClient implements UpdateService {
     private static final int MAX_RESPONSE = 8 * 1024 * 1024;
+    private final LocalSocketAddress address;
+    private final int expectedUid;
 
-    JSONObject call(JSONObject request) throws Exception {
+    RootClient() {
+        this(new LocalSocketAddress("voyahtune_updater", LocalSocketAddress.Namespace.RESERVED), 0);
+    }
+
+    RootClient(LocalSocketAddress address, int expectedUid) {
+        this.address = address;
+        this.expectedUid = expectedUid;
+    }
+
+    public JSONObject call(JSONObject request) throws Exception {
         try (LocalSocket socket = new LocalSocket()) {
-            socket.connect(new LocalSocketAddress("voyahtune_updater", LocalSocketAddress.Namespace.RESERVED));
+            socket.connect(address);
             // connect() creates the underlying Android socket before options can be set.
             String command = request.optString("command");
             socket.setSoTimeout("get_settings".equals(command) || "set_settings".equals(command) ? 45000 : 5000);
-            if (socket.getPeerCredentials().getUid() != 0) {
+            if (socket.getPeerCredentials().getUid() != expectedUid) {
                 throw new IOException("Ответ получен не от root-службы");
             }
             byte[] input = (request.toString() + "\n").getBytes(StandardCharsets.UTF_8);

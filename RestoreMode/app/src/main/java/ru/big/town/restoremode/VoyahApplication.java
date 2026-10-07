@@ -6,9 +6,13 @@ import android.os.Bundle;
 
 /** Start warmup when VoyahTune becomes visible, not when a provider wakes its process. */
 public final class VoyahApplication extends Application {
+    private static boolean isOtaProcess() {
+        return "ru.big.town.restoremode:ota".equals(Application.getProcessName());
+    }
+
     @Override protected void attachBaseContext(android.content.Context base) {
         super.attachBaseContext(base);
-        if (new java.io.File("/data/local/bin/voyahtune-update.block").exists()) {
+        if (!isOtaProcess() && new java.io.File("/data/local/bin/voyahtune-update.block").exists()) {
             android.os.Process.killProcess(android.os.Process.myPid());
             throw new IllegalStateException("VoyahTune update requires USB repair");
         }
@@ -16,6 +20,7 @@ public final class VoyahApplication extends Application {
 
     @Override public void onCreate() {
         super.onCreate();
+        if (isOtaProcess()) return;
         // Voice settings edits (dial entries, steering actions, splits, custom CAN) invalidate
         // the shared command catalog; the next load rebuilds it.
         getSharedPreferences("DrivePreferences", MODE_PRIVATE)

@@ -1,4 +1,4 @@
-package ru.big.town.updater;
+package ru.big.town.updater.ui;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public final class UpdatePresentationTest {

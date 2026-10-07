@@ -112,6 +112,14 @@
             </intent-filter>
         </receiver>
 
+        <activity
+            android:name=".OtaActivity"
+            android:process=":ota"
+            android:taskAffinity="ru.big.town.restoremode.ota"
+            android:theme="@style/ota_UpdaterTheme"
+            android:exported="true"
+            android:launchMode="singleTop" />
+
         <provider
             android:name=".RestoreModeContentProvider"
             android:authorities="ru.big.town.restoremode.restoremodecontentprovider"

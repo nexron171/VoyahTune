@@ -1,9 +1,0 @@
-<resources>
-    <color name="page">#121720</color><color name="surface">#171C25</color>
-    <color name="sidebar">#171C25</color><color name="panel">#222A37</color>
-    <color name="ink">#F3F5FA</color><color name="muted">#97A6BC</color>
-    <color name="line">#384457</color><color name="teal">#A5C8FF</color>
-    <color name="teal_dark">#102541</color><color name="teal_panel">#273B57</color>
-    <color name="error">#FF818B</color><color name="success">#70DFA3</color>
-    <color name="eyebrow">#8298B6</color>
-</resources>

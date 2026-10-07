@@ -1,4 +1,4 @@
-package ru.big.town.updater;
+package ru.big.town.updater.ui;
 
 /** Presentation of daemon facts only. No timer-derived installation progress. */
 final class UpdatePresentation {

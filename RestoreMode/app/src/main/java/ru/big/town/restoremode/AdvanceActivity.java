@@ -686,9 +686,11 @@ public class AdvanceActivity extends AppCompatActivity {
         TextView textAppVersion = findViewById(R.id.textAppVersion);
         textAppVersion.setText(BuildConfig.VERSION_NAME);
         findViewById(R.id.buttonOpenUpdates).setOnClickListener(v -> {
+            boolean embedded = ru.big.town.common.InfrastructureProfile.read(this)
+                    == ru.big.town.common.InfrastructureProfile.OD;
             Intent updates = new Intent(Intent.ACTION_MAIN)
-                    .setComponent(new android.content.ComponentName(
-                            "ru.big.town.updater", "ru.big.town.updater.MainActivity"))
+                    .setComponent(embedded ? new android.content.ComponentName(this, OtaActivity.class)
+                            : new android.content.ComponentName("ru.big.town.updater", "ru.big.town.updater.MainActivity"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK)
                     .putExtra("ru.big.town.updater.OPEN_INITIAL_SCREEN", true);
             try {

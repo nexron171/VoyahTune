@@ -56,6 +56,10 @@ pub fn read_request(reader: &mut impl BufRead) -> io::Result<Request> {
 /// packages.list is written by PackageManager, not by applications. The updater UI
 /// must be installed as a system package by the trusted USB installer. No shared UID.
 pub fn ui_uid(packages: &str) -> Option<u32> {
+    package_uid(packages, UI_PACKAGE)
+}
+
+pub fn package_uid(packages: &str, package: &str) -> Option<u32> {
     let rows: Vec<_> = packages
         .lines()
         .filter_map(|line| {
@@ -65,7 +69,7 @@ pub fn ui_uid(packages: &str) -> Option<u32> {
         .collect();
     let matches: Vec<_> = rows
         .iter()
-        .filter(|(name, _)| *name == UI_PACKAGE)
+        .filter(|(name, _)| *name == package)
         .collect();
     if matches.len() != 1 {
         return None;

@@ -8,6 +8,7 @@ pub const CAPABILITIES: &[&str] = &[
     "files-v1",
     "ota-bootstrap-v1",
     "infrastructure-v1",
+    "restoremode-ota-ui-v1",
 ];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -21,7 +22,7 @@ impl Default for Requirements {
             min_installer_version: "1.2.0".into(),
             required_capabilities: CAPABILITIES
                 .iter()
-                .filter(|s| **s != "infrastructure-v1")
+                .filter(|s| !["infrastructure-v1", "restoremode-ota-ui-v1"].contains(s))
                 .map(|s| s.to_string())
                 .collect(),
         }
@@ -31,8 +32,16 @@ impl Requirements {
     pub fn infrastructure() -> Self {
         Self {
             min_installer_version: "1.5.0".into(),
-            required_capabilities: CAPABILITIES.iter().map(|s| s.to_string()).collect(),
+            required_capabilities: CAPABILITIES.iter()
+                .filter(|s| **s != "restoremode-ota-ui-v1")
+                .map(|s| s.to_string()).collect(),
         }
+    }
+    pub fn restoremode_ota() -> Self {
+        let mut result = Self::infrastructure();
+        result.min_installer_version = "1.6.0".into();
+        result.required_capabilities.push("restoremode-ota-ui-v1".into());
+        result
     }
     pub fn validate(&self) -> Result<()> {
         let required = semver::Version::parse(&self.min_installer_version).map_err(|e| {
@@ -78,4 +87,16 @@ mod tests {
         r.required_capabilities.push("unknown".into());
         assert!(r.validate().is_err());
     }
+    #[test]
+    fn embedded_ui_requirement_is_opt_in_and_requires_the_new_installer() {
+        let od = Requirements::restoremode_ota();
+        assert_eq!(od.min_installer_version, "1.6.0");
+        assert!(od.required_capabilities.iter().any(|c| c == "restoremode-ota-ui-v1"));
+        od.validate().unwrap();
+        let pi = Requirements::infrastructure();
+        assert_eq!(pi.min_installer_version, "1.5.0");
+        assert!(!pi.required_capabilities.iter().any(|c| c == "restoremode-ota-ui-v1"));
+        assert!(!Requirements::default().required_capabilities.iter().any(|c| c == "restoremode-ota-ui-v1"));
+    }
+
 }

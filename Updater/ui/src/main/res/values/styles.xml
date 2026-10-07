@@ -1,0 +1,33 @@
+<resources>
+    <style name="ota_UpdaterTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">@font/ota_updater_arimo_regular</item>
+        <item name="android:colorAccent">@color/ota_teal</item>
+        <item name="android:windowBackground">@color/ota_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/ota_page</item>
+        <item name="android:navigationBarColor">@color/ota_page</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:alertDialogTheme">@style/ota_UpdaterDialogTheme</item>
+    </style>
+    <style name="ota_UpdaterDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:fontFamily">@font/ota_updater_arimo_regular</item>
+        <item name="android:colorAccent">@color/ota_teal</item>
+        <item name="android:windowBackground">@drawable/ota_card</item>
+        <item name="android:colorBackground">@color/ota_panel</item>
+        <item name="android:textColorPrimary">@color/ota_ink</item>
+        <item name="android:textColorSecondary">@color/ota_muted</item>
+        <item name="android:windowMinWidthMajor">60%</item>
+    </style>
+    <style name="ota_BodyText"><item name="android:textColor">@color/ota_ink</item><item name="android:textSize">22sp</item><item name="android:fontFamily">@font/ota_updater_arimo_regular</item><item name="android:includeFontPadding">false</item></style>
+    <style name="ota_MutedText" parent="ota_BodyText"><item name="android:textColor">@color/ota_muted</item></style>
+    <style name="ota_ActionButton" parent="android:style/Widget.Material.Button.Borderless">
+        <item name="android:textColor">@color/ota_ink</item><item name="android:textSize">20sp</item>
+        <item name="android:fontFamily">@font/ota_updater_arimo_regular</item><item name="android:includeFontPadding">false</item>
+        <item name="android:textAllCaps">false</item><item name="android:minHeight">64dp</item>
+        <item name="android:paddingLeft">24dp</item><item name="android:paddingRight">24dp</item>
+        <item name="android:backgroundTint">@null</item>
+        <item name="android:background">@drawable/ota_button_secondary</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+    <style name="ota_PrimaryButton" parent="ota_ActionButton"><item name="android:background">@drawable/ota_button_primary</item><item name="android:textColor">@color/ota_teal_dark</item><item name="android:fontFamily">@font/ota_updater_arimo_bold</item><item name="android:textSize">23sp</item></style>
+</resources>

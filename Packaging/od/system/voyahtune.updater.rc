@@ -1,5 +1,5 @@
 # Independent from the loader and both APKs; init maintains one process and restarts it.
-# Install this rc only together with the root executable and system UI APK.
+# The OD UI is RestoreMode's isolated :ota process.
 on post-fs-data
     mkdir /data/local/voyahtune-updater 0700 root root
     chmod 0700 /data/local/voyahtune-updater

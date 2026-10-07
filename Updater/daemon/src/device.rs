@@ -79,7 +79,7 @@ pub fn open_ui() -> io::Result<()> {
             "--user",
             "0",
             "-n",
-            "ru.big.town.updater/.MainActivity",
+            crate::restore_ui::component(),
         ],
         20,
     )

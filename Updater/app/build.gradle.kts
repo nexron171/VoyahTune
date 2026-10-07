@@ -22,4 +22,6 @@ android {
     buildFeatures { buildConfig = true }
 }
 
-dependencies { testImplementation("junit:junit:4.13.2") }
+dependencies {
+    implementation(project(":updater-ui"))
+}
