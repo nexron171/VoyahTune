@@ -130,6 +130,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean tripActive = false, tripInDrive = false, tripWaitingForMovement = false;
     private View tripStop;
     private long tripStartWall;
+    private TextView taskManagerCount;
     private long tripAccumMs = 0L, tripDriveStartElapsed = 0L;
     private String lastTripsJson = "[]"; // снимок лога для экрана истории
 
@@ -604,6 +605,15 @@ public class MainActivity extends AppCompatActivity {
                 case MSG_RESULT:
                     Log.i(TAG, "handleMessage() MSG_RESULT");
                     break;
+                case ru.big.town.common.TaskManagerProtocol.LIST: {
+                    // Ответ Native на запрос плитки «Диспетчер задач»: число в центре плитки.
+                    java.util.ArrayList<String> packages = msg.getData() == null ? null
+                            : msg.getData().getStringArrayList(ru.big.town.common.TaskManagerProtocol.PACKAGES);
+                    int count = packages == null ? 0 : packages.size();
+                    Log.i(TAG, "handleMessage() TASK_LIST count=" + count);
+                    if (taskManagerCount != null) taskManagerCount.setText(String.valueOf(count));
+                    break;
+                }
                 default:
                     Log.i(TAG, "handleMessage() default");
                     super.handleMessage(msg);
@@ -629,6 +639,7 @@ public class MainActivity extends AppCompatActivity {
                 GlobalVars.clientConnected(new Messenger(service));
                 watchSuspension();
                 watchEnergyWidgets();
+                requestTaskCount();   // плитке «Диспетчер задач» нужен свежий счётчик
             }
         }
 
@@ -1186,6 +1197,54 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** Карточка «Сценарии»: всплывающий список для запуска и включения/выключения. */
+    public void onScenariosCard(View view) {
+        ScenarioQuickList.show(this, sharedPreferences, this::runScenario,
+                this::onScenarioToggled, this::openScenarioSettings);
+    }
+
+    /** Сценарий включён/выключен из всплывающего списка: сохранить, опубликовать и перерисовать плитки. */
+    private void onScenarioToggled() {
+        SplitConfigSync.pushScenarios(this, sharedPreferences);
+        VoiceCommands.invalidate();
+        TileOrderStore.sync(sharedPreferences, getPackageManager());
+        renderSplitTiles();
+    }
+
+    private void openScenarioSettings() {
+        startActivityForResult(new Intent(this, AdvanceActivity.class)
+                .putExtra(AdvanceActivity.EXTRA_SECTION, AdvanceActivity.SECTION_SCENARIOS), REQUEST_CODE);
+    }
+
+    /** Плитка сценария: просим Native выполнить сценарий немедленно. */
+    private void runScenario(ScenarioStore.Scenario scenario) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+            showSnack("Сервис не готов");
+            return;
+        }
+        try {
+            Message message = Message.obtain(null, ru.big.town.common.ScenarioProtocol.MSG_RUN);
+            Bundle data = new Bundle();
+            data.putString(ru.big.town.common.ScenarioProtocol.EXTRA_ID, scenario.id);
+            message.setData(data);
+            GlobalVars.serviceMessenger.send(message);
+            showSnack("Сценарий запущен: " + scenario.name);
+        } catch (RemoteException e) {
+            Log.w(TAG, "runScenario failed: " + e.getMessage());
+            showSnack("Не удалось запустить сценарий");
+        }
+    }
+
+    /** Плитка «Диспетчер задач»: открыть экран со списком запущенных приложений. */
+    public void onTaskManagerTile(View view) {
+        startActivity(new Intent(this, TaskManagerActivity.class));
+    }
+
+    /** Число запущенных сторонних приложений для плитки — Native отвечает TaskManagerProtocol.LIST. */
+    private void requestTaskCount() {
+        sendMessageToService(ru.big.town.common.TaskManagerProtocol.REQUEST);
+    }
+
     private boolean isWidgetVisible(String widgetId) {
         if (EnergyWidgetView.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId))
             return sharedPreferences.getBoolean("show_" + widgetId, false);
@@ -1200,8 +1259,10 @@ public class MainActivity extends AppCompatActivity {
             case "cardSuspensionMaintenance": return sharedPreferences.getBoolean("showSuspensionMaintenance", false);
             case "cardForcedEv":     return sharedPreferences.getBoolean("showForcedEv", false);
             case "cardVoiceCommand": return sharedPreferences.getBoolean("showVoiceCommand", false);
+            case "cardScenarios":    return sharedPreferences.getBoolean("showScenariosCard", true);
             case "cardBatteryHeat":  return sharedPreferences.getBoolean("showBatteryHeat", true);
             case "launchAppsWidget": return sharedPreferences.getBoolean("showLaunchAppsWidget", false);
+            case "taskManagerTile":  return sharedPreferences.getBoolean("showTaskManagerTile", true);
             // Виджеты без тумблера («Настройки», настройки Android) видно всегда.
             default:                 return true;
         }
@@ -1263,9 +1324,12 @@ public class MainActivity extends AppCompatActivity {
         if ("tripCard".equals(widgetId)) return new int[]{3, 2};
         if ("cardBatteryHeat".equals(widgetId)) return new int[]{3, 2};
         // Компактные карточки-иконки: одна ячейка.
-        if ("cardSettings".equals(widgetId) || "cardAndroidSettings".equals(widgetId) || "cardVoiceCommand".equals(widgetId)) {
+        if ("cardSettings".equals(widgetId) || "cardAndroidSettings".equals(widgetId) || "cardVoiceCommand".equals(widgetId)
+                || "cardScenarios".equals(widgetId)) {
             return new int[]{1, 1};
         }
+        // Плитка «Диспетчер задач»: 1x1, в центре число запущенных приложений.
+        if ("taskManagerTile".equals(widgetId)) return new int[]{1, 1};
         // Плитка «Быстрый запуск»: по умолчанию 2x3, размер задаётся в «Дополнительно».
         if (TileSizeStore.LAUNCH_APPS_WIDGET_ID.equals(widgetId)) {
             return TileSizeStore.dimensions(sharedPreferences, widgetId,
@@ -1340,7 +1404,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        
+
         List<boolean[]> occupied = new ArrayList<>();
         for (int pos = 0; pos < tiles.size(); pos++) {
             TileOrderStore.Tile tile = tiles.get(pos);
@@ -1379,6 +1443,31 @@ public class MainActivity extends AppCompatActivity {
                 continue;
             }
             
+            if (TileOrderStore.Tile.TYPE_SCENARIO.equals(tile.type)) {
+                ScenarioStore.Scenario scenario = ScenarioStore.find(sharedPreferences, tile.id);
+                if (scenario == null || !scenario.enabled) continue;
+                final ScenarioStore.Scenario finalScenario = scenario;
+                View scenarioView = inf.inflate(R.layout.tile_scenario, splitTilesGrid, false);
+                ((TextView) scenarioView.findViewById(R.id.scenarioTileName)).setText(
+                        finalScenario.name.isEmpty() ? "Сценарий" : finalScenario.name);
+                scenarioView.setOnClickListener(v -> runScenario(finalScenario));
+                scenarioView.setOnLongClickListener(v -> {
+                    startTileDrag(v, TileOrderStore.Tile.TYPE_SCENARIO, finalScenario.id);
+                    return true;
+                });
+                int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
+                GridLayout.LayoutParams scenarioLp = new GridLayout.LayoutParams();
+                scenarioLp.width = tileW * 2 + m * 2;
+                scenarioLp.columnSpec = GridLayout.spec(gridPosition[0], 2);
+                scenarioLp.rowSpec = GridLayout.spec(gridPosition[1]);
+                applyTileVerticalMetrics(scenarioLp, m, tileH, gridPosition, 1, rowRemainder,
+                        topInset, stretchedColumns);
+                scenarioView.setLayoutParams(scenarioLp);
+                splitTilesGrid.addView(scenarioView);
+                tileDragController.add(scenarioView, tilePos, 2, 1);
+                continue;
+            }
+
             if (TileOrderStore.Tile.TYPE_WIDGET.equals(tile.type)) {
                 // ===== Это виджет =====
                 View widgetView = null;
@@ -1424,6 +1513,7 @@ public class MainActivity extends AppCompatActivity {
                     case "cardLeaveCar": widgetView = inf.inflate(R.layout.tile_power_hold, splitTilesGrid, false); break;
                     case "cardWashMode": widgetView = inf.inflate(R.layout.tile_wash_mode, splitTilesGrid, false); break;
                     case "cardVoiceCommand": widgetView = inf.inflate(R.layout.tile_voice_command, splitTilesGrid, false); break;
+                    case "cardScenarios": widgetView = inf.inflate(R.layout.tile_scenarios, splitTilesGrid, false); break;
                     case "cardSettings": widgetView = inf.inflate(R.layout.tile_settings, splitTilesGrid, false); break;
                     case "cardAndroidSettings": widgetView = inf.inflate(R.layout.tile_android_settings, splitTilesGrid, false); break;
                     case "cardAutoLight": widgetView = inf.inflate(R.layout.tile_auto_light, splitTilesGrid, false); break;
@@ -1432,6 +1522,7 @@ public class MainActivity extends AppCompatActivity {
                     case "cardForcedEv": widgetView = inf.inflate(R.layout.tile_forced_ev, splitTilesGrid, false); break;
                     case "cardBatteryHeat": widgetView = inf.inflate(R.layout.tile_battery_heat, splitTilesGrid, false); break;
                     case "launchAppsWidget": widgetView = inf.inflate(R.layout.tile_launch_apps, splitTilesGrid, false); break;
+                    case "taskManagerTile": widgetView = inf.inflate(R.layout.tile_task_manager, splitTilesGrid, false); break;
                 }
                 if (widgetView == null) continue;
                 applyTripHistoryVisibility(widgetView);
@@ -1486,6 +1577,9 @@ public class MainActivity extends AppCompatActivity {
                 } else if (tile.id.equals("launchAppsWidget")) {
                     launchAppsWidget  = widgetView.findViewById(R.id.launchAppsWidget);
                     populateLaunchAppsWidget();
+                } else if (tile.id.equals("taskManagerTile")) {
+                    taskManagerCount = widgetView.findViewById(R.id.taskManagerCount);
+                    requestTaskCount();
                 }
                 
                 widgetView.setOnLongClickListener(v -> {

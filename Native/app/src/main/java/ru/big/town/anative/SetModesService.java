@@ -76,6 +76,8 @@ public class SetModesService extends Service {
     static final int MSG_LOGGING_SHARE              = 33; // «Выгрузить логи» → share лог-файла
     static final int MSG_SPLIT_LAUNCH_VD            = 34; // single → physical WM-clamped task; pair → VD split
     static final int MSG_EMBEDDED_TRANSFER          = 38; // перенос/обмен запущенными экземплярами виджетов
+    /** Диспетчер задач: forceStopPackage в AMS асинхронный, поэтому список отдаём с задержкой. */
+    private static final long TASK_LIST_SETTLE_MS = 600L;
     static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
     static final String ACTION_LOG_UPDATE  = "ru.big.town.anative.LOG_UPDATE";
     static final String ACTION_LOGGING_SET   = "ru.big.town.anative.LOGGING_SET";   // extra "on" bool
@@ -104,6 +106,9 @@ public class SetModesService extends Service {
     private static final long CAR_POWER_CONNECT_WATCHDOG_MS = 15_000L;
 
     private final VoiceCommandController voiceCommands = new VoiceCommandController(this);
+    private ScenarioEngine scenarioEngine;
+    /** Живой экземпляр для конфигурационных broadcast-ов; null, когда сервис не запущен. */
+    private static volatile SetModesService activeInstance;
 
     private SuspensionWidgetController suspensionWidget;
     private EnergyWidgetController energyWidgets;
@@ -150,12 +155,14 @@ public class SetModesService extends Service {
 
                 case MSG_AUTO_LIGHT_ENABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_ENABLE");
-                    setAutoLightEnabled(true);
+                    saveAutoLightState(true);
+                    updateLightSensorObservation();
                     break;
 
                 case MSG_AUTO_LIGHT_DISABLE:
                     Log.i(TAG, "handleMessage() MSG_AUTO_LIGHT_DISABLE");
-                    setAutoLightEnabled(false);
+                    saveAutoLightState(false);
+                    updateLightSensorObservation();
                     break;
 
                 case MSG_LEAVE_CAR:
@@ -314,6 +321,77 @@ public class SetModesService extends Service {
                     break;
                 }
 
+                case ru.big.town.common.ScenarioProtocol.MSG_RUN: {
+                    android.os.Bundle runData = msg.getData();
+                    if (scenarioEngine != null && runData != null) {
+                        String scenarioId = runData.getString(
+                                ru.big.town.common.ScenarioProtocol.EXTRA_ID);
+                        if (runData.getBoolean(ru.big.town.common.ScenarioProtocol.EXTRA_TEST, false)) {
+                            scenarioEngine.testRun(scenarioId);
+                        } else {
+                            scenarioEngine.runNow(scenarioId);
+                        }
+                    }
+                    break;
+                }
+
+                // Диспетчер задач (RestoreMode): список запущенных сторонних задач и действия по ним.
+                case ru.big.town.common.TaskManagerProtocol.REQUEST:
+                    Log.i(TAG, "handleMessage() TASK_LIST request");
+                    replyTaskList(msg.replyTo);
+                    break;
+
+                case ru.big.town.common.TaskManagerProtocol.CLOSE: {
+                    String pkg = (msg.getData() != null)
+                            ? msg.getData().getString(ru.big.town.common.TaskManagerProtocol.PACKAGE) : null;
+                    Log.i(TAG, "handleMessage() TASK_CLOSE pkg=" + pkg);
+                    // Приложение могло жить в виджетах: их снимаем, иначе следующая отрисовка
+                    // главного экрана запустила бы закрытое приложение заново.
+                    releaseWidgetInstances(pkg);
+                    WidgetSupport.stopApp(SetModesService.this, pkg);
+                    // Задачи снимаются асинхронно: без паузы закрытое приложение вернётся в ответе.
+                    final android.os.Messenger taskReplyTo = msg.replyTo;
+                    mainHandler.postDelayed(() -> replyTaskList(taskReplyTo), TASK_LIST_SETTLE_MS);
+                    break;
+                }
+
+                case ru.big.town.common.TaskManagerProtocol.SWITCH: {
+                    String pkg = (msg.getData() != null)
+                            ? msg.getData().getString(ru.big.town.common.TaskManagerProtocol.PACKAGE) : null;
+                    if (WidgetSupport.isWidgetOnly(SetModesService.this, pkg, widgetDisplayIds(),
+                            embeddedPackages.containsValue(pkg))) {
+                        // Приложение живёт внутри виджета: moveTaskToFront поднял бы его задачу на
+                        // самом VirtualDisplay, и на экране ничего бы не изменилось. Переносим запуск
+                        // на водительский экран: AppDisplayLauncher снимает задачу с дисплея виджета и
+                        // уведомляет хост, чтобы плитка не осталась с мёртвой поверхностью.
+                        Log.i(TAG, "handleMessage() TASK_SWITCH pkg=" + pkg + " widget=1");
+                        boolean fullscreen = FullscreenPackagePolicy.contains(
+                                android.provider.Settings.Global.getString(
+                                        getContentResolver(), "voyahtune_fullscreen_apps"), pkg);
+                        AppDisplayLauncher.launch(SetModesService.this, pkg, 0, fullscreen, () -> true,
+                                () -> android.widget.Toast.makeText(SetModesService.this,
+                                        "Не удалось открыть приложение",
+                                        android.widget.Toast.LENGTH_LONG).show());
+                    } else {
+                        boolean moved = WidgetSupport.moveToFront(SetModesService.this, pkg);
+                        Log.i(TAG, "handleMessage() TASK_SWITCH pkg=" + pkg + " moved=" + moved);
+                    }
+                    break;
+                }
+
+                case ru.big.town.common.TaskManagerProtocol.PIN: {
+                    android.os.Bundle pinData = msg.getData();
+                    String pkg = (pinData != null)
+                            ? pinData.getString(ru.big.town.common.TaskManagerProtocol.PACKAGE) : null;
+                    boolean pinned = pinData != null && pinData.getBoolean(
+                            ru.big.town.common.TaskManagerProtocol.PINNED, false);
+                    Log.i(TAG, "handleMessage() TASK_PIN pkg=" + pkg + " pinned=" + pinned);
+                    WidgetSupport.setPinned(SetModesService.this, pkg, pinned);
+                    // Ответ сразу: фиксация не трогает задачи, ждать снятия задач не нужно.
+                    replyTaskList(msg.replyTo);
+                    break;
+                }
+
                 default:
                     Log.i(TAG, "handleMessage() default");
                     super.handleMessage(msg);
@@ -342,7 +420,8 @@ public class SetModesService extends Service {
 
     boolean isVoiceServiceAction(String action) {
         return action.equals("apply") || action.equals("battery_heat") || action.equals("close_all")
-                || action.equals("reboot") || action.startsWith("auto_light:");
+                || action.equals("reboot") || action.startsWith("auto_light:")
+                || action.startsWith(ru.big.town.common.ScenarioProtocol.ACTION_RUN_PREFIX);
     }
 
     void executeVoiceServiceAction(String action, android.os.ResultReceiver reply) {
@@ -355,6 +434,7 @@ public class SetModesService extends Service {
             } else if (action.equals("close_all")) closeAllApps();
             else if (action.equals("reboot")) rebootSystem();
             else if (action.startsWith("auto_light:")) {
+                updateLightSensorObservation();
                 boolean enabled = action.endsWith(":on");
                 ApplyEngine.postIndependentUserCommand("voice auto light", () -> {
                     try {
@@ -364,6 +444,14 @@ public class SetModesService extends Service {
                         VoiceCommandController.respond(reply, false, "Не удалось выполнить команду");
                     }
                 });
+                return;
+            } else if (action.startsWith(ru.big.town.common.ScenarioProtocol.ACTION_RUN_PREFIX)) {
+                // Голосовой запуск сценария идёт через движок, а не отдельной CAN-командой.
+                String scenarioId = action.substring(
+                        ru.big.town.common.ScenarioProtocol.ACTION_RUN_PREFIX.length());
+                boolean started = scenarioEngine != null && scenarioEngine.runNow(scenarioId);
+                VoiceCommandController.respond(reply, started,
+                        started ? null : "Сценарий недоступен");
                 return;
             }
             VoiceCommandController.respond(reply, true, null);
@@ -545,11 +633,18 @@ public class SetModesService extends Service {
             java.lang.reflect.Method forceStop =
                     android.app.ActivityManager.class.getMethod("forceStopPackage", String.class);
 
+            int pinned = 0;
             for (android.content.pm.ApplicationInfo ai : pm.getInstalledApplications(0)) {
                 String pkg = ai.packageName;
                 boolean system = (ai.flags & (android.content.pm.ApplicationInfo.FLAG_SYSTEM
                         | android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
                 if (!CloseAppsPolicy.canStop(pkg, system, home)) continue;
+                if ((ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) continue; // только сторонние
+                if (pkg.equals("ru.big.town.restoremode") || pkg.equals("ru.big.town.anative")) continue;
+                if (pkg.equals(home)) continue;
+                if (pkg.startsWith("com.qinggan") || pkg.startsWith("com.android.car")) continue;
+                // Зафиксированные в диспетчере задач приложения пользователь просил не закрывать.
+                if (WidgetSupport.isPinned(this, pkg)) { pinned++; continue; }
                 try {
                     forceStop.invoke(am, pkg);
                     count++;
@@ -561,6 +656,8 @@ public class SetModesService extends Service {
                 }
             }
             Log.i(TAG, "closeAllApps: force-stop accepted=" + count + ", failed=" + failed);
+            Log.i(TAG, "closeAllApps: остановлено " + count + " сторонних приложений"
+                    + ", пропущено зафиксированных: " + pinned);
         } catch (Exception e) {
             Log.e(TAG, "closeAllApps failed: " + e.getMessage());
             result.putString(ru.big.town.common.SystemWidgetProtocol.ERROR, "Не удалось закрыть приложения");
@@ -568,6 +665,105 @@ public class SetModesService extends Service {
         result.putInt(ru.big.town.common.SystemWidgetProtocol.SUCCEEDED, count);
         result.putInt(ru.big.town.common.SystemWidgetProtocol.FAILED, failed);
         return result;
+    }
+
+    /**
+     * Дисплеи активных embedded-виджетов: задача на таком дисплее — приложение внутри виджета,
+     * а не копия на физическом экране.
+     */
+    private java.util.Set<Integer> widgetDisplayIds() {
+        java.util.Set<Integer> ids = new java.util.HashSet<>();
+        for (VirtualDisplay display : embeddedDisplays.values()) {
+            if (display != null && display.getDisplay() != null) {
+                ids.add(display.getDisplay().getDisplayId());
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * Снять виджеты, в которых показывалось закрываемое приложение, и уведомить хост: плитку без
+     * приложения он убирает сам, иначе виджет остался бы с мёртвой поверхностью.
+     */
+    private void releaseWidgetInstances(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return;
+        boolean released = false;
+        for (String widgetId : new java.util.ArrayList<>(embeddedPackages.keySet())) {
+            if (!pkg.equals(embeddedPackages.get(widgetId))) continue;
+            releaseEmbeddedDisplay(widgetId);
+            released = true;
+        }
+        if (released) notifyEmbeddedTaskLeft(this, pkg);
+    }
+
+    /**
+     * Жив ли процесс пакета. Реестр виджетов помнит о запуске и после закрытия приложения, поэтому
+     * без этой проверки закрытый пакет оставался бы в ответе диспетчера задач. Ошибка проверки —
+     * «не жив»: показать лишнее приложение хуже, чем пропустить его в редком случае.
+     */
+    private boolean isProcessAlive(String pkg) {
+        android.app.ActivityManager am =
+                (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        if (am == null) return false;
+        try {
+            java.util.List<android.app.ActivityManager.RunningAppProcessInfo> processes =
+                    am.getRunningAppProcesses();
+            if (processes == null) return false;
+            for (android.app.ActivityManager.RunningAppProcessInfo process : processes) {
+                if (process != null && pkg.equals(process.processName)) return true;
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "isProcessAlive: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Ответ диспетчеру задач: параллельные списки пакетов, подписей, фиксаций и признака «приложение
+     * живёт внутри виджета». Пустой список — валидный ответ: UI покажет «нет запущенных приложений».
+     */
+    private void replyTaskList(android.os.Messenger replyTo) {
+        if (replyTo == null) return;
+        java.util.List<WidgetSupport.RunningApp> apps =
+                WidgetSupport.runningApps(this, widgetDisplayIds());
+        java.util.ArrayList<String> packages = new java.util.ArrayList<>(apps.size());
+        java.util.ArrayList<String> labels = new java.util.ArrayList<>(apps.size());
+        java.util.ArrayList<Boolean> widgetFlags = new java.util.ArrayList<>(apps.size());
+        for (int i = 0; i < apps.size(); i++) {
+            WidgetSupport.RunningApp app = apps.get(i);
+            packages.add(app.packageName);
+            labels.add(app.label);
+            widgetFlags.add(app.widget);
+        }
+        // Приложение внутри виджета может не попасть в getRunningTasks: его задача живёт на
+        // VirtualDisplay виджета. Native знает эти пакеты сам — добавляем их с признаком виджета,
+        // если процесс ещё жив: реестр виджетов помнит о запуске и после force-stop.
+        for (String pkg : embeddedPackages.values()) {
+            if (pkg == null || pkg.isEmpty() || packages.contains(pkg) || !isProcessAlive(pkg)) continue;
+            packages.add(pkg);
+            labels.add(WidgetSupport.labelOf(this, pkg));
+            widgetFlags.add(Boolean.TRUE);
+        }
+        boolean[] pinned = new boolean[packages.size()];
+        boolean[] widget = new boolean[packages.size()];
+        for (int i = 0; i < packages.size(); i++) {
+            pinned[i] = WidgetSupport.isPinned(this, packages.get(i));
+            widget[i] = Boolean.TRUE.equals(widgetFlags.get(i));
+        }
+        android.os.Message reply = android.os.Message.obtain(null,
+                ru.big.town.common.TaskManagerProtocol.LIST);
+        android.os.Bundle data = new android.os.Bundle();
+        data.putStringArrayList(ru.big.town.common.TaskManagerProtocol.PACKAGES, packages);
+        data.putStringArrayList(ru.big.town.common.TaskManagerProtocol.LABELS, labels);
+        data.putBooleanArray(ru.big.town.common.TaskManagerProtocol.PINNED, pinned);
+        data.putBooleanArray(ru.big.town.common.TaskManagerProtocol.WIDGETS, widget);
+        reply.setData(data);
+        try {
+            replyTo.send(reply);
+            Log.i(TAG, "task list -> " + packages.size() + " apps");
+        } catch (android.os.RemoteException e) {
+            Log.w(TAG, "replyTaskList: " + e.getMessage());
+        }
     }
 
     /**
@@ -943,6 +1139,11 @@ public class SetModesService extends Service {
         Log.i(TAG, "applyTheme mode=" + mode);
     }
 
+    private void saveAutoLightState(boolean enabled) {
+        prefs().edit().putBoolean("autoLight", enabled).apply();
+        Log.i(TAG, "saveAutoLightState: " + enabled);
+    }
+
     private void restoreAutoLightState() {
         ApplyEngine.postWakeAction("restore auto light service switch", () -> {
             AutoLightSettings.restore(this);
@@ -954,6 +1155,27 @@ public class SetModesService extends Service {
         ApplyEngine.postIndependentUserCommand("auto light switch", () -> {
             AutoLightSettings.set(this, enabled);
         });
+    }
+
+    /**
+     * Единое решение о LightSensorService: автосвет либо наблюдение уровня для сценариев.
+     * В режиме наблюдения сервис публикует уровень датчика, но не отправляет команды света.
+     */
+    void updateLightSensorObservation() {
+        boolean autoLight = prefs().getBoolean("autoLight", false);
+        boolean scenariosNeed = scenarioEngine != null && scenarioEngine.usesLightLevel();
+        LightSensorService.setObserveOnly(this, !autoLight && scenariosNeed);
+//        if (autoLight || scenariosNeed) startLightSensorService();
+//        else stopLightSensorService();
+        Log.i(TAG, "light observation: autoLight=" + autoLight + " scenarios=" + scenariosNeed);
+    }
+
+    /** Живой снимок сценариев из RestoreMode; без запущенного сервиса остаётся в NativePrefs. */
+    static void notifyScenarioConfigChanged(Context context) {
+        SetModesService service = activeInstance;
+        if (service == null || service.scenarioEngine == null) return;
+        service.scenarioEngine.reload(ScenarioConfigReceiver.loadPersisted(context));
+        service.updateLightSensorObservation();
     }
 
     /**
@@ -1206,6 +1428,12 @@ public class SetModesService extends Service {
             vehicleStateControllers = VehicleStateControllers.get(getApplicationContext());
         } catch (RuntimeException e) {
             Log.w(TAG, "start vehicle state controllers: " + e.getMessage());
+        }
+        try {
+            scenarioEngine = new ScenarioEngine(this);
+            scenarioEngine.reload(ScenarioConfigReceiver.loadPersisted(this));
+        } catch (RuntimeException e) {
+            Log.w(TAG, "start scenario engine: " + e.getMessage());
         }
         try {
             ContextCompat.registerReceiver(this, powerHoldStatusRequestReceiver,
@@ -1630,6 +1858,9 @@ public class SetModesService extends Service {
         if (energyWidgets != null) energyWidgets.close();
         if (clearApps != null) clearApps.close();
         voiceCommands.close();
+        ScenarioEngine engine = scenarioEngine;
+        scenarioEngine = null;
+        if (engine != null) engine.close();
         serviceDestroyed = true;
         ApplyEngine.stopEarlyDriveRestore("service destroyed");
         for (VirtualDisplay display : embeddedDisplays.values()) {

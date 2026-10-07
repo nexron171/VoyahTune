@@ -134,6 +134,18 @@
             android:textColor="#FFFFFF"
             android:textSize="26px" />
 
+        <TextView
+            android:id="@+id/navScenarios"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/nav_rail_item_bg"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp"
+            android:text="Сценарии"
+            android:textColor="#FFFFFF"
+            android:textSize="26px" />
+
         <!-- Раздел: Другое -->
         <TextView
             android:id="@+id/navOther"
@@ -232,6 +244,22 @@
         android:visibility="gone">
         <LinearLayout
             android:id="@+id/voiceSettingsContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="28dp"
+            android:paddingVertical="20dp" />
+    </ScrollView>
+
+    <ScrollView
+        android:id="@+id/pageScenarios"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        android:visibility="gone">
+        <LinearLayout
+            android:id="@+id/scenariosSettingsContent"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
@@ -454,6 +482,31 @@
                     android:track="@drawable/switch_track" />
             </LinearLayout>
 
+            <!-- Карточка «Сценарии» на главном -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/layout_category_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Сценарии"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26px" />
+                <Switch
+                    android:id="@+id/switchShowScenariosCard"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+            </LinearLayout>
+
             <!-- Виджет Forced EV на главном (по умолчанию скрыт) -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -580,6 +633,14 @@
                     android:layout_marginStart="8dp"
                     android:textColor="#FFFFFF" />
 
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="Диспетчер задач" android:textColor="#FFFFFF" android:textSize="26px" />
+                <Switch android:id="@+id/switchShowTaskManagerTile" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:thumb="@drawable/switch_thumb" android:track="@drawable/switch_track" />
             </LinearLayout>
 
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"

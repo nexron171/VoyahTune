@@ -1,5 +1,6 @@
 package ru.big.town.restoremode;
 
+import ru.big.town.common.ScenarioProtocol;
 
 import android.content.Context;
 import android.content.Intent;
@@ -90,6 +91,17 @@ final class VoiceCommands {
             if (number.length() == 10) number = "8" + number;
             if (!entry.name.trim().isEmpty()) VoiceCommandCatalog.add(out, "call:" + number,
                     "Набрать номер: " + entry.name, "позвони " + entry.name, "набери " + entry.name);
+        }
+        // Включённые сценарии запускаются по имени; имена с запрещёнными словами пропускаются,
+        // их можно вызвать плиткой или из настроек.
+        for (ScenarioStore.Scenario scenario : ScenarioStore.load(prefs)) {
+            if (!scenario.enabled || scenario.name.trim().isEmpty()) continue;
+            if (!VoiceCommandCatalog.phraseUsable(scenario.name)) continue;
+            VoiceCommandCatalog.add(out, ScenarioProtocol.ACTION_RUN_PREFIX + scenario.id,
+                    "Сценарий: " + scenario.name,
+                    "запусти сценарий " + scenario.name,
+                    "сценарий " + scenario.name,
+                    "выполни сценарий " + scenario.name);
         }
         Set<String> custom = new java.util.LinkedHashSet<>();
         for (String button : new String[]{"Star", "Dvr", "Voice", "Phone"}) {

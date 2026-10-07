@@ -21,7 +21,8 @@ public class TileOrderStore {
         public static final String TYPE_WIDGET = "widget";
         public static final String TYPE_APP_WIDGET = "appWidget";
         public static final String TYPE_DIAL = "dial";
-        
+        public static final String TYPE_SCENARIO = "scenario";
+
         public String type;      // "split", "app" или "widget"
         public String id;        // id пресета, имя пакета, id виджета или id dial-карточки
         
@@ -75,6 +76,8 @@ public class TileOrderStore {
             out.add(new Tile(Tile.TYPE_WIDGET, "cardVoiceCommand"));
             // Native-виджеты (запуск приложений, громкость, запущенные приложения)
             out.add(new Tile(Tile.TYPE_WIDGET, "launchAppsWidget"));
+            // Диспетчер задач: 1x1 с числом запущенных приложений.
+            out.add(new Tile(Tile.TYPE_WIDGET, "taskManagerTile"));
             // Сохранить миграцию
             if (!out.isEmpty()) {
                 save(p, out);
@@ -133,6 +136,10 @@ public class TileOrderStore {
                 if (entry.id.equals(t.id)) return true;
             }
             return false;
+        } else if (Tile.TYPE_SCENARIO.equals(t.type)) {
+            // Плитка существует, пока сценарий включён и она запрошена в его настройках.
+            ScenarioStore.Scenario scenario = ScenarioStore.find(p, t.id);
+            return scenario != null && scenario.enabled && scenario.showTile;
         }
         return false;
     }
@@ -150,10 +157,12 @@ public class TileOrderStore {
                widgetId.equals("cardSuspensionMaintenance") ||
              widgetId.equals("cardBatteryHeat") ||
              widgetId.equals("cardVoiceCommand") ||
+             widgetId.equals("cardScenarios") ||
              widgetId.equals("cardSettings") ||
              widgetId.equals("cardAndroidSettings") ||
              // Native-виджеты
-             widgetId.equals("launchAppsWidget");
+             widgetId.equals("launchAppsWidget") ||
+             widgetId.equals("taskManagerTile");
     }
 
     /** Синхронизировать список плиток: удалить несуществующие, добавить новые из SplitStore и AppShortcutStore. */
@@ -218,7 +227,10 @@ public class TileOrderStore {
         String[] knownWidgets = {SystemWidgetLayout.CPU, SystemWidgetLayout.RAM, SystemWidgetLayout.CLEAR, "energyWidget", "energyConsumptionWidget", "energyTripWidget", "tirePressureWidget", "odometerWidget", "tripCard", "cardPowerHold", "cardWashMode", "cardAutoLight",
                  "cardPedestrian", "cardForcedEv", "cardSuspensionMaintenance", "cardBatteryHeat", "suspensionWidget",
                      "cardSettings", "cardAndroidSettings", "cardVoiceCommand",
-                     "launchAppsWidget"};
+                     "cardScenarios",
+                     "launchAppsWidget",
+                     "taskManagerTile"
+        };
         for (String widgetId : knownWidgets) {
             boolean found = false;
             for (Tile t : tiles) {
@@ -255,7 +267,21 @@ public class TileOrderStore {
             }
             if (!found) tiles.add(new Tile(Tile.TYPE_APP_WIDGET, entry.id));
         }
-        
+
+        // Плитки сценариев: добавляются только для включённых сценариев с запрошенной плиткой
+        // (несуществующие/выключенные уже удалены выше через exists()).
+        for (ScenarioStore.Scenario scenario : ScenarioStore.load(p)) {
+            if (!scenario.enabled || !scenario.showTile) continue;
+            boolean found = false;
+            for (Tile tile : tiles) {
+                if (Tile.TYPE_SCENARIO.equals(tile.type) && tile.id.equals(scenario.id)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) tiles.add(new Tile(Tile.TYPE_SCENARIO, scenario.id));
+        }
+
         save(p, tiles);
     }
 }

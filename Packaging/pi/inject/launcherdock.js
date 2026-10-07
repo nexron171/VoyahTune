@@ -32,6 +32,12 @@
 //   • ДОМ ПАССАЖИРА — на display 1 вместо SecondMainActivity всегда открывается AllAppActivity:
 //     запуски лаунчера через AppLauncher.startApp перенаправляются, а если SecondMainActivity всё же
 //     поднялась (системный HOME, закрытие приложения поверх неё), сразу открываем AllAppActivity.
+//   • КЛИК по «домику» Home (mScreenUpHomeView) — открывает главный экран VoyahTune вместо штатного
+//     home: штатный onClick не вызываем. Работает и в обычном, и в компактном доке; пассажирский бар
+//     не трогаем (screenOf(bar) !== 0 → штатный путь).
+//   • ДОЛГИЙ ТАП по «домику» Home — штатный главный экран лаунчера (ACTION_MAIN + CATEGORY_HOME на
+//     com.qinggan.app.launcher/.activity.MainActivity). Долгий тап по «меню» (нижняя кнопка дока) —
+//     «Диспетчер задач» (отдельная активность RestoreMode).
 //   • ВОЗВРАТ ИЗ FULLSCREEN/ПЕРЕНОСА — TOP_ACTIVITY_CHANGED повторно просит штатный LauncherModel
 //     показать navigation bar нужного физического экрана. Во время OEM transfer короткий deadline-guard
 //     не даёт onMoveStart удалить оба бара до того, как foreground-кэш обновится на destination.
@@ -42,8 +48,12 @@ Java.perform(function () {
     var MODEL        = "com.qinggan.app.launcher.LauncherModel";
     var RELOAD_ACT   = "ru.big.town.anative.DOCK_RELOAD";
     var LAUNCHER_PKG = "com.qinggan.app.launcher";    // сам штатный лаунчер (Home обоих экранов)
+    // Главный экран штатного лаунчера (системный старт home: act=MAIN cat=[HOME] на этот компонент).
+    var LAUNCHER_HOME_ACT = "com.qinggan.app.launcher.activity.MainActivity";
     var OUR_PKG      = "ru.big.town.anative";         // наш VD-хост (SplitHostActivity) для подсветки
-    var RESTORE_PKG  = "ru.big.town.restoremode";     // VoyahTune (UI) — открывается долгим тапом по «меню»
+    var RESTORE_PKG  = "ru.big.town.restoremode";     // VoyahTune (UI) — тап по Home и долгий тап «меню»
+    // «Диспетчер задач» — отдельная активность VoyahTune на долгом тапе по «меню».
+    var RESTORE_TASK_ACT = "ru.big.town.restoremode.TaskManagerActivity";
     var SECOND_HOME  = "com.qinggan.secondlauncher.activity.SecondMainActivity";
     var SECOND_ALL_APPS = "com.qinggan.secondlauncher.activity.AllAppActivity";
     // AccountConstantUtil.SEPARATOR на ПИ = "/": LauncherModel так же делит ответ AppUtils.getTopAppInfo.
@@ -233,6 +243,7 @@ Java.perform(function () {
         return act.indexOf("SplitHostActivity") >= 0
             || act.indexOf("restoremode.MainActivity") >= 0
             || act.indexOf("AdvanceActivity") >= 0
+            || act.indexOf("TaskManagerActivity") >= 0
             || act.indexOf("TripHistoryActivity") >= 0;
     }
 
@@ -385,15 +396,53 @@ Java.perform(function () {
         ctx().sendBroadcast(i);
     }
 
-    // Открыть VoyahTune (UI RestoreMode) — по долгому тапу «меню».
-    function openVoyahTune() {
+    // Открыть VoyahTune (UI RestoreMode) — тап по «домику» Home.
+    // CLEAR_TOP + SINGLE_TOP: в стеке остаётся один экземпляр MainActivity, подэкраны «Дополнительно»
+    // закрываются — так кнопка Home ведёт «домой» и внутри VoyahTune.
+    function openVoyahTune(reason) {
         try {
             var i = Intent.$new();
             i.setClassName(RESTORE_PKG, "ru.big.town.restoremode.MainActivity");
-            i.addFlags(0x10000000);   // FLAG_ACTIVITY_NEW_TASK
+            i.addFlags(0x10000000 | 0x04000000 | 0x20000000); // NEW_TASK | CLEAR_TOP | SINGLE_TOP
             ctx().startActivity(i);
-            Log.i(DLOG, "menu long-press -> VoyahTune");
+            Log.i(DLOG, (reason || "home tap") + " -> VoyahTune");
         } catch (e) { Log.e(TAG, "[dock] openVoyahTune err: " + e); }
+    }
+
+    // Открыть «Диспетчер задач» (отдельная активность RestoreMode) — по долгому тапу «меню».
+    function openTaskManager() {
+        try {
+            var i = Intent.$new();
+            i.setClassName(RESTORE_PKG, RESTORE_TASK_ACT);
+            i.addFlags(0x10000000 | 0x04000000 | 0x20000000); // NEW_TASK | CLEAR_TOP | SINGLE_TOP
+            ctx().startActivity(i);
+            Log.i(DLOG, "menu long-press -> task manager");
+        } catch (e) { Log.e(TAG, "[dock] openTaskManager err: " + e); }
+    }
+
+    // Запустить штатный главный экран лаунчера — долгий тап по «домику» Home.
+    // Сначала с явным компонентом (как системный старт home), при отказе — без компонента:
+    // CATEGORY_HOME резолвится системой в штатный home текущего пользователя.
+    function stockLauncherHome() {
+        if (startLauncherHome(true)) return;
+        if (startLauncherHome(false)) return;
+        Log.e(TAG, "[dock] stock home launch failed");
+    }
+
+    function startLauncherHome(explicit) {
+        try {
+            var i = Intent.$new();
+            i.setAction(Intent.ACTION_MAIN.value);
+            i.addCategory(Intent.CATEGORY_HOME.value);
+            if (explicit) i.setClassName(LAUNCHER_PKG, LAUNCHER_HOME_ACT);
+            i.addFlags(0x10000000 | 0x04000000 | 0x20000000); // NEW_TASK | CLEAR_TOP | SINGLE_TOP
+            ctx().startActivity(i);
+            Log.i(DLOG, "home long-press -> stock home (explicit=" + explicit + ")");
+            return true;
+        } catch (e) {
+            Log.w(TAG, "[dock] stock home explicit=" + explicit + " err: " + e);
+            return false;
+        }
     }
 
     // Открыть назначенный слоту сплит — broadcast OPEN_DOCK_SPLIT в Native (тот резолвит детали и стартует).
@@ -458,7 +507,7 @@ Java.perform(function () {
         } catch (e) { Log.e(TAG, "[dock] passenger AllAppActivity: " + e); }
     }
 
-    // Долгий тап «меню» (mScreenUpAllAppView) → VoyahTune + return true (гасим штатное долгое).
+    // Долгий тап «меню» (mScreenUpAllAppView) → «Диспетчер задач» + return true (гасим штатное долгое).
     // Короткий тап не трогаем — идёт штатно (открытие списка приложений).
     var menuLC = Java.registerClass({
         name: "ru.big.town.dock.MenuLongClick",
@@ -467,7 +516,20 @@ Java.perform(function () {
             onLongClick: {
                 returnType: "boolean",
                 argumentTypes: ["android.view.View"],
-                implementation: function (view) { openVoyahTune(); return true; }
+                implementation: function (view) { openTaskManager(); return true; }
+            }
+        }
+    }).$new();
+
+    // Долгий тап по «домику» Home → штатный главный экран лаунчера. Короткий тап по нему наш (см. onClick).
+    var homeLC = Java.registerClass({
+        name: "ru.big.town.dock.HomeLongClick",
+        implements: [LongClick],
+        methods: {
+            onLongClick: {
+                returnType: "boolean",
+                argumentTypes: ["android.view.View"],
+                implementation: function (view) { stockLauncherHome(); return true; }
             }
         }
     }).$new();
@@ -623,10 +685,15 @@ Java.perform(function () {
                 view.setLongClickable(true);
                 view.setOnLongClickListener(slotLC);
             }
-            // Долгий тап по «меню» → VoyahTune. Навешиваем на каждом проходе (init/theme/reload).
+            // Долгий тап по «меню» → «Диспетчер задач». Навешиваем на каждом проходе (init/theme/reload).
             if (views.allApps) {
                 views.allApps.setLongClickable(true);
                 views.allApps.setOnLongClickListener(menuLC);
+            }
+            // Долгий тап по «домику» Home → штатный главный экран лаунчера (короткий тап наш, см. onClick).
+            if (views.home) {
+                views.home.setLongClickable(true);
+                views.home.setOnLongClickListener(homeLC);
             }
             if (!skipLayout) applyScreenLiftDock(bar, currentScreenLiftType());
         } catch (e) { Log.e(TAG, "[dock] updateIcons err: " + e); }
@@ -1322,13 +1389,21 @@ Java.perform(function () {
         return origUpdateSelectedApp.call(this, packageName, activityName);
     };
 
-    // 3) КЛИК: слот определяем сравнением view.getId() с getId() полей (НЕ по индексу).
-    //    Совпал + pkg установлен → обычная задача на display 0; иначе штатный onClick.
+    // 3) КЛИК: «домик» Home → VoyahTune; слот определяем сравнением view.getId() с getId() полей
+    //    (НЕ по индексу). Для слота совпал + pkg установлен → обычная задача на display 0; иначе штатный onClick.
     var mainOnClick = NavigationBar.onClick.overload('android.view.View');
     mainOnClick.implementation = function (view) {
         if (screenOf(this) !== 0) return mainOnClick.call(this, view);
         try {
             var viewId = view.getId();
+            // КОРОТКИЙ ТАП по «домику» Home → главный экран VoyahTune, штатный onClick не вызываем.
+            // Сверяем и id, и саму вьюху: у части вьюх бара id отсутствует (View.NO_ID).
+            var homeView = field(this, "mScreenUpHomeView");
+            if (homeView !== null
+                    && ((viewId !== -1 && viewId === homeView.getId()) || view.equals(homeView))) {
+                openVoyahTune("home tap");
+                return;
+            }
             for (var slot = 1; slot <= 2; slot++) {
                 var slotView = field(this, "mScreenUpItemView" + slot);
                 if (slotView === null || viewId !== slotView.getId()) continue;

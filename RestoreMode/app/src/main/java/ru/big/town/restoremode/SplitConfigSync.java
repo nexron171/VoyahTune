@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 
 import java.util.List;
 
+import ru.big.town.common.ScenarioProtocol;
+
 /**
  * Единая event-driven публикация сохранённой конфигурации в Native. Fullscreen/Dock/steering/DPI/keyboard
  * зеркалируются при изменении, старте и физическом пробуждении без периодического чтения.
@@ -23,6 +25,16 @@ final class SplitConfigSync {
         pushDock(context, prefs);
         pushSteering(context, prefs);
         pushKeyboard(context, prefs);
+        pushScenarios(context, prefs);
+    }
+
+    /** Полный снимок сценариев; движок Native перечитывает его при изменении и на старте. */
+    static void pushScenarios(Context context, SharedPreferences prefs) {
+        Intent i = new Intent(ScenarioProtocol.ACTION_CONFIG);
+        i.setClassName(NATIVE_PKG, "ru.big.town.anative.ScenarioConfigReceiver");
+        i.putExtra(ScenarioProtocol.EXTRA_JSON,
+                ScenarioStore.toJson(ScenarioStore.load(prefs)));
+        context.sendBroadcast(i);
     }
 
     static void pushFullscreenApps(Context context, SharedPreferences prefs) {

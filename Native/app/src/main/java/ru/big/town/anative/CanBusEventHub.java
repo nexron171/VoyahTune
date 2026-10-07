@@ -589,9 +589,9 @@ final class CanBusEventHub {
         }
 
         if (!doorQueryHandler.post(() -> {
-            Integer frontLeft = readDriverDoor(binder);
+            DoorQueryResult doors = readDoorStatus(binder);
             if (!ioHandler.post(() -> finishDriverDoorQuery(
-                    binder, epoch, revision, frontLeft))) {
+                    binder, epoch, revision, doors))) {
                 Log.w(TAG, "Door query completion rejected: hub IO stopped");
             }
         })) {
@@ -601,9 +601,9 @@ final class CanBusEventHub {
     }
 
     private void finishDriverDoorQuery(IBinder binder, long epoch, long revision,
-                                       Integer frontLeft) {
+                                       DoorQueryResult doors) {
         try {
-            if (frontLeft == null) return;
+            if (doors == null) return;
             synchronized (eventLock) {
                 if (activeEpoch != epoch || readyEpoch != epoch || binder != remote
                         || revision != doorRevision) {
@@ -611,7 +611,8 @@ final class CanBusEventHub {
                 }
                 doorRevision++;
                 router.dispatch(CanBusEvent.door(CanBusEvent.Origin.SEED, epoch,
-                        ++nextSequence, SystemClock.elapsedRealtime(), frontLeft));
+                        ++nextSequence, SystemClock.elapsedRealtime(),
+                        doors.frontLeft, doors.mask));
             }
         } finally {
             doorQueryGate.complete();
@@ -619,7 +620,23 @@ final class CanBusEventHub {
         }
     }
 
-    private Integer readDriverDoor(IBinder binder) {
+    /** Результат TX2-снимка дверей: водительская дверь для существующих потребителей + маска всех. */
+    private static final class DoorQueryResult {
+        final int frontLeft;
+        final int mask;
+
+        DoorQueryResult(int frontLeft, int mask) {
+            this.frontLeft = frontLeft;
+            this.mask = mask;
+        }
+    }
+
+    /**
+     * Снимок всех дверей одним TX2-запросом. Порядок полей — как в {@code DoorStatus.toString()}:
+     * bonnetDoor, fLDoor, fRDoor, loadSpace, rLDoor, rRDoor. На проверенной машине {@code loadSpace}
+     * штатно приходит как -1 (поле не поддерживается), поэтому его недоступность не считается сбоем.
+     */
+    private DoorQueryResult readDoorStatus(IBinder binder) {
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -627,8 +644,14 @@ final class CanBusEventHub {
             if (!binder.transact(TX_GET_DOOR_STATUS, data, reply, 0)) return null;
             reply.readException();
             if (reply.readInt() == 0) return null;
-            reply.readInt(); // bonnetDoor
-            return reply.readInt(); // fLDoor
+            int hood = reply.readInt();
+            int frontLeft = reply.readInt();
+            int frontRight = reply.readInt();
+            int loadSpace = reply.readInt();
+            int rearLeft = reply.readInt();
+            int rearRight = reply.readInt();
+            return new DoorQueryResult(frontLeft,
+                    doorMask(hood, frontLeft, frontRight, loadSpace, rearLeft, rearRight));
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "getDoorStatus failed: " + e.getMessage());
             return null;
@@ -636,6 +659,25 @@ final class CanBusEventHub {
             data.recycle();
             reply.recycle();
         }
+    }
+
+    /**
+     * Маска открытых дверей. Если недоступно основное поле (любая из четырёх дверей или капот),
+     * событие помечается {@link CanBusEvent#DOOR_UNKNOWN} — потребители не угадывают состояние.
+     */
+    private static int doorMask(int hood, int frontLeft, int frontRight, int loadSpace,
+                                int rearLeft, int rearRight) {
+        if (hood < 0 || frontLeft < 0 || frontRight < 0 || rearLeft < 0 || rearRight < 0) {
+            return CanBusEvent.DOOR_UNKNOWN;
+        }
+        int mask = 0;
+        if (hood > 0) mask |= CanBusEvent.DOOR_HOOD;
+        if (frontLeft > 0) mask |= CanBusEvent.DOOR_DRIVER;
+        if (frontRight > 0) mask |= CanBusEvent.DOOR_PASSENGER;
+        if (loadSpace > 0) mask |= CanBusEvent.DOOR_BOOT;
+        if (rearLeft > 0) mask |= CanBusEvent.DOOR_REAR_LEFT;
+        if (rearRight > 0) mask |= CanBusEvent.DOOR_REAR_RIGHT;
+        return mask;
     }
 
     private void acceptVehicleStateQueryRequest() {
@@ -691,12 +733,12 @@ final class CanBusEventHub {
         startVehicleStateQueryIfNeeded();
     }
 
-    private void routeDoor(long epoch, int frontLeft) {
+    private void routeDoor(long epoch, int frontLeft, int doorMask) {
         synchronized (eventLock) {
             if (epoch != activeEpoch) return;
             doorRevision++;
             routeLocked(CanBusEvent.door(CanBusEvent.Origin.LIVE, epoch,
-                    ++nextSequence, SystemClock.elapsedRealtime(), frontLeft));
+                    ++nextSequence, SystemClock.elapsedRealtime(), frontLeft, doorMask));
         }
     }
 
@@ -797,8 +839,14 @@ final class CanBusEventHub {
                         if (!router.hasInterest(CanBusEventRouter.INTEREST_DOOR)) return true;
                         data.enforceInterface(CALLBACK_DESCRIPTOR);
                         if (data.readInt() == 0) return true;
-                        data.readInt(); // bonnetDoor
-                        routeDoor(epoch, data.readInt()); // fLDoor
+                        int hood = data.readInt();
+                        int frontLeft = data.readInt();
+                        int frontRight = data.readInt();
+                        int loadSpace = data.readInt();
+                        int rearLeft = data.readInt();
+                        int rearRight = data.readInt();
+                        routeDoor(epoch, frontLeft, doorMask(hood, frontLeft, frontRight,
+                                loadSpace, rearLeft, rearRight));
                         return true;
                     }
                     case CB_AIR_CONDITION: {

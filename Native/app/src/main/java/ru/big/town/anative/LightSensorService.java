@@ -27,6 +27,7 @@ import androidx.core.app.NotificationCompat;
 
 import java.lang.ref.WeakReference;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -79,6 +80,46 @@ public class LightSensorService extends Service {
     // Broadcast для передачи уровня датчика в RestoreMode UI
     public static final String ACTION_LUX_UPDATE  = "ru.big.town.anative.LUX_UPDATE";
     public static final String EXTRA_SENSOR_LEVEL = "sensorLevel"; // int, -1 если датчик недоступен
+
+    /** Наблюдатель уровня датчика для сценариев; вызывается на главном потоке сервиса. */
+    public interface LevelListener {
+        void onLightLevel(int level);
+    }
+
+    private static final String PREF_OBSERVE_ONLY = "lightObserveOnly";
+    private static final CopyOnWriteArrayList<LevelListener> LEVEL_LISTENERS =
+            new CopyOnWriteArrayList<>();
+    /**
+     * Наблюдение без управления фарами: сервис держит подписку на датчик и публикует уровень,
+     * но не отправляет команды света. Включается, когда уровень нужен только сценариям.
+     */
+    private static volatile boolean observeOnly;
+    private static volatile int lastKnownLevel = -1;
+
+    /** Последний известный уровень 0–7 или -1, если датчик недоступен. */
+    static int lastKnownLevel() {
+        return lastKnownLevel;
+    }
+
+    static void addLevelListener(LevelListener listener) {
+        if (listener != null) LEVEL_LISTENERS.addIfAbsent(listener);
+    }
+
+    static void removeLevelListener(LevelListener listener) {
+        if (listener != null) LEVEL_LISTENERS.remove(listener);
+    }
+
+    /**
+     * Режим «только наблюдение». Флаг живёт в процессе и дублируется в NativePrefs, чтобы
+     * пережить перезапуск сервиса системой.
+     */
+    static void setObserveOnly(Context context, boolean value) {
+        observeOnly = value;
+        if (context != null) {
+            context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                    .edit().putBoolean(PREF_OBSERVE_ONLY, value).apply();
+        }
+    }
 
     // Период страховочного опроса: ловит пропущенный колбэк, CAN шлёт только при
     // реальной смене цели — холостого трафика не создаёт.
@@ -883,6 +924,8 @@ public class LightSensorService extends Service {
     // -------------------------------------------------------------------------
 
     private void requestSettingsForApply(SensorApplyRequest request) {
+        // В режиме наблюдения пороги света не нужны: никаких чтений провайдера и записей в CAN.
+        if (observeOnly) return;
         if (!isSettingsRequestCurrentOnMain(request)) return;
         LightSettingsPolicy.Decision decision = settingsDecision(request);
         if (decision != LightSettingsPolicy.Decision.NEED_THRESHOLDS) {
@@ -1102,6 +1145,10 @@ public class LightSensorService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.i(TAG, "onStartCommand()");
+        // Режим наблюдения переживает перезапуск сервиса системой: SetModesService кладёт флаг
+        // в NativePrefs, чтобы сервис не начал управлять фарами при выключенном автосвете.
+        observeOnly = getSharedPreferences("NativePrefs", MODE_PRIVATE)
+                .getBoolean(PREF_OBSERVE_ONLY, false);
         return START_STICKY;
     }
 
@@ -1114,6 +1161,13 @@ public class LightSensorService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy() — headlightsOn=" + headlightsOn);
         destroyed = true;
+        lastKnownLevel = -1;
+        for (LevelListener listener : LEVEL_LISTENERS) {
+            try {
+                listener.onLightLevel(-1);
+            } catch (RuntimeException ignored) {
+            }
+        }
         settingsRequestGate.close();
         LatestIntDelivery sensorDelivery = sensorCallbackDelivery;
         sensorCallbackDelivery = null;
@@ -1233,7 +1287,15 @@ public class LightSensorService extends Service {
         lastSensorEpoch = epoch;
         lastSensorRevision = revision;
         lastSensorLevel = level;
+        lastKnownLevel = level;
         broadcastUpdate(level);
+        for (LevelListener listener : LEVEL_LISTENERS) {
+            try {
+                listener.onLightLevel(level);
+            } catch (RuntimeException ignored) {
+                // Один потребитель не должен ломать публикацию уровня для остальных.
+            }
+        }
     }
 
     private boolean applySensorRequest(SensorApplyRequest request, int level,
@@ -1305,6 +1367,12 @@ public class LightSensorService extends Service {
     }
 
     private boolean commit(boolean targetOn, String reason) {
+        // Единственная точка записи света. В режиме наблюдения ничего не отправляем: сценариям
+        // нужен только уровень датчика, а автосвет выключен.
+        if (observeOnly) {
+            Log.i(TAG, "commit(" + (targetOn ? "ближний" : "выкл") + ") пропущен: наблюдение — " + reason);
+            return true;
+        }
         Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "выкл") + ") — " + reason);
         final long automaticToken = MANUAL_AUTO_GATE.beginAutomaticDecision();
         if (automaticToken == ManualAutoGate.INVALID_AUTOMATIC_TOKEN) {

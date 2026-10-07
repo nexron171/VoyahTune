@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Карточка запущенного приложения в «Диспетчере задач»: булавка фиксации (приложение не закроется
+     кнопкой «Закрыть все»), иконка (тап → переключиться на задачу), имя приложения, бейдж «в виджете»
+     для копии внутри VirtualDisplay виджета и кнопка «Закрыть» в стиле виджета приложения на главном
+     экране. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/taskCard"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/card_dark_ripple"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="8dp">
+
+    <ImageButton
+        android:id="@+id/taskCardPin"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/nav_back_circle_bg"
+        android:contentDescription="Зафиксировать: приложение не закроется кнопкой «Закрыть все»"
+        android:padding="12dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_pin" />
+
+    <ImageView
+        android:id="@+id/taskCardIcon"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:layout_marginTop="10dp"
+        android:contentDescription="Переключиться на приложение"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/taskCardLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="2"
+        android:textColor="#FFFFFF"
+        android:textSize="22px" />
+
+    <TextView
+        android:id="@+id/taskCardWidget"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/widget_badge_bg"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="2dp"
+        android:gravity="center"
+        android:text="в виджете"
+        android:textColor="#FFFFFF"
+        android:textSize="18px"
+        android:visibility="gone" />
+
+    <ImageButton
+        android:id="@+id/taskCardClose"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/nav_back_circle_bg"
+        android:contentDescription="Закрыть приложение"
+        android:padding="12dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_close" />
+</LinearLayout>
