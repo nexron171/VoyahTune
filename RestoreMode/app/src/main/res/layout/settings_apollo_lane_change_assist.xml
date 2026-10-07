@@ -12,6 +12,15 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingVertical="18dp">
+        <ImageView
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginEnd="16dp"
+            android:padding="8dp"
+            android:src="@drawable/settings_icon_lane_change"
+            android:background="@drawable/settings_icon"
+            android:scaleType="fitCenter"
+            android:importantForAccessibility="no" />
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
@@ -27,7 +36,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Сохранённое целевое значение. Проверка Parking не выполняется."
+                android:text="Функция автоматического перестроения при активном круиз-контроле при активации сигнала поворотника"
                 android:textSize="17sp"
                 android:textColor="#9aaac0"
                 android:includeFontPadding="false"

@@ -61,7 +61,7 @@
                 android:maxLines="3"
                 android:gravity="start|center_vertical"
                 android:tag="settings.steering-tab"
-                android:drawableStart="@drawable/settings_icon_car"
+                android:drawableStart="@drawable/settings_icon_camera"
                 android:drawablePadding="12dp" />
             <RadioButton
                 android:id="@+id/settingsVoiceTab"

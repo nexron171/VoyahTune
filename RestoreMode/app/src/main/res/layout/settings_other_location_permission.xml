@@ -16,7 +16,7 @@
             android:layout_width="46dp"
             android:layout_height="46dp"
             android:padding="9dp"
-            android:src="@drawable/settings_icon_trip"
+            android:src="@drawable/settings_icon_satellite"
             android:background="@drawable/settings_icon"
             android:importantForAccessibility="no"
             android:layout_marginEnd="16dp" />

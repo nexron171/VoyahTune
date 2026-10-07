@@ -99,7 +99,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Удержание заряда батареи"
+                    android:text="Отключение сна автомобиля при закрытии"
                     android:textSize="16sp"
                     android:textColor="#95a5bd"
                     android:includeFontPadding="false"
