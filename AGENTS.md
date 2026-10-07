@@ -29,6 +29,8 @@ VoyahTune — Android-приложения и системная интегра�
 
 - Возможности и использование: `readme.md`, `Docs/voice-commands.md`.
 - Голосовой помощник: `Docs/voice-control.md`.
+- Диспетчер задач и плитка со счётчиком запущенных приложений: `Docs/task-manager.md`.
+- Сценарии: `Docs/scenarios.md`.
 - Установщик: `Installer/README.md`, `Docs/installer-architecture.md`, `Docs/installer-classic-port.md`.
 - Состав релиза и выпуск: `Docs/installer-payload.md`, `Docs/releasing.md`, `Packaging/README.md`.
 - Для изменений конкретной функции используй соответствующее описание в `Docs/`; весь каталог перед каждой правкой читать не нужно.

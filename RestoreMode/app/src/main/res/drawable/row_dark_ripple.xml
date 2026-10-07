@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Строка списка без подложки: в покое ничего не рисуется, подсветка — только при нажатии. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#33ffffff" />

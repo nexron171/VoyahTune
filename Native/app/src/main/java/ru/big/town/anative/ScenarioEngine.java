@@ -1,0 +1,286 @@
+package ru.big.town.anative;
+
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.util.Log;
+import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import ru.big.town.common.ScenarioProtocol;
+
+/**
+ * Движок пользовательских сценариев: событийные триггеры (селектор, двери, освещённость),
+ * проверка условий и запуск последовательности действий.
+ *
+ * <p>Работает в процессе Native, поэтому сценарии срабатывают и при закрытом RestoreMode.
+ * Определения приходят снимком из RestoreMode через {@link ScenarioConfigReceiver}; запуск
+ * вручную (плитка/голос) — через {@link #runNow(String)}.</p>
+ */
+final class ScenarioEngine {
+    private static final String TAG = "$$$ ScenarioEngine $$$";
+    /** Антидребезг повторного запуска одного сценария. */
+    private static final long MIN_RUN_INTERVAL_MS = 5_000L;
+
+    private static final OemVehicleStateTransport.StateKey SOC_KEY =
+            new OemVehicleStateTransport.StateKey(
+                    PowerHoldPolicy.BMS_SOC_DISPLAY, PowerHoldPolicy.BMS_SOC_DISPLAY_ID);
+
+    private final SetModesService service;
+    private final ScenarioRunner runner;
+    private final HandlerThread thread;
+    private final Handler handler;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService conditionExecutor = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "ScenarioConditions");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private volatile List<ScenarioDefinition> scenarios = Collections.emptyList();
+    private volatile boolean lightListening;
+
+    /* Поля ниже читаются и пишутся только на handler движка. */
+    private final Set<String> running = new HashSet<>();
+    private final Map<String, Long> lastRunElapsed = new HashMap<>();
+    private boolean gearSnapshotSeen;
+    private boolean doorSnapshotSeen;
+    private ScenarioPolicy.LightState lastLight = ScenarioPolicy.LightState.HOLD;
+
+    private final GearStateController.Subscription gearSubscription;
+    private final DoorsStateController.Subscription doorSubscription;
+    private final LightSensorService.LevelListener levelListener = this::onLightLevel;
+
+    ScenarioEngine(SetModesService service) {
+        this.service = service;
+        this.runner = new ScenarioRunner(service);
+        thread = new HandlerThread("ScenarioEngine");
+        thread.start();
+        handler = new Handler(thread.getLooper());
+        VehicleStateControllers states = VehicleStateControllers.get(service);
+        gearSubscription = states.gear().subscribe(handler, this::onGear);
+        doorSubscription = states.doors().subscribe(handler, this::onDoors);
+    }
+
+    void close() {
+        gearSubscription.close();
+        doorSubscription.close();
+        stopLightListening();
+        conditionExecutor.shutdownNow();
+        thread.quitSafely();
+    }
+
+    /** Полный снимок определений из RestoreMode. Пустая строка выключает все сценарии. */
+    void reload(String json) {
+        List<ScenarioDefinition> parsed = ScenarioDefinition.parse(json);
+        scenarios = parsed;
+        updateLightListening();
+        Log.i(TAG, "Загружено сценариев: " + parsed.size());
+    }
+
+    /** Нужен ли движку уровень датчика освещённости (хотя бы одному включённому сценарию). */
+    boolean usesLightLevel() {
+        for (ScenarioDefinition scenario : scenarios) {
+            if (scenario.enabled && scenario.usesLight()) return true;
+        }
+        return false;
+    }
+
+    /** Запуск вручную: плитка на главном экране или голосовая команда. */
+    boolean runNow(String id) {
+        if (id == null) return false;
+        for (ScenarioDefinition scenario : scenarios) {
+            if (!scenario.id.equals(id)) continue;
+            if (!scenario.enabled || !scenario.hasSteps()) {
+                Log.w(TAG, "Сценарий " + id + " выключен или пуст");
+                return false;
+            }
+            handler.post(() -> start(scenario, "manual", false));
+            return true;
+        }
+        Log.w(TAG, "Сценарий не найден: " + id);
+        return false;
+    }
+
+    boolean testRun(String id) {
+        if (id == null) return false;
+        for (ScenarioDefinition scenario : scenarios) {
+            if (!scenario.id.equals(id)) continue;
+            if (!scenario.hasSteps()) {
+                Log.w(TAG, "Сценарий " + id + " пуст");
+                toast("В сценарии нет действий");
+                return false;
+            }
+            handler.post(() -> evaluateAndRun(scenario, "тест", true));
+            return true;
+        }
+        Log.w(TAG, "Сценарий не найден: " + id);
+        toast("Сценарий не найден");
+        return false;
+    }
+
+    // --- Триггеры ---
+
+    private void onGear(int gearValue) {
+        if (!gearSnapshotSeen) {
+            // Первое событие — снимок при подписке; сценарий должен реагировать только на смену.
+            gearSnapshotSeen = true;
+            return;
+        }
+        for (ScenarioDefinition scenario : enabledScenarios()) {
+            if (ScenarioPolicy.matchesGear(scenario, gearValue)) {
+                evaluateAndRun(scenario, "селектор " + gearValue);
+            }
+        }
+    }
+
+    private void onDoors(int doorMask) {
+        if (!doorSnapshotSeen) {
+            doorSnapshotSeen = true;
+            return;
+        }
+        for (ScenarioDefinition scenario : enabledScenarios()) {
+            if (ScenarioPolicy.matchesDoor(scenario, doorMask)) {
+                evaluateAndRun(scenario, "двери " + doorMask);
+            }
+        }
+    }
+
+    private void onLightLevel(int level) {
+        handler.post(() -> {
+            ScenarioPolicy.LightState state = ScenarioPolicy.lightState(level);
+            ScenarioPolicy.LightState previous = lastLight;
+            lastLight = state;
+            if (state == ScenarioPolicy.LightState.HOLD || state == previous) return;
+            for (ScenarioDefinition scenario : enabledScenarios()) {
+                if (ScenarioPolicy.matchesLight(scenario, previous, state)) {
+                    evaluateAndRun(scenario, "освещённость " + state);
+                }
+            }
+        });
+    }
+
+    // --- Проверка условий и запуск ---
+
+    private void evaluateAndRun(ScenarioDefinition scenario, String reason) {
+        evaluateAndRun(scenario, reason, false);
+    }
+
+    private void evaluateAndRun(ScenarioDefinition scenario, String reason, boolean test) {
+        if (running.contains(scenario.id)) {
+            if (test) toast("Сценарий уже выполняется");
+            return;
+        }
+        if (scenario.conditions.isEmpty()) {
+            start(scenario, reason, test);
+            return;
+        }
+        conditionExecutor.execute(() -> {
+            ScenarioPolicy.Snapshot snapshot = captureSnapshot(scenario);
+            String failure = ScenarioPolicy.firstFailingCondition(scenario, snapshot);
+            handler.post(() -> {
+                if (failure == null) {
+                    start(scenario, reason, test);
+                } else {
+                    Log.i(TAG, "«" + scenario.name + "» (" + reason + "): условия не выполнены — " + failure);
+                    toast("Сценарий не выполнен из-за несоблюдения условия: " + failure);
+                }
+            });
+        });
+    }
+
+    private void toast(String text) {
+        main.post(() -> Toast.makeText(service, text, Toast.LENGTH_LONG).show());
+    }
+
+    /** Только handler движка: держит running/lastRunElapsed без блокировок. */
+    private void start(ScenarioDefinition scenario, String reason, boolean test) {
+        if (running.contains(scenario.id)) return;
+        long now = SystemClock.elapsedRealtime();
+        Long last = lastRunElapsed.get(scenario.id);
+        if (!test && last != null && now - last < MIN_RUN_INTERVAL_MS) return;
+        running.add(scenario.id);
+        lastRunElapsed.put(scenario.id, now);
+        Log.i(TAG, "Запуск «" + scenario.name + "»: " + reason);
+        runner.run(scenario, id -> handler.post(() -> {
+            running.remove(id);
+            toast("Сценарий " + scenario.name + " выполнен");
+        }));
+    }
+
+    /** Снимок для условий; вызывается на фоновом потоке (чтение SOC — блокирующий Binder). */
+    private ScenarioPolicy.Snapshot captureSnapshot(ScenarioDefinition scenario) {
+        VehicleStateControllers states = VehicleStateControllers.get(service);
+        boolean needLight = ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_LIGHT);
+        boolean needTemperature = ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_TEMP_OUT);
+        String driveMode = null;
+        if (ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_DRIVE_MODE)) {
+            ModeFeedbackDecoder.Feedback feedback = ModeFeedbackDecoder.decode(
+                    ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID, states.latestDriveModeValue());
+            if (feedback != null) driveMode = feedback.mode;
+        }
+        Integer soc = ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_SOC)
+                ? readSoc() : null;
+        int temperature = needTemperature
+                ? states.latestAmbientTemperature()
+                : VehicleStateControllers.NO_AMBIENT_TEMPERATURE;
+        Calendar calendar = Calendar.getInstance();
+        int minutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE);
+        // ISO: понедельник 1 … воскресенье 7.
+        int day = ((calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1;
+        return new ScenarioPolicy.Snapshot(
+                needLight ? LightSensorService.lastKnownLevel() : -1,
+                temperature == VehicleStateControllers.NO_AMBIENT_TEMPERATURE
+                        ? ScenarioPolicy.Snapshot.UNKNOWN : temperature,
+                soc == null ? -1 : soc,
+                driveMode, minutes, day);
+    }
+
+    private Integer readSoc() {
+        try {
+            Map<OemVehicleStateTransport.StateKey, Integer> values =
+                    OemVehicleStateTransport.readVehicleStates(
+                            service, Collections.singletonList(SOC_KEY));
+            return values == null ? null : values.get(SOC_KEY);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Чтение заряда не удалось: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private List<ScenarioDefinition> enabledScenarios() {
+        List<ScenarioDefinition> result = new ArrayList<>();
+        for (ScenarioDefinition scenario : scenarios) {
+            if (scenario.enabled && scenario.hasSteps()) result.add(scenario);
+        }
+        return result;
+    }
+
+    private void updateLightListening() {
+        boolean needed = usesLightLevel();
+        if (needed && !lightListening) {
+            LightSensorService.addLevelListener(levelListener);
+            lightListening = true;
+        } else if (!needed && lightListening) {
+            stopLightListening();
+        }
+    }
+
+    private void stopLightListening() {
+        if (!lightListening) return;
+        LightSensorService.removeLevelListener(levelListener);
+        lightListening = false;
+        handler.post(() -> lastLight = ScenarioPolicy.LightState.HOLD);
+    }
+}

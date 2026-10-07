@@ -19,6 +19,18 @@ final class CanBusEvent {
         REPLAY
     }
 
+    /** Бит открытой двери в маске события {@link Kind#DOOR} (поле {@code second}). */
+    static final int DOOR_DRIVER = 1;
+    static final int DOOR_PASSENGER = 1 << 1;
+    static final int DOOR_REAR_LEFT = 1 << 2;
+    static final int DOOR_REAR_RIGHT = 1 << 3;
+    static final int DOOR_BOOT = 1 << 4;
+    static final int DOOR_HOOD = 1 << 5;
+    /** Хотя бы одно поле двери недоступно (-1): остальным битам этого события доверять нельзя. */
+    static final int DOOR_UNKNOWN = 1 << 6;
+    static final int DOOR_ALL = DOOR_DRIVER | DOOR_PASSENGER | DOOR_REAR_LEFT | DOOR_REAR_RIGHT
+            | DOOR_BOOT | DOOR_HOOD;
+
     final Kind kind;
     final Origin origin;
     final long connectionEpoch;
@@ -58,9 +70,15 @@ final class CanBusEvent {
                 elapsed, (int) Math.min(Integer.MAX_VALUE, closedEpoch), 0, 0);
     }
 
+    /** Совместимая форма без маски: используется там, где важна только водительская дверь. */
     static CanBusEvent door(Origin origin, long epoch, long sequence, long elapsed, int frontLeft) {
+        return door(origin, epoch, sequence, elapsed, frontLeft, 0);
+    }
+
+    static CanBusEvent door(Origin origin, long epoch, long sequence, long elapsed,
+                            int frontLeft, int doorMask) {
         return new CanBusEvent(Kind.DOOR, origin, epoch, sequence,
-                elapsed, frontLeft, 0, 0);
+                elapsed, frontLeft, doorMask, 0);
     }
 
     static CanBusEvent gear(Origin origin, long epoch, long sequence, long elapsed, int value) {

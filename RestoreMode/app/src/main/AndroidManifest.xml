@@ -71,6 +71,13 @@
             android:name=".LoggingActivity"
             android:exported="false" />
 
+        <!-- Диспетчер задач. exported без permission: его открывает и хук родного лаунчера (долгий тап
+             по нижней кнопке дока), а у процесса лаунчера нет нашей signature-пермиссии. -->
+        <activity
+            android:name=".TaskManagerActivity"
+            android:excludeFromRecents="true"
+            android:exported="true" />
+
         <!-- Native возвращает сюда результат drag. Signature-permission не позволяет сторонним
              приложениям подменять пропорции пресетов. -->
         <receiver

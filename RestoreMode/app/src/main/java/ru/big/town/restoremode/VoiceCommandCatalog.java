@@ -77,6 +77,16 @@ final class VoiceCommandCatalog {
         return out;
     }
 
+    /**
+     * Можно ли построить точную голосовую фразу из этого текста: нет отрицаний и разделителей
+     * («не», «или», «если», «затем»…) и есть хотя бы одно значимое слово. Используется для
+     * проверки имён сценариев, которые становятся частью голосовой команды.
+     */
+    static boolean phraseUsable(String text) {
+        Set<String> set = words(text);
+        return set != null && !set.isEmpty();
+    }
+
     static Command match(List<Command> commands, String text) {
         Set<String> input = words(text);
         if (input == null || input.isEmpty()) return null;

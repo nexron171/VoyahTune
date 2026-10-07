@@ -13,17 +13,22 @@ import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.util.Log;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 final class WidgetSupport {
     private static final String TAG = "NativeWidgets";
     // Ключ SharedPreferences для сохранения пакета вручную запущенного приложения.
     // Используется для автозапуска при повторном открытии MainActivity (когда у плитки отключён автозапуск).
     static final String PREF_LAST_MANUAL_APP = "lastManualApp";
+    /** CSV зафиксированных приложений: их не закрывает «Закрыть все» (диспетчер и «Дополнительно»). */
+    static final String PREF_PINNED_APPS = "pinnedApps";
+    private static final String PREF_FILE = "NativePrefs";
     static final String EXTRA_PACKAGE = "package";
     static final String ACTION_OPEN_APP = "ru.big.town.anative.WIDGET_OPEN_APP";
     static final String ACTION_CLOSE_APP = "ru.big.town.anative.WIDGET_CLOSE_APP";
@@ -33,6 +38,9 @@ final class WidgetSupport {
     static final String ACTION_SIMPLE_LAUNCH = "ru.big.town.anative.WIDGET_SIMPLE_LAUNCH";
     // Развернуть приложение на весь экран (fullscreen) — через SplitHostActivity single pane.
     static final String ACTION_FULLSCREEN_LAUNCH = "ru.big.town.anative.WIDGET_FULLSCREEN_LAUNCH";
+    // Скрытое поле RunningTaskInfo.displayId: разрешается один раз, как в AppDisplayLauncher.
+    private static Field displayField;
+    private static boolean displayFieldResolved;
 
     private WidgetSupport() {}
 
@@ -56,26 +64,81 @@ final class WidgetSupport {
         }
     }
 
-    static List<RunningApp> runningApps(Context context) {
+    /**
+     * Запущенные сторонние задачи: пакет, подпись, id задачи (нужен диспетчеру для переключения) и
+     * признак «приложение живёт внутри виджета». Задача на VirtualDisplay виджета — обычная задача,
+     * поэтому она попадает сюда наравне с задачами физических экранов.
+     */
+    static List<RunningApp> runningApps(Context context, Set<Integer> widgetDisplays) {
         ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        Map<String, RunningApp> result = new LinkedHashMap<>();
         if (manager == null) return new ArrayList<>();
+        List<TaskListPolicy.TaskCandidate> candidates = new ArrayList<>();
         for (ActivityManager.RunningTaskInfo task : manager.getRunningTasks(100)) {
             ComponentName component = task.topActivity != null ? task.topActivity : task.baseActivity;
             if (component == null || !isExternal(context, component.getPackageName())) continue;
-            String packageName = component.getPackageName();
-            if (!result.containsKey(packageName)) {
-                CharSequence label;
-                try {
-                    label = context.getPackageManager().getApplicationLabel(
-                            context.getPackageManager().getApplicationInfo(packageName, 0));
-                } catch (PackageManager.NameNotFoundException e) {
-                    label = packageName;
-                }
-                result.put(packageName, new RunningApp(packageName, label.toString()));
+            candidates.add(new TaskListPolicy.TaskCandidate(
+                    component.getPackageName(), task.id, displayIdOf(task)));
+        }
+        List<RunningApp> apps = new ArrayList<>();
+        for (TaskListPolicy.SelectedApp selected : TaskListPolicy.select(candidates, widgetDisplays)) {
+            apps.add(new RunningApp(selected.packageName, labelOf(context, selected.packageName),
+                    selected.taskId, selected.widget));
+        }
+        return apps;
+    }
+
+    /** Подпись приложения; если пакет не устанавливается — его имя как есть. */
+    static String labelOf(Context context, String packageName) {
+        try {
+            return context.getPackageManager().getApplicationLabel(
+                    context.getPackageManager().getApplicationInfo(packageName, 0)).toString();
+        } catch (PackageManager.NameNotFoundException e) {
+            return packageName;
+        }
+    }
+
+    /**
+     * Пакет запущен только внутри виджета: все его задачи на дисплеях виджетов, либо задач вовсе
+     * нет, но пакет числится в реестре виджетов Native. Переключать такое приложение через
+     * {@code moveTaskToFront} бессмысленно — задача поднимется на самом VirtualDisplay.
+     */
+    static boolean isWidgetOnly(Context context, String packageName, Set<Integer> widgetDisplays,
+                               boolean inWidgetRegistry) {
+        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (manager == null) return inWidgetRegistry;
+        List<ActivityManager.RunningTaskInfo> running;
+        try {
+            running = manager.getRunningTasks(100);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "isWidgetOnly: " + e.getMessage());
+            return inWidgetRegistry;
+        }
+        List<TaskListPolicy.TaskCandidate> tasks = new ArrayList<>();
+        for (ActivityManager.RunningTaskInfo task : running) {
+            ComponentName component = task.topActivity != null ? task.topActivity : task.baseActivity;
+            if (component == null) continue;
+            tasks.add(new TaskListPolicy.TaskCandidate(
+                    component.getPackageName(), task.id, displayIdOf(task)));
+        }
+        return TaskListPolicy.widgetOnly(tasks, packageName, widgetDisplays, inWidgetRegistry);
+    }
+
+    /** {@code RunningTaskInfo.displayId} скрыт в этом SDK — читаем полем, как AppDisplayLauncher. */
+    private static int displayIdOf(ActivityManager.RunningTaskInfo task) {
+        if (!displayFieldResolved) {
+            displayFieldResolved = true;
+            try {
+                displayField = task.getClass().getField("displayId");
+            } catch (Exception e) {
+                Log.w(TAG, "RunningTaskInfo.displayId недоступен: " + e.getMessage());
             }
         }
-        return new ArrayList<>(result.values());
+        if (displayField == null) return TaskListPolicy.UNKNOWN_DISPLAY;
+        try {
+            return displayField.getInt(task);
+        } catch (Exception e) {
+            return TaskListPolicy.UNKNOWN_DISPLAY;
+        }
     }
 
     static List<LaunchableApp> launchableApps(Context context) {
@@ -129,9 +192,63 @@ final class WidgetSupport {
         }
     }
 
+    /**
+     * Вывести задачу приложения на передний план — переключение из диспетчера задач.
+     * Задача остаётся на своём физическом дисплее (все видимые задачи у нас на display 0).
+     */
+    static boolean moveToFront(Context context, String packageName) {
+        if (packageName == null || packageName.isEmpty() || !isExternal(context, packageName)) return false;
+        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (manager == null) return false;
+        try {
+            for (ActivityManager.RunningTaskInfo task : manager.getRunningTasks(100)) {
+                ComponentName component = task.topActivity != null ? task.topActivity : task.baseActivity;
+                if (component != null && packageName.equals(component.getPackageName())) {
+                    manager.moveTaskToFront(task.id, ActivityManager.MOVE_TASK_NO_USER_ACTION);
+                    Log.i(TAG, "moveToFront " + packageName + " task=" + task.id);
+                    return true;
+                }
+            }
+            Log.w(TAG, "moveToFront " + packageName + ": задачи нет в списке");
+        } catch (Exception e) {
+            Log.w(TAG, "moveToFront " + packageName + ": " + e.getMessage());
+        }
+        return false;
+    }
+
     static void stopAllApps(Context context) {
         for (ApplicationInfo info : context.getPackageManager().getInstalledApplications(0)) {
-            if ((info.flags & ApplicationInfo.FLAG_SYSTEM) == 0) stopApp(context, info.packageName);
+            if ((info.flags & ApplicationInfo.FLAG_SYSTEM) == 0 && !isPinned(context, info.packageName)) {
+                stopApp(context, info.packageName);
+            }
+        }
+    }
+
+    /** Зафиксированные приложения (CSV) — их не закрывает «Закрыть все». */
+    static String pinnedAppsCsv(Context context) {
+        try {
+            return PinnedAppsPolicy.normalizeCsv(context
+                    .getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+                    .getString(PREF_PINNED_APPS, ""));
+        } catch (Exception e) {
+            Log.w(TAG, "pinnedAppsCsv: " + e.getMessage());
+            return "";
+        }
+    }
+
+    static boolean isPinned(Context context, String packageName) {
+        return PinnedAppsPolicy.contains(pinnedAppsCsv(context), packageName);
+    }
+
+    static void setPinned(Context context, String packageName, boolean pinned) {
+        if (packageName == null || packageName.isEmpty()) return;
+        String next = PinnedAppsPolicy.setPinned(pinnedAppsCsv(context), packageName, pinned);
+        try {
+            context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+                    .edit().putString(PREF_PINNED_APPS, next).apply();
+            Log.i(TAG, "setPinned " + packageName + " pinned=" + pinned);
+        } catch (Exception e) {
+            Log.w(TAG, "setPinned: " + e.getMessage());
         }
     }
 
@@ -180,7 +297,16 @@ final class WidgetSupport {
     static final class RunningApp {
         final String packageName;
         final String label;
-        RunningApp(String packageName, String label) { this.packageName = packageName; this.label = label; }
+        /** id задачи (RunningTaskInfo.id) — диспетчер задач переключается по нему. */
+        final int taskId;
+        /** Задача живёт на дисплее виджета: на физическом экране задачи нет. */
+        final boolean widget;
+        RunningApp(String packageName, String label, int taskId, boolean widget) {
+            this.packageName = packageName;
+            this.label = label;
+            this.taskId = taskId;
+            this.widget = widget;
+        }
     }
 
     static final class LaunchableApp {

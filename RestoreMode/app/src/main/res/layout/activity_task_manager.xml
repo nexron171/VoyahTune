@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- «Диспетчер задач»: ряд карточек запущенных приложений + карточка «Закрыть все приложения».
+     Слева остаётся полоса родного дока: отступ задаётся в TaskManagerActivity (как в MainActivity). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/taskManagerRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="12dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Диспетчер задач"
+                android:textColor="#FFFFFF"
+                android:textSize="26px" />
+
+            <ImageButton
+                android:id="@+id/taskManagerClose"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:background="@drawable/nav_back_circle_bg"
+                android:contentDescription="Закрыть"
+                android:padding="12dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_close" />
+        </LinearLayout>
+
+        <HorizontalScrollView
+            android:id="@+id/taskManagerScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:overScrollMode="never"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/taskManagerCards"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/taskManagerEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Нет запущенных приложений"
+            android:textColor="#AAAAAA"
+            android:textSize="30px"
+            android:visibility="gone" />
+    </LinearLayout>
+</FrameLayout>

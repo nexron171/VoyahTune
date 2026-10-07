@@ -62,7 +62,9 @@ import java.util.concurrent.RejectedExecutionException;
 public class AdvanceActivity extends AppCompatActivity {
     static final String EXTRA_SECTION = "settingsSection";
     static final int SECTION_VOICE = 7;
+    static final int SECTION_SCENARIOS = 8;
     private VoiceSettingsPage voiceSettings;
+    private ScenarioSettingsPage scenarioSettings;
     private EditText canCommandsEditor;
     private ImageButton buttonBack;
     private NumberPicker pickerCustomCommandCount;
@@ -73,16 +75,16 @@ public class AdvanceActivity extends AppCompatActivity {
     // Навигация: 0 главный экран, 1 настройки автомобиля (+комфорт), 2 приложения и разделение экрана,
     //            3 Apollo Tech, 4 команды (видимость настраивается), 5 кнопки на руле, 6 другое
     private TextView navMainScreen, navCustomCommands, navDriveModes, navSplitScreen, navApolloTech,
-            navSteeringButtons, navOther, navVoiceControl;
+            navSteeringButtons, navOther, navVoiceControl, navScenarios;
     private View pageMainScreen, pageCustomCommands, pageDriveModes, pageSplitScreen, pageApolloTech,
-            pageSteeringButtons, pageOther, pageVoiceControl;
+            pageSteeringButtons, pageOther, pageVoiceControl, pageScenarios;
     // Заголовок раздела в верхней панели (на одной строке с «Применить»)
     private TextView sectionTitle;
     // Освободившийся после переноса «Комфорта» индекс 3 занимает Apollo Tech. Индекс 4
     // (Собственные команды) показывается отдельной настройкой.
     private static final String[] SECTION_TITLES = {
             "Главный экран", "Настройки автомобиля", "Приложения и разделение экрана", "Apollo Tech",
-            "Собственные команды", "Кнопки на руле", "Другое", "Голосовое управление"
+            "Собственные команды", "Кнопки на руле", "Другое", "Голосовое управление", "Сценарии"
     };
     private static final String PREF_SHOW_CUSTOM_COMMANDS = "showCustomCommands";
     private int currentSection;
@@ -509,6 +511,7 @@ public class AdvanceActivity extends AppCompatActivity {
         navSteeringButtons = findViewById(R.id.navSteeringButtons);
         navOther          = findViewById(R.id.navOther);
         navVoiceControl   = findViewById(R.id.navVoiceControl);
+        navScenarios      = findViewById(R.id.navScenarios);
         pageMainScreen     = findViewById(R.id.pageMainScreen);
         pageCustomCommands = findViewById(R.id.pageCustomCommands);
         pageDriveModes     = findViewById(R.id.pageDriveModes);
@@ -517,8 +520,14 @@ public class AdvanceActivity extends AppCompatActivity {
         pageSteeringButtons = findViewById(R.id.pageSteeringButtons);
         pageOther          = findViewById(R.id.pageOther);
         pageVoiceControl   = findViewById(R.id.pageVoiceControl);
+        pageScenarios      = findViewById(R.id.pageScenarios);
         voiceSettings = new VoiceSettingsPage(this, findViewById(R.id.voiceSettingsContent),
                 prefs, this::refreshSteerActions);
+        scenarioSettings = new ScenarioSettingsPage(this, findViewById(R.id.scenariosSettingsContent),
+                prefs, () -> {
+                    SplitConfigSync.pushScenarios(this, prefs);
+                    VoiceCommands.invalidate();
+                });
         textRamStatus      = findViewById(R.id.textRamStatus);
         textCpuStatus      = findViewById(R.id.textCpuStatus);
         textHookStatus     = findViewById(R.id.textHookStatus);
@@ -530,8 +539,11 @@ public class AdvanceActivity extends AppCompatActivity {
         navSteeringButtons.setOnClickListener(v -> setSection(5));
         navOther.setOnClickListener(v -> setSection(6));
         navVoiceControl.setOnClickListener(v -> setSection(SECTION_VOICE));
+        navScenarios.setOnClickListener(v -> setSection(SECTION_SCENARIOS));
         initApolloTech();
-        setSection(intent != null && intent.getIntExtra(EXTRA_SECTION, 0) == SECTION_VOICE ? SECTION_VOICE : 0);
+        int requestedSection = intent != null ? intent.getIntExtra(EXTRA_SECTION, 0) : 0;
+        setSection(requestedSection == SECTION_VOICE || requestedSection == SECTION_SCENARIOS
+                ? requestedSection : 0);
 
         // «Собственные команды» (4) по умолчанию скрыты. Пункт можно включить в разделе «Другое».
         navCustomCommands.setVisibility(
@@ -547,6 +559,7 @@ public class AdvanceActivity extends AppCompatActivity {
         bindShowSwitch(R.id.switchShowPedestrian, "showPedestrian", true);
         bindShowSwitch(R.id.switchShowBatteryHeat, "showBatteryHeat", true);
         bindShowSwitch(R.id.switchShowVoiceCommand, "showVoiceCommand", false);
+        bindShowSwitch(R.id.switchShowScenariosCard, "showScenariosCard", true);
         bindShowSwitch(R.id.switchShowForcedEv,   "showForcedEv", false);
         bindShowSwitch(R.id.switchShowSuspensionMaintenance, "showSuspensionMaintenance", false);
         bindShowSwitch(R.id.switchShowLaunchAppsWidget, "showLaunchAppsWidget", false,
@@ -588,6 +601,8 @@ public class AdvanceActivity extends AppCompatActivity {
         });
         bindEnergyCapacity(R.id.energyBatteryCapacity, ru.big.town.common.EnergyWidgetSettings.BATTERY_KEY, 43);
         bindEnergyCapacity(R.id.energyTankCapacity, ru.big.town.common.EnergyWidgetSettings.TANK_KEY, 56);
+        // Диспетчер задач включён по умолчанию: плитка 1x1 с числом запущенных приложений.
+        bindShowSwitch(R.id.switchShowTaskManagerTile, "showTaskManagerTile", true);
         initDialWidgets();
 
         // Сохранение истории поездок (отдельно от таймера). Выкл → Native удалит журнал.
@@ -1130,7 +1145,7 @@ public class AdvanceActivity extends AppCompatActivity {
     public void onButtonCloseAll(View v) {
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
                 .setTitle("Закрыть приложения")
-                .setMessage("Все открытые сторонние приложения будут полностью закрыты и при следующем запуске откроются с нуля. Системные приложения не затрагиваются. Продолжить?")
+                .setMessage("Все открытые сторонние приложения будут полностью закрыты и при следующем запуске откроются с нуля. Системные приложения не затрагиваются. Приложения, зафиксированные в «Диспетчере задач», останутся открытыми. Продолжить?")
                 .setPositiveButton("Закрыть", (d, w) -> {
                     boolean ok = false;
                     if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
@@ -1873,6 +1888,7 @@ public class AdvanceActivity extends AppCompatActivity {
         if (pageSteeringButtons != null) pageSteeringButtons.setVisibility(index == 5 ? View.VISIBLE : View.GONE);
         if (pageOther != null)           pageOther.setVisibility(index == 6 ? View.VISIBLE : View.GONE);
         if (pageVoiceControl != null)    pageVoiceControl.setVisibility(index == SECTION_VOICE ? View.VISIBLE : View.GONE);
+        if (pageScenarios != null)       pageScenarios.setVisibility(index == SECTION_SCENARIOS ? View.VISIBLE : View.GONE);
         if (navMainScreen != null)       navMainScreen.setSelected(index == 0);
         if (navDriveModes != null)       navDriveModes.setSelected(index == 1);
         if (navSplitScreen != null)      navSplitScreen.setSelected(index == 2);
@@ -1881,17 +1897,21 @@ public class AdvanceActivity extends AppCompatActivity {
         if (navSteeringButtons != null)  navSteeringButtons.setSelected(index == 5);
         if (navOther != null)            navOther.setSelected(index == 6);
         if (navVoiceControl != null)     navVoiceControl.setSelected(index == SECTION_VOICE);
+        if (navScenarios != null)        navScenarios.setSelected(index == SECTION_SCENARIOS);
         if (index == SECTION_VOICE && voiceSettings != null) voiceSettings.refresh();
+        if (index == SECTION_SCENARIOS && scenarioSettings != null) scenarioSettings.refresh();
         if (index == 0) {
             Switch shortcut = findViewById(R.id.switchShowVoiceCommand);
             if (shortcut != null) shortcut.setChecked(prefs.getBoolean("showVoiceCommand", false));
         }
 
         if (buttonApplyAdvance != null) {
-            buttonApplyAdvance.setVisibility(index == SECTION_VOICE ? View.GONE : View.VISIBLE);
+            boolean hideApply = index == SECTION_VOICE || index == SECTION_SCENARIOS;
+            buttonApplyAdvance.setVisibility(hideApply ? View.GONE : View.VISIBLE);
         }
         if (applyProgressAdvance != null) {
-            applyProgressAdvance.setVisibility(applying && index != SECTION_VOICE ? View.VISIBLE : View.GONE);
+            boolean hideApply = index == SECTION_VOICE || index == SECTION_SCENARIOS;
+            applyProgressAdvance.setVisibility(applying && !hideApply ? View.VISIBLE : View.GONE);
         }
         updateSystemMetricsPolling();
         updateLightDiagnosticsBinding();

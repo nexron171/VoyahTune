@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Плитка «Диспетчер задач» 1x1: в центре число запущенных сторонних приложений.
+     Число приходит из Native ответом TaskManagerProtocol.LIST на запрос главного экрана. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/cardTaskManager"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/card_dark_ripple"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center"
+    android:onClick="onTaskManagerTile"
+    android:orientation="vertical"
+    android:padding="8dp">
+
+    <TextView
+        android:id="@+id/taskManagerCount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="0"
+        android:textColor="#FFFFFF"
+        android:textSize="48px"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:gravity="center"
+        android:maxLines="1"
+        android:text="запущено"
+        android:textColor="#AAAAAA"
+        android:textSize="16px" />
+</LinearLayout>

@@ -168,6 +168,13 @@
             android:exported="true"
             android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
 
+        <!-- Сценарии доступны и в Light, поэтому отдельный приёмник без Full-гейта. -->
+        <receiver
+            android:name=".ScenarioConfigReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+
         <!-- БЕЗ directBootAware: он делал пакет PARTIALLY_DIRECT_BOOT_AWARE и ломал создание
              DE-каталога (/data/user_de/0/...) при boot-скане /system priv-app на этой ROM →
              zygote-краш "Failed to mount data_de/null". Сервис стартует по BOOT_COMPLETED
