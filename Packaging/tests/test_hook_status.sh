@@ -7,6 +7,7 @@ PROVIDER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/RestoreMod
 CONTRACT="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/HookStatusContract.java"
 APP_MANIFEST="$ROOT/RestoreMode/app/src/main/AndroidManifest.xml"
 ACTIVITY="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/AdvanceActivity.java"
+READER="$ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/SystemMetricsReader.java"
 LAYOUT="$ROOT/RestoreMode/app/src/main/res/layout/activity_advance.xml"
 FULL_INSTALL="$ROOT/Packaging/od/installer/device/install.sh"
 FULL_INSTALL_BAT="$ROOT/Packaging/od/installer/device/install.bat"
@@ -59,7 +60,9 @@ require "$APP_MANIFEST" 'android:authorities="ru.big.town.restoremode.restoremod
 require "$LAYOUT" 'android:id="@+id/textHookStatus"'
 require "$ACTIVITY" 'HookStatusContract.renderForUi(hookPayload)'
 require "$ACTIVITY" 'activityResumed && currentSection == 6'
-require "$ACTIVITY" 'SYSTEM_METRICS_INTERVAL_MS = 5_000L'
+require "$ACTIVITY" 'SYSTEM_METRICS_INTERVAL_MS = SystemMetricsReader.INTERVAL_MS;'
+grep -Eq '^[[:space:]]*static[[:space:]]+final[[:space:]]+long[[:space:]]+INTERVAL_MS[[:space:]]*=[[:space:]]*5_?000[Ll]?[[:space:]]*;' "$READER" \
+    || fail "hook diagnostics interval is not 5 seconds"
 [ "$(grep -F -c 'postDelayed(systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS)' "$ACTIVITY")" -eq 1 ] \
     || fail "hook diagnostics must reuse the only Other timer"
 
