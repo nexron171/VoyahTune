@@ -11,7 +11,6 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.NumberPicker;
@@ -51,6 +50,7 @@ final class ScenarioSettingsPage {
     private final SharedPreferences prefs;
     private final Runnable changed;
     private final LinearLayout content;
+    private final SettingsComponents ui;
     /** Сценарий раскрытой карточки — его изменения записываются в prefs при сохранении. */
     private ScenarioStore.Scenario current;
 
@@ -60,19 +60,21 @@ final class ScenarioSettingsPage {
         this.content = content;
         this.prefs = prefs;
         this.changed = changed;
+        this.ui = new SettingsComponents(activity);
     }
 
     void refresh() {
         current = null;
         content.removeAllViews();
-        content.addView(text("Сценарий запускается по событию (селектор, дверь, освещённость), плиткой "
-                + "на главном экране или голосовой командой «запусти сценарий <название>». Перед выполнением "
-                + "проверяются условия; если хотя бы одно не выполнено, сценарий не запускается. "
-                + "Действия выполняются по порядку, между ними можно вставить паузу.", 20, 0xffaaaaaa));
-        content.addView(text("Сценарии с ⚠ выполняются без дополнительного подтверждения, в отличие от "
-                + "голосовых команд: перезагрузка, закрытие приложений и своя CAN-команда сработают сразу.",
-                20, 0xffaaaaaa));
-
+        content.addView(ui.intro(R.drawable.settings_icon_scenarios, "Автоматизация поездки",
+                "Объединяйте события, условия и действия. Запускайте сценарии автоматически, "
+                        + "с главного экрана или голосом."));
+        LinearLayout toolbar = new LinearLayout(activity);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.setPadding(0, dp(28), 0, dp(20));
+        List<ScenarioStore.Scenario> scenarios = ScenarioStore.load(prefs);
+        toolbar.addView(text("Ваши сценарии · " + scenarios.size(), 27, 0xfff3f5fa),
+                new LinearLayout.LayoutParams(0, -2, 1));
         MaterialButton add = actionButton("Добавить сценарий");
         add.setOnClickListener(v -> {
             ScenarioStore.Scenario created = ScenarioStore.create(prefs, "");
@@ -85,19 +87,21 @@ final class ScenarioSettingsPage {
             current = null;
             save();
         });
-        LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(-1, dp(64));
-        addParams.setMargins(0, dp(8), 0, dp(12));
-        content.addView(add, addParams);
+        add.setTag("settings.primary");
+        toolbar.addView(add);
+        content.addView(toolbar);
 
         String expandedId = prefs.getString(EXPANDED_KEY, "");
-        List<ScenarioStore.Scenario> scenarios = ScenarioStore.load(prefs);
         if (scenarios.isEmpty()) {
-            content.addView(text("Сценариев пока нет.", 22, 0xffffffff));
-            return;
+            content.addView(ui.card(ui.head(R.drawable.settings_icon_scenarios, "Первый сценарий", null),
+                    text("Выберите событие, добавьте условия и действия. Например, включите "
+                            + "подогрев сиденья при открытии двери в прохладную погоду.", 18, 0xff97a6bc)));
+        } else {
+            for (ScenarioStore.Scenario scenario : scenarios) {
+                content.addView(card(scenario, scenario.id.equals(expandedId)));
+            }
         }
-        for (ScenarioStore.Scenario scenario : scenarios) {
-            content.addView(card(scenario, scenario.id.equals(expandedId)));
-        }
+        SettingsDesign.styleTree(content);
     }
 
     // ------------------------------------------------------------------
@@ -105,34 +109,42 @@ final class ScenarioSettingsPage {
     // ------------------------------------------------------------------
 
     private View card(ScenarioStore.Scenario scenario, boolean expanded) {
-        LinearLayout card = new LinearLayout(activity);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundResource(R.drawable.layout_category_bg);
-        card.setPadding(dp(16), dp(10), dp(16), dp(12));
+        LinearLayout card = ui.card();
+        card.setTag("scenario:" + scenario.id);
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
-        cardParams.bottomMargin = dp(10);
+        cardParams.bottomMargin = dp(16);
         card.setLayoutParams(cardParams);
 
         LinearLayout header = new LinearLayout(activity);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        CheckBox enabled = new CheckBox(activity);
-        enabled.setContentDescription("Включить сценарий");
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(52), dp(52));
+        iconParams.rightMargin = dp(18);
+        header.addView(ui.icon(R.drawable.settings_icon_scenarios, 52, 28), iconParams);
+        TextView name = text(scenario.name, 24, 0xfff3f5fa);
+        name.setContentDescription(expanded ? "Свернуть сценарий" : "Раскрыть сценарий");
+        TextView summary = text((scenario.enabled ? "Включён" : "Выключен")
+                + "  ·  События: " + scenario.triggers.size()
+                + "  ·  Условия: " + scenario.conditions.size()
+                + "  ·  Действия: " + scenario.steps.size(), 16, 0xff97a6bc);
+        LinearLayout title = ui.column(name, summary);
+        title.setPadding(0, 0, dp(20), 0);
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        Switch enabled = new SettingsToggle(activity, null);
+        enabled.setContentDescription("Включить сценарий " + scenario.name);
         enabled.setChecked(scenario.enabled);
         enabled.setOnCheckedChangeListener((button, checked) -> {
             scenario.enabled = checked;
-            // Чекбокс есть и у свёрнутой карточки, поэтому пишем сценарий явно.
             ScenarioStore.update(prefs, scenario);
             changed.run();
             refresh();
         });
-        header.addView(enabled);
-        TextView name = text((expanded ? "▾  " : "▸  ") + scenario.name
-                + (scenario.showTile ? "  ▦" : ""), 26, 0xffffffff);
-        name.setTypeface(null, Typeface.BOLD);
-        name.setContentDescription(expanded ? "Свернуть сценарий" : "Раскрыть сценарий");
-        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1);
-        header.addView(name, nameParams);
-        MaterialButton delete = actionButton("Удалить");
+        LinearLayout.LayoutParams toggleParams = new LinearLayout.LayoutParams(dp(58), dp(32));
+        toggleParams.rightMargin = dp(20);
+        header.addView(enabled, toggleParams);
+        MaterialButton expand = actionButton(expanded ? "Свернуть" : "Настроить");
+        header.addView(expand);
+        MaterialButton delete = actionButton("×");
+        delete.setContentDescription("Удалить сценарий " + scenario.name);
         delete.setOnClickListener(v -> {
             ScenarioStore.remove(prefs, scenario.id);
             if (scenario.id.equals(prefs.getString(EXPANDED_KEY, ""))) {
@@ -143,25 +155,37 @@ final class ScenarioSettingsPage {
         });
         header.addView(delete);
         card.addView(header);
-
         View.OnClickListener toggle = v -> {
             String current = prefs.getString(EXPANDED_KEY, "");
-            prefs.edit().putString(EXPANDED_KEY, scenario.id.equals(current) ? "" : scenario.id).apply();
+            boolean expanding = !scenario.id.equals(current);
+            prefs.edit().putString(EXPANDED_KEY, expanding ? scenario.id : "").apply();
             refresh();
+            if (expanding) content.post(() -> {
+                View editor = content.findViewWithTag("scenario:" + scenario.id);
+                if (editor != null && content.getParent() instanceof ScrollView) {
+                    ((ScrollView) content.getParent()).smoothScrollTo(0, Math.max(0, editor.getTop() - content.getPaddingTop()));
+                }
+            });
         };
+        title.setOnClickListener(toggle);
         name.setOnClickListener(toggle);
+        expand.setOnClickListener(toggle);
 
         if (expanded) {
             current = scenario;
             if (!scenario.enabled) {
-                card.addView(text("Сценарий выключен: события и плитка не запускают его, "
-                        + "голосовая команда тоже недоступна.", 20, 0xffffb0b0));
+                card.addView(text("Автоматический, голосовой запуск и плитка выключены. "
+                        + "Кнопка «Тест» остаётся доступной.", 17, 0xfff2d46d));
             }
             card.addView(nameEditor(scenario));
             card.addView(tileSwitch(scenario));
             card.addView(testRow(scenario));
-            card.addView(triggerSection(scenario));
-            card.addView(conditionSection(scenario));
+            SettingsGrid rules = new SettingsGrid(activity, null);
+            rules.addView(triggerSection(scenario));
+            rules.addView(conditionSection(scenario));
+            LinearLayout.LayoutParams rulesParams = new LinearLayout.LayoutParams(-1, -2);
+            rulesParams.topMargin = dp(20);
+            card.addView(rules, rulesParams);
             card.addView(stepSection(scenario));
         }
         return card;
@@ -173,16 +197,21 @@ final class ScenarioSettingsPage {
         EditText input = new EditText(activity);
         input.setText(scenario.name);
         input.setHint("Название");
-        input.setTextColor(0xffffffff);
-        input.setHintTextColor(0xff888888);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_PX, 24);
+        input.setContentDescription("Название сценария");
+        input.setTextColor(0xfff3f5fa);
+        input.setBackgroundResource(R.drawable.settings_field);
+        input.setPadding(dp(16), dp(14), dp(16), dp(14));
+        input.setHintTextColor(0xff97a6bc);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         input.setInputType(InputType.TYPE_CLASS_TEXT);
         input.setSingleLine(true);
         row.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
         MaterialButton saveName = actionButton("Сохранить");
-        row.addView(saveName);
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-2, dp(54));
+        saveParams.leftMargin = dp(12);
+        row.addView(saveName, saveParams);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(8);
+        params.topMargin = dp(20);
         row.setLayoutParams(params);
         saveName.setOnClickListener(v -> {
             String error = ScenarioStore.validateName(
@@ -198,36 +227,21 @@ final class ScenarioSettingsPage {
     }
 
     private View tileSwitch(ScenarioStore.Scenario scenario) {
-        LinearLayout row = new LinearLayout(activity);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(8);
-        row.setLayoutParams(params);
-        row.addView(text("Плитка на главном экране", 24, 0xffffffff),
-                new LinearLayout.LayoutParams(0, -2, 1));
-        Switch toggle = new Switch(activity);
+        Switch toggle = new SettingsToggle(activity, null);
         toggle.setChecked(scenario.showTile);
         toggle.setContentDescription("Показывать плитку сценария на главном экране");
         toggle.setOnCheckedChangeListener((button, checked) -> {
             scenario.showTile = checked;
             save();
         });
-        row.addView(toggle);
-        return row;
+        return ui.row("Плитка на главном экране", "Отдельная кнопка для быстрого запуска", toggle);
     }
 
     private View testRow(ScenarioStore.Scenario scenario) {
-        LinearLayout row = new LinearLayout(activity);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(8);
-        row.setLayoutParams(params);
         MaterialButton test = actionButton("Тест");
+        test.setTag("settings.primary");
         test.setOnClickListener(v -> testScenario(scenario));
-        row.addView(test);
-        row.addView(text("Проверить условия и выполнить сейчас", 20, 0xffaaaaaa),
-                new LinearLayout.LayoutParams(0, -2, 1));
-        return row;
+        return ui.row("Проверить сценарий", "Проверить условия и выполнить действия сейчас", test);
     }
 
     private void testScenario(ScenarioStore.Scenario scenario) {
@@ -253,9 +267,8 @@ final class ScenarioSettingsPage {
     // ------------------------------------------------------------------
 
     private View triggerSection(ScenarioStore.Scenario scenario) {
-        LinearLayout block = section("Запуск по событию"
-                + (scenario.triggers.isEmpty() ? " (не задан: только плитка и голос)" : ""));
-        LinearLayout buttons = new LinearLayout(activity);
+        LinearLayout block = section("01  Когда запускать");
+        LinearLayout buttons = new SettingsFlow(activity, null);
         buttons.setGravity(Gravity.CENTER_VERTICAL);
         MaterialButton gear = actionButton("Селектор");
         gear.setOnClickListener(v -> pickOne("Положение селектора",
@@ -287,7 +300,7 @@ final class ScenarioSettingsPage {
             }));
         }
         if (scenario.triggers.isEmpty()) {
-            block.addView(text("Сценарий запускается только вручную.", 20, 0xffaaaaaa));
+            block.addView(text("Без события — только ручной или голосовой запуск.", 17, 0xff97a6bc));
         }
         return block;
     }
@@ -331,9 +344,8 @@ final class ScenarioSettingsPage {
     // ------------------------------------------------------------------
 
     private View conditionSection(ScenarioStore.Scenario scenario) {
-        LinearLayout block = section("Условия"
-                + (scenario.conditions.isEmpty() ? " (нет: запуск без проверок)" : ""));
-        LinearLayout buttons = new LinearLayout(activity);
+        LinearLayout block = section("02  При каких условиях");
+        LinearLayout buttons = new SettingsFlow(activity, null);
         buttons.setGravity(Gravity.CENTER_VERTICAL);
         MaterialButton light = actionButton("Освещённость");
         light.setOnClickListener(v -> addNumberCondition(scenario,
@@ -350,7 +362,10 @@ final class ScenarioSettingsPage {
         buttons.addView(soc);
         block.addView(buttons);
 
-        LinearLayout buttons2 = new LinearLayout(activity);
+        LinearLayout buttons2 = new SettingsFlow(activity, null);
+        LinearLayout.LayoutParams secondRow = new LinearLayout.LayoutParams(-1, -2);
+        secondRow.topMargin = dp(12);
+        buttons2.setLayoutParams(secondRow);
         buttons2.setGravity(Gravity.CENTER_VERTICAL);
         MaterialButton mode = actionButton("Режим движения");
         mode.setOnClickListener(v -> pickOne("Режим движения", ScenarioProtocol.DRIVE_MODES.toArray(new String[0]),
@@ -367,6 +382,7 @@ final class ScenarioSettingsPage {
         buttons2.addView(time);
         block.addView(buttons2);
 
+        block.addView(text("Проверяются при событии и по кнопке «Тест». Все условия должны совпасть.", 17, 0xff97a6bc));
         for (ScenarioStore.Condition condition : scenario.conditions) {
             block.addView(removableRow(describe(condition), () -> {
                 scenario.conditions.remove(condition);
@@ -397,11 +413,11 @@ final class ScenarioSettingsPage {
         row.setPadding(dp(16), dp(8), dp(16), dp(8));
         NumberPicker from = hourPicker(7);
         NumberPicker to = hourPicker(22);
-        row.addView(text("С", 24, 0xffffffff));
+        row.addView(text("С", 24, 0xfff3f5fa));
         row.addView(from);
-        row.addView(text("ДО", 24, 0xffffffff));
+        row.addView(text("ДО", 24, 0xfff3f5fa));
         row.addView(to);
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                 .setTitle("Интервал времени")
                 .setView(row)
                 .setPositiveButton("Далее", (dialog, which) -> pickDays((days) -> {
@@ -420,7 +436,7 @@ final class ScenarioSettingsPage {
     private void pickDays(java.util.function.Consumer<String> onPicked) {
         String[] labels = {"Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"};
         boolean[] checked = new boolean[labels.length];
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                 .setTitle("Дни недели")
                 .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Добавить", (dialog, which) -> {
@@ -462,8 +478,8 @@ final class ScenarioSettingsPage {
     // ------------------------------------------------------------------
 
     private View stepSection(ScenarioStore.Scenario scenario) {
-        LinearLayout block = section("Действия по порядку");
-        LinearLayout buttons = new LinearLayout(activity);
+        LinearLayout block = section("03  Что выполнить");
+        LinearLayout buttons = new SettingsFlow(activity, null);
         buttons.setGravity(Gravity.CENTER_VERTICAL);
         MaterialButton addAction = actionButton("Добавить действие");
         addAction.setOnClickListener(v -> pickAction(action -> {
@@ -491,10 +507,12 @@ final class ScenarioSettingsPage {
             String description = ScenarioProtocol.STEP_PAUSE.equals(step.type)
                     ? "Пауза " + ScenarioProtocol.clampPauseSeconds(step.seconds) + " с"
                     : (i + 1) + ". " + actionTitle(step.value);
-            LinearLayout row = new LinearLayout(activity);
+            LinearLayout row = new SettingsRow(activity);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.addView(text(description, 22, 0xffdddddd), new LinearLayout.LayoutParams(0, -2, 1));
+            row.setPadding(0, dp(12), 0, dp(12));
+            row.addView(text(description, 20, 0xfff3f5fa), new LinearLayout.LayoutParams(0, -2, 1));
             MaterialButton up = actionButton("↑");
+            up.setContentDescription("Поднять действие " + (index + 1));
             up.setEnabled(index > 0);
             up.setOnClickListener(v -> {
                 java.util.Collections.swap(scenario.steps, index, index - 1);
@@ -502,6 +520,7 @@ final class ScenarioSettingsPage {
             });
             row.addView(up);
             MaterialButton down = actionButton("↓");
+            down.setContentDescription("Опустить действие " + (index + 1));
             down.setEnabled(index < scenario.steps.size() - 1);
             down.setOnClickListener(v -> {
                 java.util.Collections.swap(scenario.steps, index, index + 1);
@@ -509,6 +528,7 @@ final class ScenarioSettingsPage {
             });
             row.addView(down);
             MaterialButton remove = actionButton("×");
+            remove.setContentDescription("Удалить действие " + (index + 1));
             remove.setOnClickListener(v -> {
                 scenario.steps.remove(index);
                 save();
@@ -517,8 +537,9 @@ final class ScenarioSettingsPage {
             block.addView(row);
         }
         if (scenario.steps.isEmpty()) {
-            block.addView(text("Действий нет: сценарий ничего не делает.", 20, 0xffffb0b0));
+            block.addView(text("Добавьте действие — оно станет первым шагом сценария.", 17, 0xff97a6bc));
         }
+        block.addView(text("Действия с ⚠ выполняются без дополнительного подтверждения.", 16, 0xfff2d46d));
         return block;
     }
 
@@ -604,7 +625,7 @@ final class ScenarioSettingsPage {
         content.setPadding(padding, padding / 2, padding, padding / 2);
 
         com.google.android.material.dialog.MaterialAlertDialogBuilder builder =
-                new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                         .setTitle(node.label)
                         .setView(scroll(content))
                         .setNegativeButton("Отмена", null);
@@ -613,10 +634,10 @@ final class ScenarioSettingsPage {
 
         // Собственные строки вместо setItems: крупный шрифт и единый отступ для всех уровней дерева.
         for (ActionNode child : node.children) {
-            TextView row = text(child.label, ACTION_ROW_TEXT_SP, 0xffffffff);
+            TextView row = text(child.label, ACTION_ROW_TEXT_SP, 0xfff3f5fa);
             row.setTextSize(TypedValue.COMPLEX_UNIT_SP, ACTION_ROW_TEXT_SP);
             row.setPadding(dp(12), dp(22), dp(12), dp(22));
-            row.setBackgroundResource(R.drawable.row_dark_ripple);
+            row.setBackgroundResource(R.drawable.settings_field);
             row.setOnClickListener(v -> {
                 dialog.dismiss();
                 showActionNode(child, () -> showActionNode(node, back, onPicked), onPicked);
@@ -625,6 +646,7 @@ final class ScenarioSettingsPage {
             params.bottomMargin = dp(8);
             content.addView(row, params);
         }
+        SettingsDesign.styleTree(content);
         dialog.show();
     }
 
@@ -640,7 +662,9 @@ final class ScenarioSettingsPage {
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
         input.setText(String.valueOf(DEFAULT_PAUSE_SECONDS));
         input.setSelectAllOnFocus(true);
-        input.setTextColor(0xffffffff);
+        input.setTextColor(0xfff3f5fa);
+        input.setBackgroundResource(R.drawable.settings_field);
+        input.setPadding(dp(16), dp(14), dp(16), dp(14));
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         input.setContentDescription("Пауза в секундах");
         LinearLayout wrapper = new LinearLayout(activity);
@@ -648,15 +672,16 @@ final class ScenarioSettingsPage {
         int padding = dp(24);
         wrapper.setPadding(padding, dp(8), padding, dp(8));
         wrapper.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
-        wrapper.addView(text("сек.", 24, 0xffffffff));
+        wrapper.addView(text("сек.", 24, 0xfff3f5fa));
 
         androidx.appcompat.app.AlertDialog dialog =
-                new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                         .setTitle("Пауза")
                         .setView(wrapper)
                         .setPositiveButton("Добавить", null)
                         .setNegativeButton("Отмена", null)
                         .create();
+        SettingsDesign.styleTree(wrapper);
         dialog.setOnShowListener(ignored -> dialog.getButton(DialogInterface.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
                     Integer seconds = parsePauseSeconds(input.getText().toString());
@@ -729,7 +754,7 @@ final class ScenarioSettingsPage {
     // ------------------------------------------------------------------
 
     private void pickOne(String title, String[] labels, java.util.function.IntConsumer onPicked) {
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                 .setTitle(title)
                 .setItems(labels, (dialog, which) -> onPicked.accept(which))
                 .setNegativeButton("Отмена", null)
@@ -747,7 +772,7 @@ final class ScenarioSettingsPage {
         wrapper.setGravity(Gravity.CENTER);
         wrapper.setPadding(dp(24), dp(8), dp(24), dp(8));
         wrapper.addView(picker);
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                 .setTitle(title)
                 .setView(wrapper)
                 .setPositiveButton("Добавить", (dialog, which) -> onPicked.accept(min + picker.getValue() * step))
@@ -770,7 +795,7 @@ final class ScenarioSettingsPage {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.topMargin = dp(4);
         row.setLayoutParams(params);
-        row.addView(text(label, 22, 0xffdddddd), new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(text(label, 22, 0xfff3f5fa), new LinearLayout.LayoutParams(0, -2, 1));
         MaterialButton remove = actionButton("×");
         remove.setContentDescription("Удалить");
         remove.setOnClickListener(v -> onRemove.run());
@@ -779,38 +804,34 @@ final class ScenarioSettingsPage {
     }
 
     private LinearLayout section(String title) {
-        LinearLayout block = new LinearLayout(activity);
-        block.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout block = ui.column();
+        block.setBackgroundResource(R.drawable.settings_inset);
+        block.setPadding(dp(20), dp(20), dp(20), dp(20));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(12);
+        params.topMargin = dp(16);
         block.setLayoutParams(params);
-        TextView header = text(title, 24, 0xffffffff);
-        header.setTypeface(null, Typeface.BOLD);
+        TextView header = text(title, 22, 0xffa5c8ff);
+        header.setPadding(0, 0, 0, dp(16));
         block.addView(header);
         return block;
     }
 
     private MaterialButton actionButton(String label) {
         MaterialButton button = new MaterialButton(activity);
-        button.setAllCaps(false);
         button.setText(label);
-        button.setTextSize(TypedValue.COMPLEX_UNIT_PX, 22);
-        button.setTextColor(0xffffffff);
-        button.setMinHeight(dp(52));
-        button.setCornerRadius(dp(12));
-        button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff373f4a));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
-        params.setMargins(0, 0, dp(8), 0);
+        boolean compact = "×".equals(label) || "↑".equals(label) || "↓".equals(label);
+        button.setTag("×".equals(label) ? "settings.delete" : compact ? "settings.mini" : "settings.secondary");
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(compact ? dp(48) : -2, dp(54));
+        params.rightMargin = dp(8);
         button.setLayoutParams(params);
+        SettingsDesign.styleTree(button);
         return button;
     }
 
     private TextView text(String value, int size, int color) {
-        TextView view = new TextView(activity);
-        view.setText(value);
-        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
-        view.setTextColor(color);
+        TextView view = ui.text(value, size, color);
         view.setPadding(0, dp(4), 0, dp(4));
+        view.setLineSpacing(0, 1.25f);
         return view;
     }
 

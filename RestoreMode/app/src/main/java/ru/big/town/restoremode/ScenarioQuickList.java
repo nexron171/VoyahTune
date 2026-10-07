@@ -4,7 +4,7 @@ import android.content.SharedPreferences;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.CheckBox;
+import android.widget.Switch;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -38,12 +38,12 @@ final class ScenarioQuickList {
         int padding = dp(activity, 20);
         content.setPadding(padding, padding / 2, padding, padding / 2);
         TextView hint = label(activity, "Нажмите название, чтобы запустить сценарий.");
-        hint.setTextColor(0xffaaaaaa);
-        hint.setTextSize(TypedValue.COMPLEX_UNIT_PX, 20);
+        hint.setTextColor(0xff97a6bc);
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         content.addView(hint);
 
         androidx.appcompat.app.AlertDialog dialog =
-                new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.DarkDialog)
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                         .setTitle("Сценарии")
                         .setView(scroll(activity, content))
                         .setNeutralButton("Настроить", (d, which) -> onConfigure.run())
@@ -53,22 +53,26 @@ final class ScenarioQuickList {
         for (ScenarioStore.Scenario scenario : scenarios) {
             content.addView(row(activity, prefs, scenario, dialog, onRun, onChanged));
         }
+        SettingsDesign.styleTree(content);
         dialog.show();
     }
 
     private static View row(AppCompatActivity activity, SharedPreferences prefs,
                             ScenarioStore.Scenario scenario, androidx.appcompat.app.AlertDialog dialog,
                             Consumer<ScenarioStore.Scenario> onRun, Runnable onChanged) {
-        LinearLayout row = new LinearLayout(activity);
+        LinearLayout row = new SettingsRow(activity);
+        row.setPadding(0, dp(activity, 14), 0, dp(activity, 14));
         row.setGravity(Gravity.CENTER_VERTICAL);
 
-        CheckBox enabled = new CheckBox(activity);
+        Switch enabled = new SettingsToggle(activity, null);
         enabled.setContentDescription("Включить сценарий");
         enabled.setChecked(scenario.enabled);
-        row.addView(enabled);
+        LinearLayout.LayoutParams toggle = new LinearLayout.LayoutParams(dp(activity, 58), dp(activity, 32));
+        toggle.rightMargin = dp(activity, 20);
+        row.addView(enabled, toggle);
 
         TextView name = label(activity, scenario.name.isEmpty() ? "Сценарий" : scenario.name);
-        name.setTextSize(TypedValue.COMPLEX_UNIT_PX, 24);
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         name.setPadding(0, dp(activity, 10), 0, dp(activity, 10));
         name.setContentDescription("Запустить сценарий");
         applyEnabledColour(name, scenario.enabled);
@@ -92,7 +96,7 @@ final class ScenarioQuickList {
     }
 
     private static void applyEnabledColour(TextView view, boolean enabled) {
-        view.setTextColor(enabled ? 0xffffffff : 0xff777777);
+        view.setTextColor(enabled ? 0xfff3f5fa : 0xff97a6bc);
     }
 
     private static ScrollView scroll(AppCompatActivity activity, View content) {
@@ -104,7 +108,7 @@ final class ScenarioQuickList {
     private static TextView label(AppCompatActivity activity, String value) {
         TextView view = new TextView(activity);
         view.setText(value);
-        view.setTextColor(0xffffffff);
+        view.setTextColor(0xfff3f5fa);
         return view;
     }
 

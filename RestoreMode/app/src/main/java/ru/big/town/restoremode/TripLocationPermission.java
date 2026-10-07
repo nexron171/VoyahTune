@@ -72,9 +72,19 @@ final class TripLocationPermission {
             prefs(a).edit().putBoolean("enabled", fine(a) && background(a)).putBoolean("pendingSettings", false).apply();
         }
         TextView status = a.findViewById(R.id.tripLocationPermissionStatus);
-        if (status != null) status.setText("Точная геолокация: " + (fine(a) ? "разрешена" : "не разрешена")
-                + "\nЗапись в фоне всегда: " + (background(a) ? "разрешена" : "не разрешена")
-                + "\nЗапись трека: " + (allowed(a) ? "разрешена" : "отключена"));
+        if (status != null) {
+            boolean precise = fine(a), inBackground = background(a), recording = allowed(a);
+            String details = "Точная геолокация: " + (precise ? "разрешена" : "не разрешена")
+                    + "\nЗапись в фоне всегда: " + (inBackground ? "разрешена" : "не разрешена")
+                    + "\nЗапись трека: " + (recording ? "разрешена" : "отключена");
+            if ("settings.permission".equals(status.getTag())) {
+                status.setText(recording ? "Разрешено" : !precise ? "Нет точной геолокации"
+                        : !inBackground ? "Нет доступа в фоне" : "Запись отключена");
+                status.setContentDescription(details);
+                status.setBackgroundResource(recording ? R.drawable.settings_pill_green : R.drawable.settings_pill);
+                status.setTextColor(recording ? 0xffa5d9c9 : 0xffb2d3fb);
+            } else status.setText(details);
+        }
     }
     static void sync(Context c) {
         c.sendBroadcast(new Intent(TripProtocol.LOCATION_CHANGED).setPackage(TripProtocol.NATIVE), TripProtocol.PERMISSION);

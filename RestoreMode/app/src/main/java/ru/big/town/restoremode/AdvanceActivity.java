@@ -315,6 +315,15 @@ public class AdvanceActivity extends AppCompatActivity {
         canCommandsEditor.setText("");
     }
 
+    private void refreshCanStatus() {
+        TextView status = findViewById(R.id.settingsCanStatus);
+        if (status == null || canCommandsEditor == null) return;
+        boolean valid = java.util.Arrays.stream(canCommandsEditor.getText().toString().split("\\n")).allMatch(line -> line.trim().isEmpty() || SteeringCanCommandPolicy.isValid(line));
+        status.setText(canCommandsEditor.getText().toString().trim().isEmpty() ? "Пока нет команд"
+                : valid ? "Формат корректен" : "Проверьте строки: в каждой должно быть ровно 10 байт");
+        status.setTextColor(valid ? 0xffa3d3bb : 0xfff4b5b5);
+    }
+
     /** Строит список кнопок примеров команд + кнопку удаления в каждой строке. */
     private void buildExampleButtons() {
         LinearLayout container = findViewById(R.id.examplesContainer);
@@ -326,11 +335,17 @@ public class AdvanceActivity extends AppCompatActivity {
             View row = inflater.inflate(R.layout.item_command, container, false);
             Button btn = row.findViewById(R.id.cmdButton);
             ImageButton del = row.findViewById(R.id.cmdDelete);
-            btn.setText(label);
+            android.text.SpannableString example = new android.text.SpannableString(label + "    ＋\n" + hex);
+            int hexStart = example.toString().indexOf('\n') + 1;
+            example.setSpan(new android.text.style.AbsoluteSizeSpan(12, true), hexStart, example.length(), 0);
+            example.setSpan(new android.text.style.ForegroundColorSpan(0xff8b9fb9), hexStart, example.length(), 0);
+            example.setSpan(new android.text.style.TypefaceSpan("monospace"), hexStart, example.length(), 0);
+            btn.setText(example);
             btn.setOnClickListener(v -> insertCommand(hex));
             del.setTag(hex.replaceAll("[^0-9a-fA-F]", "").toLowerCase());
             del.setOnClickListener(v -> removeCommand(hex));
             deleteButtons.add(del);
+            SettingsDesign.styleTree(row);
             container.addView(row);
         }
         updateDeleteButtons();
@@ -395,7 +410,7 @@ public class AdvanceActivity extends AppCompatActivity {
         pickerCustomCommandCount.setMaxValue(10);
         pickerCustomCommandCount.setMinValue(1);
         pickerCustomCommandCount.setTextColor(0xffffffff);
-        pickerCustomCommandCount.setTextSize(40f);
+        pickerCustomCommandCount.setContentDescription("Количество повторов команды");
 
         // Системная и плавающая кнопки «Назад» сохраняют данные так же, как кнопка в интерфейсе.
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -477,11 +492,11 @@ public class AdvanceActivity extends AppCompatActivity {
                 Log.i("$$$ LENGTH formatted.length $$$ ",String.format("%d",formatted.length()));
 
                 if(formatted.length() % 31 == 0){
-                    canCommandsEditor.setBackgroundColor(Color.WHITE);
+                    canCommandsEditor.setBackgroundResource(R.drawable.settings_code);
                     buttonBack.setEnabled(true);
                     buttonBack.setAlpha(1f);
                 } else {
-                    canCommandsEditor.setBackgroundColor(0xffffafaf);
+                    canCommandsEditor.setBackgroundResource(R.drawable.settings_code_invalid);
                     buttonBack.setEnabled(false);
                     buttonBack.setAlpha(0.4f);
                 }
@@ -497,9 +512,11 @@ public class AdvanceActivity extends AppCompatActivity {
             public void afterTextChanged(Editable s) {
                 Log.i("$$$ afterTextChanged $$$", s.toString());
                 updateDeleteButtons();
+                refreshCanStatus();
             }
         });
-
+        refreshCanStatus();
+        findViewById(R.id.settingsValidateCan).setOnClickListener(v -> refreshCanStatus());
         buildExampleButtons();
 
         // Навигация между разделами
@@ -588,8 +605,8 @@ public class AdvanceActivity extends AppCompatActivity {
         bindTileSizeSpinners(R.id.OdometerSettingWidth, R.id.OdometerSettingHeight, "odometerWidget", 4, 1);
         android.widget.Spinner carColor = findViewById(R.id.energyCarColor);
         android.widget.ArrayAdapter<String> carColors = new android.widget.ArrayAdapter<>(this,
-                R.layout.spinner_item, EnergyWidgetView.COLOR_NAMES);
-        carColors.setDropDownViewResource(R.layout.spinner_dropdown_item);
+                R.layout.settings_spinner_item, EnergyWidgetView.COLOR_NAMES);
+        carColors.setDropDownViewResource(R.layout.settings_spinner_dropdown);
         carColor.setAdapter(carColors);
         carColor.setSelection(java.util.Arrays.asList(EnergyWidgetView.COLORS).indexOf(
                 EnergyWidgetView.color(prefs.getString("energyCarColor", "burgundy"))));
@@ -692,6 +709,7 @@ public class AdvanceActivity extends AppCompatActivity {
             row.setTextColor(Color.WHITE);
             row.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 20);
             row.setPadding(0, 4, 0, 4);
+            SettingsDesign.styleTree(row);
             lightRows.addView(row);
             lightDiagnosticsRows[i] = row;
         }
@@ -710,7 +728,7 @@ public class AdvanceActivity extends AppCompatActivity {
         pickerFullscreenGridColumns.setMinValue(0);
         pickerFullscreenGridColumns.setMaxValue(12);
         pickerFullscreenGridColumns.setTextColor(0xffffffff);
-        pickerFullscreenGridColumns.setTextSize(40f);
+        pickerFullscreenGridColumns.setContentDescription("Колонок с растянутым верхним рядом");
         pickerFullscreenGridColumns.setValue(prefs.getInt("fullscreenGridColumns", 8));
         pickerFullscreenGridColumns.setOnValueChangedListener((picker, oldValue, newValue) ->
                 prefs.edit().putInt("fullscreenGridColumns", newValue).apply());
@@ -722,6 +740,11 @@ public class AdvanceActivity extends AppCompatActivity {
             prefs.edit().putBoolean("fullscreenGrid", checked).apply();
             pickerFullscreenGridColumns.setEnabled(checked);
         });
+
+        NumberPicker tileSpacing = findViewById(R.id.pickerTileSpacing);
+        tileSpacing.setMinValue(0); tileSpacing.setMaxValue(24);
+        tileSpacing.setValue(Math.max(0, Math.min(24, prefs.getInt("tileSpacingDp", 4))));
+        tileSpacing.setOnValueChangedListener((picker, oldValue, newValue) -> prefs.edit().putInt("tileSpacingDp", newValue).apply());
 
         // Keyboard modifications are optional Frida agents. The agents overlap in the
         // Qinggan IME, so the two switches expose one mutually-exclusive off/en/ru preference.
@@ -814,6 +837,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
         // Раздел «Кнопки на руле» (Frida-перехват кнопки-звёздочки).
         initSteeringButtons();
+        SettingsDesign.install(this);
 
     }
 
@@ -875,6 +899,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 TileOrderStore.sync(prefs, getPackageManager());
                 renderDialWidgets(container);
             });
+            SettingsDesign.styleTree(row);
             container.addView(row);
         }
     }
@@ -907,6 +932,11 @@ public class AdvanceActivity extends AppCompatActivity {
      * реплай MSG_RESULT приходит на наш applyClient и разблокирует кнопку.
      */
     public void onButtonClickApply(View v) {
+        if (currentSection == SECTION_VOICE || currentSection == SECTION_SCENARIOS) {
+            // These pages persist immediately; applying must not send vehicle modes.
+            android.widget.Toast.makeText(this, currentSection == SECTION_SCENARIOS ? "Сценарии сохранены" : "Настройки голосового управления сохранены", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
         if (applying) return;
         // ApplyEngine перечитывает команды через ContentProvider, поэтому сохраняем их до сообщения.
         if (!saveCustomCommands()) return;
@@ -926,9 +956,10 @@ public class AdvanceActivity extends AppCompatActivity {
 
     private void setApplying(boolean on) {
         applying = on;
-        if (buttonApplyAdvance != null) buttonApplyAdvance.setEnabled(!on);
+        boolean immediate = currentSection == SECTION_VOICE || currentSection == SECTION_SCENARIOS;
+        if (buttonApplyAdvance != null) buttonApplyAdvance.setEnabled(immediate || !on);
         if (applyProgressAdvance != null) {
-            applyProgressAdvance.setVisibility(on ? View.VISIBLE : View.GONE);
+            applyProgressAdvance.setVisibility(on && !immediate ? View.VISIBLE : View.GONE);
         }
         uiHandler.removeCallbacks(applyTimeout);
         if (on) uiHandler.postDelayed(applyTimeout, 12000); // страховка, если MSG_RESULT не придёт
@@ -983,8 +1014,8 @@ public class AdvanceActivity extends AppCompatActivity {
         String[] widths = {"1 ячейка", "2 ячейки", "3 ячейки", "4 ячейки", "5 ячеек", "6 ячеек",
                            "7 ячеек", "8 ячеек", "9 ячеек", "10 ячеек", "11 ячеек", "12 ячеек"};
         android.widget.ArrayAdapter<String> widthAdapter =
-                new android.widget.ArrayAdapter<>(this, R.layout.spinner_item, widths);
-        widthAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+                new android.widget.ArrayAdapter<>(this, R.layout.settings_spinner_item, widths);
+        widthAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
         widthSpinner.setAdapter(widthAdapter);
         widthSpinner.setSelection(TileSizeStore.width(prefs, widgetId, defaultWidth) - 1);
         widthSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -1001,8 +1032,8 @@ public class AdvanceActivity extends AppCompatActivity {
 
         String[] heights = {"1 ячейка", "2 ячейки", "3 ячейки", "4 ячейки", "5 ячеек"};
         android.widget.ArrayAdapter<String> heightAdapter =
-                new android.widget.ArrayAdapter<>(this, R.layout.spinner_item, heights);
-        heightAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+                new android.widget.ArrayAdapter<>(this, R.layout.settings_spinner_item, heights);
+        heightAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
         heightSpinner.setAdapter(heightAdapter);
         heightSpinner.setSelection(TileSizeStore.height(prefs, widgetId, defaultHeight) - 1);
         heightSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -1021,8 +1052,8 @@ public class AdvanceActivity extends AppCompatActivity {
                                 int fallback, int min, int max, Runnable onChange) {
         String[] labels=new String[max-min+1];
         for(int i=0;i<labels.length;i++)labels[i]=String.valueOf(min+i);
-        android.widget.ArrayAdapter<String> adapter=new android.widget.ArrayAdapter<>(this,R.layout.spinner_item,labels);
-        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+        android.widget.ArrayAdapter<String> adapter=new android.widget.ArrayAdapter<>(this,R.layout.settings_spinner_item,labels);
+        adapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
         spinner.setOnItemSelectedListener(null);spinner.setAdapter(adapter);
         spinner.setSelection((width?TileSizeStore.width(prefs,id,fallback):TileSizeStore.height(prefs,id,fallback))-min);
         spinner.setEnabled(max>min);
@@ -1143,7 +1174,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
     /** «Закрыть приложения»: сторонние приложения force-stop в Native (priv-app) → стартуют с нуля. */
     public void onButtonCloseAll(View v) {
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.SettingsDialog)
                 .setTitle("Закрыть приложения")
                 .setMessage("Все открытые сторонние приложения будут полностью закрыты и при следующем запуске откроются с нуля. Системные приложения не затрагиваются. Приложения, зафиксированные в «Диспетчере задач», останутся открытыми. Продолжить?")
                 .setPositiveButton("Закрыть", (d, w) -> {
@@ -1181,6 +1212,8 @@ public class AdvanceActivity extends AppCompatActivity {
         dockSplit1Btn = findViewById(R.id.buttonDockSplit1);
         dockSplit2Btn = findViewById(R.id.buttonDockSplit2);
         refreshDockButtons();
+        findViewById(R.id.settingsResetDock1).setOnClickListener(v -> clearDockApp(1));
+        findViewById(R.id.settingsResetDock2).setOnClickListener(v -> clearDockApp(2));
         if (dockApp1Btn != null) dockApp1Btn.setOnLongClickListener(v -> { clearDockApp(1); return true; });
         if (dockApp2Btn != null) dockApp2Btn.setOnLongClickListener(v -> { clearDockApp(2); return true; });
         pushDockConfig();   // синхронизируем выбор дока в Native при открытии раздела
@@ -1192,7 +1225,7 @@ public class AdvanceActivity extends AppCompatActivity {
     public void onPickDockSplit2(View v) { pickDockLongPress(2); }
 
     private void pickDockLongPress(int slot) {
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.SettingsDialog)
                 .setTitle("Долгое нажатие · приложение " + slot)
                 .setItems(new String[]{"Открыть сплит", "Открыть в медиакарточке приборной панели", "Не назначено"},
                         (dialog, which) -> {
@@ -1232,7 +1265,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 labels.add((ps.ll.isEmpty() ? ps.l : ps.ll) + "  /  " + (ps.rl.isEmpty() ? ps.r : ps.rl));
             }
         }
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.SettingsDialog)
                 .setTitle("Сплит по долгому нажатию (слот " + slot + ")")
                 .setItems(labels.toArray(new CharSequence[0]), (d, which) -> {
                     if (which == 0) {
@@ -1273,21 +1306,22 @@ public class AdvanceActivity extends AppCompatActivity {
     private void setDockButtonText(Button b, int slot) {
         if (b == null) return;
         String label = prefs.getString("dockOverride" + slot + "Label", "");
-        b.setText("Приложение " + slot + ": " + (label.isEmpty() ? "не выбрано" : label));
+        b.setText(label.isEmpty() ? "Не выбрано" : label);
     }
 
     /** Выбор действия долгого нажатия видим только для занятого слота и показывает текущее назначение. */
     private void setDockSplitButton(Button b, int slot) {
         if (b == null) return;
         boolean hasApp = !prefs.getString("dockOverride" + slot, "").isEmpty();
-        b.setVisibility(hasApp ? View.VISIBLE : View.GONE);
+        b.setVisibility(View.VISIBLE);
+        b.setEnabled(hasApp);
         String action = DockLongPressAction.resolve(prefs, slot);
         String label = "не назначено";
         if ("cluster".equals(action)) label = "медиакарточка приборной панели";
         else if ("split".equals(action)) {
             label = "сплит · " + prefs.getString("dockOverride" + slot + "SplitLabel", "не выбран");
         }
-        b.setText("Долгое нажатие: " + label);
+        b.setText(label);
     }
 
     /** Колбэк выбора приложения из диалога-списка. */
@@ -1324,7 +1358,7 @@ public class AdvanceActivity extends AppCompatActivity {
             items[i] = map.get(pkgs.get(i)) + "  ·  " + pkgs.get(i);
         }
 
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.SettingsDialog)
                 .setTitle(title)
                 .setItems(items, (d, which) -> cb.onPicked(pkgs.get(which), map.get(pkgs.get(which))))
                 .setNegativeButton("Отмена", null)
@@ -1402,6 +1436,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 TileOrderStore.sync(prefs, getPackageManager());
                 renderAppShortcuts();
             });
+            SettingsDesign.styleTree(row);
             appShortcutsContainer.addView(row);
         }
     }
@@ -1433,6 +1468,7 @@ public class AdvanceActivity extends AppCompatActivity {
         android.content.pm.PackageManager pm = getPackageManager();
         LayoutInflater inf = LayoutInflater.from(this);
         for (AppWidgetStore.Entry entry : AppWidgetStore.load(prefs)) {
+            entry.ensureProfiles();
             View row = inf.inflate(R.layout.item_app_widget_setting, appWidgetsContainer, false);
             android.widget.ImageView icon = row.findViewById(R.id.appWidgetSettingIcon);
             TextView label = row.findViewById(R.id.appWidgetSettingLabel);
@@ -1450,13 +1486,14 @@ public class AdvanceActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
             label.setText("Виджет " + AppWidgetStore.designation(prefs, entry.id) + ": " + name);
+            ((TextView) row.findViewById(R.id.settingsAppWidgetSubtitle)).setText(entry.profiles.size() + " приложений · запуск внутри карточки");
             android.widget.ArrayAdapter<String> widthAdapter = new android.widget.ArrayAdapter<>(this,
-                    R.layout.spinner_item, new String[]{"1 ячейка", "2 ячейки",
+                    R.layout.settings_spinner_item, new String[]{"1 ячейка", "2 ячейки",
                     "3 ячейки", "4 ячейки", "5 ячеек",
                     "6 ячеек", "7 ячеек", "8 ячеек",
                     "9 ячеек", "10 ячеек", "11 ячеек",
                     "12 ячеек"});
-            widthAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            widthAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
             widthSpinner.setAdapter(widthAdapter);
             widthSpinner.setSelection(AppWidgetStore.clampWidth(entry.width) - 1);
             widthSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -1473,9 +1510,9 @@ public class AdvanceActivity extends AppCompatActivity {
                 @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
             });
             android.widget.ArrayAdapter<String> heightAdapter = new android.widget.ArrayAdapter<>(this,
-                    R.layout.spinner_item, new String[]{"1 ячейка", "2 ячейки",
+                    R.layout.settings_spinner_item, new String[]{"1 ячейка", "2 ячейки",
                     "3 ячейки", "4 ячейки", "5 ячеек"});
-            heightAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            heightAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
             heightSpinner.setAdapter(heightAdapter);
             heightSpinner.setSelection(AppWidgetStore.clampHeight(entry.height) - 1);
             heightSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -1521,7 +1558,6 @@ public class AdvanceActivity extends AppCompatActivity {
                 AppWidgetStore.update(prefs, entry);
                 TileOrderStore.sync(prefs, getPackageManager());
             });
-            entry.ensureProfiles();
             renderAppWidgetProfiles(profilesContainer, entry);
             addProfile.setOnClickListener(v -> showAppPicker("Добавить приложение в виджет", (pkg, pickedLabel) -> {
                 AppWidgetStore.addProfile(entry, pkg, AppWidgetStore.DEFAULT_DPI);
@@ -1535,8 +1571,10 @@ public class AdvanceActivity extends AppCompatActivity {
                 TileOrderStore.sync(prefs, getPackageManager());
                 renderAppWidgets();
             });
+            SettingsDesign.styleTree(row);
             appWidgetsContainer.addView(row);
         }
+        SettingsDesign.refreshOverview(this);
     }
 
     private void renderAppWidgetProfiles(android.widget.LinearLayout container, AppWidgetStore.Entry entry) {
@@ -1566,8 +1604,8 @@ public class AdvanceActivity extends AppCompatActivity {
                 if (value == AppWidgetStore.normalizeDpi(profile.dpi)) selected = dpiIndex;
             }
             android.widget.ArrayAdapter<String> dpiAdapter = new android.widget.ArrayAdapter<>(this,
-                    R.layout.spinner_item, labels);
-            dpiAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+                    R.layout.settings_spinner_item, labels);
+            dpiAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
             dpi.setAdapter(dpiAdapter);
             dpi.setSelection(selected);
             dpi.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -1590,6 +1628,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 TileOrderStore.sync(prefs, getPackageManager());
                 renderAppWidgets();
             });
+            SettingsDesign.styleTree(profileView);
             container.addView(profileView);
         }
     }
@@ -1642,7 +1681,7 @@ public class AdvanceActivity extends AppCompatActivity {
             try {
                 android.content.pm.ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
                 name = pm.getApplicationLabel(info).toString();
-                icon.setImageDrawable(pm.getApplicationIcon(info));
+                icon.setImageResource(R.drawable.settings_icon_fullscreen);
             } catch (Exception ignored) {
             }
             label.setText(name);
@@ -1652,6 +1691,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 next.remove(pkg);
                 saveFullscreenApps(next);
             });
+            SettingsDesign.styleTree(row);
             fullscreenAppsContainer.addView(row);
         }
     }
@@ -1686,20 +1726,27 @@ public class AdvanceActivity extends AppCompatActivity {
         if (splitPresetsContainer == null) return;
         splitPresetsContainer.removeAllViews();
         final java.util.List<SplitStore.Preset> list = SplitStore.load(prefs);
+        TextView count = findViewById(R.id.settingsSplitCount);
+        if (count != null) count.setText("Сплитов: " + list.size());
         LayoutInflater inf = LayoutInflater.from(this);
 
         for (int i = 0; i < list.size(); i++) {
             final int idx = i;
             SplitStore.Preset ps = list.get(i);
             View row = inf.inflate(R.layout.item_split_preset, splitPresetsContainer, false);
+            SettingsPreviewView preview = row.findViewById(R.id.settingsSplitPreview);
+            preview.setSplit(ps);
+            ((TextView) row.findViewById(R.id.settingsSplitTitle)).setText("Сплит " + (i + 1));
+            TextView ratioLabel = row.findViewById(R.id.settingsSplitRatioLabel);
+            ratioLabel.setText(SplitStore.RATIO_LABELS[Math.max(0, Math.min(4, ps.ratio))]);
 
             Button lb = row.findViewById(R.id.splitLeftBtn);
             Button rb = row.findViewById(R.id.splitRightBtn);
             Button del = row.findViewById(R.id.splitDeleteBtn);
             android.widget.Spinner sp = row.findViewById(R.id.splitRatioSpinner);
 
-            lb.setText("Слева: " + (ps.ll.isEmpty() ? "не выбрано" : ps.ll));
-            rb.setText("Справа: " + (ps.rl.isEmpty() ? "не выбрано" : ps.rl));
+            lb.setText(ps.ll.isEmpty() ? "не выбрано" : ps.ll);
+            rb.setText(ps.rl.isEmpty() ? "не выбрано" : ps.rl);
 
             lb.setOnClickListener(v -> showAppPicker("Приложение слева", (pkg, label) -> {
                 java.util.List<SplitStore.Preset> l2 = SplitStore.load(prefs);
@@ -1711,10 +1758,20 @@ public class AdvanceActivity extends AppCompatActivity {
             }));
 
             android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<>(
-                    this, R.layout.spinner_ratio_item, SplitStore.RATIO_LABELS);
-            ad.setDropDownViewResource(R.layout.spinner_ratio_dropdown);
+                    this, R.layout.settings_spinner_item, SplitStore.RATIO_LABELS);
+            ad.setDropDownViewResource(R.layout.settings_spinner_dropdown);
             sp.setAdapter(ad);
             sp.setSelection(ps.ratio, false);
+            SettingsChoiceGroup ratios = row.findViewById(R.id.settingsSplitRatios);
+            for (int ri = 0; ri < SplitStore.RATIO_LABELS.length; ri++) {
+                RadioButton choice = new RadioButton(this); choice.setId(View.generateViewId());
+                choice.setText(SplitStore.RATIO_LABELS[ri]); choice.setTag(ri); ratios.addView(choice);
+                if (ri == ps.ratio) ratios.check(choice.getId());
+            }
+            ratios.setOnCheckedChangeListener((group, checkedId) -> {
+                View selected = group.findViewById(checkedId);
+                if (selected != null) sp.setSelection((Integer) selected.getTag());
+            });
             sp.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(android.widget.AdapterView<?> parent, View view, int pos, long id) {
@@ -1722,6 +1779,8 @@ public class AdvanceActivity extends AppCompatActivity {
                     if (idx < l2.size() && l2.get(idx).ratio != pos) {
                         l2.get(idx).ratio = pos;
                         l2.get(idx).split = 0f;
+                        preview.setSplit(l2.get(idx));
+                        ratioLabel.setText(SplitStore.RATIO_LABELS[l2.get(idx).ratio]);
                         saveSplitPresets(l2);
                     }
                 }
@@ -1739,6 +1798,8 @@ public class AdvanceActivity extends AppCompatActivity {
                     if (idx < l2.size()) {
                         l2.get(idx).resizable = checked;
                         if (!checked) l2.get(idx).split = 0f;
+                        preview.setSplit(l2.get(idx));
+                        ratioLabel.setText(SplitStore.RATIO_LABELS[l2.get(idx).ratio]);
                         saveSplitPresets(l2);
                     }
                 });
@@ -1749,6 +1810,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 if (idx < l2.size()) { l2.remove(idx); saveSplitPresets(l2); renderSplitPresets(); }
             });
 
+            SettingsDesign.styleTree(row);
             splitPresetsContainer.addView(row);
         }
     }
@@ -1802,8 +1864,8 @@ public class AdvanceActivity extends AppCompatActivity {
             label.setText(map.get(pkg));
 
             android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<>(
-                    this, R.layout.spinner_ratio_item, DPI_LABELS);
-            ad.setDropDownViewResource(R.layout.spinner_ratio_dropdown);
+                    this, R.layout.settings_spinner_item, DPI_LABELS);
+            ad.setDropDownViewResource(R.layout.settings_spinner_dropdown);
             sp.setAdapter(ad);
             sp.setSelection(dpiIndex(AppDpiStore.get(prefs, pkg)), false);
             sp.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -1819,6 +1881,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 public void onNothingSelected(android.widget.AdapterView<?> parent) { }
             });
 
+            SettingsDesign.styleTree(row);
             container.addView(row);
         }
     }
@@ -1850,7 +1913,7 @@ public class AdvanceActivity extends AppCompatActivity {
 
     /** «Перезагрузить систему»: диалог подтверждения → MSG_REBOOT в Native (priv-app), тот зовёт PowerManager.reboot. */
     public void onButtonRebootSystem(View v) {
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.SettingsDialog)
                 .setTitle("Перезагрузка системы")
                 .setMessage("Система (голова) будет перезагружена. Несохранённые действия могут прерваться. Продолжить?")
                 .setPositiveButton("Перезагрузить", (d, w) -> {
@@ -1878,6 +1941,10 @@ public class AdvanceActivity extends AppCompatActivity {
      *  3 Apollo Tech, 4 собственные команды, 5 кнопки на руле, 6 другое). */
     private void setSection(int index) {
         currentSection = index;
+        TextView eyebrow = findViewById(R.id.settingsEyebrow);
+        String[] categories = {"ПЕРСОНАЛИЗАЦИЯ", "АВТОМОБИЛЬ", "ПРИЛОЖЕНИЯ", "АССИСТЕНТЫ",
+                "РАСШИРЕННЫЕ НАСТРОЙКИ", "УПРАВЛЕНИЕ", "СИСТЕМА", "ГОЛОСОВОЙ ПОМОЩНИК"};
+        if (eyebrow != null && index >= 0 && index < categories.length) eyebrow.setText(categories[index]);
         if (sectionTitle != null && index >= 0 && index < SECTION_TITLES.length)
             sectionTitle.setText(SECTION_TITLES[index]);
         if (pageMainScreen != null)      pageMainScreen.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
@@ -1906,12 +1973,17 @@ public class AdvanceActivity extends AppCompatActivity {
         }
 
         if (buttonApplyAdvance != null) {
-            boolean hideApply = index == SECTION_VOICE || index == SECTION_SCENARIOS;
-            buttonApplyAdvance.setVisibility(hideApply ? View.GONE : View.VISIBLE);
+            buttonApplyAdvance.setVisibility(View.VISIBLE);
+            buttonApplyAdvance.setEnabled(index == SECTION_VOICE || index == SECTION_SCENARIOS || !applying);
         }
         if (applyProgressAdvance != null) {
             boolean hideApply = index == SECTION_VOICE || index == SECTION_SCENARIOS;
             applyProgressAdvance.setVisibility(applying && !hideApply ? View.VISIBLE : View.GONE);
+        }
+        View[] pages = {pageMainScreen, pageDriveModes, pageSplitScreen, pageApolloTech, pageCustomCommands, pageSteeringButtons, pageOther, pageVoiceControl, pageScenarios};
+        if (index >= 0 && index < pages.length && pages[index] instanceof android.widget.ScrollView) {
+            android.widget.ScrollView page = (android.widget.ScrollView) pages[index];
+            page.requestFocus(); page.post(() -> page.scrollTo(0, 0));
         }
         updateSystemMetricsPolling();
         updateLightDiagnosticsBinding();
@@ -2132,12 +2204,9 @@ public class AdvanceActivity extends AppCompatActivity {
 
         if (textApolloStatus != null) {
             textApolloStatus.setText(
-                    "VoyahTune хранит выбранные значения без чтения текущего состояния автомобиля. "
-                            + (ru.big.town.common.InfrastructureProfile.read(this).usesAccHooks()
-                            ? "Они применяются при изменении, кнопкой «Применить» и автоматически "
-                                    + "при пробуждении автомобиля."
-                            : "Они применяются кнопкой «Применить» и автоматически через 10 секунд "
-                                    + "после пробуждения."));
+                    ru.big.town.common.InfrastructureProfile.read(this).usesAccHooks()
+                            ? "Применение при изменении, кнопкой «Применить» и при пробуждении автомобиля."
+                            : "Применение кнопкой «Применить» и через 10 секунд после пробуждения.");
         }
     }
 
@@ -2225,7 +2294,7 @@ public class AdvanceActivity extends AppCompatActivity {
         labels[staticCount + 1] = "Открыть приложение…";
         labels[staticCount + 2] = "Набрать номер…";
         labels[staticCount + 3] = "Своя CAN-команда…";
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.SettingsDialog)
                 .setTitle("Добавить действие")
                 .setItems(labels, (d, which) -> {
                     if (which < staticCount) {
@@ -2258,7 +2327,7 @@ public class AdvanceActivity extends AppCompatActivity {
             labels[i] = (entry.name.isEmpty() ? "Без имени" : entry.name)
                     + " — " + entry.number;
         }
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.SettingsDialog)
                 .setTitle("Выбрать номер для кнопки руля")
                 .setItems(labels, (dialog, which) -> {
                     String number = entries.get(which).number.replaceAll("[^0-9]", "");
@@ -2289,7 +2358,7 @@ public class AdvanceActivity extends AppCompatActivity {
                     com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
             return;
         }
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DarkDialog)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.SettingsDialog)
                 .setTitle("Открыть сплит")
                 .setItems(labels.toArray(new CharSequence[0]),
                         (d, which) -> appendSteerAction(key, "split:" + readyIdx.get(which)))
@@ -2310,7 +2379,7 @@ public class AdvanceActivity extends AppCompatActivity {
         EditText editor = content.findViewById(R.id.steerCanCommandInput);
         TextView error = content.findViewById(R.id.steerCanCommandError);
         AlertDialog dialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(
-                this, R.style.DarkDialog)
+                this, R.style.SettingsDialog)
                 .setTitle("Своя CAN-команда")
                 .setView(content)
                 .setPositiveButton("Добавить", null)
@@ -2385,6 +2454,7 @@ public class AdvanceActivity extends AppCompatActivity {
                 boolean reserved = voiceOwnsSlot(keys[n]);
                 button.setEnabled(!reserved);
                 button.setAlpha(reserved ? 0.4f : 1f);
+                button.setVisibility(reserved ? View.GONE : View.VISIBLE);
             }
         }
         renderSteerActionList("steerStarShort", steerStarShortList);
@@ -2401,20 +2471,22 @@ public class AdvanceActivity extends AppCompatActivity {
         if (container == null) return;
         container.removeAllViews();
         if (voiceOwnsSlot(key)) {
-            TextView reserved = new TextView(this);
-            reserved.setText(("steerVoiceShort".equals(key) ? "Короткое" : "Долгое")
-                    + " нажатие занято голосовым помощником. Прежние действия сохранены. Изменить нажатие или отключить помощника: Голосовое управление.");
-            reserved.setTextColor(0xffa0a5b0); reserved.setTextSize(18);
+            View reserved = LayoutInflater.from(this).inflate(R.layout.settings_steering_reserved, container, false);
+            reserved.findViewById(R.id.settingsOpenVoice).setOnClickListener(v -> setSection(SECTION_VOICE));
+            SettingsDesign.styleTree(reserved);
             container.addView(reserved); return;
         }
         List<String> actions = SteeringActionStore.load(prefs, key);
         if (actions.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("Действия не назначены");
-            empty.setTextColor(0xff888888);
+            empty.setText("Штатное поведение\nДействия не назначены");
+            empty.setGravity(android.view.Gravity.CENTER);
+            empty.setPadding(0, 22, 0, 22);
+            empty.setTextColor(0xff8b9cb4);
             empty.setTextSize(18f);
-            int top = Math.round(getResources().getDisplayMetrics().density * 8f);
-            empty.setPadding(4, top, 4, 0);
+            int padding = SettingsDesign.dp(empty, 22);
+            empty.setPadding(padding, padding, padding, padding);
+            SettingsDesign.applyTypography(empty);
             container.addView(empty);
             return;
         }
@@ -2424,7 +2496,12 @@ public class AdvanceActivity extends AppCompatActivity {
             View row = inflater.inflate(R.layout.item_steering_action, container, false);
             TextView label = row.findViewById(R.id.steerActionLabel);
             ImageButton delete = row.findViewById(R.id.steerActionDelete);
-            label.setText((i + 1) + ". " + steerActionLabel(actions.get(i)));
+            label.setText(steerActionLabel(actions.get(i)));
+            ((TextView) row.findViewById(R.id.settingsSteerIndex)).setText(String.valueOf(i + 1));
+            View up = row.findViewById(R.id.settingsSteerUp), down = row.findViewById(R.id.settingsSteerDown);
+            up.setEnabled(i > 0); down.setEnabled(i + 1 < actions.size());
+            up.setOnClickListener(v -> moveSteerAction(key, index, -1));
+            down.setOnClickListener(v -> moveSteerAction(key, index, 1));
             delete.setOnClickListener(v -> {
                 List<String> current = SteeringActionStore.load(prefs, key);
                 if (index < 0 || index >= current.size()) return;
@@ -2433,8 +2510,19 @@ public class AdvanceActivity extends AppCompatActivity {
                 refreshSteerActions();
                 pushSteerConfig();
             });
+            SettingsDesign.styleTree(row);
             container.addView(row);
         }
+    }
+
+    private void moveSteerAction(String key, int index, int delta) {
+        List<String> actions = SteeringActionStore.load(prefs, key);
+        int target = index + delta;
+        if (index < 0 || index >= actions.size() || target < 0 || target >= actions.size()) return;
+        java.util.Collections.swap(actions, index, target);
+        SteeringActionStore.save(prefs, key, actions);
+        refreshSteerActions();
+        pushSteerConfig();
     }
 
     /** Человекочитаемая подпись действия: статические — из STEER_ACTIONS; «split:N» — из пресета сплита;
@@ -2721,11 +2809,11 @@ public class AdvanceActivity extends AppCompatActivity {
         RadioButton smart = findViewById(R.id.SMART);
         if (checkBox34.isChecked()) {
             if (smart != null) smart.setVisibility(View.GONE);
-            checkBox34.setText("4 кнопки");
+            checkBox34.setText("");
             prefs.edit().putBoolean("checkBox34", true).apply();
         } else {
             if (smart != null) smart.setVisibility(View.VISIBLE);
-            checkBox34.setText("3 кнопки");
+            checkBox34.setText("");
             prefs.edit().putBoolean("checkBox34", false).apply();
         }
     }

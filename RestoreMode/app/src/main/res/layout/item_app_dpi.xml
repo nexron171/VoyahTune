@@ -1,45 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ru.big.town.restoremode.SettingsRow xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginTop="10dp"
     android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:background="@drawable/layout_category_bg"
-    android:paddingHorizontal="16dp"
-    android:paddingVertical="8dp">
-
-    <ImageView
-        android:id="@+id/appDpiIco"
+    android:gravity="center_vertical">
+    <ImageView android:id="@+id/appDpiIco"
         android:layout_width="40dp"
         android:layout_height="40dp"
         android:layout_marginEnd="14dp"
-        android:scaleType="fitCenter" />
-
-    <TextView
-        android:id="@+id/appDpiLabel"
-        android:layout_width="0dp"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+    <LinearLayout android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:text=""
-        android:textColor="#FFFFFF"
-        android:textSize="26px"
-        android:singleLine="true"
-        android:ellipsize="end" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="10dp"
-        android:text="DPI"
-        android:textColor="#aaaaaa"
-        android:textSize="22px" />
-
-    <!-- Тёмный спиннер как у соотношения (popup #2b2f38, светлый текст) -->
-    <Spinner
-        android:id="@+id/appDpiSpinner"
-        android:layout_width="150dp"
-        android:layout_height="wrap_content"
-        android:popupBackground="#2b2f38" />
-
-</LinearLayout>
+        android:orientation="vertical"
+        android:layout_weight="1">
+        <TextView android:id="@+id/appDpiLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="@color/settings_text"
+            android:textSize="22sp"
+            android:ellipsize="end" />
+        <TextView android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Авто — плотность экрана по умолчанию."
+            android:textSize="17sp"
+            android:textColor="#9aaac0"
+            android:includeFontPadding="false"
+            android:layout_marginTop="7dp"
+            android:lineSpacingMultiplier="1.45" />
+    </LinearLayout>
+    <Spinner android:id="@+id/appDpiSpinner"
+        android:layout_width="280dp"
+        android:layout_height="52dp"
+        android:popupBackground="@color/settings_inset" />
+</ru.big.town.restoremode.SettingsRow>

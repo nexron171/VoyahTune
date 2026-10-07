@@ -17,7 +17,6 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.WindowManager;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -55,7 +54,7 @@ public class TaskManagerActivity extends AppCompatActivity {
     private static final long REFRESH_FALLBACK_MS = 1_500L;
     /** Полоса родного дока головы (как в MainActivity): контент отступаем, док остаётся видимым. */
     private static final float NATIVE_DOCK_DP = 145f;
-    private static final int GAP_DP = 8;
+    private static final int GAP_DP = 16;
 
     private View root;
     private LinearLayout cardsRow;
@@ -64,7 +63,9 @@ public class TaskManagerActivity extends AppCompatActivity {
 
     private Messenger nativeService;
     private boolean bound;
+    private boolean bindingRequested;
     private boolean listReceived;
+    private String connectionError;
     private int cardWidthPx, gapPx, lastWidth;
     private final List<String> cardPackages = new ArrayList<>();
     private final List<String> cardLabels = new ArrayList<>();
@@ -88,16 +89,18 @@ public class TaskManagerActivity extends AppCompatActivity {
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder service) {
             nativeService = new Messenger(service);
+            connectionError = null;
             bound = true;
             requestList();
         }
         @Override public void onServiceDisconnected(ComponentName name) {
             nativeService = null;
             bound = false;
-            showEmpty("Нет связи с сервисом автомобиля");
+            connectionError = "Нет связи с сервисом автомобиля";
+            showEmpty(connectionError);
         }
-        @Override public void onBindingDied(ComponentName name) { nativeService = null; bound = false; }
-        @Override public void onNullBinding(ComponentName name) { nativeService = null; bound = false; }
+        @Override public void onBindingDied(ComponentName name) { onServiceDisconnected(name); }
+        @Override public void onNullBinding(ComponentName name) { onServiceDisconnected(name); }
     };
 
     @Override
@@ -106,8 +109,6 @@ public class TaskManagerActivity extends AppCompatActivity {
         // Как в остальных экранах VoyahTune: без edge-to-edge система сама поглощает insets и до
         // контента они не доходят (родной док в insets не приходит вообще).
         EdgeToEdge.enable(this);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_task_manager);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
 
@@ -116,6 +117,9 @@ public class TaskManagerActivity extends AppCompatActivity {
         scroll = findViewById(R.id.taskManagerScroll);
         empty = findViewById(R.id.taskManagerEmpty);
         inflater = LayoutInflater.from(this);
+        SettingsDesign.styleTree(root);
+        View header = findViewById(R.id.taskManagerHeader);
+        header.setBackground(new SettingsHeaderDrawable(header));
         findViewById(R.id.taskManagerClose).setOnClickListener(v -> finish());
 
         float density = getResources().getDisplayMetrics().density;
@@ -133,11 +137,11 @@ public class TaskManagerActivity extends AppCompatActivity {
                 int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
                 if (id > 0) top = getResources().getDimensionPixelSize(id);
             }
-            v.setPadding(dockInset + sb.left, top, sb.right, 0);
+            v.setPadding(dockInset + sb.left, top, sb.right, sb.bottom);
             renderCards();
             return insets;
         });
-        root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+        scroll.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             if ((r - l) != lastWidth) {
                 lastWidth = r - l;
                 renderCards();
@@ -146,27 +150,36 @@ public class TaskManagerActivity extends AppCompatActivity {
 
         boolean requested;
         try {
-            requested = bindService(new Intent().setClassName(NATIVE_PKG, NATIVE_SERVICE),
+            requested = bindService(nativeServiceIntent(),
                     connection, BIND_AUTO_CREATE);
         } catch (RuntimeException e) {
             Log.w(TAG, "bindService: " + e.getMessage());
             requested = false;
         }
-        if (!requested) showEmpty("Сервис автомобиля недоступен");
+        bindingRequested = requested;
+        if (!requested) {
+            connectionError = "Сервис автомобиля недоступен";
+            showEmpty(connectionError);
+        }
     }
 
     @Override
     protected void onDestroy() {
         ui.removeCallbacks(refreshFallback);
-        if (bound) {
+        if (bindingRequested) {
             try {
                 unbindService(connection);
             } catch (RuntimeException e) {
                 Log.w(TAG, "unbindService: " + e.getMessage());
             }
             bound = false;
+            bindingRequested = false;
         }
         super.onDestroy();
+    }
+
+    protected Intent nativeServiceIntent() {
+        return new Intent().setClassName(NATIVE_PKG, NATIVE_SERVICE);
     }
 
     /** Запросить у Native актуальный список запущенных сторонних задач. */
@@ -212,12 +225,15 @@ public class TaskManagerActivity extends AppCompatActivity {
     /** Перерисовать ряд карточек текущим списком. Вызывается после инсетов, layout и каждого ответа. */
     private void renderCards() {
         if (cardsRow == null) return;
-        int available = root.getWidth() - root.getPaddingLeft() - root.getPaddingRight();
+        int available = scroll.getWidth() - scroll.getPaddingLeft() - scroll.getPaddingRight();
         if (available <= 0) return;   // раскладки ещё нет — перерисуем по addOnLayoutChangeListener
         cardWidthPx = TaskManagerCards.cardWidth(available, gapPx);
         if (cardWidthPx <= 0) return;
 
         cardsRow.removeAllViews();
+        if (connectionError != null) { showEmpty(connectionError); return; }
+        ((TextView) findViewById(R.id.taskManagerCount)).setText(listReceived
+                ? "Открыто: " + cardPackages.size() : "Подключение…");
         if (cardPackages.isEmpty()) {
             // До первого ответа Native списка ещё нет — пустой экран не показываем.
             showEmpty(listReceived ? "Нет запущенных приложений" : "Загрузка…");
@@ -239,7 +255,7 @@ public class TaskManagerActivity extends AppCompatActivity {
         icon.setImageDrawable(iconFor(pkg));
         // Приложение живёт внутри виджета: тап переносит его на физический экран, поэтому бейдж
         // подсказывает, откуда взялась карточка.
-        card.findViewById(R.id.taskCardWidget).setVisibility(widget ? View.VISIBLE : View.GONE);
+        card.findViewById(R.id.taskCardWidget).setVisibility(widget ? View.VISIBLE : View.INVISIBLE);
         // Тап по иконке и имени выводит задачу приложения на передний план, закрытие — отдельной кнопкой.
         View.OnClickListener switchAction = v -> sendSwitch(pkg);
         icon.setOnClickListener(switchAction);
@@ -248,6 +264,9 @@ public class TaskManagerActivity extends AppCompatActivity {
         // Булавка защищает приложение только от «Закрыть все»; обычная «Закрыть» работает всегда.
         ImageButton pin = card.findViewById(R.id.taskCardPin);
         setPinState(pin, pinned);
+        ((TextView) card.findViewById(R.id.taskCardStatus)).setText(pinned ? "Закреплено" : "Открыто");
+        card.setTag(pkg);
+        SettingsDesign.styleTree(card);
         pin.setOnClickListener(v -> sendPin(pkg, !pinned));
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(cardWidthPx, -1);
@@ -258,8 +277,9 @@ public class TaskManagerActivity extends AppCompatActivity {
     /** Состояние булавки: зафиксированная подсвечена акцентом, свободная — приглушена. */
     private void setPinState(ImageButton pin, boolean pinned) {
         if (pin == null) return;
-        pin.setImageTintList(ColorStateList.valueOf(pinned ? 0xff2f7fd0 : 0xffffffff));
-        pin.setAlpha(pinned ? 1f : 0.45f);
+        pin.setImageTintList(ColorStateList.valueOf(pinned ? 0xffa5c8ff : 0xff97a6bc));
+        pin.setAlpha(1f);
+        pin.setSelected(pinned);
         pin.setContentDescription(pinned
                 ? "Снять фиксацию: приложение защищено от «Закрыть все»"
                 : "Зафиксировать: приложение не закроется кнопкой «Закрыть все»");
@@ -268,12 +288,11 @@ public class TaskManagerActivity extends AppCompatActivity {
     private void addCloseAllCard() {
         final View card = inflater.inflate(R.layout.item_task_close_all, cardsRow, false);
         card.findViewById(R.id.taskCloseAll).setOnClickListener(v -> {
-            send(TaskManagerProtocol.CLOSE_ALL, null);
-            // «Закрыть все» завершает диспетчер: возвращаемся туда, откуда его открыли.
-            finish();
+            if (send(TaskManagerProtocol.CLOSE_ALL, null)) finish();
+            else showEmpty("Нет связи с сервисом автомобиля");
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(cardWidthPx, -1);
-        lp.rightMargin = gapPx;
+        SettingsDesign.styleTree(card);
         cardsRow.addView(card, lp);
     }
 
@@ -326,7 +345,7 @@ public class TaskManagerActivity extends AppCompatActivity {
         try {
             return pm.getApplicationIcon(pkg);
         } catch (PackageManager.NameNotFoundException e) {
-            return pm.getDefaultActivityIcon();
+            return getDrawable(R.drawable.settings_icon_apps);
         }
     }
 
@@ -336,5 +355,6 @@ public class TaskManagerActivity extends AppCompatActivity {
         scroll.setVisibility(View.GONE);
         empty.setVisibility(View.VISIBLE);
         empty.setText(text);
+        if (nativeService == null) ((TextView) findViewById(R.id.taskManagerCount)).setText("Нет связи");
     }
 }

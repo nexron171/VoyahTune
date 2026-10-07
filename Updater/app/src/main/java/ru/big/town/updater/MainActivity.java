@@ -50,8 +50,11 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         resetCompletedOnOpen = getIntent().getBooleanExtra(OPEN_INITIAL_SCREEN, false);
+        // Insets below reserve the system bars once, as in RestoreMode settings.
+        getWindow().setDecorFitsSystemWindows(false);
         setContentView(R.layout.activity_updater);
         applyWindowInsets(findViewById(R.id.root));
+        UpdaterDesign.install(this);
         progress = findViewById(R.id.progress);
         primary = findViewById(R.id.primary);
         secondary = findViewById(R.id.secondary);
@@ -220,9 +223,10 @@ public final class MainActivity extends Activity {
     private void confirmInstall() {
         String dns="";
         if(dnsSupported && !settings.isNull("dnsEnabled")) dns="\n\nDNS: "+(settings.optBoolean("dnsEnabled")?"Яндекс":"стандартный")+".";
-        new AlertDialog.Builder(this).setTitle("Установить обновление?")
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Установить обновление?")
             .setMessage("Автомобиль должен стоять в P с включённым питанием. Головное устройство перезагрузится. Сохраняйте питание до завершения проверки запуска.\n\nНастройки VoyahTune сохранятся. При ошибке установите релиз через USB с компьютера."+dns)
             .setNegativeButton("Отмена",null).setPositiveButton("Установить и перезагрузить",(d,w)->perform("apply",false)).show();
+        UpdaterDesign.styleDialog(dialog);
     }
     private void render() {
         String phase=state.optString("phase","idle"), step=state.optString("step");
@@ -260,8 +264,6 @@ public final class MainActivity extends Activity {
         for(int i=0;i<ids.length;i++){
             boolean done=connected&&(i<p.nav||p.success);
             text(ids[i],(done?"✓":new String[]{"①","②","③","④"}[i])+"  "+labels[i]);
-            TextView view=findViewById(ids[i]);int color=getColor(connected&&(done||i==p.nav)?R.color.teal:R.color.muted);
-            if(view.getCurrentTextColor()!=color)view.setTextColor(color);
         }
         boolean installing=p.busy&&p.nav==2;
         text(R.id.aside_title,failed||!error.isEmpty()?"Установите через USB":installing?"Сохраняйте питание":p.success?"Всё на месте":"Настройки останутся с вами");
@@ -275,6 +277,7 @@ public final class MainActivity extends Activity {
             if(settingsRepeat!=null)enabled(settingsRepeat,!actionBusy&&!p.busy);
         }
         enabled(findViewById(R.id.settings),connected&&!p.busy&&!actionBusy&&!"repair-required".equals(phase));
+        UpdaterDesign.render(this,p,connected,failed||!error.isEmpty());
     }
 
     private void openSettings() {
@@ -282,19 +285,20 @@ public final class MainActivity extends Activity {
         beginAction();
         LinearLayout content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(dp(24),dp(12),dp(24),0);
         label(content,"Адрес каталога релизов",18);
-        EditText url=new EditText(this);url.setSingleLine(true);url.setText(settings.optString("catalogUrl"));url.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);content.addView(url);
+        EditText url=new EditText(this);url.setSingleLine(true);url.setText(settings.optString("catalogUrl"));url.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);UpdaterDesign.styleField(url);content.addView(url);
         label(content,"Смена адреса не запускает скачивание или установку.",15);
         Switch dns=new Switch(this);dns.setText("Яндекс DNS");dns.setTextSize(20);dns.setPadding(0,dp(18),0,dp(18));dns.setMinHeight(dp(60));content.addView(dns);dns.setEnabled(false);
         TextView dnsInfo=label(content,dnsSupported?"Определяем текущий DNS…":"Настройка DNS доступна после обновления root-службы через USB.",16);
         final boolean[] known={false};
         dns.setOnCheckedChangeListener((button,on)->{if(known[0])dnsInfo.setText(on?"При установке релиза будет включён Яндекс DNS.":"При установке релиза будет использован стандартный DNS.");});
-        Button repeat=new Button(this);repeat.setAllCaps(false);repeat.setText("Проверить релиз для повторной установки");content.addView(repeat);
+        Button repeat=new Button(this);UpdaterDesign.styleAction(repeat,false);repeat.setText("Проверить релиз для повторной установки");
+        LinearLayout.LayoutParams repeatLayout=new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,dp(64));repeatLayout.topMargin=dp(20);content.addView(repeat,repeatLayout);
         label(content,"Позволяет скачать и установить ту же версию VoyahTune.",15);
         ScrollView scroll=new ScrollView(this);scroll.addView(content);
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Настройки обновлений").setView(scroll).setNegativeButton("Отмена",null).setNeutralButton("Завершить",(d,w)->finishResult()).setPositiveButton("Сохранить",null).create();
         settingsDialog=dialog;settingsRepeat=repeat;settingsMessage=dnsInfo;
         dialog.setOnDismissListener(d->{if(settingsDialog==dialog){settingsDialog=null;settingsSave=null;settingsRepeat=null;settingsMessage=null;}});
-        dialog.show();settingsSave=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        dialog.show();UpdaterDesign.styleDialog(dialog);settingsSave=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         repeat.setOnClickListener(v->{dialog.dismiss();perform("check",true);});
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             if(actionBusy)return;
@@ -331,7 +335,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton(terminal?"Завершить":"Открыть меню",(d,w)->{if(terminal)finishResult();}).setNegativeButton("Скрыть",(d,w)->finish()).create();
         noticeDialog=dialog;
         dialog.setOnDismissListener(d->{noticeDialog=null;if(!worker.isShutdown())worker.execute(()->{try{client.call(request("dismiss"));}catch(Exception ignored){}});});
-        dialog.setOnCancelListener(d->finish());dialog.show();
+        dialog.setOnCancelListener(d->finish());dialog.show();UpdaterDesign.styleDialog(dialog);
     }
     private TextView label(LinearLayout parent,String text,int size){TextView view=new TextView(this);view.setText(text);view.setTextColor(getColor(R.color.muted));view.setTextSize(size);view.setPadding(0,dp(8),0,dp(8));parent.addView(view);return view;}
     private void text(int id,String value){TextView view=findViewById(id);if(!TextUtils.equals(view.getText(),value))view.setText(value);}

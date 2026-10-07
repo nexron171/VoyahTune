@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="23dp"
+    android:background="@drawable/settings_reserved">
+    <ImageView android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:layout_marginBottom="12dp"
+        android:src="@drawable/settings_icon_mic"
+        android:importantForAccessibility="no" />
+    <TextView android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Вызов голосового помощника"
+        android:textSize="19sp"
+        android:textColor="#C0D6F6"
+        android:lineSpacingMultiplier="1.5" />
+    <TextView android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Ваши прежние действия сохраняются и вернутся после изменения способа вызова."
+        android:textSize="17sp"
+        android:textColor="#A2B0C5"
+        android:lineSpacingMultiplier="1.5" />
+    <Button android:id="@+id/settingsOpenVoice"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="Настроить помощника" />
+</LinearLayout>
