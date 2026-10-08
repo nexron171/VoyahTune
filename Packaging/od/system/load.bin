@@ -195,6 +195,13 @@ HOOK_STATUS_PROVIDER_PAYLOAD=
 HOOK_STATUS_PROVIDER_ATTEMPTS=0
 HOOK_STATUS_PROVIDER_MAX_ATTEMPTS=3
 
+DRIVE_HEALTH_GRACE_SECONDS=15
+
+read_state_line() {
+    STATE_LINE=
+    { IFS= read -r STATE_LINE < "$1"; } 2>/dev/null || [ -n "$STATE_LINE" ]
+}
+
 load_runtime_hook_state() {
     RUNTIME_ID=$1
     RUNTIME_MARK=$2
@@ -256,8 +263,10 @@ publish_hook_status() {
         fi
     fi
 
-    # The loader now starts in late_start, before Android's app/provider phase. Keep local status
-    # current immediately, but do not spend the bounded provider retry budget before boot complete.
+    [ "$HOOK_STATUS_PROVIDER_PAYLOAD" != "$HOOK_STATUS_PAYLOAD" ] || return 0
+    [ "$HOOK_STATUS_PROVIDER_ATTEMPTS" -lt "$HOOK_STATUS_PROVIDER_MAX_ATTEMPTS" ] || return 0
+
+    # Do not spend the provider retry budget before Android can serve the request.
     STATUS_BOOT_COMPLETED=$(getprop sys.boot_completed 2>/dev/null) || STATUS_BOOT_COMPLETED=
     [ "$STATUS_BOOT_COMPLETED" = 1 ] || return
 
@@ -294,11 +303,19 @@ process_identity() {
         "$ID_EXPECTED"|"$ID_EXPECTED "*) ;;
         *) return 1 ;;
     esac
-    ID_START=$(awk '{print $22}' "/proc/$ID_PID/stat" 2>/dev/null)
+    { IFS= read -r ID_STAT < "/proc/$ID_PID/stat"; } 2>/dev/null || return 1
+    ID_FIELDS=${ID_STAT##*) }
+    set -- $ID_FIELDS
+    [ "$#" -ge 20 ] || return 1
+    shift 19
+    ID_START=$1
     case "$ID_START" in
         ''|*[!0-9]*) return 1 ;;
     esac
-    ID_BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || return 1
+    ID_BOOT=${LOADER_BOOT_ID:-}
+    if [ -z "$ID_BOOT" ]; then
+        { IFS= read -r ID_BOOT < /proc/sys/kernel/random/boot_id; } 2>/dev/null || return 1
+    fi
     [ -n "$ID_BOOT" ] || return 1
     kill -0 "$ID_PID" 2>/dev/null || return 1
     # ':' intentionally avoids the '|' delimiter used by the in-memory retry tuple.
@@ -499,7 +516,9 @@ apollo_runtime_flag_enabled() {
 
 # Монотонные секунды с boot; после reboot старый timestamp автоматически выглядит протухшим.
 uptime_seconds() {
-    UPTIME_NOW=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+    UPTIME_VALUE=
+    { IFS=' ' read -r UPTIME_VALUE UPTIME_IDLE < /proc/uptime; } 2>/dev/null || :
+    UPTIME_NOW=${UPTIME_VALUE%%.*}
     case "$UPTIME_NOW" in
         ''|*[!0-9]*) date +%s ;;
         *) echo "$UPTIME_NOW" ;;
@@ -1139,7 +1158,10 @@ steering_cycle() {
     if [ -n "$KMP_ID" ] && [ "$SWK_STATE" = waiting ]; then
         inject_keymanager_bg "$KMP" "$KMP_ID"
     fi
-    STATUS_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
+    STATUS_BUSY_RECORD=
+    if [ -n "$KMP_ID" ] && [ "$SWK_STATE" != active ]; then
+        STATUS_BUSY_RECORD=$(readlink "$SWK_KM_BUSY" 2>/dev/null)
+    fi
     if [ -n "$KMP_ID" ] && [ "$SWK_STATE" != active ] \
             && [ "${STATUS_BUSY_RECORD%%\|*}" = "$KMP" ]; then
         SWK_STATE=injecting
@@ -1207,7 +1229,8 @@ vd_cycle() {
     SS_ID=$(process_identity "$SS" system_server 2>/dev/null) || SS_ID=
     VD_STATE=waiting
     if [ -n "$SS_ID" ]; then
-        VD_ATTEMPT_VALUE=$(cat "$VD_ATTEMPT" 2>/dev/null) || VD_ATTEMPT_VALUE=
+        read_state_line "$VD_ATTEMPT" || :
+        VD_ATTEMPT_VALUE=$STATE_LINE
         if [ "$VD_ATTEMPT_VALUE" != "$SS_ID" ]; then
             if reserve_injection_attempt "$SS_ID" "$VD_ATTEMPT" && prepare_vd_status; then
                 VD_DEADLINE=$(( $(uptime_seconds) + 25 ))
@@ -1225,8 +1248,10 @@ vd_cycle() {
             fi
         fi
         VD_STATE=failed
-        VD_RECORD=$(cat "$VD_STATUS" 2>/dev/null) || VD_RECORD=
-        VD_RESULT=$(cat "$VD_STATUS.inject-result" 2>/dev/null) || VD_RESULT=
+        read_state_line "$VD_STATUS" || :
+        VD_RECORD=$STATE_LINE
+        read_state_line "$VD_STATUS.inject-result" || :
+        VD_RESULT=$STATE_LINE
         VD_FAILED=0
         case "$VD_RESULT" in "$SS_ID|"*)
             [ "${VD_RESULT#*\|}" = 0 ] || VD_FAILED=1 ;;
@@ -1239,7 +1264,8 @@ vd_cycle() {
             case "$VD_AGENT_STATE" in
                 active) [ "$VD_FAILED" -eq 1 ] || VD_STATE=active ;;
                 preparing)
-                    VD_LIMIT=$(cat "$VD_STATUS.deadline" 2>/dev/null) || VD_LIMIT=
+                    read_state_line "$VD_STATUS.deadline" || :
+                    VD_LIMIT=$STATE_LINE
                     case "$VD_LIMIT" in "$SS_ID|"*)
                         VD_UNTIL=${VD_LIMIT#*\|}
                         case "$VD_UNTIL" in ''|*[!0-9]*) ;; *)
@@ -1256,7 +1282,8 @@ vd_cycle() {
             esac ;;
         esac
         if [ "$VD_STATE" = active ]; then
-            if [ "$(cat "$VDMARK" 2>/dev/null)" != "$SS_ID" ]; then
+            read_state_line "$VDMARK" || :
+            if [ "$STATE_LINE" != "$SS_ID" ]; then
                 printf '%s\n' "$SS_ID" > "$VDMARK.$$.new" && mv -f "$VDMARK.$$.new" "$VDMARK"
             fi
         fi
@@ -1317,17 +1344,85 @@ prepare_drive_health() {
     chmod 600 "$1" 2>/dev/null || :
 }
 
+drive_script_checksum() {
+    if [ "${DRIVE_CHECKSUM_PATH:-}" = "$1" ]; then
+        return 0
+    fi
+
+    # Script replacement requires a loader restart, as in the normal install path.
+    DRIVE_CHECKSUM_OUTPUT=$(cksum "$1" 2>/dev/null) || return 1
+    DRIVE_CHECKSUM_VALUE=${DRIVE_CHECKSUM_OUTPUT%% *}
+    case "$DRIVE_CHECKSUM_VALUE" in ''|*[!0-9]*) return 1 ;; esac
+    DRIVE_CHECKSUM_PATH=$1
+}
+
+write_drive_record() {
+    DRIVE_RECORD_TEMP="$1.$$.new"
+    if ! printf '%s\n' "$2" > "$DRIVE_RECORD_TEMP" \
+            || ! mv -f "$DRIVE_RECORD_TEMP" "$1"; then
+        rm -f "$DRIVE_RECORD_TEMP"
+        loge "drive state publication failed: $1"
+        return 1
+    fi
+}
+
+load_drive_observation() {
+    case "$DA_AGENT" in
+        voyahtune_acc_restore) DRIVE_OBSERVATION=${ACC_OBSERVATION:-} ;;
+        vehicle) DRIVE_OBSERVATION=${VEHICLE_DRIVE_OBSERVATION:-} ;;
+        *) DRIVE_OBSERVATION=${SETTINGS_DRIVE_OBSERVATION:-} ;;
+    esac
+    DRIVE_OBSERVED_ID=${DRIVE_OBSERVATION%%\|*}
+    DRIVE_OBSERVATION_REST=${DRIVE_OBSERVATION#*\|}
+    DRIVE_OBSERVED_AT=${DRIVE_OBSERVATION_REST%%\|*}
+    DRIVE_OBSERVATION_REST=${DRIVE_OBSERVATION_REST#*\|}
+    DRIVE_HEALTHY_AT=${DRIVE_OBSERVATION_REST%%\|*}
+    DRIVE_GRACE_UNTIL=${DRIVE_OBSERVATION_REST#*\|}
+
+    if [ "$DRIVE_OBSERVED_ID" != "$DA_ID" ]; then
+        DRIVE_HEALTHY_AT=0
+        DRIVE_GRACE_UNTIL=$((DA_NOW + DRIVE_HEALTH_GRACE_SECONDS))
+    elif [ "$DA_NOW" -lt "$DRIVE_OBSERVED_AT" ] \
+            || { [ $((DA_NOW - DRIVE_OBSERVED_AT)) -ge "$DRIVE_HEALTH_GRACE_SECONDS" ] \
+                && [ "$DRIVE_GRACE_UNTIL" -eq 0 ]; }; then
+        # A suspended worker may resume before the agent's pulse timer. Do not extend an
+        # existing grace repeatedly: an agent that stays dead must still be recovered.
+        DRIVE_HEALTHY_AT=0
+        DRIVE_GRACE_UNTIL=$((DA_NOW + DRIVE_HEALTH_GRACE_SECONDS))
+    fi
+}
+
+save_drive_observation() {
+    DRIVE_OBSERVATION="$DA_ID|$DA_NOW|$DRIVE_HEALTHY_AT|$DRIVE_GRACE_UNTIL"
+    case "$DA_AGENT" in
+        voyahtune_acc_restore) ACC_OBSERVATION=$DRIVE_OBSERVATION ;;
+        vehicle) VEHICLE_DRIVE_OBSERVATION=$DRIVE_OBSERVATION ;;
+        *) SETTINGS_DRIVE_OBSERVATION=$DRIVE_OBSERVATION ;;
+    esac
+}
+
 drive_agent_state() {
-    DA_ID=$1; DA_PID=$2; DA_MARK=$3; DA_ATTEMPT=$4; DA_HEALTH=$5; DA_LOG=$6
+    DA_ID=$1
+    DA_PID=$2
+    DA_MARK=$3
+    DA_ATTEMPT=$4
+    DA_HEALTH=$5
+    DA_LOG=$6
     load_runtime_hook_state "$DA_ID" "$DA_MARK" "$DA_ATTEMPT"
     [ -n "$DA_ID" ] || return 0
     [ -d /data/local/open_voyah/drive_hooks ] || mkdir -p /data/local/open_voyah/drive_hooks
     DA_RETRY="/data/local/open_voyah/drive_hooks/${DA_ATTEMPT##*/}.retry"
     DA_NOW=$(uptime_seconds)
+    case "$DA_NOW" in ''|*[!0-9]*) RUNTIME_STATE=failed; return 0 ;; esac
     # Do not turn an injected-agent crash into an OEM service restart loop.
     DA_CRASH="${DA_RETRY%.retry}.crash"
-    DA_AGENT=${DA_LOG##*/}; DA_AGENT=${DA_AGENT%.txt}
-    DA_IMAGE=$(cksum "${7:-/data/local/bin/$DA_AGENT.js}" 2>/dev/null | awk '{print $1}')
+    DA_AGENT=${DA_LOG##*/}
+    DA_AGENT=${DA_AGENT%.txt}
+    if ! drive_script_checksum "${7:-/data/local/bin/$DA_AGENT.js}"; then
+        RUNTIME_STATE=failed
+        return 0
+    fi
+    DA_IMAGE=$DRIVE_CHECKSUM_VALUE
     DA_BOOT=${DA_ID%:*}; DA_BOOT=${DA_BOOT%:*}
     DC_IMAGE=; DC_BOOT=; DC_ID=; DC_AT=0; DC_COUNT=0
     if [ -r "$DA_CRASH" ]; then
@@ -1341,14 +1436,17 @@ drive_agent_state() {
     if [ -n "$DC_ID" ] && [ "$DC_ID" != "$DA_ID" ]; then
         if [ $((DA_NOW - DC_AT)) -lt 60 ]; then DC_COUNT=$((DC_COUNT + 1)); else DC_COUNT=0; fi
         if [ "$DC_COUNT" -ge 3 ]; then
-            printf '%s|%s|%s|%s|%s\n' "$DA_IMAGE" "$DA_BOOT" "$DA_ID" "$DA_NOW" "$DC_COUNT" > "$DA_CRASH"
+            write_drive_record "$DA_CRASH" "$DA_IMAGE|$DA_BOOT|$DA_ID|$DA_NOW|$DC_COUNT" || :
             loge "drive agent blocked after rapid target restarts: $DA_AGENT; needs new script or boot"
             RUNTIME_STATE=failed
             return 0
         fi
     fi
     if [ "$DC_ID" != "$DA_ID" ]; then
-        printf '%s|%s|%s|%s|%s\n' "$DA_IMAGE" "$DA_BOOT" "$DA_ID" "$DA_NOW" "$DC_COUNT" > "$DA_CRASH"
+        if ! write_drive_record "$DA_CRASH" "$DA_IMAGE|$DA_BOOT|$DA_ID|$DA_NOW|$DC_COUNT"; then
+            RUNTIME_STATE=failed
+            return 0
+        fi
     fi
 
     DA_OLD=; DA_COUNT=0; DA_NEXT=0; DA_SINCE=0
@@ -1358,16 +1456,24 @@ drive_agent_state() {
     if [ "$DA_OLD" != "$DA_ID" ]; then DA_COUNT=0; DA_NEXT=0; DA_SINCE=$DA_NOW; fi
     case "$DA_COUNT:$DA_NEXT:$DA_SINCE" in *[!0-9:]*|::*|*::*) DA_COUNT=0; DA_NEXT=0; DA_SINCE=$DA_NOW ;; esac
     if [ "$RUNTIME_STATE" = active ]; then
+        load_drive_observation
         DA_HP=; DA_HT=; DA_HV=
         if [ -r "$DA_HEALTH" ]; then IFS='|' read -r DA_HP DA_HT DA_HV < "$DA_HEALTH" || :; fi
         case "$DA_HT" in ''|*[!0-9]*) DA_HT=0 ;; esac
         if [ "$DA_HP" = "$DA_PID" ] && [ "$DA_HV" = v2 ] && [ "$DA_HT" -le "$DA_NOW" ] \
                 && [ $((DA_NOW - DA_HT)) -lt 15 ]; then
-            # Healthy sessions reset backoff. Reusing an old PID still requires the new identity marker.
-            printf '%s|0|0|%s\n' "$DA_ID" "$DA_NOW" > "$DA_RETRY"
+            DRIVE_HEALTHY_AT=$DA_NOW
+            DRIVE_GRACE_UNTIL=0
+            save_drive_observation
+            # Persist recovery once; last healthy observation stays in this worker's memory.
+            if [ "$DA_OLD" != "$DA_ID" ] || [ "$DA_COUNT" -ne 0 ] || [ "$DA_NEXT" -ne 0 ]; then
+                write_drive_record "$DA_RETRY" "$DA_ID|0|0|$DA_NOW" || :
+            fi
             return 0
         fi
-        [ $((DA_NOW - DA_SINCE)) -ge 15 ] || return 0
+        save_drive_observation
+        [ "$DA_NOW" -ge "$DRIVE_GRACE_UNTIL" ] || return 0
+        [ $((DA_NOW - DRIVE_HEALTHY_AT)) -ge "$DRIVE_HEALTH_GRACE_SECONDS" ] || return 0
         loge "drive agent pulse expired pid=$DA_PID; reinstall without target restart"
         rm -f "$DA_MARK"
         RUNTIME_STATE=failed
@@ -1384,7 +1490,10 @@ drive_agent_state() {
         DA_COUNT=$((DA_COUNT + 1))
         case "$DA_COUNT" in 1) DA_DELAY=1 ;; 2) DA_DELAY=2 ;; 3) DA_DELAY=5 ;; *) DA_DELAY=30 ;; esac
         # The completed attempt sets the next deadline again: backoff starts after the injector exits.
-        printf '%s|%s|%s|%s\n' "$DA_ID" "$DA_COUNT" "$((DA_NOW + DA_DELAY))" "$DA_NOW" > "$DA_RETRY"
+        if ! write_drive_record "$DA_RETRY" "$DA_ID|$DA_COUNT|$((DA_NOW + DA_DELAY))|$DA_NOW"; then
+            RUNTIME_STATE=failed
+            return 0
+        fi
         prepare_drive_health "$DA_HEALTH"
     fi
 }
@@ -1395,7 +1504,7 @@ drive_agent_attempt_finished() {
     IFS='|' read -r DF_ID DF_COUNT DF_NEXT DF_SINCE < "$DF_RETRY" || return 0
     DF_NOW=$(uptime_seconds)
     case "$DF_COUNT" in 1) DF_DELAY=1 ;; 2) DF_DELAY=2 ;; 3) DF_DELAY=5 ;; *) DF_DELAY=30 ;; esac
-    printf '%s|%s|%s|%s\n' "$DF_ID" "$DF_COUNT" "$((DF_NOW + DF_DELAY))" "$DF_NOW" > "$DF_RETRY"
+    write_drive_record "$DF_RETRY" "$DF_ID|$DF_COUNT|$((DF_NOW + DF_DELAY))|$DF_NOW"
 }
 
 acc_cycle() {
@@ -1418,6 +1527,19 @@ acc_cycle() {
 }
 
 drive_reset_cycle() {
+    if [ "${1:-}" = vehicle ]; then
+        DRIVE_RESET_TARGET=com.qinggan.app.vehicle
+        DRIVE_RESET_MARK=/data/local/open_voyah/drive_hooks/vehicle.pid
+        DRIVE_RESET_ATTEMPT=/data/local/open_voyah/drive_hooks/vehicle.attempt
+        DRIVE_RESET_LOG=/data/local/open_voyah/drive_hooks/vehicle.txt
+        DRIVE_RESET_HEALTH=/data/local/open_voyah/drive_hooks/vehicle.health
+    else
+        DRIVE_RESET_TARGET=com.qinggan.app.vehiclesetting
+        DRIVE_RESET_MARK=/data/local/tmp/voyahtune_drive_reset.pid
+        DRIVE_RESET_ATTEMPT=/data/local/tmp/voyahtune_drive_reset.attempt
+        DRIVE_RESET_LOG=/data/local/tmp/voyahtune_drive_reset.txt
+        DRIVE_RESET_HEALTH=/data/local/open_voyah/drive_hooks/voyahtune_drive_reset.health
+    fi
     DRIVE_RESET_PID=$(pidof "$DRIVE_RESET_TARGET" 2>/dev/null)
     DRIVE_RESET_PID=${DRIVE_RESET_PID%% *}
     DRIVE_RESET_ID=$(process_identity "$DRIVE_RESET_PID" "$DRIVE_RESET_TARGET" 2>/dev/null) || DRIVE_RESET_ID=
@@ -1428,15 +1550,10 @@ drive_reset_cycle() {
     fi
 }
 
-vehicle_drive_cycle() (
-    # Isolated shell variables and persistent state; reuse the already packaged agent.
-    DRIVE_RESET_TARGET=com.qinggan.app.vehicle
-    DRIVE_RESET_MARK=/data/local/open_voyah/drive_hooks/vehicle.pid
-    DRIVE_RESET_ATTEMPT=/data/local/open_voyah/drive_hooks/vehicle.attempt
-    DRIVE_RESET_LOG=/data/local/open_voyah/drive_hooks/vehicle.txt
-    DRIVE_RESET_HEALTH=/data/local/open_voyah/drive_hooks/vehicle.health
-    drive_reset_cycle
-)
+vehicle_drive_cycle() {
+    # Keep both targets' observation caches in the parent worker between cycles.
+    drive_reset_cycle vehicle
+}
 
 apollo_cycle() {
     # Account-reset protection is independent of the optional Apollo subscription override.
@@ -1551,7 +1668,10 @@ worker_token() {
     [ "$#" -ge 20 ] || return 1
     shift 19  # starttime is field 22; fields after the final ') ' begin at field 3.
     WT_START=$1
-    IFS= read -r WT_BOOT < /proc/sys/kernel/random/boot_id 2>/dev/null || return 1
+    WT_BOOT=${LOADER_BOOT_ID:-}
+    if [ -z "$WT_BOOT" ]; then
+        { IFS= read -r WT_BOOT < /proc/sys/kernel/random/boot_id; } 2>/dev/null || return 1
+    fi
     case "$WT_START" in ''|*[!0-9]*) return 1 ;; esac
     [ -n "$WT_BOOT" ] && kill -0 "$WT_PID" 2>/dev/null || return 1
     printf '%s:%s:%s\n' "$WT_PID" "$WT_START" "$WT_BOOT"
@@ -1740,6 +1860,9 @@ supervise_workers() {
     done
     WORKER_CHILDREN=$NEXT_WORKER_CHILDREN
 }
+
+LOADER_BOOT_ID=
+{ IFS= read -r LOADER_BOOT_ID < /proc/sys/kernel/random/boot_id; } 2>/dev/null || :
 
 if [ "${1:-}" = --worker ]; then
     run_worker "${2:-}" "${3:-}"
