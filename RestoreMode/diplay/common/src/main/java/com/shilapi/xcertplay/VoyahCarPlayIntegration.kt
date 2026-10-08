@@ -29,6 +29,9 @@ object VoyahCarPlayIntegration {
         }
     }
 
+    @JvmStatic fun isProjectionOnMainDisplay(): Boolean =
+        CarPlayBackgroundSession.snapshot()?.ownerDisplayId?.let { it in 0..1 } == true
+
     @JvmStatic fun reset() { speed.reset(); night = null }
     @JvmStatic fun requestSiri(): Boolean =
         CarPlayBackgroundSession.snapshot()?.controller?.requestSiri() == true

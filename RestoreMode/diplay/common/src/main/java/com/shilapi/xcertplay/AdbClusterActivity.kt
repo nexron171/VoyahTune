@@ -26,8 +26,13 @@ class AdbClusterActivity : Activity() {
     internal var routeStatus = ""
         private set
 
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLocale.enforce(this)
         if (!AdbClusterRouter.enabled(this)) { finish(); return }
         val token = intent.getStringExtra("cluster_launch_token")
         if (!ClusterActivityOutput.acceptsToken(token)) { finish(); return }

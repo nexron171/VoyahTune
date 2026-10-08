@@ -29,6 +29,7 @@ object AppLocale {
     private const val KEY_LANGUAGE = "app_language"
 
     private const val KEY_MIGRATED = "app_language_platform_migrated"
+    private const val KEY_VOYAH_DEFAULT = "voyah_russian_default_initialized"
 
     fun preference(context: Context): String {
         if (Build.VERSION.SDK_INT >= 33) {
@@ -64,8 +65,23 @@ object AppLocale {
         }
     }
 
+    private fun initializeVoyahLanguage(context: Context) {
+        if (!VoyahCarPlayIntegration.available) return
+        val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (preferences.getBoolean(KEY_VOYAH_DEFAULT, false)) return
+        val hasPlatformChoice = Build.VERSION.SDK_INT >= 33 &&
+            !context.getSystemService(LocaleManager::class.java).applicationLocales.isEmpty
+        if (!preferences.contains(KEY_LANGUAGE) &&
+            !preferences.getBoolean(KEY_MIGRATED, false) && !hasPlatformChoice
+        ) {
+            save(context, RUSSIAN)
+        }
+        preferences.edit().putBoolean(KEY_VOYAH_DEFAULT, true).apply()
+    }
+
     /** On Android 13+, the OS is the single source of truth for the app language. */
     fun wrap(context: Context): Context {
+        initializeVoyahLanguage(context)
         if (Build.VERSION.SDK_INT >= 33) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             if (!prefs.getBoolean(KEY_MIGRATED, false)) {

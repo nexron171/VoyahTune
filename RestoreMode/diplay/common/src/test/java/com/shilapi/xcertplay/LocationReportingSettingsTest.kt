@@ -36,14 +36,15 @@ class LocationReportingSettingsTest {
         controller?.pause()?.stop()?.destroy()
     }
 
-    @Test fun currentSettingsExposeLocationSwitchWithDefaultOff() {
+    @Test fun currentSettingsExposeLocationSwitchWithDefaultOn() {
         openSettings()
 
-        assertFalse(locationSwitch().isChecked)
-        assertFalse(AirPlayPersistence.loadLocationReportingEnabled(context))
+        assertTrue(locationSwitch().isChecked)
+        assertTrue(AirPlayPersistence.loadLocationReportingEnabled(context))
     }
 
     @Test fun grantedSettingSurvivesRecreationAndCanBeDisabled() {
+        AirPlayPersistence.saveLocationReportingEnabled(context, false)
         shadowOf(context).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         openSettings()
 
@@ -55,9 +56,12 @@ class LocationReportingSettingsTest {
         locationSwitch().performClick()
         assertFalse(locationSwitch().isChecked)
         assertFalse(AirPlayPersistence.loadLocationReportingEnabled(context))
+        requireNotNull(controller).recreate()
+        assertFalse(locationSwitch().isChecked)
     }
 
     @Test fun enablingWaitsForPrecisePermissionAndRejectsApproximateOnly() {
+        AirPlayPersistence.saveLocationReportingEnabled(context, false)
         openSettings()
         locationSwitch().performClick()
 
@@ -75,6 +79,7 @@ class LocationReportingSettingsTest {
     }
 
     @Test fun precisePermissionResultEnablesReporting() {
+        AirPlayPersistence.saveLocationReportingEnabled(context, false)
         openSettings()
         locationSwitch().performClick()
         val request = shadowOf(activity).lastRequestedPermission
@@ -88,6 +93,7 @@ class LocationReportingSettingsTest {
     }
 
     @Test fun eitherToggleDirectionStopsTheOldSessionAndOpensANewHostWithSavedSetting() {
+        AirPlayPersistence.saveLocationReportingEnabled(context, false)
         shadowOf(context).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         AirPlayPersistence.saveWirelessEnabled(context, false)
         openSettings()

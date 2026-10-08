@@ -1,32 +1,55 @@
 package com.shilapi.xcertplay
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
+import org.junit.Assert.assertEquals
+import org.junit.Test
 
-// Lint does not check this library module's translations, so Settings copy is guarded here.
+// Lint does not check this library module's translations.
 class SettingsTranslationsTest {
     private val res = File("src/main/res")
-    private val placeholder = Regex("%\\d+\\$[sd]")
+    private val placeholder = Regex("%[0-9]+\\$[-#+ 0,(]*[0-9]*(\\.[0-9]+)?[a-zA-Z]")
 
-    @Test fun everySettingsStringIsTranslatedWithTheSamePlaceholders() {
+    @Test
+    fun everySettingsStringIsTranslatedWithTheSamePlaceholders() {
         val base = strings(File(res, "values")).filterKeys { it.startsWith("settings_") }
-        val locales = res.listFiles { file -> file.name.matches(Regex("values-[a-z]{2}(-r[A-Z]{2})?")) }!!
+        val locales = res.listFiles { file ->
+            file.name.matches(Regex("values-[a-z]{2}(-r[A-Z]{2})?"))
+        }!!
         for (locale in locales) {
-            val translated = strings(locale)
-            assertEquals(locale.name, emptySet<String>(), base.keys - translated.keys)
-            for ((name, text) in base) {
-                assertEquals("${locale.name}/$name", placeholders(text), placeholders(translated.getValue(name)))
-            }
+            assertTranslations(base, locale)
         }
     }
 
-    private fun placeholders(text: String) = placeholder.findAll(text).map { it.value }.toSet()
+    @Test
+    fun everyStringHasARussianTranslationWithTheSamePlaceholders() {
+        assertTranslations(strings(File(res, "values")), File(res, "values-ru"))
+        val sharedResources = File("../shared/src/main/res")
+        assertTranslations(strings(File(sharedResources, "values")), File(sharedResources, "values-ru"))
+    }
 
-    private fun strings(folder: File): Map<String, String> = folder.listFiles { file -> file.extension == "xml" }!!
-        .flatMap { file ->
-            val nodes = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file).getElementsByTagName("string")
-            (0 until nodes.length).map { nodes.item(it) }.map { it.attributes.getNamedItem("name").nodeValue to it.textContent }
+    private fun assertTranslations(base: Map<String, String>, locale: File) {
+        val translated = strings(locale)
+        assertEquals(locale.path, emptySet<String>(), base.keys - translated.keys)
+        for ((name, text) in base) {
+            assertEquals(
+                "${locale.path}/$name",
+                placeholders(text),
+                placeholders(translated.getValue(name)),
+            )
+        }
+    }
+
+    private fun placeholders(text: String) =
+        placeholder.findAll(text).map { it.value }.sorted().toList()
+
+    private fun strings(folder: File): Map<String, String> =
+        folder.listFiles { file -> file.extension == "xml" }!!.flatMap { file ->
+            val nodes = DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                .parse(file).getElementsByTagName("string")
+            (0 until nodes.length).map { index ->
+                val node = nodes.item(index)
+                node.attributes.getNamedItem("name").nodeValue to node.textContent
+            }
         }.toMap()
 }

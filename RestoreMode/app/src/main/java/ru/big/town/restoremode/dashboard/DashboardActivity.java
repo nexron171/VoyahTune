@@ -67,6 +67,7 @@ import ru.big.town.restoremode.TripHistoryActivity;
 import ru.big.town.restoremode.VoiceActivity;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.split.SplitStore;
+import ru.big.town.restoremode.carplay.CarPlayWidgetPlaceholder;
 import ru.big.town.restoremode.dashboard.tiles.TileDragController;
 import ru.big.town.restoremode.dashboard.tiles.TileGridPacking;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
@@ -2131,7 +2132,12 @@ public class DashboardActivity extends AppCompatActivity {
                                 entry.packageName, entry.width, entry.height)) {
                     appWidgetView.postDelayed(
                             () -> {
-                                if (!embeddedWidgetSurfaces.containsKey(entry.id)) {
+                                boolean carPlayWindowOpen =
+                                        CarPlayTarget.isCarPlay(entry.packageName)
+                                                && com.shilapi.xcertplay.VoyahCarPlayIntegration
+                                                        .isProjectionOnMainDisplay();
+                                if (!carPlayWindowOpen
+                                        && !embeddedWidgetSurfaces.containsKey(entry.id)) {
                                     showEmbeddedAppWidget(appWidgetView, entry);
                                 }
                             },
@@ -2501,6 +2507,11 @@ public class DashboardActivity extends AppCompatActivity {
         widgetView.setOnLongClickListener(dragLauncher);
         list.setOnLongClickListener(dragLauncher);
 
+        if (CarPlayWidgetPlaceholder.show(
+                widgetView, entry, () -> showEmbeddedAppWidget(widgetView, entry), dragLauncher)) {
+            return;
+        }
+
         for (int i = 0; i < entry.profiles.size(); i++) {
             final int index = i;
             AppWidgetStore.Profile profile = entry.profiles.get(i);
@@ -2518,7 +2529,7 @@ public class DashboardActivity extends AppCompatActivity {
 
             if (CarPlayTarget.isCarPlay(profile.packageName)) {
                 name = CarPlayTarget.LABEL;
-                ico.setImageResource(R.drawable.ic_carplay);
+                ico.setImageResource(R.drawable.carplay_home_logo);
             }
             label.setText(name);
             item.setOnClickListener(
@@ -2614,6 +2625,10 @@ public class DashboardActivity extends AppCompatActivity {
             return;
         }
 
+        if (CarPlayTarget.isCarPlay(packageName)) {
+            releaseEmbeddedWidgetsOf(packageName);
+        }
+        widgetView.findViewById(R.id.carPlayWidgetPlaceholder).setVisibility(View.GONE);
         final String widgetId = entry.id;
         // Запущенный пакет и DPI виджета: их читают и переподключение поверхности, и кнопки,
         // поэтому после обмена экземплярами достаточно обновить эти карты.

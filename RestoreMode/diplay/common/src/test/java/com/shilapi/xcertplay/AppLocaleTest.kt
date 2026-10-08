@@ -19,6 +19,45 @@ class AppLocaleTest {
     private val context get() = RuntimeEnvironment.getApplication()
     private val manager get() = context.getSystemService(LocaleManager::class.java)
 
+    @Test @Config(sdk = [28, 33])
+    fun embeddedVoyahDefaultsToRussianOnlyOnce() {
+        withVoyahIntegration {
+            val wrapped = AppLocale.wrap(context)
+            assertEquals(AppLocale.RUSSIAN, AppLocale.preference(context))
+            if (android.os.Build.VERSION.SDK_INT < 33) {
+                assertEquals("ru", wrapped.resources.configuration.locales[0].language)
+                assertEquals("Настройки изображения", wrapped.getString(R.string.picture_adjustments))
+            }
+            AppLocale.save(context, AppLocale.SYSTEM)
+            AppLocale.wrap(context)
+            assertEquals(AppLocale.SYSTEM, AppLocale.preference(context))
+        }
+    }
+
+    @Test @Config(sdk = [28, 33])
+    fun embeddedVoyahPreservesExplicitLanguageAndSystemChoice() {
+        withVoyahIntegration {
+            for (language in listOf(AppLocale.ENGLISH, AppLocale.SYSTEM)) {
+                context.getSharedPreferences("diplay", Context.MODE_PRIVATE).edit().clear().commit()
+                AppLocale.save(context, language)
+                AppLocale.wrap(context)
+                assertEquals(language, AppLocale.preference(context))
+            }
+        }
+    }
+
+    private fun withVoyahIntegration(action: () -> Unit) {
+        VoyahCarPlayIntegration.install(object : VoyahCarPlayIntegration.Host {
+            override fun start() {}
+            override fun stop() {}
+        })
+        try {
+            action()
+        } finally {
+            VoyahCarPlayIntegration.install(null)
+        }
+    }
+
     @Test fun pickerAndSystemSettingsShareTheSamePreference() {
         AppLocale.save(context, AppLocale.ARABIC)
         assertEquals("ar", manager.applicationLocales.toLanguageTags())

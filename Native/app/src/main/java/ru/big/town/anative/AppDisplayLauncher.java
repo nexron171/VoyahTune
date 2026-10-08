@@ -92,14 +92,15 @@ final class AppDisplayLauncher {
                 snapshot.add(new SplitHostTaskSnapshot.TaskRecord(task.taskId, pkg, oldDisplay));
             }
             Set<Integer> retiring = AppDisplayTaskPlan.retiring(snapshot, pkg, displayId);
-            // Задача уходит с виртуального дисплея (это дисплей embedded-виджета главного экрана):
-            // просим хост снять виджет, иначе тот останется с мёртвым Surface — чёрным квадратом.
-            for (SplitHostTaskSnapshot.TaskRecord task : snapshot) {
-                if (retiring.contains(task.taskId)
-                        && task.displayId != null
-                        && task.displayId > 1) {
-                    SetModesService.notifyEmbeddedTaskLeft(app, pkg);
-                    break;
+            boolean clearWidgetHost = CarPlayTarget.isCarPlay(pkg) && displayId <= 1;
+            if (!CarPlayTarget.isCarPlay(pkg)) {
+                for (SplitHostTaskSnapshot.TaskRecord task : snapshot) {
+                    if (retiring.contains(task.taskId)
+                            && task.displayId != null
+                            && task.displayId > 1) {
+                        clearWidgetHost = true;
+                        break;
+                    }
                 }
             }
             Object service = null;
@@ -127,6 +128,7 @@ final class AppDisplayLauncher {
                     generation,
                     intent,
                     retiring,
+                    clearWidgetHost,
                     0,
                     valid,
                     onFailure);
@@ -144,6 +146,7 @@ final class AppDisplayLauncher {
             long generation,
             Intent intent,
             Set<Integer> retiring,
+            boolean clearWidgetHost,
             int attempt,
             BooleanSupplier valid,
             Runnable onFailure) {
@@ -172,6 +175,7 @@ final class AppDisplayLauncher {
                                             generation,
                                             intent,
                                             retiring,
+                                            clearWidgetHost,
                                             attempt + 1,
                                             valid,
                                             onFailure),
@@ -183,6 +187,8 @@ final class AppDisplayLauncher {
                     () -> {
                         if (!current(pkg, generation) || !valid.getAsBoolean()) return;
                         try {
+                            // Release the old widget only after task removal has completed.
+                            if (clearWidgetHost) SetModesService.notifyEmbeddedTaskLeft(app, pkg);
                             ActivityOptions options = ActivityOptions.makeBasic();
                             options.setLaunchDisplayId(displayId);
                             Bundle bundle = options.toBundle();

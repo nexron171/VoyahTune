@@ -23,4 +23,15 @@
     <string name="carplay_settings_phone">Выбранный телефон: %1$s</string>
     <string name="carplay_settings_no_phone">Телефон ещё не выбран</string>
     <string name="carplay_settings_open_home">Открыть экран CarPlay</string>
+    <string name="carplay_widget_add">Добавить виджет CarPlay</string>
+    <string name="carplay_widget_description">Проекция iPhone на главном экране: высота 5 плиток, ширина от 8 до 12. 12 плиток — вся ширина сетки. Размер 1×1 открывает отдельное окно.</string>
+    <string name="carplay_widget_size_title">Размер виджета CarPlay</string>
+    <string-array name="carplay_widget_sizes">
+        <item>1×1 — открыть отдельное окно</item>
+        <item>8×5 — проекция в виджете</item>
+        <item>9×5 — проекция в виджете</item>
+        <item>10×5 — проекция в виджете</item>
+        <item>11×5 — проекция в виджете</item>
+        <item>12×5 — вся ширина сетки</item>
+    </string-array>
 </resources>

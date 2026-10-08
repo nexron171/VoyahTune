@@ -3914,6 +3914,13 @@ class CarPlayHostActivity : ComponentActivity() {
             CarPlayBackgroundSession.clear(snapshot.controller)
             return false
         }
+        val targetDisplayId = windowManager.defaultDisplay.displayId
+        if (VoyahCarPlayIntegration.available && snapshot.ownerDisplayId != null &&
+            snapshot.ownerDisplayId != targetDisplayId) {
+            appendLog("CarPlay display changed ${snapshot.ownerDisplayId} -> $targetDisplayId; reconnecting")
+            CarPlayBackgroundSession.stop { mainHandler.post { if (!isDestroyed) maybeStartCarPlay() } }
+            return false
+        }
         // The sink's pacing is fixed when it is built; a session from before a Smooth video change (for
         // example one whose reconnect stopped at a prerequisite) is stopped instead of adopted. Callers
         // retry, and the next start matches this view.
@@ -5045,6 +5052,7 @@ internal object CarPlayBackgroundSession {
         val width: Int,
         val height: Int,
         val display: CarPlaySessionDisplay,
+        val ownerDisplayId: Int?,
     )
 
     private var controller: CarPlayController? = null
@@ -5052,13 +5060,14 @@ internal object CarPlayBackgroundSession {
     private var width = 0
     private var height = 0
     private var display: CarPlaySessionDisplay? = null
+    private var ownerDisplayId: Int? = null
 
     @Synchronized
     fun snapshot(): Snapshot? {
         val currentController = controller ?: return null
         val currentSink = sink ?: return null
         val currentDisplay = display ?: return null
-        return Snapshot(currentController, currentSink, width, height, currentDisplay)
+        return Snapshot(currentController, currentSink, width, height, currentDisplay, ownerDisplayId)
     }
 
     @Synchronized
@@ -5071,6 +5080,7 @@ internal object CarPlayBackgroundSession {
         this.width = width
         this.height = height
         this.display = display
+        this.ownerDisplayId = (owner as? android.app.Activity)?.windowManager?.defaultDisplay?.displayId
     }
 
     @Synchronized
@@ -5083,5 +5093,6 @@ internal object CarPlayBackgroundSession {
         width = 0
         height = 0
         display = null
+        ownerDisplayId = null
     }
 }

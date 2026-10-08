@@ -26,6 +26,7 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_cpu_ram),
         layout(R.layout.settings_main_memory_task_manager),
         layout(R.layout.settings_main_app_widgets_heading),
+        layout(R.layout.settings_main_carplay_widget),
         dynamic(DynamicContent.APP_WIDGETS),
         layout(R.layout.settings_main_add_app_widget),
         layout(R.layout.settings_main_shortcuts_heading),

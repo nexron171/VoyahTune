@@ -4225,6 +4225,7 @@ class DiPlayActivity : ComponentActivity() {
         build: (LinearLayout) -> Unit,
     ) {
         if (settingsSectionFilter?.contains(key) == false) return
+        if (key == SettingsSection.WHEEL_KEYS && VoyahCarPlayIntegration.available) return
         section(parent, title, icon, build)
     }
     // Routing changes affect the live cluster surface as soon as the host resumes.

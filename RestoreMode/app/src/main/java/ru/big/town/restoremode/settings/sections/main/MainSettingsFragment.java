@@ -504,52 +504,51 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         refreshSettingsRows();
     }
 
-    private void onAddAppWidget(View v) {
-        if (AppWidgetStore.load(preferences).size() >= AppWidgetStore.MAX_WIDGETS) {
-            com.google.android.material.snackbar.Snackbar.make(
-                            requireView(),
-                            "Можно создать не более 20 виджетов",
-                            com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
-                    .show();
-            return;
-        }
+    private boolean canAddAppWidget() {
+        if (AppWidgetStore.load(preferences).size() < AppWidgetStore.MAX_WIDGETS) return true;
+        com.google.android.material.snackbar.Snackbar.make(
+                        requireView(),
+                        "Можно создать не более 20 виджетов",
+                        com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                .show();
+        return false;
+    }
+
+    private void onAddAppWidget(View view) {
+        if (!canAddAppWidget()) return;
         SettingsAppPicker.showWithCarPlay(
                 requireContext(),
                 "Приложение для виджета",
                 (packageName, label) -> {
                     if (CarPlayTarget.isCarPlay(packageName)) {
-                        new com.google.android.material.dialog.MaterialAlertDialogBuilder(
-                                        requireContext(), R.style.SettingsDialog)
-                                .setTitle("Размер CarPlay")
-                                .setItems(
-                                        new String[] {
-                                            "1×1 — открыть приложение",
-                                            "8×5",
-                                            "9×5",
-                                            "10×5",
-                                            "11×5",
-                                            "12×5 — вся ширина сетки"
-                                        },
-                                        (dialog, size) -> {
-                                            AppWidgetStore.Entry entry =
-                                                    AppWidgetStore.add(preferences, packageName);
-                                            if (entry == null) return;
-                                            entry.width = size == 0 ? 1 : size + 7;
-                                            entry.height = size == 0 ? 1 : 5;
-                                            AppWidgetStore.update(preferences, entry);
-                                            TileOrderStore.sync(
-                                                    preferences,
-                                                    requireContext().getPackageManager());
-                                            renderAppWidgets();
-                                        })
-                                .setNegativeButton("Отмена", null)
-                                .show();
+                        showCarPlayWidgetSizes();
                         return;
                     }
                     AppWidgetStore.add(preferences, packageName);
                     TileOrderStore.sync(preferences, requireContext().getPackageManager());
                     renderAppWidgets();
                 });
+    }
+
+    private void showCarPlayWidgetSizes() {
+        if (!canAddAppWidget()) return;
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                        requireContext(), R.style.SettingsDialog)
+                .setTitle(R.string.carplay_widget_size_title)
+                .setItems(
+                        R.array.carplay_widget_sizes,
+                        (dialog, size) -> {
+                            AppWidgetStore.Entry entry =
+                                    AppWidgetStore.add(preferences, CarPlayTarget.ID);
+                            if (entry == null) return;
+                            entry.width = size == 0 ? 1 : size + 7;
+                            entry.height = size == 0 ? 1 : 5;
+                            AppWidgetStore.update(preferences, entry);
+                            TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            renderAppWidgets();
+                        })
+                .setNegativeButton("Отмена", null)
+                .show();
     }
 
     private void renderAppWidgets() {
@@ -577,7 +576,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         }
         if (CarPlayTarget.isCarPlay(profile.packageName)) {
             label.setText(CarPlayTarget.LABEL);
-            icon.setImageResource(R.drawable.ic_carplay);
+            icon.setImageResource(R.drawable.carplay_home_logo);
         }
         String[] labels = new String[AppWidgetStore.DPI_VALUES.length];
         int selected = 0;
@@ -727,7 +726,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         }
         if (CarPlayTarget.isCarPlay(entry.packageName)) {
             name = CarPlayTarget.LABEL;
-            icon.setImageResource(R.drawable.ic_carplay);
+            icon.setImageResource(R.drawable.carplay_home_logo);
         }
         label.setText("Виджет " + AppWidgetStore.designation(preferences, entry.id) + ": " + name);
         ((TextView) row.findViewById(R.id.settingsAppWidgetSubtitle))
@@ -945,6 +944,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         bindClick(R.id.buttonAddDialWidget, view -> addDialWidget());
         bindClick(R.id.buttonAddAppShortcut, this::onAddAppShortcut);
         bindClick(R.id.buttonAddAppWidget, this::onAddAppWidget);
+        bindClick(R.id.buttonAddCarPlayWidget, view -> showCarPlayWidgetSizes());
     }
 
     @Override

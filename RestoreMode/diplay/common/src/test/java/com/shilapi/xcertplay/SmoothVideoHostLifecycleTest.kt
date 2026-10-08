@@ -123,6 +123,39 @@ class SmoothVideoHostLifecycleTest {
         assertEquals(1, stop.calls)
     }
 
+    @Test fun aVoyahDisplayTransferWaitsForDisconnectAndStartsWithTheNewWindowSize() {
+        VoyahCarPlayIntegration.install(object : VoyahCarPlayIntegration.Host {
+            override fun start() = Unit
+            override fun stop() = Unit
+        })
+        try {
+            allowStartup()
+            setField("activeDisplaySize", size(1280, 600))
+            val oldController = mock(CarPlayController::class.java)
+            val oldSink = sink(pacingDelayMillis = 0)
+            val stop = DeferredStop()
+            CarPlayBackgroundSession.store(oldController, oldSink, 1920, 990, Any(), display, stop::invoke)
+            org.robolectric.util.ReflectionHelpers.setField(CarPlayBackgroundSession, "ownerDisplayId", 9)
+
+            repeat(2) { assertEquals(false, invoke("adoptBackgroundSession")) }
+            assertEquals(1, stop.calls)
+            assertNull(getField("controller"))
+            assertNull(getField("sink"))
+
+            stop.complete()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertNotSame(oldController, getField("controller"))
+            assertNotNull(getField("controller"))
+            val newSession = requireNotNull(CarPlayBackgroundSession.snapshot())
+            assertEquals(1280, newSession.width)
+            assertEquals(600, newSession.height)
+            assertEquals(activity.windowManager.defaultDisplay.displayId, newSession.ownerDisplayId)
+        } finally {
+            VoyahCarPlayIntegration.install(null)
+        }
+    }
+
     @Test fun aBackgroundSessionWhosePacingMatchesTheViewIsAdopted() {
         for (smooth in listOf(true, false)) {
             CarPlayBackgroundSession.clear()
