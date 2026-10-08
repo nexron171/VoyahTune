@@ -13,7 +13,9 @@ checkout. Эти инструкции дополняют их и не разре
   Сохрани собственные файлы, включая untracked, и восстанови все строки карты
   адаптаций (§10) по контрактам (§§2–9). Простая замена каталога теряет интеграцию.
 - Сохрани component IDs, manifest overrides, displayId и session ownership.
-  Не завершай сессию/сервис из-за удаления UI task и не force-stop весь RestoreMode.
+  Не завершай сессию/сервис только из-за удаления UI task и не force-stop весь RestoreMode.
+  При переходе виджет ↔ Activity новый host должен дождаться остановки старой сессии
+  и переподключиться с новым размером (§4); не принимать snapshot с другого displayId.
 - Дизайн и настройки VoyahTune, Native IPC-клиент остаются в `RestoreMode/app`;
   движок подключается через `CarPlayHomeUi`, `CarPlaySettingsAccess` и
   `VoyahCarPlayIntegration`. Не вводи зависимость библиотек на R/классы приложения.
