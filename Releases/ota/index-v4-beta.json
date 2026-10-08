@@ -1,3 +1,12 @@
 {
-  "releases": []
+  "releases": [
+    {
+      "version": "4.1.0-beta-od",
+      "url": "https://storage.yandexcloud.net/voyahtune/v4.1.0-beta-od/payload_4.1.0-beta-od.zip",
+      "size": 147402022,
+      "sha256": "c55c644193c3780dbea856887a548212a24cb98ada56ddd014734fe2612bf770",
+      "minimumInstallerVersion": "1.7.0",
+      "minimumOtaVersion": "4.1.0"
+    }
+  ]
 }
