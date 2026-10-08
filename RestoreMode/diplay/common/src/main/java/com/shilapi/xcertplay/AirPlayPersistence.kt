@@ -105,7 +105,7 @@ object AirPlayPersistence {
 
     const val DEFAULT_MANUFACTURER = "DiPlay"
     const val DEFAULT_MODEL = "DiPlay"
-    const val DEFAULT_OEM_LABEL = "BYD"
+    const val DEFAULT_OEM_LABEL = "VoyahTune"
     const val DEFAULT_MFI_I2C_PATH = "/dev/i2c-1"
 
     fun loadAmbientDelaySeconds(context: Context): Int =
@@ -234,6 +234,14 @@ object AirPlayPersistence {
         // Inherit the legacy value only when the new key is absent; preserve fresh-install and explicit 0 defaults.
         return prefs.getInt(KEY_NAVIGATION_AUDIO_CHANNEL, prefs.getInt(KEY_NAVIGATION_STREAM_TYPE, 0))
             .takeIf { it in AUDIO_CHANNELS } ?: 0
+    }
+
+    /** Opt into automatic routing without replacing an explicitly selected channel. */
+    fun initializeAutomaticNavigationAudioChannel(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_NAVIGATION_AUDIO_CHANNEL)) {
+            prefs.edit().putInt(KEY_NAVIGATION_AUDIO_CHANNEL, 0).apply()
+        }
     }
 
     fun saveNavigationAudioChannel(context: Context, channel: Int) {

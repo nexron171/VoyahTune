@@ -327,7 +327,16 @@ public final class SteeringSettingsFragment extends SettingsSectionFragment {
 
     private boolean voiceOwnsSlot(String key) {
         return VoiceSteeringPolicy.ownsSlot(
-                preferences.getBoolean(VoiceCommands.ENABLED, false),
+                        preferences.getBoolean(VoiceCommands.ENABLED, false),
+                        preferences.getString(
+                                VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG),
+                        key)
+                || siriOwnsSlot(key);
+    }
+
+    private boolean siriOwnsSlot(String key) {
+        return VoiceSteeringPolicy.siriOwnsSlot(
+                preferences.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false),
                 preferences.getString(VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG),
                 key);
     }
@@ -412,6 +421,12 @@ public final class SteeringSettingsFragment extends SettingsSectionFragment {
                 View reserved =
                         LayoutInflater.from(requireContext())
                                 .inflate(R.layout.settings_steering_reserved, panel, false);
+                if (siriOwnsSlot(key)) {
+                    ((TextView) reserved.findViewById(R.id.settingsReservedVoiceTitle))
+                            .setText("Вызов Siri в CarPlay");
+                    ((Button) reserved.findViewById(R.id.settingsOpenVoice))
+                            .setText("Настроить Siri");
+                }
                 reserved.findViewById(R.id.settingsOpenVoice)
                         .setOnClickListener(view -> openSection(SettingsSection.VOICE));
                 panel.addView(reserved);

@@ -15,6 +15,16 @@ import com.shilapi.xcertplay.host.R
 
 /** Keeps an explicitly started connection alive when another car app is in the foreground. */
 class DiPlaySessionService : Service() {
+    override fun onCreate() {
+        super.onCreate()
+        VoyahCarPlayIntegration.start()
+    }
+
+    override fun onDestroy() {
+        VoyahCarPlayIntegration.stop()
+        super.onDestroy()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {

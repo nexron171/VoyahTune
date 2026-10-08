@@ -129,7 +129,7 @@
     <string name="back_to_diplay">Back to DiPlay</string>
     <string name="band">Band</string>
     <string name="bluetooth_settings">Bluetooth settings</string>
-    <string name="byd_navigation">BYD navigation</string>
+    <string name="byd_navigation">Vehicle navigation</string>
     <string name="cancel">Cancel</string>
     <string name="car_home">Car home</string>
     <string name="car_hotspot_details">Car hotspot details</string>
@@ -380,7 +380,7 @@
     <string name="settings_vehicle_summary">Driving side, wheel keys, car button and CarPlay gestures</string>
     <string name="settings_reconnect_pending">Saved. Some changes apply when CarPlay reconnects.</string>
     <string name="settings_reconnect_now">Reconnect now</string>
-    <string name="settings_byd_navigation_unavailable">BYD dashboard and HUD guidance is not available on this head unit.</string>
+    <string name="settings_byd_navigation_unavailable">dashboard and HUD guidance is not available on this head unit.</string>
     <string name="settings_advanced_media">Video and audio</string>
     <string name="settings_wheel_keys">Wheel keys</string>
     <string name="settings_experimental_display">Display (experimental)</string>
@@ -392,7 +392,7 @@
     <string name="share">Share</string>
     <string name="show_on_screen_debug_logs">Show on-screen debug logs</string>
     <string name="show_password">Show password</string>
-    <string name="show_phone_navigation_arrows_distance_and_street_names_on">Show phone navigation arrows, distance and street names on supported BYD displays. Vehicle compatibility varies.</string>
+    <string name="show_phone_navigation_arrows_distance_and_street_names_on">Show phone navigation arrows, distance and street names on supported displays. Vehicle compatibility varies.</string>
     <string name="show_the_side_map_only_when_its_card_is_open_and_switch_to">Show the side map only when its card is open, and switch to the full map in Map theme. Theme and card changes keep CarPlay connected.</string>
     <string name="shows_the_iphone_s_cluster_map_on_the_instrument_cluster_c">Shows the iPhone\'s map on the dashboard. Choose Small or Full screen navi in the dashboard\'s steering-wheel menu.</string>
     <string name="start_carplay_automatically_after_device_boot">Start CarPlay automatically after device boot</string>
@@ -400,7 +400,7 @@
     <string name="starting_airplay_service">Starting AirPlay service</string>
     <string name="starting_wireless_hotspot">Starting wireless hotspot</string>
     <string name="still_waiting_for_usage_access_check_that_the_command_ran">Still waiting for Usage Access. Check that the command ran successfully for this car, then try again.</string>
-    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">Tap a number to test. 14 = driver speaker on BYD.</string>
+    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">Tap a channel to test its audio output. Channel assignments depend on the head unit.</string>
     <string name="the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and">The head unit couldn’t start CarPlay Wi-Fi. Check Wi-Fi and close other projection apps. Retrying…</string>
     <string name="this_ends_the_existing_wi_fi_direct_connection_including_o">This ends the existing Wi-Fi Direct connection, including one left behind after reinstalling. Close other projection apps first. Your car’s internet Wi-Fi stays on.</string>
     <string name="this_head_unit_cannot_use_the_smaller_size_at_this_resolut">This head unit cannot use the smaller size at this resolution. Using Default.</string>
@@ -414,7 +414,7 @@
     <string name="turn_on_wi_fi_in_the_head_unit_s_settings_to_connect">Turn on Wi-Fi in the head unit’s settings to connect.</string>
     <string name="turn_the_car_s_wi_fi_switch_on_allow_location_nearby_devic">Turn the car’s Wi-Fi switch on. Allow Location / Nearby devices if requested and enable Location when Android asks. If playback stutters, try the built-in car hotspot at 5 GHz.</string>
     <string name="usage_access_enabled">Usage Access: enabled</string>
-    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">Usage Access lets DiPlay follow the instrument theme and map card. Only BYD cluster activity events are processed locally. This car does not provide a working permission settings page.</string>
+    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">Usage Access lets DiPlay follow the instrument theme and map card. Only cluster activity events are processed locally. This car does not provide a working permission settings page.</string>
     <string name="usage_access_setup_needed_for_automatic_mode">Usage Access: setup needed for automatic mode</string>
     <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">Use a USB data cable and the car’s USB data port. Unlock your iPhone and allow CarPlay. No hotspot setup is needed.</string>
@@ -535,7 +535,7 @@
     <string name="adb_enabled_not_approved">ADB is enabled, but this DiPlay test app is not authorized yet.</string>
     <string name="probe_adb_and_vehicle_data">Detect legacy head unit</string>
     <string name="probe_vehicle_data_again">Detect legacy head unit again</string>
-    <string name="probing_vehicle_data">Reading this firmware’s BYD field catalog and testing the required fields…</string>
+    <string name="probing_vehicle_data">Reading this firmware’s field catalog and testing the required fields…</string>
     <string name="vehicle_probe_failed">Vehicle-data probe failed: %1$s</string>
     <string name="vehicle_probe_lost_saved_fields">The probe did not confirm: %1$s. The saved configuration was kept.</string>
     <string name="replace_saved_vehicle_data_anyway">Replace saved vehicle data anyway</string>
@@ -558,7 +558,7 @@
     <string name="video_while_parked">Video while parked</string>
     <string name="video_while_parked_description">iOS 27: a video you send to CarPlay on the iPhone plays on the car screen while the car is in P. The player closes when you shift out of P; without ADB video stays off and the iPhone plays audio only. Plain HTTPS video (for example from Safari) plays; video protected with FairPlay, such as Apple TV+, needs a licensed receiver and does not play here. Reconnects CarPlay. Needs ADB over network on the head unit.</string>
     <string name="cluster_song">Song on the dashboard</string>
-    <string name="cluster_song_description">The CarPlay song title and artist appear in the music card on the instrument cluster, with play and pause. The card shows as BYD’s “Other” music source, because the dashboard does not draw CarPlay’s own source. Applies at once. Needs ADB over network on the head unit.</string>
+    <string name="cluster_song_description">The CarPlay song title and artist appear in the music card on the instrument cluster, with play and pause. The card shows as the vehicle’s “Other” music source, because the dashboard does not draw CarPlay’s own source. Applies at once. Needs ADB over network on the head unit.</string>
     <string name="video_back_to_carplay">Back to CarPlay</string>
     <string name="video_play">Play</string>
     <string name="video_pause">Pause</string>
@@ -579,7 +579,7 @@
     <string name="center_map_auto_hide_description">Automatically hides the floating card in music players, reverse camera and settings, restoring it on the launcher</string>
     <string name="center_map_auto_hide_active">Auto-hide when leaving home screen: Active</string>
     <string name="center_map_auto_hide_needed">Auto-hide when leaving home screen: Not active. Grant Usage Access via ADB or Accessibility service.</string>
-    <string name="center_map_card_description">While DiPlay is in the background, the dashboard map also shows as a card on the home screen: BYD home, map home or your default launcher. Tap the card to open CarPlay, drag it to move it, and pinch it to resize it. The dashboard keeps its map. Needs permission to draw over other apps.</string>
+    <string name="center_map_card_description">While DiPlay is in the background, the dashboard map also shows as a card on the home screen: the factory home screen, map home or your default launcher. Tap the card to open CarPlay, drag it to move it, and pinch it to resize it. The dashboard keeps its map. Needs permission to draw over other apps.</string>
     <string name="center_map_overlay_allowed">Draw over other apps: allowed</string>
     <string name="center_map_overlay_missing">Draw over other apps: not allowed. Allow it in the app settings, or over ADB: adb shell appops set %1$s SYSTEM_ALERT_WINDOW allow</string>
     <string name="center_map_usage_allowed">Usage Access: allowed, the card shows only on the home screen</string>
@@ -616,7 +616,7 @@
     <string name="settings_gesture_fingers">Open settings · swipe with %1$d fingers (tap to change)</string>
     <string name="settings_gesture_fingers_label">Open settings · swipe-down fingers</string>
     <string name="settings_gesture_fingers_option">%1$d fingers</string>
-    <string name="settings_gesture_fingers_hint">Pick a finger count your head unit does not already use. BYD takes three-finger swipe-down for its air-conditioning panel.</string>
+    <string name="settings_gesture_fingers_hint">Pick a finger count your head unit does not already use.</string>
     <string name="auto_car_hotspot_title">Automatically turn on the car hotspot</string>
     <string name="auto_car_hotspot_description">Starts the saved car hotspot when DiPlay opens. Turning this on automatically requests the required permissions through ADB; allow the prompt on the car screen. Enable “Open after the car starts” for boot startup. Keeps the hotspot name and password and never turns it off.</string>
     <string name="hotspot_control_missing">Hotspot control permission is missing. Set it up through ADB or open the hotspot in car settings.</string>
@@ -626,14 +626,14 @@
     <string name="hotspot_control_unsupported">This firmware does not support automatic hotspot startup. Open the hotspot in car settings.</string>
     <string name="hotspot_control_timeout">Timed out waiting for the car hotspot. Open the hotspot in car settings.</string>
     <string name="hotspot_control_failed">The car could not start its hotspot. Open the hotspot in car settings.</string>
-    <string name="byd_adb_features">BYD features · needs ADB</string>
+    <string name="byd_adb_features">Vehicle features · needs ADB</string>
     <string name="location_reporting_reconnects">Changing this setting reconnects an active CarPlay session.</string>
     <string name="diagnostic_report_saved_in_app">Your report was saved privately in DiPlay because a public save location was unavailable. Share it or view it here. Nothing is sent automatically.</string>
     <string name="diagnostic_report_saved_to_path">Your report was saved to:\n%1$s\n\nYou can also share it or view it here. Nothing is sent automatically.</string>
     <string name="view_diagnostic_report">View report</string>
     <string name="diagnostic_report_copy_hint">Touch and hold the report text to select and copy it. You can use this if no sharing app is available.</string>
     <string name="wheel_map_zoom">Zoom the dashboard map with the wheel</string>
-    <string name="wheel_map_zoom_description">BYD\'s custom key switches the volume keys between volume and dashboard map zoom while the dashboard shows the CarPlay map. A call always keeps the volume. On some cars the console volume sends the same keys, so it zooms too while zoom is on. Uses DiPlay\'s wheel key service; the note on the dashboard needs ADB.</string>
+    <string name="wheel_map_zoom_description">The custom key switches the volume keys between volume and dashboard map zoom while the dashboard shows the CarPlay map. A call always keeps the volume. On some cars the console volume sends the same keys, so it zooms too while zoom is on. Uses DiPlay\'s wheel key service; the note on the dashboard needs ADB.</string>
     <string name="wheel_keys_service_on">Wheel key service: on</string>
     <string name="wheel_keys_service_starting">Wheel key service: allowed, starting…</string>
     <string name="wheel_keys_service_off">Wheel key service: off</string>
@@ -654,7 +654,7 @@
     <string name="wheel_zoom_note_zoom">Map zoom</string>
     <string name="wheel_zoom_note_volume">Volume</string>
     <string name="wheel_joystick">CarPlay joystick on the wheel</string>
-    <string name="wheel_joystick_description">BYD\'s media key turns a joystick for CarPlay\'s centre screen on and off, like a car\'s rotary knob. While it is on, the volume roller or previous/next move the selection, play/pause selects and the custom key goes back; these keys then leave the music and volume alone. A call keeps the keys for the call. On some cars the console volume moves the selection too.</string>
+    <string name="wheel_joystick_description">The media key turns a joystick for CarPlay\'s centre screen on and off, like a car\'s rotary knob. While it is on, the volume roller or previous/next move the selection, play/pause selects and the custom key goes back; these keys then leave the music and volume alone. A call keeps the keys for the call. On some cars the console volume moves the selection too.</string>
     <string name="wheel_joystick_auto_off">Joystick turns off by itself</string>
     <string name="wheel_joystick_auto_off_description">After 15 seconds without a press, and when a route starts, the keys go back to music and volume.</string>
     <string name="wheel_joystick_on">Joystick on</string>
@@ -675,7 +675,7 @@
     <string name="cluster_song_on_change">Song only when it changes</string>
     <string name="cluster_song_on_change_description">A new song shows on the dashboard for 5 seconds, then the card is emptied. Pause and play alone do not show it again.</string>
     <string name="carplay_calls_on_dashboard">CarPlay calls on the dashboard</string>
-    <string name="carplay_calls_on_dashboard_description">Incoming and ongoing CarPlay calls show the caller on the instrument cluster, with the call time on the cluster and the head-up display, like BYD’s own CarPlay app. The car also turns the fan down during the call. Applies at once. Needs ADB over network on the head unit.</string>
+    <string name="carplay_calls_on_dashboard_description">Incoming and ongoing CarPlay calls show the caller on the instrument cluster, with the call time on the cluster and the head-up display, like the factory CarPlay app. The car also turns the fan down during the call. Applies at once. Needs ADB over network on the head unit.</string>
     <string name="cluster_safe_area_edit">Cluster safe area · edit box</string>
     <string name="cluster_safe_area_reset">Reset cluster safe area</string>
     <string name="cluster_safe_area_hint">Drag the four green boundaries. Saving applies to the next CarPlay connection. A custom box replaces marker offsets; reset restores them.</string>

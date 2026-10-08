@@ -98,6 +98,7 @@ public final class SplitConfigSync {
                             prefs.getBoolean(VoiceCommands.ENABLED, false),
                             prefs.getString(
                                     VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG),
+                            prefs.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false),
                             key,
                             resolveSteerActions(prefs.getString(key, "none"), prefs)));
         }

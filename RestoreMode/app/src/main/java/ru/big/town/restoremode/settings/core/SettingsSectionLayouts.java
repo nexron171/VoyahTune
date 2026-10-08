@@ -143,6 +143,8 @@ public final class SettingsSectionLayouts {
                 return CAN;
             case STEERING:
                 return STEERING;
+            case CARPLAY:
+                return new Item[] {layout(R.layout.settings_carplay)};
             case OTHER:
                 return OTHER;
             default:

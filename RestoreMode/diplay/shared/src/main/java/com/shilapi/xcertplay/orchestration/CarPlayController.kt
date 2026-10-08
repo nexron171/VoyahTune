@@ -300,6 +300,7 @@ class CarPlayController(
                 }
             }
             activeSession = session
+            if (!closed) com.shilapi.xcertplay.hud.VoyahNavigation.begin(this@CarPlayController)
             if (replacement) restoreDashboardContent(session)
             debugLog(
                 "AirPlay session active controller=${session.controllerId ?: "unknown"} " +
@@ -311,6 +312,7 @@ class CarPlayController(
         override fun onSessionEnded(session: AirPlaySession) {
             if (activeSession === session) {
                 activeSession = null
+                com.shilapi.xcertplay.hud.VoyahNavigation.end(this@CarPlayController)
                 BydNavigationOutputs.endNow(preserveTurnOverlay = !closed && config.transport == CarPlayTransport.WIRELESS)
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
                 videoListener?.onVideoSessionEnded()
@@ -415,6 +417,7 @@ class CarPlayController(
     fun start() {
         synchronized(this) {
             if (closed) return
+            com.shilapi.xcertplay.hud.VoyahNavigation.begin(this)
         }
         connectionDiagnostic("start transport=${config.transport}")
         if (!hasRequiredUsbService()) return
@@ -547,6 +550,20 @@ class CarPlayController(
     }
 
     /** Opens Siri on the iPhone, as the car's voice button does in CarPlay. */
+    fun setVehicleNightMode(night: Boolean) {
+        if (closed) return
+        val session = activeSession ?: return
+        try {
+            touchExecutor.execute {
+                if (!closed && activeSession === session) {
+                    runCatching { session.setNightMode(night) }
+                }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // Session shutdown can race with a vehicle update.
+        }
+    }
+
     fun requestSiri(): Boolean {
         if (closed) return false
         val session = activeSession ?: return false
@@ -599,6 +616,7 @@ class CarPlayController(
         connectionDiagnostic("teardown begin transport=${config.transport}")
         videoGate?.close()
         BydNavigationOutputs.endNow()
+        com.shilapi.xcertplay.hud.VoyahNavigation.end(this)
         com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
         BydNavigationOutputs.clearClusterStreamControl(::applyClusterUi)
         closeReceivers()
@@ -740,6 +758,7 @@ class CarPlayController(
 
     // HUD (SOME/IP) and cluster (AMap broadcast) keep separate state so one failing cannot stall the other.
     private fun onRouteFrame(frame: com.shilapi.xcertplay.iap2.wire.Iap2Frame) {
+        com.shilapi.xcertplay.hud.VoyahNavigation.onFrame(this, frame)
         BydNavigationOutputs.onFrame(frame)
         com.shilapi.xcertplay.glance.CarPlayGlance.onFrame(frame)
         synchronized(playbackStatus) {

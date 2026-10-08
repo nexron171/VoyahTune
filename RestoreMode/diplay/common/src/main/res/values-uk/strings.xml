@@ -127,7 +127,7 @@
     <string name="back_to_diplay">Повернутися до DiPlay</string>
     <string name="band">Діапазон</string>
     <string name="bluetooth_settings">Налаштування Bluetooth</string>
-    <string name="byd_navigation">Навігація BYD</string>
+    <string name="byd_navigation">Навігація автомобіля</string>
     <string name="cancel">Скасувати</string>
     <string name="car_home">Головний екран автомобіля</string>
     <string name="car_hotspot_details">Дані точки доступу автомобіля</string>
@@ -353,7 +353,7 @@
     <string name="share">Поділитися</string>
     <string name="show_on_screen_debug_logs">Показувати журнали налагодження на екрані</string>
     <string name="show_password">Показати пароль</string>
-    <string name="show_phone_navigation_arrows_distance_and_street_names_on">Показувати стрілки навігації, відстань і назви вулиць із телефона на підтримуваних екранах BYD. Сумісність залежить від автомобіля.</string>
+    <string name="show_phone_navigation_arrows_distance_and_street_names_on">Показувати стрілки навігації, відстань і назви вулиць із телефона на підтримуваних екранах. Сумісність залежить від автомобіля.</string>
     <string name="show_the_side_map_only_when_its_card_is_open_and_switch_to">Показувати карту збоку, лише коли відкрито її картку, та переходити до повної карти в темі «Карта». Зміна теми чи картки не перериває CarPlay.</string>
     <string name="shows_the_iphone_s_cluster_map_on_the_instrument_cluster_c">Показує карту iPhone на приборці. У меню приборки на кермі виберіть «Мала навігація» або «Повноекранна навігація».</string>
     <string name="start_carplay_automatically_after_device_boot">Автоматично запускати CarPlay після завантаження пристрою</string>
@@ -361,7 +361,7 @@
     <string name="starting_airplay_service">Запуск служби AirPlay</string>
     <string name="starting_wireless_hotspot">Запуск бездротової точки доступу</string>
     <string name="still_waiting_for_usage_access_check_that_the_command_ran">Доступ до даних використання ще не надано. Перевірте, чи команда успішно виконалася для цього автомобіля, і спробуйте знову.</string>
-    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">Торкніться числа для перевірки. 14 = динамік водія в BYD.</string>
+    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">Торкніться каналу для перевірки звуку. Призначення каналів залежить від головного пристрою.</string>
     <string name="the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and">Головний пристрій не зміг запустити Wi-Fi CarPlay. Перевірте Wi-Fi й закрийте інші застосунки проєкції. Повторна спроба…</string>
     <string name="this_ends_the_existing_wi_fi_direct_connection_including_o">Це розірве наявне з’єднання Wi-Fi Direct, зокрема те, що залишилося після перевстановлення. Спочатку закрийте інші застосунки проєкції. Звичайний Wi-Fi автомобіля для інтернету залишиться увімкненим.</string>
     <string name="this_head_unit_cannot_use_the_smaller_size_at_this_resolut">Цей головний пристрій не підтримує менший розмір за такої роздільної здатності. Використовується типовий.</string>
@@ -375,7 +375,7 @@
     <string name="turn_on_wi_fi_in_the_head_unit_s_settings_to_connect">Увімкніть Wi-Fi у налаштуваннях головного пристрою, щоб підключитися.</string>
     <string name="turn_the_car_s_wi_fi_switch_on_allow_location_nearby_devic">Увімкніть Wi-Fi автомобіля. Надайте доступ до місцезнаходження та пристроїв поблизу, якщо з’явиться запит, і ввімкніть геолокацію на запит Android. Якщо відтворення переривається, спробуйте вбудовану точку доступу автомобіля на частоті 5 ГГц.</string>
     <string name="usage_access_enabled">Доступ до даних використання: надано</string>
-    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">Доступ до даних використання дозволяє DiPlay стежити за темою приборки та карткою карти. Локально обробляються лише події екрана приборки BYD. У цьому автомобілі сторінка налаштування такого дозволу не працює.</string>
+    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">Доступ до даних використання дозволяє DiPlay стежити за темою приборки та карткою карти. Локально обробляються лише події екрана приборки. У цьому автомобілі сторінка налаштування такого дозволу не працює.</string>
     <string name="usage_access_setup_needed_for_automatic_mode">Доступ до даних використання: потрібне налаштування для автоматичного режиму</string>
     <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">Скористайтеся USB-кабелем для передавання даних і відповідним портом автомобіля. Розблокуйте iPhone та дозвольте CarPlay. Налаштовувати точку доступу не потрібно.</string>
@@ -474,7 +474,7 @@
     <string name="adb_enabled_not_approved">ADB увімкнено, але цю тестову версію DiPlay ще не авторизовано.</string>
     <string name="probe_adb_and_vehicle_data">Визначити старий головний пристрій</string>
     <string name="probe_vehicle_data_again">Повторно визначити старий головний пристрій</string>
-    <string name="probing_vehicle_data">Зчитування каталогу полів BYD цієї прошивки й перевірка потрібних полів…</string>
+    <string name="probing_vehicle_data">Зчитування каталогу полів цієї прошивки й перевірка потрібних полів…</string>
     <string name="vehicle_probe_failed">Не вдалося перевірити дані автомобіля: %1$s</string>
     <string name="vehicle_probe_lost_saved_fields">Перевірка не підтвердила: %1$s. Збережену конфігурацію залишено.</string>
     <string name="replace_saved_vehicle_data_anyway">Усе одно замінити збережені дані автомобіля</string>
@@ -501,7 +501,7 @@
     <string name="video_pause">Пауза</string>
     <string name="video_cannot_play">Це відео не можна відтворити на екрані автомобіля. Для захищеного відео, зокрема Apple TV+, потрібен ліцензований приймач.</string>
     <string name="center_map_card">Карта приборки на центральному екрані</string>
-    <string name="center_map_card_description">Поки DiPlay працює у фоні, карта приборки також показується карткою на головному екрані: BYD, домашній екран із картою або ваш типовий лаунчер. Торкніться картки, щоб відкрити CarPlay, перетягніть її, щоб перемістити, і розведіть двома пальцями, щоб змінити розмір. Карта на приборці залишається. Потрібен дозвіл на показ поверх інших застосунків.</string>
+    <string name="center_map_card_description">Поки DiPlay працює у фоні, карта приборки також показується карткою на головному екрані: штатний головний екран, домашній екран із картою або ваш типовий лаунчер. Торкніться картки, щоб відкрити CarPlay, перетягніть її, щоб перемістити, і розведіть двома пальцями, щоб змінити розмір. Карта на приборці залишається. Потрібен дозвіл на показ поверх інших застосунків.</string>
     <string name="center_map_follows_dashboard">Синхронізувати карту головного екрана з приборкою</string>
     <string name="center_map_follows_dashboard_description">Увімкнено: картка головного екрана дублює карту приборки, тому обидві показують однакове зображення. Вимкнено: картка головного екрана прихована, а карта відображається лише на приборці.</string>
     <string name="center_map_no_permission_screen">На цьому головному пристрої немає екрана налаштувань для цього дозволу. Надайте його через ADB.</string>
@@ -510,7 +510,7 @@
     <string name="center_map_usage_allowed">Доступ до даних використання: дозволено, картка показується лише на головному екрані</string>
     <string name="center_map_usage_missing">Доступ до даних використання: не дозволено, тому картка показується поверх усіх застосунків. Через ADB: adb shell appops set %1$s GET_USAGE_STATS allow</string>
     <string name="cluster_song">Пісня на приборці</string>
-    <string name="cluster_song_description">Назва й виконавець пісні з CarPlay показуються в музичній картці на приборці, разом із відтворенням і паузою. Картка показується як джерело BYD «Інше», бо приборка не малює власне джерело CarPlay. Застосовується одразу. Потрібен ADB через мережу на головному пристрої.</string>
+    <string name="cluster_song_description">Назва й виконавець пісні з CarPlay показуються в музичній картці на приборці, разом із відтворенням і паузою. Картка показується як джерело «Інше», бо приборка не малює власне джерело CarPlay. Застосовується одразу. Потрібен ADB через мережу на головному пристрої.</string>
     <string name="launcher_map_sharing">Ділитися живою картою з іншими лаунчерами</string>
     <string name="launcher_map_sharing_description">Лаунчери з підтримкою DiPlay можуть показувати живу карту приборки на своєму головному екрані. Типово вимкнено, бо тоді карту зможе запитати будь-який застосунок на головному пристрої. Див. docs/LAUNCHER_INTEGRATION.md.</string>
     <string name="location_reporting_reconnects">Зміна цього налаштування перепідключає активний сеанс CarPlay.</string>
@@ -548,7 +548,7 @@
     <string name="settings_gesture_fingers">Відкрити налаштування · свайп %1$d пальцями (торкніться, щоб змінити)</string>
     <string name="settings_gesture_fingers_label">Відкрити налаштування · кількість пальців</string>
     <string name="settings_gesture_fingers_option">%1$d пальців</string>
-    <string name="settings_gesture_fingers_hint">Виберіть кількість пальців, яку не використовує головний пристрій. BYD резервує свайп трьома пальцями вниз під панель кондиціонера.</string>
+    <string name="settings_gesture_fingers_hint">Виберіть кількість пальців, яку не використовують жести головного пристрою.</string>
     <string name="auto_car_hotspot_title">Автоматично вмикати точку доступу авто</string>
     <string name="auto_car_hotspot_description">Вмикає збережену точку доступу під час відкриття DiPlay. Перемикач автоматично запитує потрібні дозволи через ADB; підтвердьте запит на екрані авто. Для запуску після завантаження ввімкніть відкриття DiPlay після запуску авто. Назва й пароль зберігаються, точка доступу автоматично не вимикається.</string>
     <string name="hotspot_control_missing">Немає дозволу керування точкою доступу. Надайте його через ADB або ввімкніть точку доступу в налаштуваннях авто.</string>
@@ -558,13 +558,13 @@
     <string name="hotspot_control_unsupported">Прошивка не підтримує автоматичне ввімкнення точки доступу. Відкрийте налаштування авто.</string>
     <string name="hotspot_control_timeout">Час очікування ввімкнення точки доступу минув. Відкрийте налаштування авто.</string>
     <string name="hotspot_control_failed">Не вдалося ввімкнути точку доступу. Відкрийте налаштування авто.</string>
-    <string name="byd_adb_features">Функції BYD · потрібен ADB</string>
+    <string name="byd_adb_features">Функції автомобіля · потрібен ADB</string>
     <string name="diagnostic_report_saved_in_app">Звіт збережено приватно в DiPlay, оскільки загальнодоступне місце збереження недоступне. Поділіться ним або перегляньте його тут. Нічого не надсилається автоматично.</string>
     <string name="diagnostic_report_saved_to_path">Звіт збережено в:\n%1$s\n\nВи також можете поділитися ним або переглянути його тут. Нічого не надсилається автоматично.</string>
     <string name="view_diagnostic_report">Переглянути звіт</string>
     <string name="diagnostic_report_copy_hint">Натисніть і утримуйте текст звіту, щоб виділити та скопіювати його. Це можна використати, якщо немає застосунку для надсилання.</string>
     <string name="wheel_map_zoom">Масштаб карти на приборці кнопками керма</string>
-    <string name="wheel_map_zoom_description">Кастомна кнопка BYD перемикає кнопки гучності між звуком і масштабом карти на приборці, поки там карта CarPlay. Під час дзвінка кнопки завжди керують звуком. На деяких авто гучність на консолі надсилає ті самі кнопки, тож у режимі масштабу вона теж змінює масштаб. Працює через службу кнопок керма DiPlay; напис на приборці потребує ADB.</string>
+    <string name="wheel_map_zoom_description">Кастомна кнопка перемикає кнопки гучності між звуком і масштабом карти на приборці, поки там карта CarPlay. Під час дзвінка кнопки завжди керують звуком. На деяких авто гучність на консолі надсилає ті самі кнопки, тож у режимі масштабу вона теж змінює масштаб. Працює через службу кнопок керма DiPlay; напис на приборці потребує ADB.</string>
     <string name="wheel_keys_service_on">Служба кнопок керма: увімкнена</string>
     <string name="wheel_keys_service_starting">Служба кнопок керма: дозволена, запускається…</string>
     <string name="wheel_keys_service_off">Служба кнопок керма: вимкнена</string>
@@ -585,7 +585,7 @@
     <string name="wheel_zoom_note_zoom">Масштаб карти</string>
     <string name="wheel_zoom_note_volume">Гучність</string>
     <string name="wheel_joystick">Джойстик CarPlay на кермі</string>
-    <string name="wheel_joystick_description">Кнопка медіа BYD вмикає й вимикає джойстик для центрального екрана CarPlay, як крутилка в авто. Поки він увімкнений, колесо гучності або ⏮ ⏭ рухають вибір, ⏯ вибирає, а кастомна кнопка повертає назад; музикою й гучністю ці кнопки тоді не керують. Під час дзвінка кнопки працюють для дзвінка. На деяких авто вибір рухає й гучність на консолі.</string>
+    <string name="wheel_joystick_description">Кнопка медіа вмикає й вимикає джойстик для центрального екрана CarPlay, як крутилка в авто. Поки він увімкнений, колесо гучності або ⏮ ⏭ рухають вибір, ⏯ вибирає, а кастомна кнопка повертає назад; музикою й гучністю ці кнопки тоді не керують. Під час дзвінка кнопки працюють для дзвінка. На деяких авто вибір рухає й гучність на консолі.</string>
     <string name="wheel_joystick_auto_off">Джойстик вимикається сам</string>
     <string name="wheel_joystick_auto_off_description">Через 15 секунд без натискань і коли стартує маршрут кнопки знову керують музикою й гучністю.</string>
     <string name="wheel_joystick_on">Джойстик увімкнено</string>
@@ -606,7 +606,7 @@
     <string name="cluster_song_on_change">Пісня лише при зміні</string>
     <string name="cluster_song_on_change_description">Нова пісня видна на приборці 5 секунд, потім картка порожніє. Пауза й продовження її не показують.</string>
     <string name="carplay_calls_on_dashboard">Дзвінки CarPlay на приборці</string>
-    <string name="carplay_calls_on_dashboard_description">Вхідні та поточні дзвінки CarPlay показують абонента на приборці, а тривалість — на приборці й проєкційному дисплеї, як у штатному застосунку CarPlay від BYD. Під час дзвінка авто також знижує оберти вентилятора. Застосовується одразу. Потрібен ADB через мережу на головному пристрої.</string>
+    <string name="carplay_calls_on_dashboard_description">Вхідні та поточні дзвінки CarPlay показують абонента на приборці, а тривалість — на приборці й проєкційному дисплеї, як у штатному застосунку CarPlay автомобіля. Під час дзвінка авто також знижує оберти вентилятора. Застосовується одразу. Потрібен ADB через мережу на головному пристрої.</string>
     <string name="carplay_dock">Панель програм CarPlay</string>
     <string name="carplay_dock_automatic">Автоматично</string>
     <string name="carplay_dock_driver_side">З боку водія</string>

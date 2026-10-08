@@ -219,6 +219,23 @@ public final class VoiceSettingsPage {
                         saveEnabled(checked);
                     }
                 });
+        TextView siriHint = components.text(siriPressHint(), 16, 0xffb2d3fb);
+        siriHint.setVisibility(
+                preferences.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false)
+                        ? View.VISIBLE
+                        : View.GONE);
+        Switch siri = new SettingsToggle(activity);
+        siri.setContentDescription("Включить Siri в CarPlay");
+        siri.setChecked(preferences.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false));
+        siri.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    preferences
+                            .edit()
+                            .putBoolean(VoiceSteeringPolicy.SIRI_ENABLED, checked)
+                            .apply();
+                    siriHint.setVisibility(checked ? View.VISIBLE : View.GONE);
+                    SplitConfigSync.pushSteering(activity, preferences);
+                });
         SettingsChoiceGroup press = new SettingsChoiceGroup(activity, null);
         int shortPressId = View.generateViewId();
         int longPressId = View.generateViewId();
@@ -246,6 +263,7 @@ public final class VoiceSettingsPage {
                                             : VoiceSteeringPolicy.LONG)
                             .apply();
                     SplitConfigSync.pushSteering(activity, preferences);
+                    siriHint.setText(siriPressHint());
                 });
         Switch shortcut = new SettingsToggle(activity);
         shortcut.setContentDescription("Ярлык «Голосовая команда» на главном экране");
@@ -265,6 +283,11 @@ public final class VoiceSettingsPage {
                                 "Прежние действия выбранного нажатия сохраняются.",
                                 press),
                         components.row(
+                                "Включить Siri в CarPlay",
+                                "Работает при подключённом iPhone.",
+                                siri),
+                        siriHint,
+                        components.row(
                                 "Ярлык «Голосовая команда»",
                                 "Показывать на главном экране.",
                                 shortcut));
@@ -273,6 +296,17 @@ public final class VoiceSettingsPage {
         spacing.topMargin = dp(22);
         card.setLayoutParams(spacing);
         return card;
+    }
+
+    private String siriPressHint() {
+        boolean assistantShort =
+                VoiceSteeringPolicy.SHORT.equals(
+                        VoiceSteeringPolicy.normalize(
+                                preferences.getString(
+                                        VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG)));
+        return "Siri: "
+                + (assistantShort ? "долгое" : "короткое")
+                + " нажатие голосовой кнопки на руле. Прежние действия этого нажатия сохраняются.";
     }
 
     private View createAudioAndTrialCards() {

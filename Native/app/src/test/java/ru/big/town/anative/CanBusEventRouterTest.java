@@ -1,25 +1,43 @@
 package ru.big.town.anative;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executor;
 
-import org.junit.Test;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
 public class CanBusEventRouterTest {
+    @Test
+    public void unchangedSpeedRefreshesTimestampOnlyForSpeedSubscriber() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        List<CanBusEvent> speed = new ArrayList<>(), gear = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_VEHICLE_SPEED, null, Runnable::run, speed::add);
+        router.subscribe(CanBusEventRouter.INTEREST_GEAR, null, Runnable::run, gear::add);
+        router.dispatch(CanBusEvent.speed(CanBusEvent.Origin.LIVE, 1, 1, 100, 40));
+        router.dispatch(CanBusEvent.speed(CanBusEvent.Origin.LIVE, 1, 2, 200, 40));
+        assertEquals(2, speed.size());
+        assertEquals(200, speed.get(1).elapsedRealtime);
+        assertTrue(gear.isEmpty());
+        router.invalidateThrough(1);
+        router.dispatch(CanBusEvent.speed(CanBusEvent.Origin.SEED, 1, 3, 300, 50));
+        assertEquals(2, speed.size());
+    }
+
     @Test
     public void routesOnlyRequestedKindsAndVehicleIds() {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<CanBusEvent> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_DOOR
-                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                new int[]{545}, executor, delivered::add);
+        router.subscribe(
+                CanBusEventRouter.INTEREST_DOOR | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                new int[] {545},
+                executor,
+                delivered::add);
 
         router.dispatch(door(1, 1));
         router.dispatch(gear(2, 3));
@@ -38,8 +56,8 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<Integer> gears = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_GEAR, null, executor,
-                event -> gears.add(event.first));
+        router.subscribe(
+                CanBusEventRouter.INTEREST_GEAR, null, executor, event -> gears.add(event.first));
 
         router.dispatch(gear(1, 0));
         router.dispatch(gear(2, 3));
@@ -56,7 +74,10 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<Long> epochs = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION, null, executor,
+        router.subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION,
+                null,
+                executor,
                 event -> epochs.add(event.connectionEpoch));
 
         router.dispatch(CanBusEvent.connection(1, 1, 1));
@@ -72,9 +93,10 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<String> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
-                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                new int[]{PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID}, executor,
+        router.subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                new int[] {PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID},
+                executor,
                 event -> delivered.add(event.connectionEpoch + ":" + event.kind));
 
         router.dispatch(CanBusEvent.connection(1, 1, 1));
@@ -92,12 +114,15 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<String> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+        router.subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION
                         | CanBusEventRouter.INTEREST_DOOR
                         | CanBusEventRouter.INTEREST_GEAR,
-                null, executor,
-                event -> delivered.add(event.connectionEpoch + ":" + event.kind + ":"
-                        + event.first));
+                null,
+                executor,
+                event ->
+                        delivered.add(
+                                event.connectionEpoch + ":" + event.kind + ":" + event.first));
 
         router.dispatch(CanBusEvent.door(CanBusEvent.Origin.LIVE, 1, 1, 1, 1));
         router.dispatch(CanBusEvent.gear(CanBusEvent.Origin.LIVE, 1, 2, 2, 3));
@@ -114,17 +139,16 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<String> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
-                        | CanBusEventRouter.INTEREST_DOOR,
-                null, executor,
+        router.subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_DOOR,
+                null,
+                executor,
                 event -> delivered.add(event.connectionEpoch + ":" + event.kind));
 
         router.dispatch(CanBusEvent.connection(1, 1, 1));
-        router.dispatch(CanBusEvent.door(
-                CanBusEvent.Origin.LIVE, 1, 2, 2, 1));
+        router.dispatch(CanBusEvent.door(CanBusEvent.Origin.LIVE, 1, 2, 2, 1));
         router.invalidateThrough(1);
-        router.dispatch(CanBusEvent.door(
-                CanBusEvent.Origin.LIVE, 1, 3, 3, 0));
+        router.dispatch(CanBusEvent.door(CanBusEvent.Origin.LIVE, 1, 3, 3, 0));
         executor.runAll();
         assertTrue(delivered.isEmpty());
 
@@ -138,8 +162,11 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<CanBusEvent> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                new int[]{545, 957}, executor, delivered::add);
+        router.subscribe(
+                CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                new int[] {545, 957},
+                executor,
+                delivered::add);
 
         router.dispatch(vehicle(1, 545, 1));
         router.dispatch(vehicle(2, 957, 2));
@@ -158,8 +185,8 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<CanBusEvent> delivered = new ArrayList<>();
-        CanBusEventRouter.Subscription subscription = router.subscribe(
-                CanBusEventRouter.INTEREST_DOOR, null, executor, delivered::add);
+        CanBusEventRouter.Subscription subscription =
+                router.subscribe(CanBusEventRouter.INTEREST_DOOR, null, executor, delivered::add);
 
         router.dispatch(door(1, 1));
         subscription.close();
@@ -192,8 +219,12 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<Integer> doors = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_DOOR, null, executor,
-                event -> doors.add(event.first), 2);
+        router.subscribe(
+                CanBusEventRouter.INTEREST_DOOR,
+                null,
+                executor,
+                event -> doors.add(event.first),
+                2);
 
         router.dispatch(door(1, 0));
         router.dispatch(door(2, 1));
@@ -208,17 +239,19 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<CanBusEvent.Kind> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
-                        | CanBusEventRouter.INTEREST_GEAR,
-                null, executor, event -> delivered.add(event.kind), 2);
+        router.subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_GEAR,
+                null,
+                executor,
+                event -> delivered.add(event.kind),
+                2);
 
         router.dispatch(CanBusEvent.connection(1, 1, 1));
         router.dispatch(gear(2, 3));
         router.dispatch(gear(3, 0));
         executor.runAll();
 
-        assertEquals(Arrays.asList(CanBusEvent.Kind.CONNECTION, CanBusEvent.Kind.GEAR),
-                delivered);
+        assertEquals(Arrays.asList(CanBusEvent.Kind.CONNECTION, CanBusEvent.Kind.GEAR), delivered);
     }
 
     @Test
@@ -226,11 +259,15 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<CanBusEvent.Kind> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+        router.subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION
                         | CanBusEventRouter.INTEREST_DOOR
                         | CanBusEventRouter.INTEREST_GEAR
                         | CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                new int[]{545}, executor, event -> delivered.add(event.kind), 3);
+                new int[] {545},
+                executor,
+                event -> delivered.add(event.kind),
+                3);
 
         router.dispatch(CanBusEvent.connection(1, 1, 1));
         router.dispatch(door(2, 1));
@@ -238,8 +275,10 @@ public class CanBusEventRouterTest {
         router.dispatch(gear(4, 3));
         executor.runAll();
 
-        assertEquals(Arrays.asList(CanBusEvent.Kind.CONNECTION,
-                CanBusEvent.Kind.DOOR, CanBusEvent.Kind.GEAR), delivered);
+        assertEquals(
+                Arrays.asList(
+                        CanBusEvent.Kind.CONNECTION, CanBusEvent.Kind.DOOR, CanBusEvent.Kind.GEAR),
+                delivered);
     }
 
     @Test
@@ -247,10 +286,14 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<CanBusEvent.Kind> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_CONNECTION
+        router.subscribe(
+                CanBusEventRouter.INTEREST_CONNECTION
                         | CanBusEventRouter.INTEREST_DOOR
                         | CanBusEventRouter.INTEREST_GEAR,
-                null, executor, event -> delivered.add(event.kind), 2);
+                null,
+                executor,
+                event -> delivered.add(event.kind),
+                2);
 
         router.dispatch(CanBusEvent.connection(1, 1, 1));
         router.dispatch(door(2, 1));
@@ -258,8 +301,7 @@ public class CanBusEventRouterTest {
         router.dispatch(door(4, 1)); // must not be suppressed by dedupe memory
         executor.runAll();
 
-        assertEquals(Arrays.asList(CanBusEvent.Kind.CONNECTION, CanBusEvent.Kind.DOOR),
-                delivered);
+        assertEquals(Arrays.asList(CanBusEvent.Kind.CONNECTION, CanBusEvent.Kind.DOOR), delivered);
     }
 
     @Test
@@ -267,10 +309,14 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<Integer> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_GEAR, null, executor, event -> {
-            if (event.first == 0) throw new IllegalStateException("boom");
-            delivered.add(event.first);
-        });
+        router.subscribe(
+                CanBusEventRouter.INTEREST_GEAR,
+                null,
+                executor,
+                event -> {
+                    if (event.first == 0) throw new IllegalStateException("boom");
+                    delivered.add(event.first);
+                });
 
         router.dispatch(gear(1, 0));
         router.dispatch(gear(2, 3));
@@ -283,9 +329,15 @@ public class CanBusEventRouterTest {
         CanBusEventRouter router = new CanBusEventRouter();
         ManualExecutor executor = new ManualExecutor();
         List<String> delivered = new ArrayList<>();
-        router.subscribe(CanBusEventRouter.INTEREST_GEAR, null, executor,
+        router.subscribe(
+                CanBusEventRouter.INTEREST_GEAR,
+                null,
+                executor,
                 event -> delivered.add("gear:" + event.first));
-        router.subscribe(CanBusEventRouter.INTEREST_DOOR, null, executor,
+        router.subscribe(
+                CanBusEventRouter.INTEREST_DOOR,
+                null,
+                executor,
                 event -> delivered.add("door:" + event.first));
 
         router.dispatch(gear(1, 0));
@@ -297,8 +349,7 @@ public class CanBusEventRouterTest {
         executor.runNext();
         assertEquals(Arrays.asList("gear:0", "door:1"), delivered);
         executor.runAll();
-        assertEquals(Arrays.asList("gear:0", "door:1", "gear:3", "gear:0"),
-                delivered);
+        assertEquals(Arrays.asList("gear:0", "door:1", "gear:3", "gear:0"), delivered);
     }
 
     private static CanBusEvent door(long sequence, int value) {
@@ -310,8 +361,7 @@ public class CanBusEventRouterTest {
     }
 
     private static CanBusEvent vehicle(long sequence, int id, int value) {
-        return CanBusEvent.vehicleState(
-                CanBusEvent.Origin.LIVE, 1, sequence, sequence, id, value);
+        return CanBusEvent.vehicleState(CanBusEvent.Origin.LIVE, 1, sequence, sequence, id, value);
     }
 
     private static class ManualExecutor implements Executor {

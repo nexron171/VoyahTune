@@ -117,12 +117,20 @@ public class SetModesService extends Service {
 
     private SuspensionWidgetController suspensionWidget;
     private EnergyWidgetController energyWidgets;
+    private CarPlayVehicleController carPlayVehicle;
     private ClearAppsController clearApps;
 
     class IncomingHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case ru.big.town.common.CarPlayVehicleProtocol.WATCH:
+                case ru.big.town.common.CarPlayVehicleProtocol.UNWATCH:
+                case ru.big.town.common.CarPlayVehicleProtocol.NAVIGATION:
+                    if (carPlayVehicle == null)
+                        carPlayVehicle = new CarPlayVehicleController(SetModesService.this);
+                    carPlayVehicle.handle(msg);
+                    break;
                 case ru.big.town.common.EnergyWidgetProtocol.WATCH:
                 case ru.big.town.common.EnergyWidgetProtocol.UNWATCH:
                 case ru.big.town.common.EnergyWidgetProtocol.CONFIGURE:
@@ -2272,6 +2280,7 @@ public class SetModesService extends Service {
         Log.i(TAG, "onDestroy()");
         if (suspensionWidget != null) suspensionWidget.close();
         if (energyWidgets != null) energyWidgets.close();
+        if (carPlayVehicle != null) carPlayVehicle.destroy();
         if (clearApps != null) clearApps.close();
         voiceCommands.close();
         closeScenarios();

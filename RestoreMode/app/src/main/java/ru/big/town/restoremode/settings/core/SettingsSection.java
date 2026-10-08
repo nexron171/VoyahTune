@@ -4,6 +4,7 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.settings.sections.apollo.ApolloSettingsFragment;
 import ru.big.town.restoremode.settings.sections.apps.AppsSettingsFragment;
 import ru.big.town.restoremode.settings.sections.can.CanSettingsFragment;
+import ru.big.town.restoremode.settings.sections.carplay.CarPlaySettingsFragment;
 import ru.big.town.restoremode.settings.sections.main.MainSettingsFragment;
 import ru.big.town.restoremode.settings.sections.other.OtherSettingsFragment;
 import ru.big.town.restoremode.settings.sections.scenarios.ScenarioSettingsFragment;
@@ -21,7 +22,8 @@ public enum SettingsSection {
     STEERING(5, R.id.navSteeringButtons, "Кнопки на руле", "УПРАВЛЕНИЕ"),
     OTHER(6, R.id.navOther, "Другое", "СИСТЕМА"),
     VOICE(7, R.id.navVoiceControl, "Голосовое управление", "ГОЛОСОВОЙ ПОМОЩНИК"),
-    SCENARIOS(8, R.id.navScenarios, "Сценарии", "ПЕРСОНАЛИЗАЦИЯ");
+    SCENARIOS(8, R.id.navScenarios, "Сценарии", "ПЕРСОНАЛИЗАЦИЯ"),
+    CARPLAY(9, R.id.navCarPlay, "CarPlay", "ПОДКЛЮЧЕНИЕ IPHONE");
 
     public final int identifier;
     public final int navigationId;
@@ -45,7 +47,7 @@ public enum SettingsSection {
     }
 
     public boolean savesImmediately() {
-        return this == VOICE || this == SCENARIOS;
+        return this == VOICE || this == SCENARIOS || this == CARPLAY;
     }
 
     public SettingsSectionFragment createFragment() {
@@ -66,6 +68,8 @@ public enum SettingsSection {
                 return new OtherSettingsFragment();
             case VOICE:
                 return new VoiceSettingsFragment();
+            case CARPLAY:
+                return new CarPlaySettingsFragment();
             case SCENARIOS:
                 return new ScenarioSettingsFragment();
             default:

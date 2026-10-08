@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="carplay_home_title">CarPlay</string>
+    <string name="carplay_home_brand">VoyahTune</string>
+    <string name="carplay_home_wireless">Беспроводное подключение</string>
+    <string name="carplay_home_wireless_detail">По Bluetooth и Wi-Fi</string>
+    <string name="carplay_home_usb">Подключение по USB</string>
+    <string name="carplay_home_usb_detail">Подключите iPhone кабелем</string>
+    <string name="carplay_home_settings">Настройки</string>
+    <string name="carplay_home_settings_detail">Экран, звук и подключение</string>
+    <string name="carplay_home_open">Открыть CarPlay</string>
+    <string name="carplay_home_choose_phone">Выбрать iPhone</string>
+    <string name="carplay_home_exit">Выйти</string>
+    <string name="carplay_home_disconnect">Отключить</string>
+    <string name="carplay_home_hotspot">Настройки точки доступа</string>
+    <string name="carplay_home_auto_connect">Автоматическое подключение</string>
+    <string name="carplay_home_auto_connect_detail">Открывать проекцию и подключаться к выбранному iPhone при запуске CarPlay или виджета</string>
+    <string name="carplay_home_auto_connect_choose_phone">Сначала выберите связанный iPhone кнопкой «Выбрать iPhone»</string>
+    <string name="carplay_settings_connection">Подключение</string>
+    <string name="carplay_settings_disconnected">Не подключено</string>
+    <string name="carplay_settings_connecting">Подключение к iPhone…</string>
+    <string name="carplay_settings_connected">CarPlay подключён</string>
+    <string name="carplay_settings_phone">Выбранный телефон: %1$s</string>
+    <string name="carplay_settings_no_phone">Телефон ещё не выбран</string>
+    <string name="carplay_settings_open_home">Открыть экран CarPlay</string>
+</resources>

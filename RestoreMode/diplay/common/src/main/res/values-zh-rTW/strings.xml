@@ -121,7 +121,7 @@
     <string name="back_to_diplay">返回 DiPlay</string>
     <string name="band">頻段</string>
     <string name="bluetooth_settings">藍牙設定</string>
-    <string name="byd_navigation">比亞迪導航</string>
+    <string name="byd_navigation">車輛導航</string>
     <string name="cancel">取消</string>
     <string name="car_home">車機主畫面</string>
     <string name="car_hotspot_details">車機熱點詳細資訊</string>
@@ -353,7 +353,7 @@
     <string name="share">分享</string>
     <string name="show_on_screen_debug_logs">在螢幕上顯示除錯記錄</string>
     <string name="show_password">顯示密碼</string>
-    <string name="show_phone_navigation_arrows_distance_and_street_names_on">在支援的比亞迪顯示器上顯示手機導航箭頭、距離和道路名稱。不同車型的相容性有所差異。</string>
+    <string name="show_phone_navigation_arrows_distance_and_street_names_on">在支援的車載顯示器上顯示手機導航箭頭、距離和道路名稱。不同車型的相容性有所差異。</string>
     <string name="show_the_side_map_only_when_its_card_is_open_and_switch_to">僅在地圖卡片展開時顯示側邊地圖，並在「地圖主題」中切換為完整地圖。變更主題或卡片不會中斷 CarPlay 連線。</string>
     <string name="shows_the_iphone_s_cluster_map_on_the_instrument_cluster_c">在儀表板上顯示 iPhone 地圖。透過方向盤操作儀表板選單，選擇小螢幕導航或全螢幕導航。</string>
     <string name="start_carplay_automatically_after_device_boot">裝置啟動後自動啟動 CarPlay</string>
@@ -361,7 +361,7 @@
     <string name="starting_airplay_service">正在啟動 AirPlay 服務</string>
     <string name="starting_wireless_hotspot">正在啟動無線熱點</string>
     <string name="still_waiting_for_usage_access_check_that_the_command_ran">仍在等待使用狀況存取權限。請確認指令已在此車機上成功執行，然後再試一次。</string>
-    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">點一下數字進行測試。14 = 比亞迪主駕駛揚聲器。</string>
+    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">點選聲道測試音訊輸出。聲道分配取決於車機。</string>
     <string name="the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and">車機無法啟動 CarPlay Wi-Fi。請檢查 Wi-Fi 並關閉其他投放 App，正在再試一次…</string>
     <string name="this_ends_the_existing_wi_fi_direct_connection_including_o">這會結束現有的 Wi-Fi Direct 連線，包括重新安裝後遺留的連線。請先關閉其他投放 App。車機的網際網路 Wi-Fi 不受影響。</string>
     <string name="this_head_unit_cannot_use_the_smaller_size_at_this_resolut">此車機在目前解析度下無法使用較小的尺寸，將使用預設尺寸。</string>
@@ -375,7 +375,7 @@
     <string name="turn_on_wi_fi_in_the_head_unit_s_settings_to_connect">請在車機設定中開啟 Wi-Fi 後再連線。</string>
     <string name="turn_the_car_s_wi_fi_switch_on_allow_location_nearby_devic">開啟車機的 Wi-Fi 開關。如有提示，請允許位置／附近的裝置權限，並在 Android 詢問時啟用位置。如果播放卡頓，請嘗試使用 5 GHz 的內建車機熱點。</string>
     <string name="usage_access_enabled">使用狀況存取權限：已啟用</string>
-    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">使用狀況存取權限可讓 DiPlay 跟隨儀表板主題和地圖卡片。僅在本機處理 BYD 儀表板活動事件。此車機沒有可用的權限設定頁面。</string>
+    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">使用狀況存取權限可讓 DiPlay 跟隨儀表板主題和地圖卡片。僅在本機處理 儀表板活動事件。此車機沒有可用的權限設定頁面。</string>
     <string name="usage_access_setup_needed_for_automatic_mode">使用狀況存取權限：自動模式需要設定</string>
     <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">使用 USB 傳輸線連線車機的 USB 資料連線埠。解鎖 iPhone 並允許 CarPlay。無需設定熱點。</string>
@@ -496,7 +496,7 @@
     <string name="adb_enabled_not_approved">ADB 已開啟，但尚未授權這個 DiPlay 測試版。</string>
     <string name="probe_adb_and_vehicle_data">偵測舊版車機</string>
     <string name="probe_vehicle_data_again">重新偵測舊版車機</string>
-    <string name="probing_vehicle_data">正在讀取本韌體的比亞迪欄位目錄並驗證所需欄位…</string>
+    <string name="probing_vehicle_data">正在讀取本韌體的車載欄位目錄並驗證所需欄位…</string>
     <string name="vehicle_probe_failed">車輛資料偵測失敗：%1$s</string>
     <string name="vehicle_probe_lost_saved_fields">本次偵測未確認以下已儲存欄位：%1$s。舊設定已保留。</string>
     <string name="replace_saved_vehicle_data_anyway">仍然取代已儲存的車輛資料</string>
@@ -519,7 +519,7 @@
     <string name="video_while_parked">停車時播放影片 · 需要 ADB</string>
     <string name="video_while_parked_description">iOS 27：在 iPhone 上投放至 CarPlay 的影片會在車輛處於 P 檔時於車機螢幕上播放。移出 P 檔時播放器會關閉；沒有 ADB 時影片會保持關閉，iPhone 只播放聲音。一般 HTTPS 影片（例如來自 Safari）可以播放；受 FairPlay 保護的影片（例如 Apple TV+）需要獲授權的接收器，因此無法在此播放。會重新連線 CarPlay。需要車機開啟網路 ADB。</string>
     <string name="cluster_song">儀表板顯示歌曲</string>
-    <string name="cluster_song_description">CarPlay 正在播放的歌曲名稱和歌手會顯示在儀表板的音樂卡片中，並同步播放和暫停狀態。卡片以比亞迪的“其他”音訊來源顯示，因為儀表板不會繪製 CarPlay 自身的音訊來源。立即生效。需要車機開啟網路 ADB。</string>
+    <string name="cluster_song_description">CarPlay 正在播放的歌曲名稱和歌手會顯示在儀表板的音樂卡片中，並同步播放和暫停狀態。卡片以車載的“其他”音訊來源顯示，因為儀表板不會繪製 CarPlay 自身的音訊來源。立即生效。需要車機開啟網路 ADB。</string>
     <string name="video_back_to_carplay">返回 CarPlay</string>
     <string name="video_play">播放</string>
     <string name="video_pause">暫停</string>
@@ -541,7 +541,7 @@
     <string name="center_map_auto_hide_description">開啟音樂、倒車影像、全螢幕設定等App時自動隱藏浮動視窗，返回桌面時自動恢復</string>
     <string name="center_map_auto_hide_active">離開桌面自動隱藏：已開啟（使用狀況存取權限 / 輔助使用服務）</string>
     <string name="center_map_auto_hide_needed">離開桌面自動隱藏：未開啟。請開啟輔助使用服務或透過 ADB 授予使用狀況存取權限。</string>
-    <string name="center_map_card_description">DiPlay 在背景運行時，儀表板地圖也會以卡片形式顯示在主螢幕上：比亞迪主螢幕、地圖主螢幕或你的預設啟動器。點選卡片開啟 CarPlay，拖曳可移動卡片，雙指縮放可調整大小。儀表板上的地圖不受影響。需要“顯示在其他App上層”權限。</string>
+    <string name="center_map_card_description">DiPlay 在背景運行時，儀表板地圖也會以卡片形式顯示在主螢幕上：車載主螢幕、地圖主螢幕或你的預設啟動器。點選卡片開啟 CarPlay，拖曳可移動卡片，雙指縮放可調整大小。儀表板上的地圖不受影響。需要“顯示在其他App上層”權限。</string>
     <string name="center_map_overlay_allowed">顯示在其他App上層：已允許</string>
     <string name="center_map_overlay_missing">顯示在其他應用程式上層：未允許。請在應用程式設定中允許，或透過 ADB：adb shell appops set %1$s SYSTEM_ALERT_WINDOW allow</string>
     <string name="center_map_usage_allowed">使用狀況存取權限：已允許，卡片只在主螢幕上顯示</string>
@@ -562,7 +562,7 @@
     <string name="settings_gesture_fingers">開啟設定 · %1$d 指向下滑動（點選切換）</string>
     <string name="settings_gesture_fingers_label">開啟設定 · 向下滑動手指數</string>
     <string name="settings_gesture_fingers_option">%1$d 指</string>
-    <string name="settings_gesture_fingers_hint">選擇車機尚未使用的手指數。比亞迪的三指向下滑動會開啟空調面板，建議改用 2 指。</string>
+    <string name="settings_gesture_fingers_hint">選擇車機手勢尚未使用的手指數。</string>
     <string name="auto_car_hotspot_title">自動開啟熱點</string>
     <string name="auto_car_hotspot_description">DiPlay 啟動時開啟車機熱點。開啟開關會自動透過 ADB 申請所需權限，請允許車機上的授權提示。配合“車輛啟動後開啟”可隨開機啟動。保留熱點名稱和密碼，不會自動關閉熱點。</string>
     <string name="hotspot_control_missing">缺少熱點控制權限。請透過 ADB 授權，或在車機設定中手動開啟熱點。</string>
@@ -572,14 +572,14 @@
     <string name="hotspot_control_unsupported">當前韌體不支援自動開啟熱點，請在車機設定中開啟。</string>
     <string name="hotspot_control_timeout">等待車機熱點開啟超時，請在車機設定中開啟。</string>
     <string name="hotspot_control_failed">車機熱點開啟失敗，請在車機設定中開啟。</string>
-    <string name="byd_adb_features">比亞迪功能 · 需要 ADB</string>
+    <string name="byd_adb_features">車輛功能 · 需要 ADB</string>
     <string name="location_reporting_reconnects">變更此設定會重新連線當前 CarPlay 會話。</string>
     <string name="diagnostic_report_saved_in_app">由於公開儲存位置無法使用，報告已私密儲存到 DiPlay。您可以在此分享或檢視報告。不會自動傳送任何內容。</string>
     <string name="diagnostic_report_saved_to_path">報告已儲存到：\n%1$s\n\n您也可以在此分享或檢視報告。不會自動傳送任何內容。</string>
     <string name="view_diagnostic_report">檢視報告</string>
     <string name="diagnostic_report_copy_hint">長按報告文本即可選擇並複製。如果沒有可用的分享App，可以使用此方式。</string>
     <string name="wheel_map_zoom">用方向盤按鍵縮放儀表板地圖</string>
-    <string name="wheel_map_zoom_description">儀表板顯示 CarPlay 地圖時，比亞迪自訂按鍵可在音量和儀表板地圖縮放之間切換音量鍵。通話時按鍵始終調整音量。部分車型的中控音量與方向盤傳送相同按鍵，因此縮放模式下它也會縮放地圖。使用 DiPlay 方向盤按鍵服務；儀表板上的提示需要 ADB。</string>
+    <string name="wheel_map_zoom_description">儀表板顯示 CarPlay 地圖時，車載自訂按鍵可在音量和儀表板地圖縮放之間切換音量鍵。通話時按鍵始終調整音量。部分車型的中控音量與方向盤傳送相同按鍵，因此縮放模式下它也會縮放地圖。使用 DiPlay 方向盤按鍵服務；儀表板上的提示需要 ADB。</string>
     <string name="wheel_keys_service_on">方向盤按鍵服務：已開啟</string>
     <string name="wheel_keys_service_starting">方向盤按鍵服務：已允許，正在啟動…</string>
     <string name="wheel_keys_service_off">方向盤按鍵服務：已關閉</string>
@@ -600,7 +600,7 @@
     <string name="wheel_zoom_note_zoom">地圖縮放</string>
     <string name="wheel_zoom_note_volume">音量</string>
     <string name="wheel_joystick">方向盤 CarPlay 搖桿</string>
-    <string name="wheel_joystick_description">比亞迪媒體鍵可開啟或關閉用於 CarPlay 中控螢幕的搖桿，就像車上的旋鈕控制器。開啟時，音量滾輪或 ⏮ ⏭ 移動選擇，⏯ 確認，自訂按鍵返回；這些按鍵此時不再控制音樂和音量。通話時按鍵用於通話。部分車型中控台的音量也會移動選擇。</string>
+    <string name="wheel_joystick_description">車載媒體鍵可開啟或關閉用於 CarPlay 中控螢幕的搖桿，就像車上的旋鈕控制器。開啟時，音量滾輪或 ⏮ ⏭ 移動選擇，⏯ 確認，自訂按鍵返回；這些按鍵此時不再控制音樂和音量。通話時按鍵用於通話。部分車型中控台的音量也會移動選擇。</string>
     <string name="wheel_joystick_auto_off">搖桿自動關閉</string>
     <string name="wheel_joystick_auto_off_description">15 秒內無按鍵操作或開始導航時，按鍵恢復控制音樂和音量。</string>
     <string name="wheel_joystick_on">搖桿已開啟</string>
@@ -655,7 +655,7 @@
     <string name="carplay_call_controls_experimental">CarPlay 通話按鍵（實驗性）</string>
     <string name="carplay_call_controls_experimental_description">啟用尚未驗證的 DiLink 3 通話、語音與播放／暫停按鍵。仍需實車測試。預設關閉；儀表通話資訊卡是獨立設定。</string>
     <string name="carplay_calls_on_dashboard">在儀表板顯示 CarPlay 通話</string>
-    <string name="carplay_calls_on_dashboard_description">CarPlay 來電和通話期間，儀表板會顯示來電者，儀表板與抬頭顯示器會顯示通話時間，與比亞迪原廠 CarPlay 應用程式相同。通話期間車輛也會降低風扇轉速。立即生效。車機須啟用網路 ADB。</string>
+    <string name="carplay_calls_on_dashboard_description">CarPlay 來電和通話期間，儀表板會顯示來電者，儀表板與抬頭顯示器會顯示通話時間，與車載原廠 CarPlay 應用程式相同。通話期間車輛也會降低風扇轉速。立即生效。車機須啟用網路 ADB。</string>
     <string name="carplay_dock">CarPlay 程式列</string>
     <string name="carplay_dock_automatic">自動</string>
     <string name="carplay_dock_bottom">底部</string>

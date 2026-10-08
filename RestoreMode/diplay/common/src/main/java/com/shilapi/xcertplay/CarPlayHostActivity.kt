@@ -164,10 +164,11 @@ class CarPlayHostActivity : ComponentActivity() {
             firmwareVersion = "0.1.0",
             hardwareVersion = "1.0",
             carPlayUsbInterfaceNumber = 3,
-            locationInformationEnabled = locationReportingEnabled,
+            locationInformationEnabled = locationReportingEnabled || VoyahCarPlayIntegration.available,
             vehicleStatusEnabled = com.shilapi.xcertplay.hud.BydOutputSettings.batteryToIphoneActive(this),
             chargingConnectors = com.shilapi.xcertplay.hud.BydOutputSettings.chargingConnectors(this),
-            vehicleSpeedEnabled = locationReportingEnabled && com.shilapi.xcertplay.hud.BydOutputSettings.wheelSpeedToIphoneActive(this),
+            vehicleSpeedEnabled = VoyahCarPlayIntegration.available ||
+                (locationReportingEnabled && com.shilapi.xcertplay.hud.BydOutputSettings.wheelSpeedToIphoneActive(this)),
         ),
         label = "DiPlay",
         hostName = "diplay-" + DiPlayBootstrap.deviceId(airPlayIdentity).replace(":", "").lowercase(),
@@ -183,7 +184,7 @@ class CarPlayHostActivity : ComponentActivity() {
         manualHotspotSecurity = manualHotspotSecurity,
         existingWifiSsid = existingWifiSsid,
         existingWifiPassphrase = existingWifiPassphrase,
-        locationReportingEnabled = locationReportingEnabled,
+        locationReportingEnabled = locationReportingEnabled || VoyahCarPlayIntegration.available,
     )
 
     private val vpnConsent =
@@ -1159,6 +1160,11 @@ class CarPlayHostActivity : ComponentActivity() {
         if (CarPlayCallKeys.onKey(this, event.keyCode, event.action == KeyEvent.ACTION_DOWN, controller)) return true
 
         // The wheel key service, when it runs, takes an assigned Siri key before this window sees it.
+        // Native owns short/long voice presses on Voyah, including the disabled Siri setting.
+        if (VoyahCarPlayIntegration.available &&
+            (CarPlayMediaButton.opensSiri(event.keyCode) || WheelZoomSettings.isSiriKey(this, WheelKey.of(event)))) {
+            return super.dispatchKeyEvent(event)
+        }
         val assignedKey = WheelZoomSettings.isSiriKey(this, WheelKey.of(event))
         val assignedAction = if (downOrUp) siriKeyPresses.filter(
             physicalKey, event.action == KeyEvent.ACTION_DOWN, event.repeatCount == 0,
@@ -3750,6 +3756,7 @@ class CarPlayHostActivity : ComponentActivity() {
             advancedAudioChannelMapping = advancedAudioChannelMapping,
             audioFocusEnabled = AirPlayPersistence.loadAudioFocusEnabled(this),
             audioFocusAutoYield = AirPlayPersistence.loadAudioFocusAutoYield(this),
+            voyahAudioRouting = VoyahCarPlayIntegration.available,
             mediaChannel = AirPlayPersistence.loadMediaAudioChannel(this),
             navigationChannel = AirPlayPersistence.loadNavigationAudioChannel(this),
             context = this,
@@ -3993,6 +4000,15 @@ class CarPlayHostActivity : ComponentActivity() {
         val airPlayConfig = createAirPlayConfig(effectiveSize)
         val locationProvider: Iap2LocationProvider? =
             when {
+                VoyahCarPlayIntegration.available -> VehicleSpeedLocationProvider(
+                    if (locationReportingEnabled) AndroidCarPlayLocationProvider(this)
+                    else object : Iap2LocationProvider {
+                        override fun start() = false
+                        override fun stop() = Unit
+                        override fun latestNmea(): String? = null
+                    },
+                    VoyahCarPlayIntegration.speed,
+                )
                 !config.locationReportingEnabled -> null
                 config.identification.vehicleSpeedEnabled -> VehicleSpeedLocationProvider(
                     AndroidCarPlayLocationProvider(this),
@@ -4111,7 +4127,11 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun syncAirPlayDarkMode(source: ThemeModeDiagnostics.Source) {
         val session = activeAirPlaySession
-        val night = darkMode
+        val night = VoyahCarPlayIntegration.night ?: darkMode
+        if (VoyahCarPlayIntegration.available) {
+            controller?.setVehicleNightMode(night)
+            return
+        }
         if (session == null) {
             appendLog("THEME_DIAGNOSTIC request source=${source.label} applied=${if (night) "dark" else "light"} sessionActive=false")
             return

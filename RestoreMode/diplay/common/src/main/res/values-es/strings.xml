@@ -124,7 +124,7 @@
     <string name="back_to_diplay">Volver a DiPlay</string>
     <string name="band">Banda</string>
     <string name="bluetooth_settings">Ajustes de Bluetooth</string>
-    <string name="byd_navigation">Navegación BYD</string>
+    <string name="byd_navigation">Navegación del vehículo</string>
     <string name="cancel">Cancelar</string>
     <string name="car_home">Inicio del coche</string>
     <string name="car_hotspot_details">Datos del punto de acceso del coche</string>
@@ -342,7 +342,7 @@
     <string name="share">Compartir</string>
     <string name="show_on_screen_debug_logs">Mostrar registros de depuración en pantalla</string>
     <string name="show_password">Mostrar contraseña</string>
-    <string name="show_phone_navigation_arrows_distance_and_street_names_on">Muestra las flechas de navegación, la distancia y los nombres de calles del teléfono en pantallas BYD compatibles. La compatibilidad varía según el vehículo.</string>
+    <string name="show_phone_navigation_arrows_distance_and_street_names_on">Muestra las flechas de navegación, la distancia y los nombres de calles del teléfono en pantallas compatibles. La compatibilidad varía según el vehículo.</string>
     <string name="show_the_side_map_only_when_its_card_is_open_and_switch_to">Muestra el mapa lateral solo cuando su tarjeta está abierta y cambia al mapa completo en el tema del mapa. Los cambios de tema y tarjeta mantienen CarPlay conectado.</string>
     <string name="shows_the_iphone_s_cluster_map_on_the_instrument_cluster_c">Muestra el mapa del iPhone en el panel de instrumentos. Selecciona navegación en pantalla pequeña o completa en el menú del panel mediante los controles del volante.</string>
     <string name="start_carplay_automatically_after_device_boot">Iniciar CarPlay automáticamente tras el arranque del dispositivo</string>
@@ -350,7 +350,7 @@
     <string name="starting_airplay_service">Iniciando el servicio de AirPlay</string>
     <string name="starting_wireless_hotspot">Iniciando el punto de acceso inalámbrico</string>
     <string name="still_waiting_for_usage_access_check_that_the_command_ran">Sigue esperando el acceso al uso. Comprueba que el comando se ejecutó correctamente para este coche e inténtalo de nuevo.</string>
-    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">Toca un número para probar. 14 = altavoz del conductor en BYD.</string>
+    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">Toca un canal para probar su salida de audio. La asignación depende de la unidad principal.</string>
     <string name="the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and">La unidad principal no pudo iniciar el Wi‑Fi de CarPlay. Comprueba el Wi‑Fi y cierra otras aplicaciones de proyección. Reintentando…</string>
     <string name="this_ends_the_existing_wi_fi_direct_connection_including_o">Esto finaliza la conexión Wi-Fi Direct existente, incluida la que quedó tras reinstalar. Cierra primero las otras aplicaciones de proyección. El Wi‑Fi de internet de tu coche sigue activo.</string>
     <string name="this_head_unit_cannot_use_the_smaller_size_at_this_resolut">Esta unidad principal no puede usar el tamaño más pequeño con esta resolución. Se usará el predeterminado.</string>
@@ -364,7 +364,7 @@
     <string name="turn_on_wi_fi_in_the_head_unit_s_settings_to_connect">Activa el Wi‑Fi en los ajustes de la unidad principal para conectarte.</string>
     <string name="turn_the_car_s_wi_fi_switch_on_allow_location_nearby_devic">Activa el interruptor Wi‑Fi del coche. Permite Ubicación/«Dispositivos cercanos» si se te pide y activa la ubicación cuando Android lo solicite. Si la reproducción se traba, prueba el punto de acceso integrado del coche a 5 GHz.</string>
     <string name="usage_access_enabled">Acceso al uso: activado</string>
-    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">El acceso al uso permite que DiPlay siga el tema del cuadro y la tarjeta del mapa. Solo se procesan localmente los eventos de actividad del cuadro BYD. Este coche no ofrece una página de configuración de permisos funcional.</string>
+    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">El acceso al uso permite que DiPlay siga el tema del cuadro y la tarjeta del mapa. Solo se procesan localmente los eventos de actividad del cuadro. Este coche no ofrece una página de configuración de permisos funcional.</string>
     <string name="usage_access_setup_needed_for_automatic_mode">Acceso al uso: se necesita configuración para el modo automático</string>
     <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">Usa un cable de datos USB y el puerto de datos USB del coche. Desbloquea tu iPhone y permite CarPlay. No hace falta configurar el punto de acceso.</string>
@@ -462,7 +462,7 @@
     <string name="adb_enabled_not_approved">ADB está activado, pero esta versión de prueba de DiPlay aún no está autorizada.</string>
     <string name="probe_adb_and_vehicle_data">Detectar la unidad antigua</string>
     <string name="probe_vehicle_data_again">Volver a detectar la unidad antigua</string>
-    <string name="probing_vehicle_data">Leyendo el catálogo BYD de este firmware y probando los campos necesarios…</string>
+    <string name="probing_vehicle_data">Leyendo el catálogo de este firmware y probando los campos necesarios…</string>
     <string name="vehicle_probe_failed">Falló la prueba de datos del vehículo: %1$s</string>
     <string name="vehicle_probe_lost_saved_fields">La detección no confirmó estos campos guardados: %1$s. Se conservó la configuración anterior.</string>
     <string name="replace_saved_vehicle_data_anyway">Sustituir de todos modos los datos guardados</string>
@@ -485,7 +485,7 @@
     <string name="video_while_parked">Vídeo con el coche aparcado</string>
     <string name="video_while_parked_description">iOS 27: el vídeo que envías a CarPlay desde el iPhone se reproduce en la pantalla del coche mientras está en P. El reproductor se cierra al salir de P; sin ADB el vídeo queda desactivado y el iPhone solo reproduce el audio. El vídeo HTTPS normal (por ejemplo, de Safari) funciona; el vídeo protegido con FairPlay, como Apple TV+, necesita un receptor con licencia y aquí no se reproduce. Vuelve a conectar CarPlay. Requiere ADB por red en la unidad principal.</string>
     <string name="cluster_song">Canción en el cuadro</string>
-    <string name="cluster_song_description">El título y el artista de la canción de CarPlay aparecen en la tarjeta de música del cuadro de instrumentos, con reproducción y pausa. La tarjeta se muestra como la fuente de música «otra» de BYD, porque el cuadro no dibuja la fuente propia de CarPlay. Se aplica al instante. Requiere ADB por red en la unidad principal.</string>
+    <string name="cluster_song_description">El título y el artista de la canción de CarPlay aparecen en la tarjeta de música del cuadro de instrumentos, con reproducción y pausa. La tarjeta se muestra como la fuente de música «otra» del vehículo, porque el cuadro no dibuja la fuente propia de CarPlay. Se aplica al instante. Requiere ADB por red en la unidad principal.</string>
     <string name="video_back_to_carplay">Volver a CarPlay</string>
     <string name="video_play">Reproducir</string>
     <string name="video_pause">Pausa</string>
@@ -501,7 +501,7 @@
     <string name="widget_minutes">%1$d min</string>
     <string name="widget_hours_minutes">%1$d h %2$02d min</string>
     <string name="center_map_card">Mapa del panel de instrumentos en la pantalla central</string>
-    <string name="center_map_card_description">Mientras DiPlay está en segundo plano, el mapa del panel de instrumentos también aparece como una tarjeta en la pantalla de inicio: el inicio de BYD, el inicio con mapa o tu launcher predeterminado. Toca la tarjeta para abrir CarPlay, arrástrala para moverla y pellízcala para cambiar su tamaño. El panel de instrumentos conserva su mapa. Requiere permiso para mostrarse sobre otras aplicaciones.</string>
+    <string name="center_map_card_description">Mientras DiPlay está en segundo plano, el mapa del panel de instrumentos también aparece como una tarjeta en la pantalla de inicio: el inicio del vehículo, el inicio con mapa o tu launcher predeterminado. Toca la tarjeta para abrir CarPlay, arrástrala para moverla y pellízcala para cambiar su tamaño. El panel de instrumentos conserva su mapa. Requiere permiso para mostrarse sobre otras aplicaciones.</string>
     <string name="center_map_follows_dashboard">Mantener el mapa de inicio sincronizado con el cuadro</string>
     <string name="center_map_follows_dashboard_description">Activado: la tarjeta de inicio refleja el mapa del cuadro. Desactivado: la tarjeta se oculta y el mapa solo aparece en el cuadro.</string>
     <string name="center_map_overlay_allowed">Mostrar sobre otras aplicaciones: permitido</string>
@@ -535,7 +535,7 @@
     <string name="settings_gesture_fingers">Abrir ajustes · deslizar con %1$d dedos (toca para cambiar)</string>
     <string name="settings_gesture_fingers_label">Abrir ajustes · dedos del deslizamiento</string>
     <string name="settings_gesture_fingers_option">%1$d dedos</string>
-    <string name="settings_gesture_fingers_hint">Elige un número de dedos que tu unidad no use ya. BYD reserva el deslizamiento con tres dedos para el panel del aire acondicionado.</string>
+    <string name="settings_gesture_fingers_hint">Elige un número de dedos que tu unidad no use ya.</string>
     <string name="auto_car_hotspot_title">Activar automáticamente el punto de acceso del coche</string>
     <string name="auto_car_hotspot_description">Activa el punto de acceso guardado al abrir DiPlay. El interruptor solicita automáticamente los permisos necesarios mediante ADB; acepta el aviso en la pantalla del coche. Activa la apertura de DiPlay al arrancar para iniciarlo tras el encendido. Conserva el nombre y la contraseña y nunca apaga el punto de acceso.</string>
     <string name="hotspot_control_missing">Falta el permiso de control del punto de acceso. Concédelo mediante ADB o actívalo en los ajustes del coche.</string>
@@ -545,14 +545,14 @@
     <string name="hotspot_control_unsupported">El firmware no admite el inicio automático del punto de acceso. Actívalo en los ajustes del coche.</string>
     <string name="hotspot_control_timeout">Se agotó el tiempo de espera del punto de acceso. Actívalo en los ajustes del coche.</string>
     <string name="hotspot_control_failed">No se pudo iniciar el punto de acceso. Actívalo en los ajustes del coche.</string>
-    <string name="byd_adb_features">Funciones BYD · requieren ADB</string>
+    <string name="byd_adb_features">Funciones del vehículo · requieren ADB</string>
     <string name="location_reporting_reconnects">Cambiar este ajuste vuelve a conectar la sesión activa de CarPlay.</string>
     <string name="diagnostic_report_saved_in_app">El informe se guardó de forma privada en DiPlay porque no había una ubicación pública disponible. Compártelo o míralo aquí. No se envía nada automáticamente.</string>
     <string name="diagnostic_report_saved_to_path">El informe se guardó en:\n%1$s\n\nTambién puedes compartirlo o verlo aquí. No se envía nada automáticamente.</string>
     <string name="view_diagnostic_report">Ver informe</string>
     <string name="diagnostic_report_copy_hint">Mantén pulsado el texto del informe para seleccionarlo y copiarlo. Puedes usar esta opción si no hay una aplicación para compartir.</string>
     <string name="wheel_map_zoom">Zoom del mapa del panel con el volante</string>
-    <string name="wheel_map_zoom_description">El botón personalizable de BYD cambia los botones de volumen entre el volumen y el zoom del mapa del panel mientras el panel de instrumentos muestra el mapa de CarPlay. Durante una llamada siempre controlan el volumen. En algunos coches el volumen de la consola envía los mismos botones, así que también hace zoom mientras el zoom está activo. Usa el servicio de botones del volante de DiPlay; el aviso en el panel necesita ADB.</string>
+    <string name="wheel_map_zoom_description">El botón personalizable del vehículo cambia los botones de volumen entre el volumen y el zoom del mapa del panel mientras el panel de instrumentos muestra el mapa de CarPlay. Durante una llamada siempre controlan el volumen. En algunos coches el volumen de la consola envía los mismos botones, así que también hace zoom mientras el zoom está activo. Usa el servicio de botones del volante de DiPlay; el aviso en el panel necesita ADB.</string>
     <string name="wheel_keys_service_on">Servicio de botones del volante: activado</string>
     <string name="wheel_keys_service_starting">Servicio de botones del volante: permitido, iniciando…</string>
     <string name="wheel_keys_service_off">Servicio de botones del volante: desactivado</string>
@@ -573,7 +573,7 @@
     <string name="wheel_zoom_note_zoom">Zoom del mapa</string>
     <string name="wheel_zoom_note_volume">Volumen</string>
     <string name="wheel_joystick">Joystick de CarPlay en el volante</string>
-    <string name="wheel_joystick_description">El botón multimedia de BYD activa y desactiva un joystick para la pantalla central de CarPlay, como el mando giratorio de un coche. Mientras está activado, la rueda de volumen o ⏮ ⏭ mueven la selección, ⏯ selecciona y el botón personalizable vuelve atrás; esos botones dejan entonces de controlar la música y el volumen. Durante una llamada los botones sirven para la llamada. En algunos coches el volumen de la consola también mueve la selección.</string>
+    <string name="wheel_joystick_description">El botón multimedia del vehículo activa y desactiva un joystick para la pantalla central de CarPlay, como el mando giratorio de un coche. Mientras está activado, la rueda de volumen o ⏮ ⏭ mueven la selección, ⏯ selecciona y el botón personalizable vuelve atrás; esos botones dejan entonces de controlar la música y el volumen. Durante una llamada los botones sirven para la llamada. En algunos coches el volumen de la consola también mueve la selección.</string>
     <string name="wheel_joystick_auto_off">El joystick se desactiva solo</string>
     <string name="wheel_joystick_auto_off_description">Tras 15 segundos sin pulsar nada y al iniciar una ruta, los botones vuelven a controlar la música y el volumen.</string>
     <string name="wheel_joystick_on">Joystick activado</string>
@@ -594,7 +594,7 @@
     <string name="cluster_song_on_change">Canción solo al cambiar</string>
     <string name="cluster_song_on_change_description">Una canción nueva se muestra en el cuadro durante 5 segundos y luego la tarjeta se vacía. Pausar y reanudar no la vuelven a mostrar.</string>
     <string name="carplay_calls_on_dashboard">Llamadas de CarPlay en el cuadro</string>
-    <string name="carplay_calls_on_dashboard_description">Las llamadas de CarPlay entrantes y en curso muestran a quien llama en el cuadro de instrumentos, con la duración en el cuadro y en el head-up display, como la app CarPlay de BYD. El coche también baja el ventilador durante la llamada. Se aplica al instante. Requiere ADB por red en la unidad principal.</string>
+    <string name="carplay_calls_on_dashboard_description">Las llamadas de CarPlay entrantes y en curso muestran a quien llama en el cuadro de instrumentos, con la duración en el cuadro y en el head-up display, como la app CarPlay del vehículo. El coche también baja el ventilador durante la llamada. Se aplica al instante. Requiere ADB por red en la unidad principal.</string>
     <string name="carplay_dock">Dock de CarPlay</string>
     <string name="carplay_dock_automatic">Automático</string>
     <string name="carplay_dock_driver_side">Lado del conductor</string>

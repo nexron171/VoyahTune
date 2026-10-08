@@ -196,6 +196,7 @@ class AndroidMediaSink(
      * decoded. Only a SurfaceView honours the timestamps, so the host sets it with one.
      */
     private val videoPacingDelayMillis: Int = 0,
+    private val voyahAudioRouting: Boolean = false,
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
@@ -633,6 +634,7 @@ class AndroidMediaSink(
             onAudioDiagnostic,
             echoReference,
             callVoiceFilter && format.audioType == TELEPHONY_AUDIO_TYPE,
+            voyahAudioRouting,
         ).also { audioRenderers[id] = it }
     }
 
@@ -1240,6 +1242,7 @@ private class AudioRenderer(
     /** Receives the played call audio so the call microphone can cancel its echo. */
     private val echoReference: EchoReference? = null,
     voiceFilter: Boolean = false,
+    private val voyahAudioRouting: Boolean = false,
 ) : Closeable {
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
@@ -1449,12 +1452,22 @@ private class AudioRenderer(
                     AudioTrack(streamType, format.sampleRate, channelMask, encoding,
                         plan.trackBufferBytes, AudioTrack.MODE_STREAM)
                 },
-                isInitialized = { it.state == AudioTrack.STATE_INITIALIZED },
+                isInitialized = {
+                    val initialized = it.state == AudioTrack.STATE_INITIALIZED
+                    if (!voyahAudioRouting) initialized
+                    else {
+                        val actual = runCatching { it.streamType }.getOrDefault(-1)
+                        val accepted = VoyahAudioRouting.accepted(streamType, actual, initialized)
+                        report("Audio: Voyah route audioType=${format.audioType} requested=$streamType actual=$actual accepted=$accepted")
+                        accepted
+                    }
+                },
                 release = { it.release() },
                 createFallback = {
                     diagnosticStage = "track-fallback-build"
                     routeLabel = "streamType=$streamType(fallback=usage)"
                     Log.w(TAG, "streamType=$streamType rejected by this ROM; falling back to usage-based track")
+                    report("Audio: route fallback audioType=${format.audioType} requested=$streamType; independent volume unconfirmed")
                     attributes = audioAttributesFor(selection)
                     AudioTrack.Builder()
                         .setAudioAttributes(attributes)
@@ -1473,7 +1486,7 @@ private class AudioRenderer(
         startThresholdBytes = MediaAudioBuffer.startBytesFor(plan.startBytes, capacityBytes, PREBUFFER_WRITE_CHUNK_BYTES)
         val trackMetadata = runCatching {
             "api=${Build.VERSION.SDK_INT} trackState=${built.state} trackRate=${built.sampleRate} " +
-                "usage=${trackAttributes?.usage} contentType=${trackAttributes?.contentType} " +
+                "usage=${trackAttributes?.usage} contentType=${trackAttributes?.contentType} actualStream=${built.streamType} " +
                 "attributesSource=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "track" else "configured"}"
         }.getOrDefault("api=${Build.VERSION.SDK_INT} trackMetadata=unavailable")
         report("Audio: ready audioType=${format.audioType} codec=${format.codec} " +
@@ -1500,11 +1513,16 @@ private class AudioRenderer(
         )
     }
 
-    /** 0 uses usage-based routing; 1–20 attempt legacy stream types supported by the head unit. */
-    private fun channelOverride(channel: AudioChannel): Int = when (channel) {
-        AudioChannel.MEDIA -> mediaChannel
-        AudioChannel.NAVIGATION -> navigationChannel
-        else -> 0
+    /** Explicit media/navigation settings take precedence over the Voyah default route. */
+    private fun channelOverride(channel: AudioChannel): Int {
+        val configured = when (channel) {
+            AudioChannel.MEDIA -> mediaChannel
+            AudioChannel.NAVIGATION -> navigationChannel
+            else -> 0
+        }
+        return if (configured != 0) configured
+        else if (voyahAudioRouting) VoyahAudioRouting.stream(channel)
+        else 0
     }
 
     private fun audioAttributesFor(

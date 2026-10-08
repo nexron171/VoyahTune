@@ -130,12 +130,14 @@ class DiPlayActivity : ComponentActivity() {
     private var pendingCarHotspotSetup = false
     private var hotspotJoinControls: HotspotJoinControls? = null
     private var setupError: String? = null
+    private var homeScreen: CarPlayHomeUi.Screen? = null
     private var status: TextView? = null
     private var connectButton: Button? = null
     private var disconnectButton: Button? = null
     private var lastRunning: Boolean? = null
     private var pendingWireless = false
     private var initialLaunch = true
+    private var automaticConnectionPending = false
     private var notificationTransport = true
     private var exportInProgress = false
     private var usbPermissionOperation: UsbPermissionSetup.Operation? = null
@@ -264,6 +266,8 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        automaticConnectionPending = savedInstanceState?.getBoolean("automatic_connection_pending", false)
+            ?: !intent.hasExtra("page")
         VoyahCarPlayDefaults.initialize(this)
         // Back on the home page finishes this activity while the session runs on, so the icon lands here.
         if (savedInstanceState == null && isLauncherIntent(intent) && CarPlayBackgroundSession.hasSession()) {
@@ -304,10 +308,12 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
+        automaticConnectionPending = !intent.hasExtra("page")
         connectionSettingsReturnCategory = null
         // CarPlay runs in its own task, so the launcher icon resumes this one. Settings opened from
         // CarPlay carry a "page" extra, which isLauncherIntent rejects.
         if (isLauncherIntent(intent) && CarPlayBackgroundSession.hasSession()) {
+            automaticConnectionPending = false
             page = "home"; render(); openProjection(); return
         }
         page = intent.getStringExtra("page") ?: "home"; render()
@@ -316,6 +322,7 @@ class DiPlayActivity : ComponentActivity() {
         handleWirelessRecovery()
     }
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("automatic_connection_pending", automaticConnectionPending)
         outState.putString("page", page)
         outState.putString("settings_category", settingsCategory.name)
         connectionSettingsReturnCategory?.let { outState.putString("connection_settings_return_category", it.name) }
@@ -385,9 +392,12 @@ class DiPlayActivity : ComponentActivity() {
         if (initialLaunch) {
             initialLaunch = false
             startCarHotspotOnLaunch()
-            if (setupError == null && !CarPlayBackgroundSession.hasSession() &&
-                DiPlayPreferences.autoConnect(this) && intent.getStringExtra("page") == null) {
-                handler.post { connect(DiPlayPreferences.autoConnectWireless(this)) }
+        }
+        // Consume once per external opening; Back and configuration changes must keep home reachable.
+        if (automaticConnectionPending) {
+            automaticConnectionPending = false
+            if (canConnectAutomatically()) {
+                connect(DiPlayPreferences.autoConnectWireless(this))
             }
         }
     }
@@ -453,6 +463,7 @@ class DiPlayActivity : ComponentActivity() {
         val restoreRailFocus = keepRailPosition &&
             (pendingRailFocus || settingsRailScroll?.hasFocus() == true)
         settingsRailScroll = null
+        homeScreen = null
         status = null; connectButton = null; disconnectButton = null; lastRunning = null; carButtonCard = null
         reconnectBar = null
         readinessCard = null
@@ -466,7 +477,14 @@ class DiPlayActivity : ComponentActivity() {
         val content = column()
         scroll.addView(content)
         val header = if (page == "settings") settingsHeader(compact) else standardHeader(compact)
-        val root: View = if (page == "settings" && isExpandedSettingsLayout) {
+        val customHome = if (page == "home") createHomeScreen() else null
+        val root: View = if (customHome != null) {
+            homeScreen = customHome
+            scroll.setBackgroundColor(Color.TRANSPARENT)
+            scroll.removeAllViews()
+            scroll.addView(customHome.view)
+            scroll
+        } else if (page == "settings" && isExpandedSettingsLayout) {
             content.setPadding(0, 0, 0, dp(32))
             settingsCategoryContent(content)
             expandedSettingsShell(header, scroll)
@@ -570,6 +588,62 @@ class DiPlayActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(0, if (compact) dp(44) else dp(52), 1f))
         addView(button(getString(R.string.settings_search), false) { showSettingsSearch() },
             LinearLayout.LayoutParams(if (compact) dp(92) else dp(140), if (compact) dp(44) else dp(52)))
+    }
+
+    private fun canConnectAutomatically(): Boolean =
+        !isFinishing && !isDestroyed && page == "home" && setupError == null &&
+            !CarPlayBackgroundSession.hasSession() && DiPlayPreferences.autoConnect(this) &&
+            DiPlayPreferences.phoneAddress(this) != null
+
+    private fun createHomeScreen(): CarPlayHomeUi.Screen? = CarPlayHomeUi.create(
+        this,
+        object : CarPlayHomeUi.Actions {
+            override fun wireless() {
+                if (CarPlayBackgroundSession.hasSession()) openProjection() else connect(true)
+            }
+
+            override fun usb() { connect(false) }
+            override fun settings() {
+                page = "settings"
+                render()
+            }
+            override fun back() { onBackPressedDispatcher.onBackPressed() }
+            override fun choosePhone() { this@DiPlayActivity.choosePhone() }
+            override fun disconnect() {
+                CarPlayBackgroundSession.stop { runOnUiThread { refreshStatus() } }
+            }
+            override fun setAutoConnect(enabled: Boolean) {
+                DiPlayPreferences.saveAutoConnect(this@DiPlayActivity, enabled)
+                refreshStatus()
+            }
+            override fun hotspotSettings() { openCarWifiSettings() }
+        },
+    )
+
+    private fun refreshHomeScreen(statusText: String, running: Boolean) {
+        val screen = homeScreen ?: return
+        screen.updateAutoConnect(
+            DiPlayPreferences.autoConnect(this), DiPlayPreferences.phoneAddress(this) != null,
+        )
+        val hotspotMode = AirPlayPersistence.loadWirelessHotspotMode(this)
+        val connectionHint = when (hotspotMode) {
+            WirelessHotspotMode.EXISTING_WIFI -> getString(R.string.existing_wifi_hint)
+            WirelessHotspotMode.MANUAL -> getString(R.string.hotspot_hint_manual)
+            WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.hotspot_hint_local)
+            else -> getString(R.string.hotspot_hint_p2p)
+        }
+        val startupProblem = hotspotStartupResult?.takeIf {
+            it != CarHotspotTethering.Result.READY && it != CarHotspotTethering.Result.CANCELLED &&
+                CarHotspotSettings.shouldEnable(this, true, hotspotMode) &&
+                com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(this) != true
+        }
+        val hotspotProblem = when {
+            startupProblem != null -> hotspotResultText(startupProblem)
+            carHotspotOff() -> getString(R.string.msg_car_hotspot_off, AirPlayPersistence.loadManualHotspotSsid(this))
+            else -> null
+        }
+        screen.update(statusText, running, setupError == null, connectionHint,
+            setupError ?: hotspotProblem, hotspotProblem != null)
     }
 
     private fun home(content: LinearLayout) {
@@ -1023,8 +1097,7 @@ class DiPlayActivity : ComponentActivity() {
     private fun navigationSettings(content: LinearLayout) {
         settingsPageTitle(content, getString(R.string.settings_navigation), getString(R.string.settings_navigation_summary))
         renderSections(content, SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.NAVIGATION))
-        // The BYD card is hidden without its receiver; say so instead of leaving a gap.
-        if (!BydOutputSettings.available(this)) {
+        if (VoyahPlatformPolicy.vehicleIntegrationEnabled && !BydOutputSettings.available(this)) {
             content.addView(label(getString(R.string.settings_byd_navigation_unavailable), 15, MUTED).apply {
                 setPadding(dp(4), 0, dp(4), dp(SETTINGS_BLOCK_GAP_DP))
             })
@@ -1165,6 +1238,7 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun advancedVehicleDataSettings(content: LinearLayout) {
+        if (!VoyahPlatformPolicy.vehicleIntegrationEnabled) return
         section(content, getString(R.string.settings_vehicle), R.drawable.ic_dp_dashboard) { card ->
             card.addView(button(getString(if (bydVehicleAdvancedExpanded)
                 R.string.hide_advanced_vehicle_data else R.string.advanced_vehicle_data), false) {
@@ -1669,6 +1743,7 @@ class DiPlayActivity : ComponentActivity() {
             !(CarHotspotSettings.enabled(this) && CarHotspotTethering.permitted(this))
 
     private fun bydAdbSettings(parent: LinearLayout) {
+        if (!VoyahPlatformPolicy.localAdbEnabled) return
         if (AirPlayPersistence.loadWirelessHotspotMode(this) != WirelessHotspotMode.MANUAL) return
         if (!CarHotspotSetup.isBydHeadUnit(this)) {
             Log.i("DiPlay-Hotspot", "settings hidden: BYD head unit not detected")
@@ -3831,13 +3906,15 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun refreshStatus() {
         val running = CarPlayBackgroundSession.hasSession()
-        status?.text = when {
+        val statusText = when {
             setupError != null -> getString(R.string.setup_needs_attention)
             CarPlayBackgroundSession.active -> getString(R.string.carplay_connected)
             running -> getString(R.string.connecting_to_your_iphone)
             DiPlayPreferences.phoneAddress(this) != null -> "${getString(R.string.status_ready_for_prefix)}${DiPlayPreferences.phoneName(this)}"
             else -> getString(R.string.ready_when_you_are)
         }
+        status?.text = statusText
+        refreshHomeScreen(statusText, running)
         if (lastRunning != running) {
             connectButton?.text = if (running) getString(R.string.open_carplay) else getString(R.string.connect_phone)
             disconnectButton?.visibility = if (running) View.VISIBLE else View.GONE
@@ -3909,31 +3986,33 @@ class DiPlayActivity : ComponentActivity() {
                     appendLine("--- Standalone HUD compatibility ---")
                     appendLine(BydOutputSettings.standaloneHudDiagnosticReport(appContext))
                     appendLine()
-                    appendLine("--- BYD vehicle-data probe ---")
-                    appendLine(
-                        "mode=${if (BydOutputSettings.legacyVehicleProbe(appContext)) "legacy-probe" else "default"} " +
-                            "switches location=${AirPlayPersistence.loadLocationReportingEnabled(appContext)} " +
-                            "battery=${BydOutputSettings.batteryToIphone(appContext)} " +
-                            "wheelSpeed=${BydOutputSettings.wheelSpeedToIphone(appContext)} " +
-                            "parkedVideo=${BydOutputSettings.videoWhileParked(appContext)}",
-                    )
-                    val bydCapabilities = BydVehicleFieldStore.load(appContext)
-                    if (bydCapabilities == null) {
-                        appendLine("no saved successful probe")
-                    } else {
+                    if (VoyahPlatformPolicy.vehicleIntegrationEnabled) {
+                        appendLine("--- BYD vehicle-data probe ---")
                         appendLine(
-                            "catalog=${bydCapabilities.catalogAvailable} detectedAt=${bydCapabilities.detectedAtMillis} " +
-                                "savedFirmware=${bydCapabilities.firmwareKey} " +
-                                "currentFirmware=${BydVehicleFieldStore.firmwareKey()}",
+                            "mode=${if (BydOutputSettings.legacyVehicleProbe(appContext)) "legacy-probe" else "default"} " +
+                                "switches location=${AirPlayPersistence.loadLocationReportingEnabled(appContext)} " +
+                                "battery=${BydOutputSettings.batteryToIphone(appContext)} " +
+                                "wheelSpeed=${BydOutputSettings.wheelSpeedToIphone(appContext)} " +
+                                "parkedVideo=${BydOutputSettings.videoWhileParked(appContext)}",
                         )
-                        for (field in BydVehicleField.entries) {
-                            val probe = bydCapabilities.result(field)
-                            appendLine("${field.name}: supported=${probe.supported} " +
-                                (probe.address?.let { "tx=${it.transaction} dev=${it.device} fid=${it.fid} source=${it.source}" }
-                                    ?: "address=none"))
+                        val bydCapabilities = BydVehicleFieldStore.load(appContext)
+                        if (bydCapabilities == null) {
+                            appendLine("no saved successful probe")
+                        } else {
+                            appendLine(
+                                "catalog=${bydCapabilities.catalogAvailable} detectedAt=${bydCapabilities.detectedAtMillis} " +
+                                    "savedFirmware=${bydCapabilities.firmwareKey} " +
+                                    "currentFirmware=${BydVehicleFieldStore.firmwareKey()}",
+                            )
+                            for (field in BydVehicleField.entries) {
+                                val probe = bydCapabilities.result(field)
+                                appendLine("${field.name}: supported=${probe.supported} " +
+                                    (probe.address?.let { "tx=${it.transaction} dev=${it.device} fid=${it.fid} source=${it.source}" }
+                                        ?: "address=none"))
+                            }
                         }
+                        appendLine()
                     }
-                    appendLine()
                     appendLine("--- Last display negotiation (timestamps distinguish it from current settings) ---")
                     appendLine(DisplayDiagnosticSnapshot.report(appContext))
                     appendLine()

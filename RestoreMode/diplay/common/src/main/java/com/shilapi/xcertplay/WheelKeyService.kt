@@ -130,7 +130,7 @@ class WheelKeyService : AccessibilityService() {
             return true
         }
         if (CarPlayCallKeys.onKey(this, event.keyCode, down)) return true
-        if (BydOutputSettings.carPlayCallControls(this) &&
+        if (!VoyahCarPlayIntegration.available && BydOutputSettings.carPlayCallControls(this) &&
             CarPlayMediaButton.opensSiriWhileCarPlay(event.keyCode) && session() != null) {
             if (!down) Log.i(TAG, "CarPlay voice key ${event.keyCode}: Siri sent=${CarPlayBackgroundSession.snapshot()?.controller?.requestSiri() == true}")
             return true
@@ -142,7 +142,8 @@ class WheelKeyService : AccessibilityService() {
         val enabled = WheelZoomSettings.enabled(this)
         // roleOf ignores whether a role is on, so it could hand the Siri key to an inactive default role.
         val role = when {
-            WheelZoomSettings.isSiriKey(this, key) -> WheelZoomSettings.Role.SIRI
+            WheelZoomSettings.isSiriKey(this, key) ->
+                if (VoyahCarPlayIntegration.available) null else WheelZoomSettings.Role.SIRI
             WheelZoomSettings.anyEnabled(this) -> WheelZoomSettings.roleOf(this, key)
             else -> null
         }

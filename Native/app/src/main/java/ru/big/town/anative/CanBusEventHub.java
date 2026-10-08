@@ -24,18 +24,17 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * One lazy, process-wide read-side connection to the Qinggan CanBus service.
  *
- * <p>Binding and callback registration run on {@code CanBusEventHubIo}; blocking snapshot reads
- * use isolated query threads so a stuck vendor call cannot stop reconnect/unbind. Incoming oneway
+ * <p>Binding and callback registration run on {@code CanBusEventHubIo}; blocking snapshot reads use
+ * isolated query threads so a stuck vendor call cannot stop reconnect/unbind. Incoming oneway
  * callbacks do only primitive decoding, interest filtering and a bounded mailbox offer on their
  * Binder-pool thread. Consumer work is always posted through the supplied Handler; it is never
- * invoked inline from Binder.</p>
+ * invoked inline from Binder.
  */
 final class CanBusEventHub {
     private static final String TAG = "CanBusEventHub";
 
     private static final String CANBUS_DESCRIPTOR = "com.qinggan.canbus.ICanBusService";
-    private static final String CALLBACK_DESCRIPTOR =
-            "com.qinggan.canbus.ICanBusServiceCallback";
+    private static final String CALLBACK_DESCRIPTOR = "com.qinggan.canbus.ICanBusServiceCallback";
     private static final String CANBUS_ACTION = "com.qinggan.canbus.CanBusService";
     private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
 
@@ -75,8 +74,7 @@ final class CanBusEventHub {
             current = instance;
             if (current == null) {
                 Context appContext = context.getApplicationContext();
-                instance = current = new CanBusEventHub(
-                        appContext != null ? appContext : context);
+                instance = current = new CanBusEventHub(appContext != null ? appContext : context);
             }
         }
         return current;
@@ -93,10 +91,13 @@ final class CanBusEventHub {
     private final AtomicBoolean telemetryQueryPending = new AtomicBoolean();
     private final Handler gearQueryHandler;
     private final AtomicBoolean gearQueryPending = new AtomicBoolean();
+    private final AtomicBoolean speedQueryPending = new AtomicBoolean();
+    private long speedRevision; // eventLock
     private long gearRevision; // eventLock
     private float preciseTicks = Float.NaN;
     private long precisePublished = -1;
-    private final long[] telemetryRevision = new long[EnergyTelemetrySample.COUNT]; // guarded by eventLock
+    private final long[] telemetryRevision =
+            new long[EnergyTelemetrySample.COUNT]; // guarded by eventLock
     private final Executor ioExecutor;
     private final CanBusEventRouter router = new CanBusEventRouter();
     private final AtomicInteger subscriberCount = new AtomicInteger();
@@ -146,23 +147,29 @@ final class CanBusEventHub {
         telemetryThread.start();
         telemetryQueryHandler = new Handler(telemetryThread.getLooper());
         HandlerThread gearThread = new HandlerThread("CanBusGearQuery");
-        gearThread.start(); gearQueryHandler = new Handler(gearThread.getLooper());
-        ioExecutor = command -> {
-            if (!ioHandler.post(command)) {
-                throw new RejectedExecutionException("CanBusEventHubIo stopped");
-            }
-        };
+        gearThread.start();
+        gearQueryHandler = new Handler(gearThread.getLooper());
+        ioExecutor =
+                command -> {
+                    if (!ioHandler.post(command)) {
+                        throw new RejectedExecutionException("CanBusEventHubIo stopped");
+                    }
+                };
     }
 
     /** Adds a subscriber without binding until this IO-thread task is processed. */
-    Subscription subscribe(int interestMask, int[] vehicleStateIds, Handler deliveryHandler,
-                           Listener listener) {
+    Subscription subscribe(
+            int interestMask, int[] vehicleStateIds, Handler deliveryHandler, Listener listener) {
         if (deliveryHandler == null || listener == null) {
             throw new IllegalArgumentException("deliveryHandler/listener required");
         }
-        Subscription subscription = new Subscription(this, interestMask,
-                vehicleStateIds == null ? null : vehicleStateIds.clone(),
-                deliveryHandler, listener);
+        Subscription subscription =
+                new Subscription(
+                        this,
+                        interestMask,
+                        vehicleStateIds == null ? null : vehicleStateIds.clone(),
+                        deliveryHandler,
+                        listener);
         subscriberCount.incrementAndGet();
         ioHandler.post(() -> addSubscription(subscription));
         return subscription;
@@ -178,9 +185,9 @@ final class CanBusEventHub {
     }
 
     /**
-     * Requests the OEM snapshot for subscribers such as battery heat and auto light.
-     * The request is synchronous, but executes on the isolated query thread; incoming code 36 is
-     * still filtered by the union of subscribers before an event is allocated.
+     * Requests the OEM snapshot for subscribers such as battery heat and auto light. The request is
+     * synchronous, but executes on the isolated query thread; incoming code 36 is still filtered by
+     * the union of subscribers before an event is allocated.
      */
     void requestVehicleStateSnapshot() {
         if (!router.hasInterest(CanBusEventRouter.INTEREST_VEHICLE_STATE)) return;
@@ -190,64 +197,142 @@ final class CanBusEventHub {
         }
     }
 
-    /** A fresh TX6 sample is required after restoring a trip; a cached D cannot prove current gear. */
+    /**
+     * A fresh TX6 sample is required after restoring a trip; a cached D cannot prove current gear.
+     */
     void requestGearSnapshot() {
         if (!gearQueryPending.compareAndSet(false, true)) return;
-        gearQueryHandler.post(() -> {
-            IBinder binder; long epoch, revision;
-            synchronized (eventLock) { binder = remote; epoch = activeEpoch; revision = gearRevision; }
-            Parcel data = Parcel.obtain(), reply = Parcel.obtain();
-            try {
-                if (binder == null || epoch == 0) return;
-                data.writeInterfaceToken(CANBUS_DESCRIPTOR);
-                if (!binder.transact(TX_GET_GEAR_STATUS, data, reply, 0)) return;
-                reply.readException();
-                if (reply.readInt() == 0) return;
-                reply.readInt(); int value = reply.readInt(); // ordinal, stable GearState value
-                if (value < 0 || value > 4) return;
-                synchronized (eventLock) {
-                    if (epoch == activeEpoch && readyEpoch == epoch && binder == remote && revision == gearRevision) {
-                        gearRevision++;
-                        router.dispatch(CanBusEvent.gear(CanBusEvent.Origin.SEED, epoch,
-                                ++nextSequence, SystemClock.elapsedRealtime(), value));
+        gearQueryHandler.post(
+                () -> {
+                    IBinder binder;
+                    long epoch, revision;
+                    synchronized (eventLock) {
+                        binder = remote;
+                        epoch = activeEpoch;
+                        revision = gearRevision;
                     }
-                }
-            } catch (RemoteException | RuntimeException e) { Log.w(TAG, "Gear snapshot unavailable", e); }
-            finally { data.recycle(); reply.recycle(); gearQueryPending.set(false); }
-        });
+                    Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                    try {
+                        if (binder == null || epoch == 0) return;
+                        data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                        if (!binder.transact(TX_GET_GEAR_STATUS, data, reply, 0)) return;
+                        reply.readException();
+                        if (reply.readInt() == 0) return;
+                        reply.readInt();
+                        int value = reply.readInt(); // ordinal, stable GearState value
+                        if (value < 0 || value > 4) return;
+                        synchronized (eventLock) {
+                            if (epoch == activeEpoch
+                                    && readyEpoch == epoch
+                                    && binder == remote
+                                    && revision == gearRevision) {
+                                gearRevision++;
+                                router.dispatch(
+                                        CanBusEvent.gear(
+                                                CanBusEvent.Origin.SEED,
+                                                epoch,
+                                                ++nextSequence,
+                                                SystemClock.elapsedRealtime(),
+                                                value));
+                            }
+                        }
+                    } catch (RemoteException | RuntimeException e) {
+                        Log.w(TAG, "Gear snapshot unavailable", e);
+                    } finally {
+                        data.recycle();
+                        reply.recycle();
+                        gearQueryPending.set(false);
+                    }
+                });
+    }
+
+    void requestSpeedSnapshot() {
+        if (!router.hasInterest(CanBusEventRouter.INTEREST_VEHICLE_SPEED)
+                || !speedQueryPending.compareAndSet(false, true)) return;
+        gearQueryHandler.post(
+                () -> {
+                    IBinder binder;
+                    long epoch, revision;
+                    synchronized (eventLock) {
+                        binder = remote;
+                        epoch = activeEpoch;
+                        revision = speedRevision;
+                    }
+                    long sampled = SystemClock.elapsedRealtime();
+                    Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                    try {
+                        if (binder == null || epoch == 0) return;
+                        data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                        if (!binder.transact(26, data, reply, 0)) return; // getVehicleSpeed, km/h
+                        reply.readException();
+                        int kmh = reply.readInt();
+                        synchronized (eventLock) {
+                            if (epoch == activeEpoch
+                                    && readyEpoch == epoch
+                                    && binder == remote
+                                    && revision == speedRevision) {
+                                routeLocked(
+                                        CanBusEvent.speed(
+                                                CanBusEvent.Origin.SEED,
+                                                epoch,
+                                                ++nextSequence,
+                                                sampled,
+                                                kmh));
+                            }
+                        }
+                    } catch (RemoteException | RuntimeException e) {
+                        Log.w(TAG, "Speed snapshot unavailable", e);
+                    } finally {
+                        data.recycle();
+                        reply.recycle();
+                        speedQueryPending.set(false);
+                    }
+                });
     }
 
     /** Reads existing Binder getters on one bounded query worker, never on the hub/UI thread. */
     void requestEnergySnapshot() {
         if (!router.hasInterest(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY)
                 || !telemetryQueryPending.compareAndSet(false, true)) return;
-        ioHandler.post(() -> {
-            IBinder binder = remote;
-            long epoch = activeEpoch;
-            if (binder == null || epoch == 0 || readyEpoch != epoch) {
-                telemetryQueryPending.set(false); return;
-            }
-            telemetryQueryHandler.post(() -> {
-                try {
-                    for (int kind = 0; kind < EnergyTelemetrySample.COUNT; kind++) {
-                        long revision;
-                        synchronized (eventLock) {
-                            if (activeEpoch != epoch) return;
-                            revision = telemetryRevision[kind];
-                        }
-                        EnergyTelemetrySample sample = readEnergySample(binder, kind);
-                        if (sample == null) continue;
-                        synchronized (eventLock) {
-                            if (activeEpoch == epoch && readyEpoch == epoch
-                                    && telemetryRevision[kind] == revision) {
-                                routeLocked(CanBusEvent.telemetry(CanBusEvent.Origin.SEED, epoch,
-                                        ++nextSequence, SystemClock.elapsedRealtime(), sample));
-                            }
-                        }
+        ioHandler.post(
+                () -> {
+                    IBinder binder = remote;
+                    long epoch = activeEpoch;
+                    if (binder == null || epoch == 0 || readyEpoch != epoch) {
+                        telemetryQueryPending.set(false);
+                        return;
                     }
-                } finally { telemetryQueryPending.set(false); }
-            });
-        });
+                    telemetryQueryHandler.post(
+                            () -> {
+                                try {
+                                    for (int kind = 0; kind < EnergyTelemetrySample.COUNT; kind++) {
+                                        long revision;
+                                        synchronized (eventLock) {
+                                            if (activeEpoch != epoch) return;
+                                            revision = telemetryRevision[kind];
+                                        }
+                                        EnergyTelemetrySample sample =
+                                                readEnergySample(binder, kind);
+                                        if (sample == null) continue;
+                                        synchronized (eventLock) {
+                                            if (activeEpoch == epoch
+                                                    && readyEpoch == epoch
+                                                    && telemetryRevision[kind] == revision) {
+                                                routeLocked(
+                                                        CanBusEvent.telemetry(
+                                                                CanBusEvent.Origin.SEED,
+                                                                epoch,
+                                                                ++nextSequence,
+                                                                SystemClock.elapsedRealtime(),
+                                                                sample));
+                                            }
+                                        }
+                                    }
+                                } finally {
+                                    telemetryQueryPending.set(false);
+                                }
+                            });
+                });
     }
 
     private EnergyTelemetrySample readEnergySample(IBinder binder, int kind) {
@@ -255,7 +340,8 @@ final class CanBusEventHub {
         try {
             data.writeInterfaceToken(CANBUS_DESCRIPTOR);
             if (kind == EnergyTelemetrySample.PRECISE_ODOMETER) data.writeInt(0x2FE);
-            if (!binder.transact(EnergyTelemetrySample.TRANSACTIONS[kind], data, reply, 0)) return null;
+            if (!binder.transact(EnergyTelemetrySample.TRANSACTIONS[kind], data, reply, 0))
+                return null;
             reply.readException();
             if (kind == EnergyTelemetrySample.PRECISE_ODOMETER)
                 return EnergyTelemetrySample.decode(kind, reply.createIntArray());
@@ -263,7 +349,10 @@ final class CanBusEventHub {
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "Telemetry getter " + kind + ": " + e.getMessage());
             return null;
-        } finally { data.recycle(); reply.recycle(); }
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
     }
 
     private EnergyTelemetrySample decodeEnergyParcel(Parcel parcel, int kind) {
@@ -273,7 +362,8 @@ final class CanBusEventHub {
             if (parcel.readInt() == 0) return EnergyTelemetrySample.unavailable(kind);
         }
         int count = EnergyTelemetrySample.WORD_COUNTS[kind];
-        if (parcel.dataAvail() < count * 4) throw new IllegalArgumentException("short telemetry parcel");
+        if (parcel.dataAvail() < count * 4)
+            throw new IllegalArgumentException("short telemetry parcel");
         int[] words = new int[count];
         for (int i = 0; i < count; i++) words[i] = parcel.readInt();
         return EnergyTelemetrySample.decode(kind, words);
@@ -284,12 +374,20 @@ final class CanBusEventHub {
             if (epoch != activeEpoch) return;
             if (sample.kind == EnergyTelemetrySample.PRECISE_ODOMETER) {
                 long now = SystemClock.elapsedRealtime();
-                if (Float.compare(preciseTicks, sample.values[0]) == 0 && precisePublished >= 0 && now - precisePublished < 1000) return;
-                preciseTicks = sample.values[0]; precisePublished = now;
+                if (Float.compare(preciseTicks, sample.values[0]) == 0
+                        && precisePublished >= 0
+                        && now - precisePublished < 1000) return;
+                preciseTicks = sample.values[0];
+                precisePublished = now;
             }
             telemetryRevision[sample.kind]++;
-            routeLocked(CanBusEvent.telemetry(CanBusEvent.Origin.LIVE, epoch,
-                    ++nextSequence, SystemClock.elapsedRealtime(), sample));
+            routeLocked(
+                    CanBusEvent.telemetry(
+                            CanBusEvent.Origin.LIVE,
+                            epoch,
+                            ++nextSequence,
+                            SystemClock.elapsedRealtime(),
+                            sample));
         }
     }
 
@@ -299,26 +397,31 @@ final class CanBusEventHub {
             return;
         }
 
-        Executor deliveryExecutor = command -> {
-            if (!subscription.deliveryHandler.post(command)) {
-                throw new RejectedExecutionException("consumer Handler stopped");
-            }
-        };
+        Executor deliveryExecutor =
+                command -> {
+                    if (!subscription.deliveryHandler.post(command)) {
+                        throw new RejectedExecutionException("consumer Handler stopped");
+                    }
+                };
         synchronized (eventLock) {
-            CanBusEventRouter.Subscription routed = router.subscribe(
-                    subscription.interestMask, subscription.vehicleStateIds,
-                    deliveryExecutor, event -> {
-                        if (event.kind == CanBusEvent.Kind.CONNECTION_LOST
-                                || event.connectionEpoch == activeEpoch) {
-                            subscription.listener.onCanBusEvent(event);
-                        }
-                    });
+            CanBusEventRouter.Subscription routed =
+                    router.subscribe(
+                            subscription.interestMask,
+                            subscription.vehicleStateIds,
+                            deliveryExecutor,
+                            event -> {
+                                if (event.kind == CanBusEvent.Kind.CONNECTION_LOST
+                                        || event.connectionEpoch == activeEpoch) {
+                                    subscription.listener.onCanBusEvent(event);
+                                }
+                            });
             if (!subscription.attach(routed)) return;
 
             // A subscriber joining an already-ready session sees the barrier before later events.
             if (activeEpoch != 0 && readyEpoch == activeEpoch) {
-                routed.offer(CanBusEvent.connection(activeEpoch, ++nextSequence,
-                        SystemClock.elapsedRealtime()));
+                routed.offer(
+                        CanBusEvent.connection(
+                                activeEpoch, ++nextSequence, SystemClock.elapsedRealtime()));
             }
         }
         ensureBound();
@@ -349,14 +452,13 @@ final class CanBusEventHub {
 
         lastBindAttemptElapsed = now;
         long bindingGeneration = ++nextBindingGeneration;
-        GenerationServiceConnection connection =
-                new GenerationServiceConnection(bindingGeneration);
+        GenerationServiceConnection connection = new GenerationServiceConnection(bindingGeneration);
         serviceConnection = connection;
         activeBindingGeneration = bindingGeneration;
         try {
             Intent intent = new Intent(CANBUS_ACTION).setPackage(CANBUS_PACKAGE);
-            boolean bound = context.bindService(intent, Context.BIND_AUTO_CREATE,
-                    ioExecutor, connection);
+            boolean bound =
+                    context.bindService(intent, Context.BIND_AUTO_CREATE, ioExecutor, connection);
             bindingRequested = bound;
             if (!bound) {
                 serviceConnection = null;
@@ -394,8 +496,7 @@ final class CanBusEventHub {
 
         ioHandler.removeCallbacks(bindRetryRunnable);
         ioHandler.removeCallbacks(callbackRetryRunnable);
-        if (callbackAdded && remote != null && callbackBinder != null
-                && remote.isBinderAlive()) {
+        if (callbackAdded && remote != null && callbackBinder != null && remote.isBinderAlive()) {
             removeCallback(remote, callbackBinder);
         }
         clearRemoteSession("new service connection");
@@ -415,8 +516,8 @@ final class CanBusEventHub {
             readyEpoch = 0;
             doorRevision++;
             preReadyEvents.clear();
-            pendingConnectionEvent = CanBusEvent.connection(epoch, ++nextSequence,
-                    SystemClock.elapsedRealtime());
+            pendingConnectionEvent =
+                    CanBusEvent.connection(epoch, ++nextSequence, SystemClock.elapsedRealtime());
         }
 
         try {
@@ -436,8 +537,8 @@ final class CanBusEventHub {
     }
 
     private void ensureCallbackRegistered() {
-        if (subscriberCount.get() == 0 || remote == null || callbackBinder == null
-                || callbackAdded) return;
+        if (subscriberCount.get() == 0 || remote == null || callbackBinder == null || callbackAdded)
+            return;
         ioHandler.removeCallbacks(callbackRetryRunnable);
         long epoch = activeEpoch;
         if (!addCallback(remote, callbackBinder)) {
@@ -459,9 +560,14 @@ final class CanBusEventHub {
             }
             while (!preReadyEvents.isEmpty()) router.dispatch(preReadyEvents.removeFirst());
         }
-        Log.i(TAG, "CanBus callback registered, epoch=" + epoch
-                + " malformed=" + malformedCallbacks.get()
-                + " preReadyDrops=" + preReadyDrops.get());
+        Log.i(
+                TAG,
+                "CanBus callback registered, epoch="
+                        + epoch
+                        + " malformed="
+                        + malformedCallbacks.get()
+                        + " preReadyDrops="
+                        + preReadyDrops.get());
     }
 
     private boolean addCallback(IBinder binder, IBinder callback) {
@@ -556,9 +662,12 @@ final class CanBusEventHub {
                 doorRevision++;
                 router.invalidateThrough(closingEpoch);
                 long lostBarrierEpoch = ++nextEpoch;
-                router.dispatch(CanBusEvent.connectionLost(
-                        lostBarrierEpoch, ++nextSequence,
-                        SystemClock.elapsedRealtime(), closingEpoch));
+                router.dispatch(
+                        CanBusEvent.connectionLost(
+                                lostBarrierEpoch,
+                                ++nextSequence,
+                                SystemClock.elapsedRealtime(),
+                                closingEpoch));
             }
             pendingConnectionEvent = null;
             preReadyEvents.clear();
@@ -588,31 +697,39 @@ final class CanBusEventHub {
             revision = doorRevision;
         }
 
-        if (!doorQueryHandler.post(() -> {
-            DoorQueryResult doors = readDoorStatus(binder);
-            if (!ioHandler.post(() -> finishDriverDoorQuery(
-                    binder, epoch, revision, doors))) {
-                Log.w(TAG, "Door query completion rejected: hub IO stopped");
-            }
-        })) {
+        if (!doorQueryHandler.post(
+                () -> {
+                    DoorQueryResult doors = readDoorStatus(binder);
+                    if (!ioHandler.post(
+                            () -> finishDriverDoorQuery(binder, epoch, revision, doors))) {
+                        Log.w(TAG, "Door query completion rejected: hub IO stopped");
+                    }
+                })) {
             doorQueryGate.complete();
             startDriverDoorQueryIfNeeded();
         }
     }
 
-    private void finishDriverDoorQuery(IBinder binder, long epoch, long revision,
-                                       DoorQueryResult doors) {
+    private void finishDriverDoorQuery(
+            IBinder binder, long epoch, long revision, DoorQueryResult doors) {
         try {
             if (doors == null) return;
             synchronized (eventLock) {
-                if (activeEpoch != epoch || readyEpoch != epoch || binder != remote
+                if (activeEpoch != epoch
+                        || readyEpoch != epoch
+                        || binder != remote
                         || revision != doorRevision) {
                     return;
                 }
                 doorRevision++;
-                router.dispatch(CanBusEvent.door(CanBusEvent.Origin.SEED, epoch,
-                        ++nextSequence, SystemClock.elapsedRealtime(),
-                        doors.frontLeft, doors.mask));
+                router.dispatch(
+                        CanBusEvent.door(
+                                CanBusEvent.Origin.SEED,
+                                epoch,
+                                ++nextSequence,
+                                SystemClock.elapsedRealtime(),
+                                doors.frontLeft,
+                                doors.mask));
             }
         } finally {
             doorQueryGate.complete();
@@ -620,7 +737,9 @@ final class CanBusEventHub {
         }
     }
 
-    /** Результат TX2-снимка дверей: водительская дверь для существующих потребителей + маска всех. */
+    /**
+     * Результат TX2-снимка дверей: водительская дверь для существующих потребителей + маска всех.
+     */
     private static final class DoorQueryResult {
         final int frontLeft;
         final int mask;
@@ -633,8 +752,9 @@ final class CanBusEventHub {
 
     /**
      * Снимок всех дверей одним TX2-запросом. Порядок полей — как в {@code DoorStatus.toString()}:
-     * bonnetDoor, fLDoor, fRDoor, loadSpace, rLDoor, rRDoor. На проверенной машине {@code loadSpace}
-     * штатно приходит как -1 (поле не поддерживается), поэтому его недоступность не считается сбоем.
+     * bonnetDoor, fLDoor, fRDoor, loadSpace, rLDoor, rRDoor. На проверенной машине {@code
+     * loadSpace} штатно приходит как -1 (поле не поддерживается), поэтому его недоступность не
+     * считается сбоем.
      */
     private DoorQueryResult readDoorStatus(IBinder binder) {
         Parcel data = Parcel.obtain();
@@ -650,7 +770,8 @@ final class CanBusEventHub {
             int loadSpace = reply.readInt();
             int rearLeft = reply.readInt();
             int rearRight = reply.readInt();
-            return new DoorQueryResult(frontLeft,
+            return new DoorQueryResult(
+                    frontLeft,
                     doorMask(hood, frontLeft, frontRight, loadSpace, rearLeft, rearRight));
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "getDoorStatus failed: " + e.getMessage());
@@ -665,8 +786,8 @@ final class CanBusEventHub {
      * Маска открытых дверей. Если недоступно основное поле (любая из четырёх дверей или капот),
      * событие помечается {@link CanBusEvent#DOOR_UNKNOWN} — потребители не угадывают состояние.
      */
-    private static int doorMask(int hood, int frontLeft, int frontRight, int loadSpace,
-                                int rearLeft, int rearRight) {
+    private static int doorMask(
+            int hood, int frontLeft, int frontRight, int loadSpace, int rearLeft, int rearRight) {
         if (hood < 0 || frontLeft < 0 || frontRight < 0 || rearLeft < 0 || rearRight < 0) {
             return CanBusEvent.DOOR_UNKNOWN;
         }
@@ -737,8 +858,14 @@ final class CanBusEventHub {
         synchronized (eventLock) {
             if (epoch != activeEpoch) return;
             doorRevision++;
-            routeLocked(CanBusEvent.door(CanBusEvent.Origin.LIVE, epoch,
-                    ++nextSequence, SystemClock.elapsedRealtime(), frontLeft, doorMask));
+            routeLocked(
+                    CanBusEvent.door(
+                            CanBusEvent.Origin.LIVE,
+                            epoch,
+                            ++nextSequence,
+                            SystemClock.elapsedRealtime(),
+                            frontLeft,
+                            doorMask));
         }
     }
 
@@ -746,17 +873,28 @@ final class CanBusEventHub {
         synchronized (eventLock) {
             if (epoch != activeEpoch) return;
             gearRevision++;
-            routeLocked(CanBusEvent.gear(CanBusEvent.Origin.LIVE, epoch,
-                    ++nextSequence, SystemClock.elapsedRealtime(), value));
+            routeLocked(
+                    CanBusEvent.gear(
+                            CanBusEvent.Origin.LIVE,
+                            epoch,
+                            ++nextSequence,
+                            SystemClock.elapsedRealtime(),
+                            value));
         }
     }
 
     private void routeLight(long epoch, int autoLamp, int dippedBeam, int headLight) {
         synchronized (eventLock) {
             if (epoch != activeEpoch) return;
-            routeLocked(CanBusEvent.light(CanBusEvent.Origin.LIVE, epoch,
-                    ++nextSequence, SystemClock.elapsedRealtime(),
-                    autoLamp, dippedBeam, headLight));
+            routeLocked(
+                    CanBusEvent.light(
+                            CanBusEvent.Origin.LIVE,
+                            epoch,
+                            ++nextSequence,
+                            SystemClock.elapsedRealtime(),
+                            autoLamp,
+                            dippedBeam,
+                            headLight));
         }
     }
 
@@ -764,16 +902,27 @@ final class CanBusEventHub {
         if (!router.hasVehicleStateInterest(stableId)) return;
         synchronized (eventLock) {
             if (epoch != activeEpoch || !router.hasVehicleStateInterest(stableId)) return;
-            routeLocked(CanBusEvent.vehicleState(CanBusEvent.Origin.LIVE, epoch,
-                    ++nextSequence, SystemClock.elapsedRealtime(), stableId, value));
+            routeLocked(
+                    CanBusEvent.vehicleState(
+                            CanBusEvent.Origin.LIVE,
+                            epoch,
+                            ++nextSequence,
+                            SystemClock.elapsedRealtime(),
+                            stableId,
+                            value));
         }
     }
 
     private void routeAmbientTemperature(long epoch, int value) {
         synchronized (eventLock) {
             if (epoch != activeEpoch) return;
-            routeLocked(CanBusEvent.ambientTemperature(CanBusEvent.Origin.LIVE, epoch,
-                    ++nextSequence, SystemClock.elapsedRealtime(), value));
+            routeLocked(
+                    CanBusEvent.ambientTemperature(
+                            CanBusEvent.Origin.LIVE,
+                            epoch,
+                            ++nextSequence,
+                            SystemClock.elapsedRealtime(),
+                            value));
         }
     }
 
@@ -793,8 +942,14 @@ final class CanBusEventHub {
         long count = malformedCallbacks.incrementAndGet();
         // Power-of-two sampling prevents a malformed vendor stream from becoming a log storm.
         if ((count & (count - 1)) == 0) {
-            Log.w(TAG, "Dropped malformed callback code=" + code + " count=" + count
-                    + ": " + error.getMessage());
+            Log.w(
+                    TAG,
+                    "Dropped malformed callback code="
+                            + code
+                            + " count="
+                            + count
+                            + ": "
+                            + error.getMessage());
         }
     }
 
@@ -811,104 +966,153 @@ final class CanBusEventHub {
                 throws RemoteException {
             try {
                 switch (code) {
-                    case 51: { // onCanRawDataChanged(int, Bundle), existing shared CAN callback
-                        if (!router.hasInterest(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY)) return true;
-                        data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        int canId = data.readInt();
-                        if (canId != 0x2FE || data.readInt() == 0) return true;
-                        Bundle raw = Bundle.CREATOR.createFromParcel(data);
-                        routeEnergy(epoch, EnergyTelemetrySample.decode(EnergyTelemetrySample.PRECISE_ODOMETER,
-                                raw.getIntArray(Integer.toString(canId))));
-                        return true;
-                    }
+                    case 51:
+                        { // onCanRawDataChanged(int, Bundle), existing shared CAN callback
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY))
+                                return true;
+                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                            int canId = data.readInt();
+                            if (canId != 0x2FE || data.readInt() == 0) return true;
+                            Bundle raw = Bundle.CREATOR.createFromParcel(data);
+                            routeEnergy(
+                                    epoch,
+                                    EnergyTelemetrySample.decode(
+                                            EnergyTelemetrySample.PRECISE_ODOMETER,
+                                            raw.getIntArray(Integer.toString(canId))));
+                            return true;
+                        }
                     case 46: // onBatteryRemainingCapacityChanged: scalar float
                     case 17: // onFuelLevelChanged: FuelLevel Parcelable
                     case 60: // onEnergyConsumptionInfoChanged
                     case 45: // onTPMSInfoChange
-                    case 25: { // onOdometerChanged (callback direction, not getter code)
-                        if (!router.hasInterest(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY)) return true;
-                        data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        int kind = code == 46 ? EnergyTelemetrySample.SOC
-                                : code == 17 ? EnergyTelemetrySample.FUEL
-                                : code == 60 ? EnergyTelemetrySample.TRIP
-                                : code == 45 ? EnergyTelemetrySample.TIRES : EnergyTelemetrySample.ODOMETER;
-                        routeEnergy(epoch, decodeEnergyParcel(data, kind));
-                        return true;
-                    }
-                    case CB_DOOR_STATUS: {
-                        if (!router.hasInterest(CanBusEventRouter.INTEREST_DOOR)) return true;
-                        data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        if (data.readInt() == 0) return true;
-                        int hood = data.readInt();
-                        int frontLeft = data.readInt();
-                        int frontRight = data.readInt();
-                        int loadSpace = data.readInt();
-                        int rearLeft = data.readInt();
-                        int rearRight = data.readInt();
-                        routeDoor(epoch, frontLeft, doorMask(hood, frontLeft, frontRight,
-                                loadSpace, rearLeft, rearRight));
-                        return true;
-                    }
-                    case CB_AIR_CONDITION: {
-                        if (!router.hasInterest(
-                                CanBusEventRouter.INTEREST_AMBIENT_TEMPERATURE)) return true;
-                        data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        int outsideTemperature = AIR_TEMPERATURE_INVALID;
-                        if (data.readInt() != 0) {
-                            for (int index = 0; index <= AIR_TEMPERATURE_OUT_INDEX; index++) {
-                                if (index >= 11 && index <= 13) {
-                                    data.readFloat();
-                                } else {
-                                    int value = data.readInt();
-                                    if (index == AIR_TEMPERATURE_OUT_INDEX) {
-                                        outsideTemperature = value;
+                    case 25:
+                        { // onOdometerChanged (callback direction, not getter code)
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_ENERGY_TELEMETRY))
+                                return true;
+                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                            int kind =
+                                    code == 46
+                                            ? EnergyTelemetrySample.SOC
+                                            : code == 17
+                                                    ? EnergyTelemetrySample.FUEL
+                                                    : code == 60
+                                                            ? EnergyTelemetrySample.TRIP
+                                                            : code == 45
+                                                                    ? EnergyTelemetrySample.TIRES
+                                                                    : EnergyTelemetrySample
+                                                                            .ODOMETER;
+                            routeEnergy(epoch, decodeEnergyParcel(data, kind));
+                            return true;
+                        }
+                    case CB_DOOR_STATUS:
+                        {
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_DOOR)) return true;
+                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                            if (data.readInt() == 0) return true;
+                            int hood = data.readInt();
+                            int frontLeft = data.readInt();
+                            int frontRight = data.readInt();
+                            int loadSpace = data.readInt();
+                            int rearLeft = data.readInt();
+                            int rearRight = data.readInt();
+                            routeDoor(
+                                    epoch,
+                                    frontLeft,
+                                    doorMask(
+                                            hood,
+                                            frontLeft,
+                                            frontRight,
+                                            loadSpace,
+                                            rearLeft,
+                                            rearRight));
+                            return true;
+                        }
+                    case CB_AIR_CONDITION:
+                        {
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_AMBIENT_TEMPERATURE))
+                                return true;
+                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                            int outsideTemperature = AIR_TEMPERATURE_INVALID;
+                            if (data.readInt() != 0) {
+                                for (int index = 0; index <= AIR_TEMPERATURE_OUT_INDEX; index++) {
+                                    if (index >= 11 && index <= 13) {
+                                        data.readFloat();
+                                    } else {
+                                        int value = data.readInt();
+                                        if (index == AIR_TEMPERATURE_OUT_INDEX) {
+                                            outsideTemperature = value;
+                                        }
                                     }
                                 }
                             }
+                            routeAmbientTemperature(epoch, outsideTemperature);
+                            return true;
                         }
-                        routeAmbientTemperature(epoch, outsideTemperature);
-                        return true;
-                    }
-                    case CB_LIGHT_STATUS: {
-                        if (!router.hasInterest(CanBusEventRouter.INTEREST_LIGHT_STATUS)) return true;
-                        data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        int autoLamp = -1;
-                        int dippedBeam = -1;
-                        int headLight = -1;
-                        if (data.readInt() != 0) {
-                            for (int index = 0; index < LIGHT_FIELD_COUNT; index++) {
-                                int value = data.readInt();
-                                if (index == LIGHT_DIPPED_BEAM_INDEX) dippedBeam = value;
-                                else if (index == LIGHT_HEAD_LIGHT_INDEX) headLight = value;
-                                else if (index == LIGHT_AUTO_LAMP_INDEX) autoLamp = value;
+                    case CB_LIGHT_STATUS:
+                        {
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_LIGHT_STATUS))
+                                return true;
+                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                            int autoLamp = -1;
+                            int dippedBeam = -1;
+                            int headLight = -1;
+                            if (data.readInt() != 0) {
+                                for (int index = 0; index < LIGHT_FIELD_COUNT; index++) {
+                                    int value = data.readInt();
+                                    if (index == LIGHT_DIPPED_BEAM_INDEX) dippedBeam = value;
+                                    else if (index == LIGHT_HEAD_LIGHT_INDEX) headLight = value;
+                                    else if (index == LIGHT_AUTO_LAMP_INDEX) autoLamp = value;
+                                }
                             }
+                            routeLight(epoch, autoLamp, dippedBeam, headLight);
+                            return true;
                         }
-                        routeLight(epoch, autoLamp, dippedBeam, headLight);
-                        return true;
-                    }
-                    case CB_GEAR_STATUS: {
-                        if (!router.hasInterest(CanBusEventRouter.INTEREST_GEAR)) return true;
-                        data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        if (data.readInt() == 0) return true;
-                        data.readInt(); // ordinal
-                        routeGear(epoch, data.readInt()); // stable enum value
-                        return true;
-                    }
-                    case CB_VEHICLE_STATE: {
-                        if (!router.hasInterest(CanBusEventRouter.INTEREST_VEHICLE_STATE)) return true;
-                        data.enforceInterface(CALLBACK_DESCRIPTOR);
-                        boolean present = data.readInt() != 0;
-                        int stableId = -1;
-                        if (present) {
+                    case 16:
+                        { // onVehicleSpeedChanged(int kmh)
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_VEHICLE_SPEED))
+                                return true;
+                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                            int kmh = data.readInt();
+                            synchronized (eventLock) {
+                                if (epoch != activeEpoch) return true;
+                                speedRevision++;
+                                routeLocked(
+                                        CanBusEvent.speed(
+                                                CanBusEvent.Origin.LIVE,
+                                                epoch,
+                                                ++nextSequence,
+                                                SystemClock.elapsedRealtime(),
+                                                kmh));
+                            }
+                            return true;
+                        }
+                    case CB_GEAR_STATUS:
+                        {
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_GEAR)) return true;
+                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                            if (data.readInt() == 0) return true;
                             data.readInt(); // ordinal
-                            stableId = data.readInt();
+                            routeGear(epoch, data.readInt()); // stable enum value
+                            return true;
                         }
-                        int value = data.readInt();
-                        if (present) routeVehicleState(epoch, stableId, value);
-                        return true;
-                    }
+                    case CB_VEHICLE_STATE:
+                        {
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_VEHICLE_STATE))
+                                return true;
+                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                            boolean present = data.readInt() != 0;
+                            int stableId = -1;
+                            if (present) {
+                                data.readInt(); // ordinal
+                                stableId = data.readInt();
+                            }
+                            int value = data.readInt();
+                            if (present) routeVehicleState(epoch, stableId, value);
+                            return true;
+                        }
                     default:
-                        // All vendor callback transactions are oneway. Unknown regular codes must be
+                        // All vendor callback transactions are oneway. Unknown regular codes must
+                        // be
                         // swallowed silently, otherwise Binder emits UNKNOWN_TRANSACTION log spam.
                         if (code >= IBinder.FIRST_CALL_TRANSACTION
                                 && code <= IBinder.LAST_CALL_TRANSACTION) {
@@ -967,8 +1171,12 @@ final class CanBusEventHub {
         private CanBusEventRouter.Subscription routed;
         private boolean closed;
 
-        Subscription(CanBusEventHub owner, int interestMask, int[] vehicleStateIds,
-                     Handler deliveryHandler, Listener listener) {
+        Subscription(
+                CanBusEventHub owner,
+                int interestMask,
+                int[] vehicleStateIds,
+                Handler deliveryHandler,
+                Listener listener) {
             this.owner = owner;
             this.interestMask = interestMask;
             this.vehicleStateIds = vehicleStateIds;

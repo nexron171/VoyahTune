@@ -6,6 +6,7 @@ import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.shilapi.xcertplay.media.VoyahAudioRouting
 import java.io.Closeable
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -27,6 +28,9 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
     fun play(channel: Int, navigation: Boolean) {
         if (closed) return
         require(channel in AirPlayPersistence.AUDIO_CHANNELS)
+        val stream = if (channel == 0 && VoyahCarPlayIntegration.available) {
+            if (navigation) VoyahAudioRouting.NAVIGATION_STREAM else VoyahAudioRouting.MEDIA_STREAM
+        } else channel
         val request = generation.incrementAndGet()
         pending?.cancel(true)
         activeTrack.get()?.let { runCatching { it.stop() } }
@@ -40,7 +44,7 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
                 )
                 check(minimum > 0) { "No PCM output buffer is available" }
                 val bufferBytes = maxOf(minimum, SAMPLE_RATE / 10 * 2)
-                val built = if (channel == 0) {
+                val built = if (stream == 0) {
                     AudioTrack.Builder()
                         .setAudioAttributes(
                             AudioAttributes.Builder()
@@ -63,11 +67,14 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
                 } else {
                     // Match playback and let the head unit handle vendor-specific stream types.
                     @Suppress("DEPRECATION")
-                    AudioTrack(channel, SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO,
+                    AudioTrack(stream, SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO,
                         AudioFormat.ENCODING_PCM_16BIT, bufferBytes, AudioTrack.MODE_STREAM)
                 }
                 track = built
                 check(built.state == AudioTrack.STATE_INITIALIZED) { "Audio output did not initialize" }
+                if (VoyahCarPlayIntegration.available) {
+                    check(built.streamType == stream) { "Requested stream $stream became ${built.streamType}" }
+                }
                 if (closed || generation.get() != request) return@submit
                 activeTrack.set(built)
                 built.setVolume(0.6f)
@@ -81,7 +88,7 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
                     written += count
                 }
                 if (!closed && generation.get() == request && written == pcm.size) {
-                    Log.i(TAG, "Preview started channel=$channel navigation=$navigation")
+                    Log.i(TAG, "Preview started channel=$channel stream=$stream navigation=$navigation")
                 }
                 Thread.sleep(120L)
             } catch (_: InterruptedException) {

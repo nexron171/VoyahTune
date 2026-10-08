@@ -9,6 +9,35 @@ public class VoiceSteeringPolicyTest {
     private static final String SAVED_LONG = "app:example.player";
 
     @Test
+    public void siriUsesOppositePressAndDisablingRestoresSavedActions() {
+        for (String press : new String[] {"short", "long"}) {
+            String assistantSlot = press.equals("short") ? "steerVoiceShort" : "steerVoiceLong";
+            String siriSlot = press.equals("short") ? "steerVoiceLong" : "steerVoiceShort";
+            assertEquals(
+                    "voice_assistant",
+                    VoiceSteeringPolicy.publishedAction(
+                            true, press, true, assistantSlot, SAVED_SHORT));
+            assertEquals(
+                    "carplay_siri",
+                    VoiceSteeringPolicy.publishedAction(true, press, true, siriSlot, SAVED_LONG));
+            assertEquals(
+                    "carplay_siri",
+                    VoiceSteeringPolicy.publishedAction(false, press, true, siriSlot, SAVED_LONG));
+            assertEquals(
+                    SAVED_LONG,
+                    VoiceSteeringPolicy.publishedAction(true, press, false, siriSlot, SAVED_LONG));
+            assertEquals(
+                    SAVED_SHORT,
+                    VoiceSteeringPolicy.publishedAction(
+                            false, press, true, assistantSlot, SAVED_SHORT));
+            assertEquals(
+                    SAVED_LONG,
+                    VoiceSteeringPolicy.publishedAction(
+                            true, press, true, "steerPhoneLong", SAVED_LONG));
+        }
+    }
+
+    @Test
     public void missingOrUnknownPreferencePreservesLongPressDefault() {
         for (String press : new String[] {null, "", "long", "unknown"}) {
             assertEquals("long", VoiceSteeringPolicy.normalize(press));

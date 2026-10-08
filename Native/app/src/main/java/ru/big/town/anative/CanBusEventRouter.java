@@ -23,6 +23,8 @@ final class CanBusEventRouter {
 
     static final int INTEREST_ENERGY_TELEMETRY = 1 << 6;
 
+    static final int INTEREST_VEHICLE_SPEED = 1 << 7;
+
     private static final int DEFAULT_MAILBOX_CAPACITY = 32;
     // Consumer handlers may be the Android main looper. Yield after every callback so a retained
     // transition burst cannot monopolize one looper quantum.
@@ -34,14 +36,18 @@ final class CanBusEventRouter {
 
     private final CopyOnWriteArrayList<Mailbox> mailboxes = new CopyOnWriteArrayList<>();
 
-    Subscription subscribe(int interestMask, int[] vehicleStateIds, Executor executor,
-                           Listener listener) {
-        return subscribe(interestMask, vehicleStateIds, executor, listener,
-                DEFAULT_MAILBOX_CAPACITY);
+    Subscription subscribe(
+            int interestMask, int[] vehicleStateIds, Executor executor, Listener listener) {
+        return subscribe(
+                interestMask, vehicleStateIds, executor, listener, DEFAULT_MAILBOX_CAPACITY);
     }
 
-    Subscription subscribe(int interestMask, int[] vehicleStateIds, Executor executor,
-                           Listener listener, int capacity) {
+    Subscription subscribe(
+            int interestMask,
+            int[] vehicleStateIds,
+            Executor executor,
+            Listener listener,
+            int capacity) {
         if (executor == null || listener == null) {
             throw new IllegalArgumentException("executor/listener required");
         }
@@ -122,8 +128,12 @@ final class CanBusEventRouter {
         private long invalidatedThroughEpoch = Long.MIN_VALUE;
         private long dropped;
 
-        Mailbox(int interestMask, int[] vehicleStateIds, Executor executor,
-                Listener listener, int capacity) {
+        Mailbox(
+                int interestMask,
+                int[] vehicleStateIds,
+                Executor executor,
+                Listener listener,
+                int capacity) {
             if (capacity < 2) throw new IllegalArgumentException("capacity must be >= 2");
             this.interestMask = interestMask;
             if (vehicleStateIds != null) {
@@ -192,15 +202,26 @@ final class CanBusEventRouter {
 
         private boolean accepts(CanBusEvent event) {
             switch (event.kind) {
-                case CONNECTION: return hasInterest(INTEREST_CONNECTION);
-                case CONNECTION_LOST: return hasInterest(INTEREST_CONNECTION);
-                case DOOR: return hasInterest(INTEREST_DOOR);
-                case GEAR: return hasInterest(INTEREST_GEAR);
-                case LIGHT_STATUS: return hasInterest(INTEREST_LIGHT_STATUS);
-                case VEHICLE_STATE: return acceptsVehicleState(event.first);
-                case ENERGY_TELEMETRY: return hasInterest(INTEREST_ENERGY_TELEMETRY);
-                case AMBIENT_TEMPERATURE: return hasInterest(INTEREST_AMBIENT_TEMPERATURE);
-                default: return false;
+                case CONNECTION:
+                    return hasInterest(INTEREST_CONNECTION);
+                case CONNECTION_LOST:
+                    return hasInterest(INTEREST_CONNECTION);
+                case DOOR:
+                    return hasInterest(INTEREST_DOOR);
+                case GEAR:
+                    return hasInterest(INTEREST_GEAR);
+                case LIGHT_STATUS:
+                    return hasInterest(INTEREST_LIGHT_STATUS);
+                case VEHICLE_STATE:
+                    return acceptsVehicleState(event.first);
+                case VEHICLE_SPEED:
+                    return hasInterest(INTEREST_VEHICLE_SPEED);
+                case ENERGY_TELEMETRY:
+                    return hasInterest(INTEREST_ENERGY_TELEMETRY);
+                case AMBIENT_TEMPERATURE:
+                    return hasInterest(INTEREST_AMBIENT_TEMPERATURE);
+                default:
+                    return false;
             }
         }
 

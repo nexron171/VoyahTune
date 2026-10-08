@@ -68,6 +68,22 @@ class WheelSiriWindowTest {
         host.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE).edit().clear().commit()
     }
 
+    @Test fun voyahLeavesBothSiriKeyPathsToNative() {
+        VoyahCarPlayIntegration.install(object : VoyahCarPlayIntegration.Host {
+            override fun start() = Unit
+            override fun stop() = Unit
+        })
+        try {
+            for (code in listOf(KeyEvent.KEYCODE_F6, KeyEvent.KEYCODE_VOICE_ASSIST)) {
+                host.dispatchKeyEvent(key(code, true))
+                host.dispatchKeyEvent(key(code, false))
+            }
+            verify(controller, never()).requestSiri()
+        } finally {
+            VoyahCarPlayIntegration.install(null)
+        }
+    }
+
     @Test fun heldAssignedKeyKeepsItsReleaseAfterCallSessionAndSettingChanges() {
         assertTrue(host.dispatchKeyEvent(key(KeyEvent.KEYCODE_F6, true)))
         WheelZoomSettings.setSiriKey(host, false)
