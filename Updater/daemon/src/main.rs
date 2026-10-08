@@ -178,7 +178,7 @@ fn run() -> io::Result<()> {
                 let rt = shared.lock().unwrap();
                 Ok(
                     json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),
-                        "capabilities":restore_ui::capabilities(),"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok(),
+                        "capabilities":restore_ui::capabilities(),"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok().map(config::Config::response),
                         "settingsError":rt.config.as_ref().err()}),
                 )
             }
@@ -189,7 +189,7 @@ fn run() -> io::Result<()> {
                 }
                 let status = dns::status();
                 Ok(
-                    json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok(),
+                    json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response),
                     "dnsStatus":status.as_ref().ok(),"dnsError":status.as_ref().err().map(ToString::to_string)}),
                 )
             }
@@ -210,7 +210,9 @@ fn run() -> io::Result<()> {
                     rt.state.step = "Источник изменён. Проверьте каталог".into();
                 }
                 state::save(root, "state.json", &rt.state)?;
-                Ok(json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok()}))
+                Ok(
+                    json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response)}),
+                )
             }
             protocol::Request::SetCatalogUrl { url } => {
                 let mut rt = shared.lock().unwrap();
@@ -228,7 +230,9 @@ fn run() -> io::Result<()> {
                     state::save(root, "state.json", &rt.state)?;
                     log(root, "catalog_source_changed")?;
                 }
-                Ok(json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok()}))
+                Ok(
+                    json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response)}),
+                )
             }
             protocol::Request::Check { same_version } => {
                 workflow::queue(&shared, &jobs, workflow::Job::Check(same_version))?;

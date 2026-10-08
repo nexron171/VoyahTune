@@ -32,6 +32,16 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    pub fn response(&self) -> serde_json::Value {
+        let mut settings = serde_json::json!(self);
+        if crate::restore_ui::enabled() {
+            settings["defaultCatalogUrl"] = DEFAULT_CATALOG_URL.into();
+        }
+        settings
+    }
+}
+
 pub fn normalize_url(value: &str) -> io::Result<String> {
     if value.is_empty() {
         return Ok(String::new());
@@ -127,6 +137,24 @@ pub fn change_url(root: &Path, current: &mut Config, input: &str) -> io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn response_exposes_compiled_default_without_persisting_it() {
+        let config = Config {
+            catalog_url: "https://example.org/custom.json".into(),
+            ..Config::default()
+        };
+        let response = config.response();
+        assert_eq!(response["catalogUrl"], config.catalog_url);
+        if crate::restore_ui::enabled() {
+            assert_eq!(response["defaultCatalogUrl"], DEFAULT_CATALOG_URL);
+        } else {
+            assert!(response.get("defaultCatalogUrl").is_none());
+        }
+        let stored = serde_json::to_value(&config).unwrap();
+        assert!(stored.get("defaultCatalogUrl").is_none());
+        assert_eq!(serde_json::from_value::<Config>(stored).unwrap(), config);
+    }
+
     #[test]
     fn address_is_host_independent_and_persists_across_restart() {
         let root = tempfile::tempdir().unwrap();

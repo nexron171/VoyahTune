@@ -10,6 +10,7 @@
   let saving = $state(false);
   let loaded = $state(false);
   let catalogUrl = $state("");
+  let defaultCatalogUrl = $state("");
   let errorMessage = $state("");
 
   function showDialog(dialog: HTMLDialogElement) {
@@ -22,13 +23,16 @@
     loading = true;
     loaded = false;
     catalogUrl = "";
+    defaultCatalogUrl = "";
     errorMessage = "";
 
     try {
-      const settings = await command<{ catalogUrl: string }>(
-        "catalog_settings",
-      );
+      const settings = await command<{
+        catalogUrl: string;
+        defaultCatalogUrl: string;
+      }>("catalog_settings");
       catalogUrl = settings.catalogUrl;
+      defaultCatalogUrl = settings.defaultCatalogUrl;
       loaded = true;
     } catch (error) {
       errorMessage = failure(error).message;
@@ -94,17 +98,26 @@
     <form onsubmit={saveSettings} aria-busy={loading || saving}>
       <h2 id="catalog-settings-title">Настройки</h2>
       <label for="catalog-url">Адрес каталога релизов</label>
-      <input
-        id="catalog-url"
-        type="url"
-        bind:value={catalogUrl}
-        placeholder="https://example.org/index.json"
-        required
-        disabled={loading || saving || !loaded}
-        spellcheck="false"
-        autocomplete="off"
-        aria-describedby="catalog-url-hint"
-      />
+      <div class="catalog-url-field">
+        <input
+          id="catalog-url"
+          type="url"
+          bind:value={catalogUrl}
+          placeholder="https://example.org/index.json"
+          required
+          disabled={loading || saving || !loaded}
+          spellcheck="false"
+          autocomplete="off"
+          aria-describedby="catalog-url-hint"
+        />
+        <button
+          class="button secondary"
+          type="button"
+          disabled={loading || saving || !loaded || !defaultCatalogUrl}
+          onclick={() => (catalogUrl = defaultCatalogUrl)}
+          >По умолчанию</button
+        >
+      </div>
       <p id="catalog-url-hint">
         После сохранения список релизов обновится. Скачивание и установка
         запускаются отдельно.
@@ -164,6 +177,17 @@
     border-radius: 8px;
     background: var(--surface);
     color: var(--ink);
+    min-width: 0;
+  }
+
+  .catalog-url-field {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .catalog-url-field button {
+    flex-shrink: 0;
   }
 
   p {

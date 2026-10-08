@@ -70,7 +70,11 @@ export async function command(
   name: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  if (name === "catalog_settings") return { catalogUrl };
+  if (name === "catalog_settings")
+    return {
+      catalogUrl,
+      defaultCatalogUrl: "https://example.org/index.json",
+    };
   if (name === "save_catalog_url") {
     const value = String(args.url).trim();
     const url = new URL(value);

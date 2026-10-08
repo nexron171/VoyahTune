@@ -183,8 +183,12 @@ async fn release_info(app: tauri::AppHandle, path: Option<String>) -> Result<Val
     result
 }
 #[tauri::command]
-fn catalog_settings() -> Result<CatalogSettings> {
-    Cache::user()?.catalog_settings()
+fn catalog_settings() -> Result<Value> {
+    let settings = Cache::user()?.catalog_settings()?;
+    Ok(json!({
+        "catalogUrl": settings.catalog_url,
+        "defaultCatalogUrl": installer_core::catalog::CATALOG_URL,
+    }))
 }
 
 #[tauri::command]
