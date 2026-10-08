@@ -4,6 +4,7 @@
 No ADB, Frida, Android, or network required. /proc identity/Binder endpoints are host fixtures;
 the production scheduling, lane locks, snapshots, injection reservations and retries run unchanged.
 """
+
 import os
 from pathlib import Path
 import shlex
@@ -22,10 +23,13 @@ class ParallelLoaderTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="voyahtune-loader-")
         self.root = Path(self.temp.name)
         self.processes = []
-        settings=self.root/"settings"
+        settings = self.root / "settings"
         settings.write_text("#!/bin/sh\nexit 1\n")
         settings.chmod(0o755)
-        self.env={**os.environ,"PATH":str(self.root)+os.pathsep+os.environ["PATH"]}
+        self.env = {
+            **os.environ,
+            "PATH": str(self.root) + os.pathsep + os.environ["PATH"],
+        }
         for pid in range(101, 110):
             (self.root / f"generation.{pid}").write_text("1\n")
         (self.root / "proc").mkdir()
@@ -70,7 +74,7 @@ printf 'end %s %s\n' "$script" "$pid" >> "$root/events"
 if [ "$script" = app_client.js ] && [ -f "$root/app_client_timeout" ]; then exit 124; fi
 """.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root))))
         self.injector.chmod(0o755)
-        overrides = r'''
+        overrides = r"""
 # Host-only platform shims. Keep all worker and injection functions from the loader intact.
 FIXTURE=ROOT_PLACEHOLDER
 FI="$FIXTURE/frida-inject"
@@ -112,6 +116,10 @@ drive_agent_attempt_finished() {
     fixture_drive_agent_attempt_finished "$@"
     printf '%s\n' "$1" >> "$FIXTURE/finished_attempts"
 }
+save_drive_observation() {
+    fixture_save_drive_observation "$@"
+    printf '%s\n' "$DRIVE_OBSERVATION" > "$FIXTURE/observation.$DA_AGENT"
+}
 prepare_vd_status() { mkdir -p "$FIXTURE/runtime/vd_hooks"; }
 prepare_drive_health() { mkdir -p "${1%/*}"; [ -e "$1" ] || : > "$1"; }
 logi() { printf '%s\n' "$*" >> "$FIXTURE/log"; }
@@ -129,18 +137,34 @@ discover_app_client() {
     while [ ! -f "$FIXTURE/release_apps" ]; do sleep 0.05; done
 }
 if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
-'''.replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root)))
-        source = SOURCE.replace("/data/local/tmp", str(self.root)).replace("/data/local/open_voyah", str(self.root / "runtime"))
-        source = source.replace("drive_agent_attempt_finished() {", "fixture_drive_agent_attempt_finished() {")
-        source = source.replace("discover_app_client() {", "fixture_discover_app_client() {")
+""".replace("ROOT_PLACEHOLDER", shlex.quote(str(self.root)))
+        source = SOURCE.replace("/data/local/tmp", str(self.root)).replace(
+            "/data/local/open_voyah", str(self.root / "runtime")
+        )
+        source = source.replace("/data/local/bin", str(ROOT / "Packaging/od/inject"))
+        source = source.replace(
+            "save_drive_observation() {", "fixture_save_drive_observation() {"
+        )
+        source = source.replace(
+            "drive_agent_attempt_finished() {",
+            "fixture_drive_agent_attempt_finished() {",
+        )
+        source = source.replace(
+            "discover_app_client() {", "fixture_discover_app_client() {"
+        )
         source = source.replace("/proc/", str(self.root / "proc") + "/")
         entry = 'if [ "${1:-}" = --worker ]; then'
         source = source.replace(entry, overrides + "\n" + entry)
         self.loader = self.root / "load.bin"
         self.loader.write_text(source)
 
-    def rds_probe(self, uid=10109, executable="/system/bin/app_process64", enabled=True,
-                  package="com.pateo.rdsapp"):
+    def rds_probe(
+        self,
+        uid=10109,
+        executable="/system/bin/app_process64",
+        enabled=True,
+        package="com.pateo.rdsapp",
+    ):
         if enabled:
             (self.root / "enable_rds").touch()
         (self.root / "proc/sys/kernel/random").mkdir(parents=True, exist_ok=True)
@@ -151,27 +175,45 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         if not exe.is_symlink():
             exe.symlink_to(executable)
         (self.root / "app_client.js").touch()
-        selection = 'settings() { echo null; }; '
+        selection = "settings() { echo null; }; "
         if package != "com.pateo.rdsapp":
-            selection = (f'pidof() {{ [ "$1" = {shlex.quote(package)} ] && echo 109; }}; '
-                         f'settings() {{ echo {shlex.quote(package)}; }}; ')
-        subprocess.run(["sh", str(self.loader), "--probe",
-                        'APP_CLIENT="$FIXTURE/app_client.js"; ' + selection +
-                        'fixture_discover_app_client; wait'],
-                       check=True, timeout=10, env=self.env, capture_output=True)
+            selection = (
+                f'pidof() {{ [ "$1" = {shlex.quote(package)} ] && echo 109; }}; '
+                f"settings() {{ echo {shlex.quote(package)}; }}; "
+            )
+        subprocess.run(
+            [
+                "sh",
+                str(self.loader),
+                "--probe",
+                'APP_CLIENT="$FIXTURE/app_client.js"; '
+                + selection
+                + "fixture_discover_app_client; wait",
+            ],
+            check=True,
+            timeout=10,
+            env=self.env,
+            capture_output=True,
+        )
 
     def test_rds_discovered_without_fullscreen_or_dpi_selection(self):
         self.rds_probe()
         marker = self.root / "voyahtune_app_client.com.pateo.rdsapp.pid"
         self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
         self.rds_probe()
-        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+        self.assertEqual(
+            (self.root / "events").read_text().count("start app_client.js 109"), 1
+        )
 
     def test_rds_requires_specific_ready_marker(self):
         (self.root / "missing_rds_ready").touch()
         self.rds_probe()
-        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
-        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+        self.assertFalse(
+            (self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists()
+        )
+        self.assertTrue(
+            (self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists()
+        )
 
     def test_rds_does_not_attach_without_a_running_process(self):
         self.rds_probe(enabled=False)
@@ -187,14 +229,22 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.assertTrue(marker.exists(), "32-bit OEM RdsApp must reach the injector")
         self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
         self.rds_probe(uid=1000, executable="/system/bin/app_process32")
-        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+        self.assertEqual(
+            (self.root / "events").read_text().count("start app_client.js 109"), 1
+        )
 
     def test_rds_32_bit_still_requires_specific_ready_marker(self):
         (self.root / "missing_rds_ready").touch()
         self.rds_probe(executable="/system/bin/app_process32")
-        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
-        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
-        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+        self.assertEqual(
+            (self.root / "events").read_text().count("start app_client.js 109"), 1
+        )
+        self.assertFalse(
+            (self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists()
+        )
+        self.assertTrue(
+            (self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists()
+        )
 
     def test_rds_32_bit_rejects_secondary_android_user(self):
         self.rds_probe(uid=101000, executable="/system/bin/app_process32")
@@ -204,51 +254,84 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / "app_client_timeout").touch()
         self.rds_probe(executable="/system/bin/app_process32")
         marker = self.root / "voyahtune_app_client.com.pateo.rdsapp.pid"
-        self.assertTrue(marker.exists(), "eternalized RDS agent readiness survives wrapper timeout")
+        self.assertTrue(
+            marker.exists(), "eternalized RDS agent readiness survives wrapper timeout"
+        )
         self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
         self.rds_probe(executable="/system/bin/app_process32")
-        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+        self.assertEqual(
+            (self.root / "events").read_text().count("start app_client.js 109"), 1
+        )
 
     def test_rds_timeout_without_radio_ready_is_not_success(self):
         (self.root / "app_client_timeout").touch()
         (self.root / "missing_rds_ready").touch()
         self.rds_probe(executable="/system/bin/app_process32")
-        self.assertFalse((self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists())
+        self.assertFalse(
+            (self.root / "voyahtune_app_client.com.pateo.rdsapp.pid").exists()
+        )
 
     def test_other_app_timeout_still_requires_successful_exit(self):
         (self.root / "app_client_timeout").touch()
         self.rds_probe(package="example.player")
-        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
-        self.assertFalse((self.root / "voyahtune_app_client.example.player.pid").exists())
+        self.assertEqual(
+            (self.root / "events").read_text().count("start app_client.js 109"), 1
+        )
+        self.assertFalse(
+            (self.root / "voyahtune_app_client.example.player.pid").exists()
+        )
 
     def test_other_32_bit_apps_remain_unsupported(self):
         self.rds_probe(package="example.player", executable="/system/bin/app_process32")
         self.assertEqual((self.root / "events").read_text(), "")
-        self.assertTrue((self.root / "voyahtune_app_client.example.player.attempt").exists())
+        self.assertTrue(
+            (self.root / "voyahtune_app_client.example.player.attempt").exists()
+        )
 
     def test_rds_rejects_unknown_process_executable(self):
         self.rds_probe(executable="/system/bin/unknown")
         self.assertEqual((self.root / "events").read_text(), "")
-        self.assertTrue((self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists())
+        self.assertTrue(
+            (self.root / "voyahtune_app_client.com.pateo.rdsapp.attempt").exists()
+        )
 
     def test_rds_32_bit_rapid_restart_circuit_breaker(self):
         for generation in range(1, 4):
             (self.root / "generation.109").write_text(f"{generation}\n")
             self.rds_probe(executable="/system/bin/app_process32")
-        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 2)
-        self.assertEqual((self.root / "voyahtune_app_client.com.pateo.rdsapp.blocked").read_text().strip(), "test-boot")
+        self.assertEqual(
+            (self.root / "events").read_text().count("start app_client.js 109"), 2
+        )
+        self.assertEqual(
+            (self.root / "voyahtune_app_client.com.pateo.rdsapp.blocked")
+            .read_text()
+            .strip(),
+            "test-boot",
+        )
 
     def test_rds_rapid_restart_circuit_breaker(self):
         for generation in range(1, 4):
             (self.root / "generation.109").write_text(f"{generation}\n")
             self.rds_probe()
-        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 2)
-        self.assertEqual((self.root / "voyahtune_app_client.com.pateo.rdsapp.blocked").read_text().strip(), "test-boot")
+        self.assertEqual(
+            (self.root / "events").read_text().count("start app_client.js 109"), 2
+        )
+        self.assertEqual(
+            (self.root / "voyahtune_app_client.com.pateo.rdsapp.blocked")
+            .read_text()
+            .strip(),
+            "test-boot",
+        )
 
     def start(self):
         log = open(self.root / f"stderr.{len(self.processes)}", "w")
-        proc = subprocess.Popen(["sh", str(self.loader)], stdout=log, stderr=log,
-                                start_new_session=True,env=self.env)
+        proc = subprocess.Popen(
+            ["sh", str(self.loader)],
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+            env=self.env,
+        )
         log.close()
         self.processes.append(proc)
         return proc
@@ -285,13 +368,17 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
 
     def state(self, lane):
         try:
-            return (self.root / f"voyahtune_worker.{lane}.state").read_text().split("|")[1]
+            return (
+                (self.root / f"voyahtune_worker.{lane}.state").read_text().split("|")[1]
+            )
         except (FileNotFoundError, IndexError):
             return None
 
     def owner(self, lane):
         try:
-            return int(os.readlink(self.root / f"voyahtune_worker.{lane}.lock").split(":")[0])
+            return int(
+                os.readlink(self.root / f"voyahtune_worker.{lane}.lock").split(":")[0]
+            )
         except FileNotFoundError:
             return None
 
@@ -299,18 +386,29 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / f"release_{lane}").touch()
 
     def probe(self, code):
-        return subprocess.check_output(["sh", str(self.loader), "--probe", code],
-                                       text=True, timeout=5,env=self.env).strip()
+        return subprocess.check_output(
+            ["sh", str(self.loader), "--probe", code],
+            text=True,
+            timeout=5,
+            env=self.env,
+        ).strip()
 
     def test_acc_has_priority_until_ready_but_not_until_wrapper_exit(self):
         (self.root / "hold_acc_ready").touch()
         (self.root / "block_acc").touch()
         self.start()
-        self.until(lambda: "start voyahtune_acc_restore.js" in self.events(), "ACC not started")
+        self.until(
+            lambda: "start voyahtune_acc_restore.js" in self.events(), "ACC not started"
+        )
         time.sleep(0.2)
-        self.assertEqual(["start voyahtune_acc_restore.js 107"], self.events().splitlines())
+        self.assertEqual(
+            ["start voyahtune_acc_restore.js 107"], self.events().splitlines()
+        )
         (self.root / "hold_acc_ready").unlink()
-        self.until(lambda: "start vd_bypass.js" in self.events(), "ACC ready did not release workers")
+        self.until(
+            lambda: "start vd_bypass.js" in self.events(),
+            "ACC ready did not release workers",
+        )
         self.assertEqual("active", self.state("acc"))
         self.assertNotIn("end voyahtune_acc_restore.js", self.events())
 
@@ -320,8 +418,12 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.until(lambda: self.state("acc") == "waiting", "No ACC discovery")
         self.assertEqual("", self.events())
         (self.root / "missing_acc").unlink()
-        self.until(lambda: "start vd_bypass.js" in self.events(), "Late CanBus blocked workers")
-        self.assertEqual("start voyahtune_acc_restore.js 107", self.events().splitlines()[0])
+        self.until(
+            lambda: "start vd_bypass.js" in self.events(), "Late CanBus blocked workers"
+        )
+        self.assertEqual(
+            "start voyahtune_acc_restore.js 107", self.events().splitlines()[0]
+        )
 
     def test_absent_canbus_releases_priority_at_deadline_and_keeps_discovering(self):
         (self.root / "missing_acc").touch()
@@ -329,15 +431,23 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.until(lambda: self.state("acc") == "waiting", "No ACC discovery")
         self.assertEqual("", self.events())
         (self.root / "proc/uptime").write_text("146.00 0\n")
-        self.until(lambda: "start vd_bypass.js" in self.events(), "Priority deadline blocked workers")
+        self.until(
+            lambda: "start vd_bypass.js" in self.events(),
+            "Priority deadline blocked workers",
+        )
         (self.root / "missing_acc").unlink()
-        self.until(lambda: self.state("acc") == "active", "CanBus discovery stopped after deadline")
+        self.until(
+            lambda: self.state("acc") == "active",
+            "CanBus discovery stopped after deadline",
+        )
         self.assertNotIn("end vd_bypass.js", self.events())
 
     def test_failed_acc_retries_after_backoff_in_same_process(self):
         (self.root / "missing_acc_ready").touch()
         self.start()
-        self.until(lambda: "start vd_bypass.js" in self.events(), "Failed ACC blocked workers")
+        self.until(
+            lambda: "start vd_bypass.js" in self.events(), "Failed ACC blocked workers"
+        )
         self.assertEqual("failed", self.state("acc"))
         self.assertFalse((self.root / "voyahtune_acc_restore.pid").exists())
         self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
@@ -345,22 +455,43 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         time.sleep(0.2)
         self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
         (self.root / "proc/uptime").write_text("102.00 0\n")
-        self.until(lambda: self.state("acc") == "active", "Same-process retry did not recover hook")
+        self.until(
+            lambda: self.state("acc") == "active",
+            "Same-process retry did not recover hook",
+        )
         self.assertEqual(2, self.events().count("start voyahtune_acc_restore.js"))
 
     def test_expired_acc_pulse_reinstalls_without_process_restart(self):
         self.start()
         self.until(lambda: self.state("acc") == "active", "ACC not ready")
-        self.until(lambda: (self.root / "finished_attempts").exists() and "voyahtune_acc_restore.attempt" in (self.root / "finished_attempts").read_text(), "Attempt not finished")
+        self.until(
+            lambda: (self.root / "finished_attempts").exists()
+            and "voyahtune_acc_restore.attempt"
+            in (self.root / "finished_attempts").read_text(),
+            "Attempt not finished",
+        )
+        observation = self.root / "observation.voyahtune_acc_restore"
+        self.until(
+            lambda: observation.exists()
+            and observation.read_text().startswith("v2:test:107:1|100|"),
+            "ACC pulse observation not started",
+        )
         (self.root / "proc/uptime").write_text("116.00 0\n")
-        self.until(lambda: self.events().count("start voyahtune_acc_restore.js") == 2, "Expired pulse not repaired")
+        self.until(
+            lambda: self.events().count("start voyahtune_acc_restore.js") == 2,
+            "Expired pulse not repaired",
+        )
 
     def test_rapid_canbus_restarts_stop_injection(self):
         self.start()
         self.until(lambda: self.state("acc") == "active", "ACC not ready")
         for generation in [2, 3]:
             (self.root / "generation.107").write_text(str(generation) + "\n")
-            self.until(lambda: self.events().count("start voyahtune_acc_restore.js") == generation, "Restart not injected")
+            self.until(
+                lambda: self.events().count("start voyahtune_acc_restore.js")
+                == generation,
+                "Restart not injected",
+            )
             self.until(lambda: self.state("acc") == "active", "Restart not ready")
         (self.root / "generation.107").write_text("4\n")
         self.until(lambda: self.state("acc") == "failed", "Rapid restarts not blocked")
@@ -369,7 +500,9 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
     def test_fresh_acc_pulse_keeps_existing_agent(self):
         self.start()
         self.until(lambda: self.state("acc") == "active", "ACC not ready")
-        (self.root / "runtime/drive_hooks/voyahtune_acc_restore.health").write_text("107|119|v2\n")
+        (self.root / "runtime/drive_hooks/voyahtune_acc_restore.health").write_text(
+            "107|119|v2\n"
+        )
         (self.root / "proc/uptime").write_text("120.00 0\n")
         time.sleep(0.3)
         self.assertEqual(1, self.events().count("start voyahtune_acc_restore.js"))
@@ -377,18 +510,36 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
 
     def test_all_core_hooks_start_while_vd_status_and_apps_are_blocked(self):
         self.start()
-        expected = ("voyahtune_acc_restore.js", "steeringwheelkeys.js", "multidisplay.js", "launcherdock.js",
-                    "vd_bypass.js", "apollo_tech.js", "voyahtune_drive_reset.js", "keyboard_lock_en.js")
-        self.until(lambda: all(f"start {name}" in self.events() for name in expected),
-                   "A blocked lane prevented another core injection")
-        self.until(lambda: self.state("steering") == "active", "Missing early steering readiness")
+        expected = (
+            "voyahtune_acc_restore.js",
+            "steeringwheelkeys.js",
+            "multidisplay.js",
+            "launcherdock.js",
+            "vd_bypass.js",
+            "apollo_tech.js",
+            "voyahtune_drive_reset.js",
+            "keyboard_lock_en.js",
+        )
+        self.until(
+            lambda: all(f"start {name}" in self.events() for name in expected),
+            "A blocked lane prevented another core injection",
+        )
+        self.until(
+            lambda: self.state("steering") == "active",
+            "Missing early steering readiness",
+        )
         self.assertNotIn("end vd_bypass.js", self.events())
         self.assertNotIn("end steeringwheelkeys.js", self.events())
         self.assertEqual("injecting", self.state("vd"))
         self.release("status")
-        self.until(lambda: (self.root / "voyahtune-hook-status.v1").exists(), "No diagnostics")
-        self.until(lambda: "steering-wheel=active:101" in
-                   (self.root / "voyahtune-hook-status.v1").read_text(), "Stale diagnostics")
+        self.until(
+            lambda: (self.root / "voyahtune-hook-status.v1").exists(), "No diagnostics"
+        )
+        self.until(
+            lambda: "steering-wheel=active:101"
+            in (self.root / "voyahtune-hook-status.v1").read_text(),
+            "Stale diagnostics",
+        )
         status = (self.root / "voyahtune-hook-status.v1").read_text()
         self.assertIn("steering-wheel=active:101", status)
         self.assertIn("vd-bypass=injecting:104", status)
@@ -400,18 +551,26 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.until(lambda: "start vd_bypass.js" in self.events(), "VD not started")
         self.assertNotIn("start steeringwheelkeys.js", self.events())
         (self.root / "missing_steering").unlink()
-        self.until(lambda: self.state("steering") == "active", "Late keymanager was blocked")
+        self.until(
+            lambda: self.state("steering") == "active", "Late keymanager was blocked"
+        )
         self.assertNotIn("end vd_bypass.js", self.events())
 
     def test_drive_reset_is_independent_of_apollo_and_rearms_for_new_process(self):
         (self.root / "disable_apollo").touch()
         self.start()
         marker = self.root / "voyahtune_drive_reset.pid"
-        self.until(lambda: marker.exists(), "Drive reset hook did not start with Apollo disabled")
+        self.until(
+            lambda: marker.exists(),
+            "Drive reset hook did not start with Apollo disabled",
+        )
         self.assertNotIn("start apollo_tech.js", self.events())
         self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js"))
         (self.root / "generation.105").write_text("2\n")
-        self.until(lambda: marker.read_text().strip().endswith(":2"), "New VehicleSettings missed hook")
+        self.until(
+            lambda: marker.read_text().strip().endswith(":2"),
+            "New VehicleSettings missed hook",
+        )
         self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js"))
 
     def test_vehicle_hook_has_independent_lifecycle_and_health(self):
@@ -420,7 +579,10 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.start()
         vehicle = self.root / "runtime/drive_hooks/vehicle.pid"
         settings = self.root / "voyahtune_drive_reset.pid"
-        self.until(lambda: vehicle.exists() and settings.exists(), "Both drive hooks must start")
+        self.until(
+            lambda: vehicle.exists() and settings.exists(),
+            "Both drive hooks must start",
+        )
         self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 108"))
         self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 105"))
         health = self.root / "runtime/drive_hooks"
@@ -430,7 +592,10 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         time.sleep(0.5)
         self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js"))
         (self.root / "generation.108").write_text("2\n")
-        self.until(lambda: vehicle.read_text().strip().endswith(":2"), "New VehicleAir missed hook")
+        self.until(
+            lambda: vehicle.read_text().strip().endswith(":2"),
+            "New VehicleAir missed hook",
+        )
         self.assertTrue(settings.read_text().strip().endswith(":1"))
         self.assertEqual(2, self.events().count("start voyahtune_drive_reset.js 108"))
         self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js 105"))
@@ -438,11 +603,16 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
     def test_failed_drive_reset_attach_does_not_loop_or_block_apollo(self):
         (self.root / "missing_drive_ready").touch()
         self.start()
-        self.until(lambda: self.state("apollo") == "active", "Drive hook failure blocked Apollo")
+        self.until(
+            lambda: self.state("apollo") == "active",
+            "Drive hook failure blocked Apollo",
+        )
         self.assertFalse((self.root / "voyahtune_drive_reset.pid").exists())
         self.assertEqual(1, self.events().count("start voyahtune_drive_reset.js"))
-        self.assertLess(self.events().index("end voyahtune_drive_reset.js"),
-                        self.events().index("start apollo_tech.js"))
+        self.assertLess(
+            self.events().index("end voyahtune_drive_reset.js"),
+            self.events().index("start apollo_tech.js"),
+        )
 
     def test_dead_worker_waits_for_orphan_injector_and_only_new_identity_retries(self):
         self.start()
@@ -454,13 +624,21 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.assertEqual(1, self.events().count("start vd_bypass.js"))
         self.assertEqual(old, self.owner("vd"))
         self.release("vd")
-        self.until(lambda: self.owner("vd") not in (None, old) and self.state("vd") == "active",
-                   "Replacement failed to recover confirmed agent readiness")
+        self.until(
+            lambda: self.owner("vd") not in (None, old)
+            and self.state("vd") == "active",
+            "Replacement failed to recover confirmed agent readiness",
+        )
         self.assertEqual(1, self.events().count("start vd_bypass.js"))
         (self.root / "generation.104").write_text("2\n")
-        self.until(lambda: self.events().count("start vd_bypass.js") == 2,
-                   "New target identity was not injected")
-        self.until(lambda: self.state("vd") == "active", "New target readiness was not confirmed")
+        self.until(
+            lambda: self.events().count("start vd_bypass.js") == 2,
+            "New target identity was not injected",
+        )
+        self.until(
+            lambda: self.state("vd") == "active",
+            "New target readiness was not confirmed",
+        )
         self.assertEqual(2, self.events().count("start vd_bypass.js"))
 
     def test_supervisor_restart_keeps_active_hooks_without_reinjecting(self):
@@ -469,26 +647,55 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.release("status")
         self.release("apps")
         first = self.start()
-        lanes = ("acc", "steering", "multidisplay", "launcher", "vd", "apollo", "keyboard")
-        self.until(lambda: all(self.state(lane) == "active" for lane in lanes), "Initial hooks failed")
+        lanes = (
+            "acc",
+            "steering",
+            "multidisplay",
+            "launcher",
+            "vd",
+            "apollo",
+            "keyboard",
+        )
+        self.until(
+            lambda: all(self.state(lane) == "active" for lane in lanes),
+            "Initial hooks failed",
+        )
         owners = {lane: self.owner(lane) for lane in lanes}
         first.kill()
         first.wait(timeout=5)
         second = self.start()
-        self.until(lambda: all(self.owner(lane) not in (None, owners[lane]) for lane in lanes),
-                   "Workers did not transfer to the replacement supervisor")
-        self.until(lambda: all(self.state(lane) == "active" for lane in lanes), "Lost active state")
-        for script in ("voyahtune_acc_restore.js", "steeringwheelkeys.js", "multidisplay.js", "launcherdock.js", "vd_bypass.js",
-                       "apollo_tech.js", "voyahtune_drive_reset.js", "keyboard_lock_en.js"):
+        self.until(
+            lambda: all(self.owner(lane) not in (None, owners[lane]) for lane in lanes),
+            "Workers did not transfer to the replacement supervisor",
+        )
+        self.until(
+            lambda: all(self.state(lane) == "active" for lane in lanes),
+            "Lost active state",
+        )
+        for script in (
+            "voyahtune_acc_restore.js",
+            "steeringwheelkeys.js",
+            "multidisplay.js",
+            "launcherdock.js",
+            "vd_bypass.js",
+            "apollo_tech.js",
+            "voyahtune_drive_reset.js",
+            "keyboard_lock_en.js",
+        ):
             self.assertEqual(1, self.events().count(f"start {script}"), script)
-        self.until(lambda: f"pid={second.pid};" in (self.root / "voyahtune-hook-status.v1").read_text(),
-                   "Status still identifies the old supervisor")
+        self.until(
+            lambda: f"pid={second.pid};"
+            in (self.root / "voyahtune-hook-status.v1").read_text(),
+            "Status still identifies the old supervisor",
+        )
 
     def test_exit_zero_without_steering_ready_is_failure(self):
         (self.root / "missing_ready").touch()
         self.release("steering")
         self.start()
-        self.until(lambda: self.state("steering") == "failed", "Exit 0 falsely became ready")
+        self.until(
+            lambda: self.state("steering") == "failed", "Exit 0 falsely became ready"
+        )
         self.assertFalse((self.root / "voyahtune_swk_km.pid").exists())
         self.assertEqual(1, self.events().count("start steeringwheelkeys.js"))
 
@@ -496,7 +703,9 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         # Exercise the production /proc parser too; integration uses a ps shim on macOS.
         start = SOURCE.index("worker_token() {")
         end = SOURCE.index("\nworker_token_is_live()", start)
-        token_function = SOURCE[start:end].replace("/proc/", str(self.root / "proc") + "/")
+        token_function = SOURCE[start:end].replace(
+            "/proc/", str(self.root / "proc") + "/"
+        )
         proc = self.root / "proc/111"
         proc.mkdir()
         boot = self.root / "proc/sys/kernel/random/boot_id"
@@ -510,19 +719,27 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.assertEqual("111:800:boot-a", self.probe(code))
         boot.write_text("boot-b\n")
         self.assertEqual("111:800:boot-b", self.probe(code))
-        self.assertEqual("stale", self.probe(token_function +
-                         "\nkill() { return 0; }\n"
-                         "worker_token_is_live 111:700:boot-a || echo stale"))
+        self.assertEqual(
+            "stale",
+            self.probe(
+                token_function + "\nkill() { return 0; }\n"
+                "worker_token_is_live 111:700:boot-a || echo stale"
+            ),
+        )
 
     def test_snapshot_rejects_reused_target_pid(self):
         self.start()
-        self.until(lambda: self.state("launcher") == "active", "Launcher did not become ready")
+        self.until(
+            lambda: self.state("launcher") == "active", "Launcher did not become ready"
+        )
         worker = self.owner("launcher")
         os.kill(worker, signal.SIGSTOP)
         try:
             (self.root / "generation.103").write_text("2\n")
-            result = self.probe('read_worker_state launcher com.qinggan.app.launcher; '
-                                'echo "$RS_STATE:$RS_PID"')
+            result = self.probe(
+                "read_worker_state launcher com.qinggan.app.launcher; "
+                'echo "$RS_STATE:$RS_PID"'
+            )
             self.assertEqual("waiting:0", result)
         finally:
             os.kill(worker, signal.SIGCONT)
@@ -531,7 +748,10 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         (self.root / "missing_vd_ready").touch()
         self.release("vd")
         self.start()
-        self.until(lambda: self.state("vd") == "failed", "exit 0 without readiness was accepted")
+        self.until(
+            lambda: self.state("vd") == "failed",
+            "exit 0 without readiness was accepted",
+        )
         self.assertFalse((self.root / "voyahtune_vd.pid").exists())
         time.sleep(0.2)
         self.assertEqual(self.events().count("start vd_bypass.js"), 1)
@@ -542,15 +762,19 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.start()
         self.until(lambda: self.state("vd") == "failed", "VD attempt did not finish")
         status = self.root / "runtime/vd_hooks/status.v1"
-        for value in ["v2:test:104:0|3.22.0-v1|active|geometry",
-                      "v2:test:104:1|old|active|geometry"]:
+        for value in [
+            "v2:test:104:0|3.22.0-v1|active|geometry",
+            "v2:test:104:1|old|active|geometry",
+        ]:
             status.write_text(value)
             time.sleep(0.15)
             self.assertEqual(self.state("vd"), "failed")
         status.write_text("v2:test:104:1|3.22.0-v1|active|geometry")
         self.until(lambda: self.state("vd") == "active", "late readiness was lost")
         status.write_text("v2:test:104:1|3.22.0-v1|failed|partial.attach")
-        self.until(lambda: self.state("vd") == "failed", "later partial failure was hidden")
+        self.until(
+            lambda: self.state("vd") == "failed", "later partial failure was hidden"
+        )
         self.assertEqual(self.events().count("start vd_bypass.js"), 1)
 
 
