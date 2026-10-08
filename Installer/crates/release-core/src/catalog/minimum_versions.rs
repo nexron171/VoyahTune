@@ -73,7 +73,13 @@ impl Release {
         let Some(minimum) = &self.minimum_ota_version else {
             return Ok(());
         };
-        if release_version(installed)? < minimum_version(minimum)? {
+        let mut current = release_version(installed)?;
+        if Infrastructure::from_version(installed)? == Infrastructure::Od {
+            // The service baseline is a base release number, including its beta builds.
+            current.pre = semver::Prerelease::EMPTY;
+            current.build = semver::BuildMetadata::EMPTY;
+        }
+        if current < minimum_version(minimum)? {
             return Err(Error::new(
                 "OTA_USB_REQUIRED",
                 format!(
@@ -123,13 +129,13 @@ mod tests {
     #[test]
     fn ota_requires_usb_below_minimum_and_ignores_profile_suffix() {
         let release = catalog_entry("1.7.0", "4.1.0");
-        for installed in ["4.0.0", "4.0.0-od", "4.1.0-beta-od"] {
+        for installed in ["4.0.0", "4.0.0-od", "4.0.9-beta-od"] {
             let error = release.require_ota_version(installed).unwrap_err();
             assert_eq!(error.code, "OTA_USB_REQUIRED");
             assert!(error.message.contains("USB"));
             assert!(error.message.contains("Installer 1.7.0"));
         }
-        for installed in ["4.1.0", "4.1.0-od", "4.10.0-od"] {
+        for installed in ["4.1.0", "4.1.0-od", "4.1.0-beta-od", "4.10.0-od"] {
             release.require_ota_version(installed).unwrap();
         }
     }

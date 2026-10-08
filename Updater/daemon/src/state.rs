@@ -22,6 +22,8 @@ pub struct State {
     pub source_generation: u64,
     pub installed_archive_sha256: String,
     pub selected: Option<Release>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_versions: Option<Vec<String>>,
     pub same_version: bool,
     pub bytes: u64,
     pub total: u64,
@@ -33,6 +35,19 @@ pub struct State {
     pub apply_boot: String,
 }
 impl State {
+    pub fn clear_od_catalog(&mut self) {
+        if !crate::restore_ui::enabled() {
+            return;
+        }
+        self.catalog_versions = None;
+        self.selected = None;
+        self.notice = None;
+        self.error = None;
+        self.same_version = false;
+        self.bytes = 0;
+        self.total = 0;
+    }
+
     pub fn busy(&self) -> bool {
         matches!(
             self.phase.as_str(),
@@ -127,6 +142,7 @@ impl State {
             source_generation: 0,
             installed_archive_sha256: String::new(),
             selected: None,
+            catalog_versions: None,
             same_version: false,
             bytes: 0,
             total: 0,
@@ -179,6 +195,25 @@ pub fn due(s: &State, wall: u64, boot: &str, uptime: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn od_catalog_reset_discards_old_source_results_and_errors() {
+        if !crate::restore_ui::enabled() {
+            return;
+        }
+        let mut state = preparing();
+        state.catalog_versions = Some(vec!["4.0.1-od".into()]);
+        state.error = Some("old source failed".into());
+        state.notice = Some("4.0.1-od".into());
+        state.bytes = 100;
+        state.clear_od_catalog();
+        assert!(state.selected.is_none());
+        assert!(state.catalog_versions.is_none());
+        assert!(state.error.is_none());
+        assert!(state.notice.is_none());
+        assert!(!state.same_version);
+        assert_eq!(state.bytes, 0);
+    }
+
     fn preparing() -> State {
         let mut s = State::fresh("3.15.0".into(), "rom".into());
         s.phase = "preparing".into();

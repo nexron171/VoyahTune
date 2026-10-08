@@ -266,7 +266,7 @@ grep -Fq 'var driverTemperature = dockField(instance, "mScreenUpTemperatureConte
     || fail "driver compact dock does not resolve its temperature overlay"
 grep -Fq 'setDockViewVisibility(driverTemperature, compact ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide the stock driver climate overlay"
-grep -Fq 'isConfiguredFullscreenPackage(app, pkg), () -> true,' "$RECEIVER" \
+tr -d '[:space:]' < "$RECEIVER" | grep -Fq 'isConfiguredFullscreenPackage(app,pkg),()->true,' \
     || fail "launch-time windowing mode is not scoped to the saved fullscreen allowlist"
 grep -Fq 'if (fullscreen) bundle.putInt' "$APP_LAUNCHER" \
     || fail "ordinary single-app launches no longer remain normal WindowManager-clamped tasks"

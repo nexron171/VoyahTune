@@ -471,6 +471,21 @@ public class UpdaterActivity extends Activity {
                                 + (state.optBoolean("sameVersion")
                                         ? " · Повторная установка"
                                         : ""));
+        JSONArray catalogVersions = state.optJSONArray("catalogVersions");
+        String catalogText = "";
+        if (connected && catalogVersions != null) {
+            java.util.List<String> versions = new java.util.ArrayList<>();
+            for (int index = 0; index < catalogVersions.length(); index++) {
+                versions.add(catalogVersions.optString(index));
+            }
+            catalogText =
+                    "Каталог: "
+                            + settings.optString("catalogUrl")
+                            + "\nВерсии OD: "
+                            + (versions.isEmpty() ? "нет" : TextUtils.join(", ", versions));
+        }
+        text(R.id.ota_catalog_versions, catalogText);
+        visible(R.id.ota_catalog_versions, !catalogText.isEmpty());
         text(R.id.ota_badge, !connected ? "Нет связи" : p.badge);
         text(R.id.ota_detail, error);
         visible(R.id.ota_detail, !error.isEmpty());
@@ -502,16 +517,16 @@ public class UpdaterActivity extends Activity {
                 R.id.ota_aside_text,
                 failed || !error.isEmpty()
                         ? "Установите релиз через USB с компьютера. Причина ошибки показана на"
-                              + " экране."
+                                + " экране."
                         : installing
                                 ? "Оставьте автомобиль в P. Не выключайте головное устройство до"
-                                      + " завершения установки и проверки запуска."
+                                        + " завершения установки и проверки запуска."
                                 : p.success
                                         ? "Настройки VoyahTune сохранены. Можно вернуться к"
-                                              + " привычным функциям приложения."
+                                                + " привычным функциям приложения."
                                         : "Обновление сохраняет настройки VoyahTune.\n"
-                                              + "Перед установкой переведите автомобиль в P и"
-                                              + " сохраняйте питание до завершения.");
+                                                + "Перед установкой переведите автомобиль в P и"
+                                                + " сохраняйте питание до завершения.");
         text(
                 R.id.ota_footer_note,
                 failed
@@ -521,7 +536,7 @@ public class UpdaterActivity extends Activity {
                                 : p.success
                                         ? "Установка и проверка запуска завершены."
                                         : "Проверка новых версий — автоматически, не чаще одного"
-                                              + " раза в 24 часа.");
+                                                + " раза в 24 часа.");
         text(
                 R.id.ota_primary,
                 p.primary
@@ -540,6 +555,32 @@ public class UpdaterActivity extends Activity {
                 findViewById(R.id.ota_settings),
                 connected && !p.busy && !actionBusy && !"repair-required".equals(phase));
         UpdaterDesign.render(this, p, connected, failed || !error.isEmpty());
+    }
+
+    private void saveCatalogSettings(
+            AlertDialog dialog, EditText url, Switch dns, boolean dnsKnown, boolean sameVersion) {
+        if (actionBusy) return;
+        boolean refreshCatalog = settings.has("defaultCatalogUrl");
+        try {
+            JSONObject input =
+                    request(dnsSupported ? "set_settings" : "set_catalog_url")
+                            .put("url", url.getText().toString().trim());
+            if (dnsSupported)
+                input.put("dns_enabled", dnsKnown ? dns.isChecked() : JSONObject.NULL);
+            command(
+                    input,
+                    result -> {
+                        settings = result.getJSONObject("settings");
+                        dialog.dismiss();
+                        if (refreshCatalog) {
+                            perform("check", sameVersion);
+                        } else {
+                            Toast.makeText(this, "Настройки сохранены", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+        } catch (Exception error) {
+            if (settingsMessage != null) settingsMessage.setText(reason(error));
+        }
     }
 
     private void openSettings() {
@@ -574,7 +615,13 @@ public class UpdaterActivity extends Activity {
             settingsReset.setOnClickListener(view -> url.setText(defaultCatalogUrl));
             content.addView(catalogField);
         }
-        label(content, "Смена адреса не запускает скачивание или установку.", 15);
+        label(
+                content,
+                settings.has("defaultCatalogUrl")
+                        ? "Сохранение обновит список релизов по указанному адресу. Скачивание и"
+                              + " установка запускаются отдельно."
+                        : "Смена адреса не запускает скачивание или установку.",
+                15);
         Switch dns = new Switch(this);
         dns.setText("Яндекс DNS");
         dns.setTextSize(20);
@@ -597,7 +644,7 @@ public class UpdaterActivity extends Activity {
                                 on
                                         ? "При установке релиза будет включён Яндекс DNS."
                                         : "При установке релиза будет использован стандартный"
-                                              + " DNS.");
+                                                + " DNS.");
                 });
         Button repeat = new Button(this);
         UpdaterDesign.styleAction(repeat, false);
@@ -635,39 +682,15 @@ public class UpdaterActivity extends Activity {
         settingsSave = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         repeat.setOnClickListener(
                 v -> {
-                    dialog.dismiss();
-                    perform("check", true);
+                    if (settings.has("defaultCatalogUrl")) {
+                        saveCatalogSettings(dialog, url, dns, known[0], true);
+                    } else {
+                        dialog.dismiss();
+                        perform("check", true);
+                    }
                 });
         dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-                .setOnClickListener(
-                        v -> {
-                            if (actionBusy) return;
-                            try {
-                                JSONObject input =
-                                        request(dnsSupported ? "set_settings" : "set_catalog_url")
-                                                .put("url", url.getText().toString().trim());
-                                if (dnsSupported)
-                                    input.put(
-                                            "dns_enabled",
-                                            known[0] ? dns.isChecked() : JSONObject.NULL);
-                                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
-                                command(
-                                        input,
-                                        result -> {
-                                            settings = result.getJSONObject("settings");
-                                            dialog.dismiss();
-                                            Toast.makeText(
-                                                            this,
-                                                            "Настройки сохранены",
-                                                            Toast.LENGTH_SHORT)
-                                                    .show();
-                                        });
-                                // Errors remain visible inside the dialog rather than hidden behind
-                                // it.
-                            } catch (Exception e) {
-                                dnsInfo.setText(reason(e));
-                            }
-                        });
+                .setOnClickListener(v -> saveCatalogSettings(dialog, url, dns, known[0], false));
         if (dnsSupported) {
             try {
                 command(
@@ -692,7 +715,7 @@ public class UpdaterActivity extends Activity {
                                                             : "стандартный DNS")
                                                     + ". Выбор применяется при установке релиза."
                                             : "DNS не определён или изменён извне. Оставляем без"
-                                                  + " изменений."
+                                                    + " изменений."
                                                     + (!result.isNull("dnsError")
                                                             ? "\n" + result.optString("dnsError")
                                                             : ""));

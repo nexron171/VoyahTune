@@ -28,8 +28,12 @@ fn payload_body_timeout(infrastructure: Infrastructure) -> Option<Duration> {
     }
 }
 pub fn catalog(url: &str) -> io::Result<Catalog> {
-    let mut response = agent(60, Some(Duration::from_secs(45)))
-        .get(url)
+    let client = agent(60, Some(Duration::from_secs(45)));
+    let mut request = client.get(url);
+    if crate::restore_ui::enabled() {
+        request = request.header("Cache-Control", "no-cache");
+    }
+    let mut response = request
         .call()
         .map_err(|e| invalid(&format!("Каталог: {e}")))?;
     let mut bytes = Vec::new();

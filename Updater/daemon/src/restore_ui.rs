@@ -21,6 +21,7 @@ pub fn capabilities() -> Vec<&'static str> {
     let mut result = vec!["install-step-progress", "dns-settings"];
     if enabled() {
         result.push("restoremode-ota-ui-v1");
+        result.push("catalog-releases");
     }
     result
 }

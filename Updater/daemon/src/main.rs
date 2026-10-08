@@ -204,6 +204,7 @@ fn run() -> io::Result<()> {
                 let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
                 let changed = config::change_settings(root, current, &url, dns_enabled)?;
                 if changed {
+                    rt.state.clear_od_catalog();
                     rt.state.selected = None;
                     rt.state.notice = None;
                     rt.state.phase = "idle".into();
@@ -221,6 +222,7 @@ fn run() -> io::Result<()> {
                 }
                 let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
                 if config::change_url(root, current, &url)? {
+                    rt.state.clear_od_catalog();
                     rt.state.selected = None;
                     rt.state.notice = None;
                     if !rt.state.repair() {

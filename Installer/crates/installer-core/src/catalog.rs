@@ -37,6 +37,7 @@ pub struct CachedPayload {
 #[serde(rename_all = "camelCase")]
 pub struct CatalogState {
     pub catalog: Catalog,
+    pub catalog_url: String,
     pub cached: Vec<CachedPayload>,
     pub warning: Option<String>,
     pub installer_version: String,
@@ -167,6 +168,7 @@ impl Cache {
             }
         }
         Ok(CatalogState {
+            catalog_url: self.catalog_settings()?.catalog_url,
             catalog: catalog.unwrap_or_else(Catalog::empty),
             cached: self.list()?,
             warning,
@@ -356,7 +358,11 @@ impl Cache {
     }
 }
 fn fetch_catalog(client: &ureq::Agent, url: &str) -> Result<Catalog> {
-    let mut response = client.get(url).call().map_err(network)?;
+    let mut response = client
+        .get(url)
+        .header("Cache-Control", "no-cache")
+        .call()
+        .map_err(network)?;
     let bytes = response
         .body_mut()
         .with_config()
@@ -582,7 +588,10 @@ mod tests {
         assert!(offline.warning.is_some());
         let selected = a.releases[0].clone();
         let mut next = selected.clone();
-        next.version = "3.13.1".into();
+        next.version = "4.1.0-beta-od".into();
+        next.channel = "prerelease".into();
+        next.minimum_installer_version = Some("1.7.0".into());
+        next.minimum_ota_version = Some("4.1.0".into());
         next.payload.url = "https://example.org/B.zip".into();
         next.payload.sha256 = "b".repeat(64);
         a.releases.push(next);
@@ -594,12 +603,12 @@ mod tests {
         let refreshed = reopened
             .state_with(|| fetch_catalog(&client, &url), true)
             .unwrap();
-        assert_eq!(refreshed.catalog.releases[0].version, "3.13.1");
+        assert_eq!(refreshed.catalog.releases[0].version, "4.1.0-beta-od");
         assert!(refreshed
             .catalog
             .releases
             .iter()
-            .any(|r| r.version == "3.13.1"));
+            .any(|r| r.version == "4.1.0-beta-od"));
         assert_eq!(selected.version, "3.13.0");
         assert_eq!(selected.payload.sha256, "a".repeat(64));
         worker.join().unwrap();

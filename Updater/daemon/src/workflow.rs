@@ -93,6 +93,7 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     state.recover_interrupted(&device::boot());
     if let Ok(c) = &config {
         if state.source_generation != c.source_generation && !state.repair() {
+            state.clear_od_catalog();
             state.selected = None;
             state.phase = "idle".into();
             state.source_generation = c.source_generation;
@@ -262,6 +263,7 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     if url.is_empty() {
         return Err(invalid("Адрес каталога не настроен. Укажите HTTPS адрес каталога для установленной инфраструктуры."));
     }
+    update(shared, State::clear_od_catalog)?;
     phase(shared, "checking", "Проверка каталога релизов")?;
     if device::prop("ro.build.fingerprint")? != snapshot(shared).fingerprint {
         return Err(invalid("Прошивка ГУ изменилась. Требуется USB-установка"));
@@ -289,6 +291,21 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
         != generation
     {
         return Err(invalid("Источник каталога изменён"));
+    }
+    if crate::restore_ui::enabled() {
+        rt.state.catalog_versions = Some(
+            catalog
+                .releases
+                .iter()
+                .filter(|release| {
+                    release_core::infrastructure::Infrastructure::from_version(&release.version)
+                        .is_ok_and(|profile| {
+                            profile == release_core::infrastructure::Infrastructure::Od
+                        })
+                })
+                .map(|release| release.version.clone())
+                .collect(),
+        );
     }
     rt.state.source_generation = generation;
     rt.state.same_version = same;
