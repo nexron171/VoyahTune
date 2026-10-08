@@ -3,6 +3,7 @@ package ru.big.town.restoremode.settings.ui.dialogs;
 import android.content.Context;
 import android.content.Intent;
 
+import ru.big.town.common.CarPlayTarget;
 import ru.big.town.restoremode.R;
 
 public final class SettingsAppPicker {
@@ -13,6 +14,15 @@ public final class SettingsAppPicker {
     }
 
     public static void show(Context context, String title, AppPicked callback) {
+        show(context, title, callback, false);
+    }
+
+    public static void showWithCarPlay(Context context, String title, AppPicked callback) {
+        show(context, title, callback, true);
+    }
+
+    private static void show(
+            Context context, String title, AppPicked callback, boolean includeCarPlay) {
         android.content.pm.PackageManager packageManager = context.getPackageManager();
         Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         java.util.List<android.content.pm.ResolveInfo> apps =
@@ -20,7 +30,14 @@ public final class SettingsAppPicker {
 
         java.util.LinkedHashMap<String, String> map = new java.util.LinkedHashMap<>();
         for (android.content.pm.ResolveInfo ri : apps) {
-            String packageName = ri.activityInfo.packageName;
+            if (!includeCarPlay
+                    && CarPlayTarget.PACKAGE.equals(ri.activityInfo.packageName)
+                    && CarPlayTarget.LAUNCHER.equals(ri.activityInfo.name)) continue;
+            String packageName =
+                    CarPlayTarget.PACKAGE.equals(ri.activityInfo.packageName)
+                                    && CarPlayTarget.LAUNCHER.equals(ri.activityInfo.name)
+                            ? CarPlayTarget.ID
+                            : ri.activityInfo.packageName;
             if (!map.containsKey(packageName)) {
                 map.put(packageName, ri.loadLabel(packageManager).toString());
             }

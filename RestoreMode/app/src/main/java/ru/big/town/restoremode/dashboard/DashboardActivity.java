@@ -57,6 +57,7 @@ import androidx.core.view.WindowInsetsCompat;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.snackbar.Snackbar;
 
+import ru.big.town.common.CarPlayTarget;
 import ru.big.town.common.TripProtocol;
 import ru.big.town.restoremode.AdvanceActivity;
 import ru.big.town.restoremode.AdvanceActivityStarButton;
@@ -1333,7 +1334,7 @@ public class DashboardActivity extends AppCompatActivity {
             android.content.pm.PackageManager pm = getPackageManager();
             label = pm.getApplicationLabel(pm.getApplicationInfo(configured, 0)).toString();
         } catch (Exception e) {
-            label = configured;
+            label = CarPlayTarget.isCarPlay(configured) ? CarPlayTarget.LABEL : configured;
         }
         return designation.isEmpty() ? label : designation + " · " + label;
     }
@@ -2125,7 +2126,9 @@ public class DashboardActivity extends AppCompatActivity {
                 appWidgetView.setLayoutParams(lp);
                 splitTilesGrid.addView(appWidgetView);
                 tileDragController.add(appWidgetView, tilePos, widgetWidth, widgetHeight);
-                if (entry.autoStart) {
+                if (entry.autoStart
+                        && !CarPlayTarget.opensActivity(
+                                entry.packageName, entry.width, entry.height)) {
                     appWidgetView.postDelayed(
                             () -> {
                                 if (!embeddedWidgetSurfaces.containsKey(entry.id)) {
@@ -2513,6 +2516,10 @@ public class DashboardActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
 
+            if (CarPlayTarget.isCarPlay(profile.packageName)) {
+                name = CarPlayTarget.LABEL;
+                ico.setImageResource(R.drawable.ic_carplay);
+            }
             label.setText(name);
             item.setOnClickListener(
                     v -> {
@@ -2594,6 +2601,14 @@ public class DashboardActivity extends AppCompatActivity {
             String packageName,
             int profileDpi,
             String moveFromWidgetId) {
+        if (CarPlayTarget.opensActivity(packageName, entry.width, entry.height)) {
+            if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
+                sendAppWindow(packageName);
+            } else {
+                launchAppNormally(packageName);
+            }
+            return;
+        }
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
             showSnack("Сервис не готов");
             return;
@@ -3200,7 +3215,7 @@ public class DashboardActivity extends AppCompatActivity {
     /** Обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
     private void launchAppNormally(String pkg) {
         try {
-            Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+            Intent i = CarPlayTarget.launchIntent(this, pkg);
             if (i == null) {
                 showSnack("Не удалось открыть приложение");
                 return;

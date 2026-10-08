@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import ru.big.town.common.CarPlayTarget;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
@@ -144,7 +145,11 @@ public class TileOrderStore {
                 return false;
             }
             try {
-                pm.getApplicationInfo(entry.packageName, 0);
+                pm.getApplicationInfo(
+                        CarPlayTarget.isCarPlay(entry.packageName)
+                                ? CarPlayTarget.PACKAGE
+                                : entry.packageName,
+                        0);
                 return true;
             } catch (Exception ignored) {
                 return false;

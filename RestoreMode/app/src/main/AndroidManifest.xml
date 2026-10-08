@@ -37,6 +37,30 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RestoreMode"
         tools:targetApi="31">
+        <activity android:name="com.shilapi.xcertplay.DiPlayActivity"
+            android:label="VoyahTune CarPlay"
+            android:icon="@drawable/ic_carplay"
+            android:taskAffinity="${applicationId}.carplay.settings"
+            android:launchMode="singleTask"
+            tools:replace="android:launchMode">
+            <intent-filter tools:node="removeAll" />
+        </activity>
+        <activity android:name=".carplay.CarPlayLauncherActivity"
+            android:exported="true"
+            android:label="VoyahTune CarPlay"
+            android:icon="@drawable/ic_carplay"
+            android:taskAffinity="${applicationId}.carplay.launcher"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <receiver android:name="com.shilapi.xcertplay.BootReceiver"
+            android:enabled="false" tools:replace="android:enabled" />
+        <activity android:name="com.shilapi.xcertplay.AdbClusterActivity" tools:node="remove" />
+        <service android:name="com.shilapi.xcertplay.shared.MyCarAppService" tools:node="remove" />
         <service android:name=".TripLocationService"
             android:exported="true"
             android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE"

@@ -16,6 +16,7 @@ import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import ru.big.town.common.CarPlayTarget;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.dashboard.tiles.TileScrollSnap;
@@ -512,10 +513,39 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                     .show();
             return;
         }
-        SettingsAppPicker.show(
+        SettingsAppPicker.showWithCarPlay(
                 requireContext(),
                 "Приложение для виджета",
                 (packageName, label) -> {
+                    if (CarPlayTarget.isCarPlay(packageName)) {
+                        new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                                        requireContext(), R.style.SettingsDialog)
+                                .setTitle("Размер CarPlay")
+                                .setItems(
+                                        new String[] {
+                                            "1×1 — открыть приложение",
+                                            "8×5",
+                                            "9×5",
+                                            "10×5",
+                                            "11×5",
+                                            "12×5 — вся ширина сетки"
+                                        },
+                                        (dialog, size) -> {
+                                            AppWidgetStore.Entry entry =
+                                                    AppWidgetStore.add(preferences, packageName);
+                                            if (entry == null) return;
+                                            entry.width = size == 0 ? 1 : size + 7;
+                                            entry.height = size == 0 ? 1 : 5;
+                                            AppWidgetStore.update(preferences, entry);
+                                            TileOrderStore.sync(
+                                                    preferences,
+                                                    requireContext().getPackageManager());
+                                            renderAppWidgets();
+                                        })
+                                .setNegativeButton("Отмена", null)
+                                .show();
+                        return;
+                    }
                     AppWidgetStore.add(preferences, packageName);
                     TileOrderStore.sync(preferences, requireContext().getPackageManager());
                     renderAppWidgets();
@@ -544,6 +574,10 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             label.setText(packageManager.getApplicationLabel(info));
         } catch (Exception ignored) {
             label.setText(profile.packageName);
+        }
+        if (CarPlayTarget.isCarPlay(profile.packageName)) {
+            label.setText(CarPlayTarget.LABEL);
+            icon.setImageResource(R.drawable.ic_carplay);
         }
         String[] labels = new String[AppWidgetStore.DPI_VALUES.length];
         int selected = 0;
@@ -690,6 +724,10 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             name = packageManager.getApplicationLabel(info).toString();
             icon.setImageDrawable(packageManager.getApplicationIcon(info));
         } catch (Exception ignored) {
+        }
+        if (CarPlayTarget.isCarPlay(entry.packageName)) {
+            name = CarPlayTarget.LABEL;
+            icon.setImageResource(R.drawable.ic_carplay);
         }
         label.setText("Виджет " + AppWidgetStore.designation(preferences, entry.id) + ": " + name);
         ((TextView) row.findViewById(R.id.settingsAppWidgetSubtitle))

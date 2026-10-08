@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "ru.big.town.restoremode"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "ru.big.town.restoremode"
@@ -78,6 +78,7 @@ android {
 
 dependencies {
     implementation(project(":updater-ui"))
+    implementation(project(":diplay-common"))
 
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation(files(layout.buildDirectory.file("voice-deps/downloads/sherpa.aar")))
@@ -106,11 +107,11 @@ val prepareVoiceNative = tasks.register<Exec>("prepareVoiceNative") {
         rootProject.fileTree("voice-native") { exclude("target/**") })
     outputs.dir(layout.buildDirectory.dir("voice-deps/jniLibs"))
     commandLine("python3", rootProject.file("prepare_voice.py"), "--ndk",
-        android.sdkDirectory.resolve("ndk/${android.ndkVersion}"), "--abis", "arm64-v8a,x86_64")
+        androidComponents.sdkComponents.sdkDirectory.get().asFile.resolve("ndk/${android.ndkVersion}"), "--abis", "arm64-v8a,x86_64")
 }
 android.sourceSets.getByName("main") {
-    assets.srcDir(layout.buildDirectory.dir("voice-deps/assets"))
-    jniLibs.srcDir(layout.buildDirectory.dir("voice-deps/jniLibs"))
+    assets.directories.add(layout.buildDirectory.dir("voice-deps/assets").get().asFile.path)
+    jniLibs.directories.add(layout.buildDirectory.dir("voice-deps/jniLibs").get().asFile.path)
 }
 tasks.named("preBuild") { dependsOn(prepareVoiceDependencies, prepareVoiceNative) }
 
@@ -203,4 +204,11 @@ androidComponents {
     }
 }
 
-android.sourceSets.getByName("main").java.srcDir(rootProject.projectDir.parentFile.resolve("SharedAndroid/src/main/java"))
+android.sourceSets.getByName("main").java.directories.add(rootProject.projectDir.parentFile.resolve("SharedAndroid/src/main/java").path)
+
+val authenticationAssets = providers.environmentVariable("DIPLAY_AUTH_ASSETS_DIR")
+authenticationAssets.orNull?.let { directory ->
+    require(file(directory).resolve("offline-mfi/identity.pk8").isFile)
+    require(file(directory).resolve("offline-mfi/certificate.p7b").isFile)
+    android.sourceSets.getByName("main").assets.directories.add(directory)
+}
