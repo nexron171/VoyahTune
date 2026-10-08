@@ -21,8 +21,7 @@ export function onPayloadProgress(callback: (event: PayloadProgress) => void) {
 }
 const scenario = new URLSearchParams(location.search).get("fixture");
 export function subscribe(callback: (event: Event) => void) {
-  if (scenario === "events-error")
-    throw Error("core:event:allow-listen denied");
+  if (scenario === "events-error") throw Error("core:event:allow-listen denied");
   listeners.add(callback);
   return () => {
     listeners.delete(callback);
@@ -47,14 +46,22 @@ const emit = (
   for (const listener of listeners) listener(event);
 };
 const versions =
-  scenario === "profiles"
-    ? ["3.22.0-od", "3.22.0-pi", "3.21.0"]
-    : ["3.13.0", "3.12.0", "3.11.0", "3.10.0", "3.9.0", "3.8.0"];
-const digest = (version: string) => version.replaceAll(".", "").padEnd(64, "a");
+  scenario === "catalog-alias"
+    ? ["4.1.0-od", "4.0.0-od"]
+    : scenario === "profiles"
+      ? ["3.22.0-od", "3.22.0-pi", "3.21.0"]
+      : ["3.13.0", "3.12.0", "3.11.0", "3.10.0", "3.9.0", "3.8.0"];
+const digest = (version: string) =>
+  (scenario === "catalog-alias" ? "4.0.0-od" : version)
+    .replaceAll(".", "")
+    .padEnd(64, "a");
 const cachePath = (version: string) => "/demo/payloads/" + digest(version);
-let cached: CachedPayload[] = ["ready", "offline"].includes(scenario || "")
-  ? [{ version: "3.12.0", path: cachePath("3.12.0"), deletable: true }]
-  : [];
+let cached: CachedPayload[] =
+  scenario === "catalog-alias"
+    ? [{ version: "4.0.0-od", path: cachePath("4.0.0-od"), deletable: true }]
+    : ["ready", "offline"].includes(scenario || "")
+      ? [{ version: "3.12.0", path: cachePath("3.12.0"), deletable: true }]
+      : [];
 let selectedPath = "";
 let catalogUrl =
   sessionStorage.getItem("fixture-catalog-url") ||
@@ -111,15 +118,14 @@ export async function command(
             : [
                 {
                   serial: "CAR-001",
-                  state:
-                    scenario === "unauthorized" ? "unauthorized" : "device",
+                  state: scenario === "unauthorized" ? "unauthorized" : "device",
                   model: "Voyah Free",
                 },
               ],
     };
   if (name === "release_catalog")
     return {
-      installerVersion: "1.0.3",
+      installerVersion: scenario === "catalog-alias" ? "1.6.0" : "1.0.3",
       catalog: {
         generatedAt: "2026-09-27",
         releases: ["offline", "empty"].includes(scenario || "")
@@ -129,9 +135,17 @@ export async function command(
               publishedAt: `2026-09-${26 - i}`,
               channel: version.includes("-") ? "prerelease" : "stable",
               notesUrl: "https://github.com/nexron171/VoyahTune/releases",
-              compatible: scenario !== "incompatible",
-              incompatibility: "Требуется установщик 2.0.0",
-              requirements: { minInstallerVersion: "2.0.0" },
+              compatible:
+                scenario !== "incompatible" &&
+                !(scenario === "catalog-alias" && version === "4.1.0-od"),
+              incompatibility:
+                scenario === "catalog-alias"
+                  ? "Требуется установщик 1.7.0"
+                  : "Требуется установщик 2.0.0",
+              requirements: {
+                minInstallerVersion:
+                  scenario === "catalog-alias" ? "1.7.0" : "2.0.0",
+              },
               payload: { size: 150000000, sha256: digest(version) },
             })),
         installerDownloads: [],

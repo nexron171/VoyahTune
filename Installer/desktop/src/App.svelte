@@ -63,8 +63,12 @@
     const rows: ReleaseRow[] = stable.map((release) => ({
       version: release.version,
       release,
-      cached: cached.find((c) =>
-        c.path.replaceAll("\\", "/").endsWith("/" + release.payload.sha256),
+      cached: cached.find(
+        (entry) =>
+          entry.version === release.version &&
+          entry.path
+            .replaceAll("\\", "/")
+            .endsWith("/" + release.payload.sha256),
       ),
     }));
     for (const entry of cached)
