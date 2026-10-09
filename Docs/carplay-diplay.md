@@ -86,8 +86,8 @@ Release ABI приложения — arm64-v8a, debug включает arm64-v8a
 
 | Компонент | Итоговое требование |
 | --- | --- |
-| `DiPlayActivity` | `singleTask`, affinity `${applicationId}.carplay.settings`, label VoyahTune CarPlay, иконка `@drawable/carplay_home_logo`; upstream intent-фильтры удалены через `tools:node="removeAll"`. |
-| `CarPlayLauncherActivity` | Единственный launcher-вход CarPlay; exported, affinity `.carplay.launcher`, `excludeFromRecents`, прозрачная тема, иконка `@drawable/carplay_home_logo` (тот же PNG, что на стартовом экране). Основной launcher VoyahTune сохраняется. |
+| `DiPlayActivity` | `singleTask`, affinity `${applicationId}.carplay.settings`, label VoyahTune CarPlay, иконка `@mipmap/ic_carplay_launcher`; upstream intent-фильтры удалены через `tools:node="removeAll"`. |
+| `CarPlayLauncherActivity` | Единственный launcher-вход CarPlay; exported, affinity `.carplay.launcher`, `excludeFromRecents`, прозрачная тема, иконка `@mipmap/ic_carplay_launcher`. Основной launcher VoyahTune сохраняется. |
 | `CarPlayHostActivity` | `singleTask`, affinity `${applicationId}.carplay`, resizeable/configChanges и штатный USB attach intent из common. |
 | `DiPlaySessionService` | Штатный foreground service connectedDevice/microphone/location с учётом разрешений; не отдельный процесс. |
 | `BootReceiver` | `enabled=false` через manifest override. Наличие опции boot в штатном UI не включает этот receiver. |
@@ -131,6 +131,20 @@ Process-local `ready` предотвращает повторную загруз
 старого экспериментального APK в RestoreMode автоматически не мигрируют.
 
 ## 4. Запуск, виджет и владение сессией
+
+Launcher-иконки независимы от значка стартового экрана и заглушки виджета
+`drawable-nodpi/carplay_home_logo.png`. Исходник CarPlay —
+[artwork/carplay-launcher.png](../RestoreMode/artwork/carplay-launcher.png)
+(центрированная композиция: зелёный автомобиль под крупным символом CarPlay), основного приложения —
+[artwork/restoremode-launcher.png](../RestoreMode/artwork/restoremode-launcher.png)
+(серый автомобиль). Ресурсы находятся в `app/src/main/res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}`:
+`ic_carplay_launcher[_round].webp`, `ic_restoremode[_round].webp` — 48/72/96/144/192 px;
+adaptive foreground `ic_carplay_launcher_foreground.webp` и `restoremode.webp` —
+108/162/216/324/432 px, изображение занимает весь слой без полей по выбору пользователя.
+Adaptive XML в `mipmap-anydpi-v26` задаёт тёмный фон и системную маску, которая может
+обрезать края композиции; round-варианты legacy имеют круглую альфа-маску. WebP сохраняется без потерь,
+512 px PNG лежат в `app/src/main/ic_carplay_launcher-playstore.png` и
+`ic_restoremode-playstore.png`. При обновлении upstream сохранять эти app-ресурсы.
 
 `CarPlayTarget` задаёт стабильные значения:
 
@@ -553,7 +567,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [common/src/main/java/com/shilapi/xcertplay/PhoneBluetoothReceiver.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/PhoneBluetoothReceiver.kt) | Ранний return по standaloneAppEnabled: запуск только через VoyahTune/Native. |
 | [common/src/test/java/com/shilapi/xcertplay/PhoneBluetoothReceiverTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/PhoneBluetoothReceiverTest.kt) | Даже сохранённый opt-in и событие выбранного телефона не запускают отдельный task. |
 | [common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt) | Guard штатного Siri-перехвата при available, остальная обработка клавиш сохраняется. |
-| [common/src/main/res/raw/ic_car_home.png](../RestoreMode/diplay/common/src/main/res/raw/ic_car_home.png) | Бинарный ресурс из указанного commit VoyahPlay; не путать с launcher drawable-nodpi/carplay_home_logo.png. |
+| [common/src/main/res/raw/ic_car_home.png](../RestoreMode/diplay/common/src/main/res/raw/ic_car_home.png) | Бинарный ресурс из указанного commit VoyahPlay; не путать с launcher mipmap/ic_carplay_launcher и значком стартового экрана drawable-nodpi/carplay_home_logo.png. |
 | [common/src/test/java/com/shilapi/xcertplay/AppLocaleTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/AppLocaleTest.kt) | Default ru и сохранение явного выбора языка при Voyah integration. |
 | [common/src/test/java/com/shilapi/xcertplay/SettingsTranslationsTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/SettingsTranslationsTest.kt) | Полное покрытие русского перевода common/shared и совпадение форматных параметров. |
 | [common/src/test/java/com/shilapi/xcertplay/SmoothVideoHostLifecycleTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/SmoothVideoHostLifecycleTest.kt) | Смена дисплея Voyah: ждать единственного stop, не принимать старый controller, новый размер 1280×600 вместо 1920×990. |
