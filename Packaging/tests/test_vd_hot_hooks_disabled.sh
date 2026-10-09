@@ -46,8 +46,8 @@ if grep -Fq 'scheduleFreeformHotAttach(0, "config reload");' "$VD"; then
     fail "startup config immediately reattaches WindowManager hot hooks"
 fi
 config_replay_function=$(awk '
-    /^    function scheduleFreeformConfigReplay\(reason\) \{/ { capture = 1 }
-    /^    function scheduleFreeformHotAttach\(delayMs, reason\) \{/ { capture = 0 }
+    /^[[:space:]]*function scheduleFreeformConfigReplay\(reason\) \{/ { capture = 1 }
+    /^[[:space:]]*function scheduleFreeformHotAttach\(delayMs, reason\) \{/ { capture = 0 }
     capture { print }
 ' "$VD")
 [ -n "$config_replay_function" ] || fail "cannot inspect config replay implementation"
