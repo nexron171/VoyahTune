@@ -319,7 +319,6 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         Button leftAppButton = row.findViewById(R.id.splitLeftBtn);
         Button rightAppButton = row.findViewById(R.id.splitRightBtn);
         Button deleteButton = row.findViewById(R.id.splitDeleteBtn);
-        android.widget.Spinner scaleSpinner = row.findViewById(R.id.splitRatioSpinner);
 
         leftAppButton.setText(preset.ll.isEmpty() ? "не выбрано" : preset.ll);
         rightAppButton.setText(preset.rl.isEmpty() ? "не выбрано" : preset.rl);
@@ -355,12 +354,6 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
                                     }
                                 }));
 
-        android.widget.ArrayAdapter<String> spinnerAdapter =
-                new android.widget.ArrayAdapter<>(
-                        requireContext(), R.layout.settings_spinner_item, SplitStore.RATIO_LABELS);
-        spinnerAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        scaleSpinner.setAdapter(spinnerAdapter);
-        scaleSpinner.setSelection(preset.ratio, false);
         SettingsChoiceGroup ratios = row.findViewById(R.id.settingsSplitRatios);
         for (int ratioIndex = 0; ratioIndex < SplitStore.RATIO_LABELS.length; ratioIndex++) {
             RadioButton choice = new RadioButton(requireContext());
@@ -375,33 +368,20 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         ratios.setOnCheckedChangeListener(
                 (group, checkedId) -> {
                     View selected = group.findViewById(checkedId);
-                    if (selected != null) {
-                        scaleSpinner.setSelection((Integer) selected.getTag());
+                    if (selected == null) {
+                        return;
                     }
-                });
-        scaleSpinner.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long id) {
-                        java.util.List<SplitStore.Preset> updatedPresets =
-                                SplitStore.load(preferences);
-                        if (presetIndex < updatedPresets.size()
-                                && updatedPresets.get(presetIndex).ratio != position) {
-                            updatedPresets.get(presetIndex).ratio = position;
-                            updatedPresets.get(presetIndex).split = 0f;
-                            preview.setSplit(updatedPresets.get(presetIndex));
-                            ratioLabel.setText(
-                                    SplitStore.RATIO_LABELS[updatedPresets.get(presetIndex).ratio]);
-                            saveSplitPresets(updatedPresets);
-                        }
+                    int position = (Integer) selected.getTag();
+                    java.util.List<SplitStore.Preset> updatedPresets =
+                            SplitStore.load(preferences);
+                    if (presetIndex < updatedPresets.size()
+                            && updatedPresets.get(presetIndex).ratio != position) {
+                        updatedPresets.get(presetIndex).ratio = position;
+                        updatedPresets.get(presetIndex).split = 0f;
+                        preview.setSplit(updatedPresets.get(presetIndex));
+                        ratioLabel.setText(SplitStore.RATIO_LABELS[position]);
+                        saveSplitPresets(updatedPresets);
                     }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
                 });
 
         Switch resizable = row.findViewById(R.id.splitResizableSwitch);

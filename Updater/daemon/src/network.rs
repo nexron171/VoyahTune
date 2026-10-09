@@ -1,5 +1,6 @@
 use crate::config::invalid;
 use release_core::catalog::Catalog;
+use release_core::infrastructure::Infrastructure;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -8,18 +9,26 @@ use std::{
     path::Path,
     time::Duration,
 };
-fn agent(seconds: u64) -> ureq::Agent {
+fn agent(seconds: u64, body_timeout: Option<Duration>) -> ureq::Agent {
     ureq::Agent::config_builder()
         .https_only(true)
         .max_redirects(5)
         .timeout_global(Some(Duration::from_secs(seconds)))
         .timeout_connect(Some(Duration::from_secs(20)))
-        .timeout_recv_body(Some(Duration::from_secs(45)))
+        .timeout_recv_body(body_timeout)
         .build()
         .new_agent()
 }
+fn payload_body_timeout(infrastructure: Infrastructure) -> Option<Duration> {
+    match infrastructure {
+        // ureq's body timeout covers the entire transfer, not inactivity between reads.
+        // OD payloads use the global one-hour budget; PI retains its existing policy.
+        Infrastructure::Od => None,
+        Infrastructure::Pi => Some(Duration::from_secs(45)),
+    }
+}
 pub fn catalog(url: &str) -> io::Result<Catalog> {
-    let mut response = agent(60)
+    let mut response = agent(60, Some(Duration::from_secs(45)))
         .get(url)
         .call()
         .map_err(|e| invalid(&format!("Каталог: {e}")))?;
@@ -43,7 +52,7 @@ pub fn download(
     sha: &str,
     progress: impl Fn(u64),
 ) -> io::Result<()> {
-    let mut response = agent(3600)
+    let mut response = agent(3600, payload_body_timeout(Infrastructure::compiled()))
         .get(url)
         .call()
         .map_err(|e| invalid(&format!("Скачивание: {e}")))?;
@@ -142,6 +151,50 @@ pub fn extract(source: &Path, target: &Path, progress: impl Fn(u64, u64)) -> io:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{net::TcpListener, thread};
+
+    #[test]
+    fn continuous_payload_transfer_outlasts_body_budget_only_for_od() {
+        fn receive(infrastructure: Infrastructure) -> io::Result<Vec<u8>> {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket.set_nodelay(true).unwrap();
+                let mut request = [0; 4096];
+                socket.read(&mut request).unwrap();
+                socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\n")
+                    .unwrap();
+                for byte in b"payload" {
+                    if socket.write_all(&[*byte]).is_err() {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(60));
+                }
+            });
+
+            // Scale the legacy 45-second budget to 200ms for a short streaming test.
+            let body_timeout = payload_body_timeout(infrastructure).map(|timeout| timeout / 225);
+            let mut response = agent(5, body_timeout)
+                .get(format!("http://{address}/payload"))
+                .config()
+                .https_only(false)
+                .build()
+                .call()
+                .unwrap();
+            let mut bytes = Vec::new();
+            let result = response.body_mut().as_reader().read_to_end(&mut bytes);
+            drop(response);
+            server.join().unwrap();
+            result.map(|_| bytes)
+        }
+
+        assert_eq!(receive(Infrastructure::Od).unwrap(), b"payload");
+        let error = receive(Infrastructure::Pi).unwrap_err();
+        assert!(error.to_string().contains("timeout: receive body"));
+    }
+
     #[test]
     fn extraction_rejects_escape_and_collision_before_writing_outside_stage() {
         for names in [["../outside", "file"], ["A/file", "a/other"]] {
