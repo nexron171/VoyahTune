@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="carplay_night_mode">CarPlay 日夜模式</string>
+    <string name="settings_app_appearance">应用外观</string>
+    <string name="settings_app_appearance_dark">深色</string>
+    <string name="settings_app_appearance_light">浅色</string>
+    <string name="settings_app_appearance_auto">自动</string>
+    <string name="settings_app_appearance_description">自动模式跟随已保存的 CarPlay 日夜设置；CarPlay 打开时则跟随实时结果。浅色和深色模式保持固定，无需重新连接。</string>
+    <string name="settings_switch_to_light_appearance">切换到浅色外观</string>
+    <string name="settings_switch_to_dark_appearance">切换到深色外观</string>
     <string name="carplay_night_system">跟随 Android 系统</string>
     <string name="carplay_night_ambient">自动（环境光）</string>
     <string name="carplay_night_day">固定日间</string>

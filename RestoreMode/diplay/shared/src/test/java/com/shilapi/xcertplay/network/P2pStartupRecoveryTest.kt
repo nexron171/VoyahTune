@@ -357,6 +357,65 @@ class P2pStartupRecoveryTest {
         }
     }
 
+    @Test fun fiveGhzBandStaysInsideTheBandAndIgnoresStationOnTwoGhzAndRememberedAuto() {
+        val remembered = P2pCreationRequest(P2pCreationMode.FIXED_2_GHZ, 2437)
+        val plan = P2pStartupRecovery.plan(2437, remembered, preferredChannel = WifiP2pChannels.AUTO_5_GHZ)
+        assertEquals(listOf(
+            P2pCreationRequest(P2pCreationMode.BAND_5_GHZ),
+            P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5180),
+            P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5745),
+            P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5220),
+            P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5785),
+        ), plan)
+        assertTrue(plan.none { it.mode == P2pCreationMode.SYSTEM_DEFAULT })
+    }
+
+    @Test fun bandPlanPutsAnInBandStationChannelFirstWithoutRepeatingIt() {
+        assertEquals(listOf(
+            P2pCreationRequest(P2pCreationMode.ALIGNED_5_GHZ, 5745),
+            P2pCreationRequest(P2pCreationMode.BAND_5_GHZ),
+            P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5180),
+            P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5220),
+            P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5785),
+        ), P2pStartupRecovery.plan(5745, preferredChannel = WifiP2pChannels.AUTO_5_GHZ))
+        assertEquals(listOf(
+            P2pCreationRequest(P2pCreationMode.ALIGNED_2_GHZ, 2412),
+            P2pCreationRequest(P2pCreationMode.BAND_2_GHZ),
+            P2pCreationRequest(P2pCreationMode.FIXED_2_GHZ, 2437),
+            P2pCreationRequest(P2pCreationMode.FIXED_2_GHZ, 2462),
+        ), P2pStartupRecovery.plan(2412, preferredChannel = WifiP2pChannels.AUTO_2_4_GHZ))
+    }
+
+    @Test fun legacyBandPlanUsesOnlyExplicitChannels() {
+        assertEquals(listOf(5180, 5745, 5220, 5785),
+            P2pStartupRecovery.plan(null, preferredChannel = WifiP2pChannels.AUTO_5_GHZ, bandRequests = false)
+                .map { it.frequencyMHz })
+    }
+
+    @Test fun rejectedBandWalksItsChannelsThenStopsWithoutSwitchingBand() {
+        val attempts = mutableListOf<P2pCreationRequest>()
+        val failure = assertThrows(P2pChannelUnavailableException::class.java) {
+            P2pStartupRecovery.create(null, {}, preferredChannel = WifiP2pChannels.AUTO_5_GHZ) {
+                attempts += it
+                throw P2pCreateRejected(WifiP2pManager.ERROR, "rejected")
+            }
+        }
+        assertEquals(P2pStartupRecovery.plan(null, preferredChannel = WifiP2pChannels.AUTO_5_GHZ), attempts)
+        assertTrue(attempts.all { it.mode == P2pCreationMode.BAND_5_GHZ || WifiP2pBand.FIVE_GHZ.contains(it.frequencyMHz) })
+        assertTrue(failure.message!!.contains("5 GHz band"))
+    }
+
+    @Test fun bandBuilderFailureNeverFallsBackToTheUnpinnedDefault() {
+        var calls = 0
+        assertThrows(P2pChannelUnavailableException::class.java) {
+            P2pStartupRecovery.create(null, { fail("Unexpected fallback") }, preferredChannel = WifiP2pChannels.AUTO_2_4_GHZ) {
+                calls++
+                throw P2pConfigBuildCompatibilityFailure(NoSuchMethodError("vendor framework"))
+            }
+        }
+        assertEquals(1, calls)
+    }
+
     private fun reportedBuilderFailure(returnDescriptor: String = "Ljava/lang/String;") = NoSuchMethodError(
         "No virtual method getNetworkName()$returnDescriptor in class Landroid/net/wifi/p2p/WifiP2pConfig;",
     ).apply {

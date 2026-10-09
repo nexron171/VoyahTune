@@ -333,6 +333,8 @@ class WheelKeyService : AccessibilityService() {
 
         fun cancelLearning() { running?.onMain { clearLearning() } }
 
+        fun isLearning(): Boolean = running?.learning != null
+
         fun settingsChanged() { running?.onMain { settingsChanged() } }
 
         fun enabledInSettings(context: Context): Boolean {

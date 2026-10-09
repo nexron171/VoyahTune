@@ -208,10 +208,11 @@ object UsbQueueReplay {
     var transfer: ByteArray? = null
     var transferOffset = 0
     val completedBytes = mutableListOf<Int>()
+    @Volatile var untimedWaits = 0
     fun reset() {
         outcomes.clear(); sizes.clear(); buffers.clear(); request = null; buffer = null
         queueException = null; timeout = false; onQueue = null
-        transfer = null; transferOffset = 0; completedBytes.clear()
+        transfer = null; transferOffset = 0; completedBytes.clear(); untimedWaits = 0
     }
 }
 
@@ -219,7 +220,7 @@ object UsbQueueReplay {
 class CompatibilityUsbRequestShadow {
     @RealObject lateinit var request: UsbRequest
     @Implementation fun initialize(connection: UsbDeviceConnection, endpoint: UsbEndpoint) = true
-    @Implementation fun queue(buffer: ByteBuffer): Boolean {
+    @Implementation(minSdk = 26) fun queue(buffer: ByteBuffer): Boolean {
         UsbQueueReplay.sizes.add(buffer.remaining())
         UsbQueueReplay.buffers.add(buffer)
         UsbQueueReplay.queueException?.let { throw it }
@@ -228,13 +229,18 @@ class CompatibilityUsbRequestShadow {
         if (queued) { UsbQueueReplay.request = request; UsbQueueReplay.buffer = buffer }
         return queued
     }
+    /** Android 7.x queue; the buffer is filled from position 0 up to [length]. */
+    @Implementation fun queue(buffer: ByteBuffer, length: Int): Boolean {
+        check(buffer.position() == 0 && buffer.remaining() == length) { "Unexpected Android 7 queue range" }
+        return queue(buffer)
+    }
     @Implementation fun cancel() = true
     @Implementation fun close() = Unit
 }
 
 @Implements(UsbDeviceConnection::class)
 class CompatibilityUsbConnectionShadow {
-    @Implementation fun requestWait(timeoutMillis: Long): UsbRequest {
+    @Implementation(minSdk = 26) fun requestWait(timeoutMillis: Long): UsbRequest {
         if (UsbQueueReplay.timeout) throw TimeoutException()
         val buffer = UsbQueueReplay.buffer!!
         val transfer = UsbQueueReplay.transfer
@@ -248,6 +254,11 @@ class CompatibilityUsbConnectionShadow {
             UsbQueueReplay.completedBytes.add(count)
         }
         return UsbQueueReplay.request!!
+    }
+    /** Android 7.x blocking wait. */
+    @Implementation fun requestWait(): UsbRequest {
+        UsbQueueReplay.untimedWaits += 1
+        return requestWait(Long.MAX_VALUE)
     }
     @Implementation fun close() = Unit
 }

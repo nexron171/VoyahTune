@@ -8,7 +8,7 @@
     <string name="settings_navigation">Навігація</string>
     <string name="settings_vehicle">Автомобіль</string>
     <string name="settings_advanced">Додатково</string>
-    <string name="settings_advanced_subtitle">Експериментальні та залежні від автомобіля параметри для досвідчених користувачів.</string>
+    <string name="settings_advanced_subtitle">Експериментальні та залежні від автомобіля параметри для досвідчених користувачів</string>
     <string name="settings_advanced_caution_title">Змінюйте обережно</string>
     <string name="settings_advanced_caution_description">Ці функції можуть залежати від прошивки автомобіля, доступу ADB або експериментальної поведінки CarPlay. Повсякденні налаштування розміщено в категоріях вище.</string>
     <string name="settings_search">Пошук</string>
@@ -22,13 +22,13 @@
     <string name="settings_advanced_media">Відео та звук</string>
     <string name="settings_wheel_keys">Кнопки на кермі</string>
     <string name="settings_experimental_display">Екран (експериментально)</string>
-    <string name="settings_diagnostics_summary">Збережіть локальний звіт під час усунення проблем із підключенням.</string>
-    <string name="settings_full_screen_description">Приховувати обидві системні панелі, поки відкрито CarPlay.</string>
+    <string name="settings_diagnostics_summary">Збережіть локальний звіт під час усунення проблем із підключенням</string>
+    <string name="settings_full_screen_description">Приховувати панелі стану й навігації в DiPlay та CarPlay.</string>
     <string name="settings_vehicle_description">Функції автомобіля та приладової панелі залежать від моделі й прошивки. Перегляньте їх у розділі «Додатково», перш ніж вмикати експериментальні параметри.</string>
     <string name="settings_open_advanced">Відкрити додаткові налаштування</string>
     <string name="settings_reconnect_pending">Збережено. Деякі зміни набудуть чинності після перепідключення CarPlay.</string>
     <string name="settings_reconnect_now">Перепідключити</string>
-    <string name="settings_byd_navigation_unavailable">Підказки BYD на приладовій панелі та HUD недоступні на цьому головному пристрої.</string>
+    <string name="settings_byd_navigation_unavailable">Підказки на приладовій панелі та HUD недоступні на цьому головному пристрої.</string>
     <string name="settings_search_hint">Назва налаштування, наприклад частота кадрів</string>
     <string name="settings_search_empty">Нічого не знайдено. Спробуйте інше слово.</string>
     <string name="settings_ready_wireless">Бездротовий CarPlay підключиться до %1$s.</string>

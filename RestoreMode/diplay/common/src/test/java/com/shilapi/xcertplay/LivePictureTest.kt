@@ -101,4 +101,25 @@ class LivePictureTest {
         views.filterIsInstance<Button>().single { it.text == context.getString(R.string.picture_done) }.performClick()
         assertTrue(closed)
     }
+
+    @Test fun picturePanelUsesAndCanRepaintToTheLightOverlayPalette() {
+        val panel = CarPlayPicturePanel(context, initialPalette = DiPlayPalette.LIGHT) {}
+        fun descendants(view: View): List<View> = listOf(view) +
+            if (view is ViewGroup) (0 until view.childCount).flatMap { descendants(view.getChildAt(it)) }
+            else emptyList()
+
+        assertEquals(
+            DiPlayPalette.LIGHT.overlayBackground,
+            (panel.background as android.graphics.drawable.ColorDrawable).color,
+        )
+        assertTrue(descendants(panel).filterIsInstance<android.widget.TextView>()
+            .filterNot { it is Button }
+            .all { it.currentTextColor == DiPlayPalette.LIGHT.overlayPrimaryText })
+
+        panel.applyPalette(DiPlayPalette.DARK)
+        assertEquals(
+            DiPlayPalette.DARK.overlayBackground,
+            (panel.background as android.graphics.drawable.ColorDrawable).color,
+        )
+    }
 }

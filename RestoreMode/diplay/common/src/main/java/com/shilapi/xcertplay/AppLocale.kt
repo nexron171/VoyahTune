@@ -2,7 +2,6 @@
 package com.shilapi.xcertplay
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.LocaleManager
 import android.os.Build
 import android.os.LocaleList
@@ -125,7 +124,7 @@ object AppLocale {
 
     fun showPicker(activity: Activity) {
         var selected = ALL.indexOf(preference(activity)).coerceAtLeast(0)
-        AlertDialog.Builder(activity)
+        activity.appDialogBuilder()
             .setTitle(R.string.language_app_language)
             .setSingleChoiceItems(ALL.map { displayName(activity, it) }.toTypedArray(), selected) { _, index ->
                 selected = index

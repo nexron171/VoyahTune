@@ -26,6 +26,8 @@
         <package android:name="ru.big.town.updater" />
     </queries>
 
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+
     <application
         android:name=".VoyahApplication"
         android:allowBackup="true"
@@ -59,6 +61,8 @@
         </activity>
         <receiver android:name="com.shilapi.xcertplay.BootReceiver"
             android:enabled="false" tools:replace="android:enabled" />
+        <provider android:name="com.shilapi.xcertplay.update.UpdateApkProvider" tools:node="remove" />
+        <receiver android:name="com.shilapi.xcertplay.PhoneBluetoothReceiver" tools:node="remove" />
         <activity android:name="com.shilapi.xcertplay.AdbClusterActivity" tools:node="remove" />
         <service android:name="com.shilapi.xcertplay.shared.MyCarAppService" tools:node="remove" />
         <service android:name=".TripLocationService"

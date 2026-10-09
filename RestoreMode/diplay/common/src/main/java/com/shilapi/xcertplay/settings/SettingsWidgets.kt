@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -13,8 +15,10 @@ import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.host.R
+import kotlin.math.roundToInt
 
 object SettingsWidgets {
 
@@ -56,6 +60,45 @@ object SettingsWidgets {
         applyTextStyle(context, theme, bold = true)
     }
 
+    /**
+     * Replaces the platform switch (about a 36x14dp track) with a 60x34dp track and a 28dp thumb,
+     * so the state reads at arm's length on a head unit.
+     */
+    fun applyLargeSwitchStyle(switch: Switch, thumbOn: Int, thumbOff: Int, trackOn: Int, trackOff: Int) {
+        val density = switch.resources.displayMetrics.density
+        fun px(value: Int) = (value * density).roundToInt()
+        // Switch stretches the thumb to the full track height, so the inset keeps a margin around it.
+        val thumbInset = px(3)
+        switch.thumbDrawable = InsetDrawable(
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setSize(px(28), px(28))
+                setColor(Color.WHITE)
+            },
+            thumbInset,
+        )
+        switch.trackDrawable = GradientDrawable().apply {
+            cornerRadius = px(17).toFloat()
+            setSize(px(60), px(34))
+            setColor(Color.WHITE)
+            // Same 30% track as the platform switch, so the colours match the smaller switches.
+            alpha = (0.3f * 255).roundToInt()
+        }
+        switch.switchMinWidth = px(60)
+        switch.showText = false
+        switch.thumbTintList = switchStates(thumbOn, thumbOff)
+        switch.trackTintList = switchStates(trackOn, trackOff)
+    }
+
+    private fun switchStates(on: Int, off: Int) = ColorStateList(
+        arrayOf(
+            intArrayOf(-android.R.attr.state_enabled),
+            intArrayOf(android.R.attr.state_checked),
+            intArrayOf(),
+        ),
+        intArrayOf(ColorUtils.setAlphaComponent(off, 0x61), on, off),
+    )
+
     fun createSwitchRow(
         context: Context,
         label: String,
@@ -75,20 +118,8 @@ object SettingsWidgets {
             isChecked = checked
             this.contentDescription = contentDescription
             isEnabled = enabled
-            if (theme.isOverlay) {
-                showText = false
-                thumbTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(theme.accent, theme.textSecondary),
-                )
-                trackTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(theme.accentTrack, theme.trackOff),
-                )
-            } else {
-                minHeight = theme.dp(context, 56)
-                buttonTintList = ColorStateList.valueOf(theme.accent)
-            }
+            applyLargeSwitchStyle(this, theme.accent, theme.textSecondary, theme.accentTrack, theme.trackOff)
+            if (!theme.isOverlay) minHeight = theme.dp(context, 56)
             setOnCheckedChangeListener { _, isChecked -> onChanged(isChecked) }
         }
 
@@ -127,12 +158,12 @@ object SettingsWidgets {
             switch.isFocusable = false
             row.isFocusable = true
             row.background = android.graphics.drawable.RippleDrawable(
-                ColorStateList.valueOf(ROW_RIPPLE), null, android.graphics.drawable.ColorDrawable(Color.WHITE))
+                ColorStateList.valueOf(theme.ripple), null, android.graphics.drawable.ColorDrawable(Color.WHITE))
             row.foreground = android.graphics.drawable.StateListDrawable().apply {
                 addState(intArrayOf(android.R.attr.state_focused), android.graphics.drawable.GradientDrawable().apply {
                     setColor(Color.TRANSPARENT)
                     cornerRadius = theme.dp(context, 12).toFloat()
-                    setStroke(theme.dp(context, 3), theme.accent)
+                    setStroke(theme.dp(context, 3), theme.focusRing)
                 })
             }
             row.setOnClickListener { if (switch.isEnabled) switch.toggle() }
@@ -146,29 +177,10 @@ object SettingsWidgets {
                     info.isEnabled = switch.isEnabled
                 }
             }
-            clampDescription(descView)
         }
 
         return SwitchRowResult(row, switch)
     }
-
-    /** Long help stays two lines until tapped; screen readers still get the full text. */
-    private fun clampDescription(view: TextView) {
-        view.maxLines = COLLAPSED_DESCRIPTION_LINES
-        view.ellipsize = android.text.TextUtils.TruncateAt.END
-        view.post {
-            if ((view.layout?.getEllipsisCount(view.lineCount - 1) ?: 0) == 0) return@post
-            view.setOnClickListener {
-                view.maxLines = Int.MAX_VALUE
-                view.ellipsize = null
-                view.setOnClickListener(null)
-                view.isClickable = false
-            }
-        }
-    }
-
-    private const val COLLAPSED_DESCRIPTION_LINES = 2
-    private const val ROW_RIPPLE = 0x336F9FD9
 
     fun <T> createChoiceRow(
         context: Context,

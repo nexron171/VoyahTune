@@ -2,7 +2,6 @@
 package com.shilapi.xcertplay
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
@@ -111,7 +110,7 @@ object InterfaceSize {
 
     fun showPicker(activity: Activity) {
         var selected = CHOICES.indexOf(preference(activity)).coerceAtLeast(0)
-        AlertDialog.Builder(activity)
+        activity.appDialogBuilder()
             .setTitle(R.string.settings_interface_size)
             .setSingleChoiceItems(CHOICES.map { displayName(activity, it) }.toTypedArray(), selected) { _, index ->
                 selected = index

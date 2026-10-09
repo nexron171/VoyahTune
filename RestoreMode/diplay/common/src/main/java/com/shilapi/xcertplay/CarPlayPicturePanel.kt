@@ -5,24 +5,27 @@ import android.graphics.Color
 import android.view.View
 import android.widget.*
 import com.shilapi.xcertplay.host.R
+import com.shilapi.xcertplay.settings.SettingsWidgets
 
 /** An in-activity overlay: no dimmed background, decoder restart, or stream negotiation. */
 internal class CarPlayPicturePanel(
     context: Context,
     adjustmentsAvailable: Boolean = true,
+    initialPalette: DiPlayPalette = DiPlayPalette.DARK,
     close: () -> Unit,
 ) : LinearLayout(context) {
+    private var palette = initialPalette
     private val prefs = CarPlayPicture.preferences(context)
     private val controls = mutableMapOf<String, Pair<TextView, SeekBar>>()
     private val original = Switch(context)
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun text(value: String) = TextView(context).apply {
-        text = value; textSize = 15f; setTextColor(Color.WHITE)
+        text = value; textSize = 15f; setTextColor(palette.overlayPrimaryText)
     }
     init {
         orientation = VERTICAL
         setPadding(dp(12), dp(8), dp(12), dp(8))
-        setBackgroundColor(Color.argb(235, 12, 17, 27))
+        setBackgroundColor(palette.overlayBackground)
         isClickable = true
         addView(text(context.getString(R.string.picture_adjustments)))
         val rows = LinearLayout(context).apply { orientation = VERTICAL }
@@ -40,6 +43,8 @@ internal class CarPlayPicturePanel(
                 progress = CarPlayPicture.value(prefs, key) - range.first
                 contentDescription = context.getString(labels[index])
                 isEnabled = adjustmentsAvailable
+                progressTintList = android.content.res.ColorStateList.valueOf(palette.overlayAccent)
+                thumbTintList = android.content.res.ColorStateList.valueOf(palette.overlayAccent)
             }
             fun updateLabel(value: Int) { label.text = "${context.getString(labels[index])}: $value" }
             updateLabel(CarPlayPicture.value(prefs, key))
@@ -57,7 +62,14 @@ internal class CarPlayPicturePanel(
         }
         original.apply {
             text = context.getString(R.string.picture_show_original)
-            setTextColor(Color.WHITE)
+            setTextColor(palette.overlayPrimaryText)
+            SettingsWidgets.applyLargeSwitchStyle(
+                this,
+                palette.overlayAccent,
+                palette.overlaySecondaryText,
+                palette.overlayAccentTrack,
+                palette.overlayTrackOff,
+            )
             isEnabled = adjustmentsAvailable
             setOnCheckedChangeListener { _, checked ->
                 if (!adjustmentsAvailable) return@setOnCheckedChangeListener
@@ -84,5 +96,37 @@ internal class CarPlayPicturePanel(
             setOnClickListener { close() }
         }, LayoutParams(0, dp(48), 1f))
         addView(actions)
+    }
+
+    fun applyPalette(palette: DiPlayPalette) {
+        this.palette = palette
+        setBackgroundColor(palette.overlayBackground)
+        fun apply(view: View) {
+            when (view) {
+                is Switch -> {
+                    view.setTextColor(palette.overlayPrimaryText)
+                    SettingsWidgets.applyLargeSwitchStyle(
+                        view,
+                        palette.overlayAccent,
+                        palette.overlaySecondaryText,
+                        palette.overlayAccentTrack,
+                        palette.overlayTrackOff,
+                    )
+                }
+                is SeekBar -> {
+                    view.progressTintList = android.content.res.ColorStateList.valueOf(palette.overlayAccent)
+                    view.thumbTintList = android.content.res.ColorStateList.valueOf(palette.overlayAccent)
+                }
+                is Button -> {
+                    view.setTextColor(palette.overlayOnAccent)
+                    view.backgroundTintList = android.content.res.ColorStateList.valueOf(palette.overlayAccent)
+                }
+                is TextView -> view.setTextColor(palette.overlayPrimaryText)
+            }
+            if (view is android.view.ViewGroup) {
+                for (index in 0 until view.childCount) apply(view.getChildAt(index))
+            }
+        }
+        apply(this)
     }
 }

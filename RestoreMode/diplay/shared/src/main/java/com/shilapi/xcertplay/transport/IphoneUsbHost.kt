@@ -340,6 +340,7 @@ class Iap2UsbSession internal constructor(
     private var failure: IphoneUsbException? = null
     private var pendingRead: UsbRequest? = null
     private val readQueuePolicy = UsbReadQueuePolicy()
+    private val requests = UsbRequestQueue(connection, "usbmux-read-reaper")
 
     fun write(data: ByteArray, timeoutMillis: Int) = synchronized(writeLock) {
         checkOpen()
@@ -370,7 +371,7 @@ class Iap2UsbSession internal constructor(
             val queueResult = synchronized(stateLock) {
                 checkOpenLocked()
                 pendingRead = request
-                readQueuePolicy.queue(buffer, ::checkOpenLocked, request::queue)
+                readQueuePolicy.queue(buffer, ::checkOpenLocked) { requests.queue(request, it) }
             }
             if (!queueResult.queued) {
                 throw IphoneUsbException.DeviceUnavailable(
@@ -387,7 +388,7 @@ class Iap2UsbSession internal constructor(
                 )
             }
             val completed = try {
-                connection.requestWait(timeoutMillis)
+                requests.await(timeoutMillis)
             } catch (_: TimeoutException) {
                 drainCancelledRead(request)
                 return@synchronized null
@@ -422,6 +423,7 @@ class Iap2UsbSession internal constructor(
             pendingRead
         }
         requestToCancel?.cancel()
+        requests.close()
         connection.close()
     }
 
@@ -439,7 +441,7 @@ class Iap2UsbSession internal constructor(
             throw failSession("Android could not cancel timed out USBMUX read request")
         }
         val completed = try {
-            connection.requestWait(CANCEL_DRAIN_TIMEOUT_MILLIS)
+            requests.await(CANCEL_DRAIN_TIMEOUT_MILLIS)
         } catch (_: TimeoutException) {
             throw failSession("Timed out draining cancelled USBMUX read request")
         }

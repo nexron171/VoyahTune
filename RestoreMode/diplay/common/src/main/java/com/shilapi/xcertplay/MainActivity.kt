@@ -34,6 +34,8 @@ import java.util.concurrent.Executors
 class MainActivity : ComponentActivity() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private var status by mutableStateOf<DiagnosticStatus>(DiagnosticStatus.Idle)
+    private var appNight by mutableStateOf(true)
+    private var stopObservingAppearance: (() -> Unit)? = null
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(AppLocale.wrap(newBase))
@@ -42,9 +44,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppLocale.enforce(this)
+        appNight = resolveAppNightNow()
         enableEdgeToEdge()
         setContent {
-            XcertplayTheme {
+            XcertplayTheme(darkTheme = appNight) {
                 var devicePath by remember { mutableStateOf("/dev/i2c-1") }
                 Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
                     Column(
@@ -73,6 +76,23 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        appNight = resolveAppNightNow()
+        stopObservingAppearance?.invoke()
+        stopObservingAppearance = AppAppearanceRuntime.observeHost {
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) appNight = resolveAppNightNow()
+            }
+        }
+    }
+
+    override fun onPause() {
+        stopObservingAppearance?.invoke()
+        stopObservingAppearance = null
+        super.onPause()
     }
 
     override fun onDestroy() {

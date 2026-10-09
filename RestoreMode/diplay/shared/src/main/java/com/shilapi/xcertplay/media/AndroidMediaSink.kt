@@ -2,7 +2,6 @@ package com.shilapi.xcertplay.media
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioFocusRequest
 import android.media.AudioFormat as AndroidAudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
@@ -21,6 +20,7 @@ import com.shilapi.xcertplay.airplay.MediaSink
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
+import com.shilapi.xcertplay.compat.AudioFocusRequestCompat
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
@@ -46,7 +46,7 @@ internal class AudioFocusCoordinator(
 
     private val manager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val active = LinkedHashMap<AudioTrack, Entry>()
-    private var request: AudioFocusRequest? = null
+    private var request: AudioFocusRequestCompat? = null
     private var requestedChannel: AudioChannel? = null
     private var mediaVolume = FULL_VOLUME
     private var closed = false
@@ -109,12 +109,12 @@ internal class AudioFocusCoordinator(
             request = null
             requestedChannel = null
             mediaVolume = FULL_VOLUME
-            abandoned?.let { manager?.abandonAudioFocusRequest(it) }
+            manager?.let { abandoned?.abandon(it) }
             return
         }
         if (request != null && requestedChannel == primary.channel) return
         focusGeneration += 1
-        request?.let { manager?.abandonAudioFocusRequest(it) }
+        manager?.let { request?.abandon(it) }
         val gain = when (primary.channel) {
             AudioChannel.MEDIA -> AudioManager.AUDIOFOCUS_GAIN
             AudioChannel.PHONE -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
@@ -122,13 +122,10 @@ internal class AudioFocusCoordinator(
             AudioChannel.NAVIGATION -> return
         }
         currentListener = listenerFor(focusGeneration)
-        val next = AudioFocusRequest.Builder(gain)
-            .setAudioAttributes(primary.attributes)
-            .setOnAudioFocusChangeListener(currentListener, Handler(Looper.getMainLooper()))
-            .build()
+        val next = AudioFocusRequestCompat(gain, primary.attributes, currentListener, Handler(Looper.getMainLooper()))
         request = next
         requestedChannel = primary.channel
-        val result = manager?.requestAudioFocus(next)
+        val result = manager?.let(next::request)
         if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) setMediaVolume(FULL_VOLUME)
         val line = "Audio: focus requested channel=${primary.channel} gain=$gain granted=$result activeTracks=${active.size}"
         Log.i(TAG, line)
@@ -197,6 +194,8 @@ class AndroidMediaSink(
      */
     private val videoPacingDelayMillis: Int = 0,
     private val voyahAudioRouting: Boolean = false,
+    /** The main screen's frame rate (the frame-rate setting), requested from its decoder as the operating rate; 0 for none. */
+    private val mainVideoFrameRate: Int = 0,
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
@@ -608,6 +607,7 @@ class AndroidMediaSink(
         onExit = ::onVideoDecoderExit,
         // Only the main screen goes to the host's SurfaceView; mirrors and the cluster keep their path.
         pacingDelayNanos = if (type == MAIN_SCREEN_TYPE && statsLabel == null) videoPacingDelayMillis * 1_000_000L else 0L,
+        operatingRate = videoOperatingRate(type, statsLabel, mainVideoFrameRate),
     ).also { if (startImmediately) it.start() }
 
     @Synchronized
@@ -691,6 +691,36 @@ internal class ParkingOutput(width: Int, height: Int) {
     }
 }
 
+/**
+ * The operating rate requested from a stream's decoder, 0 for none: the main screen asks for the frame
+ * rate the iPhone is asked for ([frameRate], the frame-rate setting). At 60 fps on my Tang, the Qualcomm
+ * decoder's median time from queueing a frame to dequeueing its output was 8.5–9 ms lower with it.
+ * Mirrors and the cluster stream keep the format they had.
+ */
+internal fun videoOperatingRate(type: Int, statsLabel: String?, frameRate: Int): Int =
+    if (type == MAIN_SCREEN_TYPE && statsLabel == null && frameRate > 0) frameRate else 0
+
+internal data class DecoderAttempt(val codecName: String?, val tuned: Boolean, val operatingRate: Int = 0)
+
+/**
+ * Configure attempts in order. Some vendor decoders (e.g. MediaTek c2.mtk.avc.decoder) reject the tuned
+ * parameters with BAD_VALUE, so a minimal format and then software follow. An [operatingRate] is tried
+ * first on its own, so a decoder that refuses it keeps the tuned format it gets without one.
+ */
+internal fun videoDecoderAttempts(operatingRate: Int, softwareDecoder: String?): List<DecoderAttempt> = listOfNotNull(
+    DecoderAttempt(codecName = null, tuned = true, operatingRate = operatingRate).takeIf { operatingRate > 0 },
+    DecoderAttempt(codecName = null, tuned = true),
+    DecoderAttempt(codecName = null, tuned = false),
+    softwareDecoder?.let { DecoderAttempt(it, tuned = false) },
+)
+
+/**
+ * The operating rate to ask for at the next configure: none once a later attempt ([used]) worked after
+ * the rate was refused, so the refusal is not paid again; unchanged when every attempt failed.
+ */
+internal fun nextOperatingRate(requested: Int, used: DecoderAttempt?): Int =
+    if (requested > 0 && used != null && used.operatingRate == 0) 0 else requested
+
 /** Serial MediaCodec video decoder: one worker owns configure and frame feeding. */
 private class VideoDecoder(
     streamType: Int,
@@ -704,6 +734,7 @@ private class VideoDecoder(
     pacingDelayNanos: Long = 0L,
     /** Called on the worker as its last step, after it has released its codec. */
     private val onExit: (VideoDecoder) -> Unit = {},
+    operatingRate: Int = 0,
 ) : Closeable {
     private val pacer = FramePacer()
     private val pacingDelay = if (pacingDelayNanos > 0) PacingDelay(pacingDelayNanos) else null
@@ -730,6 +761,10 @@ private class VideoDecoder(
     private var parking: ParkingOutput? = null
     private var lastConfig: VideoJob.Config? = null
     private var renderedFrameLogged = false
+    // The operating rate still asked for, dropped for this stream once a decoder refuses it; and the rate
+    // the current codec was configured with.
+    private var operatingRate = operatingRate
+    private var configuredRate = 0
     private var submittedFrameLogged = false
     private var duplicateConfigLogged = false
     private var failureReports = 0
@@ -824,6 +859,11 @@ private class VideoDecoder(
                 } catch (error: Exception) {
                     if (running) Log.e(TAG, "video decoder job failed: ${job?.javaClass?.simpleName}", error)
                     if (running) reportFailure("stage=${job?.javaClass?.simpleName ?: "drain"}", error)
+                    // A codec can accept the rate and still fail once it runs (start errors may surface on
+                    // later calls): one that failed before its first frame with it is not given it again.
+                    if (configuredRate > 0 && !renderedFrameLogged && error is MediaCodec.CodecException) {
+                        dropOperatingRate("codec failed before its first frame")
+                    }
                     releaseDecoder()
                     referenceChain.reset()
                     requestKeyFrameIfDue()
@@ -876,25 +916,24 @@ private class VideoDecoder(
                 pps.takeIf { it.isNotEmpty() }?.let { START_CODE + it },
             )
         }
-        // Some vendor decoders (e.g. MediaTek c2.mtk.avc.decoder) reject the tuned
-        // parameters with BAD_VALUE. Fall back to a minimal format, then to software.
-        val attempts = listOf(
-            DecoderAttempt(codecName = null, tuned = true),
-            DecoderAttempt(codecName = null, tuned = false),
-        ) + softwareDecoderName(mime)?.let { listOf(DecoderAttempt(it, tuned = false)) }.orEmpty()
+        val requestedRate = operatingRate
         var next: MediaCodec? = null
-        for (attempt in attempts) {
+        var used: DecoderAttempt? = null
+        for (attempt in videoDecoderAttempts(requestedRate, softwareDecoderName(mime))) {
             next = tryConfigure(mime, csd, surface, attempt)
-            if (next != null) break
+            if (next != null) { used = attempt; break }
         }
         if (next == null) {
             report("decoder configuration failed mime=$mime size=${width}x$height")
         }
+        if (nextOperatingRate(requestedRate, used) != requestedRate) dropOperatingRate("refused at configure")
         decoder = next
+        configuredRate = used?.operatingRate ?: 0
         renderedFrameLogged = false
         submittedFrameLogged = false
         if (next != null) {
-            report("decoder=${next.name} mime=$mime size=${width}x$height")
+            val rate = if (requestedRate > 0) " operatingRate=$configuredRate" else ""
+            report("decoder=${next.name} mime=$mime size=${width}x$height$rate")
             Log.i(
                 TAG,
                 "video decoder configured name=${next.name} mime=$mime size=${width}x$height",
@@ -902,13 +941,17 @@ private class VideoDecoder(
         }
     }
 
-    private data class DecoderAttempt(val codecName: String?, val tuned: Boolean)
+    private fun dropOperatingRate(reason: String) {
+        report("operating rate $operatingRate dropped: $reason")
+        operatingRate = 0
+    }
 
-    private fun buildFormat(mime: String, csd: List<ByteArray>, tuned: Boolean): MediaFormat =
+    private fun buildFormat(mime: String, csd: List<ByteArray>, attempt: DecoderAttempt): MediaFormat =
         MediaFormat.createVideoFormat(mime, width, height).apply {
-            if (tuned) {
+            if (attempt.tuned) {
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_SIZE)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
+                if (attempt.operatingRate > 0) setInteger(MediaFormat.KEY_OPERATING_RATE, attempt.operatingRate)
             }
             csd.forEachIndexed { index, bytes -> setByteBuffer("csd-$index", ByteBuffer.wrap(bytes)) }
         }
@@ -921,7 +964,7 @@ private class VideoDecoder(
     ): MediaCodec? {
         var candidate: MediaCodec? = null
         return try {
-            val format = buildFormat(mime, csd, attempt.tuned)
+            val format = buildFormat(mime, csd, attempt)
             val codec = attempt.codecName?.let { MediaCodec.createByCodecName(it) } ?: createDecoder(mime)
             candidate = codec
             if (attempt.tuned && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -933,11 +976,11 @@ private class VideoDecoder(
             codec
         } catch (error: Exception) {
             runCatching { candidate?.release() }
-            reportFailure("stage=configure tuned=${attempt.tuned} mime=$mime", error)
+            reportFailure("stage=configure tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} mime=$mime", error)
             Log.w(
                 TAG,
                 "video decoder configure failed name=${attempt.codecName ?: "default"} " +
-                    "tuned=${attempt.tuned} mime=$mime size=${width}x$height",
+                    "tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} mime=$mime size=${width}x$height",
                 error,
             )
             null
@@ -1185,6 +1228,7 @@ private class VideoDecoder(
     private fun releaseDecoder() {
         val codec = decoder
         decoder = null
+        configuredRate = 0
         if (codec != null) {
             try {
                 codec.stop()
@@ -1613,7 +1657,12 @@ private class AudioRenderer(
     private fun usageFor(channel: AudioChannel): Int = when (channel) {
         AudioChannel.MEDIA -> AudioAttributes.USAGE_MEDIA
         AudioChannel.PHONE -> AudioAttributes.USAGE_VOICE_COMMUNICATION
-        AudioChannel.ASSISTANT -> AudioAttributes.USAGE_ASSISTANT
+        // Android 7.x has no assistant usage and would record the track as an unknown usage.
+        AudioChannel.ASSISTANT -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            AudioAttributes.USAGE_ASSISTANT
+        } else {
+            AudioAttributes.USAGE_MEDIA
+        }
         AudioChannel.NAVIGATION -> AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
     }
 
@@ -1849,12 +1898,17 @@ private class AudioRenderer(
     private fun maintainPlaybackBuffer() {
         val track = track ?: return
         if (bufferProgress.shouldRebuffer(mappedChannel == AudioChannel.MEDIA, playbackStarted,
-                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition)) {
-            // The hardware buffer has actually drained. Pause without flushing or discarding PCM,
-            // then use the configured start threshold again when music resumes.
+                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition,
+                startThresholdBytes / 2L)) {
+            // The hardware buffer has starved below the recovery floor. Pause without flushing
+            // or discarding PCM, then use the configured start threshold again when music resumes.
             track.pause()
             playbackStarted = false
-            prebufferBytes = 0
+            // Pausing retains queued PCM. Count it toward the restart threshold so a
+            // blocking write cannot fill the paused track before we call play().
+            prebufferBytes = bufferProgress.queuedBytes(track.playbackHeadPosition)
+                .coerceAtMost(startThresholdBytes.toLong()).toInt()
+            lastPcmWriteNs = System.nanoTime()
             rebufferCount++
         }
         // A short final burst may never reach the start threshold. Play it after a bounded wait.

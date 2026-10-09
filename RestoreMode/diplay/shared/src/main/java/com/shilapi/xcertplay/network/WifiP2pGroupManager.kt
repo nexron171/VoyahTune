@@ -17,6 +17,8 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import androidx.annotation.RequiresApi
+import com.shilapi.xcertplay.compat.closeCompat
+import com.shilapi.xcertplay.compat.isLocationEnabledCompat
 import com.shilapi.xcertplay.transport.Iap2WirelessSecurity
 import java.io.IOException
 import java.net.Inet4Address
@@ -133,9 +135,10 @@ class WifiP2pGroupManager(
             val preferred = remembered?.takeIf {
                 preferredChannel == WifiP2pChannels.AUTO && it.stationMHz == stationFrequency
             }
-            diagnostic("Wi-Fi P2P channel preference=${if (preferredChannel == WifiP2pChannels.AUTO) "auto" else preferredChannel} " +
+            diagnostic("Wi-Fi P2P channel preference=${WifiP2pChannels.describe(preferredChannel)} " +
                 "frequencyMHz=${WifiP2pChannels.frequencyMhz(preferredChannel) ?: "auto"}")
             diagnostic(when {
+                WifiP2pChannels.band(preferredChannel) != null -> "Wi-Fi P2P remembered skipped=band_preference"
                 preferredChannel != WifiP2pChannels.AUTO -> "Wi-Fi P2P remembered skipped=manual_channel"
                 preferred != null -> {
                     val position = if (P2pStartupRecovery.plan(stationFrequency, preferred.request).first() == preferred.request)
@@ -179,6 +182,8 @@ class WifiP2pGroupManager(
                 stationFrequency = stationFrequency,
                 preferred = preferred?.request,
                 preferredChannel = preferredChannel,
+                // Band-only requests need the API 29 WifiP2pConfig; the legacy path pins channels.
+                bandRequests = !legacyChannels,
                 beforeRetry = {
                     ensureStartActive(attempt)
                     // Do not cancel discovery, toggle Wi-Fi, or remove a newly observed group.
@@ -199,7 +204,11 @@ class WifiP2pGroupManager(
                             val builder = WifiP2pConfig.Builder()
                                 .setNetworkName(credentials.ssid)
                                 .setPassphrase(credentials.passphrase)
-                            builder.setGroupOperatingFrequency(requireNotNull(selection.frequencyMHz))
+                            when (selection.mode) {
+                                P2pCreationMode.BAND_5_GHZ -> builder.setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_5GHZ)
+                                P2pCreationMode.BAND_2_GHZ -> builder.setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_2GHZ)
+                                else -> builder.setGroupOperatingFrequency(requireNotNull(selection.frequencyMHz))
+                            }
                             builder.build()
                         }
                     }
@@ -257,7 +266,14 @@ class WifiP2pGroupManager(
                     "actualMHz=unavailable matched=unverified")
             } else {
                 diagnostic("Wi-Fi P2P channel requestedMHz=${creation.frequencyMHz ?: "auto"} actualMHz=${group.frequencyMHz} matched=${creation.frequencyMHz?.let { it == group.frequencyMHz } ?: "system_selected"}")
-                if (preferredChannel != WifiP2pChannels.AUTO && group.frequencyMHz != creation.frequencyMHz) {
+                val band = WifiP2pChannels.band(preferredChannel)
+                if (band != null) {
+                    // Any channel inside the chosen band is acceptable; the other band is not.
+                    if (!band.contains(group.frequencyMHz)) {
+                        throw P2pChannelUnavailableException(preferredChannel,
+                            "The car selected channel ${group.channel} (${group.bandLabel}) instead.")
+                    }
+                } else if (preferredChannel != WifiP2pChannels.AUTO && group.frequencyMHz != creation.frequencyMHz) {
                     throw P2pChannelUnavailableException(preferredChannel,
                         "The car selected channel ${group.channel} instead.")
                 }
@@ -318,7 +334,7 @@ class WifiP2pGroupManager(
         }
         synchronized(legacyChannelLock) {
             if (activeChannel != null) releaseLegacyChannelRestriction(activeChannel)
-            activeChannel?.close()
+            activeChannel?.closeCompat()
         }
         activeThread?.quitSafely()
     }
@@ -720,7 +736,7 @@ class WifiP2pGroupManager(
         val fiveGhzSupported = runCatching { wifi?.is5GHzBandSupported }.getOrNull()
         val wifiEnabled = runCatching { wifi?.isWifiEnabled }.getOrNull()
         val locationEnabled = runCatching {
-            appContext.getSystemService(LocationManager::class.java)?.isLocationEnabled
+            appContext.getSystemService(LocationManager::class.java)?.isLocationEnabledCompat()
         }.getOrNull()
         val required = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES
             else Manifest.permission.ACCESS_FINE_LOCATION
@@ -827,7 +843,7 @@ class WifiP2pGroupManager(
         }
         synchronized(legacyChannelLock) {
             if (failedChannel != null) releaseLegacyChannelRestriction(failedChannel)
-            failedChannel?.close()
+            failedChannel?.closeCompat()
         }
         failedThread?.quitSafely()
     }

@@ -19,7 +19,7 @@ import org.robolectric.annotation.Implements
 import org.robolectric.annotation.RealObject
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28, 33], manifest = Config.NONE, shadows = [AudioFocusAutoYieldTest.VolumeTrackingAudioTrack::class])
+@Config(sdk = [25, 28, 33], manifest = Config.NONE, shadows = [AudioFocusAutoYieldTest.VolumeTrackingAudioTrack::class])
 class AudioFocusAutoYieldTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
     private val manager get() = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager

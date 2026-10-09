@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="carplay_night_mode">وضع النهار والليل في CarPlay</string>
+    <string name="settings_app_appearance">مظهر التطبيق</string>
+    <string name="settings_app_appearance_dark">داكن</string>
+    <string name="settings_app_appearance_light">فاتح</string>
+    <string name="settings_app_appearance_auto">تلقائي</string>
+    <string name="settings_app_appearance_description">يتبع الوضع التلقائي إعداد النهار/الليل المحفوظ في CarPlay؛ وعند فتح CarPlay يتبع النتيجة الحالية. يظل الوضعان الفاتح والداكن ثابتين ولا يتطلبان إعادة الاتصال.</string>
+    <string name="settings_switch_to_light_appearance">التبديل إلى المظهر الفاتح</string>
+    <string name="settings_switch_to_dark_appearance">التبديل إلى المظهر الداكن</string>
     <string name="carplay_night_system">اتباع نظام Android</string>
     <string name="carplay_night_ambient">تلقائي (الإضاءة المحيطة)</string>
     <string name="carplay_night_day">نهار دائمًا</string>

@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="carplay_night_mode">Дневной/ночной режим CarPlay</string>
+    <string name="settings_app_appearance">Оформление приложения</string>
+    <string name="settings_app_appearance_dark">Тёмное</string>
+    <string name="settings_app_appearance_light">Светлое</string>
+    <string name="settings_app_appearance_auto">Авто</string>
+    <string name="settings_app_appearance_description">Авто следует сохранённой настройке дневного/ночного режима CarPlay, а пока CarPlay открыт — текущему результату. Светлое и тёмное оформление остаются фиксированными и не требуют переподключения.</string>
+    <string name="settings_switch_to_light_appearance">Переключить на светлое оформление</string>
+    <string name="settings_switch_to_dark_appearance">Переключить на тёмное оформление</string>
     <string name="carplay_night_system">Как в системе Android</string>
     <string name="carplay_night_ambient">Автоматически (по освещённости)</string>
     <string name="carplay_night_day">Всегда дневной</string>

@@ -51,6 +51,7 @@ class NcmUsbBridge internal constructor(
     private var readRequest: UsbRequest? = null
     private var readQueued = false
     private val readQueuePolicy = UsbReadQueuePolicy()
+    private val readRequests = UsbRequestQueue(connection, "ncm-read-reaper")
     private val statusRunning = AtomicBoolean(statusEndpoint != null)
     private val statusThread = statusEndpoint?.let { endpoint ->
         Thread({ drainStatus(endpoint) }, "ncm-status-in").apply {
@@ -137,6 +138,7 @@ class NcmUsbBridge internal constructor(
                 // Best-effort release; the connection close below is authoritative.
             }
         }
+        readRequests.close()
         connection.close()
         runCatching { requestToClose?.close() }
     }
@@ -236,7 +238,7 @@ class NcmUsbBridge internal constructor(
                 }
                 if (!readQueued) {
                     directReadBuffer.clear()
-                    val queued = readQueuePolicy.queue(directReadBuffer, ::checkOpenLocked, current::queue)
+                    val queued = readQueuePolicy.queue(directReadBuffer, ::checkOpenLocked) { readRequests.queue(current, it) }
                     if (!queued.queued) throw failSession(
                         "Android could not queue the NCM read request (api=${Build.VERSION.SDK_INT} " +
                             "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queued.firstBytes} " +
@@ -262,7 +264,7 @@ class NcmUsbBridge internal constructor(
         }
         try {
             val completed = try {
-                connection.requestWait(timeoutMillis.coerceAtLeast(1))
+                readRequests.await(timeoutMillis.coerceAtLeast(1))
             } catch (_: TimeoutException) {
                 // Nothing arrived yet; the request stays queued for the next call. USBMUX owns
                 // authoritative detach/failure detection for the same phone.

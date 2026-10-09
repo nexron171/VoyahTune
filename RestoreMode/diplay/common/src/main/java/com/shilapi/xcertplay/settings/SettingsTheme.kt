@@ -1,9 +1,9 @@
 package com.shilapi.xcertplay.settings
 
 import android.content.Context
-import android.graphics.Color
+import com.shilapi.xcertplay.DiPlayPalette
 
-enum class SettingsTheme(
+class SettingsTheme private constructor(
     val isOverlay: Boolean,
     val textPrimary: Int,
     val textSecondary: Int,
@@ -11,26 +11,41 @@ enum class SettingsTheme(
     val accentTrack: Int,
     val trackOff: Int,
     val buttonText: Int,
+    val ripple: Int,
+    val focusRing: Int,
 ) {
-    CARD(
-        isOverlay = false,
-        textPrimary = Color.rgb(241, 245, 252),
-        textSecondary = Color.rgb(168, 182, 202),
-        accent = Color.rgb(166, 200, 255),
-        accentTrack = Color.rgb(0x32, 0x58, 0x8c),
-        trackOff = Color.rgb(42, 56, 75),
-        buttonText = Color.rgb(12, 17, 27),
-    ),
-    OVERLAY(
-        isOverlay = true,
-        textPrimary = Color.WHITE,
-        textSecondary = Color.rgb(170, 180, 190),
-        accent = Color.rgb(127, 205, 154),
-        accentTrack = Color.rgb(78, 143, 102),
-        trackOff = Color.rgb(64, 74, 80),
-        buttonText = Color.rgb(8, 17, 11),
-    );
 
     fun dp(context: Context, value: Int): Int =
         (value * context.resources.displayMetrics.density).toInt()
+
+    companion object {
+        /** Dark aliases keep existing overlay callers source-compatible until Phase 4. */
+        @JvmField val CARD = card(DiPlayPalette.DARK)
+        @JvmField val OVERLAY = overlay(DiPlayPalette.DARK)
+        @JvmField val entries = listOf(CARD, OVERLAY)
+
+        internal fun card(palette: DiPlayPalette) = SettingsTheme(
+            isOverlay = false,
+            textPrimary = palette.primaryText,
+            textSecondary = palette.secondaryText,
+            accent = palette.accent,
+            accentTrack = palette.accentTrack,
+            trackOff = palette.trackOff,
+            buttonText = palette.onAccent,
+            ripple = palette.ripple,
+            focusRing = palette.focusRing,
+        )
+
+        internal fun overlay(palette: DiPlayPalette) = SettingsTheme(
+            isOverlay = true,
+            textPrimary = palette.overlayPrimaryText,
+            textSecondary = palette.overlaySecondaryText,
+            accent = palette.overlayAccent,
+            accentTrack = palette.overlayAccentTrack,
+            trackOff = palette.overlayTrackOff,
+            buttonText = palette.overlayOnAccent,
+            ripple = palette.ripple,
+            focusRing = palette.focusRing,
+        )
+    }
 }
