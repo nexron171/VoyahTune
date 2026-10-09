@@ -292,7 +292,7 @@ public class SetModesService extends Service {
                                     d.getString("widgetId", ""), d.getParcelable("event"));
                         } else if (CarPlayTarget.isCarPlay(left)
                                 && (right == null || right.isEmpty())) {
-                            launchTaskApp(left);
+                            launchTaskApp(left, d != null ? d.getInt("displayId", 0) : 0);
                         } else if (singleVd) {
                             launchSingleApp(left, lDpi);
                         } else if (right == null || right.isEmpty()) {
@@ -975,6 +975,14 @@ public class SetModesService extends Service {
     }
 
     protected void launchTaskApp(String pkg) {
+        launchTaskApp(pkg, 0);
+    }
+
+    private void launchTaskApp(String pkg, int displayId) {
+        if (displayId != 0 && displayId != 1) {
+            Log.w(TAG, "Reject non-physical launch display=" + displayId);
+            return;
+        }
         boolean fullscreen =
                 FullscreenPackagePolicy.contains(
                         android.provider.Settings.Global.getString(
@@ -983,7 +991,7 @@ public class SetModesService extends Service {
         AppDisplayLauncher.launch(
                 this,
                 pkg,
-                0,
+                displayId,
                 fullscreen,
                 () -> true,
                 () ->

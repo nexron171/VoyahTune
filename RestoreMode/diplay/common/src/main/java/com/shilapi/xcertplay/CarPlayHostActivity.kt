@@ -1580,7 +1580,7 @@ class CarPlayHostActivity : ComponentActivity() {
         stageStatusView = stage
         connectionPanel = viewport
         updateDebugOverlays()
-        return root
+        return CarPlayWindowUi.wrap(this, root)
     }
 
     // DiPlay's side panel: placed over the part of the stream CarPlay leaves black (placeSidePanel), so it
@@ -3304,7 +3304,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun validateMfiSettings(): Boolean {
         val error = when {
             mfiTarget == MfiTarget.LOCAL && runCatching { DiPlayBootstrap.ensure(this, mfiTarget) }.isFailure ->
-                getString(R.string.setup_error_auth)
+                CarPlayWindowUi.authenticationError(this) ?: getString(R.string.setup_error_auth)
             mfiTarget == MfiTarget.I2C && mfiI2cPath.isBlank() ->
                 getString(R.string.i2c_device_path_is_required)
             mfiTarget == MfiTarget.REMOTE && remoteMfiServer.isBlank() ->
@@ -5080,6 +5080,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun applyFullscreenMode() {
+        if (CarPlayWindowUi.configureWindow(this)) return
         val multiWindow = isMultiWindowActive()
         val hideTop = hideTopBar && !multiWindow
         val hideBottom = hideBottomBar && !multiWindow

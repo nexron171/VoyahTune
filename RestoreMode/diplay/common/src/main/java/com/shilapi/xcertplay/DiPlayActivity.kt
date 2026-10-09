@@ -331,7 +331,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         applyWindowAppearance()
         setupError = runCatching { DiPlayBootstrap.ensure(this, AirPlayPersistence.loadMfiTarget(this)) }.exceptionOrNull()?.let {
             android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
-            getString(R.string.setup_error_auth)
+            CarPlayWindowUi.authenticationError(this) ?: getString(R.string.setup_error_auth)
         }
         pendingCarHotspotSetup = savedInstanceState?.getBoolean("pending_car_hotspot") ?: false
         bydVehicleAdvancedExpanded = savedInstanceState?.getBoolean("byd_vehicle_advanced") ?: false
@@ -529,6 +529,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun applyFullscreenMode() {
+        if (CarPlayWindowUi.configureWindow(this)) return
         val multiWindow = Build.VERSION.SDK_INT >= 24 && isInMultiWindowMode
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = palette.systemBarIconsAreDark
@@ -662,7 +663,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 baseRight + safe.right, baseBottom + safe.bottom)
             insets
         }
-        setContentView(root)
+        setContentView(CarPlayWindowUi.wrap(this, root))
         ViewCompat.requestApplyInsets(root)
         renderedPage = page
         renderedSettingsCategory = settingsCategory.takeIf { page == "settings" }

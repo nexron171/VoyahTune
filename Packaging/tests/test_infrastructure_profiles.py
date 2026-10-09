@@ -29,7 +29,7 @@ OD = (
     'test_loader_fault_backoff.sh', 'test_loader_pipe_records.sh',
     'test_mapkit_dpi_client.sh', 'test_screen_lift_resize_restore.sh',
     'test_vd_hot_hooks_disabled.sh', 'test_vd_reparent_replay.sh',
-    'test_native_task_removal.js', 'test_vehicle_drive_hook.js',
+    'test_native_task_removal.js', 'test_vehicle_drive_hook.js', 'test_carplay_allapps.js',
     'test_parallel_hook_loader.py', 'test_updater_ui_worker.py',
 )
 

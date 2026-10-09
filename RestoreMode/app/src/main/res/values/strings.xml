@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">VoyahTune</string>
+    <string name="voyahtune_app_name" translatable="false">VoyahTune</string>
     <string name="wash_mode_title">Режим мойки</string>
     <string name="wash_mode_confirmation">Перед активацией включите P. Автомобиль немедленно выключится. Бесключевое открытие и закрытие временно станет недоступно; снаружи используйте физический ключ. Для выхода из режима нажмите педаль тормоза.</string>
     <string name="wash_mode_activate">Активировать</string>

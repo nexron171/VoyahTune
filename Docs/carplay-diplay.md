@@ -59,9 +59,11 @@ flowchart LR
 
 1. `VoyahCarPlayIntegration.install(new CarPlayVehicleBridge(this))`.
 2. `CarPlayHomeUi.install(CarPlayHomeScreen::new)`.
+3. `CarPlayWindowUi.install(new CarPlayWindowPolicy())`.
 
 Первый включает наличие интеграции (`available`) и источники Voyah, второй заменяет
-только стартовый экран. Их отсутствие не должно требовать ссылки библиотеки на
+только стартовый экран, третий задаёт безопасную область окна и текст ошибки
+аутентификации. Их отсутствие не должно требовать ссылки библиотеки на
 приложение: штатный home остаётся fallback. Статические регистрации не должны
 удерживать Activity; bridge хранит application context, фабрика создаёт отдельный View.
 
@@ -95,9 +97,14 @@ Release ABI приложения — arm64-v8a, debug включает arm64-v8a
 | `AdbClusterActivity`, `MyCarAppService` | Удалены manifest merge overrides. Не возвращать при обновлении. |
 | Native IPC | RestoreMode запрашивает `ru.big.town.anative.permission.BIND_SET_MODES_SERVICE`; служба Native защищена этой signature-permission. APK должны иметь совместимую подпись. |
 
+Название приложения и `MainActivity` используют собственный нетранслируемый ресурс
+`voyahtune_app_name`. Не использовать для них `app_name`: локализованные варианты
+DiPlay (`values-ru`, `values-uk`, китайские locale) иначе перекрывают имя приложения.
+
 Локальная пара хранится в `Credentials/CarPlayKeys/offline-mfi/` от корня проекта.
 Весь `Credentials/` исключён из Git; файлы передаются отдельно от исходников.
-Для сборки из корня проекта задать:
+Gradle автоматически использует эту локальную папку. Другой источник можно задать
+через окружение самого Gradle/сборщика релиза:
 
 ```sh
 export DIPLAY_AUTH_ASSETS_DIR="$PWD/Credentials/CarPlayKeys"
@@ -111,10 +118,14 @@ offline-mfi/
   certificate.p7b
 ```
 
-В APK копируется вся указанная папка; она должна содержать только нужные runtime
-assets. Если переменная задана, Gradle проверяет наличие файлов, но не соответствие
-ключа сертификату. Без неё source-only сборка возможна, чистая LOCAL MFi установка
-не заработает. Значение должно попасть в окружение самого Gradle/сборщика релиза.
+Задача `prepare<Variant>CarPlayAuthentication` копирует в generated assets только
+эти два непустых файла. Посторонние файлы из папки credentials в APK не попадают.
+Release-сборка останавливается, если пары нет; явный `DIPLAY_AUTH_ASSETS_DIR` имеет
+приоритет над локальной папкой и также требует полной пары. Без обоих источников
+source-only debug-сборка остаётся возможной, но LOCAL MFi в ней не заработает.
+Проверка наличия файлов не доказывает соответствие ключа сертификату; bootstrap
+проверяет пару при загрузке. Упаковку и наличие обоих assets в итоговом APK проверять
+отдельно от подписи APK. Ключи и сертификаты не выводить в логи.
 
 `DiPlayBootstrap.ensure()` сначала применяет `VoyahCarPlayDefaults`, затем для
 LOCAL MFi устанавливает assets в `noBackupFilesDir/offline-mfi` через staging,
@@ -158,9 +169,24 @@ ID       = ru.big.town.restoremode/com.shilapi.xcertplay.DiPlayActivity
 `ID` — компонент, а не имя пакета. `launchIntent` создаёт MAIN + LAUNCHER с явным
 компонентом. `matches` для CarPlay принимает только `com.shilapi.xcertplay.*` внутри
 RestoreMode: пакетная фильтрация без имени Activity закроет также Dashboard/настройки.
+Для обычного `PACKAGE` тот же helper явно открывает `MainActivity`, а не случайный
+первый launcher-компонент пакета.
+
+OD All Apps в `Packaging/od/inject/launcherdock.js` содержит две отдельные записи
+одного APK. Их ключи — package для VoyahTune и package/`CarPlayLauncherActivity`
+для CarPlay; `AppBean.packageName` в обоих случаях остаётся настоящим package.
+Subtype различает записи при добавлении, повторном bind и клике. Название и иконка
+берутся из соответствующего ActivityInfo, поэтому CarPlay получает зелёный значок.
+Обновление/удаление пакета сбрасывает кэш обеих иконок и пересобирает списки.
+Клик сохраняет физический экран владельца All Apps (0/1) и явный компонент,
+включая пассажирскую ленту. PI-хуки этим изменением не затрагиваются.
+Стартовая и проекционная Activity CarPlay включены в `ourInsetActivity`: док остаётся
+видимым над зарезервированной ими полосой, как над Dashboard.
 
 - Launcher связывается с Native и посылает существующее сообщение **34**, `arg1=1`,
-  `left=CarPlayTarget.ID`, `right=""`. Тайм-аут ожидания службы — 5 секунд.
+  `left=CarPlayTarget.ID`, `right=""`, `displayId` своего окна. Native принимает
+  только физические 0/1; старые вызовы без displayId сохраняют водительский экран 0.
+  Тайм-аут ожидания службы — 5 секунд.
 - `SettingsAppPicker` отображает отдельный логический выбор CarPlay, не дублируя
   launcher как обычный пакет. `TileOrderStore` проверяет существование `PACKAGE`.
 - **Настройки → Главный экран → Виджеты приложений → CarPlay → Добавить виджет CarPlay**:
@@ -241,6 +267,17 @@ VoyahTune; скрытие не изменяет сохранённые preferenc
 DiPlayActivity.onBackPressedDispatcher.onBackPressed(), как системное «Назад».
 Она не вызывает disconnect/stop сессии и не меняет автоподключение.
 **Таймера и кнопки «Отмена» нет**: пользователь отменил эту идею.
+
+`CarPlayWindowUi` оборачивает home/settings и весь корневой View проекции, включая
+видео и жесты, общей безопасной областью. `CarPlayWindowPolicy` из app сохраняет
+видимые системные панели. На физических дисплеях 0/1 он резервирует 145dp OEM-дока
+и `status_bar_height`, используя плотность дисплея, а не масштаб UI DiPlay.
+Уже учтённое смещение окна вычитается из OEM-отступов; Android insets объединяются
+через максимум, а не сложение. Insets потребляются обёрткой один раз, чтобы внутренний
+экран подключения не повторял их. На VirtualDisplay OEM-отступы не добавляются.
+Размер видео и передаваемая телефону геометрия берутся из оставшейся области;
+координаты касаний используют тот же viewport. Без app-policy библиотека сохраняет
+свой исходный режим. Сохранённые предпочтения fullscreen не удаляются.
 
 Раздел **VoyahTune → CarPlay** имеет стабильный идентификатор **9** (`SettingsSection.CARPLAY`),
 nav id `navCarPlay`, `savesImmediately=true`. `CarPlaySettingsFragment` через публичный
@@ -560,8 +597,8 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayVideoActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayVideoActivity.kt) | AppLocale.wrap/enforce для отдельного видеоэкрана. |
 | [common/src/main/java/com/shilapi/xcertplay/AdbClusterActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AdbClusterActivity.kt) | AppLocale.wrap/enforce для отдельного экрана карты. |
 | [common/src/main/java/com/shilapi/xcertplay/AudioChannelPreview.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AudioChannelPreview.kt) | Automatic использует OEM 3/1; проверять фактический AudioTrack stream и fallback. |
-| [common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt) | available → источники скорости/темы/аудиомаршруты Voyah; Siri keys переданы Native. В snapshot сохранять ownerDisplayId; при смене дисплея ждать stop и запускать новую сессию с новым размером (§4). |
-| [common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt) | Defaults; projection launchDisplayId; фабрика home + обновление состояния; одноразовый запрос автоподключения при открытии; скрытие WHEEL_KEYS при доступной VoyahCarPlayIntegration (§5); guards OEM/ADB-разделов и vehicle-data probe в диагностике (§9). |
+| [common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt) | available → источники скорости/темы/аудиомаршруты Voyah; Siri keys переданы Native. В snapshot сохранять ownerDisplayId; при смене дисплея ждать stop и запускать новую сессию с новым размером (§4); подключить CarPlayWindowUi к корневому View и window policy (§5). |
+| [common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt) | Defaults; projection launchDisplayId; фабрика home + обновление состояния; CarPlayWindowUi для границ окна и ошибки auth; одноразовый запрос автоподключения при открытии; скрытие WHEEL_KEYS при доступной VoyahCarPlayIntegration (§5); guards OEM/ADB-разделов и vehicle-data probe в диагностике (§9). |
 | [common/src/main/java/com/shilapi/xcertplay/DiPlayBootstrap.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlayBootstrap.kt) | Вызов VoyahCarPlayDefaults.initialize до штатной загрузки identity. |
 | [common/src/main/java/com/shilapi/xcertplay/DiPlaySessionService.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlaySessionService.kt) | start/stop интеграции по жизни сервиса, сохранение сессии при onTaskRemoved на Voyah; локализованный context и уведомление. |
 | [common/src/main/java/com/shilapi/xcertplay/PhoneBluetoothReceiver.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/PhoneBluetoothReceiver.kt) | Ранний return по standaloneAppEnabled: запуск только через VoyahTune/Native. |
@@ -601,12 +638,13 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 
 ### 10.2. Собственные файлы внутри DiPlay
 
-Эти **8 файлов реализации** не придут из upstream; их нужно сохранить/перенести
+Эти **9 файлов реализации** не придут из upstream; их нужно сохранить/перенести
 вместе с собственными тестами. `AGENTS.md` и наш `README.md` также не заменять upstream-версией.
 
 | Файл | Назначение |
 | --- | --- |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt) | Контракт фабрики app-owned home и callbacks/state. |
+| [common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt) | App-policy безопасных границ, единая обёртка UI/видео, потребление insets и текст ошибки auth (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt) | Java-friendly доступ настроек VoyahTune к preferences/состоянию/stop DiPlay. |
 | [common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayDefaults.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayDefaults.kt) | Defaults с отдельными миграциями навигационного канала и названия кнопки автомобиля. |
 | [common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayIntegration.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayIntegration.kt) | Регистрация Host, available, скорость, night, Siri через snapshot. |
@@ -623,7 +661,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 проверяет setup-навигацию, блокировку standalone updater и Bluetooth extra.
 
 Собственные тесты common: `VoyahSessionTransferTest`, `VoyahCarPlayIntegrationTest`,
-`VoyahAudioDefaultsTest`, `VoyahCarBrandingTest`, `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`.
+`VoyahAudioDefaultsTest`, `VoyahCarBrandingTest`, `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `CarPlayWindowUiTest`.
 Shared: `VoyahNavigationTest`, `VoyahAudioRoutingTest`. Они перечислены с путями в §12.
 
 ### 10.3. Код вне vendored дерева
@@ -635,7 +673,9 @@ Shared: `VoyahNavigationTest`, `VoyahAudioRoutingTest`. Они перечисл�
 | --- | --- |
 | [RestoreMode/settings.gradle.kts](../RestoreMode/settings.gradle.kts)<br>[RestoreMode/app/build.gradle.kts](../RestoreMode/app/build.gradle.kts)<br>[RestoreMode/gradle/libs.versions.toml](../RestoreMode/gradle/libs.versions.toml)<br>[RestoreMode/gradle/wrapper/gradle-wrapper.properties](../RestoreMode/gradle/wrapper/gradle-wrapper.properties) | Модули, зависимости, AGP/Gradle, assets и ABI (§3). |
 | [RestoreMode/app/src/main/AndroidManifest.xml](../RestoreMode/app/src/main/AndroidManifest.xml)<br>[Native/app/src/main/AndroidManifest.xml](../Native/app/src/main/AndroidManifest.xml) | Overrides компонентов/launcher/boot и signature permission (§3). |
-| [RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java) | Установка bridge и home factory вне :ota (§2). |
+| [RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java) | Установка bridge, home factory и window policy вне :ota (§2). |
+| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWindowPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWindowPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlaySafeArea.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlaySafeArea.java) | Физические OEM-отступы, вычитание смещения окна, отсутствие резерва дока в виджетах (§5). |
+| [Packaging/od/inject/launcherdock.js](../Packaging/od/inject/launcherdock.js) | Две записи одного APK, ActivityInfo label/icon, явный компонент и сохранение экрана All Apps (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayLauncherActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayLauncherActivity.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayTarget.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayTarget.java) | Адресный launcher и стабильный component ID (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/MainSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/MainSettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileOrderStore.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileOrderStore.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java)<br>[RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Отдельная карточка добавления CarPlay; общий picker, имя/иконка, размеры, 1×1 и embedded (§4). |
 | [Native/app/src/main/java/ru/big/town/anative/AppDisplayLauncher.java](../Native/app/src/main/java/ru/big/town/anative/AppDisplayLauncher.java)<br>[Native/app/src/main/java/ru/big/town/anative/AppDisplayTaskPlan.java](../Native/app/src/main/java/ru/big/town/anative/AppDisplayTaskPlan.java)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesService.java](../Native/app/src/main/java/ru/big/town/anative/SetModesService.java) | Запуск и фильтрация tasks, перенос/cleanup дисплеев, сообщения 34/120/121/123, destroy контроллера (§4/6). |
@@ -721,6 +761,7 @@ Authentication assets и бинарную иконку сохранить отд
 
 | Контракт | Существующие целевые тесты |
 | --- | --- |
+| Два значка OD и безопасная область | `Packaging/tests/test_carplay_allapps.js`; app `CarPlaySafeAreaTest`; common `CarPlayWindowUiTest`, `CarPlayHostVideoSurfaceTest` |
 | Task/component/display | Native `CarPlayTargetTest`, `AppDisplayTaskPlanTest`; common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
 | Автоподключение и настройки | common `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `DefaultConnectionModeTest`, `VoyahEmbeddedEntryPointsTest`, `PhoneBluetoothReceiverTest` |
 | Скорость, gear, SWReason | common `VoyahCarPlayIntegrationTest`; Native `CanBusEventRouterTest` |

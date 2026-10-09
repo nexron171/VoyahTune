@@ -250,6 +250,9 @@ Java.perform(function () {
         act = cleanJavaString(act);
         return act.indexOf("SplitHostActivity") >= 0
             || act.indexOf("restoremode.MainActivity") >= 0
+            || act === "com.shilapi.xcertplay.DiPlayActivity"
+            || act === "com.shilapi.xcertplay.CarPlayHostActivity"
+            || act === "ru.big.town.restoremode.carplay.CarPlayLauncherActivity"
             || act.indexOf("AdvanceActivity") >= 0
             || act.indexOf("TripHistoryActivity") >= 0;
     }
@@ -794,7 +797,23 @@ Java.perform(function () {
             var packageRefreshTimer = null;
             var FLAG_SYSTEM = 0x00000001;
             var SYNTHETIC_PREFIX = "__voyahtune_allapps__:";
+            var CARPLAY_ENTRY = RESTORE_PKG + "/ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
+            var ComponentName = Java.use("android.content.ComponentName");
             var resourceTemplate = null;
+
+            function entryPackage(target) {
+                return target === CARPLAY_ENTRY ? RESTORE_PKG : target;
+            }
+
+            function entryComponent(target) {
+                if (target === CARPLAY_ENTRY) {
+                    return ComponentName.$new(RESTORE_PKG, target.substring(target.indexOf("/") + 1));
+                }
+                if (target === RESTORE_PKG) {
+                    return ComponentName.$new(RESTORE_PKG, RESTORE_PKG + ".MainActivity");
+                }
+                return null;
+            }
 
             function packageFromIntent(intent) {
                 if (intent === null) return "";
@@ -825,6 +844,8 @@ Java.perform(function () {
                 startAppIntent.implementation = function (context, intent, screenIdArg) {
                     var screenId = Number(screenIdArg);
                     var pkg = packageFromIntent(intent);
+                    // Preserve the explicit Dashboard/CarPlay entry and the OEM display routing.
+                    if (pkg === RESTORE_PKG) return startAppIntent.call(this, context, intent, screenIdArg);
                     if (returnDockAppToScreen(pkg, screenId)) return;
                     if (isUserFullscreen(pkg) && launchFullscreen(pkg, screenId)) return;
                     return startAppIntent.call(this, context, intent, screenIdArg);
@@ -834,6 +855,7 @@ Java.perform(function () {
                 startAppComponent.implementation = function (context, pkgArg, classArg, screenIdArg) {
                     var pkg = cleanJavaString(pkgArg);
                     var screenId = Number(screenIdArg);
+                    if (pkg === RESTORE_PKG) return startAppComponent.call(this, context, pkgArg, classArg, screenIdArg);
                     if (returnDockAppToScreen(pkg, screenId)) return;
                     if (isUserFullscreen(pkg) && launchFullscreen(pkg, screenId)) return;
                     return startAppComponent.call(this,
@@ -848,8 +870,13 @@ Java.perform(function () {
                         Log.e(TAG, "[allapps] reject non-physical display=" + screenId + " for " + pkg);
                         return false;
                     }
-                    if (isUserFullscreen(pkg)) return launchFullscreen(pkg, screenId);
-                    var intent = pm.getLaunchIntentForPackage(pkg);
+                    var component = entryComponent(pkg);
+                    if (component === null) {
+                        if (isUserFullscreen(pkg)) return launchFullscreen(pkg, screenId);
+                    }
+                    var intent = component !== null
+                            ? Intent.$new("android.intent.action.MAIN").addCategory("android.intent.category.LAUNCHER").setComponent(component)
+                            : pm.getLaunchIntentForPackage(pkg);
                     if (intent === null) return false;
                     intent.addFlags(0x10000000); // FLAG_ACTIVITY_NEW_TASK
                     AppLauncher.startApp(ctx(), intent, screenId);
@@ -886,9 +913,16 @@ Java.perform(function () {
                         var ai = Java.cast(installed.get(i), ApplicationInfo);
                         var pkg = "" + ai.packageName.value;
                         var flags = Number(ai.flags.value);
-                        if ((flags & FLAG_SYSTEM) !== 0 || pkg === "com.qinggan.app.launcher") continue;
+                        if (((flags & FLAG_SYSTEM) !== 0 && pkg !== RESTORE_PKG)
+                                || pkg === "com.qinggan.app.launcher" || !ai.enabled.value) continue;
                         if (pm.getLaunchIntentForPackage(pkg) === null) continue;
                         result.push(pkg);
+                        if (pkg === RESTORE_PKG) {
+                            try {
+                                var carplay = pm.getActivityInfo(entryComponent(CARPLAY_ENTRY), 0);
+                                if (carplay.enabled.value && carplay.exported.value) result.push(CARPLAY_ENTRY);
+                            } catch (absentCarPlay) {}
+                        }
                     } catch (ignored) {}
                 }
                 installedSnapshot = result;
@@ -935,15 +969,20 @@ Java.perform(function () {
                 for (var i = 0; i < list.size(); i++) {
                     try {
                         var current = Java.cast(list.get(i), AppBean);
-                        existing["pkg:" + current.getPackageName()] = true;
+                        var existingTarget = syntheticPackage(current) || "" + current.getPackageName();
+                        existing["pkg:" + existingTarget] = true;
+                        if (existingTarget === RESTORE_PKG) {
+                            current.setSubType(SYNTHETIC_PREFIX + RESTORE_PKG);
+                        }
                     } catch (ignored) {}
                 }
 
                 var apps = snapshotInstalled();
                 var template = null;
                 for (var j = 0; j < apps.length; j++) {
-                    var pkg = apps[j];
-                    if (existing["pkg:" + pkg]) continue;
+                    var target = apps[j];
+                    var pkg = entryPackage(target);
+                    if (existing["pkg:" + target]) continue;
                     try {
                         if (template === null) template = findAppTemplate(list);
                         // На редкой конфигурации passenger OEM-list может быть пустым. Ресурсы обоих
@@ -957,9 +996,9 @@ Java.perform(function () {
                             return;
                         }
                         var bean = AppBean.$new(template.icon, template.name, pkg);
-                        bean.setSubType(SYNTHETIC_PREFIX + pkg);
+                        bean.setSubType(SYNTHETIC_PREFIX + target);
                         list.add(bean);
-                        existing["pkg:" + pkg] = true;
+                        existing["pkg:" + target] = true;
                     } catch (e) { Log.e(TAG, "[allapps] add " + pkg + ": " + e); }
                 }
             }
@@ -975,6 +1014,7 @@ Java.perform(function () {
                 try {
                     var pkg = "" + bean.getPackageName();
                     var subType = "" + bean.getSubType();
+                    if (pkg === RESTORE_PKG && subType === SYNTHETIC_PREFIX + CARPLAY_ENTRY) return CARPLAY_ENTRY;
                     if (!pkg || subType !== SYNTHETIC_PREFIX + pkg) return null;
                     return pkg;
                 } catch (ignored) {
@@ -985,7 +1025,8 @@ Java.perform(function () {
             function loadIcon(pkg) {
                 var icon = iconCache[pkg];
                 if (!icon) {
-                    icon = pm.getApplicationIcon(pkg);
+                    var component = entryComponent(pkg);
+                    icon = component !== null ? pm.getActivityIcon(component) : pm.getApplicationIcon(pkg);
                     try { icon = Java.retain(icon); } catch (ignored) {}
                     iconCache[pkg] = icon;
                 }
@@ -993,7 +1034,9 @@ Java.perform(function () {
             }
 
             function invalidateIconCache(packageName) {
-                var keys = packageName ? [packageName] : Object.keys(iconCache);
+                var keys = Object.keys(iconCache).filter(function (key) {
+                    return !packageName || entryPackage(key) === packageName;
+                });
                 for (var i = 0; i < keys.length; i++) {
                     var cached = iconCache[keys[i]];
                     if (cached) {
@@ -1006,6 +1049,8 @@ Java.perform(function () {
             function loadLabel(pkg) {
                 // PackageManager label зависит от текущей locale. Не кэшируем его на жизнь launcher,
                 // иначе payload 10001 после смены языка снова нарисует прежнюю подпись.
+                var component = entryComponent(pkg);
+                if (component !== null) return "" + pm.getActivityInfo(component, 0).loadLabel(pm);
                 return "" + pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
             }
 

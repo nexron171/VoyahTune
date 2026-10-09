@@ -32,10 +32,11 @@ public final class CarPlayTarget {
     }
 
     public static Intent launchIntent(Context context, String target) {
-        if (isCarPlay(target)) {
+        if (isCarPlay(target) || PACKAGE.equals(target)) {
             return new Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_LAUNCHER)
-                    .setComponent(new ComponentName(PACKAGE, ACTIVITY));
+                    .setComponent(new ComponentName(PACKAGE,
+                            isCarPlay(target) ? ACTIVITY : PACKAGE + ".MainActivity"));
         }
         return context.getPackageManager().getLaunchIntentForPackage(target);
     }

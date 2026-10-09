@@ -31,6 +31,7 @@ public final class CarPlayLauncherActivity extends Activity {
                         Bundle data = new Bundle();
                         data.putString("left", CarPlayTarget.ID);
                         data.putString("right", "");
+                        data.putInt("displayId", getWindowManager().getDefaultDisplay().getDisplayId());
                         request.setData(data);
                         new Messenger(binder).send(request);
                         finish();

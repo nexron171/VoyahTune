@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="carplay_authentication_error">Не удалось загрузить ключи CarPlay. Установите полную сборку VoyahTune поверх текущей. Удалять приложение или сбрасывать его данные не требуется.</string>
     <string name="carplay_home_title">CarPlay</string>
     <string name="carplay_home_brand">VoyahTune</string>
     <string name="carplay_home_wireless">Беспроводное подключение</string>
