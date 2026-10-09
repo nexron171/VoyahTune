@@ -122,3 +122,6 @@ CONTEXT.md
 Installer/scripts/__pycache__
 Packaging/tests/__pycache__
 Utils/__pycache__
+
+# Local credentials must never be committed.
+/Credentials/
