@@ -42,7 +42,8 @@ Java.perform(function () {
     // Лаунчер является home на обоих дисплеях; наши SplitHost живут на VirtualDisplay; SystemUI
     // не является переносимым приложением. Для них сохраняем явный deny.
     var NEVER = ["com.qinggan.app.launcher", "com.qinggan.mainlauncher",
-                 "ru.big.town", "com.android.systemui"];
+             //    "ru.big.town", 
+                 "com.android.systemui"];
 
     function safeConsole(line) {
         try { console.log(line); } catch (ignored) {}
