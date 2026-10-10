@@ -169,6 +169,7 @@ Adaptive XML в `mipmap-anydpi-v26` задаёт тёмный фон и сист
 ```text
 PACKAGE  = ru.big.town.restoremode
 ACTIVITY = com.shilapi.xcertplay.DiPlayActivity
+ENTRY    = com.shilapi.xcertplay.CarPlayEntryActivity
 PROJECTION = com.shilapi.xcertplay.CarPlayHostActivity
 LAUNCHER = ru.big.town.restoremode.carplay.CarPlayLauncherActivity
 ID       = ru.big.town.restoremode/com.shilapi.xcertplay.DiPlayActivity
@@ -176,8 +177,8 @@ ID       = ru.big.town.restoremode/com.shilapi.xcertplay.DiPlayActivity
 
 `ID` — стабильная логическая цель, записанная как компонент, а не имя пакета.
 `launchIntent(context, target, displayId)` создаёт MAIN + LAUNCHER с явным
-компонентом: для CarPlay на физических 0/1 — `ACTIVITY`, на VirtualDisplay (>1) —
-`PROJECTION`. Перегрузка без displayId сохраняет стартовый экран. Native передаёт
+компонентом: для CarPlay на физических 0/1 — `ENTRY`, на VirtualDisplay (>1) —
+`PROJECTION`. Перегрузка без displayId использует `ENTRY` на основном экране. Native передаёт
 фактический displayId виджета; существующие ID в профилях не требуют миграции.
 `matches` для CarPlay принимает только `com.shilapi.xcertplay.*` внутри
 RestoreMode: пакетная фильтрация без имени Activity закроет также Dashboard/настройки.
@@ -528,8 +529,13 @@ AppLocaleTest проверяет default ru и сохранение выбора
    могут оставить пользователя на настройке подключения, а не открыть проекцию.
 5. Возврат из проекции, внутренних настроек и обычная смена размера не повторяют запрос.
    Установка переключателя сама по себе не запускает подключение в этот момент.
-6. Существующая сессия при обычном launcher-входе открывается сразу по штатному пути,
-   независимо от auto_connect; это показ текущей проекции, не новое подключение.
+6. Руль, док и ярлык 1×1 используют `CarPlayEntryActivity`: при существующей сессии
+   сразу открывается `CarPlayHostActivity`, иначе — `DiPlayActivity`. Проверка выполняется
+   до построения стартового UI, независимо от auto_connect. На том же дисплее сессия
+   сохраняется; смена дисплея требует teardown и нового подключения с новыми размерами.
+   Виджет-окно открывает проекцию напрямую и применяет ту же политику смены дисплея.
+7. Кнопка «Открыть CarPlay экран» в настройках VoyahTune запускает непосредственно
+   `DiPlayActivity` с `page=home`, даже при активной сессии; роутер для неё не используется.
 
 Android Back из проекции открывает home с `page=home`, сохраняя сессию. Штатный свайп
 вниз тремя пальцами (число настраивается) открывает меню DiPlay с переходом в полные
@@ -1400,3 +1406,11 @@ Debug RestoreMode **4.0.0-od** установлен и DiPlayActivity откры
 в интерфейсе iPhone CarPlay, OEM-арбитраж навигации и автоматическое обновление identity
 не входят в реализованный контракт. Не добавлять их при обновлении upstream как
 неявное «восстановление» существующих функций.
+
+### Открытие CarPlay кнопками руля
+
+В списке действий кнопок руля доступно «Открыть CarPlay» (`open_carplay`) для
+короткого и долгого нажатия. RestoreMode сохраняет и публикует действие через
+существующий протокол руля; Native запускает `CarPlayLauncherActivity` на основном
+экране (display 0). Используется тот же путь переноса задачи между виджетом и
+полноэкранным CarPlay, что у ярлыка. Дополнительная сессия CarPlay не создаётся.
