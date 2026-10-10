@@ -29,8 +29,8 @@
     {
       "version": "4.3.0-beta-od",
       "url": "https://storage.yandexcloud.net/voyahtune/v4.3.0-beta-od/payload_4.3.0-beta-od.zip",
-      "size": 148390646,
-      "sha256": "14e884f5685d823b412f503e7881cac15652c679bd092aa7b4455e95f7a9712b",
+      "size": 148390696,
+      "sha256": "ba7daec9911789c05eab537e4ffb68787a893d9d009e2d35462153455aa3294f",
       "minimumInstallerVersion": "1.7.0",
       "minimumOtaVersion": "4.2.0"
     }
