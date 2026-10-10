@@ -5,16 +5,20 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.NumberPicker;
+import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
+import ru.big.town.restoremode.dashboard.tiles.TileScrollSnap;
 import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
 import ru.big.town.restoremode.integration.GlobalVars;
 import ru.big.town.restoremode.settings.core.SettingsSection;
@@ -210,6 +214,35 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         tileSpacing.setOnValueChangedListener(
                 (picker, oldValue, newValue) ->
                         preferences.edit().putInt("tileSpacingDp", newValue).apply());
+
+        Spinner gridSnapMode = settingView(R.id.gridSnapMode);
+        if (gridSnapMode != null) {
+            ArrayAdapter<String> modes =
+                    new ArrayAdapter<>(
+                            requireContext(),
+                            R.layout.settings_spinner_item,
+                            TileScrollSnap.LABELS);
+            modes.setDropDownViewResource(R.layout.settings_spinner_dropdown);
+            gridSnapMode.setAdapter(modes);
+            gridSnapMode.setSelection(
+                    TileScrollSnap.indexOf(
+                            TileScrollSnap.fromKey(
+                                    preferences.getString("gridSnapMode", null))));
+            gridSnapMode.setOnItemSelectedListener(
+                    new AdapterView.OnItemSelectedListener() {
+                        @Override
+                        public void onItemSelected(
+                                AdapterView<?> parent, View view, int position, long id) {
+                            preferences
+                                    .edit()
+                                    .putString("gridSnapMode", TileScrollSnap.KEYS[position])
+                                    .apply();
+                        }
+
+                        @Override
+                        public void onNothingSelected(AdapterView<?> parent) {}
+                    });
+        }
     }
 
     private void addDialWidget() {

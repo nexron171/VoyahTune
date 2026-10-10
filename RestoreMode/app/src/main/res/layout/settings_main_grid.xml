@@ -113,4 +113,41 @@
             android:layout_height="52dp"
             android:contentDescription="Расстояние между плитками" />
     </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Выравнивание после прокрутки"
+                android:textSize="22sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Через 100 ms покоя сетка за 500 ms доводится до выровненного положения; «По целой странице» — сразу после отпускания"
+                android:textSize="17sp"
+                android:textColor="#9aaac0"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <Spinner
+            android:id="@+id/gridSnapMode"
+            android:layout_width="260dp"
+            android:layout_height="48dp"
+            android:popupBackground="@color/settings_inset"
+            android:background="@drawable/settings_field"
+            android:contentDescription="Режим выравнивания сетки после прокрутки" />
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
 </LinearLayout>

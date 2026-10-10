@@ -1,5 +1,8 @@
 package ru.big.town.restoremode.dashboard;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -36,9 +39,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -64,6 +69,7 @@ import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.dashboard.tiles.TileDragController;
 import ru.big.town.restoremode.dashboard.tiles.TileGridPacking;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
+import ru.big.town.restoremode.dashboard.tiles.TileScrollSnap;
 import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
 import ru.big.town.restoremode.integration.GlobalVars;
 import ru.big.town.restoremode.integration.config.SplitConfigSync;
@@ -207,6 +213,25 @@ public class DashboardActivity extends AppCompatActivity {
     // Собственные вертикальные отступы сетки из разметки — «Полноэкранная сетка» снимает верхний.
     private int gridPaddingTop;
     private int gridPaddingBottom;
+
+    // -------- Автовыравнивание прокрутки сетки после остановки --------
+    // Пауза покоя и длительность плавного выравнивания; настройка выбирает только режим.
+    // «По целой странице» паузу не ждёт и стартует сразу после отпускания.
+    private static final long GRID_SNAP_IDLE_MS = 100L;
+    private static final long GRID_SNAP_DURATION_MS = 500L;
+    private static final int GRID_COLUMNS = 12;
+    private static final String PREF_GRID_SNAP_MODE = "gridSnapMode";
+    private HorizontalScrollView contentScroll;
+    // Шаг одной колонки в пикселях: считается в renderSplitTiles вместе с размерами плиток.
+    private int tilePitchPx;
+    private ValueAnimator gridSnapAnimator;
+    private boolean gridSnapping;
+    // Прокрутка в начале текущего жеста: режим «По целой странице» от неё отсчитывает переход.
+    private int gridSnapAnchorPx = -1;
+    // Ждёт ли паузу покоя уже начатая прокрутка и последняя применённая анимацией прокрутка.
+    private boolean gridSnapPending;
+    private int gridSnapAppliedPx = -1;
+    private final Runnable gridSnapIdle = this::runGridSnap;
     private final Map<String, TextureView> embeddedWidgetSurfaces = new HashMap<>();
     private final Map<String, Surface> embeddedWidgetOutputs = new HashMap<>();
     // Пакет и DPI запущенного в виджете приложения. Хранятся отдельно от настроек виджета,
@@ -1042,6 +1067,26 @@ public class DashboardActivity extends AppCompatActivity {
         gridPaddingTop = splitTilesGrid.getPaddingTop();
         gridPaddingBottom = splitTilesGrid.getPaddingBottom();
 
+        // Автовыравнивание сетки: отсчёт покоя после прокрутки и отмена по касанию.
+        contentScroll = findViewById(R.id.contentScroll);
+        if (contentScroll != null) {
+            contentScroll.setOnScrollChangeListener(
+                    (v, scrollX, scrollY, oldScrollX, oldScrollY) ->
+                            onGridScrolled(scrollX, oldScrollX));
+            // Тап обрабатывает плитка, поэтому сюда доходят движения после начала прокрутки;
+            // любое из них означает, что пользователь ведёт сетку сам.
+            contentScroll.setOnTouchListener(
+                    (v, event) -> {
+                        if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                            // «По целой странице» — сразу после отпускания, без паузы покоя.
+                            v.post(this::snapPageOnRelease);
+                        } else {
+                            stopGridSnapAnimation();
+                        }
+                        return false;
+                    });
+        }
+
         editor = sharedPreferences.edit();
         GlobalVars.editor = editor;
 
@@ -1672,6 +1717,8 @@ public class DashboardActivity extends AppCompatActivity {
         if (splitTilesGrid == null) {
             return;
         }
+        // Перестроение меняет размеры плиток и шаг колонки — начатое выравнивание больше не верно.
+        cancelGridSnap();
         // «Полноэкранная сетка» снимает и верхний отступ самой сетки: растянутый ряд должен
         // начинаться от границы экрана, а отрицательный отступ GridLayout не переносит.
         splitTilesGrid.setPadding(
@@ -1703,6 +1750,8 @@ public class DashboardActivity extends AppCompatActivity {
         int m = Math.round(spacingDp * metrics.density);
         int tileW = (availableW / 12) - 2 * m;
         int tileH = (availableH / 5) - 2 * m;
+        // Шаг колонки: ширина плитки плюс её отступы слева и справа.
+        tilePitchPx = tileW + 2 * m;
         final int rows = 5;
         // Высота сетки не делится на число рядов нацело. Остаток (до 4px) раздаём по
         // одному пикселю верхним рядам, иначе под нижним рядом остаётся пустая полоса.
@@ -2233,6 +2282,147 @@ public class DashboardActivity extends AppCompatActivity {
                         FULLSCREEN_GRID_COLUMNS_MAX,
                         sharedPreferences.getInt(
                                 "fullscreenGridColumns", FULLSCREEN_GRID_COLUMNS_DEFAULT)));
+    }
+
+    // -------- Автовыравнивание сетки после остановки прокрутки --------
+
+    /** Пользователь прокрутил сетку: перезапускаем отсчёт покоя перед выравниванием. */
+    private void onGridScrolled(int scrollX, int oldScrollX) {
+        if (contentScroll == null || tilePitchPx <= 0) {
+            return;
+        }
+        if (gridSnapping) {
+            if (scrollX == gridSnapAppliedPx) {
+                // Это шаг нашей же анимации.
+                return;
+            }
+            // Пользователь перехватил прокрутку: анимация больше не нужна.
+            cancelGridSnap();
+        }
+        if (tileDragController != null && tileDragController.isDragging()) {
+            return;
+        }
+        if (gridSnapMode() == TileScrollSnap.Mode.OFF) {
+            return;
+        }
+        if (!gridSnapPending) {
+            // Первое событие новой прокрутки: запоминаем положение до неё.
+            gridSnapAnchorPx = oldScrollX;
+            gridSnapPending = true;
+        }
+        uiHandler.removeCallbacks(gridSnapIdle);
+        uiHandler.postDelayed(gridSnapIdle, GRID_SNAP_IDLE_MS);
+    }
+
+    /** Прошла пауза покоя: плавно доводим сетку до выровненного положения. */
+    private void runGridSnap() {
+        gridSnapPending = false;
+        if (contentScroll == null || splitTilesGrid == null || tilePitchPx <= 0) {
+            return;
+        }
+        int from = contentScroll.getScrollX();
+        int target = gridSnapTarget(from);
+        if (target == from) {
+            return;
+        }
+        gridSnapping = true;
+        gridSnapAnimator = ValueAnimator.ofFloat(0f, 1f);
+        gridSnapAnimator.setDuration(GRID_SNAP_DURATION_MS);
+        gridSnapAnimator.setInterpolator(new DecelerateInterpolator());
+        gridSnapAnimator.addUpdateListener(
+                animation -> {
+                    float fraction = (float) animation.getAnimatedValue();
+                    gridSnapAppliedPx = Math.round(from + (target - from) * fraction);
+                    contentScroll.scrollTo(gridSnapAppliedPx, 0);
+                });
+        gridSnapAnimator.addListener(
+                new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        gridSnapping = false;
+                    }
+
+                    @Override
+                    public void onAnimationCancel(Animator animation) {
+                        gridSnapping = false;
+                    }
+                });
+        gridSnapAnimator.start();
+    }
+
+    /** «По целой странице»: доводим страницу сразу после отпускания, не ожидая паузы покоя. */
+    private void snapPageOnRelease() {
+        if (contentScroll == null || gridSnapMode() != TileScrollSnap.Mode.PAGE) {
+            return;
+        }
+        // Жест завершён: пауза покоя не нужна, а инерцию гасим, чтобы анимация вела сетку сама.
+        uiHandler.removeCallbacks(gridSnapIdle);
+        gridSnapPending = false;
+        contentScroll.fling(0);
+        runGridSnap();
+    }
+
+    /** Куда довести прокрутку в выбранном режиме. */
+    private int gridSnapTarget(int from) {
+        int maxScroll = Math.max(0, splitTilesGrid.getWidth() - contentScroll.getWidth());
+        TileScrollSnap.Mode mode = gridSnapMode();
+        if (mode == TileScrollSnap.Mode.TILE) {
+            return TileScrollSnap.tileLeftEdge(from, visibleTileLefts(), maxScroll);
+        }
+        return TileScrollSnap.target(
+                from, gridSnapAnchorPx, tilePitchPx, GRID_COLUMNS, maxScroll, mode);
+    }
+
+    /**
+     * Левые края видимых плиток в координатах сетки: границы для режима «По левому краю плитки».
+     * {@code getLeft()} включает отступ карточки, поэтому выравнивается её реальный край,
+     * в том числе у плиток шириной больше одной колонки.
+     */
+    private int[] visibleTileLefts() {
+        int count = 0;
+        for (int i = 0; i < splitTilesGrid.getChildCount(); i++) {
+            if (isVisibleTile(splitTilesGrid.getChildAt(i))) {
+                count++;
+            }
+        }
+        int[] lefts = new int[count];
+        int index = 0;
+        for (int i = 0; i < splitTilesGrid.getChildCount(); i++) {
+            View child = splitTilesGrid.getChildAt(i);
+            if (isVisibleTile(child)) {
+                lefts[index++] = child.getLeft();
+            }
+        }
+        return lefts;
+    }
+
+    private static boolean isVisibleTile(View child) {
+        return child.getVisibility() == View.VISIBLE && child.getWidth() > 0;
+    }
+
+    /** Отменяет отложенное и текущее выравнивание: перестроение сетки, перехват, пауза. */
+    private void cancelGridSnap() {
+        uiHandler.removeCallbacks(gridSnapIdle);
+        stopGridSnapAnimation();
+        gridSnapPending = false;
+        gridSnapAppliedPx = -1;
+    }
+
+    /** Останавливает только анимацию выравнивания, не трогая отсчёт жеста. */
+    private void stopGridSnapAnimation() {
+        if (gridSnapAnimator != null) {
+            gridSnapAnimator.cancel();
+            gridSnapAnimator = null;
+        }
+        gridSnapping = false;
+    }
+
+    /** Режим автовыравнивания из настроек «Сетка главного экрана». */
+    private TileScrollSnap.Mode gridSnapMode() {
+        if (sharedPreferences == null) {
+            return TileScrollSnap.DEFAULT_MODE;
+        }
+        return TileScrollSnap.fromKey(sharedPreferences.getString(PREF_GRID_SNAP_MODE, null));
     }
 
     /** Верхний отступ контента: «Полноэкранная сетка» снимает его целиком. */
@@ -3115,6 +3305,7 @@ public class DashboardActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        cancelGridSnap();
         suspensionScreenResumed = false;
         systemWidgets.setResumed(false);
         watchSuspension();
@@ -3163,6 +3354,7 @@ public class DashboardActivity extends AppCompatActivity {
         if (tileDragController != null) {
             tileDragController.cancel();
         }
+        cancelGridSnap();
         uiHandler.removeCallbacks(suspensionUnavailable);
         uiHandler.removeCallbacks(tripTick);
         releaseMessengerBinding("onDestroy");
