@@ -8,7 +8,8 @@ enum class CarPlayNightMode(val key: String) {
     AMBIENT("ambient"),
     DAY("day"),
     NIGHT("night"),
-    SCHEDULE("schedule");
+    SCHEDULE("schedule"),
+    VEHICLE("voyah_light");
 
     companion object {
         fun fromKey(key: String?): CarPlayNightMode = entries.firstOrNull { it.key == key } ?: SYSTEM
@@ -117,12 +118,13 @@ internal class CarPlayNightModeController(
         systemNight = night
         val ambientFallback = mode == CarPlayNightMode.AMBIENT &&
             (!light.available || (resumed && !listening))
-        if (mode == CarPlayNightMode.SYSTEM || ambientFallback) applyNight(night)
+        if (mode == CarPlayNightMode.SYSTEM || mode == CarPlayNightMode.VEHICLE || ambientFallback) applyNight(night)
     }
 
     private fun applyMode() {
         when (mode) {
-            CarPlayNightMode.SYSTEM -> applyNight(systemNight)
+            // Vehicle light changes only the projection; this is also DiPlay's local fallback.
+            CarPlayNightMode.SYSTEM, CarPlayNightMode.VEHICLE -> applyNight(systemNight)
             CarPlayNightMode.DAY -> applyNight(false)
             CarPlayNightMode.NIGHT -> applyNight(true)
             CarPlayNightMode.SCHEDULE -> applySchedule()

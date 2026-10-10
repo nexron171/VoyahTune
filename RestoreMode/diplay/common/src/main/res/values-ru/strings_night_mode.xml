@@ -10,6 +10,7 @@
     <string name="settings_switch_to_dark_appearance">Переключить на тёмное оформление</string>
     <string name="carplay_night_system">Как в системе Android</string>
     <string name="carplay_night_ambient">Автоматически (по освещённости)</string>
+    <string name="carplay_night_vehicle">По освещённости автомобиля (SWReason)</string>
     <string name="carplay_night_day">Всегда дневной</string>
     <string name="carplay_night_night">Всегда ночной</string>
     <string name="carplay_night_schedule">По расписанию</string>

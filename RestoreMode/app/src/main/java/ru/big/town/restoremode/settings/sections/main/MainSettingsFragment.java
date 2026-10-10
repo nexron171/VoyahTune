@@ -537,18 +537,21 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                 .setTitle(R.string.carplay_widget_size_title)
                 .setItems(
                         R.array.carplay_widget_sizes,
-                        (dialog, size) -> {
-                            AppWidgetStore.Entry entry =
-                                    AppWidgetStore.add(preferences, CarPlayTarget.ID);
-                            if (entry == null) return;
-                            entry.width = size == 0 ? 1 : size + 7;
-                            entry.height = size == 0 ? 1 : 5;
-                            AppWidgetStore.update(preferences, entry);
-                            TileOrderStore.sync(preferences, requireContext().getPackageManager());
-                            renderAppWidgets();
-                        })
+                        (dialog, size) -> addCarPlayWidget(size == 0 ? 1 : size + 7, size == 0 ? 1 : 5))
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    private void addCarPlayWidget(int width, int height) {
+        if (!canAddAppWidget()) return;
+        AppWidgetStore.Entry entry = AppWidgetStore.add(preferences, CarPlayTarget.ID);
+        if (entry == null) return;
+        entry.width = width;
+        entry.height = height;
+        entry.autoStart = false;
+        AppWidgetStore.update(preferences, entry);
+        TileOrderStore.sync(preferences, requireContext().getPackageManager());
+        renderAppWidgets();
     }
 
     private void renderAppWidgets() {
@@ -729,8 +732,10 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             icon.setImageResource(R.drawable.carplay_home_logo);
         }
         label.setText("Виджет " + AppWidgetStore.designation(preferences, entry.id) + ": " + name);
+        boolean carPlayShortcut = CarPlayTarget.opensActivity(entry.packageName, entry.width, entry.height);
         ((TextView) row.findViewById(R.id.settingsAppWidgetSubtitle))
-                .setText(entry.profiles.size() + " приложений · запуск внутри карточки");
+                .setText(carPlayShortcut ? getString(R.string.carplay_shortcut_description)
+                        : entry.profiles.size() + " приложений · запуск внутри карточки");
         android.widget.ArrayAdapter<String> widthAdapter =
                 new android.widget.ArrayAdapter<>(
                         requireContext(),
@@ -765,6 +770,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                             entry.width = value;
                             AppWidgetStore.update(preferences, entry);
                             TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            if (CarPlayTarget.isCarPlay(entry.packageName)) renderAppWidgets();
                         }
                     }
 
@@ -792,19 +798,21 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                             entry.height = value;
                             AppWidgetStore.update(preferences, entry);
                             TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            if (CarPlayTarget.isCarPlay(entry.packageName)) renderAppWidgets();
                         }
                     }
 
                     @Override
                     public void onNothingSelected(android.widget.AdapterView<?> parent) {}
                 });
-        autoStart.setChecked(entry.autoStart);
+        autoStart.setChecked(entry.autoStart && !carPlayShortcut);
+        autoStart.setEnabled(!carPlayShortcut);
 
         View delayContainer = row.findViewById(R.id.appWidgetDelayContainer);
         android.widget.SeekBar delaySeek = row.findViewById(R.id.appWidgetSettingDelay);
         TextView delayText = row.findViewById(R.id.appWidgetSettingDelayText);
 
-        delayContainer.setVisibility(entry.autoStart ? View.VISIBLE : View.GONE);
+        delayContainer.setVisibility(entry.autoStart && !carPlayShortcut ? View.VISIBLE : View.GONE);
         delaySeek.setProgress(entry.autoStartDelay - 1);
         delayText.setText(entry.autoStartDelay + " сек");
 
@@ -944,6 +952,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         bindClick(R.id.buttonAddDialWidget, view -> addDialWidget());
         bindClick(R.id.buttonAddAppShortcut, this::onAddAppShortcut);
         bindClick(R.id.buttonAddAppWidget, this::onAddAppWidget);
+        bindClick(R.id.buttonAddCarPlayShortcut, view -> addCarPlayWidget(1, 1));
         bindClick(R.id.buttonAddCarPlayWidget, view -> showCarPlayWidgetSizes());
     }
 

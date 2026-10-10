@@ -41,6 +41,17 @@
         android:includeFontPadding="false" />
 
     <Button
+        android:id="@+id/buttonAddCarPlayShortcut"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:minHeight="60dp"
+        android:text="@string/carplay_shortcut_add"
+        android:textColor="@color/settings_text"
+        android:textSize="@dimen/settings_body_size"
+        android:tag="settings.add" />
+
+    <Button
         android:id="@+id/buttonAddCarPlayWidget"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="voyah_carplay_projection_launch_failed">Could not open CarPlay on this display. Try again.</string>
     <string name="voyah_carplay_notification_channel">CarPlay connection</string>
     <string name="voyah_carplay_notification_running">CarPlay connection running</string>
     <string name="voyah_mfi_title">Board I2C diagnostic</string>

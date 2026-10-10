@@ -95,6 +95,18 @@ public class SplitHostActivity extends Activity {
     private static volatile WeakReference<SplitHostActivity> activeHost =
             new WeakReference<>(null);
 
+    static boolean ownsCarPlayDisplay(int displayId) {
+        SplitHostActivity host = activeHost.get();
+        if (host == null || host.hostDestroyed) return false;
+        for (Pane pane : new Pane[] {host.left, host.right}) {
+            android.view.Display display = pane.vd != null ? pane.vd.getDisplay() : null;
+            if (display != null && display.isValid()
+                    && ru.big.town.common.CarPlayTarget.canProjectOnDisplay(
+                            displayId, display.getDisplayId(), pane.pkg)) return true;
+        }
+        return false;
+    }
+
     private DisplayManager displayManager;
     private int defaultDpi = 213;
     private boolean touchWarned = false;

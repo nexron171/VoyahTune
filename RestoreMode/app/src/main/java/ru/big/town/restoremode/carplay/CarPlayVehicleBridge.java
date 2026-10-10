@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat;
 import com.shilapi.xcertplay.VoyahCarPlayIntegration;
 
 import ru.big.town.common.CarPlayVehicleProtocol;
+import ru.big.town.common.CarPlayAudioProtocol;
 import ru.big.town.restoremode.voice.commands.VoiceSteeringPolicy;
 
 /** One subscription per foreground CarPlay session, including UI/display transfers. */
@@ -49,6 +50,7 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
 
     private Messenger service;
     private boolean started, bound;
+    private int audioStream = CarPlayAudioProtocol.NONE;
     private final Runnable retry = this::bind;
     private final Runnable navigationTick =
             new Runnable() {
@@ -90,6 +92,7 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
                     replies = createReplies();
                     service = new Messenger(binder);
                     send(CarPlayVehicleProtocol.WATCH);
+                    sendAudioFocus();
                 }
 
                 @Override
@@ -125,6 +128,36 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
 
     public CarPlayVehicleBridge(Context context) {
         this.context = context.getApplicationContext();
+    }
+
+    @Override
+    public void audioFocus(int stream) {
+        if (stream != CarPlayAudioProtocol.NONE && !CarPlayAudioProtocol.validStream(stream)) return;
+        audioStream = stream;
+        sendAudioFocus();
+    }
+
+    private void sendAudioFocus() {
+        if (!started || service == null) return;
+        Message message = Message.obtain(null, CarPlayAudioProtocol.FOCUS);
+        message.replyTo = replies;
+        Bundle data = new Bundle();
+        data.putInt(CarPlayAudioProtocol.STREAM, audioStream);
+        message.setData(data);
+        try { service.send(message); } catch (RemoteException unavailable) { reconnect(); }
+    }
+
+    @Override
+    public boolean openProjection(android.app.Activity activity, int displayId,
+            VoyahCarPlayIntegration.ProjectionResult result) {
+        if (displayId <= 1) return false;
+        new CarPlayProjectionClient(activity, displayId, result).start();
+        return true;
+    }
+
+    @Override
+    public boolean openDashboard(int displayId) {
+        return CarPlayDashboardLauncher.open(context, displayId);
     }
 
     @Override
@@ -180,6 +213,7 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
     public void stop() {
         if (!started) return;
         started = false;
+        audioStream = CarPlayAudioProtocol.NONE;
         send(CarPlayVehicleProtocol.UNWATCH);
         generation++;
         handler.removeCallbacks(retry);

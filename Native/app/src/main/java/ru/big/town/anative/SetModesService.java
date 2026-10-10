@@ -14,6 +14,7 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -33,18 +34,21 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
 import ru.big.town.common.CarPlayTarget;
+import ru.big.town.common.CarPlayWidgetProtocol;
 import ru.big.town.common.InfrastructureProfile;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class SetModesService extends Service {
 
     private Messenger clientMessenger;
     private final Map<String, VirtualDisplay> embeddedDisplays = new HashMap<>();
+    private final Map<VirtualDisplay, CarPlayWidgetSurface> carPlayParkedOutputs = new HashMap<>();
     private final Map<String, String> embeddedPackages = new HashMap<>();
     private final Map<String, Boolean> embeddedLaunched = new HashMap<>();
     // Время последнего запуска приложения в виджет: задача создаётся не мгновенно, и без этой паузы
@@ -108,6 +112,7 @@ public class SetModesService extends Service {
     static final String TAG = "$$$ SetModesService $$$";
     private static final long CAR_POWER_RECONNECT_DELAY_MS = 5_000L;
     private static final long CAR_POWER_CONNECT_WATCHDOG_MS = 15_000L;
+    private static final AtomicBoolean WIFI_STARTUP_IN_PROGRESS = new AtomicBoolean();
 
     private final VoiceCommandController voiceCommands = new VoiceCommandController(this);
     private ScenarioEngine scenarioEngine;
@@ -118,18 +123,31 @@ public class SetModesService extends Service {
     private SuspensionWidgetController suspensionWidget;
     private EnergyWidgetController energyWidgets;
     private CarPlayVehicleController carPlayVehicle;
+    private CarPlayAudioController carPlayAudio;
     private ClearAppsController clearApps;
 
     class IncomingHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case ru.big.town.common.CarPlayVehicleProtocol.OPEN_PROJECTION:
+                    openCarPlayProjection(msg);
+                    break;
                 case ru.big.town.common.CarPlayVehicleProtocol.WATCH:
                 case ru.big.town.common.CarPlayVehicleProtocol.UNWATCH:
                 case ru.big.town.common.CarPlayVehicleProtocol.NAVIGATION:
+                case ru.big.town.common.CarPlayAudioProtocol.FOCUS:
+                    if (carPlayAudio == null)
+                        carPlayAudio = new CarPlayAudioController(SetModesService.this);
                     if (carPlayVehicle == null)
-                        carPlayVehicle = new CarPlayVehicleController(SetModesService.this);
+                        carPlayVehicle = new CarPlayVehicleController(SetModesService.this, carPlayAudio);
                     carPlayVehicle.handle(msg);
+                    break;
+                case ru.big.town.common.CarPlayAudioProtocol.QUERY:
+                case ru.big.town.common.CarPlayAudioProtocol.SET:
+                    if (carPlayAudio == null)
+                        carPlayAudio = new CarPlayAudioController(SetModesService.this);
+                    carPlayAudio.volumes(msg);
                     break;
                 case ru.big.town.common.EnergyWidgetProtocol.WATCH:
                 case ru.big.town.common.EnergyWidgetProtocol.UNWATCH:
@@ -276,7 +294,11 @@ public class SetModesService extends Service {
                                         + presetIdx
                                         + " presetId="
                                         + presetId);
-                        if (d != null && d.getBoolean("embeddedRelease", false)) {
+                        if (d != null && d.getBoolean(CarPlayWidgetProtocol.QUERY, false)) {
+                            replyCarPlayWidgets(msg);
+                        } else if (d != null && d.getBoolean(CarPlayWidgetProtocol.DETACH, false)) {
+                            detachEmbeddedDisplay(d.getString("widgetId", ""));
+                        } else if (d != null && d.getBoolean("embeddedRelease", false)) {
                             releaseEmbeddedDisplay(d.getString("widgetId", ""));
                         } else if (d != null && d.getBoolean("embeddedSurface", false)) {
                             Surface surface = d.getParcelable("surface");
@@ -912,19 +934,64 @@ public class SetModesService extends Service {
         return ids;
     }
 
+    private boolean ownsCarPlayDisplay(int displayId) {
+        for (Map.Entry<String, VirtualDisplay> entry : embeddedDisplays.entrySet()) {
+            VirtualDisplay vd = entry.getValue();
+            android.view.Display display = vd != null ? vd.getDisplay() : null;
+            if (display != null && display.isValid()
+                    && CarPlayTarget.canProjectOnDisplay(displayId, display.getDisplayId(),
+                            embeddedPackages.get(entry.getKey()))) return true;
+        }
+        return SplitHostActivity.ownsCarPlayDisplay(displayId);
+    }
+
+    private void openCarPlayProjection(Message request) {
+        int displayId = request.getData().getInt(
+                ru.big.town.common.CarPlayVehicleProtocol.DISPLAY_ID, -1);
+        boolean launched = false;
+        try {
+            if (!ownsCarPlayDisplay(displayId)) {
+                Log.w(TAG, "Reject CarPlay projection on inactive/unowned display=" + displayId);
+            } else {
+                Intent intent = new Intent().setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.PROJECTION)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+                options.setLaunchDisplayId(displayId);
+                startActivity(intent, options.toBundle());
+                launched = true;
+                Log.i(TAG, "CarPlay projection opened on owned display=" + displayId);
+            }
+        } catch (RuntimeException denied) {
+            Log.e(TAG, "CarPlay projection launch failed display=" + displayId, denied);
+        }
+        if (request.replyTo == null) return;
+        Message reply = Message.obtain(null, ru.big.town.common.CarPlayVehicleProtocol.PROJECTION_RESULT);
+        android.os.Bundle result = new android.os.Bundle();
+        result.putInt(ru.big.town.common.CarPlayVehicleProtocol.DISPLAY_ID, displayId);
+        result.putBoolean(ru.big.town.common.CarPlayVehicleProtocol.LAUNCHED, launched);
+        reply.setData(result);
+        try { request.replyTo.send(reply); } catch (RemoteException gone) {
+            Log.w(TAG, "CarPlay projection requester disconnected");
+        }
+    }
+
     /**
      * Снять виджеты, в которых показывалось закрываемое приложение, и уведомить хост: плитку без
      * приложения он убирает сам, иначе виджет остался бы с мёртвой поверхностью.
      */
     protected void releaseWidgetInstances(String pkg) {
         if (pkg == null || pkg.isEmpty()) return;
+        if (releaseEmbeddedDisplaysOf(pkg)) notifyEmbeddedTaskLeft(this, pkg);
+    }
+
+    private boolean releaseEmbeddedDisplaysOf(String pkg) {
         boolean released = false;
         for (String widgetId : new java.util.ArrayList<>(embeddedPackages.keySet())) {
             if (!pkg.equals(embeddedPackages.get(widgetId))) continue;
             releaseEmbeddedDisplay(widgetId);
             released = true;
         }
-        if (released) notifyEmbeddedTaskLeft(this, pkg);
+        return released;
     }
 
     /**
@@ -984,7 +1051,7 @@ public class SetModesService extends Service {
             return;
         }
         boolean fullscreen =
-                FullscreenPackagePolicy.contains(
+                CarPlayTarget.isCarPlay(pkg) || FullscreenPackagePolicy.contains(
                         android.provider.Settings.Global.getString(
                                 getContentResolver(), "voyahtune_fullscreen_apps"),
                         pkg);
@@ -1173,8 +1240,12 @@ public class SetModesService extends Service {
                 display = null;
             }
             if (display != null) {
+                boolean parkedCarPlay = carPlayParkedOutputs.containsKey(display);
                 display.setSurface(surface);
+                closeCarPlayParking(display);
                 display.resize(width, height, dpi > 0 ? dpi : 213);
+                if (parkedCarPlay) Log.i(TAG, "CarPlay widget reattached widget=" + widgetId
+                        + " display=" + display.getDisplay().getDisplayId());
             } else {
                 DisplayManager manager = (DisplayManager) getSystemService(DISPLAY_SERVICE);
                 try {
@@ -1250,7 +1321,70 @@ public class SetModesService extends Service {
                 display.release();
             } catch (Exception ignored) {
             }
+            closeCarPlayParking(display);
             Log.i(TAG, "embedded VD released widget=" + widgetId);
+        }
+    }
+
+    /** Navigation detaches the visible surface; only CarPlay keeps its display and UI task. */
+    private void detachEmbeddedDisplay(String widgetId) {
+        if (!CarPlayTarget.isCarPlay(embeddedPackages.get(widgetId))) {
+            releaseEmbeddedDisplay(widgetId);
+            return;
+        }
+        VirtualDisplay display = embeddedDisplays.get(widgetId);
+        if (display == null || carPlayParkedOutputs.containsKey(display)) return;
+        CarPlayWidgetSurface parking = null;
+        try {
+            android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+            display.getDisplay().getRealMetrics(metrics);
+            parking = new CarPlayWidgetSurface(metrics.widthPixels, metrics.heightPixels);
+            display.setSurface(parking.surface());
+            carPlayParkedOutputs.put(display, parking);
+            Log.i(TAG, "CarPlay widget parked widget=" + widgetId
+                    + " display=" + display.getDisplay().getDisplayId());
+        } catch (RuntimeException error) {
+            if (parking != null) parking.close();
+            // Keep the VD/task even if parking fails; navigation never retires CarPlay.
+            Log.w(TAG, "CarPlay widget parking failed widget=" + widgetId, error);
+        }
+    }
+
+    private void closeCarPlayParking(VirtualDisplay display) {
+        CarPlayWidgetSurface parking = carPlayParkedOutputs.remove(display);
+        if (parking != null) parking.close();
+    }
+
+    private void replyCarPlayWidgets(Message request) {
+        if (request.replyTo == null) return;
+        android.os.Bundle data = new android.os.Bundle();
+        data.putLong(CarPlayWidgetProtocol.GENERATION,
+                request.getData().getLong(CarPlayWidgetProtocol.GENERATION));
+        java.util.ArrayList<String> widgets = new java.util.ArrayList<>();
+        android.os.Bundle dpi = new android.os.Bundle();
+        for (String id : new java.util.ArrayList<>(embeddedDisplays.keySet())) {
+            if (!CarPlayTarget.isCarPlay(embeddedPackages.get(id))) continue;
+            VirtualDisplay vd = embeddedDisplays.get(id);
+            android.view.Display display = vd != null ? vd.getDisplay() : null;
+            if (display == null || !display.isValid()) continue;
+            Long launchAt = embeddedLaunchAt.get(id);
+            boolean settled = launchAt == null
+                    || SystemClock.elapsedRealtime() - launchAt > EMBEDDED_LAUNCH_GRACE_MS;
+            if (settled && !hasTaskOnDisplay(CarPlayTarget.ID, display.getDisplayId())) {
+                releaseEmbeddedDisplay(id); // An explicit task transfer/close has removed this host.
+                continue;
+            }
+            android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+            display.getRealMetrics(metrics);
+            widgets.add(id);
+            dpi.putInt(id, metrics.densityDpi);
+        }
+        data.putStringArrayList(CarPlayWidgetProtocol.WIDGETS, widgets);
+        data.putBundle(CarPlayWidgetProtocol.DPI, dpi);
+        Message reply = Message.obtain(null, CarPlayWidgetProtocol.MESSAGE);
+        reply.setData(data);
+        try { request.replyTo.send(reply); } catch (RemoteException gone) {
+            Log.w(TAG, "CarPlay widget requester disconnected");
         }
     }
 
@@ -1295,6 +1429,7 @@ public class SetModesService extends Service {
             embeddedLaunchAt.put(toWidgetId, SystemClock.elapsedRealtime());
             if (surface != null && surface.isValid()) {
                 display.setSurface(surface);
+                closeCarPlayParking(display);
                 if (width > 0 && height > 0) display.resize(width, height, dpi > 0 ? dpi : 213);
             }
             Log.i(
@@ -1357,11 +1492,13 @@ public class SetModesService extends Service {
             }
             if (surfaceA != null && surfaceA.isValid()) {
                 displayB.setSurface(surfaceA);
+                closeCarPlayParking(displayB);
                 if (widthA > 0 && heightA > 0)
                     displayB.resize(widthA, heightA, dpiA > 0 ? dpiA : 213);
             }
             if (surfaceB != null && surfaceB.isValid()) {
                 displayA.setSurface(surfaceB);
+                closeCarPlayParking(displayA);
                 if (widthB > 0 && heightB > 0)
                     displayA.resize(widthB, heightB, dpiB > 0 ? dpiB : 213);
             }
@@ -1685,6 +1822,11 @@ public class SetModesService extends Service {
      * защёлка embeddedLaunched не даёт перезапустить приложение без запроса хоста.
      */
     static void notifyEmbeddedTaskLeft(Context context, String pkg) {
+        // Task removal has completed. Dashboard may already be paused/unregistered;
+        // clear Native's VD registry before starting the physical CarPlay task.
+        SetModesService service = activeInstance;
+        if (CarPlayTarget.isCarPlay(pkg) && service != null)
+            service.releaseEmbeddedDisplaysOf(pkg);
         Intent update = new Intent(ACTION_EMBEDDED_TASK_LEFT);
         update.setPackage(RESTOREMODE_PKG);
         update.putExtra(EXTRA_EMBEDDED_TASK_PKG, pkg);
@@ -1824,6 +1966,7 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        enableWifiOnStartup();
         energyWidgets = new EnergyWidgetController(this);
         clearApps = new ClearAppsController(this::performCloseAllApps);
         ApplyEngine.activateWake("service create");
@@ -1875,6 +2018,41 @@ public class SetModesService extends Service {
         }
         restoreLoggingState();
         Log.i(TAG, "onCreated");
+    }
+
+    @SuppressWarnings("deprecation") // System Native can enable Wi-Fi on Android 11.
+    private void enableWifiOnStartup() {
+        if (!WIFI_STARTUP_IN_PROGRESS.compareAndSet(false, true)) return;
+        Context app = getApplicationContext();
+        // Keep Wi-Fi Binder calls off main and independent from the CarPower worker.
+        // A service recreation cannot add another worker while a request is still running.
+        Thread worker = new Thread(() -> {
+            try {
+                if (InfrastructureProfile.read(app) != InfrastructureProfile.OD) return;
+                WifiManager wifi = app.getSystemService(WifiManager.class);
+                if (wifi == null) {
+                    Log.w(TAG, "startup Wi-Fi: manager unavailable");
+                    return;
+                }
+                int state = wifi.getWifiState();
+                if (state == WifiManager.WIFI_STATE_ENABLED
+                        || state == WifiManager.WIFI_STATE_ENABLING) {
+                    Log.i(TAG, "startup Wi-Fi: already enabled or enabling");
+                    return;
+                }
+                if (wifi.setWifiEnabled(true)) {
+                    Log.i(TAG, "startup Wi-Fi: enable request accepted");
+                } else {
+                    Log.w(TAG, "startup Wi-Fi: enable request rejected");
+                }
+            } catch (RuntimeException error) {
+                Log.w(TAG, "startup Wi-Fi: enable request failed", error);
+            } finally {
+                WIFI_STARTUP_IN_PROGRESS.set(false);
+            }
+        }, "NativeStartupWifi");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void handlePowerStateChanged(int state) {
@@ -2289,6 +2467,7 @@ public class SetModesService extends Service {
         if (suspensionWidget != null) suspensionWidget.close();
         if (energyWidgets != null) energyWidgets.close();
         if (carPlayVehicle != null) carPlayVehicle.destroy();
+        if (carPlayAudio != null) carPlayAudio.destroy();
         if (clearApps != null) clearApps.close();
         voiceCommands.close();
         closeScenarios();
@@ -2301,6 +2480,8 @@ public class SetModesService extends Service {
             }
         }
         embeddedDisplays.clear();
+        for (CarPlayWidgetSurface parking : carPlayParkedOutputs.values()) parking.close();
+        carPlayParkedOutputs.clear();
         embeddedPackages.clear();
         embeddedLaunched.clear();
         embeddedLaunchAt.clear();

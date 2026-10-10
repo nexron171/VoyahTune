@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="voyah_carplay_projection_launch_failed">Не удалось открыть CarPlay на этом экране. Повторите попытку.</string>
     <string name="voyah_carplay_notification_channel">Подключение CarPlay</string>
     <string name="voyah_carplay_notification_running">Подключение CarPlay активно</string>
     <string name="voyah_mfi_title">Диагностика I2C</string>

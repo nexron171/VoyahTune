@@ -75,4 +75,105 @@
             android:textColor="@color/settings_muted"
             android:textSize="18sp" />
     </LinearLayout>
+    <LinearLayout
+        style="@style/SettingsCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+        <Switch
+            android:id="@+id/carPlayThemeByLight"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:saveEnabled="false"
+            android:text="@string/carplay_theme_by_light"
+            android:textColor="@color/settings_text"
+            android:textSize="22sp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/carplay_theme_by_light_description"
+            android:textColor="@color/settings_muted"
+            android:textSize="18sp" />
+    </LinearLayout>
+    <LinearLayout
+        style="@style/SettingsCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/carplay_volume_title"
+            android:textColor="@color/settings_text"
+            android:textSize="24sp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/carplay_volume_description"
+            android:textColor="@color/settings_muted"
+            android:textSize="18sp" />
+        <TextView
+            android:id="@+id/carPlayMediaVolumeLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/carplay_volume_media"
+            android:textColor="@color/settings_text"
+            android:textSize="22sp" />
+        <SeekBar
+            android:id="@+id/carPlayMediaVolume"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:enabled="false"
+            android:saveEnabled="false"
+            android:contentDescription="@string/carplay_volume_media" />
+        <TextView
+            android:id="@+id/carPlayNavigationVolumeLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/carplay_volume_navigation"
+            android:textColor="@color/settings_text"
+            android:textSize="22sp" />
+        <SeekBar
+            android:id="@+id/carPlayNavigationVolume"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:enabled="false"
+            android:saveEnabled="false"
+            android:contentDescription="@string/carplay_volume_navigation" />
+        <TextView
+            android:id="@+id/carPlayPhoneVolumeLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/carplay_volume_phone"
+            android:textColor="@color/settings_text"
+            android:textSize="22sp" />
+        <SeekBar
+            android:id="@+id/carPlayPhoneVolume"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:enabled="false"
+            android:saveEnabled="false"
+            android:contentDescription="@string/carplay_volume_phone" />
+        <TextView
+            android:id="@+id/carPlaySiriVolumeLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/carplay_volume_siri"
+            android:textColor="@color/settings_text"
+            android:textSize="22sp" />
+        <SeekBar
+            android:id="@+id/carPlaySiriVolume"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:enabled="false"
+            android:saveEnabled="false"
+            android:contentDescription="@string/carplay_volume_siri" />
+    </LinearLayout>
 </LinearLayout>

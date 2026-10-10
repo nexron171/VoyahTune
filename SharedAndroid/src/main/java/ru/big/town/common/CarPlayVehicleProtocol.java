@@ -5,6 +5,8 @@ public final class CarPlayVehicleProtocol {
     private CarPlayVehicleProtocol() {}
 
     public static final int WATCH = 120, UNWATCH = 121, STATE = 122, NAVIGATION = 123;
+    public static final int OPEN_PROJECTION = 124, PROJECTION_RESULT = 125;
+    public static final String DISPLAY_ID = "displayId", LAUNCHED = "launched";
     public static final String NAV_ACTIVE = "navigationActive",
             NAV_ICON = "navigationIcon",
             NAV_DISTANCE = "navigationDistance",

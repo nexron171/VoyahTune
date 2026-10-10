@@ -75,7 +75,7 @@ final class AppDisplayLauncher {
             Runnable onFailure) {
         if (!current(pkg, generation)) return;
         try {
-            Intent intent = CarPlayTarget.launchIntent(app, pkg);
+            Intent intent = CarPlayTarget.launchIntent(app, pkg, displayId);
             if (intent == null) throw new IllegalStateException("No launcher for " + pkg);
             ActivityManager am = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
             List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(100);

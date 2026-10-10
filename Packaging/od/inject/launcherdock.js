@@ -414,12 +414,25 @@ Java.perform(function () {
     }
 
     // Открыть VoyahTune (UI RestoreMode) — по долгому тапу «меню».
-    function openVoyahTune() {
+    function openVoyahTune(view) {
         try {
-            var i = Intent.$new();
+            var displayId = 0;
+            if (view) {
+                var display = view.getDisplay();
+                if (display && (display.getDisplayId() === 0 || display.getDisplayId() === 1)) {
+                    displayId = display.getDisplayId();
+                }
+            }
+            var i = Intent.$new(Intent.ACTION_MAIN.value);
+            i.addCategory(Intent.CATEGORY_LAUNCHER.value);
             i.setClassName(RESTORE_PKG, "ru.big.town.restoremode.MainActivity");
-            i.addFlags(0x10000000);   // FLAG_ACTIVITY_NEW_TASK
-            ctx().startActivity(i);
+            // Clear settings above Dashboard instead of merely bringing the previous task forward.
+            i.addFlags(0x10000000 | 0x04000000 | 0x20000000); // NEW_TASK | CLEAR_TOP | SINGLE_TOP
+            var options = Java.use("android.app.ActivityOptions").makeBasic();
+            options.setLaunchDisplayId(displayId);
+            var bundle = options.toBundle();
+            bundle.putInt("android.activity.windowingMode", 1);
+            ctx().startActivity(i, bundle);
             try { Java.use("android.util.Log").i("voyahdock", "menu long-press -> VoyahTune"); } catch (ee) {}
             Log.i(TAG, "[dock] menu long-press -> VoyahTune");
         } catch (e) { Log.e(TAG, "[dock] openVoyahTune err: " + e); }
@@ -439,7 +452,7 @@ Java.perform(function () {
                     onLongClick: {
                         returnType: "boolean",
                         argumentTypes: ["android.view.View"],
-                        implementation: function (view) { openVoyahTune(); return true; }
+                        implementation: function (view) { openVoyahTune(view); return true; }
                     }
                 }
             });
@@ -800,6 +813,10 @@ Java.perform(function () {
             var CARPLAY_ENTRY = RESTORE_PKG + "/ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
             var ComponentName = Java.use("android.content.ComponentName");
             var resourceTemplate = null;
+            var WeakHashMap = Java.use("java.util.WeakHashMap");
+            var originalAppIconBackgrounds = WeakHashMap.$new();
+            var originalAppIconDrawables = WeakHashMap.$new();
+            var IconDrawable = Java.use("android.graphics.drawable.Drawable");
 
             function entryPackage(target) {
                 return target === CARPLAY_ENTRY ? RESTORE_PKG : target;
@@ -920,8 +937,16 @@ Java.perform(function () {
                         if (pkg === RESTORE_PKG) {
                             try {
                                 var carplay = pm.getActivityInfo(entryComponent(CARPLAY_ENTRY), 0);
-                                if (carplay.enabled.value && carplay.exported.value) result.push(CARPLAY_ENTRY);
-                            } catch (absentCarPlay) {}
+                                if (carplay.enabled.value && carplay.exported.value) {
+                                    result.push(CARPLAY_ENTRY);
+                                    Log.i(TAG, "[allapps] CarPlay launcher entry available");
+                                } else {
+                                    Log.w(TAG, "[allapps] CarPlay launcher entry unavailable enabled="
+                                            + carplay.enabled.value + " exported=" + carplay.exported.value);
+                                }
+                            } catch (absentCarPlay) {
+                                Log.w(TAG, "[allapps] CarPlay launcher entry lookup failed: " + absentCarPlay);
+                            }
                         }
                     } catch (ignored) {}
                 }
@@ -1067,6 +1092,18 @@ Java.perform(function () {
                 return (screenId === 0 || screenId === 1) ? screenId : -1;
             }
 
+            function restoreAppIcon(holder) {
+                var iconView = fieldValue(holder, "iconView");
+                if (iconView === null || !originalAppIconBackgrounds.containsKey(iconView)) return;
+                var concreteIconView = runtimeObject(iconView) || iconView;
+                var background = originalAppIconBackgrounds.get(iconView);
+                var drawable = originalAppIconDrawables.get(iconView);
+                concreteIconView.setBackground(background === null ? null : Java.cast(background, IconDrawable));
+                concreteIconView.setImageDrawable(drawable === null ? null : Java.cast(drawable, IconDrawable));
+                originalAppIconBackgrounds.remove(iconView);
+                originalAppIconDrawables.remove(iconView);
+            }
+
             function finishBoundItem(adapter, holder, position) {
                 var bean = beanAt(adapter, position);
                 var pkg = syntheticPackage(bean);
@@ -1076,11 +1113,15 @@ Java.perform(function () {
                 var iconView = fieldValue(holder, "iconView");
                 var nameView = fieldValue(holder, "nameView");
                 if (iconView !== null && icon) {
-                    // Плитка рисует иконку в BACKGROUND у SimpleDraweeView (проверено на живой
-                    // CN-голове: после штатного bind getBackground() = BitmapDrawable, а
-                    // getDrawable() — пустой drawee RootDrawable). setImageDrawable ушёл бы под
-                    // иерархию drawee, и осталась бы placeholder-иконка шаблона.
+                    // OEM variants render in either the background or ImageView drawable. Keep
+                    // our image in the background, hide the template drawable, and restore both
+                    // original layers before this holder is rebound to any OEM item.
                     var concreteIconView = runtimeObject(iconView) || iconView;
+                    if (!originalAppIconBackgrounds.containsKey(iconView)) {
+                        originalAppIconBackgrounds.put(iconView, concreteIconView.getBackground());
+                        originalAppIconDrawables.put(iconView, concreteIconView.getDrawable());
+                    }
+                    concreteIconView.setImageDrawable(null);
                     concreteIconView.setBackground(icon);
                 }
                 if (nameView !== null) nameView.setText(JavaString.$new(label));
@@ -1113,6 +1154,8 @@ Java.perform(function () {
             var bind = Adapter.onBindViewHolder.overload(
                     allAppsAbi.adapter + '$AppViewHolder', 'int');
             bind.implementation = function (holder, position) {
+                try { restoreAppIcon(holder); }
+                catch (e) { Log.e(TAG, "[allapps] restore icon: " + e); }
                 bind.call(this, holder, position);
                 try {
                     finishBoundItem(this, holder, position);
@@ -1126,6 +1169,8 @@ Java.perform(function () {
                         allAppsAbi.adapter + '$AppViewHolder',
                         'int', 'java.util.List');
                 bindPayload.implementation = function (holder, position, payloads) {
+                    try { restoreAppIcon(holder); }
+                    catch (e) { Log.e(TAG, "[allapps] payload restore icon: " + e); }
                     bindPayload.call(this, holder, position, payloads);
                     try {
                         finishBoundItem(this, holder, position);

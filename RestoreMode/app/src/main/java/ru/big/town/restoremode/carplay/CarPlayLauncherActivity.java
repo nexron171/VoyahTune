@@ -25,6 +25,7 @@ public final class CarPlayLauncherActivity extends Activity {
             new ServiceConnection() {
                 @Override
                 public void onServiceConnected(ComponentName name, IBinder binder) {
+                    if (isFinishing() || isDestroyed()) return;
                     handler.removeCallbacks(timeout);
                     try {
                         Message request = Message.obtain(null, LAUNCH_ON_DISPLAY, 1, 0);
@@ -42,6 +43,16 @@ public final class CarPlayLauncherActivity extends Activity {
 
                 @Override
                 public void onServiceDisconnected(ComponentName name) {
+                    unavailable();
+                }
+
+                @Override
+                public void onBindingDied(ComponentName name) {
+                    unavailable();
+                }
+
+                @Override
+                public void onNullBinding(ComponentName name) {
                     unavailable();
                 }
             };

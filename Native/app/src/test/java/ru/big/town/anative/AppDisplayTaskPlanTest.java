@@ -28,6 +28,24 @@ public class AppDisplayTaskPlanTest {
     }
 
     @Test
+    public void carPlayHandoffWorksInBothDirectionsOnEitherPhysicalScreen() {
+        String carPlay = ru.big.town.common.CarPlayTarget.ID;
+        String dashboard = ru.big.town.common.CarPlayTarget.PACKAGE;
+        for (int physical : new int[] {0, 1}) {
+            assertEquals(Collections.singleton(10),
+                    AppDisplayTaskPlan.retiring(
+                            Arrays.asList(task(10, carPlay, physical), task(11, dashboard, physical)),
+                            carPlay, 9));
+            // Android can reparent a released VD's task onto the destination already.
+            assertEquals(new java.util.HashSet<>(Arrays.asList(10, 12)),
+                    AppDisplayTaskPlan.retiring(
+                            Arrays.asList(task(10, carPlay, 9), task(12, carPlay, physical),
+                                    task(11, dashboard, physical)),
+                            carPlay, physical));
+        }
+    }
+
+    @Test
     public void returningToClickedPassengerScreenRetiresOnlyOldNavigatorTasks() {
         Set<Integer> retiring =
                 AppDisplayTaskPlan.retiring(

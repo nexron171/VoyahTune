@@ -163,6 +163,7 @@ class CarPlayController(
     private val clearPairRecord: () -> Unit = {},
     private val locationProvider: Iap2LocationProvider? = null,
     private val vehicleStatusProvider: com.shilapi.xcertplay.transport.VehicleStatusProvider? = null,
+    private val openHostUi: (() -> Boolean)? = null,
 ) : Closeable {
     init {
         require(!config.locationReportingEnabled || locationProvider != null) {
@@ -341,17 +342,24 @@ class CarPlayController(
             uiListener?.onDeviceInfo(session, info)
         }
 
-        // The user tapped the car icon in CarPlay: show the head unit's own menu, like its Home button.
-        // The session keeps running in the background, so returning to DiPlay resumes CarPlay.
+        // The car icon uses the app-owned route. UI navigation never tears down the phone session.
         override fun onHostUiRequested(session: AirPlaySession) {
-            debugLog("CarPlay requested the car UI; opening the head-unit home screen")
-            runCatching {
-                appContext.startActivity(
-                    Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
-            }.onFailure { debugLog("Car home screen could not open: ${it.javaClass.simpleName}") }
-            uiListener?.onHostUiRequested(session)
+            if (closed || activeSession !== session) return
+            mainHandler.post {
+                if (closed || activeSession !== session) return@post
+                debugLog("CarPlay requested the car UI")
+                runCatching {
+                    if (openHostUi != null) {
+                        if (!openHostUi.invoke()) debugLog("App-owned car UI could not open")
+                    } else {
+                        appContext.startActivity(
+                            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                }.onFailure { debugLog("Car UI could not open: ${it.javaClass.simpleName}") }
+                uiListener?.onHostUiRequested(session)
+            }
         }
 
         override fun onRemoteControlMessage(session: AirPlaySession, streamId: Long, message: Map<String, Any?>) {
@@ -549,7 +557,7 @@ class CarPlayController(
         }
     }
 
-    /** Opens Siri on the iPhone, as the car's voice button does in CarPlay. */
+    /** Sends only the projection appearance; the Android app theme stays independent. */
     fun setVehicleNightMode(night: Boolean) {
         if (closed) return
         val session = activeSession ?: return
@@ -557,6 +565,9 @@ class CarPlayController(
             touchExecutor.execute {
                 if (!closed && activeSession === session) {
                     runCatching { session.setNightMode(night) }
+                        .onSuccess { written -> debugLog("THEME_DIAGNOSTIC send source=projection " +
+                            "applied=${if (night) "dark" else "light"} commandWritten=$written") }
+                        .onFailure { error -> debugLog("THEME_DIAGNOSTIC send failed=${error.javaClass.simpleName}") }
                 }
             }
         } catch (_: java.util.concurrent.RejectedExecutionException) {

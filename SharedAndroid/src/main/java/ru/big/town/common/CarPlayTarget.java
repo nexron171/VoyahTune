@@ -8,6 +8,7 @@ import android.content.Intent;
 public final class CarPlayTarget {
     public static final String PACKAGE = "ru.big.town.restoremode";
     public static final String ACTIVITY = "com.shilapi.xcertplay.DiPlayActivity";
+    public static final String PROJECTION = "com.shilapi.xcertplay.CarPlayHostActivity";
     public static final String LAUNCHER = "ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
     public static final String ID = PACKAGE + "/" + ACTIVITY;
     public static final String LABEL = "VoyahTune CarPlay";
@@ -16,6 +17,11 @@ public final class CarPlayTarget {
 
     public static boolean isCarPlay(String target) {
         return ID.equals(target);
+    }
+
+    /** Only a live Native-owned CarPlay VD can receive a projection request. */
+    public static boolean canProjectOnDisplay(int requested, int owned, String target) {
+        return requested > 1 && requested == owned && isCarPlay(target);
     }
 
     public static boolean opensActivity(String target, int width, int height) {
@@ -32,11 +38,21 @@ public final class CarPlayTarget {
     }
 
     public static Intent launchIntent(Context context, String target) {
-        if (isCarPlay(target) || PACKAGE.equals(target)) {
+        return launchIntent(context, target, 0);
+    }
+
+    /** Saved targets stay stable; embedded CarPlay opens the projection, not its home screen. */
+    public static String activityForDisplay(String target, int displayId) {
+        if (isCarPlay(target)) return displayId > 1 ? PROJECTION : ACTIVITY;
+        return PACKAGE.equals(target) ? PACKAGE + ".MainActivity" : null;
+    }
+
+    public static Intent launchIntent(Context context, String target, int displayId) {
+        String activity = activityForDisplay(target, displayId);
+        if (activity != null) {
             return new Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_LAUNCHER)
-                    .setComponent(new ComponentName(PACKAGE,
-                            isCarPlay(target) ? ACTIVITY : PACKAGE + ".MainActivity"));
+                    .setComponent(new ComponentName(PACKAGE, activity));
         }
         return context.getPackageManager().getLaunchIntentForPackage(target);
     }

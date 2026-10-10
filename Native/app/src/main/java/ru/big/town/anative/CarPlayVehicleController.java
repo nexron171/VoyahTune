@@ -14,6 +14,7 @@ final class CarPlayVehicleController implements AutoCloseable {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final CanBusEventHub hub;
     private final CarPlayClusterNavigation navigation;
+    private final CarPlayAudioController audio;
     private android.os.Messenger owner;
     private final MessengerSubscription client = new MessengerSubscription();
     private CanBusEventHub.Subscription subscription;
@@ -35,12 +36,18 @@ final class CarPlayVehicleController implements AutoCloseable {
                 }
             };
 
-    CarPlayVehicleController(Context context) {
+    CarPlayVehicleController(Context context, CarPlayAudioController audio) {
         hub = CanBusEventHub.get(context);
         navigation = new CarPlayClusterNavigation(context);
+        this.audio = audio;
     }
 
     void handle(Message message) {
+        if (message.what == ru.big.town.common.CarPlayAudioProtocol.FOCUS) {
+            if (owner != null && owner.equals(message.replyTo) && client.active())
+                audio.setFocus(message.getData().getInt(ru.big.town.common.CarPlayAudioProtocol.STREAM, -1));
+            return;
+        }
         if (message.what == CarPlayVehicleProtocol.NAVIGATION) {
             if (owner != null && owner.equals(message.replyTo) && client.active()) {
                 navigation.update(message.getData());
@@ -52,7 +59,10 @@ final class CarPlayVehicleController implements AutoCloseable {
             return;
         }
         if (message.replyTo == null) return;
-        if (!message.replyTo.equals(owner)) navigation.clear();
+        if (!message.replyTo.equals(owner)) {
+            navigation.clear();
+            audio.setFocus(ru.big.town.common.CarPlayAudioProtocol.NONE);
+        }
         owner = message.replyTo;
         client.set(message.replyTo);
         if (subscription == null) {
@@ -121,6 +131,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         client.clear();
         owner = null;
         navigation.clear();
+        audio.setFocus(ru.big.town.common.CarPlayAudioProtocol.NONE);
         if (subscription != null) subscription.close();
         subscription = null;
         speed = gear = reason = -1;

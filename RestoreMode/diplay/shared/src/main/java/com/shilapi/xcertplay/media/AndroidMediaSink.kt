@@ -40,9 +40,12 @@ internal class AudioFocusCoordinator(
     context: Context?,
     private val enabled: Boolean,
     private val muteMediaOnTransientLoss: Boolean = true,
+    private val navigationFocusEnabled: Boolean = false,
     private val report: (String) -> Unit = {},
+    private val onFocusStreamChanged: (Int) -> Unit = {},
 ) {
-    private data class Entry(val channel: AudioChannel, val attributes: AudioAttributes, var appliedVolume: Float = FULL_VOLUME)
+    private data class Entry(val channel: AudioChannel, val attributes: AudioAttributes,
+        val oemStream: Int, var appliedVolume: Float = FULL_VOLUME)
 
     private val manager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val active = LinkedHashMap<AudioTrack, Entry>()
@@ -51,6 +54,7 @@ internal class AudioFocusCoordinator(
     private var mediaVolume = FULL_VOLUME
     private var closed = false
     private var focusGeneration = 0L
+    private var publishedStream = -1
     private var currentListener = listenerFor(focusGeneration)
     internal val listener: AudioManager.OnAudioFocusChangeListener get() = currentListener
 
@@ -77,8 +81,18 @@ internal class AudioFocusCoordinator(
 
     @Synchronized
     fun acquire(track: AudioTrack, channel: AudioChannel, attributes: AudioAttributes) {
-        if (closed || !enabled || manager == null || channel == AudioChannel.NAVIGATION) return
-        active[track] = Entry(channel, attributes)
+        if (closed || !enabled || manager == null ||
+            (channel == AudioChannel.NAVIGATION && !navigationFocusEnabled)) return
+        // Voyah stream 1 has Android's legacy SONIFICATION attributes, but Qinggan selects
+        // the navigation volume group only from a NAVIGATION_GUIDANCE focus request.
+        val focusAttributes = if (channel == AudioChannel.NAVIGATION) AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build() else attributes
+        val expectedStream = VoyahAudioRouting.stream(channel)
+        val oemStream = if (navigationFocusEnabled &&
+            runCatching { track.streamType == expectedStream }.getOrDefault(false)) expectedStream else -1
+        active[track] = Entry(channel, focusAttributes, oemStream)
         refreshRequest()
         applyMediaVolume(track, active.getValue(track))
     }
@@ -110,16 +124,20 @@ internal class AudioFocusCoordinator(
             requestedChannel = null
             mediaVolume = FULL_VOLUME
             manager?.let { abandoned?.abandon(it) }
+            publishStream(-1)
             return
         }
-        if (request != null && requestedChannel == primary.channel) return
+        if (request != null && requestedChannel == primary.channel) {
+            publishStream(primary.oemStream)
+            return
+        }
         focusGeneration += 1
         manager?.let { request?.abandon(it) }
         val gain = when (primary.channel) {
             AudioChannel.MEDIA -> AudioManager.AUDIOFOCUS_GAIN
             AudioChannel.PHONE -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
             AudioChannel.ASSISTANT -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
-            AudioChannel.NAVIGATION -> return
+            AudioChannel.NAVIGATION -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
         }
         currentListener = listenerFor(focusGeneration)
         val next = AudioFocusRequestCompat(gain, primary.attributes, currentListener, Handler(Looper.getMainLooper()))
@@ -130,6 +148,13 @@ internal class AudioFocusCoordinator(
         val line = "Audio: focus requested channel=${primary.channel} gain=$gain granted=$result activeTracks=${active.size}"
         Log.i(TAG, line)
         runCatching { report(line) }
+        publishStream(primary.oemStream)
+    }
+
+    private fun publishStream(stream: Int) {
+        if (stream == publishedStream) return
+        publishedStream = stream
+        runCatching { onFocusStreamChanged(stream) }
     }
 
     private fun setMediaVolume(volume: Float) {
@@ -138,14 +163,19 @@ internal class AudioFocusCoordinator(
     }
 
     private fun applyMediaVolume(track: AudioTrack, entry: Entry) {
-        // Telephony and assistant speech remain audible, and navigation never enters this map.
+        // Telephony, assistant speech and navigation remain audible.
         // This changes only the renderer's relative gain, never Android's user stream volume.
         if (entry.channel != AudioChannel.MEDIA || entry.appliedVolume == mediaVolume) return
         val applied = runCatching { track.setStereoVolume(mediaVolume, mediaVolume) == AudioTrack.SUCCESS }.getOrDefault(false)
         if (applied) entry.appliedVolume = mediaVolume
     }
 
-    private fun AudioChannel.focusPriority(): Int = when (this) {
+    private fun AudioChannel.focusPriority(): Int = if (navigationFocusEnabled) when (this) {
+        AudioChannel.PHONE -> 4
+        AudioChannel.ASSISTANT -> 3
+        AudioChannel.NAVIGATION -> 2
+        AudioChannel.MEDIA -> 1
+    } else when (this) {
         AudioChannel.MEDIA -> 3
         AudioChannel.PHONE -> 2
         AudioChannel.ASSISTANT -> 1
@@ -196,6 +226,7 @@ class AndroidMediaSink(
     private val voyahAudioRouting: Boolean = false,
     /** The main screen's frame rate (the frame-rate setting), requested from its decoder as the operating rate; 0 for none. */
     private val mainVideoFrameRate: Int = 0,
+    private val onAudioFocusStreamChanged: (Int) -> Unit = {},
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
@@ -205,7 +236,9 @@ class AndroidMediaSink(
         appContext,
         audioFocusEnabled,
         audioFocusAutoYield,
+        voyahAudioRouting,
         onAudioDiagnostic,
+        onAudioFocusStreamChanged,
     )
 
     /** The media-key session may own Android's current focus request for this same sink. */
@@ -1295,6 +1328,7 @@ private class AudioRenderer(
 
     private var trackAttributes: AudioAttributes? = null
     private var mappedChannel: AudioChannel? = null
+    private var navigationAudioFocus: NavigationAudioFocus? = null
     private val queue = LinkedBlockingQueue<AudioPacket>(MAX_QUEUED_PACKETS)
     @Volatile private var running = true
     @Volatile private var started = false
@@ -1525,6 +1559,13 @@ private class AudioRenderer(
         track = built
         diagnosticStage = "track-attributes"
         trackAttributes = audioTrackAttributesForFocus(built, attributes)
+        if (audioFocusEnabled && voyahAudioRouting && selection.channel == AudioChannel.NAVIGATION &&
+            runCatching { built.streamType == VoyahAudioRouting.NAVIGATION_STREAM }.getOrDefault(false)) {
+            navigationAudioFocus = NavigationAudioFocus(
+                request = { audioFocusCoordinator.acquire(built, AudioChannel.NAVIGATION, trackAttributes ?: attributes) },
+                abandon = { audioFocusCoordinator.release(built) },
+            )
+        }
         diagnosticStage = "track-capacity"
         val capacityBytes = built.bufferSizeInFrames * frameBytes
         startThresholdBytes = MediaAudioBuffer.startBytesFor(plan.startBytes, capacityBytes, PREBUFFER_WRITE_CHUNK_BYTES)
@@ -1609,14 +1650,16 @@ private class AudioRenderer(
             .build()
 
     /**
-     * Shares a sink-level focus request across all active non-navigation renderers.
-     * Navigation guidance intentionally takes no focus: it overlays media without ducking it.
+     * Shares a sink-level focus request across renderers. Voyah navigation takes focus only
+     * while decoded guidance is playing, rather than for the whole remote stream lifetime.
      */
     private fun requestAudioFocus() {
         val channel = mappedChannel ?: return
         val attributes = trackAttributes ?: return
         if (channel == AudioChannel.NAVIGATION) {
-            Log.i(TAG, "audio focus skipped channel=NAVIGATION; overlays without ducking")
+            val line = "Audio: navigation focus follows PCM=${navigationAudioFocus != null}"
+            Log.i(TAG, line)
+            runCatching { report(line) }
             return
         }
         track?.let { audioFocusCoordinator.acquire(it, channel, attributes) }
@@ -1870,6 +1913,8 @@ private class AudioRenderer(
             writtenFramesThisWindow += framesWritten
             bufferProgress.written(count)
             lastPcmWriteNs = System.nanoTime()
+            navigationAudioFocus?.pcmQueued(data, offset + written - count, count,
+                lastPcmWriteNs, totalWrittenFrames)
             if (!playbackStarted) {
                 prebufferBytes += count
                 if (prebufferBytes >= startThresholdBytes) {
@@ -1916,6 +1961,8 @@ private class AudioRenderer(
             System.nanoTime() - lastPcmWriteNs >= BUFFER_TAIL_WAIT_NS) {
             startPlayback(track)
         }
+        navigationAudioFocus?.advance(System.nanoTime(),
+            totalWrittenFrames - bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes)
     }
 
     // Persist counters even during packet starvation, and flush before disconnect releases the track.
@@ -1999,6 +2046,8 @@ private class AudioRenderer(
 
     @Synchronized
     private fun release() {
+        navigationAudioFocus?.close()
+        navigationAudioFocus = null
         abandonAudioFocus()
         val codec = codec
         this.codec = null

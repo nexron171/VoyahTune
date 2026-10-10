@@ -13,6 +13,16 @@ object CarPlaySettingsAccess {
     fun setAutoConnect(context: Context, enabled: Boolean) = DiPlayPreferences.saveAutoConnect(context, enabled)
 
     @JvmStatic
+    fun themeByLight(context: Context): Boolean =
+        AirPlayPersistence.loadCarPlayNightMode(context) == CarPlayNightMode.VEHICLE
+
+    @JvmStatic
+    fun setThemeByLight(context: Context, enabled: Boolean) {
+        if (enabled) AirPlayPersistence.saveCarPlayNightMode(context, CarPlayNightMode.VEHICLE)
+        else if (themeByLight(context)) AirPlayPersistence.saveCarPlayNightMode(context, CarPlayNightMode.SYSTEM)
+    }
+
+    @JvmStatic
     fun hasPhone(context: Context): Boolean = DiPlayPreferences.phoneAddress(context) != null
 
     @JvmStatic

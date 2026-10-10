@@ -511,6 +511,15 @@ object AirPlayPersistence {
             .putString(KEY_CARPLAY_NIGHT_MODE, mode.key).apply()
     }
 
+    internal fun observeCarPlayNightMode(context: Context, onChanged: () -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_CARPLAY_NIGHT_MODE) onChanged()
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     fun loadCarPlayNightSchedule(context: Context): CarPlayNightSchedule {
         val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val defaults = CarPlayNightSchedule()

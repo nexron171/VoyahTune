@@ -319,10 +319,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var sink: AndroidMediaSink? = null
     private var controller: CarPlayController? = null
     private val videoSurfaceOwner = CarPlayVideoSurfaceOwner<Surface>(
-        detach = { surface ->
-            sink?.clearSurface(SCREEN_TYPE_MAIN, surface)
-            sink?.clearSurface(SCREEN_TYPE_ALT, surface)
-        },
+        detach = ::detachVideoSurface,
         release = { it.release() },
     )
     private val currentSurface: Surface? get() = videoSurfaceOwner.current
@@ -419,6 +416,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var ambientLightThreshold = AmbientLightThreshold()
     private var ambientDelaySeconds = 2
     private var nightModeDiagnosticSource = ThemeModeDiagnostics.Source.CARPLAY_MODE
+    private var nightModeObserverRemoval: (() -> Unit)? = null
     private val nightModeController by lazy {
         CarPlayNightModeController(
             light = AndroidAmbientLight(this),
@@ -486,6 +484,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
     private val applyDisplaySize = Runnable {
         val size = pendingDisplaySize ?: return@Runnable
+        if (VoyahCarPlayIntegration.available && !isActivityStarted && controller != null) return@Runnable
         pendingDisplaySize = null
         applyDisplaySize(size)
     }
@@ -534,8 +533,6 @@ class CarPlayHostActivity : ComponentActivity() {
             videoSurfaceOwner.replace(surface, releaseOnDetach = false)
             appendLog("SurfaceView video surface created valid=${surface.isValid}")
             attachSurface(surface)
-            // A still CarPlay screen sends no frames, so ask for one instead of showing the parked gap.
-            if (smoothVideo) sink?.refreshPicture(SCREEN_TYPE_MAIN)
             videoView?.let { updateVideoLayout(it.width, it.height) }
         }
 
@@ -547,16 +544,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
         override fun surfaceDestroyed(holder: SurfaceHolder) {
             val surface = holder.surface
-            // The SurfaceHolder contract: nothing may render to the surface once this returns. Every decoder
-            // is asked at once, then waited for against one deadline; each confirms once it has moved,
-            // parked or released its codec, and closing decoders count once their workers exit. With
-            // smooth video the live session's main decoder parks off screen and keeps its state.
-            val live = sink
-            val detaches = (listOfNotNull(live) + retiringSinks).distinct()
-                .map { owner -> owner.beginSurfaceDetach(surface, parkMain = smoothVideo && owner === live) }
-            val confirmed = detaches.map { it.await() }.all { it }
             videoSurfaceOwner.clear(surface)
-            appendLog("SurfaceView video surface destroyed detachConfirmed=$confirmed")
+            appendLog("SurfaceView video surface destroyed")
         }
     }
 
@@ -589,6 +578,14 @@ class CarPlayHostActivity : ComponentActivity() {
             resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)
         airPlayIdentity = AirPlayPersistence.loadIdentity(this)
         loadPersistedSettings()
+        nightModeObserverRemoval = AirPlayPersistence.observeCarPlayNightMode(this) {
+            mainHandler.post {
+                if (!isFinishing && !isDestroyed) {
+                    reloadCarPlayNightSettings()
+                    syncAirPlayDarkMode(ThemeModeDiagnostics.Source.CARPLAY_MODE)
+                }
+            }
+        }
         locationPermissionAvailable = hasFineLocationPermission()
         setContentView(buildContentView())
         applyFullscreenMode()
@@ -799,6 +796,11 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         isActivityStarted = true
+        if (VoyahCarPlayIntegration.available) {
+            // Re-measure the visible window; stale sizes reported in the background cannot restart it.
+            pendingDisplaySize = null
+            videoView?.post { videoView?.let { scheduleDisplaySize(it.width, it.height) } }
+        }
         logThemeState(ThemeModeDiagnostics.Source.START, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
         mainHandler.post(pollConfiguration)
@@ -810,21 +812,10 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         hostAppearanceResumed = true
-        val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
-        val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
-        val savedDelay = AirPlayPersistence.loadAmbientDelaySeconds(this)
-        val savedSchedule = AirPlayPersistence.loadCarPlayNightSchedule(this)
+        reloadCarPlayNightSettings()
         val systemNight = nightModeOrNull(resources.configuration.uiMode) ?: false
-        if (savedNightMode != carPlayNightMode || savedThreshold != ambientLightThreshold ||
-            savedDelay != ambientDelaySeconds || savedSchedule != nightSchedule) {
-            carPlayNightMode = savedNightMode
-            ambientLightThreshold = savedThreshold
-            ambientDelaySeconds = savedDelay
-            nightSchedule = savedSchedule
-            nightModeController.configure(carPlayNightMode, systemNight, ambientLightThreshold, ambientDelaySeconds,
-                nightSchedule)
-        }
         nightModeController.resume(systemNight)
+        syncAirPlayDarkMode(ThemeModeDiagnostics.Source.CARPLAY_MODE)
         AppAppearanceRuntime.publishHost(this, darkMode)
         refreshAppAppearance()
         if (!menuOpen) {
@@ -895,6 +886,21 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+
+    private fun reloadCarPlayNightSettings() {
+        val mode = AirPlayPersistence.loadCarPlayNightMode(this)
+        val threshold = AirPlayPersistence.loadAmbientLightThreshold(this)
+        val delay = AirPlayPersistence.loadAmbientDelaySeconds(this)
+        val schedule = AirPlayPersistence.loadCarPlayNightSchedule(this)
+        if (mode == carPlayNightMode && threshold == ambientLightThreshold &&
+            delay == ambientDelaySeconds && schedule == nightSchedule) return
+        carPlayNightMode = mode
+        ambientLightThreshold = threshold
+        ambientDelaySeconds = delay
+        nightSchedule = schedule
+        nightModeController.configure(mode, nightModeOrNull(resources.configuration.uiMode) ?: false,
+            threshold, delay, schedule)
+    }
 
     // Experimental: the CarPlay instrument-cluster stream on the BYD cluster projection display.
     private fun effectiveClusterTheme(): DiLink51ClusterLayout.Theme =
@@ -1286,6 +1292,7 @@ class CarPlayHostActivity : ComponentActivity() {
         closePicturePanel()
         // The controller, USB/iAP2 link, and VPN attachment intentionally outlive the UI.
         isActivityStarted = false
+        if (VoyahCarPlayIntegration.available) mainHandler.removeCallbacks(applyDisplaySize)
         logThemeState(ThemeModeDiagnostics.Source.STOP, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
         super.onStop()
@@ -1373,6 +1380,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        nightModeObserverRemoval?.invoke()
+        nightModeObserverRemoval = null
         resetSidePanel()
         hostAppearanceResumed = false
         AppAppearanceRuntime.clearHost(this)
@@ -3908,6 +3917,7 @@ class CarPlayHostActivity : ComponentActivity() {
     ): AndroidMediaSink {
         // Capture this session's log: late decoder shutdown must not write into a new session.
         val diagnosticLog = sessionLog
+        VoyahCarPlayIntegration.audioFocus(-1)
         return AndroidMediaSink(
             surface = null,
             videoWidth = videoWidth,
@@ -3938,6 +3948,11 @@ class CarPlayHostActivity : ComponentActivity() {
             // Only a SurfaceView honours release timestamps; smooth video always selects one.
             videoPacingDelayMillis = if (smoothVideo) smoothVideoDelayMillis(fps) else 0,
             mainVideoFrameRate = fps,
+            onAudioFocusStreamChanged = { stream ->
+                mainHandler.post {
+                    if (controllerGeneration == restartGeneration) VoyahCarPlayIntegration.audioFocus(stream)
+                }
+            },
         )
     }
 
@@ -4160,6 +4175,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun startCarPlay(size: DisplaySize) {
+        if (isFinishing || isDestroyed) return
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) return
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || controller != null) return
         val controllerGeneration = restartGeneration
@@ -4227,6 +4243,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val pairings = AirPlayPersistence.loadPairings(this) { id, key ->
             AirPlayPersistence.savePairing(this, id, key)
         }
+        val hostDisplayId = windowManager.defaultDisplay.displayId
         val next = CarPlayController(
             context = this,
             config = config,
@@ -4245,6 +4262,10 @@ class CarPlayHostActivity : ComponentActivity() {
             } else {
                 null
             },
+            // Capture only the display, so the session can navigate after its UI was destroyed.
+            openHostUi = if (VoyahCarPlayIntegration.available) {
+                { VoyahCarPlayIntegration.openDashboard(hostDisplayId) }
+            } else null,
         )
         controller = next
         resetSidePanel() // a new session starts without the side panel
@@ -4295,15 +4316,20 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun logThemeState(source: ThemeModeDiagnostics.Source, configuration: Configuration) {
         themeDiagnostics.observe(
-            source, configuration.uiMode, darkMode, activeAirPlaySession != null, SystemClock.elapsedRealtime(),
+            source, configuration.uiMode,
+            projectionNight(carPlayNightMode, VoyahCarPlayIntegration.night, darkMode),
+            activeAirPlaySession != null, SystemClock.elapsedRealtime(),
         )?.let(::appendLog)
     }
 
     private fun syncAirPlayDarkMode(source: ThemeModeDiagnostics.Source) {
         val session = activeAirPlaySession
-        val night = VoyahCarPlayIntegration.night ?: darkMode
+        val night = projectionNight(carPlayNightMode, VoyahCarPlayIntegration.night, darkMode)
         if (VoyahCarPlayIntegration.available) {
-            controller?.setVehicleNightMode(night)
+            appendLog("THEME_DIAGNOSTIC selection mode=${carPlayNightMode.key} " +
+                "swReason=${VoyahCarPlayIntegration.swReason} applied=${if (night) "dark" else "light"} " +
+                "appApplied=${if (appNight) "dark" else "light"}")
+            VoyahCarPlayIntegration.updateProjectionTheme(carPlayNightMode, darkMode)
             return
         }
         if (session == null) {
@@ -4531,7 +4557,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun maybeStartCarPlay() {
-        if (shuttingDown.get()) return
+        if (shuttingDown.get() || isFinishing || isDestroyed) return
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) {
             if (!adoptBackgroundSession()) mainHandler.postDelayed({ maybeStartCarPlay() }, 500)
             return
@@ -4621,6 +4647,7 @@ class CarPlayHostActivity : ComponentActivity() {
         setConnectionStage(reason)
         Log.i(TAG, "$reason; rebuilding stack at ${size.width}x${size.height}")
         val generation = ++restartGeneration
+        VoyahCarPlayIntegration.audioFocus(-1)
         handshakeResetInProgress = true
         val oldController = controller
         val oldSink = sink
@@ -4783,6 +4810,7 @@ class CarPlayHostActivity : ComponentActivity() {
         resetSidePanel()
         startupRetryBudget.disconnected()
         restartGeneration += 1
+        VoyahCarPlayIntegration.audioFocus(-1)
         mainHandler.removeCallbacks(applyDisplaySize)
         val oldController = controller
         val oldSink = sink
@@ -4873,6 +4901,19 @@ class CarPlayHostActivity : ComponentActivity() {
         return if (id != 0) runCatching { resources.getDimensionPixelSize(id) }.getOrDefault(0) else 0
     }
 
+    private fun detachVideoSurface(surface: Surface) {
+        // Both TextureView and SurfaceHolder can disappear in the background. Move every decoder
+        // before the framework releases the surface; the live Voyah main decoder keeps consuming
+        // frames offscreen, independently of the UI and smooth-video setting.
+        val live = sink
+        val detaches = (listOfNotNull(live) + retiringSinks).distinct().map { owner ->
+            owner.beginSurfaceDetach(surface,
+                parkMain = owner === live && (smoothVideo || VoyahCarPlayIntegration.available))
+        }
+        val confirmed = detaches.map { it.await() }.all { it }
+        appendLog("Video surface detached confirmed=$confirmed")
+    }
+
     private fun attachSurface(surface: Surface) {
         sink?.setSurface(SCREEN_TYPE_MAIN, surface)
         if (AirPlayPersistence.loadClusterMapEnabled(this)) {
@@ -4880,6 +4921,8 @@ class CarPlayHostActivity : ComponentActivity() {
         } else {
             sink?.setSurface(SCREEN_TYPE_ALT, surface)
         }
+        // A still CarPlay screen sends no frames; request a picture after surface creation or adoption.
+        if (smoothVideo || VoyahCarPlayIntegration.available) sink?.refreshPicture(SCREEN_TYPE_MAIN)
     }
 
     private fun onHostTouch(view: View, event: MotionEvent): Boolean {

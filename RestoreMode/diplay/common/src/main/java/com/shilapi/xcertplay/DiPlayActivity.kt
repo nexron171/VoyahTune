@@ -1300,6 +1300,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             CarPlayNightMode.DAY -> R.string.carplay_night_day
             CarPlayNightMode.NIGHT -> R.string.carplay_night_night
             CarPlayNightMode.SCHEDULE -> R.string.carplay_night_schedule
+            CarPlayNightMode.VEHICLE -> R.string.carplay_night_vehicle
         })
     }
 
@@ -4511,12 +4512,40 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (CarPlayBackgroundSession.hasSession()) CarPlayBackgroundSession.stop { runOnUiThread { open() } }
         else open()
     }
+    private var projectionLaunchPending = false
     private fun openProjection() {
-        val options = android.app.ActivityOptions.makeBasic().apply {
-            launchDisplayId = window.decorView.display?.displayId ?: 0
+        if (projectionLaunchPending) return
+        val displayId = window.decorView.display?.displayId ?: windowManager.defaultDisplay.displayId
+        if (displayId > 1 && VoyahCarPlayIntegration.available) {
+            projectionLaunchPending = true
+            try {
+                val handled = VoyahCarPlayIntegration.openProjection(this, displayId) { success ->
+                    runOnUiThread {
+                        projectionLaunchPending = false
+                        if (!success && !isFinishing && !isDestroyed) projectionLaunchFailed()
+                    }
+                }
+                if (handled) return
+                projectionLaunchPending = false
+            } catch (denied: RuntimeException) {
+                projectionLaunchPending = false
+                projectionLaunchFailed(denied)
+                return
+            }
         }
-        startActivity(Intent(this, CarPlayHostActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), options.toBundle())
+        val options = android.app.ActivityOptions.makeBasic().apply {
+            launchDisplayId = displayId
+        }
+        try {
+            startActivity(Intent(this, CarPlayHostActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), options.toBundle())
+        } catch (denied: RuntimeException) {
+            projectionLaunchFailed(denied)
+        }
+    }
+    private fun projectionLaunchFailed(error: RuntimeException? = null) {
+        Log.w("VoyahCarPlay", "Projection launch rejected", error)
+        toast(getString(R.string.voyah_carplay_projection_launch_failed))
     }
     private fun choosePhone() {
         if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
