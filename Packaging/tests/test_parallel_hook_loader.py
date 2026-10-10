@@ -58,6 +58,7 @@ case "$script" in
         if [ -f "$root/block_acc" ]; then gate=acc; else gate=none; fi ;;
     app_client.js)
         echo '[app-client] hook ready v1'
+        if [ ! -f "$root/missing_cluster_ready" ]; then echo '[cluster-units] hook ready v1'; fi
         if [ ! -f "$root/missing_rds_ready" ]; then echo '[rds-restore] hook ready v1'; fi
         gate=none ;;
     voyahtune_drive_reset.js)
@@ -164,6 +165,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         executable="/system/bin/app_process64",
         enabled=True,
         package="com.pateo.rdsapp",
+        selected=True,
     ):
         if enabled:
             (self.root / "enable_rds").touch()
@@ -181,6 +183,8 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
                 f'pidof() {{ [ "$1" = {shlex.quote(package)} ] && echo 109; }}; '
                 f"settings() {{ echo {shlex.quote(package)}; }}; "
             )
+        if not selected:
+            selection += "settings() { echo null; }; "
         subprocess.run(
             [
                 "sh",
@@ -195,6 +199,23 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
             env=self.env,
             capture_output=True,
         )
+
+    def test_cluster_units_discovered_without_geometry_selection(self):
+        self.rds_probe(package="com.qinggan.cluster", selected=False)
+        marker = self.root / "voyahtune_app_client.com.qinggan.cluster.pid"
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe(package="com.qinggan.cluster", selected=False)
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_cluster_units_supports_32_bit_process(self):
+        self.rds_probe(package="com.qinggan.cluster", selected=False,
+                       executable="/system/bin/app_process32")
+        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.cluster.pid").exists())
+
+    def test_cluster_units_requires_specific_ready_marker(self):
+        (self.root / "missing_cluster_ready").touch()
+        self.rds_probe(package="com.qinggan.cluster", selected=False)
+        self.assertFalse((self.root / "voyahtune_app_client.com.qinggan.cluster.pid").exists())
 
     def test_rds_discovered_without_fullscreen_or_dpi_selection(self):
         self.rds_probe()

@@ -1017,6 +1017,10 @@ inject_app_client_bg() {
                 && ! grep -qF "$RDS_CLIENT_READY" "$FC_TRY"; then
             FC_READY_OK=0
         fi
+        if [ "$FC_TARGET_PACKAGE" = com.qinggan.cluster ] \
+                && ! grep -qF '[cluster-units] hook ready v1' "$FC_TRY"; then
+            FC_READY_OK=0
+        fi
         if [ "$FC_READY_OK" -eq 1 ]; then
             FC_ID_AFTER=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE" 2>/dev/null) \
                 || FC_ID_AFTER=
@@ -1052,9 +1056,9 @@ discover_app_client() {
     case "$FC_FULLSCREEN_LIST" in null) FC_FULLSCREEN_LIST= ;; esac
     case "$FC_DPI_LIST" in null) FC_DPI_LIST= ;; esac
     FC_DPI_LIST=$(printf '%s' "$FC_DPI_LIST" | tr -d '[:space:]')
-    # RdsApp has a dedicated branch in app_client.js independent of geometry settings. Never
+    # RdsApp and Cluster have dedicated branches independent of geometry settings. Never
     # launch the OEM app: only attach to an existing exact main process using the same circuit breaker.
-    FC_LIST="com.pateo.rdsapp${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
+    FC_LIST="com.pateo.rdsapp,com.qinggan.cluster${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
     FC_SAVED_IFS=$IFS
     IFS=,
     for FC_DPI_PACKAGE in $FC_DPI_LIST; do
@@ -1123,10 +1127,10 @@ discover_app_client() {
         fi
         FC_EXE=$(readlink "/proc/$FC_PID/exe" 2>/dev/null)
         # The shipped arm64 injector also embeds the 32-bit agent (used by CAN hooks).
-        # RdsApp on the verified OEM build is app_process32. Keep other app-client
-        # targets 64-bit only; the radio adapter resolves its singleton without Java.choose.
+        # OEM radio and Cluster adapters support either runtime ABI; other app-client
+        # targets remain 64-bit only.
         case "$FC_PACKAGE:$FC_EXE" in
-            *:*/app_process64|com.pateo.rdsapp:*/app_process32) FC_INJECTOR=$FI ;;
+            *:*/app_process64|com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32) FC_INJECTOR=$FI ;;
             *)
                 reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
                 loge "app client unsupported process ABI package=$FC_PACKAGE exe=$FC_EXE"
