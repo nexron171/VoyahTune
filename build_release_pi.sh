@@ -1,5 +1,5 @@
 #!/bin/bash
-VER=TEST
+VER=4.2.0-pi
 DIR=./Releases/build/$VER
 echo "Release dir: $DIR"
 mkdir -p $DIR
