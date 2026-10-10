@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Switch
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import org.junit.After
@@ -68,6 +69,22 @@ class VoyahSettingsUiTest {
         val selected = views(connection).filterIsInstance<Button>().filter { it.text.startsWith("✓") }.toList()
         assertEquals(listOf("✓  ${activity.getString(R.string.wifi_direct)}"), selected.map { it.text.toString() })
         assertEquals(WirelessHotspotMode.WIFI_P2P, AirPlayPersistence.loadWirelessHotspotMode(activity))
+    }
+
+    @Test
+    fun locationReportingIsCheckedByDefaultAndPreservesExplicitDisable() {
+        val activity = open()
+        fun locationSwitch(): Switch = views(activity.window.decorView).filterIsInstance<Switch>()
+            .single { it.contentDescription == activity.getString(R.string.report_location_to_iphone) }
+        assertTrue(locationSwitch().isChecked)
+        assertTrue(AirPlayPersistence.loadLocationReportingEnabled(activity))
+        AirPlayPersistence.saveLocationReportingEnabled(activity, false)
+        lifecycle!!.recreate()
+        val recreated = lifecycle!!.get()
+        val control = views(recreated.window.decorView).filterIsInstance<Switch>()
+            .single { it.contentDescription == recreated.getString(R.string.report_location_to_iphone) }
+        assertFalse(control.isChecked)
+        assertFalse(AirPlayPersistence.loadLocationReportingEnabled(recreated))
     }
 
     @Test
