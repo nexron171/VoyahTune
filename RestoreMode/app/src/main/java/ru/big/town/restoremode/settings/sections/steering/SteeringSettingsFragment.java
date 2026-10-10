@@ -49,6 +49,7 @@ public final class SteeringSettingsFragment extends SettingsSectionFragment {
     static final String[][] STEER_ACTIONS = {
         {"none", "Не менять"},
         {"open_voyahtune", "Открыть VoyahTune"},
+        {"open_carplay", "Открыть CarPlay"},
         {"system_back", "Системное действие: Назад"},
         {"energy:EV", "Энергорежим: Electric"},
         {"energy:REV", "Энергорежим: Fuel"},

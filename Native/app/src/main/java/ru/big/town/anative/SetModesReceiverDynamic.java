@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import ru.big.town.common.CarPlayTarget;
 import ru.big.town.common.InfrastructureProfile;
 
 import java.util.List;
@@ -669,6 +670,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     call.putExtra("dial_number", number);
                     ctx.sendBroadcast(call);
                     Log.i(TAG, "STEER_ACTION → вызов номера " + number);
+                } else if ("open_carplay".equals(action)) {
+                    openCarPlay(ctx);
                 } else if ("open_voyahtune".equals(action)) {
                     openVoyahTune(ctx);
                 } else {
@@ -707,6 +710,22 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             } catch (Exception e) {
                 Log.w(TAG, "STEER_ACTION split parse: " + e.getMessage());
             }
+        }
+    }
+
+    private static void openCarPlay(Context context) {
+        try {
+            // The launcher delegates to Native's existing widget/fullscreen task transfer.
+            Intent intent = new Intent(Intent.ACTION_MAIN)
+                    .setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.LAUNCHER)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(0);
+            android.os.Bundle launchOptions = options.toBundle();
+            launchOptions.putInt("android.activity.windowingMode", 1);
+            context.startActivity(intent, launchOptions);
+        } catch (Exception error) {
+            Log.w(TAG, "Cannot open CarPlay from steering action", error);
         }
     }
 
