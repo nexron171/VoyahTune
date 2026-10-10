@@ -434,6 +434,12 @@ CarPlay, управляемую SWReason. Заголовок экрана под
 координаты касаний используют тот же viewport. Без app-policy библиотека сохраняет
 свой исходный режим. Сохранённые предпочтения fullscreen не удаляются.
 
+Беспроводной транспорт по умолчанию для VoyahTune — **Wi-Fi Direct** (`WIFI_P2P`).
+`VoyahCarPlayDefaults.initialize` записывает его до загрузки штатных настроек только
+при отсутствии `xcertplay_airplay/wireless_hotspot_mode`; сохранённый MANUAL или
+EXISTING_WIFI при обновлении не меняется. Проверка отсутствия ключа не зависит от
+старого флага `voyah_carplay/initialized`.
+
 Раздел **VoyahTune → CarPlay** имеет стабильный идентификатор **9** (`SettingsSection.CARPLAY`),
 nav id `navCarPlay`, `savesImmediately=true`. `CarPlaySettingsFragment` через публичный
 `CarPlaySettingsAccess` читает те же preferences и ту же process-local сессию:
@@ -915,7 +921,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt) | App-policy безопасных границ, обёртка UI/видео, потребление insets, текст ошибки auth, connectionIcon и darkHostAppearance с безопасным fallback без приложения (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt) | Java-friendly доступ настроек VoyahTune к preferences/состоянию/stop DiPlay. |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayThemePolicy.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayThemePolicy.kt) | SWReason влияет только на projection в выбранном VEHICLE (§6). |
-| [common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayDefaults.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayDefaults.kt) | Defaults с отдельными миграциями навигационного канала и названия кнопки автомобиля. |
+| [common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayDefaults.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayDefaults.kt) | Defaults с отдельными миграциями навигационного канала и названия кнопки автомобиля; Wi-Fi Direct при отсутствии wireless_hotspot_mode без перезаписи сохранённого выбора. |
 | [common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayIntegration.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayIntegration.kt) | Регистрация Host, available, скорость, night, Siri через snapshot; callbacks запуска проекции на VD и главной VoyahTune (§4). |
 | [shared/src/main/java/com/shilapi/xcertplay/VoyahPlatformPolicy.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/VoyahPlatformPolicy.kt) | Ограничения BYD/ADB/standaloneAppEnabled false. |
 | [shared/src/main/java/com/shilapi/xcertplay/transport/VoyahVehicleSpeedSource.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/VoyahVehicleSpeedSource.kt) | Буфер/единицы/передачи/возраст данных. |
@@ -933,12 +939,13 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 Собственные тесты common: `VoyahSessionTransferTest`, `VoyahCarPlayIntegrationTest`,
 `VoyahAudioDefaultsTest`, `VoyahCarBrandingTest`, `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `CarPlayWindowUiTest`.
 Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
+`VoyahSettingsUiTest`, `VoyahConnectionUiTest`,
 `VoyahUpstreamGuardsTest` (defaults, updater, BYD opt-ins и Native wheel ownership без UI); shared: `VoyahNavigationTest`, `VoyahAudioRoutingTest`,
 `NavigationAudioFocusTest`, `VoyahAudioFocusTest`. Они перечислены с путями в §12.
 
 Сверка дерева с чистым Git blob baseline из §1 на 10 октября 2026:
-55 изменённых файла, 29 собственных файлов внутри common/shared/gradle
-(11 файлов реализации, 2 ресурса и 16 тестов), 5 намеренно не импортированных
+55 изменённых файла, 31 собственный файл внутри common/shared/gradle
+(11 файлов реализации, 2 ресурса и 18 тестов), 5 намеренно не импортированных
 файлов из списка выше. Это контроль полноты, а не число строк для механического
 переноса; собственные app/Native/OD-файлы дополнительно перечислены в §10.3.
 
@@ -1101,6 +1108,7 @@ UI-тесты и испытания на ГУ выполнять только в
 
 | Контракт | Существующие целевые тесты |
 | --- | --- |
+| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `VoyahSettingsUiTest`: скрытые категории/пункты и поисковый индекс, восстановление AUDIO/ADVANCED, SWReason и Wi-Fi Direct в выбранных UI-контролах, сохранение явного выбора. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, закрытие controller/sink и блокировка повторной отмены, сохранение сессии при возврате. |
 | Два значка OD и безопасная область | `Packaging/tests/test_carplay_allapps.js`; app `CarPlaySafeAreaTest`; common `CarPlayWindowUiTest`, `CarPlayHostVideoSurfaceTest` |
 | Нажатия OD-дока | `Packaging/tests/test_dock_navigation_actions.js`; перенос обоих config extras и OD guards проверить с двух сторон |
 | Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`; отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
@@ -1119,6 +1127,15 @@ app — `RestoreMode/app/src/test/java/ru/big/town/restoremode/voice/commands/`
 и `RestoreMode/app/src/test/java/ru/big/town/restoremode/carplay/` для громкости.
 Это проверки отдельных контрактов, не полное покрытие: реальный выбор дисплея,
 динамический OEM ClassLoader, Binder-доступ и готовый UI требуют отдельной проверки.
+
+UI-проверки выше работают в Robolectric (SDK 30, русский интерфейс), без машины
+и реального iPhone. В app для них включены Android resources, Robolectric 4.17
+и Mockito 5.20.0 в testImplementation; [тестовый manifest](../RestoreMode/app/src/test/AndroidManifest.xml)
+явно сохраняет exported DiPlayActivity из библиотечного manifest для unit-test merger.
+Рабочий manifest приложения не меняется. Тесты:
+[главный экран](../RestoreMode/app/src/test/java/ru/big/town/restoremode/carplay/CarPlayHomeScreenUiTest.java),
+[настройки](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/VoyahSettingsUiTest.kt),
+[подключение](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/VoyahConnectionUiTest.kt).
 
 Примеры команд из корня; настроить JAVA_HOME/SDK/NDK и внешний DIPLAY_AUTH_ASSETS_DIR.
 Не копировать локальные пути Gradle cache/SDK из машины автора.
