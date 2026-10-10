@@ -78,6 +78,17 @@ class LauncherIntentTest {
         assertNull(shadowOf(activity).nextStartedActivity)
     }
 
+    @Test fun explicitHomeFromSettingsKeepsTheHomeScreenDuringAnActiveSession() {
+        controller = Robolectric.buildActivity(DiPlayActivity::class.java,
+            Intent().putExtra("page", "home")).create()
+        val activity = controller!!.get()
+        assertFalse(activity.isFinishing)
+        assertEquals("home", ReflectionHelpers.getField<String>(activity, "page"))
+        assertNull(shadowOf(activity).nextStartedActivity)
+        assertTrue(CarPlayBackgroundSession.hasSession())
+        assertEquals(0, stops)
+    }
+
     @Test fun recreationRetainsSettingsInsteadOfRedirectingToProjection() {
         controller = Robolectric.buildActivity(DiPlayActivity::class.java, launcher())
             .create(Bundle().apply { putString("page", "settings") })

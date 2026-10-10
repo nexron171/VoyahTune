@@ -4826,10 +4826,11 @@ class CarPlayHostActivity : ComponentActivity() {
             return false
         }
         val targetDisplayId = windowManager.defaultDisplay.displayId
-        if (VoyahCarPlayIntegration.available && snapshot.ownerDisplayId != null &&
-            snapshot.ownerDisplayId != targetDisplayId) {
+        if (VoyahCarPlayIntegration.available &&
+            CarPlayBackgroundSession.stopForDisplayChange(targetDisplayId) {
+                mainHandler.post { if (!isDestroyed) maybeStartCarPlay() }
+            }) {
             appendLog("CarPlay display changed ${snapshot.ownerDisplayId} -> $targetDisplayId; reconnecting")
-            CarPlayBackgroundSession.stop { mainHandler.post { if (!isDestroyed) maybeStartCarPlay() } }
             return false
         }
         // The sink's pacing is fixed when it is built; a session from before a Smooth video change (for
@@ -6037,6 +6038,14 @@ internal object CarPlayBackgroundSession {
     @Synchronized fun isOwner(candidate: Any): Boolean = owner === candidate
     @Synchronized fun hasSession(): Boolean = stopAction != null || stopping
     private val stopWaiters = mutableListOf<() -> Unit>()
+
+    fun stopForDisplayChange(targetDisplayId: Int, completion: () -> Unit): Boolean {
+        val sourceDisplayId = synchronized(this) { ownerDisplayId } ?: return false
+        if (sourceDisplayId == targetDisplayId) return false
+        // Wait for transport teardown before negotiating the new host's measured dimensions.
+        stop(completion)
+        return true
+    }
 
     fun stop(completion: () -> Unit = {}) {
         val action: (((() -> Unit)) -> Unit)?

@@ -11,9 +11,9 @@ import ru.big.town.common.CarPlayTarget;
 
 public class CarPlayTargetTest {
     @Test
-    public void savedCarPlayTargetOpensProjectionOnlyOnVirtualDisplays() {
+    public void savedCarPlayTargetRoutesPhysicalDisplaysAndOpensVirtualProjection() {
         for (int physical : new int[] {0, 1}) {
-            assertEquals(CarPlayTarget.ACTIVITY,
+            assertEquals(CarPlayTarget.ENTRY,
                     CarPlayTarget.activityForDisplay(CarPlayTarget.ID, physical));
         }
         for (int virtual : new int[] {2, 9, 42}) {

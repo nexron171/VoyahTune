@@ -8,6 +8,7 @@ import android.content.Intent;
 public final class CarPlayTarget {
     public static final String PACKAGE = "ru.big.town.restoremode";
     public static final String ACTIVITY = "com.shilapi.xcertplay.DiPlayActivity";
+    public static final String ENTRY = "com.shilapi.xcertplay.CarPlayEntryActivity";
     public static final String PROJECTION = "com.shilapi.xcertplay.CarPlayHostActivity";
     public static final String LAUNCHER = "ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
     public static final String ID = PACKAGE + "/" + ACTIVITY;
@@ -43,7 +44,7 @@ public final class CarPlayTarget {
 
     /** Saved targets stay stable; embedded CarPlay opens the projection, not its home screen. */
     public static String activityForDisplay(String target, int displayId) {
-        if (isCarPlay(target)) return displayId > 1 ? PROJECTION : ACTIVITY;
+        if (isCarPlay(target)) return displayId > 1 ? PROJECTION : ENTRY;
         return PACKAGE.equals(target) ? PACKAGE + ".MainActivity" : null;
     }
 
