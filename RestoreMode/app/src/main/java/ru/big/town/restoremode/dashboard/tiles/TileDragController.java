@@ -101,6 +101,11 @@ public final class TileDragController {
         return true;
     }
 
+    /** Идёт ли перетаскивание плитки: во время него автовыравнивание сетки не запускается. */
+    public boolean isDragging() {
+        return dragged != null;
+    }
+
     private void buildSlots() {
         List<Item> remaining = new ArrayList<>(items);
         remaining.remove(dragged);
