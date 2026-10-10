@@ -491,6 +491,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             toggleHeadlights(ctx, completion);
         } else if ("toggle_headlights_auto".equals(action)) {
             toggleHeadlightsAuto(ctx, completion);
+        } else if ("wash".equals(action)) {
+            SetModesService.requestWashAction(ctx, completion);
         } else if (action.startsWith("can:")) {
             sendCustomCan(action, completion);
         } else {

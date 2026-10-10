@@ -394,6 +394,29 @@ public class SetModesService extends Service {
             Log.i(TAG, "wash mode activation outcome=" + outcome);
         });
     }
+
+    /**
+     * Активация режима мойки из действия кнопки руля: тот же разовый путь, что у плитки и голоса,
+     * на командном потоке ApplyEngine. Используем контроллер живого сервиса, а не новый экземпляр:
+     * одноразовый request-бит и его очистка на SCREEN_OFF/SCREEN_ON живут именно в нём
+     * ({@link WashModeRequestLease}).
+     */
+    static void requestWashAction(Context context, Runnable completion) {
+        SetModesService service = context instanceof SetModesService
+                ? (SetModesService) context
+                : activeInstance;
+        WashModeController controller = service == null ? null : service.washModeController;
+        if (controller == null) {
+            Log.w(TAG, "STEER_ACTION wash: служба не запущена, запрос пропущен");
+            if (completion != null) completion.run();
+            return;
+        }
+        ApplyEngine.postUserCommand("steer wash mode", () -> {
+            WashModePolicy.Outcome outcome = controller.activate();
+            Log.i(TAG, "STEER_ACTION wash outcome=" + outcome);
+        }, completion);
+    }
+
     protected void requestMaintenance(boolean maintenance) {
         ApplyEngine.postUserCommand("suspension maintenance", () -> {
             if (MainActivity.sendSuspensionMaintenanceCommand(SetModesService.this, maintenance)) {
