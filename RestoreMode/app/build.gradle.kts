@@ -72,6 +72,9 @@ android {
         includeInApk = true
         includeInBundle = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
     ndkVersion = "27.0.12077973"
 
 }
@@ -89,6 +92,8 @@ dependencies {
     implementation(libs.constraintlayout)
     implementation("androidx.recyclerview:recyclerview:1.2.1")
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("org.mockito:mockito-core:5.20.0")
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 }
