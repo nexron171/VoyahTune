@@ -610,6 +610,17 @@ vehicleSpeedEnabled и config.locationReportingEnabled. `VehicleSpeedLocationPro
 оборачивает GPS provider, а если GPS выключен — пустой provider. Благодаря этому
 `$PASCD` со скоростью/передачей доступен по запросу iPhone без выдачи фиктивных GPS-координат.
 Не связывать включение скорости Voyah с пользовательским GPS-переключателем.
+Цепочка отправки: `CarPlayVehicleBridge` принимает STATE/122 и передаёт значения
+в `VoyahCarPlayIntegration.update` → `VoyahVehicleSpeedSource`; host подключает
+`VehicleSpeedLocationProvider` к `CarPlayController`. Как USB, так и Wi-Fi iAP2
+используют `Iap2LocationReporter`: запрос 0xFFFA с selector 4 включает скорость,
+`tick` передаёт NUL-terminated `$PASCD` в параметре 0 сообщения 0xFFFB, 0xFFFC
+останавливает отправку. Выдача пакета не доказывает его использование навигацией iPhone.
+[CarPlayVehicleSpeedPipelineTest](../RestoreMode/app/src/test/java/ru/big/town/restoremode/carplay/CarPlayVehicleSpeedPipelineTest.kt)
+проверяет настоящий Messenger-приёмник bridge и сериализацию iAP2 с тестовой службой
+Native: 36 км/ч → 10 м/с, передачу/контрольную сумму, запрос/остановку, stale/unknown
+и отбрасывание ответов предыдущего соединения. OEM Binder и физический канал к iPhone
+этим локальным тестом не проверяются.
 Передача GPS iPhone по умолчанию включена: loadLocationReportingEnabled возвращает
 true при отсутствии `xcertplay_airplay/location_reporting_enabled`. Сохранённые true/false
 сохраняются, включая явное отключение на существующей установке. Разрешение точного
@@ -1108,14 +1119,14 @@ UI-тесты и испытания на ГУ выполнять только в
 
 | Контракт | Существующие целевые тесты |
 | --- | --- |
-| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `VoyahSettingsUiTest`: скрытые категории/пункты и поисковый индекс, восстановление AUDIO/ADVANCED, SWReason и Wi-Fi Direct в выбранных UI-контролах, сохранение явного выбора. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, закрытие controller/sink и блокировка повторной отмены, сохранение сессии при возврате. |
+| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `VoyahSettingsUiTest`: скрытые категории/пункты и поисковый индекс, восстановление AUDIO/ADVANCED, SWReason, Wi-Fi Direct и включённая передача местоположения в UI-контролах; сохранение явного выбора, включая отключение GPS после recreate. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, закрытие controller/sink и блокировка повторной отмены, сохранение сессии при возврате. |
 | Два значка OD и безопасная область | `Packaging/tests/test_carplay_allapps.js`; app `CarPlaySafeAreaTest`; common `CarPlayWindowUiTest`, `CarPlayHostVideoSurfaceTest` |
 | Нажатия OD-дока | `Packaging/tests/test_dock_navigation_actions.js`; перенос обоих config extras и OD guards проверить с двух сторон |
 | Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`; отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
 | Возврат на главную и фон | `Packaging/tests/test_carplay_dashboard_navigation.js`; app `carplay.CarPlayDashboardDisplayTest`; common `CarPlayHostUiNavigationTest` (requestUI/controller без Activity), `VoyahSessionTransferTest`; shared `media.VideoSurfaceHandoffTest` |
 | Task/component/display | Native `CarPlayTargetTest` (включая выбор home на 0/1 и projection на VD со старым ID), `AppDisplayTaskPlanTest`; common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
 | Автоподключение и настройки | common `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `DefaultConnectionModeTest`, `VoyahEmbeddedEntryPointsTest`, `PhoneBluetoothReceiverTest` |
-| Скорость, gear, SWReason | common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest`; Native `CanBusEventRouterTest` |
+| Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest`; Native `CanBusEventRouterTest` |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `CarPlayNavigationLeaseTest` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
