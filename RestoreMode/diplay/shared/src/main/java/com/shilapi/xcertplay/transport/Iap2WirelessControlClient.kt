@@ -47,7 +47,7 @@ class Iap2WirelessControlClient(
         if (identified.vehicleStatusEnabled != identification.vehicleStatusEnabled) {
             onProgress("iap2 no battery reading: not declaring an electric vehicle")
         }
-        Iap2IdentificationClient(session).identify(identified, deadline.requireRemaining())
+        Iap2IdentificationClient(session).identify(identified, deadline.requireRemaining(), onProgress)
         onProgress("iap2 identification accepted")
         var stage = Iap2WirelessControlStage.IDENTIFIED
 

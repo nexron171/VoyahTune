@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Optional: diagnostic reports in the visible Downloads/DiPlay folder on Android 9.
+         Android 10+ needs no permission for this, so it is never requested there. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <!-- Optional: the dashboard map as a card over the home screen. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Optional, owner-enabled Usage Access for the verified DiLink 5.1 cluster profile. -->

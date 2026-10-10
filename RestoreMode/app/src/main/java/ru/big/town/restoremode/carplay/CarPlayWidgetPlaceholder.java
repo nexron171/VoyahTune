@@ -1,8 +1,9 @@
 package ru.big.town.restoremode.carplay;
 
+import android.graphics.Color;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.TextView;
 
 import ru.big.town.common.CarPlayTarget;
 import ru.big.town.restoremode.R;
@@ -19,6 +20,9 @@ public final class CarPlayWidgetPlaceholder {
             View.OnLongClickListener drag) {
         View placeholder = widget.findViewById(R.id.carPlayWidgetPlaceholder);
         boolean carPlay = entry.profiles.size() == 1 && CarPlayTarget.isCarPlay(entry.packageName);
+        boolean shortcut = carPlay
+                && CarPlayTarget.opensActivity(entry.packageName, entry.width, entry.height);
+        widget.setBackgroundResource(shortcut ? 0 : R.drawable.card_dark_ripple);
         placeholder.setVisibility(carPlay ? View.VISIBLE : View.GONE);
         if (!carPlay) return false;
 
@@ -27,14 +31,18 @@ public final class CarPlayWidgetPlaceholder {
         widget.findViewById(R.id.appWidgetOverlayControls).setVisibility(View.GONE);
         widget.findViewById(R.id.appWidgetBadge).setVisibility(View.GONE);
         ImageView button = widget.findViewById(R.id.carPlayWidgetLaunch);
-        boolean shortcut = CarPlayTarget.opensActivity(entry.packageName, entry.width, entry.height);
-        int size = shortcut ? 64 : 112;
-        button.setImageResource(shortcut ? R.mipmap.ic_carplay_launcher : R.drawable.carplay_home_logo);
-        ViewGroup.LayoutParams params = button.getLayoutParams();
-        params.width =
-                params.height =
-                        Math.round(size * widget.getResources().getDisplayMetrics().density);
-        button.setLayoutParams(params);
+        View shortcutTile = widget.findViewById(R.id.carPlayWidgetShortcut);
+        placeholder.setBackgroundColor(shortcut ? Color.TRANSPARENT : Color.BLACK);
+        shortcutTile.setVisibility(shortcut ? View.VISIBLE : View.GONE);
+        button.setVisibility(shortcut ? View.GONE : View.VISIBLE);
+        if (shortcut) {
+            ImageView icon = shortcutTile.findViewById(R.id.tileIco);
+            icon.setImageResource(R.drawable.carplay_home_logo);
+            TextView title = shortcutTile.findViewById(R.id.tileTitle);
+            title.setText(R.string.carplay_home_title);
+            shortcutTile.setOnClickListener(view -> launch.run());
+            shortcutTile.setOnLongClickListener(drag);
+        }
         button.setOnClickListener(view -> launch.run());
         button.setOnLongClickListener(drag);
         placeholder.setOnClickListener(view -> launch.run());

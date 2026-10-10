@@ -15,7 +15,7 @@ import android.widget.Toast;
 
 import ru.big.town.common.CarPlayTarget;
 
-/** Uses Native's task transfer path when the launcher opens an embedded CarPlay session. */
+/** Launcher entry and fullscreen shortcut using Native's task transfer path. */
 public final class CarPlayLauncherActivity extends Activity {
     private static final int LAUNCH_ON_DISPLAY = 34;
     private final Handler handler = new Handler(Looper.getMainLooper());

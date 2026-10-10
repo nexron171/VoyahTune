@@ -12,6 +12,7 @@ import android.widget.Switch
 import com.shilapi.xcertplay.airplay.*
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.media.AndroidMediaSink
+import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.media.CarPlayVideoLayout
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.orchestration.CarPlayRuntimeConfig
@@ -50,7 +51,9 @@ class CarPlayHostDisplaySizeTest {
         // Source-only tests have no provisioned local authentication identity.
         AirPlayPersistence.saveMfiTarget(activity, MfiTarget.USB_CH341)
         // Exercise host startup without launching vendor-service workers or real transports.
-        controllerConstruction = mockConstruction(CarPlayController::class.java)
+        controllerConstruction = mockConstruction(CarPlayController::class.java) { controller, _ ->
+            org.mockito.Mockito.`when`(controller.nowPlayingSnapshot()).thenReturn(CarPlayNowPlaying())
+        }
         (getField("teardownExecutor") as ExecutorService).shutdownNow()
         setField("teardownExecutor", PausedExecutorService())
         CarPlayBackgroundSession::class.java.getDeclaredField("owner").apply { isAccessible = true }
@@ -101,6 +104,34 @@ class CarPlayHostDisplaySizeTest {
         assertEquals(1, getField("restartGeneration"))
         assertNull(getField("sessionDisplay"))
     }
+
+    @Test fun resumingASquareCanvasInTheSameWindowDoesNotReconnect() {
+        AirPlayPersistence.saveAdaptPipResolution(activity, true)
+        val display = startSession(windowHeight = 1080, canvasHeight = 1920)
+        val video = object : TextureView(activity) {
+            override fun post(action: Runnable): Boolean = Handler(Looper.getMainLooper()).post(action)
+        }.apply { layout(0, 0, 1920, 1080) }
+        setField("videoView", video)
+
+        invoke("onResume")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+
+        assertSame(display, getField("sessionDisplay"))
+        assertEquals(size(1920, 1080), getField("activeDisplaySize"))
+        assertEquals(0, getField("restartGeneration"))
+        assertNull(getField("pendingDisplaySize"))
+    }
+
+    @Test fun aRealPipAspectChangeStillReconnectsWithASquareCanvas() {
+        AirPlayPersistence.saveAdaptPipResolution(activity, true)
+        startSession(windowHeight = 1080, canvasHeight = 1920)
+
+        applySize(700, 1080)
+
+        assertEquals(1, getField("restartGeneration"))
+        assertNull(getField("sessionDisplay"))
+    }
+
 
     @Test fun connectingInANarrowWindowRebuildsWhenTheCameraCloses() {
         startSession(windowWidth = 700)
@@ -420,6 +451,7 @@ class CarPlayHostDisplaySizeTest {
         try {
             for ((clusterSize, native) in listOf((1920 to 720) to true, (1280 to 720) to false, null to false)) {
                 val controller = org.mockito.Mockito.mock(CarPlayController::class.java)
+                org.mockito.Mockito.`when`(controller.nowPlayingSnapshot()).thenReturn(CarPlayNowPlaying())
                 org.mockito.Mockito.`when`(controller.configuredClusterSize()).thenReturn(clusterSize)
                 CarPlayBackgroundSession.store(controller, sink, 1920, 990, Any(), display) {}
                 assertEquals(true, invoke("adoptBackgroundSession"))

@@ -31,6 +31,33 @@ class SetupGuideTest {
         assertEquals(Source.LIKELY, detection.source)
     }
 
+    @Test fun controllerVersionIsDetectedBeforeTheGenericIviFallback() {
+        val expected = mapOf(
+            DiLinkGeneration.DILINK_3 to listOf(13, 15, 18),
+            DiLinkGeneration.DILINK_4 to listOf(16, 17, 21),
+            DiLinkGeneration.DILINK_5 to listOf(23, 34, 57, 59),
+        )
+        expected.forEach { (generation, controllers) ->
+            controllers.forEach { controller ->
+                val version = "$controller.1.22.2304120.1"
+                val detection = DiLinkGeneration.detect("IVI",
+                    "BYD-AUTO/IVI/IVI:13/TP1A.220624.014/x:user/release-keys", null, 33, version)
+                assertEquals(generation, detection.generation)
+                assertEquals(Source.SYSTEM_VERSION, detection.source)
+                assertEquals(version, detection.evidence)
+            }
+        }
+    }
+
+    @Test fun unknownControllerVersionKeepsTheExistingFallbacks() {
+        val fingerprint = "BYD-AUTO/IVI/IVI:13/TP1A.220624.014/x:user/release-keys"
+        for (version in listOf("", "unknown", "99.1.22.2304120.1")) {
+            val detection = DiLinkGeneration.detect("IVI", fingerprint, null, 33, version)
+            assertEquals(DiLinkGeneration.DILINK_5, detection.generation)
+            assertEquals(Source.LIKELY, detection.source)
+        }
+    }
+
     @Test fun otherHeadUnitsAreUnknown() {
         val detection = DiLinkGeneration.detect("sdk_car_x86", "google/sdk_car_x86/generic:10/x:user/release-keys", "", 29)
         assertEquals(DiLinkGeneration.UNKNOWN, detection.generation)

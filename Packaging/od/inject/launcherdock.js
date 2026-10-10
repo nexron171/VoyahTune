@@ -36,6 +36,8 @@ Java.perform(function () {
     var NAV_SECOND = "com.qinggan.launcher.navigation.NavigationBarSecond";
     var RELOAD_ACT = "ru.big.town.anative.DOCK_RELOAD";
     var OUR_PKG    = "ru.big.town.anative";           // наш VD-хост (SplitHostActivity) для подсветки
+    var CARPLAY_TARGET = "ru.big.town.restoremode/com.shilapi.xcertplay.DiPlayActivity";
+    var CARPLAY_LAUNCHER = "ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
     var RESTORE_PKG = "ru.big.town.restoremode";      // VoyahTune (UI) — открывается долгим тапом по «меню»
 
     var ActivityThread = Java.use("android.app.ActivityThread");
@@ -373,6 +375,11 @@ Java.perform(function () {
     function isInstalled(pkg) {
         if (pkg === "none") return false;
         try {
+            if (pkg === CARPLAY_TARGET) {
+                var component = Java.use("android.content.ComponentName").$new(RESTORE_PKG, CARPLAY_LAUNCHER);
+                var activity = ctx().getPackageManager().getActivityInfo(component, 0);
+                return !!activity.enabled.value && !!activity.exported.value;
+            }
             var li = ctx().getPackageManager().getLaunchIntentForPackage(pkg);
             return li !== null;
         } catch (e) { return false; }
@@ -396,8 +403,9 @@ Java.perform(function () {
     function getAppDrawable(pkg) {
         try {
             var pm = ctx().getPackageManager();
-            var ai = pm.getApplicationInfo(pkg, 0);
-            var icon = pm.getApplicationIcon(ai);
+            var icon = pkg === CARPLAY_TARGET
+                ? pm.getActivityIcon(Java.use("android.content.ComponentName").$new(RESTORE_PKG, CARPLAY_LAUNCHER))
+                : pm.getApplicationIcon(pm.getApplicationInfo(pkg, 0));
             var bmp = Bitmap.createBitmap(icon.getIntrinsicWidth(), icon.getIntrinsicHeight(), BitmapConfig.ARGB_8888.value);
             var canvas = Canvas.$new(bmp);
             icon.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
@@ -438,27 +446,46 @@ Java.perform(function () {
         } catch (e) { Log.e(TAG, "[dock] openVoyahTune err: " + e); }
     }
 
-    // Слушатель долгого тапа «меню» (кнопка «все приложения», последний элемент дока). Регистрируем
-    // один раз лениво. onLongClick → VoyahTune + return true (гасим штатное долгое). Короткий тап не
-    // трогаем — идёт штатно (открытие списка приложений).
-    var menuLC = null;
-    function getMenuLongClick() {
-        if (menuLC !== null) return menuLC;
+    var navigationButtonKeys = {};
+    var invokingStockNavigation = false;
+    var navigationLongClick = null;
+
+    function navigationOpensVoyahTune(key, longPress) {
+        var shortVoyahTune = cfg(key) === "1";
+        return longPress ? !shortVoyahTune : shortVoyahTune;
+    }
+
+    function handleNavigationLongClick(view) {
+        var key = navigationButtonKeys["" + view.getId()];
+        if (!key) return false;
+        if (navigationOpensVoyahTune(key, true)) {
+            openVoyahTune(view);
+        } else {
+            // performClick keeps the OEM listener and screen routing; bypass our short-press hook.
+            invokingStockNavigation = true;
+            try { view.performClick(); }
+            finally { invokingStockNavigation = false; }
+        }
+        return true;
+    }
+
+    function getNavigationLongClick() {
+        if (navigationLongClick !== null) return navigationLongClick;
         try {
             var Listener = Java.registerClass({
-                name: "ru.big.town.dock.MenuLongClick",
+                name: "ru.big.town.dock.NavigationLongClick",
                 implements: [Java.use("android.view.View$OnLongClickListener")],
                 methods: {
                     onLongClick: {
                         returnType: "boolean",
                         argumentTypes: ["android.view.View"],
-                        implementation: function (view) { openVoyahTune(view); return true; }
+                        implementation: handleNavigationLongClick
                     }
                 }
             });
-            menuLC = Listener.$new();
-        } catch (e) { Log.e(TAG, "[dock] menuLongClick reg err: " + e); }
-        return menuLC;
+            navigationLongClick = Listener.$new();
+        } catch (error) { Log.e(TAG, "[dock] navigation listener: " + error); }
+        return navigationLongClick;
     }
 
     // Native resolves the configured long-press action. HasSplit supports older saved settings.
@@ -641,16 +668,19 @@ Java.perform(function () {
                 }
                 view.invalidate();
             }
-            // Долгий тап по «меню» (все приложения, mScreenUpAllAppView) → VoyahTune. Короткий тап НЕ
-            // трогаем — идёт штатно (открытие списка приложений). setOnLongClickListener идемпотентен,
-            // навешиваем на каждом проходе updateIcons (init/theme/reload) — переживает перекраску темы.
             try {
-                var av = dockField(instance, "mScreenUpAllAppView");
-                if (av) {
-                    var lc = getMenuLongClick();
-                    if (lc) { av.setLongClickable(true); av.setOnLongClickListener(lc); }
-                }
-            } catch (e) { Log.e(TAG, "[dock] menu long-press attach err: " + e); }
+                var listener = getNavigationLongClick();
+                var navigation = [
+                    {view: views.home, key: "dockHomeShortVoyahTune"},
+                    {view: views.allApps, key: "dockAllAppsShortVoyahTune"}
+                ];
+                navigation.forEach(function (button) {
+                    if (!button.view || !listener) return;
+                    navigationButtonKeys["" + button.view.getId()] = button.key;
+                    button.view.setLongClickable(true);
+                    button.view.setOnLongClickListener(listener);
+                });
+            } catch (error) { Log.e(TAG, "[dock] navigation attach: " + error); }
             // Долгий тап по слотам 1/2 → открыть назначенный сплит. Регистрируем viewId→slot и вешаем
             // слушатель (идемпотентно, переживает перекраску темы, как и меню-лонгтап выше).
             try {
@@ -810,6 +840,7 @@ Java.perform(function () {
             var packageRefreshTimer = null;
             var FLAG_SYSTEM = 0x00000001;
             var SYNTHETIC_PREFIX = "__voyahtune_allapps__:";
+            // Recognize the old synthetic shortcut so reused OEM lists can discard it.
             var CARPLAY_ENTRY = RESTORE_PKG + "/ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
             var ComponentName = Java.use("android.content.ComponentName");
             var resourceTemplate = null;
@@ -935,18 +966,8 @@ Java.perform(function () {
                         if (pm.getLaunchIntentForPackage(pkg) === null) continue;
                         result.push(pkg);
                         if (pkg === RESTORE_PKG) {
-                            try {
-                                var carplay = pm.getActivityInfo(entryComponent(CARPLAY_ENTRY), 0);
-                                if (carplay.enabled.value && carplay.exported.value) {
-                                    result.push(CARPLAY_ENTRY);
-                                    Log.i(TAG, "[allapps] CarPlay launcher entry available");
-                                } else {
-                                    Log.w(TAG, "[allapps] CarPlay launcher entry unavailable enabled="
-                                            + carplay.enabled.value + " exported=" + carplay.exported.value);
-                                }
-                            } catch (absentCarPlay) {
-                                Log.w(TAG, "[allapps] CarPlay launcher entry lookup failed: " + absentCarPlay);
-                            }
+                            var carPlayActivity = pm.getActivityInfo(entryComponent(CARPLAY_ENTRY), 0);
+                            if (carPlayActivity.enabled.value && carPlayActivity.exported.value) result.push(CARPLAY_ENTRY);
                         }
                     } catch (ignored) {}
                 }
@@ -991,10 +1012,14 @@ Java.perform(function () {
 
             function addMissingAppsImpl(list) {
                 var existing = {};
-                for (var i = 0; i < list.size(); i++) {
+                for (var i = list.size() - 1; i >= 0; i--) {
                     try {
                         var current = Java.cast(list.get(i), AppBean);
                         var existingTarget = syntheticPackage(current) || "" + current.getPackageName();
+                        if (existingTarget === CARPLAY_ENTRY && existing["pkg:" + existingTarget]) {
+                            list.remove(i);
+                            continue;
+                        }
                         existing["pkg:" + existingTarget] = true;
                         if (existingTarget === RESTORE_PKG) {
                             current.setSubType(SYNTHETIC_PREFIX + RESTORE_PKG);
@@ -1494,10 +1519,18 @@ Java.perform(function () {
         var mainOnClick = NavigationBarMain.onClick.overload('android.view.View');
         mainOnClick.implementation = function (view) {
             var sid = managedScreenId(this, mainFallbackScreen);
-            if (sid !== 0) return mainOnClick.call(this, view);
+            if (sid !== 0 || invokingStockNavigation) return mainOnClick.call(this, view);
             try {
                 var viewId = view.getId();
                 var clickViews = dockViews(this, sid);
+                var navigationKey = clickViews.home && viewId === clickViews.home.getId()
+                    ? "dockHomeShortVoyahTune"
+                    : clickViews.allApps && viewId === clickViews.allApps.getId()
+                        ? "dockAllAppsShortVoyahTune" : null;
+                if (navigationKey && navigationOpensVoyahTune(navigationKey, false)) {
+                    openVoyahTune(view);
+                    return;
+                }
                 if (clickViews.slot1 !== null && viewId === clickViews.slot1.getId()) {
                     var p1 = dockPackage(sid, 1, true);
                     if (isInstalled(p1)) { lastSlot[sid] = 1; launchFreeform(p1, sid); return; }

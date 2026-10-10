@@ -2,6 +2,8 @@ package ru.big.town.restoremode.widgets.apps;
 
 import android.content.SharedPreferences;
 
+import ru.big.town.common.CarPlayTarget;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -141,7 +143,30 @@ public class AppWidgetStore {
             }
         } catch (Exception ignored) {
         }
+        if (removeDuplicateCarPlayWidgets(result)) {
+            save(preferences, result);
+        }
         return result;
+    }
+
+    static boolean removeDuplicateCarPlayWidgets(List<Entry> entries) {
+        boolean found = false;
+        boolean changed = false;
+        java.util.Iterator<Entry> iterator = entries.iterator();
+        while (iterator.hasNext()) {
+            Entry entry = iterator.next();
+            entry.ensureProfiles();
+            if (entry.profiles.size() != 1 || !CarPlayTarget.isCarPlay(entry.packageName)) {
+                continue;
+            }
+            if (found) {
+                iterator.remove();
+                changed = true;
+            } else {
+                found = true;
+            }
+        }
+        return changed;
     }
 
     static void save(SharedPreferences preferences, List<Entry> entries) {
@@ -175,6 +200,13 @@ public class AppWidgetStore {
 
     public static Entry add(SharedPreferences preferences, String packageName) {
         List<Entry> entries = load(preferences);
+        if (CarPlayTarget.isCarPlay(packageName)) {
+            for (Entry entry : entries) {
+                if (entry.profiles.size() == 1 && CarPlayTarget.isCarPlay(entry.packageName)) {
+                    return entry;
+                }
+            }
+        }
         if (entries.size() >= MAX_WIDGETS) {
             return null;
         }

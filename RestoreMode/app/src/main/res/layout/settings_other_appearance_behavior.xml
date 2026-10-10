@@ -241,4 +241,72 @@
             android:thumb="@drawable/switch_thumb"
             android:track="@drawable/switch_track" />
     </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
+        android:id="@+id/dockHomePressRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Док · Домой"
+                android:textSize="22sp"
+                android:textColor="@color/settings_text" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:text="Включено: короткое нажатие — VoyahTune, долгое — домашний экран. Выключено: наоборот."
+                android:textSize="17sp"
+                android:textColor="@color/settings_muted" />
+        </LinearLayout>
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchDockHomeShortVoyahTune"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:contentDescription="Домой: VoyahTune коротким нажатием"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
+        android:id="@+id/dockAllAppsPressRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="18dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Док · Все приложения"
+                android:textSize="22sp"
+                android:textColor="@color/settings_text" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:text="Включено: короткое нажатие — VoyahTune, долгое — список приложений. Выключено: наоборот."
+                android:textSize="17sp"
+                android:textColor="@color/settings_muted" />
+        </LinearLayout>
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchDockAllAppsShortVoyahTune"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:contentDescription="Все приложения: VoyahTune коротким нажатием"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
 </LinearLayout>

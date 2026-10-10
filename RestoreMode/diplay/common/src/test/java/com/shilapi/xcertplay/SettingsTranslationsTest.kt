@@ -47,8 +47,9 @@ class SettingsTranslationsTest {
         folder.listFiles { file -> file.extension == "xml" }!!.flatMap { file ->
             val nodes = DocumentBuilderFactory.newInstance().newDocumentBuilder()
                 .parse(file).getElementsByTagName("string")
-            (0 until nodes.length).map { index ->
+            (0 until nodes.length).mapNotNull { index ->
                 val node = nodes.item(index)
+                if (node.attributes.getNamedItem("translatable")?.nodeValue == "false") return@mapNotNull null
                 node.attributes.getNamedItem("name").nodeValue to node.textContent
             }
         }.toMap()

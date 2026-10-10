@@ -51,15 +51,6 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         audio = new CarPlayAudioClient(requireContext(), this::updateVolumes);
         for (int i = 0; i < SLIDERS.length; i++) bindVolume(i);
         updateVolumes(new CarPlayAudioClient.Volumes(null, null));
-        Switch toggle = settingView(R.id.carPlayAutoConnect);
-        toggle.setSaveEnabled(false);
-        toggle.setOnCheckedChangeListener(
-                (button, enabled) -> {
-                    if (!updating) {
-                        CarPlaySettingsAccess.setAutoConnect(requireContext(), enabled);
-                        updateState();
-                    }
-                });
         Switch theme = settingView(R.id.carPlayThemeByLight);
         theme.setSaveEnabled(false);
         theme.setOnCheckedChangeListener(
@@ -138,21 +129,12 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     }
 
     private void updateState() {
-        Switch toggle = settingView(R.id.carPlayAutoConnect);
-        if (toggle == null) return;
-        boolean enabled = CarPlaySettingsAccess.autoConnect(requireContext());
+        Switch theme = settingView(R.id.carPlayThemeByLight);
+        if (theme == null) return;
         boolean hasPhone = CarPlaySettingsAccess.hasPhone(requireContext());
         updating = true;
-        toggle.setChecked(enabled);
-        toggle.setEnabled(hasPhone || enabled);
-        Switch theme = settingView(R.id.carPlayThemeByLight);
         theme.setChecked(CarPlaySettingsAccess.themeByLight(requireContext()));
         updating = false;
-        TextView description = settingView(R.id.carPlayAutoConnectDescription);
-        description.setText(
-                hasPhone
-                        ? R.string.carplay_home_auto_connect_detail
-                        : R.string.carplay_home_auto_connect_choose_phone);
         TextView phone = settingView(R.id.carPlayPhone);
         phone.setText(
                 hasPhone

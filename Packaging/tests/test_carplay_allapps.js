@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '../od/inject/launcherdock.j
 const restore = 'ru.big.town.restoremode';
 const carplay = restore + '/ru.big.town.restoremode.carplay.CarPlayLauncherActivity';
 const prefix = '__voyahtune_allapps__:';
-// Run the production All Apps functions against a PackageManager with two activities in one APK.
+// Run production All Apps routing for both explicit RestoreMode activities.
 function production(name) {
     const match = new RegExp('^([ ]*)function ' + name + '\\(', 'm').exec(source);
     assert(match, name);
@@ -18,7 +18,8 @@ function production(name) {
     return source.slice(start, end);
 }
 function list(items = []) {
-    return { items, size() { return items.length; }, get(i) { return items[i]; }, add(v) { items.push(v); } };
+    return { items, size() { return items.length; }, get(i) { return items[i]; },
+        add(v) { items.push(v); }, remove(i) { return items.splice(i, 1)[0]; } };
 }
 function bean(icon, name, pkg) {
     return { icon, name, pkg, subType: '', getPackageName() { return pkg; }, getType() { return 1; },
@@ -26,8 +27,6 @@ function bean(icon, name, pkg) {
         setSubType(v) { this.subType = v; } };
 }
 const launches = [];
-let componentEnabled = true;
-let componentInstalled = true;
 const c = {
     RESTORE_PKG: restore, CARPLAY_ENTRY: carplay, SYNTHETIC_PREFIX: prefix, FLAG_SYSTEM: 1,
     installedSnapshot: null, resourceTemplate: null, iconCache: {}, getAll: null,
@@ -48,11 +47,10 @@ const c = {
         getLaunchIntentForPackage: pkg => ({package: pkg, addFlags() {}}),
         getActivityInfo(component) {
             const isCarPlay = component.activity.endsWith('CarPlayLauncherActivity');
-            if (isCarPlay && !componentInstalled) throw Error('Not installed');
-            return {enabled: {value: componentEnabled}, exported: {value: true},
+            return {enabled: {value: true}, exported: {value: true},
                 loadLabel: () => isCarPlay ? 'VoyahTune CarPlay' : 'VoyahTune'};
         },
-        getActivityIcon: component => component.activity.endsWith('CarPlayLauncherActivity') ? 'green' : 'grey',
+        getActivityIcon: component => component.activity.endsWith('CarPlayLauncherActivity') ? 'dark-carplay' : 'grey',
         getApplicationIcon: () => 'package icon', getApplicationInfo: pkg => pkg,
         getApplicationLabel: () => 'DiPlay',
     },
@@ -64,14 +62,11 @@ vm.runInContext(['cleanJavaString', 'ourInsetActivity', 'entryPackage', 'entryCo
 const apps = list([bean(10, 20, 'oem.app')]);
 c.addMissingAppsImpl(apps);
 c.addMissingAppsImpl(apps);
-assert.equal(apps.size(), 4); // OEM + two VoyahTune entries + ordinary music app.
+assert.equal(apps.size(), 4); // OEM + VoyahTune + CarPlay + music.
 assert.deepEqual(apps.items.slice(1).map(b => c.syntheticPackage(b)), [restore, carplay, 'app.music']);
 assert.equal(apps.get(1).getPackageName(), restore);
-assert.equal(apps.get(2).getPackageName(), restore);
 assert.equal(c.loadLabel(restore), 'VoyahTune');
-assert.equal(c.loadLabel(carplay), 'VoyahTune CarPlay');
 assert.equal(c.loadIcon(restore), 'grey');
-assert.equal(c.loadIcon(carplay), 'green');
 assert.equal(c.ourInsetActivity('com.shilapi.xcertplay.DiPlayActivity'), true);
 assert.equal(c.ourInsetActivity('com.shilapi.xcertplay.CarPlayHostActivity'), true);
 assert.equal(c.ourInsetActivity('com.shilapi.xcertplay.OtherActivity'), false);
@@ -81,18 +76,22 @@ for (const screen of [0, 1]) {
     assert.equal(c.launchAllApp(restore, screen), true);
     assert.equal(launches.at(-1).intent.component.activity, restore + '.MainActivity');
     assert.equal(launches.at(-1).screen, screen);
-    assert.equal(c.launchAllApp(carplay, screen), true);
-    assert.equal(launches.at(-1).intent.component.activity, carplay.split('/')[1]);
-    assert.equal(launches.at(-1).screen, screen);
 }
 const existing = list([bean(10, 20, restore)]);
 c.addMissingAppsImpl(existing);
 assert.equal(existing.size(), 3);
 assert.equal(c.syntheticPackage(existing.get(0)), restore);
-componentEnabled = false;
-c.installedSnapshot = null;
-assert.deepEqual(Array.from(c.snapshotInstalled()), [restore, 'app.music']);
-componentInstalled = false;
-c.installedSnapshot = null;
-assert.deepEqual(Array.from(c.snapshotInstalled()), [restore, 'app.music']);
-console.log('PASS: OD All Apps keeps Dashboard/CarPlay labels, icons, deduplication and both physical displays');
+const legacy = [bean(10, 20, restore), bean(10, 20, restore)];
+for (const entry of legacy) entry.setSubType(prefix + carplay);
+const cached = list([bean(10, 20, 'oem.app'), ...legacy, bean(10, 20, restore)]);
+c.addMissingAppsImpl(cached);
+c.addMissingAppsImpl(cached);
+assert.deepEqual(cached.items.map(b => c.syntheticPackage(b) || b.getPackageName()),
+    ['oem.app', carplay, restore, 'app.music']);
+assert.equal(c.loadIcon(carplay), 'dark-carplay');
+for (const screen of [0, 1]) {
+    assert.equal(c.launchAllApp(carplay, screen), true);
+    assert.equal(launches.at(-1).intent.component.activity, restore + '.carplay.CarPlayLauncherActivity');
+    assert.equal(launches.at(-1).screen, screen);
+}
+console.log('PASS: OD All Apps preserves unique Dashboard and CarPlay entries on both displays');

@@ -16,6 +16,8 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_forced_ev_suspension_maintenance),
         layout(R.layout.settings_main_launch_apps_suspension),
         layout(R.layout.settings_main_suspension_description),
+        layout(R.layout.settings_main_carplay_heading),
+        dynamic(DynamicContent.CARPLAY_WIDGETS),
         layout(R.layout.settings_main_energy_heading),
         layout(R.layout.settings_main_energy_charge_consumption),
         layout(R.layout.settings_main_energy_trip_tire_pressure),
@@ -26,7 +28,6 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_cpu_ram),
         layout(R.layout.settings_main_memory_task_manager),
         layout(R.layout.settings_main_app_widgets_heading),
-        layout(R.layout.settings_main_carplay_widget),
         dynamic(DynamicContent.APP_WIDGETS),
         layout(R.layout.settings_main_add_app_widget),
         layout(R.layout.settings_main_shortcuts_heading),
@@ -104,6 +105,7 @@ public final class SettingsSectionLayouts {
     };
 
     public enum DynamicContent {
+        CARPLAY_WIDGETS,
         APP_WIDGETS,
         DIAL_CARDS,
         SHORTCUTS,

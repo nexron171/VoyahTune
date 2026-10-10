@@ -58,29 +58,6 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
         <Switch
-            android:id="@+id/carPlayAutoConnect"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="48dp"
-            android:saveEnabled="false"
-            android:text="@string/carplay_home_auto_connect"
-            android:textColor="@color/settings_text"
-            android:textSize="22sp" />
-        <TextView
-            android:id="@+id/carPlayAutoConnectDescription"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="@string/carplay_home_auto_connect_detail"
-            android:textColor="@color/settings_muted"
-            android:textSize="18sp" />
-    </LinearLayout>
-    <LinearLayout
-        style="@style/SettingsCard"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
-        <Switch
             android:id="@+id/carPlayThemeByLight"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

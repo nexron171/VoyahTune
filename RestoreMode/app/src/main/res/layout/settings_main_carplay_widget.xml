@@ -1,64 +1,196 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ru.big.town.restoremode.settings.ui.layout.SettingsGrid
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:background="@drawable/settings_card"
-    android:padding="25dp">
-
-    <LinearLayout
+    app:settingsColumns="2">
+    <ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
-
-        <ImageView
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:src="@drawable/carplay_home_logo"
-            android:scaleType="fitCenter"
-            android:importantForAccessibility="no" />
-
-        <TextView
-            android:layout_width="0dp"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        android:padding="1dp"
+        app:settingsToggleRef="@id/switchShowCarPlayWidget">
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="16dp"
-            android:text="@string/carplay_home_title"
-            android:textSize="22sp"
-            android:textColor="@color/settings_text"
-            android:includeFontPadding="false" />
-    </LinearLayout>
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/carplay_widget_description"
-        android:textSize="17sp"
-        android:textColor="@color/settings_muted"
-        android:lineSpacingMultiplier="1.45"
-        android:includeFontPadding="false" />
-
-    <Button
-        android:id="@+id/buttonAddCarPlayShortcut"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:minHeight="60dp"
-        android:text="@string/carplay_shortcut_add"
-        android:textColor="@color/settings_text"
-        android:textSize="@dimen/settings_body_size"
-        android:tag="settings.add" />
-
-    <Button
-        android:id="@+id/buttonAddCarPlayWidget"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:minHeight="60dp"
-        android:text="@string/carplay_widget_add"
-        android:textColor="@color/settings_text"
-        android:textSize="@dimen/settings_body_size"
-        android:tag="settings.add" />
-</LinearLayout>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="22dp"
+            android:minHeight="100dp">
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginEnd="16dp"
+                android:src="@drawable/carplay_home_logo"
+                android:importantForAccessibility="no" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/carplay_home_title"
+                    android:textSize="23sp"
+                    android:textColor="@color/settings_text"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="7dp"
+                    android:text="@string/carplay_widget_description"
+                    android:textSize="16sp"
+                    android:textColor="@color/settings_muted"
+                    android:includeFontPadding="false" />
+            </LinearLayout>
+            <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+                android:id="@+id/switchShowCarPlayWidget"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:contentDescription="@string/carplay_widget_enable"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="22dp"
+            android:background="@color/settings_inset">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/carplay_widget_enable_hint"
+                android:textSize="16sp"
+                android:textColor="@color/settings_muted"
+                android:tag="settings.off-note" />
+            <LinearLayout
+                android:id="@+id/carPlayWidgetOptions"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+                <RadioGroup
+                    android:id="@+id/carPlayWidgetMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+                    <RadioButton
+                        android:id="@+id/carPlayWidgetShortcutMode"
+                        android:layout_marginEnd="8dp"
+                        android:layout_width="0dp"
+                        android:layout_height="56dp"
+                        android:layout_weight="1"
+                        android:text="@string/carplay_widget_mode_shortcut"
+                        android:textSize="18sp"
+                        android:textColor="@color/settings_text" />
+                    <RadioButton
+                        android:id="@+id/carPlayWidgetWindowMode"
+                        android:layout_width="0dp"
+                        android:layout_height="56dp"
+                        android:layout_weight="1"
+                        android:text="@string/carplay_widget_mode_window"
+                        android:textSize="18sp"
+                        android:textColor="@color/settings_text" />
+                </RadioGroup>
+                <TextView
+                    android:id="@+id/carPlayWidgetShortcutHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/carplay_shortcut_description"
+                    android:textSize="16sp"
+                    android:textColor="@color/settings_muted" />
+                <LinearLayout
+                    android:id="@+id/carPlayWidgetWindowOptions"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+                    <Switch
+                        android:id="@+id/carPlayWidgetAutoStart"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:saveEnabled="false"
+                        android:text="@string/carplay_widget_auto_start"
+                        android:textSize="18sp"
+                        android:textColor="@color/settings_text" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/carplay_widget_window_description"
+                        android:textSize="16sp"
+                        android:textColor="@color/settings_muted" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:orientation="horizontal">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="10dp"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Ширина"
+                                android:textSize="15sp"
+                                android:textColor="@color/settings_muted" />
+                            <Spinner
+                                android:id="@+id/carPlayWidgetWidth"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_marginTop="8dp"
+                                android:contentDescription="Ширина окна CarPlay в ячейках"
+                                android:popupBackground="@color/settings_inset"
+                                android:background="@drawable/settings_field" />
+                        </LinearLayout>
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Высота"
+                                android:textSize="15sp"
+                                android:textColor="@color/settings_muted" />
+                            <Spinner
+                                android:id="@+id/carPlayWidgetHeight"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_marginTop="8dp"
+                                android:contentDescription="Высота окна CarPlay в ячейках"
+                                android:popupBackground="@color/settings_inset"
+                                android:background="@drawable/settings_field" />
+                        </LinearLayout>
+                    </LinearLayout>
+                    <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
+                        android:id="@+id/carPlayWidgetGrid"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        app:settingsPreviewKind="grid"
+                        android:tag="settings.cell-grid" />
+                    <TextView
+                        android:id="@+id/carPlayWidgetSizeSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:textSize="16sp"
+                        android:textColor="@color/settings_muted" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard>
+</ru.big.town.restoremode.settings.ui.layout.SettingsGrid>

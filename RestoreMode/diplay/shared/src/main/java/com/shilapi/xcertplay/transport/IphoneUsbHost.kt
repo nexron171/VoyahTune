@@ -157,6 +157,9 @@ class IphoneUsbHost(
                     CONTROL_TRANSFER_TIMEOUT_MILLIS,
                 )
                 if (transferred != response.size) {
+                    // iOS 12 and 15 rejected this request even while unlocked (#509, #455); a locked
+                    // iPhone rejects it too (#100). Record what the iPhone exposes to tell them apart.
+                    runCatching { onDiagnostic(modeRejectionDiagnostic(connection, device)) }
                     throw IphoneUsbException.Protocol(
                         "CarPlay configuration request transferred $transferred of ${response.size} bytes",
                     )
@@ -312,12 +315,31 @@ class IphoneUsbHost(
         getParcelableExtra(UsbManager.EXTRA_DEVICE)
     }
 
+    /** The iPhone's current USB mode (usbmuxd's 0x45 request) and every configuration it exposes. */
+    private fun modeRejectionDiagnostic(connection: UsbDeviceConnection, device: UsbDevice): String {
+        val mode = ByteArray(USB_MODE_RESPONSE_LENGTH)
+        val read = connection.controlTransfer(
+            USB_VENDOR_DEVICE_IN, GET_USB_MODE_REQUEST, 0, 0, mode, mode.size, CONTROL_TRANSFER_TIMEOUT_MILLIS,
+        )
+        return usbModeDiagnostic(read, mode, device.version,
+            (0 until device.configurationCount).map(device::getConfiguration).map { "${it.id}[${IphoneCarPlayConfiguration.describe(it)}]" })
+    }
+
     companion object {
         private const val USB_VENDOR_DEVICE_IN = 0xc0
+        private const val GET_USB_MODE_REQUEST = 0x45
+        private const val USB_MODE_RESPONSE_LENGTH = 4
         private const val CARPLAY_CONFIGURATION_REQUEST = 0x52
         private const val CARPLAY_CONFIGURATION_INDEX = 0x0004
         private const val VENDOR_RESPONSE_LENGTH = 1
         private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
+
+        /** usbmuxd reads 3:3:3:0 in the initial mode and 5:3:3:0 once a mode is set. */
+        internal fun usbModeDiagnostic(read: Int, mode: ByteArray, deviceVersion: String?, configurations: List<String>): String {
+            val current = if (read == mode.size) mode.joinToString(":") { (it.toInt() and 0xff).toString() } else "unreadable($read)"
+            return "CarPlay USB mode request rejected; current mode=$current " +
+                "usbVersion=${deviceVersion ?: "unknown"} configurations=$configurations"
+        }
     }
 
 }
@@ -339,7 +361,7 @@ class Iap2UsbSession internal constructor(
     private var closed = false
     private var failure: IphoneUsbException? = null
     private var pendingRead: UsbRequest? = null
-    private val readQueuePolicy = UsbReadQueuePolicy()
+    private val readQueuePolicy = UsbReadQueuePolicy.forCurrentPlatform()
     private val requests = UsbRequestQueue(connection, "usbmux-read-reaper")
 
     fun write(data: ByteArray, timeoutMillis: Int) = synchronized(writeLock) {

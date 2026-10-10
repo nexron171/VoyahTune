@@ -184,9 +184,17 @@ class CarPlayMediaEngine(
         val meta = AudioMeta(type, format, connectionId, latencyMs)
         val microphone = microphoneConfig(session, type, stream, format)
         if (microphone != null) pendingMicrophone[streamKey] = microphone
+        if (type == STREAM_TYPE_MAIN_AUDIO && audioType != "media") {
+            session.logDebug(
+                "Audio: setup type=$type audioType=$audioType input=${stream["input"] ?: "none"} " +
+                    "micPort=${if ((stream["dataPort"] as? Number)?.toInt()?.let { it > 0 } == true) "yes" else "no"} " +
+                    "microphone=${if (microphone != null) "on" else "off"} keys=${stream.keys.sorted().joinToString(",")}",
+            )
+        }
 
         val capture = audioCaptureDirectory?.let { AudioPacketCapture(it, type) }
         if (capture != null) audioCaptures[streamKey] = capture
+        val clockProbe = RtpClockProbe()
         val audio = AudioStream(key, type, session::logDebug)
         val (dataPort, controlPort) = audio.listen(
             object : AudioStream.Listener {
@@ -197,8 +205,16 @@ class CarPlayMediaEngine(
                     microphone?.let { sink.onMicrophoneStarted(streamId, it) }
                 }
 
-                override fun onRtp(rtp: ByteArray, sample: Int) =
+                override fun onRtp(rtp: ByteArray, sample: Int) {
+                    clockProbe.observe(sample, System.nanoTime())?.let { hz ->
+                        session.logDebug(
+                            "Audio: rtp clock type=$type audioType=$audioType " +
+                                "audioFormat=0x${java.lang.Long.toHexString((stream["audioFormat"] as? Number)?.toLong() ?: 0L)} " +
+                                "measuredHz=$hz microphoneClockHz=${microphone?.opusClockRate ?: "none"}",
+                        )
+                    }
                     sink.onAudioRtp(streamId, format, rtp, sample)
+                }
 
                 override fun onPacket(
                     wire: ByteArray,
@@ -556,7 +572,7 @@ class CarPlayMediaEngine(
         format: AudioFormat,
     ): MicrophoneConfig? {
         if (!microphoneEnabled || type != STREAM_TYPE_MAIN_AUDIO) return null
-        if (format.audioType != "telephony" && format.audioType != "speechrecognition") return null
+        if (!wantsMicrophone(format.audioType, stream)) return null
         val port = (stream["dataPort"] as? Number)?.toInt() ?: return null
         if (port !in 1..65535) return null
         val host = session.remoteAddress ?: return null
@@ -608,19 +624,34 @@ class CarPlayMediaEngine(
     private fun isScreenStreamType(type: Int): Boolean =
         type == STREAM_TYPE_MAIN_SCREEN || type == STREAM_TYPE_ALT_SCREEN
 
-    private companion object {
-        const val TAG = "xcertplay-usb"
-        const val STREAM_TYPE_MAIN_SCREEN = 110
-        const val STREAM_TYPE_ALT_SCREEN = 111
-        const val STREAM_TYPE_MAIN_AUDIO = 100
-        const val STREAM_TYPE_DATA = 130
-        const val DATASTREAM_OUTPUT_KEY = "DataStream-Output-Encryption-Key"
-        const val DATASTREAM_INPUT_KEY = "DataStream-Input-Encryption-Key"
-        const val IAP_DATASTREAM_UUID = "E9459FD0-BCAD-4C45-820F-1E72447EF2F2"
-        const val VIDEO_SETTINGS_STREAM_ID = 2L
-        const val FIRST_REMOTE_CONTROL_STREAM_ID = 3L
-        const val OPUS_24K = 0x20000000L
-        const val OPUS_48K = 0x40000000L
+    internal companion object {
+        /**
+         * Calls and Siri always record. App audio ("default", e.g. a WhatsApp voice note) also carries
+         * guidance prompts, so it records only when the iPhone asks for input: an explicit `input` flag,
+         * or, without one, the uplink port the iPhone sends for a recording stream.
+         */
+        fun wantsMicrophone(audioType: String, stream: Map<String, Any?>): Boolean = when (audioType) {
+            "telephony", "speechrecognition" -> true
+            "default", "compatibility" -> when (val input = stream["input"]) {
+                is Boolean -> input
+                is Number -> input.toInt() != 0
+                else -> (stream["dataPort"] as? Number)?.toInt()?.let { it in 1..65535 } == true
+            }
+            else -> false
+        }
+
+        private const val TAG = "xcertplay-usb"
+        private const val STREAM_TYPE_MAIN_SCREEN = 110
+        private const val STREAM_TYPE_ALT_SCREEN = 111
+        private const val STREAM_TYPE_MAIN_AUDIO = 100
+        private const val STREAM_TYPE_DATA = 130
+        private const val DATASTREAM_OUTPUT_KEY = "DataStream-Output-Encryption-Key"
+        private const val DATASTREAM_INPUT_KEY = "DataStream-Input-Encryption-Key"
+        private const val IAP_DATASTREAM_UUID = "E9459FD0-BCAD-4C45-820F-1E72447EF2F2"
+        private const val VIDEO_SETTINGS_STREAM_ID = 2L
+        private const val FIRST_REMOTE_CONTROL_STREAM_ID = 3L
+        private const val OPUS_24K = 0x20000000L
+        private const val OPUS_48K = 0x40000000L
     }
 }
 

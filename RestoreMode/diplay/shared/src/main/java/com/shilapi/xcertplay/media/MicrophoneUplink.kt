@@ -27,10 +27,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class MicrophoneUplink(
     private val config: MicrophoneConfig,
     private val onDiagnostic: (String) -> Unit = {},
+    private val speakerphoneCall: Boolean = false,
     /** The call's far-end audio; when set, telephony capture runs DiPlay's own echo canceller. */
     private val echoReference: EchoReference? = null,
     private val echoCancellerFactory: (Int, Int, Int) -> CallEchoCanceller? = { frame, rate, tail ->
         SpeexEchoCanceller.create(frame, rate, tail)
+    },
+    private val opusEncoderFactory: (Int) -> MicrophoneOpusEncoder? = { bitrate ->
+        MicrophoneOpusEncoders.create(
+            bitrate = bitrate,
+            software = { value ->
+                SoftwareOpusEncoder(value, onError = { message, error -> Log.w(TAG, message, error) })
+            },
+        )
     },
 ) : Closeable {
     private val running = AtomicBoolean(false)
@@ -40,7 +49,7 @@ internal class MicrophoneUplink(
     })
     @Volatile private var recorder: AudioRecord? = null
     @Volatile private var socket: DatagramSocket? = null
-    @Volatile private var opusEncoder: OpusEncoder? = null
+    @Volatile private var opusEncoder: MicrophoneOpusEncoder? = null
     @Volatile private var effects: List<AudioEffect> = emptyList()
     @Volatile private var echoCanceller: CallEchoCanceller? = null
     private var thread: Thread? = null
@@ -65,13 +74,14 @@ internal class MicrophoneUplink(
             return false
         }
 
-        val source = when (config.audioType) {
-            "telephony" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
-            "speechrecognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+        val source = when {
+            config.audioType == "telephony" && speakerphoneCall -> MediaRecorder.AudioSource.MIC
+            config.audioType == "telephony" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            config.audioType == "speechrecognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
             else -> MediaRecorder.AudioSource.MIC
         }
         val nextEncoder = if (config.codec == AudioCodecKind.OPUS) {
-            OpusEncoder(config.bitrate ?: 48_000).takeIf { it.available }
+            opusEncoderFactory(config.bitrate ?: 48_000)
         } else {
             null
         }
@@ -80,6 +90,12 @@ internal class MicrophoneUplink(
             stats.failure(MicrophoneFailureStage.ENCODER)
             running.set(false)
             return false
+        }
+        if (nextEncoder != null) {
+            val message = "Microphone: encoder type=${config.audioType} codec=OPUS " +
+                "implementation=${nextEncoder.implementation}"
+            Log.i(TAG, message)
+            runCatching { onDiagnostic(message) }
         }
         val bufferSize = maxOf(minBuffer * 2, config.frameBytes * 4)
         // Some head units throw on VOICE_RECOGNITION at build(); VOICE_COMMUNICATION works there.
@@ -116,7 +132,7 @@ internal class MicrophoneUplink(
         return try {
             if (config.audioType == "telephony") {
                 echoCanceller = createEchoCanceller()
-                effects = voiceEffects(nextRecorder.audioSessionId)
+                if (!speakerphoneCall) effects = voiceEffects(nextRecorder.audioSessionId)
                 if (echoReference != null) {
                     Log.i(TAG, "microphone echo canceller enabled=${echoCanceller != null} tail=${ECHO_TAIL_MILLIS}ms")
                 }
@@ -192,9 +208,18 @@ internal class MicrophoneUplink(
                 if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(sessionId) else null
             }
         }
-        return listOfNotNull(aec, enabledEffect("NS") {
-            if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(sessionId) else null
-        })
+        val ns = if (echoCanceller != null) {
+            // Noise suppression before the canceller distorts the echo it has to model; Speex
+            // denoises after cancelling instead. Keep the controller so a fallback can re-enable it.
+            configuredEffect("NS", false) {
+                if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(sessionId) else null
+            }
+        } else {
+            enabledEffect("NS") {
+                if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(sessionId) else null
+            }
+        }
+        return listOfNotNull(aec, ns)
     }
 
     // Advertised effects may still fail to initialize on a vendor ROM. Keep recording without them.
@@ -346,6 +371,10 @@ internal class MicrophoneUplink(
         echoCanceller = null
         current.close()
         if (!running.get()) return // close/release already owns all recorder effects.
+        effects.filterIsInstance<NoiseSuppressor>().forEach { ns ->
+            runCatching { ns.setEnabled(true) }
+                .onFailure { Log.w(TAG, "microphone platform NS could not be restored", it) }
+        }
         val aec = effects.filterIsInstance<AcousticEchoCanceler>().firstOrNull()
         if (aec != null) {
             val enabled = runCatching { aec.setEnabled(true) == AudioEffect.SUCCESS && aec.enabled }.getOrDefault(false)

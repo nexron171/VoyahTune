@@ -8,15 +8,15 @@
     <string name="carplay_home_usb">Подключение по USB</string>
     <string name="carplay_home_usb_detail">Подключите iPhone кабелем</string>
     <string name="carplay_home_settings">Настройки</string>
-    <string name="carplay_home_settings_detail">Экран, звук и подключение</string>
+    <string name="carplay_home_settings_detail">Экран и подключение</string>
     <string name="carplay_home_open">Открыть CarPlay</string>
     <string name="carplay_home_choose_phone">Выбрать iPhone</string>
-    <string name="carplay_home_exit">Выйти</string>
+    <string name="carplay_home_back">Назад</string>
     <string name="carplay_home_disconnect">Отключить</string>
     <string name="carplay_home_hotspot">Настройки точки доступа</string>
     <string name="carplay_home_auto_connect">Автоматическое подключение</string>
     <string name="carplay_home_auto_connect_detail">Открывать проекцию и подключаться к выбранному iPhone при запуске CarPlay или виджета</string>
-    <string name="carplay_home_auto_connect_choose_phone">Сначала выберите связанный iPhone кнопкой «Выбрать iPhone»</string>
+    <string name="carplay_home_auto_connect_choose_phone">Сначала выберите iPhone при беспроводном подключении</string>
     <string name="carplay_settings_connection">Подключение</string>
     <string name="carplay_settings_disconnected">Не подключено</string>
     <string name="carplay_settings_connecting">Подключение к iPhone…</string>
@@ -34,17 +34,14 @@
     <string name="carplay_volume_siri">Siri</string>
     <string name="carplay_volume_value">%1$s: %2$d / %3$d</string>
     <string name="carplay_volume_unavailable">%1$s: недоступно</string>
-    <string name="carplay_widget_add">Добавить виджет CarPlay</string>
-    <string name="carplay_shortcut_add">Добавить ярлык CarPlay 1×1</string>
     <string name="carplay_shortcut_description">Ярлык 1×1 · открывает CarPlay на весь экран</string>
-    <string name="carplay_widget_description">Ярлык 1×1 открывает CarPlay на весь экран. Для проекции внутри главного экрана добавьте виджет высотой 5 плиток и шириной от 8 до 12.</string>
-    <string name="carplay_widget_size_title">Размер виджета CarPlay</string>
-    <string-array name="carplay_widget_sizes">
-        <item>1×1 — ярлык, CarPlay на весь экран</item>
-        <item>8×5 — проекция в виджете</item>
-        <item>9×5 — проекция в виджете</item>
-        <item>10×5 — проекция в виджете</item>
-        <item>11×5 — проекция в виджете</item>
-        <item>12×5 — вся ширина сетки</item>
-    </string-array>
+    <string name="carplay_widget_section">CarPlay</string>
+    <string name="carplay_widget_description">CarPlay на главном экране</string>
+    <string name="carplay_widget_enable">Показывать виджет CarPlay</string>
+    <string name="carplay_widget_enable_hint">Включите виджет, чтобы выбрать ярлык или окно</string>
+    <string name="carplay_widget_mode_shortcut">Ярлык</string>
+    <string name="carplay_widget_mode_window">Окно</string>
+    <string name="carplay_widget_window_description">CarPlay внутри главного экрана. Подключение сохраняется при переходе на другие экраны.</string>
+    <string name="carplay_widget_size_summary">%1$d × %2$d · %3$d из 60 ячеек</string>
+    <string name="carplay_widget_auto_start">Автоматический запуск</string>
 </resources>

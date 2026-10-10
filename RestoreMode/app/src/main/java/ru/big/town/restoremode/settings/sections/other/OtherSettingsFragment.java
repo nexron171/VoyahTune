@@ -316,6 +316,21 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
                 (b, checked) -> preferences.edit().putBoolean("autoLaunchOnWake", checked).apply());
     }
 
+    private void bindDockNavigation(int rowId, int switchId, String preference) {
+        View row = settingView(rowId);
+        if (row == null) return;
+        boolean supported = ru.big.town.common.InfrastructureProfile.read(requireContext())
+                == ru.big.town.common.InfrastructureProfile.OD;
+        row.setVisibility(supported ? View.VISIBLE : View.GONE);
+        if (!supported) return;
+        Switch toggle = settingView(switchId);
+        toggle.setChecked(preferences.getBoolean(preference, false));
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            preferences.edit().putBoolean(preference, checked).apply();
+            SplitConfigSync.pushDock(requireContext(), preferences);
+        });
+    }
+
     private void bindFloatingBack() {
         if (settingView(R.id.switchFloatingBack) == null) {
             return;
@@ -769,6 +784,10 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         bindCustomCommandsVisibility();
         bindAutoLaunch();
         bindFloatingBack();
+        bindDockNavigation(R.id.dockHomePressRow, R.id.switchDockHomeShortVoyahTune,
+                "dockHomeShortVoyahTune");
+        bindDockNavigation(R.id.dockAllAppsPressRow, R.id.switchDockAllAppsShortVoyahTune,
+                "dockAllAppsShortVoyahTune");
         bindTheme();
         bindLocationPermission();
         bindFloatingBackPosition();

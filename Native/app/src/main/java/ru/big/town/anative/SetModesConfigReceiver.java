@@ -42,6 +42,13 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             SetModesReceiverDynamic.mirrorDock(context, intent, 1);
             SetModesReceiverDynamic.mirrorDock(context, intent, 2);
             SetModesReceiverDynamic.clearLegacyPassengerDock(context);
+            if (ru.big.town.common.InfrastructureProfile.read(context)
+                    == ru.big.town.common.InfrastructureProfile.OD) {
+                for (String key : new String[] {"dockHomeShortVoyahTune", "dockAllAppsShortVoyahTune"}) {
+                    Settings.Global.putString(context.getContentResolver(), "voyahtune_" + key,
+                            intent.getBooleanExtra(key, false) ? "1" : "0");
+                }
+            }
             Intent reload = new Intent("ru.big.town.anative.DOCK_RELOAD");
             reload.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             context.sendBroadcast(reload);

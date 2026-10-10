@@ -246,7 +246,6 @@ public class DashboardActivity extends AppCompatActivity {
     // View плиток app_widget по id записи: нужен, чтобы запустить приложение в первом виджете.
     private final Map<String, View> appWidgetTileViews = new HashMap<>();
     private long carPlayWidgetGeneration;
-    private long carPlayLaunchGeneration;
     private final Messenger carPlayWidgetClient = new Messenger(new IncomingHandler());
 
     // -------- Drag-and-drop для переупорядочивания плиток --------
@@ -2147,21 +2146,11 @@ public class DashboardActivity extends AppCompatActivity {
                 appWidgetView.setLayoutParams(lp);
                 splitTilesGrid.addView(appWidgetView);
                 tileDragController.add(appWidgetView, tilePos, widgetWidth, widgetHeight);
-                if (entry.autoStart
-                        && !CarPlayTarget.opensActivity(
-                                entry.packageName, entry.width, entry.height)) {
-                    final long carPlayAutoLaunchGeneration = carPlayLaunchGeneration;
+                if (entry.autoStart && !CarPlayTarget.isCarPlay(entry.packageName)) {
                     appWidgetView.postDelayed(
                             () -> {
-                                boolean carPlayWindowOpen =
-                                        CarPlayTarget.isCarPlay(entry.packageName)
-                                                && com.shilapi.xcertplay.VoyahCarPlayIntegration
-                                                        .isProjectionOnMainDisplay();
                                 if (suspensionScreenResumed && !destroyed
                                         && appWidgetTileViews.get(entry.id) == appWidgetView
-                                        && !carPlayWindowOpen
-                                        && (!CarPlayTarget.isCarPlay(entry.packageName)
-                                                || carPlayAutoLaunchGeneration == carPlayLaunchGeneration)
                                         && !embeddedWidgetSurfaces.containsKey(entry.id)) {
                                     showEmbeddedAppWidget(appWidgetView, entry);
                                 }
@@ -2662,7 +2651,6 @@ public class DashboardActivity extends AppCompatActivity {
         }
 
         if (CarPlayTarget.isCarPlay(packageName) && !retainedCarPlay) {
-            carPlayLaunchGeneration++;
             carPlayWidgetGeneration++;
             releaseEmbeddedWidgetsOf(packageName);
         }
@@ -3332,6 +3320,18 @@ public class DashboardActivity extends AppCompatActivity {
                 Log.i(TAG, "CarPlay widget restored widget=" + id);
             }
         }
+        // Restore retained surfaces before considering a fresh launch.
+        if (com.shilapi.xcertplay.VoyahCarPlayIntegration.isProjectionOnMainDisplay()) return;
+        for (Map.Entry<String, View> tile : appWidgetTileViews.entrySet()) {
+            AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, tile.getKey());
+            if (entry != null && entry.autoStart && CarPlayTarget.isCarPlay(entry.packageName)
+                    && !CarPlayTarget.opensActivity(entry.packageName, entry.width, entry.height)
+                    && tile.getValue().isShown()
+                    && !embeddedWidgetSurfaces.containsKey(entry.id)) {
+                showEmbeddedAppWidget(tile.getValue(), entry);
+            }
+        }
+
     }
 
     /** Обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
@@ -3346,7 +3346,6 @@ public class DashboardActivity extends AppCompatActivity {
                 return;
             }
             if (CarPlayTarget.isCarPlay(pkg)) {
-                carPlayLaunchGeneration++;
                 carPlayWidgetGeneration++;
             }
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -3370,7 +3369,6 @@ public class DashboardActivity extends AppCompatActivity {
         int dpi = AppDpiStore.get(sharedPreferences, pkg);
         try {
             if (CarPlayTarget.isCarPlay(pkg)) {
-                carPlayLaunchGeneration++;
                 carPlayWidgetGeneration++;
                 detachCarPlayWidgetsForWindow();
             }

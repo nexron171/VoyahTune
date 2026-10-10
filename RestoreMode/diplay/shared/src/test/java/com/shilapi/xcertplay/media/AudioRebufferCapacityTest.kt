@@ -29,10 +29,10 @@ class AudioRebufferCapacityTest {
                     .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_STEREO).build())
                 .setBufferSizeInBytes(plan.trackBufferBytes).build()
             val type = Class.forName("com.shilapi.xcertplay.media.AudioRenderer")
-            val renderer = type.declaredConstructors.single { it.parameterCount == 12 }
+            val renderer = type.declaredConstructors.single { it.parameterCount == 14 }
                 .apply { isAccessible = true }.newInstance(
                     AudioFormat(AudioCodecKind.LPCM, 48_000, 2, 96, "media"), false, false, 0, 0,
-                    AudioFocusCoordinator(null, false, false), 0, millis, { _: String -> }, null, false, true)
+                    AudioFocusCoordinator(null, false, false), 0, millis, { _: String -> }, 0L, false, null, false, true)
             fun set(name: String, value: Any) = type.getDeclaredField(name).apply { isAccessible = true }.set(renderer, value)
             fun get(name: String) = type.getDeclaredField(name).apply { isAccessible = true }.get(renderer)
             try {

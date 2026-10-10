@@ -15,6 +15,16 @@ import ru.big.town.restoremode.R;
 /** Same physical dock/status reservations as VoyahTune, without padding embedded displays. */
 public final class CarPlayWindowPolicy implements CarPlayWindowUi.Policy {
     @Override
+    public int connectionIcon() {
+        return R.drawable.carplay_home_logo;
+    }
+
+    @Override
+    public boolean darkHostAppearance() {
+        return true;
+    }
+
+    @Override
     public Insets insets(Activity activity, View view, Insets system) {
         Display display = view.getDisplay();
         if (display == null) display = activity.getWindowManager().getDefaultDisplay();

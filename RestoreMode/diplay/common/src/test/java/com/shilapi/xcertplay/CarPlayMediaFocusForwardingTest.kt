@@ -5,6 +5,7 @@ import android.os.Looper
 import android.view.Surface
 import com.shilapi.xcertplay.compat.AudioFocusRequestCompat
 import com.shilapi.xcertplay.media.AndroidMediaSink
+import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import org.junit.After
 import org.junit.Before
@@ -140,6 +141,7 @@ class CarPlayMediaFocusForwardingTest {
 
     private fun start(controller: CarPlayController, sink: AndroidMediaSink,
         clearInitialGrant: Boolean = true): AudioManager.OnAudioFocusChangeListener {
+        `when`(controller.nowPlayingSnapshot()).thenReturn(CarPlayNowPlaying())
         CarPlayBackgroundSession.store(controller, sink, 800, 480, Any(),
             CarPlaySessionDisplay(800, 480, Surface.ROTATION_0, false, false, 800, 480)) {}
         CarPlayMediaKeys.attach(app, controller)

@@ -72,6 +72,11 @@ public final class SplitConfigSync {
         i.putExtra("dock2", p2.isEmpty() ? "none" : p2);
         i.putExtra("dock1Dpi", p1.isEmpty() ? 0 : AppDpiStore.get(prefs, p1));
         i.putExtra("dock2Dpi", p2.isEmpty() ? 0 : AppDpiStore.get(prefs, p2));
+        if (ru.big.town.common.InfrastructureProfile.read(context)
+                == ru.big.town.common.InfrastructureProfile.OD) {
+            i.putExtra("dockHomeShortVoyahTune", prefs.getBoolean("dockHomeShortVoyahTune", false));
+            i.putExtra("dockAllAppsShortVoyahTune", prefs.getBoolean("dockAllAppsShortVoyahTune", false));
+        }
         addDockSplitExtras(i, 1, p1, prefs);
         addDockSplitExtras(i, 2, p2, prefs);
         context.sendBroadcast(i);

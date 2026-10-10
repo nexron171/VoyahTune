@@ -14,12 +14,16 @@ object CarPlayWindowUi {
     interface Policy {
         fun insets(activity: Activity, view: View, system: Insets): Insets
         fun authenticationError(activity: Activity): String
+        fun connectionIcon(): Int = 0
+        fun darkHostAppearance(): Boolean = false
     }
 
     private var policy: Policy? = null
     @JvmStatic fun install(policy: Policy?) { this.policy = policy }
 
     internal fun authenticationError(activity: Activity): String? = policy?.authenticationError(activity)
+    internal fun connectionIcon(): Int = policy?.connectionIcon() ?: 0
+    internal fun darkHostAppearance(): Boolean = policy?.darkHostAppearance() == true
 
     internal fun configureWindow(activity: Activity): Boolean {
         if (policy == null) return false

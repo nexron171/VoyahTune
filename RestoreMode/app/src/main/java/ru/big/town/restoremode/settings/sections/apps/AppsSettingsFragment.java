@@ -97,6 +97,7 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         SettingsAppPicker.show(
                 requireContext(),
                 "Приложение " + slot + " в доке",
+                true,
                 (packageName, label) -> {
                     preferences
                             .edit()

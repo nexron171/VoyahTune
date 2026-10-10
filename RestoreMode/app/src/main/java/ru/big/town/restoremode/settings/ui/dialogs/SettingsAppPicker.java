@@ -14,56 +14,50 @@ public final class SettingsAppPicker {
     }
 
     public static void show(Context context, String title, AppPicked callback) {
-        show(context, title, callback, false);
+        show(context, title, false, callback);
     }
 
-    public static void showWithCarPlay(Context context, String title, AppPicked callback) {
-        show(context, title, callback, true);
-    }
-
-    private static void show(
-            Context context, String title, AppPicked callback, boolean includeCarPlay) {
+    public static void show(Context context, String title, boolean includeCarPlay, AppPicked callback) {
         android.content.pm.PackageManager packageManager = context.getPackageManager();
         Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         java.util.List<android.content.pm.ResolveInfo> apps =
                 packageManager.queryIntentActivities(launcher, 0);
 
-        java.util.LinkedHashMap<String, String> map = new java.util.LinkedHashMap<>();
-        for (android.content.pm.ResolveInfo ri : apps) {
-            if (!includeCarPlay
-                    && CarPlayTarget.PACKAGE.equals(ri.activityInfo.packageName)
-                    && CarPlayTarget.LAUNCHER.equals(ri.activityInfo.name)) continue;
-            String packageName =
-                    CarPlayTarget.PACKAGE.equals(ri.activityInfo.packageName)
-                                    && CarPlayTarget.LAUNCHER.equals(ri.activityInfo.name)
-                            ? CarPlayTarget.ID
-                            : ri.activityInfo.packageName;
-            if (!map.containsKey(packageName)) {
-                map.put(packageName, ri.loadLabel(packageManager).toString());
+        java.util.LinkedHashMap<String, String> labels = new java.util.LinkedHashMap<>();
+        for (android.content.pm.ResolveInfo activity : apps) {
+            if (CarPlayTarget.PACKAGE.equals(activity.activityInfo.packageName)
+                    && CarPlayTarget.LAUNCHER.equals(activity.activityInfo.name)) {
+                continue;
+            }
+            String packageName = activity.activityInfo.packageName;
+            if (!labels.containsKey(packageName)) {
+                labels.put(packageName, activity.loadLabel(packageManager).toString());
             }
         }
 
-        final java.util.List<String> pkgs = new java.util.ArrayList<>(map.keySet());
+        if (includeCarPlay) labels.put(CarPlayTarget.ID, CarPlayTarget.LABEL);
+
+        final java.util.List<String> packages = new java.util.ArrayList<>(labels.keySet());
 
         java.util.Collections.sort(
-                pkgs,
-                (a, b) -> {
-                    boolean aIsCom = isSystemApp(a);
-                    boolean bIsCom = isSystemApp(b);
+                packages,
+                (first, second) -> {
+                    boolean firstSystem = isSystemApp(first);
+                    boolean secondSystem = isSystemApp(second);
 
-                    if (aIsCom && !bIsCom) {
+                    if (firstSystem && !secondSystem) {
                         return 1;
                     }
-                    if (!aIsCom && bIsCom) {
+                    if (!firstSystem && secondSystem) {
                         return -1;
                     }
 
-                    return map.get(a).compareToIgnoreCase(map.get(b));
+                    return labels.get(first).compareToIgnoreCase(labels.get(second));
                 });
 
-        final CharSequence[] items = new CharSequence[pkgs.size()];
-        for (int i = 0; i < pkgs.size(); i++) {
-            items[i] = map.get(pkgs.get(i)) + "  ·  " + pkgs.get(i);
+        final CharSequence[] items = new CharSequence[packages.size()];
+        for (int i = 0; i < packages.size(); i++) {
+            items[i] = labels.get(packages.get(i)) + "  ·  " + packages.get(i);
         }
 
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(
@@ -71,7 +65,9 @@ public final class SettingsAppPicker {
                 .setTitle(title)
                 .setItems(
                         items,
-                        (d, which) -> callback.onPicked(pkgs.get(which), map.get(pkgs.get(which))))
+                        (dialog, which) ->
+                                callback.onPicked(
+                                        packages.get(which), labels.get(packages.get(which))))
                 .setNegativeButton("Отмена", null)
                 .show();
     }
