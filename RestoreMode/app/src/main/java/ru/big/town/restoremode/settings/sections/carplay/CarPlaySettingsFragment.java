@@ -1,6 +1,7 @@
 package ru.big.town.restoremode.settings.sections.carplay;
 
 import android.content.Intent;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
@@ -23,7 +24,9 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     private boolean updating;
     private boolean stopping;
     private CarPlayAudioClient audio;
-    private final boolean[] dragging = new boolean[4], pending = new boolean[4];
+    private CarPlayAudioClient.Volumes volumes = new CarPlayAudioClient.Volumes(null, null);
+    private final boolean[] dragging = new boolean[4];
+    private final boolean[] pending = new boolean[4];
     private final Runnable[] volumeWrites = new Runnable[4];
     private static final int[] SLIDERS = {R.id.carPlayMediaVolume, R.id.carPlayNavigationVolume,
             R.id.carPlayPhoneVolume, R.id.carPlaySiriVolume};
@@ -36,7 +39,9 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                 @Override
                 public void run() {
                     updateState();
-                    if (audio != null) audio.query();
+                    if (audio != null) {
+                        audio.query();
+                    }
                     handler.postDelayed(this, 1000);
                 }
             };
@@ -47,10 +52,17 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     }
 
     @Override
-    protected void bindSettingsRow() {
+    protected void onSectionViewCreated(Bundle state) {
+        // Rows are inflated lazily, potentially after onResume has bound the service.
         audio = new CarPlayAudioClient(requireContext(), this::updateVolumes);
-        for (int i = 0; i < SLIDERS.length; i++) bindVolume(i);
-        updateVolumes(new CarPlayAudioClient.Volumes(null, null));
+    }
+
+    @Override
+    protected void bindSettingsRow() {
+        for (int i = 0; i < SLIDERS.length; i++) {
+            bindVolume(i);
+        }
+        updateVolumes(volumes);
         Switch theme = settingView(R.id.carPlayThemeByLight);
         theme.setSaveEnabled(false);
         theme.setOnCheckedChangeListener(
@@ -70,7 +82,9 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                                     handler.post(
                                             () -> {
                                                 stopping = false;
-                                                if (getView() != null) updateState();
+                                                if (getView() != null) {
+                                                    updateState();
+                                                }
                                             }));
                 });
         bindClick(
@@ -87,21 +101,31 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         SeekBar slider = settingView(SLIDERS[index]);
         slider.setSaveEnabled(false);
         volumeWrites[index] = () -> {
-            if (!pending[index]) return;
+            if (!pending[index]) {
+                return;
+            }
             pending[index] = false;
-            if (audio != null && getView() != null && slider.isEnabled())
+            if (audio != null && getView() != null && slider.isEnabled()) {
                 audio.setVolume(CarPlayAudioProtocol.streams()[index], slider.getProgress());
+            }
         };
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar view, int value, boolean fromUser) {
-                if (!fromUser) return;
+            @Override
+            public void onProgressChanged(SeekBar view, int value, boolean fromUser) {
+                if (!fromUser) {
+                    return;
+                }
                 showVolume(index, value, view.getMax());
                 pending[index] = true;
                 handler.removeCallbacks(volumeWrites[index]);
                 handler.postDelayed(volumeWrites[index], 120);
             }
-            @Override public void onStartTrackingTouch(SeekBar view) { dragging[index] = true; }
-            @Override public void onStopTrackingTouch(SeekBar view) {
+            @Override
+            public void onStartTrackingTouch(SeekBar view) {
+                dragging[index] = true;
+            }
+            @Override
+            public void onStopTrackingTouch(SeekBar view) {
                 handler.removeCallbacks(volumeWrites[index]);
                 volumeWrites[index].run();
                 dragging[index] = false;
@@ -110,27 +134,39 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     }
 
     private void updateVolumes(CarPlayAudioClient.Volumes values) {
-        if (getView() == null) return;
+        volumes = values;
+        if (getView() == null) {
+            return;
+        }
         for (int i = 0; i < SLIDERS.length; i++) {
             SeekBar slider = settingView(SLIDERS[i]);
-            if (slider == null || dragging[i] || pending[i]) continue;
+            if (slider == null || dragging[i] || pending[i]) {
+                continue;
+            }
             boolean available = values.maxima[i] > 0;
             slider.setEnabled(available);
-            if (available) { slider.setMax(values.maxima[i]); slider.setProgress(values.levels[i]); }
+            if (available) {
+                slider.setMax(values.maxima[i]);
+                slider.setProgress(values.levels[i]);
+            }
             showVolume(i, values.levels[i], values.maxima[i]);
         }
     }
 
     private void showVolume(int index, int level, int maximum) {
         TextView label = settingView(LABELS[index]);
-        if (label == null) return;
+        if (label == null) {
+            return;
+        }
         label.setText(maximum > 0 ? getString(R.string.carplay_volume_value, getString(TITLES[index]), level, maximum)
                 : getString(R.string.carplay_volume_unavailable, getString(TITLES[index])));
     }
 
     private void updateState() {
         Switch theme = settingView(R.id.carPlayThemeByLight);
-        if (theme == null) return;
+        if (theme == null) {
+            return;
+        }
         boolean hasPhone = CarPlaySettingsAccess.hasPhone(requireContext());
         updating = true;
         theme.setChecked(CarPlaySettingsAccess.themeByLight(requireContext()));
@@ -161,15 +197,24 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     @Override
     public void onResume() {
         super.onResume();
-        if (audio != null) audio.start();
+        if (audio != null) {
+            audio.start();
+        }
         handler.removeCallbacks(refresh);
         refresh.run();
     }
 
     @Override
     public void onPause() {
-        for (Runnable write : volumeWrites) if (write != null) { handler.removeCallbacks(write); write.run(); }
-        if (audio != null) audio.stop();
+        for (Runnable write : volumeWrites) {
+            if (write != null) {
+                handler.removeCallbacks(write);
+                write.run();
+            }
+        }
+        if (audio != null) {
+            audio.stop();
+        }
         handler.removeCallbacks(refresh);
         super.onPause();
     }
@@ -181,10 +226,15 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected void onSectionViewDestroyed() {
-        if (audio != null) audio.stop();
+        if (audio != null) {
+            audio.stop();
+        }
         audio = null;
+        volumes = new CarPlayAudioClient.Volumes(null, null);
         for (int i = 0; i < volumeWrites.length; i++) {
-            if (volumeWrites[i] != null) handler.removeCallbacks(volumeWrites[i]);
+            if (volumeWrites[i] != null) {
+                handler.removeCallbacks(volumeWrites[i]);
+            }
             volumeWrites[i] = null;
             pending[i] = dragging[i] = false;
         }
