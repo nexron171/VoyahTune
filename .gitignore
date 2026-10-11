@@ -95,7 +95,6 @@ CONTEXT.md
 !/Releases/ota/
 /Releases/ota/*
 !/Releases/ota/index.json
-!/Releases/ota/index-beta.json
 !/Releases/ota/index-v4.json
 !/Releases/ota/index-v4-beta.json
 
