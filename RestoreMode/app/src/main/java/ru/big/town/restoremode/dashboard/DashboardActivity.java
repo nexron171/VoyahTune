@@ -2729,6 +2729,19 @@ public class DashboardActivity extends AppCompatActivity {
             container = (ViewGroup) widgetView;
         }
 
+        final boolean carPlayWindow = CarPlayTarget.isCarPlay(packageName);
+        if (carPlayWindow) {
+            // Clip the tile background as well as the projection's rounded corners.
+            container.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, Outline outline) {
+                    float radius = getResources().getDimension(R.dimen.carplay_widget_corner_radius);
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+                }
+            });
+            container.setClipToOutline(true);
+        }
+
         // Перенос выполняется один раз — на первом же подключённом surface.
         final String[] pendingMoveFrom = {moveFromWidgetId};
 
@@ -2739,7 +2752,9 @@ public class DashboardActivity extends AppCompatActivity {
                 new ViewOutlineProvider() {
                     @Override
                     public void getOutline(View view, Outline outline) {
-                        float radius = 18f * getResources().getDisplayMetrics().density;
+                        float radius = carPlayWindow
+                                ? getResources().getDimension(R.dimen.carplay_widget_corner_radius)
+                                : 18f * getResources().getDisplayMetrics().density;
                         outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
                     }
                 });
@@ -2963,6 +2978,9 @@ public class DashboardActivity extends AppCompatActivity {
         if (container == null) {
             container = (ViewGroup) widgetView;
         }
+
+        container.setClipToOutline(false);
+        container.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
 
         // Удалить TextureView (он обычно последний добавленный)
         for (int i = container.getChildCount() - 1; i >= 0; i--) {
