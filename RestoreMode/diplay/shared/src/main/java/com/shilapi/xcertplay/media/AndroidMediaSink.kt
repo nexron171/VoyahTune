@@ -10,6 +10,8 @@ import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
 import android.os.Handler
+import android.os.SystemClock
+import kotlin.math.pow
 import android.os.Looper
 import android.util.Log
 import android.view.Surface
@@ -52,6 +54,9 @@ internal class AudioFocusCoordinator(
     private val active = LinkedHashMap<AudioTrack, Entry>()
     private var request: AudioFocusRequestCompat? = null
     private var requestedChannel: AudioChannel? = null
+    private var carPlayVolume = FULL_VOLUME
+    private val duckingHandler = Handler(Looper.getMainLooper())
+    private var duckingTransition: Runnable? = null
     private var mediaVolume = FULL_VOLUME
     private var closed = false
     private var focusGeneration = 0L
@@ -91,8 +96,33 @@ internal class AudioFocusCoordinator(
     }
 
     @Synchronized
+    fun setCarPlayDucking(volumeDb: Double, durationMs: Long) {
+        if (closed || !volumeDb.isFinite() || volumeDb > 0 || durationMs < 0) return
+        duckingTransition?.let(duckingHandler::removeCallbacks)
+        val initial = carPlayVolume
+        val target = 10.0.pow(volumeDb / 20.0).toFloat().coerceIn(0f, 1f)
+        val duration = durationMs.coerceAtMost(60_000)
+        val started = SystemClock.uptimeMillis()
+        val transition = object : Runnable {
+            override fun run() {
+                synchronized(this@AudioFocusCoordinator) {
+                    if (closed || duckingTransition !== this) return
+                    val progress = if (duration == 0L) 1f else
+                        ((SystemClock.uptimeMillis() - started).toFloat() / duration).coerceIn(0f, 1f)
+                    carPlayVolume = initial + (target - initial) * progress
+                    active.forEach { (track, entry) -> applyMediaVolume(track, entry) }
+                    if (progress < 1f) duckingHandler.postDelayed(this, 16)
+                    else duckingTransition = null
+                }
+            }
+        }
+        duckingTransition = transition
+        transition.run()
+    }
+
+    @Synchronized
     fun acquire(track: AudioTrack, channel: AudioChannel, attributes: AudioAttributes) {
-        if (closed || !enabled || manager == null ||
+        if (closed ||
             (channel == AudioChannel.NAVIGATION && !navigationFocusEnabled)) return
         // Voyah stream 1 has Android's legacy SONIFICATION attributes, but Qinggan selects
         // the navigation volume group only from a NAVIGATION_GUIDANCE focus request.
@@ -122,11 +152,14 @@ internal class AudioFocusCoordinator(
     fun close() {
         if (closed) return
         closed = true
+        duckingTransition?.let(duckingHandler::removeCallbacks)
+        duckingTransition = null
         active.clear()
         refreshRequest()
     }
 
     private fun refreshRequest() {
+        if (!enabled || manager == null) return
         val primary = active.values.maxByOrNull { it.channel.focusPriority() }
         if (primary == null) {
             focusGeneration += 1
@@ -176,9 +209,10 @@ internal class AudioFocusCoordinator(
     private fun applyMediaVolume(track: AudioTrack, entry: Entry) {
         // Telephony, assistant speech and navigation remain audible.
         // This changes only the renderer's relative gain, never Android's user stream volume.
-        if (entry.channel != AudioChannel.MEDIA || entry.appliedVolume == mediaVolume) return
-        val applied = runCatching { track.setStereoVolume(mediaVolume, mediaVolume) == AudioTrack.SUCCESS }.getOrDefault(false)
-        if (applied) entry.appliedVolume = mediaVolume
+        val volume = minOf(mediaVolume, carPlayVolume)
+        if (entry.channel != AudioChannel.MEDIA || entry.appliedVolume == volume) return
+        val applied = runCatching { track.setStereoVolume(volume, volume) == AudioTrack.SUCCESS }.getOrDefault(false)
+        if (applied) entry.appliedVolume = volume
     }
 
     private fun AudioChannel.focusPriority(): Int = if (navigationFocusEnabled) when (this) {
@@ -257,6 +291,10 @@ class AndroidMediaSink(
         onAudioDiagnostic,
         onAudioFocusStreamChanged,
     )
+
+    override fun onAudioDucking(volumeDb: Double, durationMs: Long) {
+        audioFocusCoordinator.setCarPlayDucking(volumeDb, durationMs)
+    }
 
     /** The media-key session may own Android's current focus request for this same sink. */
     fun onMediaAudioFocusChanged(change: Int) {

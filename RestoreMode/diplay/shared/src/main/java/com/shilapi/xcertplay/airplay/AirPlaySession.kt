@@ -42,6 +42,7 @@ interface AirPlaySessionListener {
 
 /** Stream transport seam; media decode/render is supplied by a later layer. */
 interface AirPlayMediaHandler {
+    fun onAudioDucking(session: AirPlaySession, volumeDb: Double, durationMs: Long) {}
     fun onScreen(session: AirPlaySession, type: Int, stream: Map<String, Any?>): Int? = null
     fun onAudio(session: AirPlaySession, type: Int, stream: Map<String, Any?>): Map<String, Any?>? = null
     fun onDataStream(session: AirPlaySession, stream: Map<String, Any?>): Map<String, Any?>? = null
@@ -737,6 +738,11 @@ class AirPlaySession(
         val type = string(body["type"])
         val params = asMap(body["params"]) ?: emptyMap()
         debugLog("airplay command type=$type keys=${params.keys.sorted()}")
+        if (type == "duckAudio" || type == "unduckAudio") {
+            val volume = params["volume"] as? Number
+            val duration = params["durationMs"] as? Number
+            debugLog("airplay audio command=$type volume=$volume durationMs=$duration")
+        }
         val streamId = request.headers["x-apple-streamid"]?.toLongOrNull()
         val data = params["data"] as? ByteArray
         if (streamId != null && data != null) {

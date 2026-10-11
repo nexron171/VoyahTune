@@ -17,6 +17,7 @@ data class AudioStreamId(val type: Int, val audioType: String)
 
 /** Rendering seam for the decrypted CarPlay media streams. */
 interface MediaSink {
+    fun onAudioDucking(volumeDb: Double, durationMs: Long) {}
     fun onVideoCodec(type: Int, codec: VideoCodec) {}
     fun onVideoConfig(type: Int, codecData: ByteArray) {}
     fun onVideoFrame(type: Int, naluBytes: ByteArray) {}
@@ -494,7 +495,21 @@ class CarPlayMediaEngine(
         if (isScreenStreamType(type)) sink.onScreenStreamActive(type, false)
     }
 
+    private var duckingSession: AirPlaySession? = null
+
+    @Synchronized
+    override fun onAudioDucking(session: AirPlaySession, volumeDb: Double, durationMs: Long) {
+        duckingSession = session
+        sink.onAudioDucking(volumeDb, durationMs)
+    }
+
     override fun onSessionClosed(session: AirPlaySession) {
+        synchronized(this) {
+            if (duckingSession === session) {
+                duckingSession = null
+                sink.onAudioDucking(0.0, 0)
+            }
+        }
         clearPendingIapTunnel(session)
         retireBuffered(session)
         videoSettingsChannels.remove(session)?.close()

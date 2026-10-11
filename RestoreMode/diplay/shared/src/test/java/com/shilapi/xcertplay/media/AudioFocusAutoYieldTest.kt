@@ -158,6 +158,59 @@ class AudioFocusAutoYieldTest {
         assertTrue(volumes(late).isEmpty())
     }
 
+    @Test fun carPlayCommandsDuckOnlyMusicAndSurviveFocusChanges() {
+        val coordinator = AudioFocusCoordinator(context, true, true, true).also(coordinators::add)
+        val media = track()
+        val navigation = track()
+        val assistant = track()
+        coordinator.acquire(media, AudioChannel.MEDIA, attributes)
+        coordinator.setCarPlayDucking(-20.0, 0)
+        coordinator.acquire(navigation, AudioChannel.NAVIGATION, attributes)
+        coordinator.acquire(assistant, AudioChannel.ASSISTANT, attributes)
+        coordinator.onExternalFocusChange(AudioManager.AUDIOFOCUS_GAIN)
+        assertEquals(0.1f, volumes(media).last(), 0.0001f)
+        assertTrue(volumes(navigation).isEmpty())
+        assertTrue(volumes(assistant).isEmpty())
+        coordinator.onExternalFocusChange(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
+        coordinator.setCarPlayDucking(0.0, 0)
+        assertEquals(0f, volumes(media).last(), 0f)
+        coordinator.onExternalFocusChange(AudioManager.AUDIOFOCUS_GAIN)
+        assertEquals(1f, volumes(media).last(), 0f)
+    }
+
+    @Test fun navigationWithoutDuckingCommandKeepsMusicVolume() {
+        val coordinator = AudioFocusCoordinator(context, true, true, true).also(coordinators::add)
+        val media = track()
+        coordinator.acquire(media, AudioChannel.MEDIA, attributes)
+        coordinator.acquire(track(), AudioChannel.NAVIGATION, attributes)
+        assertTrue(volumes(media).isEmpty())
+    }
+
+    @Test fun duckingCommandBeforeMediaAppliesWithAndroidFocusDisabled() {
+        val coordinator = coordinator(enabled = false)
+        coordinator.setCarPlayDucking(-13.979399681091309, 0)
+        val media = track()
+        coordinator.acquire(media, AudioChannel.MEDIA, attributes)
+        assertEquals(0.2f, volumes(media).last(), 0.0001f)
+        coordinator.setCarPlayDucking(0.0, 0)
+        assertEquals(1f, volumes(media).last(), 0f)
+    }
+
+    @Test fun duckingRampsAndAnUnduckReplacesThePendingTransition() {
+        val coordinator = coordinator()
+        val media = track()
+        coordinator.acquire(media, AudioChannel.MEDIA, attributes)
+        coordinator.setCarPlayDucking(-20.0, 500)
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(250))
+        assertTrue(volumes(media).last() in 0.5f..0.6f)
+        coordinator.setCarPlayDucking(0.0, 100)
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(600))
+        assertEquals(1f, volumes(media).last(), 0f)
+        coordinator.close()
+        coordinator.setCarPlayDucking(-20.0, 0)
+        assertEquals(1f, volumes(media).last(), 0f)
+    }
+
     private fun coordinator(enabled: Boolean = true, autoYield: Boolean = true) =
         AudioFocusCoordinator(context, enabled, autoYield).also(coordinators::add)
     private fun track(): AudioTrack = AudioTrack.Builder().setAudioAttributes(attributes)
