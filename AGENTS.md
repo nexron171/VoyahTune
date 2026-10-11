@@ -14,7 +14,7 @@ VoyahTune — Android-приложения и системная интегра�
 - `Installer/` — GUI на Tauri/Svelte, общий Rust-движок и сборщик payload.
 - `Utils/` — вспомогательные инструменты и тестовое окружение.
 - `versions.json` — единственный источник текущих версий Installer и VoyahTune/payload.
-- `Releases/` — локальные результаты сборки; исходники релиза находятся в `Packaging/`. Исключения: каталоги `Releases/ota/index.json`, `index-beta.json` и `index-v4.json` хранятся в Git.
+- `Releases/` — локальные результаты сборки; исходники релиза находятся в `Packaging/`. Исключения: каталоги `Releases/ota/index.json`, `index-v4-beta.json` и `index-v4.json` хранятся в Git.
 
 ## Документация и рабочие материалы
 
@@ -72,9 +72,9 @@ VoyahTune — Android-приложения и системная интегра�
 
 ## Основной и beta-каталог релизов
 
-- Для OD 4+ основной каталог — `Releases/ota/index-v4.json`; каждая запись содержит version/url/size/sha256 и `minimumInstallerVersion`/`minimumOtaVersion`. Прежний основной каталог — `Releases/ota/index.json`; отдельный beta-каталог — `Releases/ota/index-beta.json`.
+- Для OD 4+ основной каталог — `Releases/ota/index-v4.json`; каждая запись содержит version/url/size/sha256 и `minimumInstallerVersion`/`minimumOtaVersion`. Прежний основной каталог — `Releases/ota/index.json`; отдельный beta-каталог — `Releases/ota/index-v4-beta.json`.
 - Добавляй релизы в beta-каталог только по явной просьбе пользователя о добавлении или публикации в beta. Создание ветки, реализация функции, сборка и суффикс версии сами по себе такого разрешения не дают.
-- При работе с beta не изменяй основные каталоги. Для скриптов обновления явно передавай нужный `--index`: `Releases/ota/index-beta.json` для beta или `Releases/ota/index-v4.json` для OD 4+. Не полагайся на прежний путь по умолчанию.
+- При работе с beta не изменяй основные каталоги. Для скриптов обновления явно передавай нужный `--index`: `Releases/ota/index-v4-beta.json` для beta или `Releases/ota/index-v4.json` для OD 4+. Не полагайся на прежний путь по умолчанию.
 - Не копируй записи между каталогами и не продвигай beta в основной без отдельного явного поручения. Выбор каталога не заменяет разрешение на загрузку артефактов или push.
 
 ## Порядок работы

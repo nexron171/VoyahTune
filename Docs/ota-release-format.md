@@ -3,7 +3,9 @@
 Установщик и OD root-служба по умолчанию читают
 [Releases/ota/index-v4.json](../Releases/ota/index-v4.json) для релизов **4.0.0 и новее**.
 Базовые версии — Installer **1.6.0** и payload **4.0.0-od**.
-Прежние `index.json` и `index-beta.json` сохраняются без изменений. PI сохраняет прежний адрес.
+Прежний `index.json` сохраняется без изменений. PI сохраняет прежний адрес.
+Единый beta-каталог — [index-v4-beta.json](../Releases/ota/index-v4-beta.json);
+он объединяет ранее раздельные beta-каталоги и сохраняет исторические версии 3.x.
 Старый [Installer/releases/index.json](../Installer/releases/index.json) остаётся для
 прежних установщиков; новые релизы в него не добавляются.
 
@@ -114,7 +116,7 @@ Installer/target/release/installer-build verify-ota ENTRY_JSON PAYLOAD_DIRECTORY
 Эта команда не скачивает ZIP и не проверяет его размер/SHA-256: это выполняют
 клиенты при скачивании и скрипт публикации. Порядок публикации — в
 [инструкции выпуска](releasing.md). В Git хранятся `Releases/ota/index.json`,
-`Releases/ota/index-beta.json` и `Releases/ota/index-v4.json`;
+`Releases/ota/index-v4-beta.json` и `Releases/ota/index-v4.json`;
 остальные сборочные файлы в `Releases/` остаются игнорируемыми.
 
 Обновление на более старую версию запрещено. Повтор той же версии разрешается
