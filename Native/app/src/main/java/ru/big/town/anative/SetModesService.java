@@ -1967,6 +1967,7 @@ public class SetModesService extends Service {
         Log.i(TAG, "onCreate()");
         super.onCreate();
         enableWifiOnStartup();
+        StartupBluetooth.enable(this);
         energyWidgets = new EnergyWidgetController(this);
         clearApps = new ClearAppsController(this::performCloseAllApps);
         ApplyEngine.activateWake("service create");
@@ -2028,7 +2029,6 @@ public class SetModesService extends Service {
         // A service recreation cannot add another worker while a request is still running.
         Thread worker = new Thread(() -> {
             try {
-                if (InfrastructureProfile.read(app) != InfrastructureProfile.OD) return;
                 WifiManager wifi = app.getSystemService(WifiManager.class);
                 if (wifi == null) {
                     Log.w(TAG, "startup Wi-Fi: manager unavailable");
