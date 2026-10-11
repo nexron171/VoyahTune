@@ -92,6 +92,16 @@
             android:text="@string/carplay_volume_description"
             android:textColor="@color/settings_muted"
             android:textSize="18sp" />
+        <Switch
+            android:id="@+id/carPlayDuckMusic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:minHeight="48dp"
+            android:saveEnabled="false"
+            android:text="@string/carplay_duck_music"
+            android:textColor="@color/settings_text"
+            android:textSize="22sp" />
         <TextView
             android:id="@+id/carPlayMediaVolumeLabel"
             android:layout_width="match_parent"

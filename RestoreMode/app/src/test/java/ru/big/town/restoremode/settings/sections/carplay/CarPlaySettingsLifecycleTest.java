@@ -14,6 +14,8 @@ import android.os.Messenger;
 import android.os.RemoteException;
 import android.view.View;
 import android.widget.SeekBar;
+import android.widget.Switch;
+import com.shilapi.xcertplay.media.CarPlayAudioSettings;
 
 import androidx.fragment.app.FragmentActivity;
 
@@ -35,6 +37,8 @@ import ru.big.town.restoremode.R;
 public class CarPlaySettingsLifecycleTest {
     @Test
     public void bindsBeforeDeferredRowsAndRestoresVolumesAfterResume() {
+        RuntimeEnvironment.getApplication().getSharedPreferences("voyah_carplay_audio", 0)
+                .edit().clear().commit();
         Messenger nativeService = new Messenger(new Handler(Looper.getMainLooper(), request -> {
             Message response = Message.obtain(null, CarPlayAudioProtocol.VALUES);
             Bundle values = new Bundle();
@@ -72,12 +76,17 @@ public class CarPlaySettingsLifecycleTest {
             root.layout(0, 0, 1920, 1080);
             shadowOf(Looper.getMainLooper()).idle();
             assertVolumes(root);
+            Switch duckMusic = root.findViewById(R.id.carPlayDuckMusic);
+            assertTrue(duckMusic.isChecked());
+            duckMusic.setChecked(false);
+            assertTrue(!CarPlayAudioSettings.duckMusic(controller.get()));
 
             controller.pause();
             assertTrue(shadowOf(RuntimeEnvironment.getApplication()).getBoundServiceConnections().isEmpty());
             controller.resume();
             shadowOf(Looper.getMainLooper()).idle();
             assertVolumes(root);
+            assertTrue(!((Switch) root.findViewById(R.id.carPlayDuckMusic)).isChecked());
             assertEquals(1, shadowOf(RuntimeEnvironment.getApplication())
                     .getBoundServiceConnections().size());
         } finally {

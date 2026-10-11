@@ -12,6 +12,7 @@ import android.widget.TextView;
 
 import com.shilapi.xcertplay.CarPlaySettingsAccess;
 import com.shilapi.xcertplay.DiPlayActivity;
+import com.shilapi.xcertplay.media.CarPlayAudioSettings;
 
 import ru.big.town.restoremode.R;
 import ru.big.town.common.CarPlayAudioProtocol;
@@ -63,6 +64,14 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
             bindVolume(i);
         }
         updateVolumes(volumes);
+        Switch duckMusic = settingView(R.id.carPlayDuckMusic);
+        duckMusic.setSaveEnabled(false);
+        duckMusic.setChecked(CarPlayAudioSettings.duckMusic(requireContext()));
+        duckMusic.setOnCheckedChangeListener((button, enabled) -> {
+            if (!updating) {
+                CarPlayAudioSettings.setDuckMusic(requireContext(), enabled);
+            }
+        });
         Switch theme = settingView(R.id.carPlayThemeByLight);
         theme.setSaveEnabled(false);
         theme.setOnCheckedChangeListener(
@@ -169,6 +178,10 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         }
         boolean hasPhone = CarPlaySettingsAccess.hasPhone(requireContext());
         updating = true;
+        Switch duckMusic = settingView(R.id.carPlayDuckMusic);
+        if (duckMusic != null) {
+            duckMusic.setChecked(CarPlayAudioSettings.duckMusic(requireContext()));
+        }
         theme.setChecked(CarPlaySettingsAccess.themeByLight(requireContext()));
         updating = false;
         TextView phone = settingView(R.id.carPlayPhone);

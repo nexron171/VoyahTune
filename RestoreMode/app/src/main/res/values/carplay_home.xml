@@ -44,4 +44,5 @@
     <string name="carplay_widget_window_description">CarPlay внутри главного экрана. Подключение сохраняется при переходе на другие экраны.</string>
     <string name="carplay_widget_size_summary">%1$d × %2$d · %3$d из 60 ячеек</string>
     <string name="carplay_widget_auto_start">Автоматический запуск</string>
+    <string name="carplay_duck_music">Приглушать музыку при объявлении маневра</string>
 </resources>

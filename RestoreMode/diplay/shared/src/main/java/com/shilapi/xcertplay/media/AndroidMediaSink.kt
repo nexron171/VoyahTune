@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.media
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.media.AudioAttributes
 import android.media.AudioFormat as AndroidAudioFormat
 import android.media.AudioManager
@@ -54,6 +55,8 @@ internal class AudioFocusCoordinator(
     private val active = LinkedHashMap<AudioTrack, Entry>()
     private var request: AudioFocusRequestCompat? = null
     private var requestedChannel: AudioChannel? = null
+    private var carPlayDuckingEnabled = true
+    private var requestedCarPlayVolumeDb = 0.0
     private var carPlayVolume = FULL_VOLUME
     private val duckingHandler = Handler(Looper.getMainLooper())
     private var duckingTransition: Runnable? = null
@@ -98,6 +101,18 @@ internal class AudioFocusCoordinator(
     @Synchronized
     fun setCarPlayDucking(volumeDb: Double, durationMs: Long) {
         if (closed || !volumeDb.isFinite() || volumeDb > 0 || durationMs < 0) return
+        requestedCarPlayVolumeDb = volumeDb
+        applyCarPlayDucking(if (carPlayDuckingEnabled) volumeDb else 0.0, durationMs)
+    }
+
+    @Synchronized
+    fun setCarPlayDuckingEnabled(enabled: Boolean) {
+        if (closed || carPlayDuckingEnabled == enabled) return
+        carPlayDuckingEnabled = enabled
+        applyCarPlayDucking(if (enabled) requestedCarPlayVolumeDb else 0.0, 150)
+    }
+
+    private fun applyCarPlayDucking(volumeDb: Double, durationMs: Long) {
         duckingTransition?.let(duckingHandler::removeCallbacks)
         val initial = carPlayVolume
         val target = 10.0.pow(volumeDb / 20.0).toFloat().coerceIn(0f, 1f)
@@ -291,6 +306,23 @@ class AndroidMediaSink(
         onAudioDiagnostic,
         onAudioFocusStreamChanged,
     )
+
+    private val audioPreferences = appContext?.takeIf { voyahAudioRouting }
+        ?.let(CarPlayAudioSettings::preferences)
+    private val audioPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
+        if (key == CarPlayAudioSettings.DUCK_MUSIC || key == null) {
+            audioFocusCoordinator.setCarPlayDuckingEnabled(
+                preferences.getBoolean(CarPlayAudioSettings.DUCK_MUSIC, true),
+            )
+        }
+    }
+
+    init {
+        audioPreferences?.registerOnSharedPreferenceChangeListener(audioPreferenceListener)
+        audioFocusCoordinator.setCarPlayDuckingEnabled(
+            audioPreferences?.getBoolean(CarPlayAudioSettings.DUCK_MUSIC, true) ?: true,
+        )
+    }
 
     override fun onAudioDucking(volumeDb: Double, durationMs: Long) {
         audioFocusCoordinator.setCarPlayDucking(volumeDb, durationMs)
@@ -660,6 +692,7 @@ class AndroidMediaSink(
     }
 
     fun close() {
+        audioPreferences?.unregisterOnSharedPreferenceChangeListener(audioPreferenceListener)
         AmbientMusicController.closeSink(ambientSinkToken)
         synchronized(videoOwnershipLock) {
             videoClosed = true

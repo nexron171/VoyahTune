@@ -211,6 +211,39 @@ class AudioFocusAutoYieldTest {
         assertEquals(1f, volumes(media).last(), 0f)
     }
 
+    @Test fun disablingDuckingRestoresMusicButPreservesTransientFocusMute() {
+        val coordinator = coordinator()
+        val media = track()
+        coordinator.acquire(media, AudioChannel.MEDIA, attributes)
+        coordinator.setCarPlayDucking(-20.0, 0)
+        assertEquals(0.1f, volumes(media).last(), 0.0001f)
+        coordinator.setCarPlayDuckingEnabled(false)
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
+        assertEquals(1f, volumes(media).last(), 0f)
+        coordinator.setCarPlayDucking(-20.0, 0)
+        assertEquals(1f, volumes(media).last(), 0f)
+        coordinator.onExternalFocusChange(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
+        assertEquals(0f, volumes(media).last(), 0f)
+        coordinator.setCarPlayDucking(0.0, 0)
+        coordinator.setCarPlayDuckingEnabled(true)
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
+        assertEquals(0f, volumes(media).last(), 0f)
+        coordinator.onExternalFocusChange(AudioManager.AUDIOFOCUS_GAIN)
+        assertEquals(1f, volumes(media).last(), 0f)
+    }
+
+    @Test fun enablingDuckingAppliesTheCurrentIphoneRequest() {
+        val coordinator = coordinator()
+        coordinator.setCarPlayDuckingEnabled(false)
+        coordinator.setCarPlayDucking(-20.0, 0)
+        val media = track()
+        coordinator.acquire(media, AudioChannel.MEDIA, attributes)
+        assertTrue(volumes(media).isEmpty())
+        coordinator.setCarPlayDuckingEnabled(true)
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
+        assertEquals(0.1f, volumes(media).last(), 0.0001f)
+    }
+
     private fun coordinator(enabled: Boolean = true, autoYield: Boolean = true) =
         AudioFocusCoordinator(context, enabled, autoYield).also(coordinators::add)
     private fun track(): AudioTrack = AudioTrack.Builder().setAudioAttributes(attributes)
