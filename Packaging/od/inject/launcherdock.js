@@ -399,22 +399,33 @@ Java.perform(function () {
         } catch (e) { return obj; }
     }
 
-    // Drawable иконки приложения: pm.getApplicationIcon → рисуем на Bitmap → масштаб 50x50 → BitmapDrawable.
+    // Dock artwork is independent of launcher and dashboard icons.
     function getAppDrawable(pkg) {
         try {
-            var pm = ctx().getPackageManager();
-            var icon = pkg === CARPLAY_TARGET
-                ? pm.getActivityIcon(Java.use("android.content.ComponentName").$new(RESTORE_PKG, CARPLAY_LAUNCHER))
-                : pm.getApplicationIcon(pm.getApplicationInfo(pkg, 0));
-            var bmp = Bitmap.createBitmap(icon.getIntrinsicWidth(), icon.getIntrinsicHeight(), BitmapConfig.ARGB_8888.value);
-            var canvas = Canvas.$new(bmp);
+            var packageManager = ctx().getPackageManager();
+            var icon;
+            if (pkg === CARPLAY_TARGET) {
+                var resources = packageManager.getResourcesForApplication(RESTORE_PKG);
+                var resourceId = resources.getIdentifier("carplay_dock_logo", "drawable", RESTORE_PKG);
+                icon = resourceId !== 0
+                    ? resources.getDrawable(resourceId, null)
+                    : packageManager.getActivityIcon(
+                        Java.use("android.content.ComponentName").$new(RESTORE_PKG, CARPLAY_LAUNCHER));
+            } else {
+                icon = packageManager.getApplicationIcon(packageManager.getApplicationInfo(pkg, 0));
+            }
+
+            var bitmap = Bitmap.createBitmap(
+                icon.getIntrinsicWidth(), icon.getIntrinsicHeight(), BitmapConfig.ARGB_8888.value);
+            var canvas = Canvas.$new(bitmap);
             icon.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
             icon.draw(canvas);
-            var scaled = Bitmap.createScaledBitmap(bmp, 50, 50, true);
-            var d = BitmapDrawable.$new(ctx().getResources(), scaled);
-            d.setGravity(17);              // Gravity.CENTER
-            d.setBounds(0, 0, 50, 50);
-            return retainDrawable(d);
+
+            var scaled = Bitmap.createScaledBitmap(bitmap, 50, 50, true);
+            var drawable = BitmapDrawable.$new(ctx().getResources(), scaled);
+            drawable.setGravity(17); // Gravity.CENTER
+            drawable.setBounds(0, 0, 50, 50);
+            return retainDrawable(drawable);
         } catch (e) {
             Log.e(TAG, "[dock] getAppDrawable err " + pkg + ": " + e);
             return null;
