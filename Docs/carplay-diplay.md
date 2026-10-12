@@ -367,7 +367,11 @@ Dashboard сначала восстанавливает сохранённую V
 VoyahTune CarPlay. OD-хук загружает отдельный ресурс
 [`carplay_dock_logo`](../RestoreMode/app/src/main/res/drawable-nodpi/carplay_dock_logo.png)
 из RestoreMode только для слота дока; при отсутствии ресурса в установленном APK
-использует иконку `CarPlayLauncherActivity`. В All Apps, плитках и экранах CarPlay
+использует иконку `CarPlayLauncherActivity`. Ресурс имеет прозрачный холст 116×90 px,
+рисунок 47×49 px с полями 35/19/34/22 px (слева/сверху/справа/снизу),
+по геометрии `music_icon.png` штатного Launcher 1.0.6 (14), и серо-синюю палитру.
+Хук использует его напрямую, сохраняя поля и пропорции без конверсии в 50×50.
+В All Apps, плитках и экранах CarPlay
 сохраняется `carplay_home_logo`. OPEN_FREEFORM передаёт стабильный CarPlay target в существующий AppDisplayLauncher:
 перенос окна и владение сессией совпадают с ярлыком 1×1. Основной пакет VoyahTune
 по-прежнему открывает Dashboard.
