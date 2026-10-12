@@ -87,7 +87,7 @@ Java.perform(function () {
             var distanceUnit = GuidanceFormat.toDistanceUnit.overload("android.content.Context", "int");
             // Cluster encodes this string and its byte length into the navigation packet itself.
             distanceUnit.implementation = function (context, distanceMeters) {
-                return distanceMeters < 1000 ? "м" : "км";
+                return distanceMeters < 1000 ? "m" : "km";
             };
             console.log("[cluster-units] hook ready v1");
             console.log(READY_MARKER);

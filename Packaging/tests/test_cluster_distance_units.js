@@ -37,8 +37,8 @@ function loadClusterAgent(compatible) {
 (async () => {
     const supported = loadClusterAgent(true);
     await supported.ready;
-    for (const [meters, expected] of [[0, 'м'], [500, 'м'], [999, 'м'],
-        [1000, 'км'], [1500, 'км'], [100000, 'км']]) {
+    for (const [meters, expected] of [[0, 'm'], [500, 'm'], [999, 'm'],
+        [1000, 'km'], [1500, 'km'], [100000, 'km']]) {
         assert.equal(supported.distanceUnit.implementation(null, meters), expected);
     }
     assert(supported.messages.includes('[cluster-units] hook ready v1'));
