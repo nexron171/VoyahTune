@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 
+import ru.big.town.common.DockIconStyle;
 import ru.big.town.common.ScenarioProtocol;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.DockLongPressAction;
@@ -74,8 +75,16 @@ public final class SplitConfigSync {
         i.putExtra("dock2Dpi", p2.isEmpty() ? 0 : AppDpiStore.get(prefs, p2));
         if (ru.big.town.common.InfrastructureProfile.read(context)
                 == ru.big.town.common.InfrastructureProfile.OD) {
+            for (int slot = 1; slot <= 2; slot++) {
+                DockIconStyle style =
+                        DockIconStyle.fromValue(
+                                prefs.getString(DockIconStyle.preferenceKey(slot), "default"));
+                i.putExtra(DockIconStyle.configKey(slot), style.value);
+            }
             i.putExtra("dockHomeShortVoyahTune", prefs.getBoolean("dockHomeShortVoyahTune", false));
-            i.putExtra("dockAllAppsShortVoyahTune", prefs.getBoolean("dockAllAppsShortVoyahTune", false));
+            i.putExtra(
+                    "dockAllAppsShortVoyahTune",
+                    prefs.getBoolean("dockAllAppsShortVoyahTune", false));
         }
         addDockSplitExtras(i, 1, p1, prefs);
         addDockSplitExtras(i, 2, p2, prefs);

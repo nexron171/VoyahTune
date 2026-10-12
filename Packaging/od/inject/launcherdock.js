@@ -399,6 +399,24 @@ Java.perform(function () {
         } catch (e) { return obj; }
     }
 
+    function getDockDrawable(pkg, slot) {
+        var style = cfg("dock" + slot + "Icon");
+        var resourceName = style === "navigation" ? "dock_navigation_icon"
+            : style === "music" ? "dock_music_icon" : null;
+        if (resourceName !== null) {
+            try {
+                var resources = ctx().getPackageManager().getResourcesForApplication(RESTORE_PKG);
+                var resourceId = resources.getIdentifier(resourceName, "drawable", RESTORE_PKG);
+                if (resourceId !== 0) {
+                    return retainDrawable(resources.getDrawable(resourceId, null));
+                }
+            } catch (error) {
+                Log.w(TAG, "[dock] icon override unavailable: " + error);
+            }
+        }
+        return getAppDrawable(pkg);
+    }
+
     // Dock artwork is independent of launcher and dashboard icons.
     function getAppDrawable(pkg) {
         try {
@@ -676,7 +694,7 @@ Java.perform(function () {
                 } else {
                     // getAppDrawable uses getApplicationInfo directly. It commonly becomes available
                     // earlier during cold boot than getLaunchIntentForPackage used by the click gate.
-                    var d = getAppDrawable(pkg);
+                    var d = getDockDrawable(pkg, slotIndex + 1);
                     if (d) view.setBackground(d);
                 }
                 view.invalidate();
