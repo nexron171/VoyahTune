@@ -15,6 +15,14 @@
       "sha256": "6c58fbcda23f1bc51d95449250fb49c00ae904be9871da9969f1650643a7f7a3",
       "minimumInstallerVersion": "1.6.0",
       "minimumOtaVersion": "4.0.0"
+    },
+    {
+      "version": "4.1.0-od",
+      "url": "https://storage.yandexcloud.net/voyahtune/v4.1.0-od/payload_4.1.0-od.zip",
+      "size": 148441646,
+      "sha256": "0577112fe0c1c3baa0a058dad3a039c7d741374123bbe2e155b4a78e0b1249e5",
+      "minimumInstallerVersion": "1.7.0",
+      "minimumOtaVersion": "4.1.0"
     }
   ]
 }
