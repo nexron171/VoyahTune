@@ -15,7 +15,8 @@ class HotspotModeMigrationTest {
     private val context get() = RuntimeEnvironment.getApplication()
     private val prefs get() = context.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE)
 
-    @Test fun oldLocalSelectionMigratesWithoutLosingCarHotspotDetails() {
+    @Test
+    fun oldLocalSelectionMigratesWithoutLosingCarHotspotDetails() {
         prefs.edit().putString("wireless_hotspot_mode", "LOCAL_ONLY_HOTSPOT").apply()
         AirPlayPersistence.saveManualHotspotSsid(context, "Test car")
         AirPlayPersistence.saveManualHotspotPassphrase(context, "test-password")
@@ -25,17 +26,21 @@ class HotspotModeMigrationTest {
         assertEquals("test-password", AirPlayPersistence.loadManualHotspotPassphrase(context))
     }
 
-    @Test fun freshInstallUsesBuiltInHotspot() {
+    @Test
+    fun freshInstallUsesWifiDirect() {
         prefs.edit().clear().apply()
-        assertEquals(WirelessHotspotMode.MANUAL, AirPlayPersistence.loadWirelessHotspotMode(context))
+        assertEquals(WirelessHotspotMode.WIFI_P2P, AirPlayPersistence.loadWirelessHotspotMode(context))
     }
 
-    @Test fun existingWifiDirectSelectionIsPreserved() {
+    @Test
+    fun existingWifiDirectSelectionIsPreserved() {
         AirPlayPersistence.saveWirelessHotspotMode(context, WirelessHotspotMode.WIFI_P2P)
         assertEquals(WirelessHotspotMode.WIFI_P2P, AirPlayPersistence.loadWirelessHotspotMode(context))
     }
 
-    @Test @Config(sdk = [28]) fun olderAndroidKeepsWifiDirectSelected() {
+    @Test
+    @Config(sdk = [28])
+    fun olderAndroidKeepsWifiDirectSelected() {
         prefs.edit().putString("wireless_hotspot_mode", "WIFI_P2P").apply()
         assertEquals(WirelessHotspotMode.WIFI_P2P, AirPlayPersistence.loadWirelessHotspotMode(context))
     }
