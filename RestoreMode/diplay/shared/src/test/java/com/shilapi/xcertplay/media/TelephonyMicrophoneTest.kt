@@ -97,14 +97,16 @@ class TelephonyMicrophoneTest {
         assertEquals(AudioRecord.STATE_UNINITIALIZED, record.state)
     }
 
-    @Test fun aCallWhileCarBluetoothIsOffUsesTheCabinMicrophone() {
+    @Test fun voyahCallWhileCarBluetoothIsOffUsesRecognitionCapture() {
+        sink.close()
+        sink = AndroidMediaSink(context = context, voyahAudioRouting = true)
         context.getSharedPreferences("diplay_bt_suspend", 0).edit().putBoolean("restore_initially_enabled", true).commit()
         shadowOf(context.getSystemService(BluetoothManager::class.java).adapter).setState(BluetoothAdapter.STATE_OFF)
         manager.mode = AudioManager.MODE_NORMAL
         sink.onMicrophoneStarted(telephony, config("telephony"))
         val record = awaitCapture()
         assertEquals(AudioManager.MODE_NORMAL, manager.mode)
-        assertEquals(MediaRecorder.AudioSource.MIC, record.audioSource)
+        assertEquals(MediaRecorder.AudioSource.VOICE_RECOGNITION, record.audioSource)
         assertTrue(ShadowAudioEffect.getAudioEffects().isEmpty())
         sink.onMicrophoneStopped(telephony)
         assertEquals(AudioManager.MODE_NORMAL, manager.mode)

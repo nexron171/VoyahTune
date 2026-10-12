@@ -28,6 +28,7 @@ internal class MicrophoneUplink(
     private val config: MicrophoneConfig,
     private val onDiagnostic: (String) -> Unit = {},
     private val speakerphoneCall: Boolean = false,
+    private val voyahCallCapture: Boolean = false,
     /** The call's far-end audio; when set, telephony capture runs DiPlay's own echo canceller. */
     private val echoReference: EchoReference? = null,
     private val echoCancellerFactory: (Int, Int, Int) -> CallEchoCanceller? = { frame, rate, tail ->
@@ -75,11 +76,13 @@ internal class MicrophoneUplink(
         }
 
         val source = when {
+            voyahCallCapture -> MediaRecorder.AudioSource.VOICE_RECOGNITION
             config.audioType == "telephony" && speakerphoneCall -> MediaRecorder.AudioSource.MIC
             config.audioType == "telephony" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
             config.audioType == "speechrecognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
             else -> MediaRecorder.AudioSource.MIC
         }
+        if (voyahCallCapture) stats.useVoiceRecognitionSource()
         val nextEncoder = if (config.codec == AudioCodecKind.OPUS) {
             opusEncoderFactory(config.bitrate ?: 48_000)
         } else {
@@ -100,7 +103,7 @@ internal class MicrophoneUplink(
         val bufferSize = maxOf(minBuffer * 2, config.frameBytes * 4)
         // Some head units throw on VOICE_RECOGNITION at build(); VOICE_COMMUNICATION works there.
         val nextRecorder = createRecorder(source, channelMask, bufferSize)
-            ?: if (source == MediaRecorder.AudioSource.VOICE_RECOGNITION) {
+            ?: if (source == MediaRecorder.AudioSource.VOICE_RECOGNITION && !voyahCallCapture) {
                 stats.useVoiceCommunicationSource()
                 createRecorder(MediaRecorder.AudioSource.VOICE_COMMUNICATION, channelMask, bufferSize)
             } else {
@@ -132,7 +135,10 @@ internal class MicrophoneUplink(
         return try {
             if (config.audioType == "telephony") {
                 echoCanceller = createEchoCanceller()
-                if (!speakerphoneCall) effects = voiceEffects(nextRecorder.audioSessionId)
+                // Voyah's hardware communication preprocessing selects an unavailable VoIP path.
+                if (!speakerphoneCall && !voyahCallCapture) {
+                    effects = voiceEffects(nextRecorder.audioSessionId)
+                }
                 if (echoReference != null) {
                     Log.i(TAG, "microphone echo canceller enabled=${echoCanceller != null} tail=${ECHO_TAIL_MILLIS}ms")
                 }
@@ -301,7 +307,7 @@ internal class MicrophoneUplink(
                                 false
                             }
                             if (!processed) {
-                                restorePlatformEchoCancellation()
+                                if (!voyahCallCapture) restorePlatformEchoCancellation()
                                 canceller = null
                             }
                         }

@@ -625,10 +625,14 @@ class AndroidMediaSink(
         try {
             val speakerphoneCall = config.audioType == "telephony" &&
                 appContext != null && BydBluetoothSuspend.isSuspendedByUs(appContext)
-            if (config.audioType == "telephony" && !speakerphoneCall) enterCommunicationMode(id)
+            val voyahCallCapture = voyahAudioRouting && config.audioType == TELEPHONY_AUDIO_TYPE
+            if (config.audioType == TELEPHONY_AUDIO_TYPE && !speakerphoneCall && !voyahCallCapture) {
+                enterCommunicationMode(id)
+            }
             val uplink = microphoneUplinks.computeIfAbsent(id) {
                 MicrophoneUplink(config, onAudioDiagnostic,
                     speakerphoneCall = speakerphoneCall,
+                    voyahCallCapture = voyahCallCapture,
                     echoReference = if (config.audioType == TELEPHONY_AUDIO_TYPE) callEchoReferences[id] else null)
             }
             if (!uplink.start()) {

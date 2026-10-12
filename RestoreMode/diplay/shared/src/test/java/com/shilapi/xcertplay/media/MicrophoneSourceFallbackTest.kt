@@ -119,6 +119,43 @@ class MicrophoneSourceFallbackTest {
         assertTrue(ShadowAudioEffect.getAudioEffects().isEmpty())
     }
 
+    @Test fun voyahCallUsesRecognitionWithoutCommunicationModeOrHardwareEffects() {
+        sink.close()
+        sink = AndroidMediaSink(context = context, voyahAudioRouting = true,
+            onAudioDiagnostic = diagnostics::add)
+        val callId = AudioStreamId(100, "telephony")
+
+        sink.onMicrophoneStarted(callId, config("telephony"))
+
+        assertTrue(captureStarted.await(5, TimeUnit.SECONDS))
+        val recorder = requireNotNull(captured.get())
+        assertEquals(listOf(MediaRecorder.AudioSource.VOICE_RECOGNITION), RecorderBuilder.attempts)
+        assertEquals(MediaRecorder.AudioSource.VOICE_RECOGNITION, recorder.audioSource)
+        assertEquals(AudioManager.MODE_RINGTONE, context.getSystemService(AudioManager::class.java).mode)
+        assertTrue(ShadowAudioEffect.getAudioEffects().isEmpty())
+        assertTrue(diagnostics.any {
+            it.startsWith("Microphone: start type=telephony source=VOICE_RECOGNITION")
+        })
+
+        sink.onMicrophoneStopped(callId)
+        assertEquals(AudioRecord.STATE_UNINITIALIZED, recorder.state)
+        assertEquals(AudioManager.MODE_RINGTONE, context.getSystemService(AudioManager::class.java).mode)
+    }
+
+    @Test fun voyahCallDoesNotFallBackToBrokenVoipCapture() {
+        sink.close()
+        sink = AndroidMediaSink(context = context, voyahAudioRouting = true,
+            onAudioDiagnostic = diagnostics::add)
+        RecorderBuilder.rejectSources = setOf(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+
+        sink.onMicrophoneStarted(AudioStreamId(100, "telephony"), config("telephony"))
+
+        assertEquals(listOf(MediaRecorder.AudioSource.VOICE_RECOGNITION), RecorderBuilder.attempts)
+        assertNull(captured.get())
+        assertEquals(AudioManager.MODE_RINGTONE, context.getSystemService(AudioManager::class.java).mode)
+        assertTrue(diagnostics.none { it.startsWith("Microphone: start") })
+    }
+
     private fun config(type: String) = MicrophoneConfig(audioType = type, sampleRate = 16_000,
         channels = 1, payloadType = 100, frameMillis = 20, host = InetAddress.getLoopbackAddress(),
         port = 9, key = ByteArray(32))
