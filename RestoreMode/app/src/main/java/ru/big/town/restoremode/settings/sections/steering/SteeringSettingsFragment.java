@@ -90,6 +90,7 @@ public final class SteeringSettingsFragment extends SettingsSectionFragment {
         {"toggle_pedestrian_sound", "Звук пешеходов: вкл/выкл"},
         {"toggle_headlights", "Фары: выкл/ближний"},
         {"toggle_headlights_auto", "Фары: ближний/авто"},
+        {"headlights:parking", "Фары: габариты"},
         {"wash", "Режим мойки"},
     };
 

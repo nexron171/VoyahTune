@@ -305,6 +305,16 @@ public final class VoiceCommandCatalog {
         binary(all, "headlights", "Ближний свет", "фары", "ближний свет");
         addVehicle(
                 all,
+                "headlights:parking",
+                "Фары: габариты",
+                "габариты",
+                "ходовые огни",
+                "включи габариты",
+                "включить габариты",
+                "включи ходовые огни",
+                "включить ходовые огни");
+        addVehicle(
+                all,
                 "headlights:auto",
                 "Штатный свет: Авто",
                 "автоматический свет",

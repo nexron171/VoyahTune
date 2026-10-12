@@ -629,6 +629,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             toggleHeadlights(ctx, completion);
         } else if ("toggle_headlights_auto".equals(action)) {
             toggleHeadlightsAuto(ctx, completion);
+        } else if (action.startsWith("headlights:")) {
+            HeadlightCommandController.select(ctx, action, sent -> completeSteerAction(completion));
         } else if ("wash".equals(action)) {
             SetModesService.requestWashAction(ctx, completion);
         } else if (action.startsWith("can:")) {
@@ -716,9 +718,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     private static void openCarPlay(Context context) {
         try {
             // The launcher delegates to Native's existing widget/fullscreen task transfer.
-            Intent intent = new Intent(Intent.ACTION_MAIN)
-                    .setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.LAUNCHER)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            Intent intent =
+                    new Intent(Intent.ACTION_MAIN)
+                            .setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.LAUNCHER)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
             options.setLaunchDisplayId(0);
             android.os.Bundle launchOptions = options.toBundle();
@@ -911,7 +914,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                         Log.w(
                                 TAG,
                                 "STEER_ACTION headlights auto/low: CAN failed, state not"
-                                    + " persisted");
+                                        + " persisted");
                         return;
                     }
                     prefs.edit().putBoolean("steerHeadlightsAutoLowBeam", nextLowBeam).apply();
