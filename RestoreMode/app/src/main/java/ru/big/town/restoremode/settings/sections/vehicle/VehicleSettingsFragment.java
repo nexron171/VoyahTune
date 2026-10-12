@@ -526,6 +526,18 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         initModeEnableToggles();
         initModeRememberLastToggles();
         bindSmartSave();
+        View driveEntryRow = settingView(R.id.driveEntryRestoreRow);
+        if (driveEntryRow != null) {
+            driveEntryRow.setVisibility(
+                    ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks()
+                            ? View.VISIBLE
+                            : View.GONE);
+            Switch toggle = settingView(R.id.switchDriveEntryRestore);
+            toggle.setChecked(preferences.getBoolean("applySettingsOnDrive", false));
+            toggle.setOnCheckedChangeListener(
+                    (button, checked) ->
+                            preferences.edit().putBoolean("applySettingsOnDrive", checked).apply());
+        }
         initFragranceSettings();
         initPedestrianSoundGroup();
         initForcedEvGroup();

@@ -862,6 +862,11 @@ final class OemVehicleStateTransport {
         for (Map.Entry<StateKey, Integer> entry : values.entrySet()) {
             vehicleBundle.putInt(entry.getKey().name, entry.getValue());
         }
+        if (ApplyEngine.isDriveEntryRestore()
+                && (vehicleBundle.containsKey("DRIVING_MODE_SET")
+                        || vehicleBundle.containsKey("IVI_SOC_MODESET"))) {
+            vehicleBundle.putBoolean("__vt_auto", true);
+        }
         return transactBundle(binder, vehicleBundle, label);
     }
 

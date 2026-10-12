@@ -25,7 +25,8 @@ public class SettingsContentProvider extends ContentProvider {
     private SharedPreferences sharedPreferences;
     private final SharedPreferences.OnSharedPreferenceChangeListener smartSaveListener =
             (preferences, key) -> {
-                if (SmartSaveSettings.ENABLED.equals(key)
+                if ("applySettingsOnDrive".equals(key)
+                        || SmartSaveSettings.ENABLED.equals(key)
                         || "energy".equals(key)
                         || "currentTripEnergy".equals(key)
                         || "forcedEv".equals(key)

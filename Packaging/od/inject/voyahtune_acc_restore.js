@@ -363,7 +363,7 @@ Java.perform(function () {
                 var nativeCaller = trusted("ru.big.town.anative");
                 var stockCaller = trusted("com.qinggan.app.vehiclesetting");
                 if (vehicle !== null) {
-                    var taggedAuto = stockCaller && vehicle.getBoolean("__vt_auto", false);
+                    var taggedAuto = (stockCaller || nativeCaller) && vehicle.getBoolean("__vt_auto", false);
                     var taggedUser = stockCaller && vehicle.getBoolean("__vt_user", false);
                     var startup = sending.get() !== null;
                     var guest =

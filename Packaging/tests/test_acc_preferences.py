@@ -89,6 +89,9 @@ public final class AccPreferencesHarness {
         scenario("smart Save snapshot retains user intent and honors forced EV",()->{
             Memory p=new Memory();p.disk.put("energy","SREV");
             equal(false,action(p,"snapshot",null,1).getBoolean("smartSaveEnabled"));
+            equal(false,action(p,"snapshot",null,1).getBoolean("applySettingsOnDrive"));
+            p.disk.put("applySettingsOnDrive",true);
+            equal(true,action(p,"snapshot",null,1).getBoolean("applySettingsOnDrive"));
             p.disk.put("smartSaveEnabled",true);acc(p,2,1);
             Bundle enabled=action(p,"snapshot",null,1);
             equal(true,enabled.getBoolean("smartSaveEnabled"));

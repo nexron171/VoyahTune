@@ -873,3 +873,13 @@ for (const platform of ["H97Y", "H97X"]) {
 console.log(
     "PASS: H97Y/H97X guest reset, late attach, repeated ACC cycles and unsupported platform isolation"
 );
+
+{
+    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
+    assert.equal(scenario.request({ IVI_SOC_MODESET: 4, __vt_auto: true }, 10), 0);
+    scenario.execute(0);
+    assert.equal(scenario.revision, 0, "Drive restoration cannot become a manual choice");
+    assert.equal(scenario.energy, "SREV");
+    assert.equal(scenario.sends.at(-1).vehicle.values.__vt_auto, undefined);
+}
+console.log("PASS: Native Drive restoration preserves explicit mode selection");

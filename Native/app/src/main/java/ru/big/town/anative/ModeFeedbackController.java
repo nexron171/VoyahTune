@@ -42,6 +42,7 @@ final class ModeFeedbackController implements AutoCloseable {
 
     private boolean receiverRegistered;
     private SmartSaveController smartSaveController;
+    private DriveEntryRestoreController driveEntryRestoreController;
     private volatile boolean closed;
 
     static ModeFeedbackController create(Context context, Handler feedbackHandler) {
@@ -67,6 +68,7 @@ final class ModeFeedbackController implements AutoCloseable {
             receiverRegistered = true;
             if (ru.big.town.common.InfrastructureProfile.read(appContext).usesAccHooks()) {
                 smartSaveController = new SmartSaveController(appContext);
+                driveEntryRestoreController = new DriveEntryRestoreController(appContext);
             }
         } catch (RuntimeException e) {
             close();
@@ -103,6 +105,10 @@ final class ModeFeedbackController implements AutoCloseable {
     public void close() {
         if (closed) return;
         closed = true;
+        if (driveEntryRestoreController != null) {
+            driveEntryRestoreController.close();
+            driveEntryRestoreController = null;
+        }
         if (smartSaveController != null) {
             smartSaveController.close();
             smartSaveController = null;

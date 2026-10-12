@@ -237,6 +237,8 @@ public final class DriveSelectionPreferences {
         result.putString("energy", energy(prefs));
         if (accHooks) {
             result.putString("recycle", recycle(prefs));
+            result.putBoolean(
+                    "applySettingsOnDrive", prefs.getBoolean("applySettingsOnDrive", false));
             result.putLong("energySelectionRevision", prefs.getLong("energySelectionRevision", 0));
             result.putBoolean("smartSaveEnabled", prefs.getBoolean("smartSaveEnabled", false));
             result.putBoolean("forcedEv", prefs.getBoolean("forcedEv", false));
