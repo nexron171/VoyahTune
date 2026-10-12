@@ -318,7 +318,7 @@
     <string name="s_1000_ms_most_stable">1000 мс · самая стабильная</string>
     <string name="s_1_choose_your_connection">1 · Выберите способ подключения</string>
     <string name="s_1_connect_a_computer_with_adb_installed_to_the_car_using">1. Подключите компьютер с установленным ADB к автомобилю по имеющемуся USB или беспроводной отладке. При запросе подтвердите отладку на автомобиле.\n\n2. Выполните эту команду в терминале компьютера:</string>
-    <string name="s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele">1. Откройте настройки точки доступа автомобиля, включите её и выберите 5 ГГц, если доступно.\n2. Точно скопируйте ниже её имя и пароль.\n3. Оставляйте точку доступа включённой при подключении. DiPlay передаёт данные по Bluetooth; iPhone подключится автоматически.</string>
+    <string name="s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele">1. Откройте настройки точки доступа автомобиля, включите её и выберите 5 ГГц, если доступно.\n2. Точно скопируйте название точки доступа и пароль; важно! не меняйте название точки доступа, автомобиль может вернуть старое название в любой момент.\n3. Оставляйте точку доступа включённой при подключении. DiPlay передаёт данные по Bluetooth; iPhone подключится автоматически.</string>
     <string name="s_2_pair_your_iphone">2 · Свяжите iPhone</string>
     <string name="s_300_ms_default">300 мс · по умолчанию</string>
     <string name="s_30_fps_lighter_load">30 кадров/с · меньшая нагрузка</string>
