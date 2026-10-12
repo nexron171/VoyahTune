@@ -407,10 +407,12 @@ Java.perform(function () {
             if (pkg === CARPLAY_TARGET) {
                 var resources = packageManager.getResourcesForApplication(RESTORE_PKG);
                 var resourceId = resources.getIdentifier("carplay_dock_logo", "drawable", RESTORE_PKG);
-                icon = resourceId !== 0
-                    ? resources.getDrawable(resourceId, null)
-                    : packageManager.getActivityIcon(
-                        Java.use("android.content.ComponentName").$new(RESTORE_PKG, CARPLAY_LAUNCHER));
+                if (resourceId !== 0) {
+                    // The resource includes the OEM dock canvas and transparent padding.
+                    return retainDrawable(resources.getDrawable(resourceId, null));
+                }
+                icon = packageManager.getActivityIcon(
+                    Java.use("android.content.ComponentName").$new(RESTORE_PKG, CARPLAY_LAUNCHER));
             } else {
                 icon = packageManager.getApplicationIcon(packageManager.getApplicationInfo(pkg, 0));
             }
