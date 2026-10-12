@@ -1445,3 +1445,16 @@ Debug RestoreMode **4.0.0-od** установлен и DiPlayActivity откры
 существующий протокол руля; Native запускает `CarPlayLauncherActivity` на основном
 экране (display 0). Используется тот же путь переноса задачи между виджетом и
 полноэкранным CarPlay, что у ярлыка. Дополнительная сессия CarPlay не создаётся.
+
+### Захват микрофона звонков на Voyah
+
+При `voyahAudioRouting` поток `telephony` использует `VOICE_RECOGNITION`,
+как Siri, без включения `MODE_IN_COMMUNICATION` и аппаратных AEC/NS.
+На исследованном ГУ источник `VOICE_COMMUNICATION` выбирает `VOIP_TX`,
+но OEM HAL не находит `audio-record-voip`/`echo-reference-voip`, и
+`pcm_prepare` завершается ошибкой при формально активном AudioRecord.
+Fallback звонка в этот тракт запрещён. Опциональный программный Speex AEC
+сохраняется; при его ошибке аппаратные эффекты для Voyah не включаются.
+Остальные платформы сохраняют upstream-выбор источника и режима.
+При обновлении upstream сохранить условие в `AndroidMediaSink`,
+выбор источника/эффектов в `MicrophoneUplink` и точное имя источника в диагностике.
