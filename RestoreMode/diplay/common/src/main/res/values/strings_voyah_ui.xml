@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voyah_carplay_projection_launch_failed">Could not open CarPlay on this display. Try again.</string>
+    <string name="voyah_carplay_notification_channel">CarPlay connection</string>
+    <string name="voyah_carplay_notification_running">CarPlay connection running</string>
+    <string name="voyah_mfi_title">Board I2C diagnostic</string>
+    <string name="voyah_mfi_device">Linux I2C device</string>
+    <string name="voyah_mfi_run">Run MFi self-check</string>
+    <string name="voyah_mfi_ch341_hint">CH341 requires deployment-specific VID/PID configuration.</string>
+    <string name="voyah_mfi_library_unavailable">I2C native library is unavailable</string>
+    <string name="voyah_mfi_idle">Idle</string>
+    <string name="voyah_mfi_running">Running…</string>
+    <string name="voyah_mfi_failed">Failed: %1$s</string>
+    <string name="voyah_mfi_interrupted">MFi scan interrupted</string>
+    <string name="voyah_mfi_not_found">Found: none</string>
+    <string name="voyah_mfi_result">Found: 0x%1$02X; device version: 0x%2$02X; protocol major (raw): %3$s</string>
+</resources>

@@ -203,7 +203,7 @@ Content-MD5, который проверяет Yandex. Это поддержив
 
 ## Beta-каталог
 
-[Releases/ota/index-beta.json](../Releases/ota/index-beta.json) — отдельный каталог
+[Releases/ota/index-v4-beta.json](../Releases/ota/index-v4-beta.json) — отдельный каталог
 рядом с основным, с теми же полями version/url/size/sha256. Он пополняется только
 по явной просьбе пользователя. При работе с beta основной `index.json` не меняется,
 записи не копируются между каталогами автоматически. Сборка или суффикс версии
@@ -214,24 +214,24 @@ Content-MD5, который проверяет Yandex. Это поддержив
 
 ```sh
 python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" \
-  --index Releases/ota/index-beta.json --dry-run
+  --index Releases/ota/index-v4-beta.json --dry-run
 python3 Installer/scripts/upload-release-s3.py "$RELEASE_VERSION" \
-  --index Releases/ota/index-beta.json --update-catalog
+  --index Releases/ota/index-v4-beta.json --update-catalog
 ```
 
 Если артефакты уже загружены, обновление только beta-каталога с HEAD-проверкой:
 
 ```sh
 python3 Installer/scripts/update-catalog.py \
-  --index Releases/ota/index-beta.json \
+  --index Releases/ota/index-v4-beta.json \
   --entry "Releases/dist/s3-v${RELEASE_VERSION}/payload_${RELEASE_VERSION}.json" \
   --verify-head
-git diff -- Releases/ota/index-beta.json
+git diff -- Releases/ota/index-v4-beta.json
 ```
 
 В коммит beta-публикации включайте только выбранный каталог и относящиеся к
 поручению изменения. Для проверки после разрешённого push используйте точный
-путь `Releases/ota/index-beta.json` в опубликованной ветке. Создание файла само
+путь `Releases/ota/index-v4-beta.json` в опубликованной ветке. Создание файла само
 по себе не публикует его и не меняет встроенный основной URL GUI/OTA.
 Изменения только файла каталога и документации не требуют пересборки установщика.
 

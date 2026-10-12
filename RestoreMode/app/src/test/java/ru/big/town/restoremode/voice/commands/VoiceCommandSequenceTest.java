@@ -39,6 +39,12 @@ public class VoiceCommandSequenceTest {
     }
 
     @Test
+    public void parkingLightAliasesKeepTheirModeInsideSequences() {
+        assertEquals("headlights:parking,drive:SPORT", actions("включи габариты затем спорт"));
+        assertEquals("headlights:parking,headlights:auto", actions("ходовые огни и фары авто"));
+    }
+
+    @Test
     public void ambiguousWindowSegmentIsRejectedWhileTheRestRuns() {
         List<VoiceCommandSequence.Segment> segments =
                 VoiceCommandSequence.parse(

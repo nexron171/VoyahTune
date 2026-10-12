@@ -13,12 +13,12 @@ import android.os.Parcel;
 import android.os.RemoteException;
 import android.util.Log;
 
+import dalvik.system.PathClassLoader;
+
 import java.lang.reflect.Method;
 import java.util.EnumMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
-import dalvik.system.PathClassLoader;
 
 /**
  * Minimal OEM CanBus Binder transport used only for exterior-headlight mode commands.
@@ -26,7 +26,7 @@ import dalvik.system.PathClassLoader;
  * <p>The stock VehicleSetting app sends {@code VehicleState} through ICanBusService TX58. The
  * service then constructs the firmware-specific 0x1F frame from current cached vehicle values.
  * Keeping that construction in the OEM service avoids replaying stale screen, language, fragrance
- * and ambient-light fields that share the same raw messages.</p>
+ * and ambient-light fields that share the same raw messages.
  */
 final class HeadlightCanTransport {
     private static final String TAG = "$$$ HeadlightCanTransport $$$";
@@ -42,11 +42,13 @@ final class HeadlightCanTransport {
 
     private final Object lock = new Object();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final ExecutorService schemaExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "HeadlightCanSchema");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final ExecutorService schemaExecutor =
+            Executors.newSingleThreadExecutor(
+                    r -> {
+                        Thread thread = new Thread(r, "HeadlightCanSchema");
+                        thread.setDaemon(true);
+                        return thread;
+                    });
     private final EnumMap<HeadlightCanPolicy.Command, Integer> ordinals =
             new EnumMap<>(HeadlightCanPolicy.Command.class);
 
@@ -58,67 +60,74 @@ final class HeadlightCanTransport {
 
     private final Runnable rebindRunnable = this::bindCanBus;
 
-    private final ServiceConnection connection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            try {
-                String descriptor = service.getInterfaceDescriptor();
-                if (!CANBUS_DESCRIPTOR.equals(descriptor)) {
-                    Log.e(TAG, "Unexpected Binder descriptor: " + descriptor);
-                    rejectBinding();
-                    return;
+    private final ServiceConnection connection =
+            new ServiceConnection() {
+                @Override
+                public void onServiceConnected(ComponentName name, IBinder service) {
+                    try {
+                        String descriptor = service.getInterfaceDescriptor();
+                        if (!CANBUS_DESCRIPTOR.equals(descriptor)) {
+                            Log.e(TAG, "Unexpected Binder descriptor: " + descriptor);
+                            rejectBinding();
+                            return;
+                        }
+                    } catch (RemoteException | RuntimeException e) {
+                        Log.e(TAG, "Cannot verify CanBus Binder descriptor", e);
+                        restartBinding();
+                        return;
+                    }
+                    synchronized (lock) {
+                        canBusBinder = service;
+                    }
+                    mainHandler.removeCallbacks(rebindRunnable);
+                    Log.i(TAG, "CanBusService connected; headlight TX58 ready");
                 }
-            } catch (RemoteException | RuntimeException e) {
-                Log.e(TAG, "Cannot verify CanBus Binder descriptor", e);
-                restartBinding();
-                return;
-            }
-            synchronized (lock) {
-                canBusBinder = service;
-            }
-            mainHandler.removeCallbacks(rebindRunnable);
-            Log.i(TAG, "CanBusService connected; headlight TX58 ready");
-        }
 
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            synchronized (lock) {
-                canBusBinder = null;
-            }
-            // Android keeps the binding and reconnects it automatically when the service returns.
-            Log.w(TAG, "CanBusService disconnected; waiting for reconnect");
-        }
+                @Override
+                public void onServiceDisconnected(ComponentName name) {
+                    synchronized (lock) {
+                        canBusBinder = null;
+                    }
+                    // Android keeps the binding and reconnects it automatically when the service
+                    // returns.
+                    Log.w(TAG, "CanBusService disconnected; waiting for reconnect");
+                }
 
-        @Override
-        public void onBindingDied(ComponentName name) {
-            Log.w(TAG, "CanBusService binding died");
-            restartBinding();
-        }
+                @Override
+                public void onBindingDied(ComponentName name) {
+                    Log.w(TAG, "CanBusService binding died");
+                    restartBinding();
+                }
 
-        @Override
-        public void onNullBinding(ComponentName name) {
-            Log.e(TAG, "CanBusService returned a null binding");
-            restartBinding();
-        }
-    };
+                @Override
+                public void onNullBinding(ComponentName name) {
+                    Log.e(TAG, "CanBusService returned a null binding");
+                    restartBinding();
+                }
+            };
 
     private HeadlightCanTransport() {}
 
-    /** Starts schema verification and binding once per process. Safe to call from multiple services. */
+    /**
+     * Starts schema verification and binding once per process. Safe to call from multiple services.
+     */
     static void initialize(Context context) {
         INSTANCE.initializeInternal(context);
     }
 
     /** Sends LOW_BEAM for true and explicit OUT_LAMP_OFF for false. */
     static boolean send(Context context, boolean headlightsOn) {
-        INSTANCE.initializeInternal(context);
-        return INSTANCE.sendInternal(HeadlightCanPolicy.commandFor(headlightsOn));
+        return send(context, HeadlightCanPolicy.commandFor(headlightsOn));
     }
 
     /** Sends LOW_BEAM for true and OEM AUTO_LAMP_SWITCH for false. */
     static boolean sendAutoPair(Context context, boolean lowBeam) {
+        return send(context, HeadlightCanPolicy.commandForAutoPair(lowBeam));
+    }
+
+    static boolean send(Context context, HeadlightCanPolicy.Command command) {
         INSTANCE.initializeInternal(context);
-        return INSTANCE.sendInternal(HeadlightCanPolicy.commandForAutoPair(lowBeam));
+        return INSTANCE.sendInternal(command);
     }
 
     private void initializeInternal(Context context) {
@@ -133,17 +142,18 @@ final class HeadlightCanTransport {
             Log.e(TAG, "WRITE_CANBUS permission missing; headlight commands disabled");
             return;
         }
-        schemaExecutor.execute(() -> {
-            SchemaResult result = resolveSchema();
-            mainHandler.post(() -> applySchema(result));
-        });
+        schemaExecutor.execute(
+                () -> {
+                    SchemaResult result = resolveSchema();
+                    mainHandler.post(() -> applySchema(result));
+                });
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private SchemaResult resolveSchema() {
         try {
-            ApplicationInfo info = appContext.getPackageManager()
-                    .getApplicationInfo(CANBUS_PACKAGE, 0);
+            ApplicationInfo info =
+                    appContext.getPackageManager().getApplicationInfo(CANBUS_PACKAGE, 0);
             ClassLoader loader = new PathClassLoader(info.sourceDir, appContext.getClassLoader());
             Class enumClass = Class.forName("com.qinggan.canbus.VehicleState", true, loader);
             if (!enumClass.isEnum()) return SchemaResult.failed("VehicleState is not an enum");
@@ -155,8 +165,8 @@ final class HeadlightCanTransport {
                 Object stableId = getValue.invoke(value);
                 if (!(stableId instanceof Integer)
                         || ((Integer) stableId).intValue() != command.stableId) {
-                    return SchemaResult.failed("VehicleState id mismatch for "
-                            + command.vehicleStateName);
+                    return SchemaResult.failed(
+                            "VehicleState id mismatch for " + command.vehicleStateName);
                 }
                 resolved.put(command, value.ordinal());
             }
@@ -179,7 +189,7 @@ final class HeadlightCanTransport {
             Log.e(TAG, "Headlight Binder disabled: " + result.error);
             return;
         }
-        Log.i(TAG, "VehicleState schema verified for LOW_BEAM, OUT_LAMP_OFF and AUTO_LAMP_SWITCH");
+        Log.i(TAG, "VehicleState schema verified for " + result.ordinals.keySet());
         bindCanBus();
     }
 
@@ -233,8 +243,9 @@ final class HeadlightCanTransport {
                 return false;
             }
             reply.readException();
-            Log.i(TAG, "TX58 " + command.vehicleStateName + " state="
-                    + HeadlightCanPolicy.ACTIVATE);
+            Log.i(
+                    TAG,
+                    "TX58 " + command.vehicleStateName + " state=" + HeadlightCanPolicy.ACTIVATE);
             return true;
         } catch (RemoteException | RuntimeException e) {
             Log.e(TAG, "TX58 failed for " + command.vehicleStateName, e);
@@ -291,9 +302,10 @@ final class HeadlightCanTransport {
         final EnumMap<HeadlightCanPolicy.Command, Integer> ordinals;
         final String error;
 
-        private SchemaResult(boolean success,
-                             EnumMap<HeadlightCanPolicy.Command, Integer> ordinals,
-                             String error) {
+        private SchemaResult(
+                boolean success,
+                EnumMap<HeadlightCanPolicy.Command, Integer> ordinals,
+                String error) {
             this.success = success;
             this.ordinals = ordinals;
             this.error = error;
@@ -304,8 +316,7 @@ final class HeadlightCanTransport {
         }
 
         static SchemaResult failed(String error) {
-            return new SchemaResult(false,
-                    new EnumMap<>(HeadlightCanPolicy.Command.class), error);
+            return new SchemaResult(false, new EnumMap<>(HeadlightCanPolicy.Command.class), error);
         }
     }
 }

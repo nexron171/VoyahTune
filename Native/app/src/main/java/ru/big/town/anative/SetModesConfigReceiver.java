@@ -1,12 +1,13 @@
 package ru.big.town.anative;
 
-
 import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.provider.Settings;
 import android.util.Log;
+
+import ru.big.town.common.DockIconStyle;
 
 import java.lang.reflect.Method;
 
@@ -29,19 +30,41 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 String longKey = "steer" + button + "Long";
                 SetModesReceiverDynamic.mirrorSteer(context, intent, shortKey);
                 SetModesReceiverDynamic.mirrorSteer(context, intent, longKey);
-                needsBackService |= SteeringActionSequence.contains(
-                        intent.getStringExtra(shortKey), "system_back");
-                needsBackService |= SteeringActionSequence.contains(
-                        intent.getStringExtra(longKey), "system_back");
+                needsBackService |=
+                        SteeringActionSequence.contains(
+                                intent.getStringExtra(shortKey), "system_back");
+                needsBackService |=
+                        SteeringActionSequence.contains(
+                                intent.getStringExtra(longKey), "system_back");
             }
-            needsBackService |= SteeringActionSequence.contains(intent.getStringExtra("steerVoiceLong"), "voice_assistant");
-            needsBackService |= SteeringActionSequence.contains(intent.getStringExtra("steerVoiceShort"), "voice_assistant");
+            needsBackService |=
+                    SteeringActionSequence.contains(
+                            intent.getStringExtra("steerVoiceLong"), "voice_assistant");
+            needsBackService |=
+                    SteeringActionSequence.contains(
+                            intent.getStringExtra("steerVoiceShort"), "voice_assistant");
             BackButtonService.setSteeringBackEnabled(context, needsBackService);
             Log.i(TAG, "STEER_CONFIG зеркалирован");
         } else if ("ru.big.town.anative.DOCK_CONFIG".equals(action)) {
             SetModesReceiverDynamic.mirrorDock(context, intent, 1);
             SetModesReceiverDynamic.mirrorDock(context, intent, 2);
             SetModesReceiverDynamic.clearLegacyPassengerDock(context);
+            if (ru.big.town.common.InfrastructureProfile.read(context)
+                    == ru.big.town.common.InfrastructureProfile.OD) {
+                for (int slot = 1; slot <= 2; slot++) {
+                    String key = DockIconStyle.configKey(slot);
+                    DockIconStyle style = DockIconStyle.fromValue(intent.getStringExtra(key));
+                    Settings.Global.putString(
+                            context.getContentResolver(), "voyahtune_" + key, style.value);
+                }
+                for (String key :
+                        new String[] {"dockHomeShortVoyahTune", "dockAllAppsShortVoyahTune"}) {
+                    Settings.Global.putString(
+                            context.getContentResolver(),
+                            "voyahtune_" + key,
+                            intent.getBooleanExtra(key, false) ? "1" : "0");
+                }
+            }
             Intent reload = new Intent("ru.big.town.anative.DOCK_RELOAD");
             reload.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             context.sendBroadcast(reload);
@@ -69,8 +92,8 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
 
     private static void applyKeyboardMode(Context context, String requestedMode) {
         String mode = normalizeKeyboardMode(requestedMode);
-        String previous = Settings.Global.getString(
-                context.getContentResolver(), "voyahtune_keyboard_mode");
+        String previous =
+                Settings.Global.getString(context.getContentResolver(), "voyahtune_keyboard_mode");
         String normalizedPrevious = normalizeKeyboardMode(previous);
         if (!Settings.Global.putString(
                 context.getContentResolver(), "voyahtune_keyboard_mode", mode)) {
@@ -84,8 +107,10 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
         // Hooks are eternalized inside qgime. An exact process restart is the only safe way to
         // remove or replace them; load.bin injects at most once into the new Android 11 process.
         try {
-            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-            Method forceStopPackage = ActivityManager.class.getMethod("forceStopPackage", String.class);
+            ActivityManager am =
+                    (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            Method forceStopPackage =
+                    ActivityManager.class.getMethod("forceStopPackage", String.class);
             forceStopPackage.invoke(am, "com.qinggan.app.qgime");
             Log.i(TAG, "KEYBOARD_CONFIG=" + mode + "; Qinggan IME restarted");
         } catch (Exception e) {

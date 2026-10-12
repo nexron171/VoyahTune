@@ -98,10 +98,29 @@ public class VoiceCommandCatalogTest {
     }
 
     @Test
-    public void headlightsHaveThreeDistinctIntents() {
+    public void headlightModesHaveDistinctIntents() {
         assertAction("headlights:on", "ближний свет", "включи ближний свет", "включить фары");
         assertAction("headlights:off", "выключи фары", "отключи ближний свет");
         assertAction("headlights:auto", "фары авто", "включи авто свет");
+        assertAction(
+                "headlights:parking",
+                "габариты",
+                "включи габариты",
+                "включить габариты",
+                "ходовые огни",
+                "включи ходовые огни",
+                "включить ходовые огни",
+                "пожалуйста включите ходовые огни",
+                "огни ходовые включи");
+        for (String phrase :
+                new String[] {
+                    "выключи габариты",
+                    "отключи ходовые огни",
+                    "не включи габариты",
+                    "включи выключи ходовые огни"
+                }) {
+            assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
+        }
     }
 
     @Test

@@ -36,6 +36,8 @@ Java.perform(function () {
     var NAV_SECOND = "com.qinggan.launcher.navigation.NavigationBarSecond";
     var RELOAD_ACT = "ru.big.town.anative.DOCK_RELOAD";
     var OUR_PKG    = "ru.big.town.anative";           // наш VD-хост (SplitHostActivity) для подсветки
+    var CARPLAY_TARGET = "ru.big.town.restoremode/com.shilapi.xcertplay.DiPlayActivity";
+    var CARPLAY_LAUNCHER = "ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
     var RESTORE_PKG = "ru.big.town.restoremode";      // VoyahTune (UI) — открывается долгим тапом по «меню»
 
     var ActivityThread = Java.use("android.app.ActivityThread");
@@ -250,6 +252,9 @@ Java.perform(function () {
         act = cleanJavaString(act);
         return act.indexOf("SplitHostActivity") >= 0
             || act.indexOf("restoremode.MainActivity") >= 0
+            || act === "com.shilapi.xcertplay.DiPlayActivity"
+            || act === "com.shilapi.xcertplay.CarPlayHostActivity"
+            || act === "ru.big.town.restoremode.carplay.CarPlayLauncherActivity"
             || act.indexOf("AdvanceActivity") >= 0
             || act.indexOf("TripHistoryActivity") >= 0;
     }
@@ -370,6 +375,11 @@ Java.perform(function () {
     function isInstalled(pkg) {
         if (pkg === "none") return false;
         try {
+            if (pkg === CARPLAY_TARGET) {
+                var component = Java.use("android.content.ComponentName").$new(RESTORE_PKG, CARPLAY_LAUNCHER);
+                var activity = ctx().getPackageManager().getActivityInfo(component, 0);
+                return !!activity.enabled.value && !!activity.exported.value;
+            }
             var li = ctx().getPackageManager().getLaunchIntentForPackage(pkg);
             return li !== null;
         } catch (e) { return false; }
@@ -389,21 +399,53 @@ Java.perform(function () {
         } catch (e) { return obj; }
     }
 
-    // Drawable иконки приложения: pm.getApplicationIcon → рисуем на Bitmap → масштаб 50x50 → BitmapDrawable.
+    function getDockDrawable(pkg, slot) {
+        var style = cfg("dock" + slot + "Icon");
+        var resourceName = style === "navigation" ? "dock_navigation_icon"
+            : style === "music" ? "dock_music_icon" : null;
+        if (resourceName !== null) {
+            try {
+                var resources = ctx().getPackageManager().getResourcesForApplication(RESTORE_PKG);
+                var resourceId = resources.getIdentifier(resourceName, "drawable", RESTORE_PKG);
+                if (resourceId !== 0) {
+                    return retainDrawable(resources.getDrawable(resourceId, null));
+                }
+            } catch (error) {
+                Log.w(TAG, "[dock] icon override unavailable: " + error);
+            }
+        }
+        return getAppDrawable(pkg);
+    }
+
+    // Dock artwork is independent of launcher and dashboard icons.
     function getAppDrawable(pkg) {
         try {
-            var pm = ctx().getPackageManager();
-            var ai = pm.getApplicationInfo(pkg, 0);
-            var icon = pm.getApplicationIcon(ai);
-            var bmp = Bitmap.createBitmap(icon.getIntrinsicWidth(), icon.getIntrinsicHeight(), BitmapConfig.ARGB_8888.value);
-            var canvas = Canvas.$new(bmp);
+            var packageManager = ctx().getPackageManager();
+            var icon;
+            if (pkg === CARPLAY_TARGET) {
+                var resources = packageManager.getResourcesForApplication(RESTORE_PKG);
+                var resourceId = resources.getIdentifier("carplay_dock_logo", "drawable", RESTORE_PKG);
+                if (resourceId !== 0) {
+                    // The resource includes the OEM dock canvas and transparent padding.
+                    return retainDrawable(resources.getDrawable(resourceId, null));
+                }
+                icon = packageManager.getActivityIcon(
+                    Java.use("android.content.ComponentName").$new(RESTORE_PKG, CARPLAY_LAUNCHER));
+            } else {
+                icon = packageManager.getApplicationIcon(packageManager.getApplicationInfo(pkg, 0));
+            }
+
+            var bitmap = Bitmap.createBitmap(
+                icon.getIntrinsicWidth(), icon.getIntrinsicHeight(), BitmapConfig.ARGB_8888.value);
+            var canvas = Canvas.$new(bitmap);
             icon.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
             icon.draw(canvas);
-            var scaled = Bitmap.createScaledBitmap(bmp, 50, 50, true);
-            var d = BitmapDrawable.$new(ctx().getResources(), scaled);
-            d.setGravity(17);              // Gravity.CENTER
-            d.setBounds(0, 0, 50, 50);
-            return retainDrawable(d);
+
+            var scaled = Bitmap.createScaledBitmap(bitmap, 50, 50, true);
+            var drawable = BitmapDrawable.$new(ctx().getResources(), scaled);
+            drawable.setGravity(17); // Gravity.CENTER
+            drawable.setBounds(0, 0, 50, 50);
+            return retainDrawable(drawable);
         } catch (e) {
             Log.e(TAG, "[dock] getAppDrawable err " + pkg + ": " + e);
             return null;
@@ -411,38 +453,70 @@ Java.perform(function () {
     }
 
     // Открыть VoyahTune (UI RestoreMode) — по долгому тапу «меню».
-    function openVoyahTune() {
+    function openVoyahTune(view) {
         try {
-            var i = Intent.$new();
+            var displayId = 0;
+            if (view) {
+                var display = view.getDisplay();
+                if (display && (display.getDisplayId() === 0 || display.getDisplayId() === 1)) {
+                    displayId = display.getDisplayId();
+                }
+            }
+            var i = Intent.$new(Intent.ACTION_MAIN.value);
+            i.addCategory(Intent.CATEGORY_LAUNCHER.value);
             i.setClassName(RESTORE_PKG, "ru.big.town.restoremode.MainActivity");
-            i.addFlags(0x10000000);   // FLAG_ACTIVITY_NEW_TASK
-            ctx().startActivity(i);
+            // Clear settings above Dashboard instead of merely bringing the previous task forward.
+            i.addFlags(0x10000000 | 0x04000000 | 0x20000000); // NEW_TASK | CLEAR_TOP | SINGLE_TOP
+            var options = Java.use("android.app.ActivityOptions").makeBasic();
+            options.setLaunchDisplayId(displayId);
+            var bundle = options.toBundle();
+            bundle.putInt("android.activity.windowingMode", 1);
+            ctx().startActivity(i, bundle);
             try { Java.use("android.util.Log").i("voyahdock", "menu long-press -> VoyahTune"); } catch (ee) {}
             Log.i(TAG, "[dock] menu long-press -> VoyahTune");
         } catch (e) { Log.e(TAG, "[dock] openVoyahTune err: " + e); }
     }
 
-    // Слушатель долгого тапа «меню» (кнопка «все приложения», последний элемент дока). Регистрируем
-    // один раз лениво. onLongClick → VoyahTune + return true (гасим штатное долгое). Короткий тап не
-    // трогаем — идёт штатно (открытие списка приложений).
-    var menuLC = null;
-    function getMenuLongClick() {
-        if (menuLC !== null) return menuLC;
+    var navigationButtonKeys = {};
+    var invokingStockNavigation = false;
+    var navigationLongClick = null;
+
+    function navigationOpensVoyahTune(key, longPress) {
+        var shortVoyahTune = cfg(key) === "1";
+        return longPress ? !shortVoyahTune : shortVoyahTune;
+    }
+
+    function handleNavigationLongClick(view) {
+        var key = navigationButtonKeys["" + view.getId()];
+        if (!key) return false;
+        if (navigationOpensVoyahTune(key, true)) {
+            openVoyahTune(view);
+        } else {
+            // performClick keeps the OEM listener and screen routing; bypass our short-press hook.
+            invokingStockNavigation = true;
+            try { view.performClick(); }
+            finally { invokingStockNavigation = false; }
+        }
+        return true;
+    }
+
+    function getNavigationLongClick() {
+        if (navigationLongClick !== null) return navigationLongClick;
         try {
             var Listener = Java.registerClass({
-                name: "ru.big.town.dock.MenuLongClick",
+                name: "ru.big.town.dock.NavigationLongClick",
                 implements: [Java.use("android.view.View$OnLongClickListener")],
                 methods: {
                     onLongClick: {
                         returnType: "boolean",
                         argumentTypes: ["android.view.View"],
-                        implementation: function (view) { openVoyahTune(); return true; }
+                        implementation: handleNavigationLongClick
                     }
                 }
             });
-            menuLC = Listener.$new();
-        } catch (e) { Log.e(TAG, "[dock] menuLongClick reg err: " + e); }
-        return menuLC;
+            navigationLongClick = Listener.$new();
+        } catch (error) { Log.e(TAG, "[dock] navigation listener: " + error); }
+        return navigationLongClick;
     }
 
     // Native resolves the configured long-press action. HasSplit supports older saved settings.
@@ -620,21 +694,24 @@ Java.perform(function () {
                 } else {
                     // getAppDrawable uses getApplicationInfo directly. It commonly becomes available
                     // earlier during cold boot than getLaunchIntentForPackage used by the click gate.
-                    var d = getAppDrawable(pkg);
+                    var d = getDockDrawable(pkg, slotIndex + 1);
                     if (d) view.setBackground(d);
                 }
                 view.invalidate();
             }
-            // Долгий тап по «меню» (все приложения, mScreenUpAllAppView) → VoyahTune. Короткий тап НЕ
-            // трогаем — идёт штатно (открытие списка приложений). setOnLongClickListener идемпотентен,
-            // навешиваем на каждом проходе updateIcons (init/theme/reload) — переживает перекраску темы.
             try {
-                var av = dockField(instance, "mScreenUpAllAppView");
-                if (av) {
-                    var lc = getMenuLongClick();
-                    if (lc) { av.setLongClickable(true); av.setOnLongClickListener(lc); }
-                }
-            } catch (e) { Log.e(TAG, "[dock] menu long-press attach err: " + e); }
+                var listener = getNavigationLongClick();
+                var navigation = [
+                    {view: views.home, key: "dockHomeShortVoyahTune"},
+                    {view: views.allApps, key: "dockAllAppsShortVoyahTune"}
+                ];
+                navigation.forEach(function (button) {
+                    if (!button.view || !listener) return;
+                    navigationButtonKeys["" + button.view.getId()] = button.key;
+                    button.view.setLongClickable(true);
+                    button.view.setOnLongClickListener(listener);
+                });
+            } catch (error) { Log.e(TAG, "[dock] navigation attach: " + error); }
             // Долгий тап по слотам 1/2 → открыть назначенный сплит. Регистрируем viewId→slot и вешаем
             // слушатель (идемпотентно, переживает перекраску темы, как и меню-лонгтап выше).
             try {
@@ -794,7 +871,28 @@ Java.perform(function () {
             var packageRefreshTimer = null;
             var FLAG_SYSTEM = 0x00000001;
             var SYNTHETIC_PREFIX = "__voyahtune_allapps__:";
+            // Recognize the old synthetic shortcut so reused OEM lists can discard it.
+            var CARPLAY_ENTRY = RESTORE_PKG + "/ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
+            var ComponentName = Java.use("android.content.ComponentName");
             var resourceTemplate = null;
+            var WeakHashMap = Java.use("java.util.WeakHashMap");
+            var originalAppIconBackgrounds = WeakHashMap.$new();
+            var originalAppIconDrawables = WeakHashMap.$new();
+            var IconDrawable = Java.use("android.graphics.drawable.Drawable");
+
+            function entryPackage(target) {
+                return target === CARPLAY_ENTRY ? RESTORE_PKG : target;
+            }
+
+            function entryComponent(target) {
+                if (target === CARPLAY_ENTRY) {
+                    return ComponentName.$new(RESTORE_PKG, target.substring(target.indexOf("/") + 1));
+                }
+                if (target === RESTORE_PKG) {
+                    return ComponentName.$new(RESTORE_PKG, RESTORE_PKG + ".MainActivity");
+                }
+                return null;
+            }
 
             function packageFromIntent(intent) {
                 if (intent === null) return "";
@@ -825,6 +923,8 @@ Java.perform(function () {
                 startAppIntent.implementation = function (context, intent, screenIdArg) {
                     var screenId = Number(screenIdArg);
                     var pkg = packageFromIntent(intent);
+                    // Preserve the explicit Dashboard/CarPlay entry and the OEM display routing.
+                    if (pkg === RESTORE_PKG) return startAppIntent.call(this, context, intent, screenIdArg);
                     if (returnDockAppToScreen(pkg, screenId)) return;
                     if (isUserFullscreen(pkg) && launchFullscreen(pkg, screenId)) return;
                     return startAppIntent.call(this, context, intent, screenIdArg);
@@ -834,6 +934,7 @@ Java.perform(function () {
                 startAppComponent.implementation = function (context, pkgArg, classArg, screenIdArg) {
                     var pkg = cleanJavaString(pkgArg);
                     var screenId = Number(screenIdArg);
+                    if (pkg === RESTORE_PKG) return startAppComponent.call(this, context, pkgArg, classArg, screenIdArg);
                     if (returnDockAppToScreen(pkg, screenId)) return;
                     if (isUserFullscreen(pkg) && launchFullscreen(pkg, screenId)) return;
                     return startAppComponent.call(this,
@@ -848,8 +949,13 @@ Java.perform(function () {
                         Log.e(TAG, "[allapps] reject non-physical display=" + screenId + " for " + pkg);
                         return false;
                     }
-                    if (isUserFullscreen(pkg)) return launchFullscreen(pkg, screenId);
-                    var intent = pm.getLaunchIntentForPackage(pkg);
+                    var component = entryComponent(pkg);
+                    if (component === null) {
+                        if (isUserFullscreen(pkg)) return launchFullscreen(pkg, screenId);
+                    }
+                    var intent = component !== null
+                            ? Intent.$new("android.intent.action.MAIN").addCategory("android.intent.category.LAUNCHER").setComponent(component)
+                            : pm.getLaunchIntentForPackage(pkg);
                     if (intent === null) return false;
                     intent.addFlags(0x10000000); // FLAG_ACTIVITY_NEW_TASK
                     AppLauncher.startApp(ctx(), intent, screenId);
@@ -886,9 +992,14 @@ Java.perform(function () {
                         var ai = Java.cast(installed.get(i), ApplicationInfo);
                         var pkg = "" + ai.packageName.value;
                         var flags = Number(ai.flags.value);
-                        if ((flags & FLAG_SYSTEM) !== 0 || pkg === "com.qinggan.app.launcher") continue;
+                        if (((flags & FLAG_SYSTEM) !== 0 && pkg !== RESTORE_PKG)
+                                || pkg === "com.qinggan.app.launcher" || !ai.enabled.value) continue;
                         if (pm.getLaunchIntentForPackage(pkg) === null) continue;
                         result.push(pkg);
+                        if (pkg === RESTORE_PKG) {
+                            var carPlayActivity = pm.getActivityInfo(entryComponent(CARPLAY_ENTRY), 0);
+                            if (carPlayActivity.enabled.value && carPlayActivity.exported.value) result.push(CARPLAY_ENTRY);
+                        }
                     } catch (ignored) {}
                 }
                 installedSnapshot = result;
@@ -932,18 +1043,27 @@ Java.perform(function () {
 
             function addMissingAppsImpl(list) {
                 var existing = {};
-                for (var i = 0; i < list.size(); i++) {
+                for (var i = list.size() - 1; i >= 0; i--) {
                     try {
                         var current = Java.cast(list.get(i), AppBean);
-                        existing["pkg:" + current.getPackageName()] = true;
+                        var existingTarget = syntheticPackage(current) || "" + current.getPackageName();
+                        if (existingTarget === CARPLAY_ENTRY && existing["pkg:" + existingTarget]) {
+                            list.remove(i);
+                            continue;
+                        }
+                        existing["pkg:" + existingTarget] = true;
+                        if (existingTarget === RESTORE_PKG) {
+                            current.setSubType(SYNTHETIC_PREFIX + RESTORE_PKG);
+                        }
                     } catch (ignored) {}
                 }
 
                 var apps = snapshotInstalled();
                 var template = null;
                 for (var j = 0; j < apps.length; j++) {
-                    var pkg = apps[j];
-                    if (existing["pkg:" + pkg]) continue;
+                    var target = apps[j];
+                    var pkg = entryPackage(target);
+                    if (existing["pkg:" + target]) continue;
                     try {
                         if (template === null) template = findAppTemplate(list);
                         // На редкой конфигурации passenger OEM-list может быть пустым. Ресурсы обоих
@@ -957,9 +1077,9 @@ Java.perform(function () {
                             return;
                         }
                         var bean = AppBean.$new(template.icon, template.name, pkg);
-                        bean.setSubType(SYNTHETIC_PREFIX + pkg);
+                        bean.setSubType(SYNTHETIC_PREFIX + target);
                         list.add(bean);
-                        existing["pkg:" + pkg] = true;
+                        existing["pkg:" + target] = true;
                     } catch (e) { Log.e(TAG, "[allapps] add " + pkg + ": " + e); }
                 }
             }
@@ -975,6 +1095,7 @@ Java.perform(function () {
                 try {
                     var pkg = "" + bean.getPackageName();
                     var subType = "" + bean.getSubType();
+                    if (pkg === RESTORE_PKG && subType === SYNTHETIC_PREFIX + CARPLAY_ENTRY) return CARPLAY_ENTRY;
                     if (!pkg || subType !== SYNTHETIC_PREFIX + pkg) return null;
                     return pkg;
                 } catch (ignored) {
@@ -985,7 +1106,8 @@ Java.perform(function () {
             function loadIcon(pkg) {
                 var icon = iconCache[pkg];
                 if (!icon) {
-                    icon = pm.getApplicationIcon(pkg);
+                    var component = entryComponent(pkg);
+                    icon = component !== null ? pm.getActivityIcon(component) : pm.getApplicationIcon(pkg);
                     try { icon = Java.retain(icon); } catch (ignored) {}
                     iconCache[pkg] = icon;
                 }
@@ -993,7 +1115,9 @@ Java.perform(function () {
             }
 
             function invalidateIconCache(packageName) {
-                var keys = packageName ? [packageName] : Object.keys(iconCache);
+                var keys = Object.keys(iconCache).filter(function (key) {
+                    return !packageName || entryPackage(key) === packageName;
+                });
                 for (var i = 0; i < keys.length; i++) {
                     var cached = iconCache[keys[i]];
                     if (cached) {
@@ -1006,6 +1130,8 @@ Java.perform(function () {
             function loadLabel(pkg) {
                 // PackageManager label зависит от текущей locale. Не кэшируем его на жизнь launcher,
                 // иначе payload 10001 после смены языка снова нарисует прежнюю подпись.
+                var component = entryComponent(pkg);
+                if (component !== null) return "" + pm.getActivityInfo(component, 0).loadLabel(pm);
                 return "" + pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
             }
 
@@ -1022,6 +1148,18 @@ Java.perform(function () {
                 return (screenId === 0 || screenId === 1) ? screenId : -1;
             }
 
+            function restoreAppIcon(holder) {
+                var iconView = fieldValue(holder, "iconView");
+                if (iconView === null || !originalAppIconBackgrounds.containsKey(iconView)) return;
+                var concreteIconView = runtimeObject(iconView) || iconView;
+                var background = originalAppIconBackgrounds.get(iconView);
+                var drawable = originalAppIconDrawables.get(iconView);
+                concreteIconView.setBackground(background === null ? null : Java.cast(background, IconDrawable));
+                concreteIconView.setImageDrawable(drawable === null ? null : Java.cast(drawable, IconDrawable));
+                originalAppIconBackgrounds.remove(iconView);
+                originalAppIconDrawables.remove(iconView);
+            }
+
             function finishBoundItem(adapter, holder, position) {
                 var bean = beanAt(adapter, position);
                 var pkg = syntheticPackage(bean);
@@ -1031,11 +1169,15 @@ Java.perform(function () {
                 var iconView = fieldValue(holder, "iconView");
                 var nameView = fieldValue(holder, "nameView");
                 if (iconView !== null && icon) {
-                    // Плитка рисует иконку в BACKGROUND у SimpleDraweeView (проверено на живой
-                    // CN-голове: после штатного bind getBackground() = BitmapDrawable, а
-                    // getDrawable() — пустой drawee RootDrawable). setImageDrawable ушёл бы под
-                    // иерархию drawee, и осталась бы placeholder-иконка шаблона.
+                    // OEM variants render in either the background or ImageView drawable. Keep
+                    // our image in the background, hide the template drawable, and restore both
+                    // original layers before this holder is rebound to any OEM item.
                     var concreteIconView = runtimeObject(iconView) || iconView;
+                    if (!originalAppIconBackgrounds.containsKey(iconView)) {
+                        originalAppIconBackgrounds.put(iconView, concreteIconView.getBackground());
+                        originalAppIconDrawables.put(iconView, concreteIconView.getDrawable());
+                    }
+                    concreteIconView.setImageDrawable(null);
                     concreteIconView.setBackground(icon);
                 }
                 if (nameView !== null) nameView.setText(JavaString.$new(label));
@@ -1068,6 +1210,8 @@ Java.perform(function () {
             var bind = Adapter.onBindViewHolder.overload(
                     allAppsAbi.adapter + '$AppViewHolder', 'int');
             bind.implementation = function (holder, position) {
+                try { restoreAppIcon(holder); }
+                catch (e) { Log.e(TAG, "[allapps] restore icon: " + e); }
                 bind.call(this, holder, position);
                 try {
                     finishBoundItem(this, holder, position);
@@ -1081,6 +1225,8 @@ Java.perform(function () {
                         allAppsAbi.adapter + '$AppViewHolder',
                         'int', 'java.util.List');
                 bindPayload.implementation = function (holder, position, payloads) {
+                    try { restoreAppIcon(holder); }
+                    catch (e) { Log.e(TAG, "[allapps] payload restore icon: " + e); }
                     bindPayload.call(this, holder, position, payloads);
                     try {
                         finishBoundItem(this, holder, position);
@@ -1404,10 +1550,18 @@ Java.perform(function () {
         var mainOnClick = NavigationBarMain.onClick.overload('android.view.View');
         mainOnClick.implementation = function (view) {
             var sid = managedScreenId(this, mainFallbackScreen);
-            if (sid !== 0) return mainOnClick.call(this, view);
+            if (sid !== 0 || invokingStockNavigation) return mainOnClick.call(this, view);
             try {
                 var viewId = view.getId();
                 var clickViews = dockViews(this, sid);
+                var navigationKey = clickViews.home && viewId === clickViews.home.getId()
+                    ? "dockHomeShortVoyahTune"
+                    : clickViews.allApps && viewId === clickViews.allApps.getId()
+                        ? "dockAllAppsShortVoyahTune" : null;
+                if (navigationKey && navigationOpensVoyahTune(navigationKey, false)) {
+                    openVoyahTune(view);
+                    return;
+                }
                 if (clickViews.slot1 !== null && viewId === clickViews.slot1.getId()) {
                     var p1 = dockPackage(sid, 1, true);
                     if (isInstalled(p1)) { lastSlot[sid] = 1; launchFreeform(p1, sid); return; }

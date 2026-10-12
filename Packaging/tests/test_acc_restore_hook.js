@@ -74,7 +74,8 @@ function fixture(options = {}) {
             this.values[key] = v;
         }
         getLong(key, fallback = 0) {
-            return this.values[key] ?? fallback;
+            const value = this.values[key] ?? fallback;
+            return { toString: () => String(value) };
         }
         putLong(key, v) {
             this.values[key] = v;
@@ -229,6 +230,10 @@ function fixture(options = {}) {
         result.putInt("protocol", 2);
         result.putInt("acc", scenario.providerAcc);
         result.putLong("revision", scenario.revision);
+        result.putLong("cycle", scenario.cycle);
+        result.putString("energy", scenario.energy);
+        result.putBoolean("forcedEv", !!scenario.forcedEv);
+        result.putBoolean("smartSaveEnabled", !!scenario.smartSaveEnabled);
         result.putString("startup", scenario.startup);
         if (action === "dispatchSettings") {
             const dispatched =
@@ -244,7 +249,7 @@ function fixture(options = {}) {
         }
         if (action === "claim") {
             const claimed =
-                scenario.startup === "pending" && args.getLong("revision") === scenario.revision;
+                scenario.startup === "pending" && String(args.getLong("revision")) === String(scenario.revision);
             result.putBoolean("claimed", claimed);
             if (claimed) scenario.startup = "claimed";
         }
@@ -702,6 +707,59 @@ console.log(
 
 assert.ok(!source.includes("Java.choose("), "Never enumerate the heap of the 32-bit OEM service");
 
+function temporaryEnergy(scenario, mode) {
+    return {
+        IVI_SOC_MODESET: mode,
+        __vt_temporary_energy: true,
+        __vt_energy_revision: scenario.revision,
+        __vt_energy_cycle: scenario.cycle
+    };
+}
+
+{
+    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
+    for (const mode of [2, 4, 2]) {
+        assert.equal(scenario.request(temporaryEnergy(scenario, mode), 10), 0);
+        scenario.execute(scenario.tasks.length - 1);
+        assert.equal(scenario.executed.get("IVI_SOC_MODESET"), mode);
+        assert.equal(scenario.energy, "SREV", "temporary modes cannot replace user intent");
+        assert.equal(scenario.revision, 0);
+        for (const key of ["__vt_temporary_energy", "__vt_energy_revision", "__vt_energy_cycle"]) {
+            assert.equal(scenario.sends.at(-1).vehicle.values[key], undefined);
+        }
+    }
+    scenario.smartSaveEnabled = false;
+    assert.equal(scenario.request(temporaryEnergy(scenario, 2), 10), -1);
+    assert.equal(scenario.request(temporaryEnergy(scenario, 4), 10), 0);
+    scenario.execute(scenario.tasks.length - 1);
+    assert.equal(scenario.executed.get("IVI_SOC_MODESET"), 4);
+}
+
+for (const cancel of [
+    scenario => scenario.request({ IVI_SOC_MODESET: 3, __vt_user: true }, 20),
+    scenario => { scenario.smartSaveEnabled = false; },
+    scenario => { scenario.forcedEv = true; },
+    scenario => { scenario.providerAcc = 0; },
+    scenario => { scenario.cycle++; },
+    scenario => { scenario.queryError = true; }
+]) {
+    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
+    assert.equal(scenario.request(temporaryEnergy(scenario, 2), 10), 0);
+    cancel(scenario);
+    assert.equal(scenario.execute(0), false, "stale queued EV must be cancelled");
+    assert.equal(scenario.executed, undefined);
+}
+
+{
+    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
+    scenario.request(temporaryEnergy(scenario, 2), 20);
+    assert.equal(scenario.energy, "SREV", "only Native can mark a command temporary");
+    scenario.request({ IVI_SOC_MODESET: 3 }, 10);
+    assert.equal(scenario.energy, "REV", "explicit Native selections still persist");
+    assert.equal(scenario.request(temporaryEnergy(scenario, 4), 10), -1);
+}
+console.log("PASS: temporary energy, immediate disable restore and queued command cancellation");
+
 {
     const scenario = fixture({ acc: 2 });
     scenario.startup = "selected"; // durable provider state from VehicleAir or widget, including reattach
@@ -815,3 +873,13 @@ for (const platform of ["H97Y", "H97X"]) {
 console.log(
     "PASS: H97Y/H97X guest reset, late attach, repeated ACC cycles and unsupported platform isolation"
 );
+
+{
+    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
+    assert.equal(scenario.request({ IVI_SOC_MODESET: 4, __vt_auto: true }, 10), 0);
+    scenario.execute(0);
+    assert.equal(scenario.revision, 0, "Drive restoration cannot become a manual choice");
+    assert.equal(scenario.energy, "SREV");
+    assert.equal(scenario.sends.at(-1).vehicle.values.__vt_auto, undefined);
+}
+console.log("PASS: Native Drive restoration preserves explicit mode selection");

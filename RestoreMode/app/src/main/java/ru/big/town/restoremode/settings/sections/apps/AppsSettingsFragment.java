@@ -12,6 +12,8 @@ import android.widget.TextView;
 
 import androidx.lifecycle.ViewModelProvider;
 
+import ru.big.town.common.DockIconStyle;
+import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.DockLongPressAction;
@@ -23,6 +25,7 @@ import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 import ru.big.town.restoremode.settings.core.SettingsSectionLayouts;
 import ru.big.town.restoremode.settings.ui.controls.SettingsChoiceGroup;
+import ru.big.town.restoremode.settings.ui.dialogs.DockIconPicker;
 import ru.big.town.restoremode.settings.ui.dialogs.SettingsAppPicker;
 import ru.big.town.restoremode.settings.ui.layout.SettingsGrid;
 import ru.big.town.restoremode.settings.ui.layout.SettingsPanels;
@@ -40,12 +43,21 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
 
     private Button dockApp1Btn, dockApp2Btn;
     private Button dockSplit1Btn, dockSplit2Btn;
+    private Button dockIcon1Button, dockIcon2Button;
 
     private void initDockOverride() {
         dockApp1Btn = settingView(R.id.buttonDockApp1);
         dockApp2Btn = settingView(R.id.buttonDockApp2);
         dockSplit1Btn = settingView(R.id.buttonDockSplit1);
         dockSplit2Btn = settingView(R.id.buttonDockSplit2);
+        dockIcon1Button = settingView(R.id.buttonDockIcon1);
+        dockIcon2Button = settingView(R.id.buttonDockIcon2);
+        boolean supportsIcons =
+                InfrastructureProfile.read(requireContext()) == InfrastructureProfile.OD;
+        settingView(R.id.dockIconOptions1).setVisibility(supportsIcons ? View.VISIBLE : View.GONE);
+        settingView(R.id.dockIconOptions2).setVisibility(supportsIcons ? View.VISIBLE : View.GONE);
+        dockIcon1Button.setOnClickListener(view -> pickDockIcon(1));
+        dockIcon2Button.setOnClickListener(view -> pickDockIcon(2));
         refreshDockButtons();
         settingView(R.id.settingsResetDock1).setOnClickListener(v -> clearDockApp(1));
         settingView(R.id.settingsResetDock2).setOnClickListener(v -> clearDockApp(2));
@@ -97,11 +109,40 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         SettingsAppPicker.show(
                 requireContext(),
                 "Приложение " + slot + " в доке",
+                true,
                 (packageName, label) -> {
+                    String previousPackage = preferences.getString("dockOverride" + slot, "");
                     preferences
                             .edit()
                             .putString("dockOverride" + slot, packageName)
                             .putString("dockOverride" + slot + "Label", label)
+                            .putString(
+                                    DockIconStyle.preferenceKey(slot),
+                                    packageName.equals(previousPackage)
+                                            ? dockIconStyle(slot).value
+                                            : DockIconStyle.DEFAULT.value)
+                            .apply();
+                    refreshDockButtons();
+                    pushDockConfig();
+                });
+    }
+
+    private DockIconStyle dockIconStyle(int slot) {
+        return DockIconStyle.fromValue(
+                preferences.getString(
+                        DockIconStyle.preferenceKey(slot), DockIconStyle.DEFAULT.value));
+    }
+
+    private void pickDockIcon(int slot) {
+        DockIconPicker.show(
+                requireContext(),
+                slot,
+                preferences.getString("dockOverride" + slot, ""),
+                dockIconStyle(slot),
+                style -> {
+                    preferences
+                            .edit()
+                            .putString(DockIconStyle.preferenceKey(slot), style.value)
                             .apply();
                     refreshDockButtons();
                     pushDockConfig();
@@ -159,6 +200,7 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
                 .edit()
                 .remove("dockOverride" + slot)
                 .remove("dockOverride" + slot + "Label")
+                .remove(DockIconStyle.preferenceKey(slot))
                 .remove("dockOverride" + slot + "LongAction")
                 .remove("dockOverride" + slot + "Split")
                 .remove("dockOverride" + slot + "SplitLabel")
@@ -177,6 +219,16 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         setDockButtonText(dockApp2Btn, 2);
         setDockSplitButton(dockSplit1Btn, 1);
         setDockSplitButton(dockSplit2Btn, 2);
+        setDockIconButton(dockIcon1Button, 1);
+        setDockIconButton(dockIcon2Button, 2);
+    }
+
+    private void setDockIconButton(Button button, int slot) {
+        if (button == null) {
+            return;
+        }
+        button.setText(DockIconPicker.label(dockIconStyle(slot)));
+        button.setEnabled(!preferences.getString("dockOverride" + slot, "").isEmpty());
     }
 
     private void setDockButtonText(Button b, int slot) {
@@ -372,8 +424,7 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
                         return;
                     }
                     int position = (Integer) selected.getTag();
-                    java.util.List<SplitStore.Preset> updatedPresets =
-                            SplitStore.load(preferences);
+                    java.util.List<SplitStore.Preset> updatedPresets = SplitStore.load(preferences);
                     if (presetIndex < updatedPresets.size()
                             && updatedPresets.get(presetIndex).ratio != position) {
                         updatedPresets.get(presetIndex).ratio = position;
@@ -505,6 +556,12 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected void releaseSettingsRow(View row) {
+        if (isDescendant(row, dockIcon1Button)) {
+            dockIcon1Button = null;
+        }
+        if (isDescendant(row, dockIcon2Button)) {
+            dockIcon2Button = null;
+        }
         if (isDescendant(row, dockApp1Btn)) {
             dockApp1Btn = null;
         }

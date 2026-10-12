@@ -26,17 +26,45 @@
         <package android:name="ru.big.town.updater" />
     </queries>
 
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+
     <application
         android:name=".VoyahApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_restoremode"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_restoremode"
+        android:label="@string/voyahtune_app_name"
+        android:roundIcon="@mipmap/ic_restoremode_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.RestoreMode"
         tools:targetApi="31">
+        <activity android:name="com.shilapi.xcertplay.DiPlayActivity"
+            android:label="VoyahTune CarPlay"
+            android:icon="@drawable/carplay_home_logo"
+            android:taskAffinity="${applicationId}.carplay.settings"
+            android:launchMode="singleTask"
+            tools:replace="android:launchMode">
+            <intent-filter tools:node="removeAll" />
+        </activity>
+        <activity android:name=".carplay.CarPlayLauncherActivity"
+            android:exported="true"
+            android:label="VoyahTune CarPlay"
+            android:icon="@drawable/carplay_home_logo"
+            android:taskAffinity="${applicationId}.carplay.launcher"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <receiver android:name="com.shilapi.xcertplay.BootReceiver"
+            android:enabled="false" tools:replace="android:enabled" />
+        <provider android:name="com.shilapi.xcertplay.update.UpdateApkProvider" tools:node="remove" />
+        <receiver android:name="com.shilapi.xcertplay.PhoneBluetoothReceiver" tools:node="remove" />
+        <activity android:name="com.shilapi.xcertplay.AdbClusterActivity" tools:node="remove" />
+        <service android:name="com.shilapi.xcertplay.shared.MyCarAppService" tools:node="remove" />
         <service android:name=".TripLocationService"
             android:exported="true"
             android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE"
@@ -128,6 +156,8 @@
 
         <activity
             android:name=".MainActivity"
+            android:label="@string/voyahtune_app_name"
+            android:icon="@mipmap/ic_restoremode"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

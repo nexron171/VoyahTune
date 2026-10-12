@@ -88,7 +88,7 @@ for REQUIRED in \
         'FC_CURRENT_ID=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE"' \
         'FC_ID_BEFORE=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE"' \
         '[ "$FC_UID" -lt 100000 ]' \
-        '*:*/app_process64|com.pateo.rdsapp:*/app_process32) FC_INJECTOR=$FI' \
+        '*:*/app_process64|com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32) FC_INJECTOR=$FI' \
         'reserve_injection_attempt "$FC_TARGET_ID" "$FC_TARGET_ATTEMPT"' \
         'grep -qF "$APP_CLIENT_READY" "$FC_TRY"' \
         'grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"' \

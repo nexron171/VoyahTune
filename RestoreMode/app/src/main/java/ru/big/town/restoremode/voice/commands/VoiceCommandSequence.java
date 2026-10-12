@@ -1,5 +1,8 @@
 package ru.big.town.restoremode.voice.commands;
 
+import ru.big.town.common.CustomVoiceCommandProtocol;
+import ru.big.town.restoremode.vehicle.steering.SteeringActionStore;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -83,11 +86,33 @@ public final class VoiceCommandSequence {
     }
 
     static boolean isNavigation(String action) {
+        if (CustomVoiceCommandProtocol.isAction(action)) {
+            for (String step :
+                    SteeringActionStore.decode(CustomVoiceCommandProtocol.configuration(action))) {
+                if (isDirectNavigation(step)) return true;
+            }
+            return false;
+        }
+        return isDirectNavigation(action);
+    }
+
+    private static boolean isDirectNavigation(String action) {
         return "system_back".equals(action)
                 || "open_voyahtune".equals(action)
+                || "open_carplay".equals(action)
                 || action.startsWith("app:")
                 || action.startsWith("split:")
                 || action.startsWith("call:");
+    }
+
+    public static long responseBudgetMillis(List<Segment> segments) {
+        long budget = 20000;
+        for (Segment segment : segments) {
+            if (segment.accepted() && CustomVoiceCommandProtocol.isAction(segment.command.action)) {
+                budget += CustomVoiceCommandProtocol.responseTimeoutMillis(segment.command.action);
+            }
+        }
+        return budget;
     }
 
     /** "и" splits only where at least one side already reads as a command on its own. */

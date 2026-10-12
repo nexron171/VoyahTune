@@ -86,6 +86,38 @@ public final class AccPreferencesHarness {
     static void next(Memory p){acc(p,0,1);acc(p,2,1);}
     static void scenario(String name,Runnable test){test.run();System.out.println("PASS: "+name);}
     public static void main(String[] args){
+        scenario("smart Save snapshot retains user intent and honors forced EV",()->{
+            Memory p=new Memory();p.disk.put("energy","SREV");
+            equal(false,action(p,"snapshot",null,1).getBoolean("smartSaveEnabled"));
+            equal(false,action(p,"snapshot",null,1).getBoolean("applySettingsOnDrive"));
+            p.disk.put("applySettingsOnDrive",true);
+            equal(true,action(p,"snapshot",null,1).getBoolean("applySettingsOnDrive"));
+            p.disk.put("smartSaveEnabled",true);acc(p,2,1);
+            Bundle enabled=action(p,"snapshot",null,1);
+            equal(true,enabled.getBoolean("smartSaveEnabled"));
+            equal("SREV",enabled.getString("energy"));
+            p.disk.put("energyRememberLast",false);
+            DriveSelectionPreferences.selectEnergy(p,"REV",false);
+            Bundle manual=action(p,"snapshot",null,1);
+            equal("REV",manual.getString("energy"));
+            equal("SREV",manual.getString("configuredEnergy"));
+            DriveSelectionPreferences.selectEnergy(p,"FORCE_EV",false);
+            equal(true,action(p,"snapshot",null,1).getBoolean("forcedEv"));
+            Bundle pi=DriveSelectionPreferences.hook(p,"snapshot",null,1,false);
+            equal(false,pi.containsKey("smartSaveEnabled"));
+        });
+        scenario("explicit energy choices have an independent durable revision",()->{
+            Memory p=new Memory();acc(p,2,1);
+            equal(0L,action(p,"snapshot",null,1).getLong("energySelectionRevision",-1));
+            DriveSelectionPreferences.selectEnergy(p,"SREV",false);
+            equal(1L,action(p,"snapshot",null,1).getLong("energySelectionRevision",-1));
+            DriveSelectionPreferences.selectRecycle(p,"HIGH");
+            equal(1L,action(p,"snapshot",null,1).getLong("energySelectionRevision",-1));
+            DriveSelectionPreferences.selectEnergy(p,"SREV",true);
+            Memory restarted=new Memory(new HashMap<>(p.disk));
+            equal(2L,action(restarted,"snapshot",null,1).getLong("energySelectionRevision",-1));
+            equal(false,DriveSelectionPreferences.hook(p,"snapshot",null,1,false).containsKey("energySelectionRevision"));
+        });
         scenario("one settings claim per ACC survives provider recreation",()->{
             Memory p=new Memory();Bundle first=acc(p,2,1);
             equal(1L,first.getLong("cycle",-1));equal("pending",first.getString("settingsStartup"));

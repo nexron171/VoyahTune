@@ -1,4 +1,4 @@
-// Client-side repairs for selected applications and station persistence in the exact RdsApp process.
+// Client-side repairs, RdsApp station persistence, and Cluster navigation units.
 //
 // The OEM launcher may start an application with WindowManager.LayoutParams.width fixed to the
 // old 1780 px work area. system_server can already give that window a 1920 px frame and Surface,
@@ -81,6 +81,21 @@ Java.perform(function () {
     }
 
     var packageName = "" + application.getPackageName();
+    if (packageName === "com.qinggan.cluster") {
+        try {
+            var GuidanceFormat = Java.use("com.qinggan.cluster.GuidanceFormat");
+            var distanceUnit = GuidanceFormat.toDistanceUnit.overload("android.content.Context", "int");
+            // Cluster encodes this string and its byte length into the navigation packet itself.
+            distanceUnit.implementation = function (context, distanceMeters) {
+                return distanceMeters < 1000 ? "m" : "km";
+            };
+            console.log("[cluster-units] hook ready v1");
+            console.log(READY_MARKER);
+        } catch (error) {
+            console.log("[cluster-units] hook unavailable: " + error);
+        }
+        return;
+    }
     if (packageName === "com.pateo.rdsapp") {
         // Finish Application.onCreate before resolving RdsManager's singleton. Initializing it
         // from the attach thread too early can see BaseApplication.mContext == null.

@@ -16,6 +16,8 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_forced_ev_suspension_maintenance),
         layout(R.layout.settings_main_launch_apps_suspension),
         layout(R.layout.settings_main_suspension_description),
+        layout(R.layout.settings_main_carplay_heading),
+        dynamic(DynamicContent.CARPLAY_WIDGETS),
         layout(R.layout.settings_main_energy_heading),
         layout(R.layout.settings_main_energy_charge_consumption),
         layout(R.layout.settings_main_energy_trip_tire_pressure),
@@ -103,6 +105,7 @@ public final class SettingsSectionLayouts {
     };
 
     public enum DynamicContent {
+        CARPLAY_WIDGETS,
         APP_WIDGETS,
         DIAL_CARDS,
         SHORTCUTS,
@@ -143,6 +146,8 @@ public final class SettingsSectionLayouts {
                 return CAN;
             case STEERING:
                 return STEERING;
+            case CARPLAY:
+                return new Item[] {layout(R.layout.settings_carplay)};
             case OTHER:
                 return OTHER;
             default:

@@ -1,8 +1,6 @@
 package ru.big.town.anative;
 
-
 import static ru.big.town.anative.SetModesService.MSG_APPLY_DRIVE_MODES_STAR_BUTTON;
-import static ru.big.town.anative.SetModesService.STATE_SHUTDOWN_PREPARE;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -11,8 +9,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import java.util.List;
+import ru.big.town.common.CarPlayTarget;
 import ru.big.town.common.InfrastructureProfile;
+
+import java.util.List;
 
 public class SetModesReceiverDynamic extends BroadcastReceiver {
     public static volatile int repeat = 7;
@@ -44,24 +44,22 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         if ("android.intent.action.KEYCODE_SWC_USER_DEFINE".equals(receivedIntent)
                 && intent.getComponent() == null) {
             Log.i(TAG, "android.intent.action.KEYCODE_SWC_USER_DEFINE");
-            Log.i(TAG, "GlobalVars.buttonDriveMode: " +
-                    GlobalVars.buttonDriveMode);
-            //MainActivity.setCanValues(1, MainActivity.getCustomCommandOff());
-            switch (GlobalVars.buttonDriveMode){
+            Log.i(TAG, "GlobalVars.buttonDriveMode: " + GlobalVars.buttonDriveMode);
+            // MainActivity.setCanValues(1, MainActivity.getCustomCommandOff());
+            switch (GlobalVars.buttonDriveMode) {
                 case 1:
-                    SetModesService.worker(1, 200, MSG_APPLY_DRIVE_MODES_STAR_BUTTON,1);
-                    GlobalVars.buttonDriveMode=2;
+                    SetModesService.worker(1, 200, MSG_APPLY_DRIVE_MODES_STAR_BUTTON, 1);
+                    GlobalVars.buttonDriveMode = 2;
                     break;
                 case 2:
-                    SetModesService.worker(1, 200, MSG_APPLY_DRIVE_MODES_STAR_BUTTON,2);
-                    GlobalVars.buttonDriveMode=1;
+                    SetModesService.worker(1, 200, MSG_APPLY_DRIVE_MODES_STAR_BUTTON, 2);
+                    GlobalVars.buttonDriveMode = 1;
                     break;
-
             }
-
         }
 
-        // Одиночное приложение из дока открываем обычной задачей целевого пакета на физическом дисплее.
+        // Одиночное приложение из дока открываем обычной задачей целевого пакета на физическом
+        // дисплее.
         // Возврат из медиакарточки восстанавливает OEM-карточку и учитывает экран нажатия.
         if ("ru.big.town.anative.OPEN_FREEFORM".equals(receivedIntent)) {
             // Accept only configured dock packages and the two physical application screens.
@@ -112,26 +110,73 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             int slot = intent.getIntExtra("slot", 0);
             if (slot == 1 || slot == 2) {
                 android.content.ContentResolver cr = context.getContentResolver();
-                String action = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "LongAction");
-                String has = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "HasSplit");
+                String action =
+                        android.provider.Settings.Global.getString(
+                                cr, "voyahtune_dock" + slot + "LongAction");
+                String has =
+                        android.provider.Settings.Global.getString(
+                                cr, "voyahtune_dock" + slot + "HasSplit");
                 if ("cluster".equals(action)) {
-                    String pkg = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot);
+                    String pkg =
+                            android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot);
                     ClusterMediaHostActivity.launch(context, pkg);
                 } else if ((action == null || "split".equals(action)) && "1".equals(has)) {
-                    String l = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitL");
-                    String r = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitR");
-                    int ratio = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitRatio"), 1);
-                    int lDpi  = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitLDpi"), 0);
-                    int rDpi  = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitRDpi"), 0);
-                    boolean rsz = "1".equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitResizable"));
-                    float frac = parseFloatSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitFraction"), 0f);
-                    int pIdx = parseIntSafe(android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitPresetIdx"), -1);
-                    String pId = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot + "SplitPresetId");
+                    String l =
+                            android.provider.Settings.Global.getString(
+                                    cr, "voyahtune_dock" + slot + "SplitL");
+                    String r =
+                            android.provider.Settings.Global.getString(
+                                    cr, "voyahtune_dock" + slot + "SplitR");
+                    int ratio =
+                            parseIntSafe(
+                                    android.provider.Settings.Global.getString(
+                                            cr, "voyahtune_dock" + slot + "SplitRatio"),
+                                    1);
+                    int lDpi =
+                            parseIntSafe(
+                                    android.provider.Settings.Global.getString(
+                                            cr, "voyahtune_dock" + slot + "SplitLDpi"),
+                                    0);
+                    int rDpi =
+                            parseIntSafe(
+                                    android.provider.Settings.Global.getString(
+                                            cr, "voyahtune_dock" + slot + "SplitRDpi"),
+                                    0);
+                    boolean rsz =
+                            "1"
+                                    .equals(
+                                            android.provider.Settings.Global.getString(
+                                                    cr,
+                                                    "voyahtune_dock" + slot + "SplitResizable"));
+                    float frac =
+                            parseFloatSafe(
+                                    android.provider.Settings.Global.getString(
+                                            cr, "voyahtune_dock" + slot + "SplitFraction"),
+                                    0f);
+                    int pIdx =
+                            parseIntSafe(
+                                    android.provider.Settings.Global.getString(
+                                            cr, "voyahtune_dock" + slot + "SplitPresetIdx"),
+                                    -1);
+                    String pId =
+                            android.provider.Settings.Global.getString(
+                                    cr, "voyahtune_dock" + slot + "SplitPresetId");
                     ClusterMediaHostActivity.closeForPackage(l);
                     ClusterMediaHostActivity.closeForPackage(r);
-                    SplitHostActivity.launchSplit(context.getApplicationContext(), l, r, ratio, lDpi, rDpi,
-                            rsz, frac, pIdx, pId);
-                    Log.i(TAG, "OPEN_DOCK_SPLIT slot=" + slot + " " + l + "/" + r + " ratio=" + ratio);
+                    SplitHostActivity.launchSplit(
+                            context.getApplicationContext(),
+                            l,
+                            r,
+                            ratio,
+                            lDpi,
+                            rDpi,
+                            rsz,
+                            frac,
+                            pIdx,
+                            pId);
+                    Log.i(
+                            TAG,
+                            "OPEN_DOCK_SPLIT slot=" + slot + " " + l + "/" + r + " ratio=" + ratio);
                 } else {
                     Log.i(TAG, "OPEN_DOCK_SPLIT slot=" + slot + " — сплит не назначен");
                 }
@@ -144,13 +189,13 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             if (isConfiguredSteerAction(context, action)) handleSteerActions(context, action);
             else Log.w(TAG, "STEER_ACTION отклонён: действие не настроено: " + action);
         }
-//        if (receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES")) {
-//            repeat = 3;
-//            isButton = true;
-//        } else {
-//            repeat = 7;
-//            isButton = false;
-//        }
+        //        if (receivedIntent.equals("ru.big.town.anative.APPLY_DRIVE_MODES")) {
+        //            repeat = 3;
+        //            isButton = true;
+        //        } else {
+        //            repeat = 7;
+        //            isButton = false;
+        //        }
         // SCREEN_OFF приходит раньше suspend/wake CAN-эхо и закрывает sync заранее. Это страховка
         // для прошивок, где CarPowerListener периодически пропускает SUSPEND_ENTER.
         if (Intent.ACTION_SCREEN_OFF.equals(receivedIntent) && !explicitComponent) {
@@ -162,8 +207,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         // Fallback-триггер пробуждения через броадкасты. Держим его активным всегда (даже если
         // power-listener работает): при рестарте CarService слушатель может «протухнуть», а этот
         // путь остаётся. Настройки восстанавливаются по сохранённому ACC-циклу.
-        if (!explicitComponent && (Intent.ACTION_SCREEN_ON.equals(receivedIntent) ||
-                "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent))) {
+        if (!explicitComponent
+                && (Intent.ACTION_SCREEN_ON.equals(receivedIntent)
+                        || "com.android.server.jobscheduler.GARAGE_MODE_OFF"
+                                .equals(receivedIntent))) {
             Log.i(TAG, "onReceive ACTION_SCREEN_ON or GARAGE_MODE_OFF");
             ApplyEngine.activateWake(receivedIntent);
             if (Intent.ACTION_SCREEN_ON.equals(receivedIntent) && wakeCallback != null) {
@@ -171,49 +218,61 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
-        if (explicitComponent && (Intent.ACTION_SCREEN_ON.equals(receivedIntent)
-                || Intent.ACTION_SCREEN_OFF.equals(receivedIntent)
-                || "com.android.server.jobscheduler.GARAGE_MODE_OFF".equals(receivedIntent))) {
+        if (explicitComponent
+                && (Intent.ACTION_SCREEN_ON.equals(receivedIntent)
+                        || Intent.ACTION_SCREEN_OFF.equals(receivedIntent)
+                        || "com.android.server.jobscheduler.GARAGE_MODE_OFF"
+                                .equals(receivedIntent))) {
             Log.w(TAG, "ignored explicit power broadcast: " + receivedIntent);
         }
 
-                //throw new UnsupportedOperationException("Not yet implemented");
+        // throw new UnsupportedOperationException("Not yet implemented");
         if (isOrderedBroadcast()) {
             setResultCode(-1);
         }
     }
 
-    /** Записать выбор действия слота в Settings.Global под ключом voyahtune_<slot> (нужен WRITE_SECURE_SETTINGS). */
+    /**
+     * Записать выбор действия слота в Settings.Global под ключом voyahtune_<slot> (нужен
+     * WRITE_SECURE_SETTINGS).
+     */
     static void mirrorSteer(Context ctx, Intent intent, String key) {
         String v = intent.getStringExtra(key);
         if (v == null) v = "none";
         try {
-            android.provider.Settings.Global.putString(ctx.getContentResolver(), "voyahtune_" + key, v);
+            android.provider.Settings.Global.putString(
+                    ctx.getContentResolver(), "voyahtune_" + key, v);
         } catch (Exception e) {
             Log.w(TAG, "mirrorSteer " + key + ": " + e.getMessage());
         }
     }
 
-    /** Записать выбор слота дока в Settings.Global: voyahtune_dock&lt;slot&gt; (pkg) + voyahtune_dock&lt;slot&gt;Dpi (int).
-     *  Нужен WRITE_SECURE_SETTINGS (уже в privapp-whitelist, раз mirrorSteer работает). Читает launcherdock.js. */
+    /**
+     * Записать выбор слота дока в Settings.Global: voyahtune_dock&lt;slot&gt; (pkg) +
+     * voyahtune_dock&lt;slot&gt;Dpi (int). Нужен WRITE_SECURE_SETTINGS (уже в privapp-whitelist,
+     * раз mirrorSteer работает). Читает launcherdock.js.
+     */
     static void mirrorDock(Context ctx, Intent intent, int slot) {
         String pkg = intent.getStringExtra("dock" + slot);
         if (pkg == null || pkg.isEmpty()) pkg = "none";
         int dpi = intent.getIntExtra("dock" + slot + "Dpi", 0);
         try {
             android.content.ContentResolver cr = ctx.getContentResolver();
-            String previousPkg = android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot);
+            String previousPkg =
+                    android.provider.Settings.Global.getString(cr, "voyahtune_dock" + slot);
             if (previousPkg != null && !previousPkg.equals(pkg)) {
                 ClusterMediaHostActivity.closeForPackage(previousPkg);
             }
             android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot, pkg);
-            android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "Dpi", String.valueOf(dpi));
+            android.provider.Settings.Global.putString(
+                    cr, "voyahtune_dock" + slot + "Dpi", String.valueOf(dpi));
             // Per-package DPI остаётся для VD split-панелей: 0 тоже обязательно зеркалируем. Иначе
             // после выбора «Авто» в Settings.Global навсегда оставалось старое ненулевое значение.
             if (!"none".equals(pkg)) {
                 boolean accHooks = InfrastructureProfile.read(ctx).usesAccHooks();
                 if (accHooks) dpi = sanitizeDpi(dpi);
-                android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
+                android.provider.Settings.Global.putString(
+                        cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
                 if (accHooks) updateAppDpiIndex(cr, pkg, dpi);
             }
             // Сплит, открываемый долгим нажатием на слот дока. Флаг HasSplit читает launcherdock.js
@@ -221,23 +280,51 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             boolean hasSplit = intent.getBooleanExtra("dock" + slot + "HasSplit", false);
             String action = intent.getStringExtra("dock" + slot + "LongAction");
             if (action == null) action = hasSplit ? "split" : "none";
-            if ("none".equals(pkg) || !("split".equals(action) || "cluster".equals(action))) action = "none";
+            if ("none".equals(pkg) || !("split".equals(action) || "cluster".equals(action)))
+                action = "none";
             hasSplit = hasSplit && "split".equals(action);
-            android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "LongAction", action);
-            android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "HasSplit", hasSplit ? "1" : "0");
+            android.provider.Settings.Global.putString(
+                    cr, "voyahtune_dock" + slot + "LongAction", action);
+            android.provider.Settings.Global.putString(
+                    cr, "voyahtune_dock" + slot + "HasSplit", hasSplit ? "1" : "0");
             if (hasSplit) {
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitL", nz(intent.getStringExtra("dock" + slot + "SplitL")));
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitR", nz(intent.getStringExtra("dock" + slot + "SplitR")));
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitRatio", String.valueOf(intent.getIntExtra("dock" + slot + "SplitRatio", 1)));
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitLDpi", String.valueOf(intent.getIntExtra("dock" + slot + "SplitLDpi", 0)));
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitRDpi", String.valueOf(intent.getIntExtra("dock" + slot + "SplitRDpi", 0)));
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitResizable",
-                        intent.getBooleanExtra("dock" + slot + "SplitResizable", false) ? "1" : "0");
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitFraction",
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitL",
+                        nz(intent.getStringExtra("dock" + slot + "SplitL")));
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitR",
+                        nz(intent.getStringExtra("dock" + slot + "SplitR")));
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitRatio",
+                        String.valueOf(intent.getIntExtra("dock" + slot + "SplitRatio", 1)));
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitLDpi",
+                        String.valueOf(intent.getIntExtra("dock" + slot + "SplitLDpi", 0)));
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitRDpi",
+                        String.valueOf(intent.getIntExtra("dock" + slot + "SplitRDpi", 0)));
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitResizable",
+                        intent.getBooleanExtra("dock" + slot + "SplitResizable", false)
+                                ? "1"
+                                : "0");
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitFraction",
                         String.valueOf(intent.getFloatExtra("dock" + slot + "SplitFraction", 0f)));
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitPresetIdx",
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitPresetIdx",
                         String.valueOf(intent.getIntExtra("dock" + slot + "SplitPresetIdx", -1)));
-                android.provider.Settings.Global.putString(cr, "voyahtune_dock" + slot + "SplitPresetId",
+                android.provider.Settings.Global.putString(
+                        cr,
+                        "voyahtune_dock" + slot + "SplitPresetId",
                         nz(intent.getStringExtra("dock" + slot + "SplitPresetId")));
             }
         } catch (Exception e) {
@@ -262,7 +349,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
     }
 
-    /** Полный event-driven снимок per-app DPI. Никакого polling: вызывается при изменении и startup/wake. */
+    /**
+     * Полный event-driven снимок per-app DPI. Никакого polling: вызывается при изменении и
+     * startup/wake.
+     */
     static void mirrorAppDpi(Context ctx, Intent intent) {
         String json = intent.getStringExtra("appDpiJson");
         if (json == null) return;
@@ -276,13 +366,13 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 if (!validPackageName(pkg)) continue;
                 int dpi = sanitizeDpi(values.optInt(pkg, 0));
                 if (dpi <= 0) continue;
-                android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + pkg,
-                        String.valueOf(dpi));
+                android.provider.Settings.Global.putString(
+                        cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
                 next.add(pkg);
             }
 
-            String previous = android.provider.Settings.Global.getString(cr,
-                    "voyahtune_dpi_packages");
+            String previous =
+                    android.provider.Settings.Global.getString(cr, "voyahtune_dpi_packages");
             if (previous != null && !previous.isEmpty()) {
                 for (String pkg : previous.split(",")) {
                     if (validPackageName(pkg) && !next.contains(pkg)) {
@@ -296,12 +386,13 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             String changedPkg = intent.getStringExtra("changedPkg");
             if (validPackageName(changedPkg)) {
                 int changedDpi = sanitizeDpi(intent.getIntExtra("changedDpi", 0));
-                android.provider.Settings.Global.putString(cr, "voyahtune_dpi_" + changedPkg,
-                        String.valueOf(changedDpi));
-                if (changedDpi > 0) next.add(changedPkg); else next.remove(changedPkg);
+                android.provider.Settings.Global.putString(
+                        cr, "voyahtune_dpi_" + changedPkg, String.valueOf(changedDpi));
+                if (changedDpi > 0) next.add(changedPkg);
+                else next.remove(changedPkg);
             }
-            android.provider.Settings.Global.putString(cr, "voyahtune_dpi_packages",
-                    android.text.TextUtils.join(",", next));
+            android.provider.Settings.Global.putString(
+                    cr, "voyahtune_dpi_packages", android.text.TextUtils.join(",", next));
         } catch (Exception e) {
             Log.w(TAG, "mirrorAppDpi: " + e.getMessage());
         }
@@ -318,8 +409,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             String current = android.provider.Settings.Global.getString(cr, key);
             boolean valueChanged = !wanted.equals(current);
             if (valueChanged) android.provider.Settings.Global.putString(cr, key, wanted);
-            boolean indexed = InfrastructureProfile.read(ctx).usesAccHooks()
-                    && updateAppDpiIndex(cr, pkg, dpi);
+            boolean indexed =
+                    InfrastructureProfile.read(ctx).usesAccHooks()
+                            && updateAppDpiIndex(cr, pkg, dpi);
             if (!valueChanged && !indexed) return false;
             sendWinReload(ctx);
             return true;
@@ -330,7 +422,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     }
 
     /** Keep launch/dock deltas visible in the full snapshot consumed outside WM callbacks. */
-    private static boolean updateAppDpiIndex(android.content.ContentResolver cr, String pkg, int dpi) {
+    private static boolean updateAppDpiIndex(
+            android.content.ContentResolver cr, String pkg, int dpi) {
         if (!validPackageName(pkg)) return false;
         String previous = android.provider.Settings.Global.getString(cr, "voyahtune_dpi_packages");
         java.util.LinkedHashSet<String> packages = new java.util.LinkedHashSet<>();
@@ -341,33 +434,46 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
         boolean changed = dpi > 0 ? packages.add(pkg) : packages.remove(pkg);
         if (changed) {
-            android.provider.Settings.Global.putString(cr, "voyahtune_dpi_packages",
-                    android.text.TextUtils.join(",", packages));
+            android.provider.Settings.Global.putString(
+                    cr, "voyahtune_dpi_packages", android.text.TextUtils.join(",", packages));
         }
         return changed;
     }
 
     private static boolean validPackageName(String pkg) {
-        return pkg != null && !pkg.isEmpty() && pkg.matches("[A-Za-z0-9_.]+") && pkg.indexOf('.') > 0;
+        return pkg != null
+                && !pkg.isEmpty()
+                && pkg.matches("[A-Za-z0-9_.]+")
+                && pkg.indexOf('.') > 0;
     }
 
     private static int sanitizeDpi(int dpi) {
         return dpi >= 100 && dpi <= 640 ? dpi : 0;
     }
 
-    private static String nz(String s) { return s == null ? "" : s; }
+    private static String nz(String s) {
+        return s == null ? "" : s;
+    }
 
     private static int parseIntSafe(String s, int def) {
-        try { return (s == null || s.isEmpty()) ? def : Integer.parseInt(s.trim()); }
-        catch (Exception e) { return def; }
+        try {
+            return (s == null || s.isEmpty()) ? def : Integer.parseInt(s.trim());
+        } catch (Exception e) {
+            return def;
+        }
     }
 
     private static float parseFloatSafe(String s, float def) {
-        try { return (s == null || s.isEmpty()) ? def : Float.parseFloat(s.trim()); }
-        catch (Exception e) { return def; }
+        try {
+            return (s == null || s.isEmpty()) ? def : Float.parseFloat(s.trim());
+        } catch (Exception e) {
+            return def;
+        }
     }
 
-    /** Публичный launcher bridge принимает только пакет, уже записанный защищённым config-receiver. */
+    /**
+     * Публичный launcher bridge принимает только пакет, уже записанный защищённым config-receiver.
+     */
     private static boolean isConfiguredDockPackage(Context ctx, String pkg) {
         if (pkg == null || pkg.isEmpty()) return false;
         android.content.ContentResolver cr = ctx.getContentResolver();
@@ -375,16 +481,21 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 || pkg.equals(android.provider.Settings.Global.getString(cr, "voyahtune_dock2"));
     }
 
-    /** STEER_ACTION должен совпадать с одним из значений, зеркалированных из подписанного RestoreMode. */
+    /**
+     * STEER_ACTION должен совпадать с одним из значений, зеркалированных из подписанного
+     * RestoreMode.
+     */
     private static boolean isConfiguredSteerAction(Context ctx, String action) {
         if (action == null || action.isEmpty() || "none".equals(action)) return false;
         android.content.ContentResolver cr = ctx.getContentResolver();
         String[] buttons = {"Star", "Dvr", "Voice", "Phone"};
         for (String button : buttons) {
-            if (action.equals(android.provider.Settings.Global.getString(cr,
-                    "voyahtune_steer" + button + "Short"))) return true;
-            if (action.equals(android.provider.Settings.Global.getString(cr,
-                    "voyahtune_steer" + button + "Long"))) return true;
+            if (action.equals(
+                    android.provider.Settings.Global.getString(
+                            cr, "voyahtune_steer" + button + "Short"))) return true;
+            if (action.equals(
+                    android.provider.Settings.Global.getString(
+                            cr, "voyahtune_steer" + button + "Long"))) return true;
         }
         return false;
     }
@@ -393,8 +504,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     private static boolean isConfiguredFullscreenPackage(Context ctx, String pkg) {
         if (pkg == null || pkg.isEmpty()) return false;
         try {
-            String csv = android.provider.Settings.Global.getString(
-                    ctx.getContentResolver(), "voyahtune_fullscreen_apps");
+            String csv =
+                    android.provider.Settings.Global.getString(
+                            ctx.getContentResolver(), "voyahtune_fullscreen_apps");
             return FullscreenPackagePolicy.contains(csv, pkg);
         } catch (Exception e) {
             Log.w(TAG, "fullscreen allowlist unavailable: " + e.getMessage());
@@ -402,30 +514,47 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
     }
 
-    /** Флаг + bounds физического «оконного режима» → Settings.Global.
-     *  Два system_server hook читают их в кэш только при attach/WIN_RELOAD, не на каждом layout.
-     *  extras: on(boolean, опц.), left/top/right/bottom(int, опц., пишем только >=0). */
+    /**
+     * Флаг + bounds физического «оконного режима» → Settings.Global. Два system_server hook читают
+     * их в кэш только при attach/WIN_RELOAD, не на каждом layout. extras: on(boolean, опц.),
+     * left/top/right/bottom(int, опц., пишем только >=0).
+     */
     static void mirrorFreeform(Context ctx, Intent intent) {
         try {
             if (intent.hasExtra("on")) {
-                android.provider.Settings.Global.putString(ctx.getContentResolver(),
-                        "voyahtune_freeform", intent.getBooleanExtra("on", false) ? "1" : "0");
+                android.provider.Settings.Global.putString(
+                        ctx.getContentResolver(),
+                        "voyahtune_freeform",
+                        intent.getBooleanExtra("on", false) ? "1" : "0");
             }
-            int[] v = { intent.getIntExtra("left", -1), intent.getIntExtra("top", -1),
-                        intent.getIntExtra("right", -1), intent.getIntExtra("bottom", -1) };
-            String[] k = { "voyahtune_win_left", "voyahtune_win_top", "voyahtune_win_right", "voyahtune_win_bottom" };
+            int[] v = {
+                intent.getIntExtra("left", -1), intent.getIntExtra("top", -1),
+                intent.getIntExtra("right", -1), intent.getIntExtra("bottom", -1)
+            };
+            String[] k = {
+                "voyahtune_win_left",
+                "voyahtune_win_top",
+                "voyahtune_win_right",
+                "voyahtune_win_bottom"
+            };
             for (int i = 0; i < 4; i++) {
-                if (v[i] >= 0) android.provider.Settings.Global.putString(ctx.getContentResolver(), k[i], String.valueOf(v[i]));
+                if (v[i] >= 0)
+                    android.provider.Settings.Global.putString(
+                            ctx.getContentResolver(), k[i], String.valueOf(v[i]));
             }
-        } catch (Exception e) { Log.w(TAG, "mirrorFreeform: " + e.getMessage()); }
+        } catch (Exception e) {
+            Log.w(TAG, "mirrorFreeform: " + e.getMessage());
+        }
     }
 
     /**
      * Авторитетный список пакетов, которые обходят physical window clamp. Один и тот же CSV читают
-     * system_server/launcher hooks, а NativePrefs держит accessibility-сервис для forced Назад/Home.
+     * system_server/launcher hooks, а NativePrefs держит accessibility-сервис для forced
+     * Назад/Home.
      */
     static void mirrorFullscreenApps(Context ctx, Intent intent) {
-        String packages = FullscreenPackagePolicy.normalizeCsv(intent.getStringExtra("packagesCsv"));
+        String packages =
+                FullscreenPackagePolicy.normalizeCsv(intent.getStringExtra("packagesCsv"));
         try {
             android.provider.Settings.Global.putString(
                     ctx.getContentResolver(), "voyahtune_fullscreen_apps", packages);
@@ -435,40 +564,56 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         }
     }
 
-    /** Разбудить vd_bypass config receiver: перечитать кэш и переустановить WindowManager hooks.
-     *  Receiver гейтится WRITE_SECURE_SETTINGS. */
+    /**
+     * Разбудить vd_bypass config receiver: перечитать кэш и переустановить WindowManager hooks.
+     * Receiver гейтится WRITE_SECURE_SETTINGS.
+     */
     static void sendWinReload(Context ctx) {
         try {
             Intent w = new Intent("ru.big.town.anative.WIN_RELOAD");
             w.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             ctx.sendBroadcast(w);
-        } catch (Exception e) { Log.w(TAG, "sendWinReload: " + e.getMessage()); }
+        } catch (Exception e) {
+            Log.w(TAG, "sendWinReload: " + e.getMessage());
+        }
     }
 
     private static final Handler STEER_SEQUENCE_HANDLER = new Handler(Looper.getMainLooper());
 
-    /** Декодирует назначение и запускает каждый пункт только после terminal callback предыдущего. */
+    /**
+     * Декодирует назначение и запускает каждый пункт только после terminal callback предыдущего.
+     */
     private static void handleSteerActions(Context ctx, String configured) {
         List<String> actions = SteeringActionSequence.decode(configured);
         if (actions.isEmpty()) return;
         Log.i(TAG, "STEER_ACTION sequence start, count=" + actions.size());
-        runSteerAction(ctx.getApplicationContext(), actions, 0);
+        runConfiguredActions(ctx, actions, accepted -> {});
     }
 
-    private static void runSteerAction(Context ctx, List<String> actions, int index) {
-        if (index >= actions.size()) {
-            Log.i(TAG, "STEER_ACTION sequence complete, count=" + actions.size());
-            return;
-        }
-        String action = actions.get(index);
-        Log.i(TAG, "STEER_ACTION sequence " + (index + 1) + "/" + actions.size() + ": " + action);
-        handleSteerAction(ctx, action, () -> STEER_SEQUENCE_HANDLER.post(
-                () -> runSteerAction(ctx, actions, index + 1)));
+    static void runConfiguredActions(
+            Context context,
+            List<String> actions,
+            java.util.function.Consumer<Boolean> completion) {
+        Context application = context.getApplicationContext();
+        OrderedActionSequence.run(
+                actions,
+                (action, terminal) -> handleSteerAction(application, action, terminal),
+                task -> STEER_SEQUENCE_HANDLER.post(task),
+                accepted -> {
+                    Log.i(
+                            TAG,
+                            "Configured sequence complete, count="
+                                    + actions.size()
+                                    + " accepted="
+                                    + accepted);
+                    completion.accept(accepted);
+                });
     }
 
     /**
-     * Один пункт последовательности. Асинхронные CAN-действия вызывают completion через exactly-once
-     * terminal callback ApplyEngine; синхронные действия завершаются сразу после вызова API.
+     * Один пункт последовательности. Асинхронные CAN-действия вызывают completion через
+     * exactly-once terminal callback ApplyEngine; синхронные действия завершаются сразу после
+     * вызова API.
      */
     static void handleSteerAction(Context ctx, String action, Runnable completion) {
         if (action == null || action.isEmpty()) {
@@ -491,15 +636,29 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             toggleHeadlights(ctx, completion);
         } else if ("toggle_headlights_auto".equals(action)) {
             toggleHeadlightsAuto(ctx, completion);
+        } else if (action.startsWith("headlights:")) {
+            HeadlightCommandController.select(ctx, action, sent -> completeSteerAction(completion));
         } else if ("wash".equals(action)) {
             SetModesService.requestWashAction(ctx, completion);
         } else if (action.startsWith("can:")) {
             sendCustomCan(action, completion);
         } else {
             try {
-                if ("voice_assistant".equals(action)) {
-                    Intent voice = new Intent().setClassName("ru.big.town.restoremode", "ru.big.town.restoremode.VoiceActivity");
-                    voice.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                if (ru.big.town.common.CarPlayVehicleProtocol.SIRI_ACTION.equals(action)) {
+                    ctx.sendBroadcast(
+                            new Intent(ru.big.town.common.CarPlayVehicleProtocol.SIRI_BROADCAST)
+                                    .setPackage("ru.big.town.restoremode"),
+                            ru.big.town.common.CarPlayVehicleProtocol.PERMISSION);
+                } else if ("voice_assistant".equals(action)) {
+                    Intent voice =
+                            new Intent()
+                                    .setClassName(
+                                            "ru.big.town.restoremode",
+                                            "ru.big.town.restoremode.VoiceActivity");
+                    voice.addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK
+                                    | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                     android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
                     options.setLaunchDisplayId(0);
                     android.os.Bundle voiceOptions = options.toBundle();
@@ -508,7 +667,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 } else if ("system_back".equals(action)) {
                     BackButtonService.performBack(ctx);
                 } else if (action.startsWith("app:")) {
-                    // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный сплит.
+                    // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный
+                    // сплит.
                     openFreeformApp(ctx, action.substring("app:".length()));
                     Log.i(TAG, "STEER_ACTION → приложение " + action.substring("app:".length()));
                 } else if (action.startsWith("split:")) {
@@ -519,6 +679,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     call.putExtra("dial_number", number);
                     ctx.sendBroadcast(call);
                     Log.i(TAG, "STEER_ACTION → вызов номера " + number);
+                } else if ("open_carplay".equals(action)) {
+                    openCarPlay(ctx);
                 } else if ("open_voyahtune".equals(action)) {
                     openVoyahTune(ctx);
                 } else {
@@ -531,7 +693,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     }
 
     private static void launchSteerSplit(Context ctx, String action) {
-        // Backward-compatible строка: split:<L>,<R>,<ratio>,<lDpi>,<rDpi>[,<resizable>,<fraction>,<presetId>].
+        // Backward-compatible строка:
+        // split:<L>,<R>,<ratio>,<lDpi>,<rDpi>[,<resizable>,<fraction>,<presetId>].
         String[] p = action.substring("split:".length()).split(",");
         if (p.length >= 3) {
             try {
@@ -541,12 +704,38 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 boolean resizable = p.length > 5 && "1".equals(p[5].trim());
                 float fraction = p.length > 6 ? parseFloatSafe(p[6], 0f) : 0f;
                 String presetId = p.length > 7 ? p[7].trim() : "";
-                SplitHostActivity.launchSplit(ctx.getApplicationContext(), p[0].trim(), p[1].trim(),
-                        ratio, lDpi, rDpi, resizable, fraction, -1, presetId);
+                SplitHostActivity.launchSplit(
+                        ctx.getApplicationContext(),
+                        p[0].trim(),
+                        p[1].trim(),
+                        ratio,
+                        lDpi,
+                        rDpi,
+                        resizable,
+                        fraction,
+                        -1,
+                        presetId);
                 Log.i(TAG, "STEER_ACTION → сплит " + p[0] + "/" + p[1] + " ratio=" + ratio);
             } catch (Exception e) {
                 Log.w(TAG, "STEER_ACTION split parse: " + e.getMessage());
             }
+        }
+    }
+
+    private static void openCarPlay(Context context) {
+        try {
+            // The launcher delegates to Native's existing widget/fullscreen task transfer.
+            Intent intent =
+                    new Intent(Intent.ACTION_MAIN)
+                            .setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.LAUNCHER)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(0);
+            android.os.Bundle launchOptions = options.toBundle();
+            launchOptions.putInt("android.activity.windowingMode", 1);
+            context.startActivity(intent, launchOptions);
+        } catch (Exception error) {
+            Log.w(TAG, "Cannot open CarPlay from steering action", error);
         }
     }
 
@@ -572,10 +761,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             completeSteerAction(completion);
             return;
         }
-        ApplyEngine.postUserCommand("steer custom CAN", () -> {
-            boolean sent = MainActivity.setCanValues(1, new byte[][] {frame}, "steering custom CAN");
-            Log.i(TAG, "STEER_ACTION custom CAN: " + (sent ? "sent" : "failed"));
-        }, completion);
+        ApplyEngine.postUserCommand(
+                "steer custom CAN",
+                () -> {
+                    boolean sent =
+                            MainActivity.setCanValues(
+                                    1, new byte[][] {frame}, "steering custom CAN");
+                    Log.i(TAG, "STEER_ACTION custom CAN: " + (sent ? "sent" : "failed"));
+                },
+                completion);
     }
 
     private static void completeSteerAction(Runnable completion) {
@@ -593,61 +787,92 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         Context app = context.getApplicationContext();
         ClusterMediaHostActivity.closeForPackage(pkg);
         SplitHostActivity.closeActiveHost();
-        AppDisplayLauncher.launch(app, pkg, displayId,
-                isConfiguredFullscreenPackage(app, pkg), () -> true,
-                () -> android.widget.Toast.makeText(app, "Не удалось открыть приложение",
-                        android.widget.Toast.LENGTH_LONG).show());
+        AppDisplayLauncher.launch(
+                app,
+                pkg,
+                displayId,
+                isConfiguredFullscreenPackage(app, pkg),
+                () -> true,
+                () ->
+                        android.widget.Toast.makeText(
+                                        app,
+                                        "Не удалось открыть приложение",
+                                        android.widget.Toast.LENGTH_LONG)
+                                .show());
     }
 
     /** Cycle the vehicle state; only remember-last opt-in updates the saved UI selection. */
     private static void cycleMode(Context ctx, String csv, String modeKey, Runnable completion) {
         final Context app = ctx.getApplicationContext();
-        // Пользовательский выбор должен идти ПОСЛЕ уже запущенного wake-restore, а не параллельно с ним:
+        // Пользовательский выбор должен идти ПОСЛЕ уже запущенного wake-restore, а не параллельно с
+        // ним:
         // иначе restore успевал отправить старый snapshot поверх только что выбранного режима.
-        ApplyEngine.postUserCommand("steer " + modeKey, () -> {
-            String cur = MainActivity.currentVehicleMode(app, modeKey);
-            String next = SteeringActionPolicy.nextMode(csv, cur);
-            if (next == null) return;
-            boolean sent = "driveMode".equals(modeKey)
-                    ? MainActivity.sendDriveModeCommand(app, next)
-                    : "energy".equals(modeKey)
-                            ? MainActivity.sendEnergyModeCommand(app, next)
-                            : MainActivity.sendRecuperationModeCommand(app, next);
-            if (!sent) {
-                Log.w(TAG, "STEER_ACTION " + modeKey + ": CAN failed, selection not persisted");
-                return;
-            }
-            ApplyEngine.noteVehicleMode(modeKey, next);
-            MainActivity.persistExplicitMode(app, modeKey, next);
-            Log.i(TAG, "STEER_ACTION " + modeKey + ": набор=" + csv
-                    + " тек=" + cur + " → " + next);
-        }, completion);
+        ApplyEngine.postUserCommand(
+                "steer " + modeKey,
+                () -> {
+                    String cur = MainActivity.currentVehicleMode(app, modeKey);
+                    String next = SteeringActionPolicy.nextMode(csv, cur);
+                    if (next == null) return;
+                    boolean sent =
+                            "driveMode".equals(modeKey)
+                                    ? MainActivity.sendDriveModeCommand(app, next)
+                                    : "energy".equals(modeKey)
+                                            ? MainActivity.sendEnergyModeCommand(app, next)
+                                            : MainActivity.sendRecuperationModeCommand(app, next);
+                    if (!sent) {
+                        Log.w(
+                                TAG,
+                                "STEER_ACTION "
+                                        + modeKey
+                                        + ": CAN failed, selection not persisted");
+                        return;
+                    }
+                    ApplyEngine.noteVehicleMode(modeKey, next);
+                    MainActivity.persistExplicitMode(app, modeKey, next);
+                    Log.i(
+                            TAG,
+                            "STEER_ACTION "
+                                    + modeKey
+                                    + ": набор="
+                                    + csv
+                                    + " тек="
+                                    + cur
+                                    + " → "
+                                    + next);
+                },
+                completion);
     }
 
-    /** Переключить бинарную настройку относительно сохранённого значения, применить CAN и сохранить новый state. */
+    /**
+     * Переключить бинарную настройку относительно сохранённого значения, применить CAN и сохранить
+     * новый state.
+     */
     private static void toggleSetting(Context ctx, String key, Runnable completion) {
         final Context app = ctx.getApplicationContext();
-        ApplyEngine.postUserCommand("steer " + key, () -> {
-            boolean current = MainActivity.currentSavedToggle(app, key);
-            boolean next = !current;
-            boolean sent;
-            if ("forcedEv".equals(key)) {
-                sent = MainActivity.sendForcedEvCommand(next);
-            } else if ("suspensionMaintenance".equals(key)) {
-                sent = MainActivity.sendSuspensionMaintenanceCommand(app, next);
-            } else if ("disablePedestrianSound".equals(key)) {
-                // В pref хранится инвертированная семантика: true = звук выключен.
-                sent = MainActivity.sendPedestrianSoundCommand(next);
-            } else {
-                return;
-            }
-            if (!sent) {
-                Log.w(TAG, "STEER_ACTION " + key + ": CAN failed, toggle not persisted");
-                return;
-            }
-            MainActivity.persistSavedToggle(app, key, next);
-            Log.i(TAG, "STEER_ACTION " + key + ": " + current + " → " + next);
-        }, completion);
+        ApplyEngine.postUserCommand(
+                "steer " + key,
+                () -> {
+                    boolean current = MainActivity.currentSavedToggle(app, key);
+                    boolean next = !current;
+                    boolean sent;
+                    if ("forcedEv".equals(key)) {
+                        sent = MainActivity.sendForcedEvCommand(next);
+                    } else if ("suspensionMaintenance".equals(key)) {
+                        sent = MainActivity.sendSuspensionMaintenanceCommand(app, next);
+                    } else if ("disablePedestrianSound".equals(key)) {
+                        // В pref хранится инвертированная семантика: true = звук выключен.
+                        sent = MainActivity.sendPedestrianSoundCommand(next);
+                    } else {
+                        return;
+                    }
+                    if (!sent) {
+                        Log.w(TAG, "STEER_ACTION " + key + ": CAN failed, toggle not persisted");
+                        return;
+                    }
+                    MainActivity.persistSavedToggle(app, key, next);
+                    Log.i(TAG, "STEER_ACTION " + key + ": " + current + " → " + next);
+                },
+                completion);
     }
 
     /** Переключить фары теми же CAN-командами, которые использует автоматический свет. */
@@ -655,23 +880,26 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         final Context app = ctx.getApplicationContext();
         final ManualAutoGate.Ticket manualTicket =
                 LightSensorService.reserveManualHeadlightCommand();
-        ApplyEngine.postUserCommand("steer headlights", () -> {
-            android.content.SharedPreferences prefs =
-                    app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
-            boolean current = prefs.getBoolean("steerHeadlightsOn", false);
-            boolean next = !current;
-            boolean previousManualAuto = LightSensorService.setManualAutoOverride(false);
-            if (!MainActivity.setHeadlights(app, next)) {
-                LightSensorService.setManualAutoOverride(previousManualAuto);
-                Log.w(TAG, "STEER_ACTION headlights: CAN failed, state not persisted");
-                return;
-            }
-            prefs.edit().putBoolean("steerHeadlightsOn", next).apply();
-            Log.i(TAG, "STEER_ACTION headlights: " + current + " → " + next);
-        }, () -> {
-            manualTicket.close();
-            completeSteerAction(completion);
-        });
+        ApplyEngine.postUserCommand(
+                "steer headlights",
+                () -> {
+                    android.content.SharedPreferences prefs =
+                            app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+                    boolean current = prefs.getBoolean("steerHeadlightsOn", false);
+                    boolean next = !current;
+                    boolean previousManualAuto = LightSensorService.setManualAutoOverride(false);
+                    if (!MainActivity.setHeadlights(app, next)) {
+                        LightSensorService.setManualAutoOverride(previousManualAuto);
+                        Log.w(TAG, "STEER_ACTION headlights: CAN failed, state not persisted");
+                        return;
+                    }
+                    prefs.edit().putBoolean("steerHeadlightsOn", next).apply();
+                    Log.i(TAG, "STEER_ACTION headlights: " + current + " → " + next);
+                },
+                () -> {
+                    manualTicket.close();
+                    completeSteerAction(completion);
+                });
     }
 
     /** Независимая пара для руля: штатный Auto ↔ ручной ближний свет. */
@@ -679,26 +907,34 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         final Context app = ctx.getApplicationContext();
         final ManualAutoGate.Ticket manualTicket =
                 LightSensorService.reserveManualHeadlightCommand();
-        ApplyEngine.postUserCommand("steer headlights auto/low", () -> {
-            android.content.SharedPreferences prefs =
-                    app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
-            boolean currentLowBeam = prefs.getBoolean("steerHeadlightsAutoLowBeam", false);
-            boolean nextLowBeam = !currentLowBeam;
-            boolean previousManualAuto =
-                    LightSensorService.setManualAutoOverride(!nextLowBeam);
-            if (!MainActivity.setHeadlightsAutoLow(app, nextLowBeam)) {
-                LightSensorService.setManualAutoOverride(previousManualAuto);
-                Log.w(TAG, "STEER_ACTION headlights auto/low: CAN failed, state not persisted");
-                return;
-            }
-            prefs.edit().putBoolean("steerHeadlightsAutoLowBeam", nextLowBeam).apply();
-            Log.i(TAG, "STEER_ACTION headlights auto/low: "
-                    + (currentLowBeam ? "LOW_BEAM" : "AUTO") + " → "
-                    + (nextLowBeam ? "LOW_BEAM" : "AUTO"));
-        }, () -> {
-            manualTicket.close();
-            completeSteerAction(completion);
-        });
+        ApplyEngine.postUserCommand(
+                "steer headlights auto/low",
+                () -> {
+                    android.content.SharedPreferences prefs =
+                            app.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+                    boolean currentLowBeam = prefs.getBoolean("steerHeadlightsAutoLowBeam", false);
+                    boolean nextLowBeam = !currentLowBeam;
+                    boolean previousManualAuto =
+                            LightSensorService.setManualAutoOverride(!nextLowBeam);
+                    if (!MainActivity.setHeadlightsAutoLow(app, nextLowBeam)) {
+                        LightSensorService.setManualAutoOverride(previousManualAuto);
+                        Log.w(
+                                TAG,
+                                "STEER_ACTION headlights auto/low: CAN failed, state not"
+                                        + " persisted");
+                        return;
+                    }
+                    prefs.edit().putBoolean("steerHeadlightsAutoLowBeam", nextLowBeam).apply();
+                    Log.i(
+                            TAG,
+                            "STEER_ACTION headlights auto/low: "
+                                    + (currentLowBeam ? "LOW_BEAM" : "AUTO")
+                                    + " → "
+                                    + (nextLowBeam ? "LOW_BEAM" : "AUTO"));
+                },
+                () -> {
+                    manualTicket.close();
+                    completeSteerAction(completion);
+                });
     }
-
 }

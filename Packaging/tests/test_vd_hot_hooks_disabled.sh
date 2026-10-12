@@ -46,8 +46,8 @@ if grep -Fq 'scheduleFreeformHotAttach(0, "config reload");' "$VD"; then
     fail "startup config immediately reattaches WindowManager hot hooks"
 fi
 config_replay_function=$(awk '
-    /^    function scheduleFreeformConfigReplay\(reason\) \{/ { capture = 1 }
-    /^    function scheduleFreeformHotAttach\(delayMs, reason\) \{/ { capture = 0 }
+    /^[[:space:]]*function scheduleFreeformConfigReplay\(reason\) \{/ { capture = 1 }
+    /^[[:space:]]*function scheduleFreeformHotAttach\(delayMs, reason\) \{/ { capture = 0 }
     capture { print }
 ' "$VD")
 [ -n "$config_replay_function" ] || fail "cannot inspect config replay implementation"
@@ -266,7 +266,7 @@ grep -Fq 'var driverTemperature = dockField(instance, "mScreenUpTemperatureConte
     || fail "driver compact dock does not resolve its temperature overlay"
 grep -Fq 'setDockViewVisibility(driverTemperature, compact ? 8 : 0' "$DOCK" \
     || fail "compact dock does not hide the stock driver climate overlay"
-grep -Fq 'isConfiguredFullscreenPackage(app, pkg), () -> true,' "$RECEIVER" \
+tr -d '[:space:]' < "$RECEIVER" | grep -Fq 'isConfiguredFullscreenPackage(app,pkg),()->true,' \
     || fail "launch-time windowing mode is not scoped to the saved fullscreen allowlist"
 grep -Fq 'if (fullscreen) bundle.putInt' "$APP_LAUNCHER" \
     || fail "ordinary single-app launches no longer remain normal WindowManager-clamped tasks"
@@ -298,9 +298,9 @@ if grep -Fq 'closeActiveSplit' "$RECEIVER" "$HOST"; then
 fi
 grep -Fq 'static boolean closeActiveHost()' "$HOST" \
     || fail "physical launch cannot retire an active VD split"
-grep -Fq 'OemVirtualDisplay.create(displayManager, name, pane.w, pane.h, dpi, surface, true)' "$HOST" \
+tr -d '[:space:]' < "$HOST" | grep -Fq 'OemVirtualDisplay.create(displayManager,name,pane.w,pane.h,dpi,surface,true)' \
     || fail "trusted split VD must use the shared display contract"
-grep -Fq 'OemVirtualDisplay.create(displayManager, name, pane.w, pane.h, dpi, surface, false)' "$HOST" \
+tr -d '[:space:]' < "$HOST" | grep -Fq 'OemVirtualDisplay.create(displayManager,name,pane.w,pane.h,dpi,surface,false)' \
     || fail "fallback split VD must use the shared display contract"
 grep -Fq 'DESTROY_CONTENT_ON_REMOVAL = 1 << 8' "$VD_FACTORY" \
     || fail "shared VD factory changed Android 11 destroy-content flag"

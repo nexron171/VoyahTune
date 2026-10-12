@@ -9,7 +9,7 @@ import android.util.AttributeSet;
 import android.view.View;
 
 import ru.big.town.restoremode.R;
-import ru.big.town.restoremode.widgets.energy.EnergyWidgetView;
+import ru.big.town.restoremode.widgets.energy.CarAppearance;
 
 /** Explicitly labelled examples, never used as vehicle readings. */
 public final class SettingsWidgetPreview extends View
@@ -43,7 +43,7 @@ public final class SettingsWidgetPreview extends View
 
     @Override
     public void onSharedPreferenceChanged(SharedPreferences p, String key) {
-        if ("energyCarColor".equals(key)) {
+        if (CarAppearance.COLOR_PREFERENCE.equals(key)) {
             invalidate();
         }
     }
@@ -72,8 +72,8 @@ public final class SettingsWidgetPreview extends View
                 0xff161a20, 0xffe5e5df, 0xff555d66, 0xff28483c, 0xff67394c, 0xff8c7459, 0xff88928c
             };
             int selected =
-                    java.util.Arrays.asList(EnergyWidgetView.COLORS)
-                            .indexOf(prefs.getString("energyCarColor", "burgundy"));
+                    java.util.Arrays.asList(CarAppearance.COLORS)
+                            .indexOf(CarAppearance.savedColor(prefs));
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(colors[Math.max(0, selected)]);
             c.drawRoundRect(71, 8, 117, 84, 17, 17, paint);

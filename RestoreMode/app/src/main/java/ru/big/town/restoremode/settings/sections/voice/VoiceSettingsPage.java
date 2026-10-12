@@ -19,6 +19,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.button.MaterialButton;
 
+import ru.big.town.common.CustomVoiceCommandProtocol;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.VoiceActivity;
 import ru.big.town.restoremode.VoiceWarmupService;
@@ -83,12 +84,14 @@ public final class VoiceSettingsPage {
     private final java.util.function.BiConsumer<String[], Integer> requestPermissions;
     private final SettingsList viewport;
     private final SettingsComponents components;
+    private final VoiceCustomCommandsSection customCommands;
     private final ExecutorService catalogWorker = Executors.newSingleThreadExecutor();
     private final Map<String, VoiceCommandCatalog.Command> commandsByAction = new LinkedHashMap<>();
     private final Map<String, LinkedHashSet<String>> phrasesByAction = new LinkedHashMap<>();
     private boolean catalogLoading;
     private boolean catalogLoaded;
     private boolean closed;
+    private int catalogRevision;
 
     VoiceSettingsPage(
             AppCompatActivity activity,
@@ -100,6 +103,15 @@ public final class VoiceSettingsPage {
         this.preferences = preferences;
         this.requestPermissions = requestPermissions;
         components = new SettingsComponents(activity);
+        customCommands =
+                new VoiceCustomCommandsSection(
+                        activity,
+                        preferences,
+                        () -> {
+                            catalogRevision++;
+                            catalogLoaded = false;
+                            refresh();
+                        });
     }
 
     void refresh() {
@@ -118,12 +130,15 @@ public final class VoiceSettingsPage {
         addRow(rows, "activation", this::createActivationCard);
         addRow(rows, "audioHeading", () -> components.heading("Звук и распознавание"));
         addRow(rows, "audio", this::createAudioAndTrialCards);
+        addRow(rows, "customHeading", () -> components.heading("Собственные голосовые команды"));
+        addRow(rows, "customCommands", customCommands::create);
         addRow(rows, "commandsHeading", () -> components.heading("Примеры голосовых команд"));
         for (VoiceCommandGroups.Group group : VoiceCommandGroups.Group.values()) {
             List<String> actions = new ArrayList<>();
             for (Map.Entry<String, VoiceCommandCatalog.Command> entry :
                     commandsByAction.entrySet()) {
                 if (VoiceCommandGroups.forAction(entry.getValue().action).contains(group)) {
+                    if (CustomVoiceCommandProtocol.isAction(entry.getValue().action)) continue;
                     actions.add(entry.getKey());
                 }
             }
@@ -163,12 +178,18 @@ public final class VoiceSettingsPage {
             return;
         }
         catalogLoading = true;
+        int revision = catalogRevision;
         catalogWorker.execute(
                 () -> {
                     List<VoiceCommandCatalog.Command> catalog = VoiceCommands.load(activity);
                     activity.runOnUiThread(
                             () -> {
                                 if (closed) {
+                                    return;
+                                }
+                                if (revision != catalogRevision) {
+                                    catalogLoading = false;
+                                    loadCatalog();
                                     return;
                                 }
                                 commandsByAction.clear();
@@ -219,6 +240,23 @@ public final class VoiceSettingsPage {
                         saveEnabled(checked);
                     }
                 });
+        TextView siriHint = components.text(siriPressHint(), 16, 0xffb2d3fb);
+        siriHint.setVisibility(
+                preferences.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false)
+                        ? View.VISIBLE
+                        : View.GONE);
+        Switch siri = new SettingsToggle(activity);
+        siri.setContentDescription("Включить Siri в CarPlay");
+        siri.setChecked(preferences.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false));
+        siri.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    preferences
+                            .edit()
+                            .putBoolean(VoiceSteeringPolicy.SIRI_ENABLED, checked)
+                            .apply();
+                    siriHint.setVisibility(checked ? View.VISIBLE : View.GONE);
+                    SplitConfigSync.pushSteering(activity, preferences);
+                });
         SettingsChoiceGroup press = new SettingsChoiceGroup(activity, null);
         int shortPressId = View.generateViewId();
         int longPressId = View.generateViewId();
@@ -246,6 +284,7 @@ public final class VoiceSettingsPage {
                                             : VoiceSteeringPolicy.LONG)
                             .apply();
                     SplitConfigSync.pushSteering(activity, preferences);
+                    siriHint.setText(siriPressHint());
                 });
         Switch shortcut = new SettingsToggle(activity);
         shortcut.setContentDescription("Ярлык «Голосовая команда» на главном экране");
@@ -265,6 +304,11 @@ public final class VoiceSettingsPage {
                                 "Прежние действия выбранного нажатия сохраняются.",
                                 press),
                         components.row(
+                                "Включить Siri в CarPlay",
+                                "Работает при подключённом iPhone.",
+                                siri),
+                        siriHint,
+                        components.row(
                                 "Ярлык «Голосовая команда»",
                                 "Показывать на главном экране.",
                                 shortcut));
@@ -273,6 +317,17 @@ public final class VoiceSettingsPage {
         spacing.topMargin = dp(22);
         card.setLayoutParams(spacing);
         return card;
+    }
+
+    private String siriPressHint() {
+        boolean assistantShort =
+                VoiceSteeringPolicy.SHORT.equals(
+                        VoiceSteeringPolicy.normalize(
+                                preferences.getString(
+                                        VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG)));
+        return "Siri: "
+                + (assistantShort ? "долгое" : "короткое")
+                + " нажатие голосовой кнопки на руле. Прежние действия этого нажатия сохраняются.";
     }
 
     private View createAudioAndTrialCards() {

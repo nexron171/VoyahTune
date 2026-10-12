@@ -14,6 +14,19 @@ RESTORE_LAYOUT="$REPO_ROOT/RestoreMode/app/src/main/res/layout/tile_power_hold.x
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 require_fixed() { grep -Fq -- "$2" "$1" || fail "missing '$2' in $1"; }
+require_compact_source() {
+    python3 - "$1" "$2" <<'PY_CHECK'
+import re
+import sys
+from pathlib import Path
+
+source = re.sub(r"\s+", "", Path(sys.argv[1]).read_text())
+expected = re.sub(r"\s+", "", sys.argv[2])
+if expected not in source:
+    sys.exit(f"FAIL: missing source fragment {sys.argv[2]!r} in {sys.argv[1]}")
+PY_CHECK
+}
+
 forbid_fixed() {
     if grep -Fq -- "$2" "$1"; then
         fail "forbidden '$2' remains in $1"
@@ -60,7 +73,7 @@ require_fixed "$TRACKER" 'seedLoader.load(epoch,'
 require_fixed "$TRACKER" 'seedRevision != liveRevision'
 require_fixed "$TRACKER" 'scheduler.postDelayed(timeout, ACTIVATION_TIMEOUT_MS)'
 require_fixed "$TRACKER" 'case CONNECTION_LOST:'
-require_fixed "$HUB" 'router.dispatch(CanBusEvent.connectionLost('
+require_compact_source "$HUB" 'router.dispatch(CanBusEvent.connectionLost('
 forbid_fixed "$TRACKER" 'TX_QUERY_VEHICLE_STATE'
 forbid_fixed "$TRACKER" 'TX_ADD_CALLBACK'
 forbid_fixed "$TRACKER" 'TX_REMOVE_CALLBACK'
@@ -90,7 +103,7 @@ forbid_fixed "$SERVICE" 'restorePowerHold'
 # switch feedback instead of treating Binder acceptance as ACTIVE.
 require_fixed "$SERVICE" 'ACTION_REQUEST_POWER_HOLD_STATUS'
 require_fixed "$SERVICE" 'ACTION_POWER_HOLD_STATUS_UPDATE'
-require_fixed "$SERVICE" 'tracker.beginActivation(requestGeneration -> {'
+require_compact_source "$SERVICE" 'tracker.beginActivation(requestGeneration -> {'
 require_fixed "$SERVICE" 'tracker.finishActivation('
 require_fixed "$SERVICE" 'update.setPackage(RESTOREMODE_PKG);'
 require_fixed "$SERVICE" 'sendBroadcast(update, BIND_PERMISSION);'

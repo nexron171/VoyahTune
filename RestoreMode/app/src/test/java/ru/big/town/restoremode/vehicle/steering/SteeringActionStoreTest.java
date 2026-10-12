@@ -35,5 +35,6 @@ public class SteeringActionStoreTest {
     public void noneAndBrokenSequenceAreEmpty() {
         assertTrue(SteeringActionStore.decode("none").isEmpty());
         assertTrue(SteeringActionStore.decode("steer-actions-v1:9:short").isEmpty());
+        assertTrue(SteeringActionStore.decode("steer-actions-v1:2147483647:short").isEmpty());
     }
 }

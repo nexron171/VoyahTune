@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.CarPlayTarget;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -19,6 +21,15 @@ final class SplitHostTaskSnapshot {
             this.taskId = taskId;
             this.packageName = packageName;
             this.displayId = displayId;
+        }
+
+        static TaskRecord fromComponent(
+                int taskId, String packageName, String activityName, Integer displayId) {
+            String target =
+                    CarPlayTarget.matches(CarPlayTarget.ID, packageName, activityName)
+                            ? CarPlayTarget.ID
+                            : packageName;
+            return new TaskRecord(taskId, target, displayId);
         }
     }
 
@@ -53,8 +64,7 @@ final class SplitHostTaskSnapshot {
     }
 
     static SplitHostTaskSnapshot known(List<TaskRecord> tasks) {
-        return new SplitHostTaskSnapshot(true,
-                tasks == null ? Collections.emptyList() : tasks);
+        return new SplitHostTaskSnapshot(true, tasks == null ? Collections.emptyList() : tasks);
     }
 
     /**

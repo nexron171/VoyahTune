@@ -11,9 +11,11 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.util.Log;
 
+import ru.big.town.common.CarPlayTarget;
+
 import java.lang.reflect.Method;
-import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -29,6 +31,7 @@ final class AppDisplayLauncher {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final Map<String, Long> GENERATIONS = new HashMap<>();
     private static final Handler WORKER;
+
     static {
         HandlerThread thread = new HandlerThread("voyah-display-launch");
         thread.start();
@@ -50,36 +53,63 @@ final class AppDisplayLauncher {
         return GENERATIONS.getOrDefault(pkg, 0L) == generation;
     }
 
-    static void launch(Context context, String pkg, int displayId, boolean fullscreen,
-                       BooleanSupplier valid, Runnable onFailure) {
-        Context app = context.getApplicationContext();
+    static void launch(
+            Context context,
+            String pkg,
+            int displayId,
+            boolean fullscreen,
+            BooleanSupplier valid,
+            Runnable onFailure) {
         long generation = next(pkg);
+        if (CarPlayTarget.isCarPlay(pkg) && (displayId == 0 || displayId == 1)) {
+            SplitHostActivity.launchSingle(
+                    context,
+                    pkg,
+                    0,
+                    displayId,
+                    () -> current(pkg, generation) && valid.getAsBoolean());
+            return;
+        }
+        Context app = context.getApplicationContext();
         WORKER.post(() -> prepare(app, pkg, displayId, fullscreen, generation, valid, onFailure));
     }
 
-    private static void prepare(Context app, String pkg, int displayId, boolean fullscreen,
-                                long generation, BooleanSupplier valid, Runnable onFailure) {
+    private static void prepare(
+            Context app,
+            String pkg,
+            int displayId,
+            boolean fullscreen,
+            long generation,
+            BooleanSupplier valid,
+            Runnable onFailure) {
         if (!current(pkg, generation)) return;
         try {
-            Intent intent = app.getPackageManager().getLaunchIntentForPackage(pkg);
+            Intent intent = CarPlayTarget.launchIntent(app, pkg, displayId);
             if (intent == null) throw new IllegalStateException("No launcher for " + pkg);
             ActivityManager am = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
             List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(100);
             if (tasks == null) throw new IllegalStateException("Task list unavailable");
             List<SplitHostTaskSnapshot.TaskRecord> snapshot = new ArrayList<>();
             for (ActivityManager.RunningTaskInfo task : tasks) {
-                ComponentName component = task.baseActivity != null ? task.baseActivity : task.topActivity;
-                if (component == null || !pkg.equals(component.getPackageName())) continue;
+                ComponentName component =
+                        task.baseActivity != null ? task.baseActivity : task.topActivity;
+                if (component == null
+                        || !CarPlayTarget.matches(
+                                pkg, component.getPackageName(), component.getClassName()))
+                    continue;
                 int oldDisplay = task.getClass().getField("displayId").getInt(task);
                 snapshot.add(new SplitHostTaskSnapshot.TaskRecord(task.taskId, pkg, oldDisplay));
             }
             Set<Integer> retiring = AppDisplayTaskPlan.retiring(snapshot, pkg, displayId);
-            // Задача уходит с виртуального дисплея (это дисплей embedded-виджета главного экрана):
-            // просим хост снять виджет, иначе тот останется с мёртвым Surface — чёрным квадратом.
-            for (SplitHostTaskSnapshot.TaskRecord task : snapshot) {
-                if (retiring.contains(task.taskId) && task.displayId != null && task.displayId > 1) {
-                    SetModesService.notifyEmbeddedTaskLeft(app, pkg);
-                    break;
+            boolean clearWidgetHost = CarPlayTarget.isCarPlay(pkg) && displayId <= 1;
+            if (!CarPlayTarget.isCarPlay(pkg)) {
+                for (SplitHostTaskSnapshot.TaskRecord task : snapshot) {
+                    if (retiring.contains(task.taskId)
+                            && task.displayId != null
+                            && task.displayId > 1) {
+                        clearWidgetHost = true;
+                        break;
+                    }
                 }
             }
             Object service = null;
@@ -87,25 +117,48 @@ final class AppDisplayLauncher {
             for (int taskId : retiring) {
                 if (!current(pkg, generation)) return;
                 if (service == null) {
-                    service = Class.forName("android.app.ActivityTaskManager")
-                            .getMethod("getService").invoke(null);
+                    service =
+                            Class.forName("android.app.ActivityTaskManager")
+                                    .getMethod("getService")
+                                    .invoke(null);
                     remove = service.getClass().getMethod("removeTask", int.class);
                 }
                 Object removed = remove.invoke(service, taskId);
-                if (Boolean.FALSE.equals(removed)) throw new IllegalStateException("Cannot retire task " + taskId);
+                if (Boolean.FALSE.equals(removed))
+                    throw new IllegalStateException("Cannot retire task " + taskId);
             }
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            awaitRemoval(app, am, pkg, displayId, fullscreen, generation, intent,
-                    retiring, 0, valid, onFailure);
+            awaitRemoval(
+                    app,
+                    am,
+                    pkg,
+                    displayId,
+                    fullscreen,
+                    generation,
+                    intent,
+                    retiring,
+                    clearWidgetHost,
+                    0,
+                    valid,
+                    onFailure);
         } catch (Exception e) {
             failed(pkg, generation, valid, onFailure, e);
         }
     }
 
-    private static void awaitRemoval(Context app, ActivityManager am, String pkg, int displayId,
-                                     boolean fullscreen, long generation, Intent intent,
-                                     Set<Integer> retiring, int attempt,
-                                     BooleanSupplier valid, Runnable onFailure) {
+    private static void awaitRemoval(
+            Context app,
+            ActivityManager am,
+            String pkg,
+            int displayId,
+            boolean fullscreen,
+            long generation,
+            Intent intent,
+            Set<Integer> retiring,
+            boolean clearWidgetHost,
+            int attempt,
+            BooleanSupplier valid,
+            Runnable onFailure) {
         if (!current(pkg, generation)) return;
         try {
             if (!retiring.isEmpty()) {
@@ -113,35 +166,79 @@ final class AppDisplayLauncher {
                 if (tasks == null) throw new IllegalStateException("Task list unavailable");
                 boolean remains = false;
                 for (ActivityManager.RunningTaskInfo task : tasks) {
-                    if (retiring.contains(task.taskId)) { remains = true; break; }
+                    if (retiring.contains(task.taskId)) {
+                        remains = true;
+                        break;
+                    }
                 }
                 if (remains) {
                     if (attempt >= 20) throw new IllegalStateException("Task teardown timed out");
-                    WORKER.postDelayed(() -> awaitRemoval(app, am, pkg, displayId, fullscreen,
-                            generation, intent, retiring, attempt + 1, valid, onFailure), 100);
+                    WORKER.postDelayed(
+                            () ->
+                                    awaitRemoval(
+                                            app,
+                                            am,
+                                            pkg,
+                                            displayId,
+                                            fullscreen,
+                                            generation,
+                                            intent,
+                                            retiring,
+                                            clearWidgetHost,
+                                            attempt + 1,
+                                            valid,
+                                            onFailure),
+                            100);
                     return;
                 }
             }
-            MAIN.post(() -> {
-                if (!current(pkg, generation) || !valid.getAsBoolean()) return;
-                try {
-                    ActivityOptions options = ActivityOptions.makeBasic();
-                    options.setLaunchDisplayId(displayId);
-                    Bundle bundle = options.toBundle();
-                    if (fullscreen) bundle.putInt("android.activity.windowingMode", 1);
-                    DockLaunchGuard.arm(app, displayId, pkg);
-                    app.startActivity(intent, bundle);
-                    Log.i(TAG, "launched pkg=" + pkg + " display=" + displayId);
-                } catch (Exception e) { failed(pkg, generation, valid, onFailure, e); }
-            });
-        } catch (Exception e) { failed(pkg, generation, valid, onFailure, e); }
+            MAIN.post(
+                    () -> {
+                        if (!current(pkg, generation) || !valid.getAsBoolean()) return;
+                        try {
+                            // Release the old widget only after task removal has completed.
+                            if (clearWidgetHost
+                                    || (CarPlayTarget.isCarPlay(pkg)
+                                            && SplitHostActivity.ownsCarPlayDisplay(displayId))) {
+                                SetModesService.notifyEmbeddedTaskLeft(app, pkg);
+                            }
+                            if (CarPlayTarget.isCarPlay(pkg)) {
+                                SplitHostActivity.closeFullscreenCarPlayHostExcept(displayId);
+                                int physicalDisplay =
+                                        SplitHostActivity.physicalCarPlayHostDisplay(displayId);
+                                if (physicalDisplay == 0 || physicalDisplay == 1) {
+                                    intent.putExtra(
+                                            CarPlayTarget.EXTRA_HOST_DISPLAY_ID, physicalDisplay);
+                                }
+                            }
+                            ActivityOptions options = ActivityOptions.makeBasic();
+                            options.setLaunchDisplayId(displayId);
+                            Bundle bundle = options.toBundle();
+                            if (fullscreen) bundle.putInt("android.activity.windowingMode", 1);
+                            if (!CarPlayTarget.isCarPlay(pkg))
+                                DockLaunchGuard.arm(app, displayId, pkg);
+                            app.startActivity(intent, bundle);
+                            Log.i(TAG, "launched pkg=" + pkg + " display=" + displayId);
+                        } catch (Exception e) {
+                            failed(pkg, generation, valid, onFailure, e);
+                        }
+                    });
+        } catch (Exception e) {
+            failed(pkg, generation, valid, onFailure, e);
+        }
     }
 
-    private static void failed(String pkg, long generation, BooleanSupplier valid,
-                               Runnable onFailure, Exception error) {
+    private static void failed(
+            String pkg,
+            long generation,
+            BooleanSupplier valid,
+            Runnable onFailure,
+            Exception error) {
         Log.w(TAG, "launch failed: " + pkg, error);
-        MAIN.post(() -> {
-            if (current(pkg, generation) && valid.getAsBoolean() && onFailure != null) onFailure.run();
-        });
+        MAIN.post(
+                () -> {
+                    if (current(pkg, generation) && valid.getAsBoolean() && onFailure != null)
+                        onFailure.run();
+                });
     }
 }

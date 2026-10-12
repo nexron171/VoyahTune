@@ -24,7 +24,7 @@ pub(super) fn choose(
 ) -> Result<Option<Release>> {
     for release in catalog.ota_releases().filter(|release| {
         Infrastructure::from_version(&release.version).is_ok_and(|value| value == infrastructure)
-            && release.channel == "stable"
+            && (infrastructure == Infrastructure::Od || release.channel == "stable")
             && (!same_version || release.version == installed)
     }) {
         let compatibility = ota::verify(release)
@@ -76,6 +76,41 @@ mod tests {
         );
         assert!(
             choose(&catalog(), "4.2.0-od", true, Infrastructure::Od, |_| {})
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn od_catalog_includes_beta_and_can_reinstall_it() {
+        let mut catalog = catalog();
+        catalog.releases[0].version = "4.1.0-beta-od".into();
+        catalog.releases[0].channel = "prerelease".into();
+        catalog.releases[0].minimum_ota_version = Some("4.0.0".into());
+        catalog.validate().unwrap();
+        let selected = choose(&catalog, "4.0.0-od", false, Infrastructure::Od, |_| {})
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.version, "4.1.0-beta-od");
+        let same = choose(&catalog, "4.1.0-beta-od", true, Infrastructure::Od, |_| {})
+            .unwrap()
+            .unwrap();
+        assert_eq!(same.version, "4.1.0-beta-od");
+        assert!(
+            choose(&catalog, "4.1.0-od", false, Infrastructure::Od, |_| {})
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn pi_still_excludes_prereleases() {
+        let mut catalog = catalog();
+        catalog.releases[0].version = "4.1.0-beta-pi".into();
+        catalog.releases[0].channel = "prerelease".into();
+        catalog.validate().unwrap();
+        assert!(
+            choose(&catalog, "4.0.0-pi", false, Infrastructure::Pi, |_| {})
                 .unwrap()
                 .is_none()
         );

@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.CustomVoiceCommandProtocol;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -10,7 +12,10 @@ final class SteeringActionSequence {
 
     private SteeringActionSequence() {}
 
-    /** Legacy single ids remain valid while RestoreMode migrates each edited slot to the list format. */
+    /**
+     * Legacy single ids remain valid while RestoreMode migrates each edited slot to the list
+     * format.
+     */
     static List<String> decode(String stored) {
         if (stored == null || stored.isEmpty() || "none".equals(stored)) {
             return new ArrayList<>();
@@ -32,7 +37,7 @@ final class SteeringActionSequence {
             }
             int start = separator + 1;
             int end = start + length;
-            if (length <= 0 || end > stored.length()) return new ArrayList<>();
+            if (length <= 0 || length > stored.length() - start) return new ArrayList<>();
             String action = stored.substring(start, end);
             if (!"none".equals(action)) actions.add(action);
             position = end;
@@ -42,6 +47,18 @@ final class SteeringActionSequence {
 
     static boolean contains(String stored, String target) {
         return target != null && decode(stored).contains(target);
+    }
+
+    static List<String> decodeCustomVoice(String action) {
+        String configuration = CustomVoiceCommandProtocol.configuration(action);
+        List<String> actions = decode(configuration);
+        if (actions.size() > CustomVoiceCommandProtocol.MAX_ACTIONS) return new ArrayList<>();
+        for (String item : actions) {
+            if (CustomVoiceCommandProtocol.isAction(item) || "voice_assistant".equals(item)) {
+                return new ArrayList<>();
+            }
+        }
+        return actions;
     }
 
     /** Returns one exact 10-byte CAN frame or null for a malformed/non-CAN action. */

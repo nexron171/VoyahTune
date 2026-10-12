@@ -1,47 +1,96 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
+<ru.big.town.restoremode.settings.ui.layout.SettingsGrid
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="@drawable/settings_card"
-    android:padding="25dp"
-    android:layout_marginTop="16dp">
-    <ru.big.town.restoremode.settings.ui.layout.SettingsRow
+    android:layout_marginTop="16dp"
+    app:settingsColumns="2">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="top"
+        android:background="@drawable/settings_card"
+        android:padding="25dp">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="16dp"
+            android:text="Три режима топлива"
+            android:textSize="24sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false" />
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/checkBox34"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track"
+            android:contentDescription="Три режима топлива" />
+    </LinearLayout>
+        <LinearLayout
+            android:id="@+id/smartSaveRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/settings_card"
+            android:padding="25dp">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="14dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Умный Save режим"
+                    android:textSize="24sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+                <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+                    android:id="@+id/switchSmartSave"
+                    android:layout_width="58dp"
+                    android:layout_height="32dp"
+                    android:checked="false"
+                    android:thumb="@drawable/switch_thumb"
+                    android:track="@drawable/switch_track" />
+            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Умный режим позволяет глушить двигатель на маленькой скорости и при остановках, если заряд батареи не менее -5% от целевого уровня, если заряд опустился ниже 5% от целевого, то двигатель будет работать постоянно, пока не наберет целевой уровень"
+                android:textSize="18sp"
+                android:textColor="#a9b3c5"
+                android:includeFontPadding="false" />
+        </LinearLayout>
+    <LinearLayout
+        android:id="@+id/driveEntryRestoreRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingVertical="18dp">
-        <LinearLayout
+        android:background="@drawable/settings_card"
+        android:padding="25dp">
+        <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_weight="1">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Раскладка кнопок энергии"
-                android:textSize="22sp"
-                android:textColor="#f3f5fa"
-                android:includeFontPadding="false" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Штатный вариант панели выбора режима."
-                android:textSize="17sp"
-                android:textColor="#9aaac0"
-                android:includeFontPadding="false"
-                android:layout_marginTop="7dp"
-                android:lineSpacingMultiplier="1.45" />
-        </LinearLayout>
-        <CheckBox
-            android:id="@+id/checkBox34"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:text="3 кнопки"
-            android:textColor="@color/settings_muted"
-            android:textSize="@dimen/settings_body_size"
-            android:contentDescription="Изменить раскладку кнопок энергии" />
-    </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
-</LinearLayout>
+            android:layout_weight="1"
+            android:layout_marginEnd="16dp"
+            android:text="Применение настроек при переводе в D"
+            android:textSize="24sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false" />
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchDriveEntryRestore"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:checked="false"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </LinearLayout>
+</ru.big.town.restoremode.settings.ui.layout.SettingsGrid>

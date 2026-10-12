@@ -200,6 +200,23 @@ Java.perform(function () {
                 outgoing.putInt("HUM_ENERGY_PTREGEN_LEVL", targets.recycle);
             if (targets.energy !== null) outgoing.putInt("IVI_SOC_MODESET", targets.energy);
         }
+        function temporaryEnergyAllowed(request) {
+            var snapshot = hook(
+                ActivityThread.currentApplication().getContentResolver(),
+                "snapshot"
+            );
+            var mode = request.getInt("IVI_SOC_MODESET", -1);
+            return (
+                snapshot.getInt("acc", -1) === 2 &&
+                String(snapshot.getString("energy")) === "SREV" &&
+                !snapshot.getBoolean("forcedEv", false) &&
+                String(snapshot.getLong("revision")) ===
+                    String(request.getLong("__vt_energy_revision", -1)) &&
+                String(snapshot.getLong("cycle")) ===
+                    String(request.getLong("__vt_energy_cycle", -1)) &&
+                (mode === 4 || (mode === 2 && snapshot.getBoolean("smartSaveEnabled", false)))
+            );
+        }
         install(taskInit, function (outer, component) {
             var result = taskInit.call(this, outer, component);
             var requestMetadata = sending.get();
@@ -209,10 +226,20 @@ Java.perform(function () {
         });
         install(taskSend, function (values) {
             lock.lock();
+            var oldSending = sending.get();
             try {
                 var raw = taskMeta.remove(this);
                 if (raw !== null) {
                     var requestMetadata = Java.cast(raw, Bundle);
+                    if (requestMetadata.getBoolean("__vt_temporary_energy", false)) {
+                        try {
+                            if (!temporaryEnergyAllowed(requestMetadata)) return false;
+                        } catch (error) {
+                            log("temporary energy cancelled: " + error);
+                            return false;
+                        }
+                        sending.set(requestMetadata);
+                    }
                     log(
                         "mode task origin=" +
                             (requestMetadata.getBoolean("automatic") ? "automatic" : "user")
@@ -223,6 +250,8 @@ Java.perform(function () {
                     log("mode task send result=" + result + " (not physical confirmation)");
                 return result;
             } finally {
+                if (oldSending === null) sending.remove();
+                else sending.set(oldSending);
                 lock.unlock();
             }
         });
@@ -334,7 +363,7 @@ Java.perform(function () {
                 var nativeCaller = trusted("ru.big.town.anative");
                 var stockCaller = trusted("com.qinggan.app.vehiclesetting");
                 if (vehicle !== null) {
-                    var taggedAuto = stockCaller && vehicle.getBoolean("__vt_auto", false);
+                    var taggedAuto = (stockCaller || nativeCaller) && vehicle.getBoolean("__vt_auto", false);
                     var taggedUser = stockCaller && vehicle.getBoolean("__vt_user", false);
                     var startup = sending.get() !== null;
                     var guest =
@@ -354,7 +383,20 @@ Java.perform(function () {
                     outgoing = Bundle.$new(vehicle);
                     outgoing.remove("__vt_auto");
                     outgoing.remove("__vt_user");
-                    if (automatic) {
+                    outgoing.remove("__vt_temporary_energy");
+                    outgoing.remove("__vt_energy_revision");
+                    outgoing.remove("__vt_energy_cycle");
+                    if (nativeCaller && vehicle.getBoolean("__vt_temporary_energy", false)) {
+                        try {
+                            if (!temporaryEnergyAllowed(vehicle)) return -1;
+                            var temporaryMetadata = Bundle.$new(vehicle);
+                            temporaryMetadata.putBoolean("automatic", true);
+                            sending.set(temporaryMetadata);
+                        } catch (error) {
+                            log("temporary energy rejected: " + error);
+                            return -1;
+                        }
+                    } else if (automatic) {
                         try {
                             var requestMetadata = metadata(this, true);
                             var targets = selectedTargets(this.contentResolver.value);
@@ -421,8 +463,13 @@ Java.perform(function () {
             }
             lock.lock();
             try {
+                var pending = sending.get();
+                var temporary =
+                    pending !== null &&
+                    Java.cast(pending, Bundle).getBoolean("__vt_temporary_energy", false);
                 if (
                     state === null &&
+                    !temporary &&
                     trusted("ru.big.town.anative") &&
                     (String(vehicle) === "DRIVING_MODE_SET" ||
                         String(vehicle) === "IVI_SOC_MODESET")

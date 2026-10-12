@@ -58,9 +58,9 @@
     cached?: CachedPayload;
   };
   const releaseRows = $derived.by(() => {
-    const stable = catalog?.catalog.releases || [];
+    const releases = catalog?.catalog.releases || [];
     const cached = catalog?.cached || [];
-    const rows: ReleaseRow[] = stable.map((release) => ({
+    const rows: ReleaseRow[] = releases.map((release) => ({
       version: release.version,
       release,
       cached: cached.find(
@@ -74,9 +74,7 @@
     for (const entry of cached)
       if (!rows.some((row) => row.cached?.path === entry.path))
         rows.push({ version: entry.version, cached: entry });
-    return rows.sort((a, b) =>
-      b.version.localeCompare(a.version, undefined, { numeric: true }),
-    );
+    return rows;
   });
   const nextBlocked = $derived(
     busy
@@ -544,12 +542,18 @@
                   onclick={() => updateCatalog(true)}>Обновить список</button
                 ><CatalogSettings
                   disabled={busy}
-                  onsaved={() => updateCatalog(true)}
+                  onsaved={async () => {
+                    catalog = null;
+                    await updateCatalog(true);
+                  }}
                 />
               </div>
             </div>
             {#if catalog?.warning}<p class="info-note">
                 {catalog.warning} Скачанные релизы доступны без интернета.
+              </p>{/if}
+            {#if catalog?.catalogUrl}<p class="info-note">
+                Источник: {catalog.catalogUrl}
               </p>{/if}
             {#if catalog?.catalog.generatedAt}<p class="release-date">
                 Каталог: {catalog.catalog.generatedAt}

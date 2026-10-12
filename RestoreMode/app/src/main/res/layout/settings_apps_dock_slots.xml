@@ -55,6 +55,32 @@
                 android:singleLine="true"
                 app:cornerRadius="20dp"
                 android:tag="settings.field" />
+            <LinearLayout
+                android:id="@+id/dockIconOptions1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dock_icon_label"
+                    android:textSize="15sp"
+                    android:textColor="#97a6bc"
+                    android:includeFontPadding="false"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="8dp" />
+                <Button
+                    android:id="@+id/buttonDockIcon1"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="@string/dock_icon_default"
+                    android:textColor="@color/settings_text"
+                    android:textSize="@dimen/settings_caption_size"
+                    android:singleLine="true"
+                    app:cornerRadius="20dp"
+                    android:tag="settings.field" />
+            </LinearLayout>
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -134,6 +160,32 @@
                 android:singleLine="true"
                 app:cornerRadius="20dp"
                 android:tag="settings.field" />
+            <LinearLayout
+                android:id="@+id/dockIconOptions2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dock_icon_label"
+                    android:textSize="15sp"
+                    android:textColor="#97a6bc"
+                    android:includeFontPadding="false"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="8dp" />
+                <Button
+                    android:id="@+id/buttonDockIcon2"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="@string/dock_icon_default"
+                    android:textColor="@color/settings_text"
+                    android:textSize="@dimen/settings_caption_size"
+                    android:singleLine="true"
+                    app:cornerRadius="20dp"
+                    android:tag="settings.field" />
+            </LinearLayout>
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

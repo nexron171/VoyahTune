@@ -14,6 +14,11 @@ import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
 
+import dalvik.system.PathClassLoader;
+
+import ru.big.town.common.InfrastructureProfile;
+import ru.big.town.common.SmartSaveSettings;
+
 import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.Collections;
@@ -22,15 +27,13 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-import dalvik.system.PathClassLoader;
-
 /**
  * Event-demanded access to the stock Android 11 {@code ICanBusService} VehicleState API.
  *
  * <p>The transport deliberately does not own a retry timer. A caller may make another attempt as
  * part of its already bounded apply cycle, but a failed bind never creates an independent forever
  * loop. TX58 and TX77 share one Binder and one transaction lock so a compound OEM operation cannot
- * be interleaved with another VehicleState request from VoyahTune.</p>
+ * be interleaved with another VehicleState request from VoyahTune.
  */
 final class OemVehicleStateTransport {
     private static final String TAG = "$$$ OemVehicleState $$$";
@@ -122,9 +125,13 @@ final class OemVehicleStateTransport {
     interface Session {
         GearStatus readGearStatus();
 
-        default FuelLevel readFuelLevel() { return null; }
+        default FuelLevel readFuelLevel() {
+            return null;
+        }
 
-        default Integer readVehicleSpeed() { return null; }
+        default Integer readVehicleSpeed() {
+            return null;
+        }
 
         Integer readVehicleState(StateKey key);
 
@@ -137,8 +144,7 @@ final class OemVehicleStateTransport {
         T run(Session session);
     }
 
-    private static final OemVehicleStateTransport INSTANCE =
-            new OemVehicleStateTransport();
+    private static final OemVehicleStateTransport INSTANCE = new OemVehicleStateTransport();
 
     private final Object connectionLock = new Object();
     private final Object schemaLock = new Object();
@@ -212,8 +218,8 @@ final class OemVehicleStateTransport {
 
     private OemVehicleStateTransport() {}
 
-    static Result sendVehicleState(Context context, String name, int stableId, int value,
-                                   String label) {
+    static Result sendVehicleState(
+            Context context, String name, int stableId, int value, String label) {
         return sendVehicleState(context, new StateKey(name, stableId), value, label);
     }
 
@@ -226,10 +232,11 @@ final class OemVehicleStateTransport {
      * transaction lock used by TX58/TX77. A null result means that the schema or Binder was not
      * available before the operation started.
      */
-    static <T> T withSession(Context context, Collection<StateKey> keys,
-                             SessionOperation<T> operation) {
+    static <T> T withSession(
+            Context context, Collection<StateKey> keys, SessionOperation<T> operation) {
         return INSTANCE.withSessionInternal(
-                context, Objects.requireNonNull(keys, "VehicleState keys"),
+                context,
+                Objects.requireNonNull(keys, "VehicleState keys"),
                 Objects.requireNonNull(operation, "session operation"));
     }
 
@@ -237,9 +244,33 @@ final class OemVehicleStateTransport {
         return INSTANCE.sendBundleInternal(context, immutableCopy(values), label);
     }
 
+    static Result sendTemporaryEnergyMode(Context context, int mode, long revision, long cycle) {
+        if (!InfrastructureProfile.read(context).usesAccHooks()
+                || (mode != VehicleRestorePolicy.SOC_EV && mode != VehicleRestorePolicy.SOC_SREV)) {
+            return Result.TRANSIENT_FAILURE;
+        }
+        StateKey key =
+                new StateKey(VehicleRestorePolicy.SOC_MODE, VehicleRestorePolicy.SOC_MODE_ID);
+        Context app = INSTANCE.applicationContext(context);
+        if (app == null || !INSTANCE.resolveStates(app, Collections.singleton(key))) {
+            return Result.TRANSIENT_FAILURE;
+        }
+        IBinder binder = INSTANCE.acquireBinder(app);
+        if (binder == null) {
+            return Result.TRANSIENT_FAILURE;
+        }
+        Bundle values = new Bundle();
+        values.putInt(key.name, mode);
+        values.putBoolean(SmartSaveSettings.TEMPORARY, true);
+        values.putLong(SmartSaveSettings.REVISION, revision);
+        values.putLong(SmartSaveSettings.CYCLE, cycle);
+        synchronized (INSTANCE.transactionLock) {
+            return INSTANCE.transactBundle(binder, values, "smart Save temporary mode");
+        }
+    }
+
     /** Reads a narrow immutable TX57 snapshot once; a partial result is never published. */
-    static Map<StateKey, Integer> readVehicleStates(
-            Context context, Collection<StateKey> keys) {
+    static Map<StateKey, Integer> readVehicleStates(Context context, Collection<StateKey> keys) {
         if (keys == null || keys.isEmpty()) {
             throw new IllegalArgumentException("VehicleState snapshot is empty");
         }
@@ -247,19 +278,25 @@ final class OemVehicleStateTransport {
         for (StateKey key : keys) {
             requested.put(Objects.requireNonNull(key, "VehicleState key"), 0);
         }
-        return withSession(context, requested.keySet(), session -> {
-            LinkedHashMap<StateKey, Integer> result = new LinkedHashMap<>();
-            for (StateKey key : requested.keySet()) {
-                Integer value = session.readVehicleState(key);
-                if (value == null) return null;
-                result.put(key, value);
-            }
-            return Collections.unmodifiableMap(result);
-        });
+        return withSession(
+                context,
+                requested.keySet(),
+                session -> {
+                    LinkedHashMap<StateKey, Integer> result = new LinkedHashMap<>();
+                    for (StateKey key : requested.keySet()) {
+                        Integer value = session.readVehicleState(key);
+                        if (value == null) return null;
+                        result.put(key, value);
+                    }
+                    return Collections.unmodifiableMap(result);
+                });
     }
 
-    static Result sendBundle(Context context, Map<String, Integer> values,
-                             Map<String, Integer> stableIds, String label) {
+    static Result sendBundle(
+            Context context,
+            Map<String, Integer> values,
+            Map<String, Integer> stableIds,
+            String label) {
         return sendBundle(context, keyedValues(values, stableIds), label);
     }
 
@@ -267,44 +304,61 @@ final class OemVehicleStateTransport {
      * Executes one TX58 followed by one TX77 without allowing another OEM transaction between them.
      * This is intended for settings whose duration/control state lives outside their shared bundle.
      */
-    static Result sendVehicleStateThenBundle(Context context, StateValue first,
-                                             Map<StateKey, Integer> values, String label) {
+    static Result sendVehicleStateThenBundle(
+            Context context, StateValue first, Map<StateKey, Integer> values, String label) {
         return INSTANCE.sendSequenceInternal(
                 context, Objects.requireNonNull(first, "first"), immutableCopy(values), label);
     }
 
     static Result sendVehicleStateThenBundle(
-            Context context, String firstName, int firstStableId, int firstValue,
-            Map<String, Integer> values, Map<String, Integer> stableIds, String label) {
+            Context context,
+            String firstName,
+            int firstStableId,
+            int firstValue,
+            Map<String, Integer> values,
+            Map<String, Integer> stableIds,
+            String label) {
         return sendVehicleStateThenBundle(
-                context, new StateValue(new StateKey(firstName, firstStableId), firstValue),
-                keyedValues(values, stableIds), label);
+                context,
+                new StateValue(new StateKey(firstName, firstStableId), firstValue),
+                keyedValues(values, stableIds),
+                label);
     }
 
     /**
      * Sends one ordered restore snapshot under the shared transaction lock. On Android 11 the OEM
      * TX77 implementation enqueues {@code AsyncTask.execute()} work on its serial executor, so the
      * trailing bundle is processed after the primary one. This is required for Snow: the primary
-     * drive request may force recuperation=2 and the trailing explicit recuperation target must win.
+     * drive request may force recuperation=2 and the trailing explicit recuperation target must
+     * win.
      */
     static Result sendRestoreSequence(
-            Context context, StateValue first,
-            Map<String, Integer> primaryValues, Map<String, Integer> trailingValues,
-            Map<String, Integer> stableIds, String label) {
-        return sendRestoreSequence(context, first, primaryValues, null, trailingValues,
-                stableIds, label);
+            Context context,
+            StateValue first,
+            Map<String, Integer> primaryValues,
+            Map<String, Integer> trailingValues,
+            Map<String, Integer> stableIds,
+            String label) {
+        return sendRestoreSequence(
+                context, first, primaryValues, null, trailingValues, stableIds, label);
     }
 
     /** Optional mode preparation is a separate OEM task, ordered before feature enablement. */
     static Result sendRestoreSequence(
-            Context context, StateValue first,
-            Map<String, Integer> primaryValues, Map<String, Integer> preparationValues,
-            Map<String, Integer> trailingValues, Map<String, Integer> stableIds, String label) {
+            Context context,
+            StateValue first,
+            Map<String, Integer> primaryValues,
+            Map<String, Integer> preparationValues,
+            Map<String, Integer> trailingValues,
+            Map<String, Integer> stableIds,
+            String label) {
         return INSTANCE.sendRestoreSequenceInternal(
-                context, first,
+                context,
+                first,
                 keyedValuesOptional(primaryValues, stableIds),
                 keyedValuesOptional(preparationValues, stableIds),
-                keyedValuesOptional(trailingValues, stableIds), label);
+                keyedValuesOptional(trailingValues, stableIds),
+                label);
     }
 
     private static LinkedHashMap<StateKey, Integer> keyedValues(
@@ -333,8 +387,7 @@ final class OemVehicleStateTransport {
         return keyedValues(values, stableIds);
     }
 
-    private static LinkedHashMap<StateKey, Integer> immutableCopy(
-            Map<StateKey, Integer> values) {
+    private static LinkedHashMap<StateKey, Integer> immutableCopy(Map<StateKey, Integer> values) {
         if (values == null || values.isEmpty()) {
             throw new IllegalArgumentException("VehicleState bundle is empty");
         }
@@ -359,8 +412,8 @@ final class OemVehicleStateTransport {
         }
     }
 
-    private <T> T withSessionInternal(Context context, Collection<StateKey> keys,
-                                      SessionOperation<T> operation) {
+    private <T> T withSessionInternal(
+            Context context, Collection<StateKey> keys, SessionOperation<T> operation) {
         Context app = applicationContext(context);
         if (app == null || !resolveStates(app, keys)) return null;
 
@@ -401,7 +454,10 @@ final class OemVehicleStateTransport {
             } catch (RemoteException | RuntimeException e) {
                 Log.w(TAG, "getVehicleSpeed failed", e);
                 return null;
-            } finally { reply.recycle(); data.recycle(); }
+            } finally {
+                reply.recycle();
+                data.recycle();
+            }
         }
 
         @Override
@@ -423,8 +479,8 @@ final class OemVehicleStateTransport {
         }
     }
 
-    private Result sendBundleInternal(Context context, LinkedHashMap<StateKey, Integer> values,
-                                      String label) {
+    private Result sendBundleInternal(
+            Context context, LinkedHashMap<StateKey, Integer> values, String label) {
         Context app = applicationContext(context);
         if (app == null || !resolveStates(app, values.keySet())) {
             return Result.TRANSIENT_FAILURE;
@@ -436,17 +492,22 @@ final class OemVehicleStateTransport {
         }
     }
 
-    private Result sendSequenceInternal(Context context, StateValue first,
-                                        LinkedHashMap<StateKey, Integer> values, String label) {
+    private Result sendSequenceInternal(
+            Context context,
+            StateValue first,
+            LinkedHashMap<StateKey, Integer> values,
+            String label) {
         return sendRestoreSequenceInternal(
                 context, first, values, new LinkedHashMap<>(), new LinkedHashMap<>(), label);
     }
 
     private Result sendRestoreSequenceInternal(
-            Context context, StateValue first,
+            Context context,
+            StateValue first,
             LinkedHashMap<StateKey, Integer> primaryValues,
             LinkedHashMap<StateKey, Integer> preparationValues,
-            LinkedHashMap<StateKey, Integer> trailingValues, String label) {
+            LinkedHashMap<StateKey, Integer> trailingValues,
+            String label) {
         Context app = applicationContext(context);
         if (app == null) return Result.TRANSIENT_FAILURE;
         LinkedHashMap<StateKey, Integer> all = new LinkedHashMap<>(primaryValues);
@@ -467,14 +528,20 @@ final class OemVehicleStateTransport {
     }
 
     private Result transactRestoreSequence(
-            IBinder binder, StateValue first, Map<StateKey, Integer> primaryValues,
+            IBinder binder,
+            StateValue first,
+            Map<StateKey, Integer> primaryValues,
             Map<StateKey, Integer> preparationValues,
-            Map<StateKey, Integer> trailingValues, String label) {
+            Map<StateKey, Integer> trailingValues,
+            String label) {
         if (first != null) {
             Result result = transactSingle(binder, first, label + " first");
             if (!result.accepted()) return result;
         }
-        return sendOrderedBundles(primaryValues, preparationValues, trailingValues,
+        return sendOrderedBundles(
+                primaryValues,
+                preparationValues,
+                trailingValues,
                 (values, stage) -> transactBundle(binder, values, label + " " + stage));
     }
 
@@ -483,9 +550,11 @@ final class OemVehicleStateTransport {
     }
 
     /** Stop on an unaccepted phase: never enable a feature before its mode was submitted. */
-    static Result sendOrderedBundles(Map<StateKey, Integer> primaryValues,
-                                     Map<StateKey, Integer> preparationValues,
-                                     Map<StateKey, Integer> trailingValues, BundleSender sender) {
+    static Result sendOrderedBundles(
+            Map<StateKey, Integer> primaryValues,
+            Map<StateKey, Integer> preparationValues,
+            Map<StateKey, Integer> trailingValues,
+            BundleSender sender) {
         if (!primaryValues.isEmpty()) {
             Result result = sender.send(primaryValues, "primary");
             if (!result.accepted()) return result;
@@ -514,12 +583,11 @@ final class OemVehicleStateTransport {
         synchronized (schemaLock) {
             try {
                 if (vehicleStateClass == null) {
-                    ApplicationInfo info = context.getPackageManager()
-                            .getApplicationInfo(CANBUS_PACKAGE, 0);
-                    ClassLoader loader = new PathClassLoader(
-                            info.sourceDir, context.getClassLoader());
-                    Class rawClass = Class.forName(
-                            "com.qinggan.canbus.VehicleState", true, loader);
+                    ApplicationInfo info =
+                            context.getPackageManager().getApplicationInfo(CANBUS_PACKAGE, 0);
+                    ClassLoader loader =
+                            new PathClassLoader(info.sourceDir, context.getClassLoader());
+                    Class rawClass = Class.forName("com.qinggan.canbus.VehicleState", true, loader);
                     if (!rawClass.isEnum()) {
                         Log.e(TAG, "VehicleState is not an enum");
                         return false;
@@ -533,8 +601,12 @@ final class OemVehicleStateTransport {
                     Object installedId = vehicleStateGetValue.invoke(enumValue);
                     if (!(installedId instanceof Integer)
                             || ((Integer) installedId).intValue() != key.stableId) {
-                        Log.e(TAG, "VehicleState id mismatch for " + key
-                                + ", installed=" + installedId);
+                        Log.e(
+                                TAG,
+                                "VehicleState id mismatch for "
+                                        + key
+                                        + ", installed="
+                                        + installedId);
                         return false;
                     }
                     resolvedOrdinals.put(key, enumValue.ordinal());
@@ -566,7 +638,8 @@ final class OemVehicleStateTransport {
             if (current != null) return current;
 
             if (activeConnection != null && !bindingInProgress) {
-                // Binder liveness can turn false just before Android delivers a disconnect callback.
+                // Binder liveness can turn false just before Android delivers a disconnect
+                // callback.
                 // Give that registered binding one bounded reconnect window, then the next demand
                 // will replace it through the stale-generation path below.
                 bindingInProgress = true;
@@ -575,7 +648,8 @@ final class OemVehicleStateTransport {
 
             // No timer owns this recovery. A later real demand may replace exactly one stale bind;
             // generation fencing makes every delayed callback from the old attempt harmless.
-            if (activeConnection != null && bindingInProgress
+            if (activeConnection != null
+                    && bindingInProgress
                     && now - bindingStartedElapsed >= STALE_BIND_MS) {
                 staleConnection = activeConnection;
                 staleWasRegistered = connectionRegistered;
@@ -628,10 +702,10 @@ final class OemVehicleStateTransport {
             intent.setPackage(CANBUS_PACKAGE);
             // Android 11: explicit executor keeps connection delivery well-defined while the
             // ApplyEngine worker performs a bounded wait for this one demand attempt.
-            bound = context.bindService(intent, Context.BIND_AUTO_CREATE,
-                    context.getMainExecutor(), candidate);
-            Log.i(TAG, "demand bindService gen=" + candidate.generation
-                    + " returned " + bound);
+            bound =
+                    context.bindService(
+                            intent, Context.BIND_AUTO_CREATE, context.getMainExecutor(), candidate);
+            Log.i(TAG, "demand bindService gen=" + candidate.generation + " returned " + bound);
         } catch (RuntimeException e) {
             Log.e(TAG, "Demand CanBus bind failed", e);
         } finally {
@@ -678,8 +752,14 @@ final class OemVehicleStateTransport {
                 return Result.TRANSIENT_FAILURE;
             }
             reply.readException();
-            Log.i(TAG, "TX58 accepted-unconfirmed [" + safeLabel(label) + "] "
-                    + state.key + "=" + state.value);
+            Log.i(
+                    TAG,
+                    "TX58 accepted-unconfirmed ["
+                            + safeLabel(label)
+                            + "] "
+                            + state.key
+                            + "="
+                            + state.value);
             return Result.ACCEPTED_UNCONFIRMED;
         } catch (RemoteException | RuntimeException e) {
             Log.e(TAG, "TX58 failed [" + safeLabel(label) + "] " + state.key, e);
@@ -730,7 +810,8 @@ final class OemVehicleStateTransport {
             if (!binder.transact(TX_FUEL_LEVEL, data, reply, 0)) return null;
             reply.readException();
             if (reply.readInt() == 0 || reply.dataAvail() < 28) return null;
-            // OEM FuelLevel Parcelable: capacity, remain, percentage, shortage, three consumption floats.
+            // OEM FuelLevel Parcelable: capacity, remain, percentage, shortage, three consumption
+            // floats.
             int capacity = reply.readInt();
             reply.readInt(); // mRemain is not populated by the examined H97C/H97X service.
             float percentage = reply.readFloat();
@@ -777,12 +858,20 @@ final class OemVehicleStateTransport {
     }
 
     private Result transactBundle(IBinder binder, Map<StateKey, Integer> values, String label) {
-        if (!isCurrentBinder(binder)) return Result.TRANSIENT_FAILURE;
         Bundle vehicleBundle = new Bundle();
         for (Map.Entry<StateKey, Integer> entry : values.entrySet()) {
             vehicleBundle.putInt(entry.getKey().name, entry.getValue());
         }
+        if (ApplyEngine.isDriveEntryRestore()
+                && (vehicleBundle.containsKey("DRIVING_MODE_SET")
+                        || vehicleBundle.containsKey("IVI_SOC_MODESET"))) {
+            vehicleBundle.putBoolean("__vt_auto", true);
+        }
+        return transactBundle(binder, vehicleBundle, label);
+    }
 
+    private Result transactBundle(IBinder binder, Bundle vehicleBundle, String label) {
+        if (!isCurrentBinder(binder)) return Result.TRANSIENT_FAILURE;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -793,8 +882,7 @@ final class OemVehicleStateTransport {
             if (!CanSender.beginFrameAttemptForCurrentGuard()) {
                 return Result.TRANSIENT_FAILURE;
             }
-            if (!binder.transact(
-                    TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE, data, reply, 0)) {
+            if (!binder.transact(TX_SET_VEHICLE_AND_AIR_BUNDLE_STATE, data, reply, 0)) {
                 Log.e(TAG, "TX77 rejected [" + safeLabel(label) + "]");
                 return Result.TRANSIENT_FAILURE;
             }
@@ -805,8 +893,9 @@ final class OemVehicleStateTransport {
                 return Result.TRANSIENT_FAILURE;
             }
             // H97C starts ModeSettingTask asynchronously and returns zero before sendCanIOCtl.
-            Log.i(TAG, "TX77 accepted-unconfirmed [" + safeLabel(label)
-                    + "] states=" + vehicleBundle);
+            Log.i(
+                    TAG,
+                    "TX77 accepted-unconfirmed [" + safeLabel(label) + "] states=" + vehicleBundle);
             return Result.ACCEPTED_UNCONFIRMED;
         } catch (RemoteException | RuntimeException e) {
             Log.e(TAG, "TX77 failed [" + safeLabel(label) + "]", e);

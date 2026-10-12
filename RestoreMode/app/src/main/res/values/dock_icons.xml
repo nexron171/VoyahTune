@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dock_icon_label">Иконка в доке</string>
+    <string name="dock_icon_title">Иконка в доке · слот %1$d</string>
+    <string name="dock_icon_default">По умолчанию</string>
+    <string name="dock_icon_navigation">Навигация</string>
+    <string name="dock_icon_music">Музыка</string>
+</resources>

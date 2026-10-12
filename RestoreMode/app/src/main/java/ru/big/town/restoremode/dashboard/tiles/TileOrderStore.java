@@ -5,12 +5,13 @@ import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import ru.big.town.common.CarPlayTarget;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
-import ru.big.town.restoremode.widgets.energy.EnergyWidgetView;
+import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -144,7 +145,11 @@ public class TileOrderStore {
                 return false;
             }
             try {
-                pm.getApplicationInfo(entry.packageName, 0);
+                pm.getApplicationInfo(
+                        CarPlayTarget.isCarPlay(entry.packageName)
+                                ? CarPlayTarget.PACKAGE
+                                : entry.packageName,
+                        0);
                 return true;
             } catch (Exception ignored) {
                 return false;
@@ -166,7 +171,7 @@ public class TileOrderStore {
 
     /** Проверить, это известный виджет. */
     static boolean isKnownWidget(String widgetId) {
-        if (EnergyWidgetView.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) {
+        if (VehicleWidgets.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) {
             return true;
         }
         // Список всех известных виджетов на главном экране

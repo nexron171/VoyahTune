@@ -1,6 +1,7 @@
 package ru.big.town.anative;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 
 import org.junit.Test;
 
@@ -39,5 +40,30 @@ public class HeadlightCanPolicyTest {
         assertEquals("AUTO_LAMP_SWITCH", command.vehicleStateName);
         assertEquals(1097, command.stableId);
         assertEquals(1, HeadlightCanPolicy.ACTIVATE);
+    }
+
+    @Test
+    public void explicitActionsKeepAutoParkingAndLowBeamDistinct() {
+        assertEquals(
+                HeadlightCanPolicy.Command.LOW_BEAM,
+                HeadlightCanPolicy.commandForAction("headlights:on"));
+        assertEquals(
+                HeadlightCanPolicy.Command.OUT_LAMP_OFF,
+                HeadlightCanPolicy.commandForAction("headlights:off"));
+        assertEquals(
+                HeadlightCanPolicy.Command.AUTO_LAMP_SWITCH,
+                HeadlightCanPolicy.commandForAction("headlights:auto"));
+
+        HeadlightCanPolicy.Command parking =
+                HeadlightCanPolicy.commandForAction("headlights:parking");
+        assertEquals("POSITION_LAMP_SWITCH", parking.vehicleStateName);
+        assertEquals(1095, parking.stableId);
+    }
+
+    @Test
+    public void unsupportedActionsDoNotDefaultToLowBeam() {
+        assertNull(HeadlightCanPolicy.commandForAction("headlights:unknown"));
+        assertNull(HeadlightCanPolicy.commandForAction(""));
+        assertNull(HeadlightCanPolicy.commandForAction(null));
     }
 }

@@ -12,6 +12,8 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
 
+import ru.big.town.common.CarPlayTarget;
+
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -22,13 +24,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.BooleanSupplier;
 
 /**
  * One process-wide bounded lane for SplitHost package/task Binder calls.
  *
  * <p>There is at most one running item and one latest pending item for single-host preflight and
  * supervision, plus one latest pending launch per pane. A wedged car/system Binder therefore blocks
- * this background thread, never main, and Activity recreation cannot multiply blocked threads.</p>
+ * this background thread, never main, and Activity recreation cannot multiply blocked threads.
  */
 final class SplitHostTaskLane {
     private static final String TAG = "$$$ SplitHostTasks $$$";
@@ -57,8 +60,12 @@ final class SplitHostTaskLane {
         final String packageName;
         final int displayId;
 
-        PaneTicket(long hostGeneration, int paneIndex, long paneGeneration,
-                   String packageName, int displayId) {
+        PaneTicket(
+                long hostGeneration,
+                int paneIndex,
+                long paneGeneration,
+                String packageName,
+                int displayId) {
             this.hostGeneration = hostGeneration;
             this.paneIndex = paneIndex;
             this.paneGeneration = paneGeneration;
@@ -86,8 +93,12 @@ final class SplitHostTaskLane {
         final long supervisionGeneration;
         final List<PaneTicket> panes;
 
-        SupervisionRequest(long sequence, SplitHostActivity owner, long hostGeneration,
-                           long supervisionGeneration, List<PaneTicket> panes) {
+        SupervisionRequest(
+                long sequence,
+                SplitHostActivity owner,
+                long hostGeneration,
+                long supervisionGeneration,
+                List<PaneTicket> panes) {
             this.sequence = sequence;
             this.owner = new WeakReference<>(owner);
             this.hostGeneration = hostGeneration;
@@ -101,12 +112,15 @@ final class SplitHostTaskLane {
         final String packageName;
         final int dpi;
         final int displayId;
+        final BooleanSupplier valid;
 
-        SingleHostRequest(long sequence, String packageName, int dpi, int displayId) {
+        SingleHostRequest(
+                long sequence, String packageName, int dpi, int displayId, BooleanSupplier valid) {
             this.sequence = sequence;
             this.packageName = packageName;
             this.dpi = dpi;
             this.displayId = displayId;
+            this.valid = valid;
         }
     }
 
@@ -143,8 +157,8 @@ final class SplitHostTaskLane {
         final boolean enabled;
         final SplitHostTaskSnapshot snapshot;
 
-        SupervisionResult(SupervisionRequest request, boolean enabled,
-                          SplitHostTaskSnapshot snapshot) {
+        SupervisionResult(
+                SupervisionRequest request, boolean enabled, SplitHostTaskSnapshot snapshot) {
             this.request = request;
             this.enabled = enabled;
             this.snapshot = snapshot;
@@ -185,91 +199,112 @@ final class SplitHostTaskLane {
     private long watchSettingExpiresAt;
     private boolean cachedWatchEnabled = true;
 
-    private final Runnable singleHostDrain = new Runnable() {
-        @Override public void run() {
-            SingleHostRequest request;
-            synchronized (lock) {
-                request = singleHostWork.take(0);
-            }
-            try {
-                if (request != null && isLatestSingleHost(request)) {
-                    final boolean launchable = resolveLaunchIntent(request.packageName) != null;
-                    final SingleHostRequest delivered = request;
-                    if (launchable && isLatestSingleHost(delivered)) {
-                        // This Settings write is part of launch preparation too; keep it off main.
-                        DockLaunchGuard.arm(appContext, delivered.displayId, "ru.big.town.anative");
+    private final Runnable singleHostDrain =
+            new Runnable() {
+                @Override
+                public void run() {
+                    SingleHostRequest request;
+                    synchronized (lock) {
+                        request = singleHostWork.take(0);
                     }
-                    singleHostResults.offer(1L, delivered.sequence,
-                            new SingleHostResult(delivered, launchable));
+                    try {
+                        if (request != null
+                                && isLatestSingleHost(request)
+                                && request.valid.getAsBoolean()) {
+                            final boolean launchable =
+                                    resolveLaunchIntent(request.packageName, request.displayId)
+                                            != null;
+                            final SingleHostRequest delivered = request;
+                            if (launchable && isLatestSingleHost(delivered)) {
+                                // This Settings write is part of launch preparation too; keep it
+                                // off main.
+                                DockLaunchGuard.arm(
+                                        appContext, delivered.displayId, "ru.big.town.anative");
+                            }
+                            singleHostResults.offer(
+                                    1L,
+                                    delivered.sequence,
+                                    new SingleHostResult(delivered, launchable));
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "single-host preflight failed: " + rootCause(t));
+                    } finally {
+                        finishSingleHostDrain();
+                    }
                 }
-            } catch (Throwable t) {
-                Log.w(TAG, "single-host preflight failed: " + rootCause(t));
-            } finally {
-                finishSingleHostDrain();
-            }
-        }
-    };
+            };
 
-    private final Runnable paneLaunchDrain = new Runnable() {
-        @Override public void run() {
-            PaneLaunchRequest[] batch = new PaneLaunchRequest[2];
-            synchronized (lock) {
-                batch[0] = paneLaunchWork.take(0);
-                batch[1] = paneLaunchWork.take(1);
-            }
-            try {
-                processPaneLaunchBatch(batch);
-            } catch (Throwable t) {
-                Log.w(TAG, "pane launch batch failed: " + rootCause(t));
-                for (PaneLaunchRequest request : batch) {
-                    if (request != null) postPaneLaunchResult(request, null);
+    private final Runnable paneLaunchDrain =
+            new Runnable() {
+                @Override
+                public void run() {
+                    PaneLaunchRequest[] batch = new PaneLaunchRequest[2];
+                    synchronized (lock) {
+                        batch[0] = paneLaunchWork.take(0);
+                        batch[1] = paneLaunchWork.take(1);
+                    }
+                    try {
+                        processPaneLaunchBatch(batch);
+                    } catch (Throwable t) {
+                        Log.w(TAG, "pane launch batch failed: " + rootCause(t));
+                        for (PaneLaunchRequest request : batch) {
+                            if (request != null) postPaneLaunchResult(request, null);
+                        }
+                    } finally {
+                        finishPaneLaunchDrain();
+                    }
                 }
-            } finally {
-                finishPaneLaunchDrain();
-            }
-        }
-    };
+            };
 
-    private final Runnable supervisionDrain = new Runnable() {
-        @Override public void run() {
-            SupervisionRequest request;
-            synchronized (lock) {
-                request = supervisionWork.take(0);
-            }
-            try {
-                if (request != null && isCurrentSupervisionHost(request)) {
-                    boolean enabled = readWatchEnabled();
-                    if (!isCurrentSupervisionHost(request)) return;
-                    SplitHostTaskSnapshot snapshot = enabled
-                            ? queryTasks().snapshot : SplitHostTaskSnapshot.unknown();
-                    postSupervisionResult(request, enabled, snapshot);
+    private final Runnable supervisionDrain =
+            new Runnable() {
+                @Override
+                public void run() {
+                    SupervisionRequest request;
+                    synchronized (lock) {
+                        request = supervisionWork.take(0);
+                    }
+                    try {
+                        if (request != null && isCurrentSupervisionHost(request)) {
+                            boolean enabled = readWatchEnabled();
+                            if (!isCurrentSupervisionHost(request)) return;
+                            SplitHostTaskSnapshot snapshot =
+                                    enabled
+                                            ? queryTasks().snapshot
+                                            : SplitHostTaskSnapshot.unknown();
+                            postSupervisionResult(request, enabled, snapshot);
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "supervision query failed: " + rootCause(t));
+                        if (request != null) {
+                            postSupervisionResult(request, true, SplitHostTaskSnapshot.unknown());
+                        }
+                    } finally {
+                        finishSupervisionDrain();
+                    }
                 }
-            } catch (Throwable t) {
-                Log.w(TAG, "supervision query failed: " + rootCause(t));
-                if (request != null) {
-                    postSupervisionResult(request, true, SplitHostTaskSnapshot.unknown());
-                }
-            } finally {
-                finishSupervisionDrain();
-            }
-        }
-    };
+            };
 
     private SplitHostTaskLane(Context appContext) {
         this.appContext = appContext;
-        this.activityManager = (ActivityManager) appContext.getSystemService(Context.ACTIVITY_SERVICE);
-        HandlerThread thread = new HandlerThread("SplitHostTasks", Process.THREAD_PRIORITY_BACKGROUND);
+        this.activityManager =
+                (ActivityManager) appContext.getSystemService(Context.ACTIVITY_SERVICE);
+        HandlerThread thread =
+                new HandlerThread("SplitHostTasks", Process.THREAD_PRIORITY_BACKGROUND);
         thread.start();
         worker = new Handler(thread.getLooper());
-        java.util.concurrent.Executor mainExecutor = command -> {
-            if (!main.post(command)) {
-                throw new RejectedExecutionException("main Handler rejected SplitHost result");
-            }
-        };
+        java.util.concurrent.Executor mainExecutor =
+                command -> {
+                    if (!main.post(command)) {
+                        throw new RejectedExecutionException(
+                                "main Handler rejected SplitHost result");
+                    }
+                };
         singleHostResults = new LatestValueDelivery<>(mainExecutor, this::deliverSingleHostResult);
         leftPaneResults = new LatestValueDelivery<>(mainExecutor, this::deliverPaneLaunchResult);
         rightPaneResults = new LatestValueDelivery<>(mainExecutor, this::deliverPaneLaunchResult);
-        supervisionResults = new LatestValueDelivery<>(mainExecutor, this::deliverSupervisionResult);
+        supervisionResults =
+                new LatestValueDelivery<>(mainExecutor, this::deliverSupervisionResult);
     }
 
     long registerHost(SplitHostActivity owner) {
@@ -283,12 +318,13 @@ final class SplitHostTaskLane {
         return registration.generation;
     }
 
-    void requestSingleHost(String packageName, int dpi, int displayId) {
+    void requestSingleHost(String packageName, int dpi, int displayId, BooleanSupplier valid) {
         synchronized (lock) {
             long sequence = ++nextSequence;
             latestSingleHostSequence = sequence;
-            boolean postDrain = singleHostWork.offer(
-                    0, new SingleHostRequest(sequence, packageName, dpi, displayId));
+            boolean postDrain =
+                    singleHostWork.offer(
+                            0, new SingleHostRequest(sequence, packageName, dpi, displayId, valid));
             if (postDrain && !worker.post(singleHostDrain)) {
                 singleHostWork.rejectDrainPost();
                 Log.e(TAG, "worker rejected single-host drain");
@@ -310,13 +346,19 @@ final class SplitHostTaskLane {
         }
     }
 
-    void requestSupervision(SplitHostActivity owner, long hostGeneration,
-                            long supervisionGeneration, List<PaneTicket> panes) {
+    void requestSupervision(
+            SplitHostActivity owner,
+            long hostGeneration,
+            long supervisionGeneration,
+            List<PaneTicket> panes) {
         if (panes == null || panes.isEmpty()) return;
         synchronized (lock) {
             long sequence = ++nextSequence;
-            boolean postDrain = supervisionWork.offer(0, new SupervisionRequest(sequence, owner,
-                    hostGeneration, supervisionGeneration, panes));
+            boolean postDrain =
+                    supervisionWork.offer(
+                            0,
+                            new SupervisionRequest(
+                                    sequence, owner, hostGeneration, supervisionGeneration, panes));
             latestSupervisionHost = hostGeneration;
             if (postDrain && !worker.post(supervisionDrain)) {
                 supervisionWork.rejectDrainPost();
@@ -370,14 +412,15 @@ final class SplitHostTaskLane {
         for (int pane = 0; pane < batch.length; pane++) {
             PaneLaunchRequest request = batch[pane];
             if (request == null || !isLatestPane(request)) continue;
-            launchIntents[pane] = resolveLaunchIntent(request.pane.packageName);
+            launchIntents[pane] =
+                    resolveLaunchIntent(request.pane.packageName, request.pane.displayId);
         }
 
         boolean anyLaunchable = false;
         for (int pane = 0; pane < batch.length; pane++) {
             PaneLaunchRequest request = batch[pane];
-            anyLaunchable |= request != null && launchIntents[pane] != null
-                    && isLatestPane(request);
+            anyLaunchable |=
+                    request != null && launchIntents[pane] != null && isLatestPane(request);
         }
         if (anyLaunchable) {
             // Exactly one task snapshot services both pane teardowns in this batch.
@@ -398,10 +441,10 @@ final class SplitHostTaskLane {
         }
     }
 
-    private Intent resolveLaunchIntent(String packageName) {
+    private Intent resolveLaunchIntent(String packageName, int displayId) {
         assertWorkerThread();
         try {
-            return appContext.getPackageManager().getLaunchIntentForPackage(packageName);
+            return CarPlayTarget.launchIntent(appContext, packageName, displayId);
         } catch (Throwable t) {
             Log.w(TAG, "launch intent " + packageName + ": " + rootCause(t));
             return null;
@@ -413,8 +456,9 @@ final class SplitHostTaskLane {
         long now = SystemClock.elapsedRealtime();
         if (now < watchSettingExpiresAt) return cachedWatchEnabled;
         try {
-            String value = Settings.Global.getString(
-                    appContext.getContentResolver(), "voyahtune_splitwatch");
+            String value =
+                    Settings.Global.getString(
+                            appContext.getContentResolver(), "voyahtune_splitwatch");
             cachedWatchEnabled = !"0".equals(value);
         } catch (Throwable t) {
             Log.w(TAG, "splitwatch setting: " + rootCause(t));
@@ -433,10 +477,15 @@ final class SplitHostTaskLane {
             if (running == null) return new TaskQuery(SplitHostTaskSnapshot.unknown());
             List<SplitHostTaskSnapshot.TaskRecord> normalized = new ArrayList<>(running.size());
             for (ActivityManager.RunningTaskInfo task : running) {
-                ComponentName component = task.topActivity != null ? task.topActivity : task.baseActivity;
+                ComponentName component =
+                        task.topActivity != null ? task.topActivity : task.baseActivity;
                 String packageName = component != null ? component.getPackageName() : null;
-                normalized.add(new SplitHostTaskSnapshot.TaskRecord(
-                        task.taskId, packageName, readDisplayId(task)));
+                normalized.add(
+                        SplitHostTaskSnapshot.TaskRecord.fromComponent(
+                                task.taskId,
+                                packageName,
+                                component != null ? component.getClassName() : null,
+                                readDisplayId(task)));
             }
             return new TaskQuery(SplitHostTaskSnapshot.known(normalized));
         } catch (Throwable t) {
@@ -462,8 +511,8 @@ final class SplitHostTaskLane {
         }
     }
 
-    private void removeMatchingTasks(SplitHostTaskSnapshot snapshot, Set<String> packages,
-                                     PaneLaunchRequest[] batch) {
+    private void removeMatchingTasks(
+            SplitHostTaskSnapshot snapshot, Set<String> packages, PaneLaunchRequest[] batch) {
         assertWorkerThread();
         if (packages.isEmpty() || !ensureRemoveTask()) return;
         int removed = 0;
@@ -479,8 +528,14 @@ final class SplitHostTaskLane {
                 removed++;
             } catch (Throwable t) {
                 invocationFailed = true;
-                Log.w(TAG, "removeTask " + task.taskId + " (" + task.packageName + "): "
-                        + rootCause(t));
+                Log.w(
+                        TAG,
+                        "removeTask "
+                                + task.taskId
+                                + " ("
+                                + task.packageName
+                                + "): "
+                                + rootCause(t));
             }
         }
         if (invocationFailed) {
@@ -493,7 +548,8 @@ final class SplitHostTaskLane {
 
     private boolean hasCurrentRequestForPackage(PaneLaunchRequest[] batch, String packageName) {
         for (PaneLaunchRequest request : batch) {
-            if (request != null && packageName.equals(request.pane.packageName)
+            if (request != null
+                    && packageName.equals(request.pane.packageName)
                     && isLatestPane(request)) return true;
         }
         return false;
@@ -502,8 +558,10 @@ final class SplitHostTaskLane {
     private boolean ensureRemoveTask() {
         if (activityTaskManager != null && removeTaskMethod != null) return true;
         try {
-            activityTaskManager = Class.forName("android.app.ActivityTaskManager")
-                    .getMethod("getService").invoke(null);
+            activityTaskManager =
+                    Class.forName("android.app.ActivityTaskManager")
+                            .getMethod("getService")
+                            .invoke(null);
             removeTaskMethod = activityTaskManager.getClass().getMethod("removeTask", int.class);
             return true;
         } catch (Throwable t) {
@@ -517,20 +575,25 @@ final class SplitHostTaskLane {
     private void postPaneLaunchResult(PaneLaunchRequest request, Intent launchIntent) {
         LatestValueDelivery<PaneLaunchResult> delivery =
                 request.pane.paneIndex == SplitHostGenerationGate.LEFT
-                        ? leftPaneResults : rightPaneResults;
-        delivery.offer(request.pane.hostGeneration, request.sequence,
+                        ? leftPaneResults
+                        : rightPaneResults;
+        delivery.offer(
+                request.pane.hostGeneration,
+                request.sequence,
                 new PaneLaunchResult(request, launchIntent));
     }
 
-    private void postSupervisionResult(SupervisionRequest request, boolean enabled,
-                                       SplitHostTaskSnapshot snapshot) {
-        supervisionResults.offer(request.hostGeneration, request.sequence,
+    private void postSupervisionResult(
+            SupervisionRequest request, boolean enabled, SplitHostTaskSnapshot snapshot) {
+        supervisionResults.offer(
+                request.hostGeneration,
+                request.sequence,
                 new SupervisionResult(request, enabled, snapshot));
     }
 
     private void deliverSingleHostResult(SingleHostResult result) {
         SingleHostRequest request = result.request;
-        if (!isLatestSingleHost(request)) return;
+        if (!isLatestSingleHost(request) || !request.valid.getAsBoolean()) return;
         if (!result.launchable) {
             Log.w(TAG, "launchSingle: нет launch intent для " + request.packageName);
             return;

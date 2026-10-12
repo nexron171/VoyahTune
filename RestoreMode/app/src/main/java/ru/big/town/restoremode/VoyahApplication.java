@@ -28,6 +28,12 @@ public final class VoyahApplication extends Application {
         if (isOtaProcess()) {
             return;
         }
+        com.shilapi.xcertplay.VoyahCarPlayIntegration.install(
+                new ru.big.town.restoremode.carplay.CarPlayVehicleBridge(this));
+        com.shilapi.xcertplay.CarPlayHomeUi.install(
+                ru.big.town.restoremode.carplay.CarPlayHomeScreen::new);
+        com.shilapi.xcertplay.CarPlayWindowUi.install(
+                new ru.big.town.restoremode.carplay.CarPlayWindowPolicy());
         // Voice settings edits (dial entries, steering actions, splits, custom CAN) invalidate
         // the shared command catalog; the next load rebuilds it.
         getSharedPreferences("DrivePreferences", MODE_PRIVATE)

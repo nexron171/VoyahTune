@@ -16,7 +16,7 @@ import org.junit.runner.RunWith;
 import ru.big.town.common.*;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.dashboard.DashboardActivity;
-import ru.big.town.restoremode.widgets.energy.EnergyWidgetView;
+import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 
 import java.lang.reflect.Field;
 import java.util.*;
@@ -167,7 +167,7 @@ public class RestoreIntegrationTest {
                         f.setAccessible(true);
                         List<?> views = (List<?>) f.get(a);
                         assertFalse(views.isEmpty());
-                        Field s = EnergyWidgetView.class.getDeclaredField("state");
+                        Field s = VehicleWidgetView.class.getDeclaredField("state");
                         s.setAccessible(true);
                         assertEquals(
                                 66, ((Bundle) s.get(views.get(0))).getFloatArray("levels")[0], 0);

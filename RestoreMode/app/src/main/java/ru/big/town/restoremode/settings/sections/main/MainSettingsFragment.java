@@ -16,6 +16,7 @@ import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import ru.big.town.common.CarPlayTarget;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.dashboard.tiles.TileScrollSnap;
@@ -34,7 +35,6 @@ import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
-import ru.big.town.restoremode.widgets.energy.EnergyWidgetView;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -124,40 +124,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                 R.id.OdometerSettingWidth, R.id.OdometerSettingHeight, "odometerWidget", 4, 1);
     }
 
-    private void bindEnergyAppearance() {
-        if (settingView(R.id.energyCarColor) == null) {
-            return;
-        }
-        android.widget.Spinner carColor = settingView(R.id.energyCarColor);
-        android.widget.ArrayAdapter<String> carColors =
-                new android.widget.ArrayAdapter<>(
-                        requireContext(),
-                        R.layout.settings_spinner_item,
-                        EnergyWidgetView.COLOR_NAMES);
-        carColors.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        carColor.setAdapter(carColors);
-        carColor.setSelection(
-                java.util.Arrays.asList(EnergyWidgetView.COLORS)
-                        .indexOf(
-                                EnergyWidgetView.color(
-                                        preferences.getString("energyCarColor", "burgundy"))));
-        carColor.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long id) {
-                        preferences
-                                .edit()
-                                .putString("energyCarColor", EnergyWidgetView.COLORS[position])
-                                .apply();
-                    }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-                });
+    private void bindEnergyCapacities() {
         bindEnergyCapacity(
                 R.id.energyBatteryCapacity,
                 ru.big.town.common.EnergyWidgetSettings.BATTERY_KEY,
@@ -226,8 +193,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             gridSnapMode.setAdapter(modes);
             gridSnapMode.setSelection(
                     TileScrollSnap.indexOf(
-                            TileScrollSnap.fromKey(
-                                    preferences.getString("gridSnapMode", null))));
+                            TileScrollSnap.fromKey(preferences.getString("gridSnapMode", null))));
             gridSnapMode.setOnItemSelectedListener(
                     new AdapterView.OnItemSelectedListener() {
                         @Override
@@ -503,13 +469,20 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         refreshSettingsRows();
     }
 
-    private void onAddAppWidget(View v) {
-        if (AppWidgetStore.load(preferences).size() >= AppWidgetStore.MAX_WIDGETS) {
-            com.google.android.material.snackbar.Snackbar.make(
-                            requireView(),
-                            "Можно создать не более 20 виджетов",
-                            com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
-                    .show();
+    private boolean canAddAppWidget() {
+        if (AppWidgetStore.load(preferences).size() < AppWidgetStore.MAX_WIDGETS) {
+            return true;
+        }
+        com.google.android.material.snackbar.Snackbar.make(
+                        requireView(),
+                        "Можно создать не более 20 виджетов",
+                        com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                .show();
+        return false;
+    }
+
+    private void onAddAppWidget(View view) {
+        if (!canAddAppWidget()) {
             return;
         }
         SettingsAppPicker.show(
@@ -520,6 +493,27 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                     TileOrderStore.sync(preferences, requireContext().getPackageManager());
                     renderAppWidgets();
                 });
+    }
+
+    private void addCarPlayWidgetRows(List<SettingsList.Row> rows) {
+        List<AppWidgetStore.Entry> entries = AppWidgetStore.load(preferences);
+        entries.removeIf(entry -> !CarPlayWidgetSettings.isDedicated(entry));
+        if (entries.isEmpty()) {
+            entries.add(null);
+        }
+        for (AppWidgetStore.Entry entry : entries) {
+            rows.add(
+                    new SettingsList.Row(
+                            "carplay:" + (entry == null ? "new" : entry.id),
+                            parent ->
+                                    CarPlayWidgetSettings.create(
+                                            requireContext(),
+                                            parent,
+                                            preferences,
+                                            entry,
+                                            this::canAddAppWidget,
+                                            this::refreshSettingsRows)));
+        }
     }
 
     private void renderAppWidgets() {
@@ -544,6 +538,10 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             label.setText(packageManager.getApplicationLabel(info));
         } catch (Exception ignored) {
             label.setText(profile.packageName);
+        }
+        if (CarPlayTarget.isCarPlay(profile.packageName)) {
+            label.setText(CarPlayTarget.LABEL);
+            icon.setImageResource(R.drawable.carplay_home_logo);
         }
         String[] labels = new String[AppWidgetStore.DPI_VALUES.length];
         int selected = 0;
@@ -691,9 +689,18 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             icon.setImageDrawable(packageManager.getApplicationIcon(info));
         } catch (Exception ignored) {
         }
+        if (CarPlayTarget.isCarPlay(entry.packageName)) {
+            name = CarPlayTarget.LABEL;
+            icon.setImageResource(R.drawable.carplay_home_logo);
+        }
         label.setText("Виджет " + AppWidgetStore.designation(preferences, entry.id) + ": " + name);
+        boolean carPlayShortcut =
+                CarPlayTarget.opensActivity(entry.packageName, entry.width, entry.height);
         ((TextView) row.findViewById(R.id.settingsAppWidgetSubtitle))
-                .setText(entry.profiles.size() + " приложений · запуск внутри карточки");
+                .setText(
+                        carPlayShortcut
+                                ? getString(R.string.carplay_shortcut_description)
+                                : entry.profiles.size() + " приложений · запуск внутри карточки");
         android.widget.ArrayAdapter<String> widthAdapter =
                 new android.widget.ArrayAdapter<>(
                         requireContext(),
@@ -728,6 +735,9 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                             entry.width = value;
                             AppWidgetStore.update(preferences, entry);
                             TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            if (CarPlayTarget.isCarPlay(entry.packageName)) {
+                                renderAppWidgets();
+                            }
                         }
                     }
 
@@ -755,19 +765,24 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                             entry.height = value;
                             AppWidgetStore.update(preferences, entry);
                             TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            if (CarPlayTarget.isCarPlay(entry.packageName)) {
+                                renderAppWidgets();
+                            }
                         }
                     }
 
                     @Override
                     public void onNothingSelected(android.widget.AdapterView<?> parent) {}
                 });
-        autoStart.setChecked(entry.autoStart);
+        autoStart.setChecked(entry.autoStart && !carPlayShortcut);
+        autoStart.setEnabled(!carPlayShortcut);
 
         View delayContainer = row.findViewById(R.id.appWidgetDelayContainer);
         android.widget.SeekBar delaySeek = row.findViewById(R.id.appWidgetSettingDelay);
         TextView delayText = row.findViewById(R.id.appWidgetSettingDelayText);
 
-        delayContainer.setVisibility(entry.autoStart ? View.VISIBLE : View.GONE);
+        delayContainer.setVisibility(
+                entry.autoStart && !carPlayShortcut ? View.VISIBLE : View.GONE);
         delaySeek.setProgress(entry.autoStartDelay - 1);
         delayText.setText(entry.autoStartDelay + " сек");
 
@@ -845,6 +860,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
 
     private void addAppWidgetRows(List<SettingsList.Row> rows) {
         List<AppWidgetStore.Entry> entries = AppWidgetStore.load(preferences);
+        entries.removeIf(CarPlayWidgetSettings::isDedicated);
         for (int index = 0; index < entries.size(); index += 2) {
             List<AppWidgetStore.Entry> pair =
                     new ArrayList<>(entries.subList(index, Math.min(index + 2, entries.size())));
@@ -900,7 +916,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
     @Override
     protected void bindSettingsRow() {
         bindMainWidgetSwitches();
-        bindEnergyAppearance();
+        bindEnergyCapacities();
         bindTripHistory();
         bindMainGrid();
         bindShowSwitch(R.id.switchShowTaskManagerTile, "showTaskManagerTile", true);
@@ -927,6 +943,9 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
     protected void addDynamicRows(
             List<SettingsList.Row> rows, SettingsSectionLayouts.DynamicContent kind) {
         switch (kind) {
+            case CARPLAY_WIDGETS:
+                addCarPlayWidgetRows(rows);
+                break;
             case APP_WIDGETS:
                 addAppWidgetRows(rows);
                 break;

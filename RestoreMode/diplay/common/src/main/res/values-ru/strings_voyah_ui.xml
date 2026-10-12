@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voyah_carplay_projection_launch_failed">Не удалось открыть CarPlay на этом экране. Повторите попытку.</string>
+    <string name="voyah_carplay_notification_channel">Подключение CarPlay</string>
+    <string name="voyah_carplay_notification_running">Подключение CarPlay активно</string>
+    <string name="voyah_mfi_title">Диагностика I2C</string>
+    <string name="voyah_mfi_device">Устройство I2C в Linux</string>
+    <string name="voyah_mfi_run">Проверить MFi</string>
+    <string name="voyah_mfi_ch341_hint">Для CH341 необходимо указать VID/PID конкретного адаптера.</string>
+    <string name="voyah_mfi_library_unavailable">Библиотека I2C недоступна</string>
+    <string name="voyah_mfi_idle">Готово к проверке</string>
+    <string name="voyah_mfi_running">Проверка…</string>
+    <string name="voyah_mfi_failed">Ошибка: %1$s</string>
+    <string name="voyah_mfi_interrupted">Поиск MFi прерван</string>
+    <string name="voyah_mfi_not_found">Устройства не найдены</string>
+    <string name="voyah_mfi_result">Найдено: 0x%1$02X; версия устройства: 0x%2$02X; основная версия протокола (исходное значение): %3$s</string>
+</resources>

@@ -34,7 +34,16 @@ require_fixed "$VEHICLE_STATE" 'ModeFeedbackController.create(appContext, stateH
 require_fixed "$DECODER" 'RECYCLE_MODE_VSTATE_ID = VehicleRestorePolicy.REGEN_LEVEL_ID'
 require_fixed "$CONTROLLER" 'ModeFeedbackDecoder.decode(id, state)'
 require_fixed "$CONTROLLER" 'ApplyEngine.persistModeFeedbackIfAllowed('
-require_fixed "$CONTROLLER" 'new IntentFilter(ACTION_REMEMBER_LAST_CHANGED), BIND_PERMISSION'
+python3 - "$CONTROLLER" <<'PY_CHECK'
+from pathlib import Path
+import re
+import sys
+
+source = Path(sys.argv[1]).read_text()
+assert re.search(
+    r'new IntentFilter\(ACTION_REMEMBER_LAST_CHANGED\),\s*BIND_PERMISSION', source
+), 'Remember-last receiver must require the binding permission'
+PY_CHECK
 
 if grep -Eq 'ModeFeedback|MODE_REMEMBER|persistModeFeedback|INTEREST_VEHICLE_STATE' "$TRIPS"; then
     fail "TripStatsService contains vehicle-mode responsibilities"
@@ -57,7 +66,7 @@ python3 - "$APPLY_ENGINE" <<'PY_CHECK'
 from pathlib import Path
 import sys
 source = Path(sys.argv[1]).read_text()
-start = source.index('static void persistModeFeedbackIfAllowed(\n')
+start = source.index('static void persistModeFeedbackIfAllowed(')
 end = source.index('private ApplyEngine()', start)
 body = source[start:end]
 assert 'if (usesAccHooks()) {' in body, 'OD observation must be profile-gated'

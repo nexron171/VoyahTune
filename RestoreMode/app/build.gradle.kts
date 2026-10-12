@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "ru.big.town.restoremode"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "ru.big.town.restoremode"
@@ -72,12 +72,16 @@ android {
         includeInApk = true
         includeInBundle = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
     ndkVersion = "27.0.12077973"
 
 }
 
 dependencies {
     implementation(project(":updater-ui"))
+    implementation(project(":diplay-common"))
 
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation(files(layout.buildDirectory.file("voice-deps/downloads/sherpa.aar")))
@@ -88,6 +92,8 @@ dependencies {
     implementation(libs.constraintlayout)
     implementation("androidx.recyclerview:recyclerview:1.2.1")
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("org.mockito:mockito-core:5.20.0")
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 }
@@ -106,11 +112,11 @@ val prepareVoiceNative = tasks.register<Exec>("prepareVoiceNative") {
         rootProject.fileTree("voice-native") { exclude("target/**") })
     outputs.dir(layout.buildDirectory.dir("voice-deps/jniLibs"))
     commandLine("python3", rootProject.file("prepare_voice.py"), "--ndk",
-        android.sdkDirectory.resolve("ndk/${android.ndkVersion}"), "--abis", "arm64-v8a,x86_64")
+        androidComponents.sdkComponents.sdkDirectory.get().asFile.resolve("ndk/${android.ndkVersion}"), "--abis", "arm64-v8a,x86_64")
 }
 android.sourceSets.getByName("main") {
-    assets.srcDir(layout.buildDirectory.dir("voice-deps/assets"))
-    jniLibs.srcDir(layout.buildDirectory.dir("voice-deps/jniLibs"))
+    assets.directories.add(layout.buildDirectory.dir("voice-deps/assets").get().asFile.path)
+    jniLibs.directories.add(layout.buildDirectory.dir("voice-deps/jniLibs").get().asFile.path)
 }
 tasks.named("preBuild") { dependsOn(prepareVoiceDependencies, prepareVoiceNative) }
 
@@ -150,8 +156,46 @@ abstract class VoyahBuildIdentity : DefaultTask() {
         )) + "\n")
     }
 }
+// Only the two runtime files may enter the APK; never copy the credentials directory wholesale.
+abstract class CarPlayAuthenticationAssets : DefaultTask() {
+    @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val authenticationFiles: ConfigurableFileCollection
+    @get:Input abstract val required: Property<Boolean>
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction fun prepare() {
+        val output = outputDirectory.get().asFile
+        output.deleteRecursively()
+        output.mkdirs()
+        val names = listOf("identity.pk8", "certificate.p7b")
+        val files = authenticationFiles.files.associateBy { it.name }
+        if (files.isEmpty() && !required.get()) return
+        require(names.all { files[it]?.let { file -> file.isFile && file.length() > 0 } == true }) {
+            "CarPlay authentication assets are required: set DIPLAY_AUTH_ASSETS_DIR to a directory " +
+                "containing offline-mfi/identity.pk8 and offline-mfi/certificate.p7b, " +
+                "or provision Credentials/CarPlayKeys at the repository root."
+        }
+        val target = output.resolve("offline-mfi").apply { mkdirs() }
+        names.forEach { files.getValue(it).copyTo(target.resolve(it), overwrite = true) }
+    }
+}
+
+val authenticationAssetsOverride = providers.environmentVariable("DIPLAY_AUTH_ASSETS_DIR")
+val authenticationAssetsDirectory = authenticationAssetsOverride.orNull?.let { file(it) }
+    ?: rootProject.projectDir.parentFile.resolve("Credentials/CarPlayKeys")
+
 androidComponents {
     onVariants(selector().all()) { variant ->
+        val authentication = tasks.register<CarPlayAuthenticationAssets>(
+            "prepare${variant.name.replaceFirstChar { it.uppercase() }}CarPlayAuthentication"
+        ) {
+            authenticationFiles.from(fileTree(authenticationAssetsDirectory) {
+                include("offline-mfi/identity.pk8", "offline-mfi/certificate.p7b")
+            })
+            required.set(variant.buildType == "release" || authenticationAssetsOverride.isPresent)
+            outputDirectory.set(layout.buildDirectory.dir("generated/carplayAuthentication/${variant.name}"))
+        }
+        variant.sources.assets?.addGeneratedSourceDirectory(authentication, CarPlayAuthenticationAssets::outputDirectory)
         val identity = tasks.register<VoyahBuildIdentity>("generate${variant.name.replaceFirstChar { it.uppercase() }}VoyahIdentity") {
             releaseVersion.set(providers.gradleProperty("voyahReleaseVersion").orElse("0.0.0-dev"))
             revision.set(providers.gradleProperty("voyahBuildRevision").orElse("local"))
@@ -203,4 +247,4 @@ androidComponents {
     }
 }
 
-android.sourceSets.getByName("main").java.srcDir(rootProject.projectDir.parentFile.resolve("SharedAndroid/src/main/java"))
+android.sourceSets.getByName("main").java.directories.add(rootProject.projectDir.parentFile.resolve("SharedAndroid/src/main/java").path)

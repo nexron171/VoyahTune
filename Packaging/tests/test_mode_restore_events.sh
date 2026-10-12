@@ -5,7 +5,7 @@ SRC="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative"
 ENGINE="$SRC/ApplyEngine.java"
 PROVIDER="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/DriveSelectionPreferences.java"
 HOOK="$REPO_ROOT/Packaging/od/inject/voyahtune_acc_restore.js"
-# OD starts the automatic Native pass only from ACC; PI retains door/gear restoration.
+# OD supports ACC and opt-in first-Drive restoration; PI retains its existing triggers.
 ! grep -Rq 'ApplyEngine.scheduleApply(' "$SRC"
 grep -Fq 'if (!accHooks)' "$SRC/VehicleStateControllers.java"
 grep -Fq 'if (!InfrastructureProfile.read(context).usesAccHooks()) return;' "$ENGINE"
@@ -15,8 +15,8 @@ grep -Fq 'ApplyEngine.scheduleAccApply(this)' "$SRC/SetModesService.java"
 grep -Fq '"claimSettings"' "$ENGINE" "$PROVIDER"
 grep -Fq '"completeSettings"' "$ENGINE" "$PROVIDER"
 grep -Fq '"dispatchSettings"' "$HOOK"
-# Automatic pass excludes drive/energy, which are handled by the OEM-origin hook.
-grep -Fq 'MainActivity.createCanRestorePlan(manual || !usesAccHooks())' "$ENGINE"
+# ACC excludes drive/energy; the opt-in Drive pass includes the complete set.
+tr -d '[:space:]' < "$ENGINE" | grep -Fq 'MainActivity.createCanRestorePlan(manual||!usesAccHooks()||isDriveEntryRestore())'
 grep -Fq 'if (includeModes && driveEnabled)' "$SRC/MainActivity.java"
 grep -Fq 'includeModes && energyEnabled, energy, includeModes && forcedEv' "$SRC/MainActivity.java"
 [ -s "$SRC/EarlyDriveModeRestore.java" ]

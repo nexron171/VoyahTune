@@ -7,9 +7,10 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
 
+import ru.big.town.common.InfrastructureProfile;
+
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-import ru.big.town.common.InfrastructureProfile;
 
 /** Shared restore execution, driven by the installed infrastructure's OEM event source. */
 public final class ApplyEngine {
@@ -55,8 +56,14 @@ public final class ApplyEngine {
             runGeneration = RESTORE_RUN_STATE.cancelAndAdvance();
             gateGeneration = MODE_SYNC_POLICY.freeze();
         }
-        Log.i(TAG, "mode sync gate FROZEN gen=" + gateGeneration
-                + " runGen=" + runGeneration + " reason=" + reason);
+        Log.i(
+                TAG,
+                "mode sync gate FROZEN gen="
+                        + gateGeneration
+                        + " runGen="
+                        + runGeneration
+                        + " reason="
+                        + reason);
     }
 
     /** Snapshot used by finite event adjudication which must fail closed across physical sleep. */
@@ -74,18 +81,31 @@ public final class ApplyEngine {
     }
 
     /** Полный снимок источника истины, прочитанный MainActivity из provider/cache. */
-    static void noteLoadedModes(String drive, String energy, String recycle,
-                                boolean driveEnabled, boolean energyEnabled,
-                                boolean recycleEnabled,
-                                boolean driveRememberLast, boolean energyRememberLast,
-                                boolean recycleRememberLast) {
+    static void noteLoadedModes(
+            String drive,
+            String energy,
+            String recycle,
+            boolean driveEnabled,
+            boolean energyEnabled,
+            boolean recycleEnabled,
+            boolean driveRememberLast,
+            boolean energyRememberLast,
+            boolean recycleRememberLast) {
         MODE_SYNC_POLICY.updateExpected(
-                drive, energy, recycle,
-                driveEnabled, energyEnabled, recycleEnabled,
-                driveRememberLast, energyRememberLast, recycleRememberLast);
+                drive,
+                energy,
+                recycle,
+                driveEnabled,
+                energyEnabled,
+                recycleEnabled,
+                driveRememberLast,
+                energyRememberLast,
+                recycleRememberLast);
     }
 
-    /** Явно сохранённый режим (руль или уже разрешённая внешняя смена) сразу становится ожидаемым. */
+    /**
+     * Явно сохранённый режим (руль или уже разрешённая внешняя смена) сразу становится ожидаемым.
+     */
     static void noteSavedMode(boolean energy, String mode) {
         noteSavedMode(energy ? "energy" : "driveMode", mode);
     }
@@ -100,11 +120,15 @@ public final class ApplyEngine {
     }
 
     static void noteDriverDoorOpened() {
-        synchronized (RESTORE_LOCK) { MODE_SYNC_POLICY.onDriverDoorOpened(); }
+        synchronized (RESTORE_LOCK) {
+            MODE_SYNC_POLICY.onDriverDoorOpened();
+        }
     }
 
     static void noteGear(int gear) {
-        synchronized (RESTORE_LOCK) { MODE_SYNC_POLICY.onGear(gear); }
+        synchronized (RESTORE_LOCK) {
+            MODE_SYNC_POLICY.onGear(gear);
+        }
     }
 
     static boolean canRememberModeSelection() {
@@ -120,7 +144,8 @@ public final class ApplyEngine {
     /** Feedback never initiates another restore. */
     static boolean shouldPersistModeFeedback(String modeKey, String observedMode) {
         synchronized (RESTORE_LOCK) {
-            return MODE_SYNC_POLICY.evaluate(modeKey, observedMode) == ModeSyncPolicy.Decision.ACCEPT;
+            return MODE_SYNC_POLICY.evaluate(modeKey, observedMode)
+                    == ModeSyncPolicy.Decision.ACCEPT;
         }
     }
 
@@ -135,21 +160,22 @@ public final class ApplyEngine {
     /** Invalidate a queued ACC restore while a user drive command is being dispatched/saved. */
     static void driveSelectionSaved() {
         synchronized (RESTORE_LOCK) {
-            EarlyDriveModeRestore.stop(RESTORE_RUN_STATE.currentGeneration(), "saved user selection");
+            EarlyDriveModeRestore.stop(
+                    RESTORE_RUN_STATE.currentGeneration(), "saved user selection");
             RESTORE_RUN_STATE.cancelRestoreAndAdvance();
             long generation = MODE_SYNC_POLICY.cancelRestore();
             MODE_SYNC_POLICY.completeUserCommand(generation);
         }
     }
 
-    /** Revalidates stable feedback without holding the restore-cancellation lock across Binder I/O. */
+    /**
+     * Revalidates stable feedback without holding the restore-cancellation lock across Binder I/O.
+     */
     static void persistModeFeedbackIfAllowed(Context context, boolean energy, String observedMode) {
-        persistModeFeedbackIfAllowed(
-                context, energy ? "energy" : "driveMode", observedMode);
+        persistModeFeedbackIfAllowed(context, energy ? "energy" : "driveMode", observedMode);
     }
 
-    static void persistModeFeedbackIfAllowed(
-            Context context, String modeKey, String observedMode) {
+    static void persistModeFeedbackIfAllowed(Context context, String modeKey, String observedMode) {
         if (usesAccHooks()) {
             MODE_SYNC_POLICY.observe(modeKey, observedMode);
             // Origin-free callbacks are observations, never user intent.
@@ -166,8 +192,7 @@ public final class ApplyEngine {
         // Provider.update/broadcast may block on another process. Revalidate immediately before it,
         // then release RESTORE_LOCK so sleep can cancel CAN even if that external process is stuck.
         synchronized (RESTORE_LOCK) {
-            if (!MODE_SYNC_POLICY.canPersist(
-                    gateGeneration, modeKey)) {
+            if (!MODE_SYNC_POLICY.canPersist(gateGeneration, modeKey)) {
                 return;
             }
         }
@@ -200,7 +225,8 @@ public final class ApplyEngine {
             MODE_SYNC_POLICY.useAccHooks(usesAccHooks());
             RESTORE_RUN_STATE.activate(RESTORE_RUN_STATE.currentGeneration());
             MODE_SYNC_POLICY.activateWake();
-            if (!usesAccHooks()) EarlyDriveModeRestore.activate(RESTORE_RUN_STATE.currentGeneration(), reason);
+            if (!usesAccHooks())
+                EarlyDriveModeRestore.activate(RESTORE_RUN_STATE.currentGeneration(), reason);
         }
         Log.i(TAG, "wake active: " + reason);
     }
@@ -209,65 +235,89 @@ public final class ApplyEngine {
     static void applyApolloTargets(Context context) {
         if (!InfrastructureProfile.read(context).usesAccHooks()) return;
         // Serialize with the ACC pass; changing Apollo must not cancel unrelated restoration.
-        bg().post(() -> {
-            if (MainActivity.loadModes(context, false) != 2) {
-                Log.w(TAG, "Apollo apply skipped: saved targets unavailable");
-                return;
-            }
-            CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
-            MainActivity.appendApolloRestore(builder, context);
-            Log.i(TAG, "Apollo apply: " + builder.build().sendPending((frames, label) -> false));
-        });
+        bg().post(
+                        () -> {
+                            if (MainActivity.loadModes(context, false) != 2) {
+                                Log.w(TAG, "Apollo apply skipped: saved targets unavailable");
+                                return;
+                            }
+                            CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
+                            MainActivity.appendApolloRestore(builder, context);
+                            Log.i(
+                                    TAG,
+                                    "Apollo apply: "
+                                            + builder.build()
+                                                    .sendPending((frames, label) -> false));
+                        });
     }
 
     public static void scheduleAccApply(Context context) {
         if (!InfrastructureProfile.read(context).usesAccHooks()) return;
         final Context app = context.getApplicationContext();
-        bg().post(() -> {
-            long cycle;
-            try {
-                Bundle claim = app.getContentResolver().call(Uri.parse(MODES_URI),
-                        "driveHookV2", "claimSettings", null);
-                if (claim == null) return;
-                if (!claim.getBoolean("claimed")) {
-                    // The durable pass can outlive Native. Restore the feedback policy too, but
-                    // never reopen a gate already closed by sleep, a restore, or a user command.
-                    if (claim.getInt("acc", -1) == 2
-                            && "submitted".equals(claim.getString("settingsStartup"))) {
-                        MainActivity.loadModes(app, true);
-                        synchronized (RESTORE_LOCK) {
-                            MODE_SYNC_POLICY.reconcileCompletedAcc(
-                                    claim.getInt("acc", -1), claim.getString("settingsStartup"));
-                        }
-                    }
-                    return;
-                }
-                cycle = claim.getLong("cycle", -1);
-            } catch (RuntimeException e) {
-                Log.w(TAG, "ACC settings claim unavailable", e);
-                return;
-            }
-            final long wakeGeneration;
-            final long restoreEpoch;
-            final long gateGeneration;
-            synchronized (RESTORE_LOCK) {
-                wakeGeneration = RESTORE_RUN_STATE.currentGeneration();
-                RESTORE_RUN_STATE.activate(wakeGeneration);
-                restoreEpoch = RESTORE_RUN_STATE.currentRestoreEpoch();
-                gateGeneration = beginRestoreGate("ACC cycle " + cycle);
-            }
-            CycleResult result = applyInternal(null, gateGeneration, wakeGeneration,
-                    restoreEpoch, false);
-            Bundle completion = new Bundle();
-            completion.putLong("cycle", cycle);
-            completion.putBoolean("accepted", result.completesRestore());
-            try {
-                app.getContentResolver().call(Uri.parse(MODES_URI),
-                        "driveHookV2", "completeSettings", completion);
-            } catch (RuntimeException e) {
-                Log.w(TAG, "ACC settings completion unavailable", e);
-            }
-        });
+        bg().post(
+                        () -> {
+                            long cycle;
+                            try {
+                                Bundle claim =
+                                        app.getContentResolver()
+                                                .call(
+                                                        Uri.parse(MODES_URI),
+                                                        "driveHookV2",
+                                                        "claimSettings",
+                                                        null);
+                                if (claim == null) return;
+                                if (!claim.getBoolean("claimed")) {
+                                    // The durable pass can outlive Native. Restore the feedback
+                                    // policy too, but
+                                    // never reopen a gate already closed by sleep, a restore, or a
+                                    // user command.
+                                    if (claim.getInt("acc", -1) == 2
+                                            && "submitted"
+                                                    .equals(claim.getString("settingsStartup"))) {
+                                        MainActivity.loadModes(app, true);
+                                        synchronized (RESTORE_LOCK) {
+                                            MODE_SYNC_POLICY.reconcileCompletedAcc(
+                                                    claim.getInt("acc", -1),
+                                                    claim.getString("settingsStartup"));
+                                        }
+                                    }
+                                    return;
+                                }
+                                cycle = claim.getLong("cycle", -1);
+                            } catch (RuntimeException e) {
+                                Log.w(TAG, "ACC settings claim unavailable", e);
+                                return;
+                            }
+                            final long wakeGeneration;
+                            final long restoreEpoch;
+                            final long gateGeneration;
+                            synchronized (RESTORE_LOCK) {
+                                wakeGeneration = RESTORE_RUN_STATE.currentGeneration();
+                                RESTORE_RUN_STATE.activate(wakeGeneration);
+                                restoreEpoch = RESTORE_RUN_STATE.currentRestoreEpoch();
+                                gateGeneration = beginRestoreGate("ACC cycle " + cycle);
+                            }
+                            CycleResult result =
+                                    applyInternal(
+                                            null,
+                                            gateGeneration,
+                                            wakeGeneration,
+                                            restoreEpoch,
+                                            false);
+                            Bundle completion = new Bundle();
+                            completion.putLong("cycle", cycle);
+                            completion.putBoolean("accepted", result.completesRestore());
+                            try {
+                                app.getContentResolver()
+                                        .call(
+                                                Uri.parse(MODES_URI),
+                                                "driveHookV2",
+                                                "completeSettings",
+                                                completion);
+                            } catch (RuntimeException e) {
+                                Log.w(TAG, "ACC settings completion unavailable", e);
+                            }
+                        });
     }
 
     static void stopEarlyDriveRestore(String reason) {
@@ -276,7 +326,40 @@ public final class ApplyEngine {
         }
     }
 
-    /** PI retains the door/first-Drive triggers from master; OD uses the durable ACC claim above. */
+    /**
+     * PI retains the door/first-Drive triggers from master; OD uses the durable ACC claim above.
+     */
+    private static final ThreadLocal<BooleanSupplier> DRIVE_ENTRY_GUARD = new ThreadLocal<>();
+
+    static boolean isDriveEntryRestore() {
+        return DRIVE_ENTRY_GUARD.get() != null;
+    }
+
+    static void scheduleDriveEntryApply(BooleanSupplier allowed) {
+        if (!usesAccHooks()) return;
+        final long wakeGeneration;
+        final long restoreEpoch;
+        synchronized (RESTORE_LOCK) {
+            wakeGeneration = RESTORE_RUN_STATE.currentGeneration();
+            restoreEpoch = RESTORE_RUN_STATE.currentRestoreEpoch();
+        }
+        bg().post(
+                        () -> {
+                            synchronized (RESTORE_LOCK) {
+                                if (!allowed.getAsBoolean()
+                                        || !RESTORE_RUN_STATE.isRestoreCurrent(
+                                                wakeGeneration, restoreEpoch)) return;
+                            }
+                            DRIVE_ENTRY_GUARD.set(allowed);
+                            try {
+                                long gate = beginRestoreGate("first Drive after driver door");
+                                applyInternal(null, gate, wakeGeneration, restoreEpoch, false);
+                            } finally {
+                                DRIVE_ENTRY_GUARD.remove();
+                            }
+                        });
+    }
+
     static void scheduleNativeApply(String reason) {
         if (!usesAccHooks()) enqueueApply(reason, false, null);
     }
@@ -292,41 +375,54 @@ public final class ApplyEngine {
             final long wakeGeneration = RESTORE_RUN_STATE.currentGeneration();
             EarlyDriveModeRestore.stop(wakeGeneration, reason);
             RESTORE_RUN_STATE.activate(wakeGeneration);
-            final long restoreEpoch = manual ? RESTORE_RUN_STATE.cancelRestoreAndAdvance()
-                    : RESTORE_RUN_STATE.currentRestoreEpoch();
+            final long restoreEpoch =
+                    manual
+                            ? RESTORE_RUN_STATE.cancelRestoreAndAdvance()
+                            : RESTORE_RUN_STATE.currentRestoreEpoch();
             final long gateGeneration = beginRestoreGate(reason);
-            h.post(() -> applyInternal(onDone, gateGeneration, wakeGeneration, restoreEpoch, manual));
+            h.post(
+                    () ->
+                            applyInternal(
+                                    onDone, gateGeneration, wakeGeneration, restoreEpoch, manual));
         }
     }
 
     /** Automated action which must be cancelled if its physical wake has already ended. */
     public static void postWakeAction(String reason, Runnable action) {
-        postWakeAction(reason, (BooleanSupplier) () -> {
-            action.run();
-            return true;
-        }, null);
+        postWakeAction(
+                reason,
+                (BooleanSupplier)
+                        () -> {
+                            action.run();
+                            return true;
+                        },
+                null);
     }
 
     /**
-     * Automated CAN action tied to the current awake generation. It uses a small command worker,
-     * so light/battery reactions use the same serialized CAN transport. CanSender keeps
-     * transactions atomic. Sleep cancels it before each actual frame.
+     * Automated CAN action tied to the current awake generation. It uses a small command worker, so
+     * light/battery reactions use the same serialized CAN transport. CanSender keeps transactions
+     * atomic. Sleep cancels it before each actual frame.
      */
     public static void postWakeAction(String reason, Runnable action, Runnable onSkipped) {
-        postWakeAction(reason, (BooleanSupplier) () -> {
-            action.run();
-            return true;
-        }, result -> {
-            if (result != WakeActionResult.SUCCESS && onSkipped != null) onSkipped.run();
-        });
+        postWakeAction(
+                reason,
+                (BooleanSupplier)
+                        () -> {
+                            action.run();
+                            return true;
+                        },
+                result -> {
+                    if (result != WakeActionResult.SUCCESS && onSkipped != null) onSkipped.run();
+                });
     }
 
     /**
      * Automated action with one terminal callback. The callback is delivered exactly once for
      * success, CAN/application failure, cancellation, a frozen wake, or an exception.
      */
-    public static void postWakeAction(String reason, BooleanSupplier action,
-                                      Consumer<WakeActionResult> onComplete) {
+    public static void postWakeAction(
+            String reason, BooleanSupplier action, Consumer<WakeActionResult> onComplete) {
         Log.i(TAG, "postWakeAction: " + reason);
         final Handler h = commandBg();
         final long runGeneration;
@@ -334,30 +430,42 @@ public final class ApplyEngine {
             runGeneration = RESTORE_RUN_STATE.currentGeneration();
             if (!RESTORE_RUN_STATE.isActionAllowed(runGeneration)) {
                 Log.i(TAG, "postWakeAction [" + reason + "] suppressed while frozen");
-                if (!h.post(() -> deliverWakeActionResult(reason, onComplete,
-                        WakeActionResult.SKIPPED))) {
+                if (!h.post(
+                        () ->
+                                deliverWakeActionResult(
+                                        reason, onComplete, WakeActionResult.SKIPPED))) {
                     deliverWakeActionResult(reason, onComplete, WakeActionResult.SKIPPED);
                 }
                 return;
             }
         }
-        if (!h.post(() -> runWakeActionExactlyOnce(reason,
-                () -> RESTORE_RUN_STATE.isActionAllowed(runGeneration), action, onComplete))) {
+        if (!h.post(
+                () ->
+                        runWakeActionExactlyOnce(
+                                reason,
+                                () -> RESTORE_RUN_STATE.isActionAllowed(runGeneration),
+                                action,
+                                onComplete))) {
             deliverWakeActionResult(reason, onComplete, WakeActionResult.SKIPPED);
         }
     }
 
     /** Android-free core used by unit tests and by the command HandlerThread. */
-    static void runWakeActionExactlyOnce(String reason, BooleanSupplier guard,
-                                         BooleanSupplier action,
-                                         Consumer<WakeActionResult> onComplete) {
+    static void runWakeActionExactlyOnce(
+            String reason,
+            BooleanSupplier guard,
+            BooleanSupplier action,
+            Consumer<WakeActionResult> onComplete) {
         final boolean[] entered = {false};
         WakeActionResult result;
         try {
-            boolean successful = CanSender.runGuardedSend(guard, () -> {
-                entered[0] = true;
-                return action.getAsBoolean();
-            });
+            boolean successful =
+                    CanSender.runGuardedSend(
+                            guard,
+                            () -> {
+                                entered[0] = true;
+                                return action.getAsBoolean();
+                            });
             if (!entered[0]) {
                 result = WakeActionResult.SKIPPED;
             } else if (successful) {
@@ -365,13 +473,11 @@ public final class ApplyEngine {
                 // SKIPPED and produce a second, contradictory terminal callback in the caller.
                 result = WakeActionResult.SUCCESS;
             } else {
-                result = guardAllowed(guard)
-                        ? WakeActionResult.FAILED : WakeActionResult.SKIPPED;
+                result = guardAllowed(guard) ? WakeActionResult.FAILED : WakeActionResult.SKIPPED;
             }
         } catch (Throwable t) {
             result = WakeActionResult.FAILED;
-            safeWakeActionError("postWakeAction [" + reason + "] failed: "
-                    + t.getMessage(), t);
+            safeWakeActionError("postWakeAction [" + reason + "] failed: " + t.getMessage(), t);
         }
         deliverWakeActionResult(reason, onComplete, result);
     }
@@ -384,17 +490,15 @@ public final class ApplyEngine {
         }
     }
 
-    private static void deliverWakeActionResult(String reason,
-                                                Consumer<WakeActionResult> onComplete,
-                                                WakeActionResult result) {
+    private static void deliverWakeActionResult(
+            String reason, Consumer<WakeActionResult> onComplete, WakeActionResult result) {
         if (onComplete == null) return;
         try {
             onComplete.accept(result);
         } catch (Throwable t) {
             // Terminal delivery already happened; logging must never turn it into a retry or hide
             // the original action result (and Android's local-test Log stub may itself throw).
-            safeWakeActionError(
-                    "postWakeAction [" + reason + "] terminal callback failed", t);
+            safeWakeActionError("postWakeAction [" + reason + "] terminal callback failed", t);
         }
     }
 
@@ -406,7 +510,9 @@ public final class ApplyEngine {
         }
     }
 
-    /** Explicit user command: prompt and never discarded merely because SCREEN_OFF raced the tap. */
+    /**
+     * Explicit user command: prompt and never discarded merely because SCREEN_OFF raced the tap.
+     */
     public static void postUserCommand(String reason, Runnable action) {
         postUserCommand(reason, action, null);
     }
@@ -425,21 +531,31 @@ public final class ApplyEngine {
             restoreEpoch = RESTORE_RUN_STATE.cancelRestoreAndAdvance();
             gateGeneration = MODE_SYNC_POLICY.cancelRestore();
         }
-        Log.i(TAG, "automatic restore cancelled for user command: restoreEpoch="
-                + restoreEpoch + " gateGen=" + gateGeneration + " reason=" + reason);
-        enqueueUserCommand(commandHandler, reason, action, () -> {
-            try {
-                final boolean opened;
-                synchronized (RESTORE_LOCK) {
-                    opened = MODE_SYNC_POLICY.completeUserCommand(gateGeneration);
-                }
-                if (opened) {
-                    Log.i(TAG, "user command feedback gate OPEN gen=" + gateGeneration);
-                }
-            } finally {
-                if (onTerminal != null) onTerminal.run();
-            }
-        });
+        Log.i(
+                TAG,
+                "automatic restore cancelled for user command: restoreEpoch="
+                        + restoreEpoch
+                        + " gateGen="
+                        + gateGeneration
+                        + " reason="
+                        + reason);
+        enqueueUserCommand(
+                commandHandler,
+                reason,
+                action,
+                () -> {
+                    try {
+                        final boolean opened;
+                        synchronized (RESTORE_LOCK) {
+                            opened = MODE_SYNC_POLICY.completeUserCommand(gateGeneration);
+                        }
+                        if (opened) {
+                            Log.i(TAG, "user command feedback gate OPEN gen=" + gateGeneration);
+                        }
+                    } finally {
+                        if (onTerminal != null) onTerminal.run();
+                    }
+                });
     }
 
     /** Explicit command unrelated to restored drive modes (for example battery preheating). */
@@ -448,30 +564,35 @@ public final class ApplyEngine {
     }
 
     /** Independent explicit command with exactly-once completion, including queue rejection. */
-    public static void postIndependentUserCommand(String reason, Runnable action,
-                                                  Runnable onTerminal) {
+    public static void postIndependentUserCommand(
+            String reason, Runnable action, Runnable onTerminal) {
         Log.i(TAG, "postIndependentUserCommand: " + reason);
         enqueueUserCommand(commandBg(), reason, action, onTerminal);
     }
 
-    private static void enqueueUserCommand(Handler commandHandler, String reason, Runnable action,
-                                           Runnable onTerminal) {
-        if (!commandHandler.post(() -> {
-            try {
-                action.run();
-            } catch (Throwable t) {
-                Log.e(TAG, "postUserCommand [" + reason + "] failed: " + t.getMessage(), t);
-            } finally {
-                if (onTerminal != null) onTerminal.run();
-            }
-        })) {
+    private static void enqueueUserCommand(
+            Handler commandHandler, String reason, Runnable action, Runnable onTerminal) {
+        if (!commandHandler.post(
+                () -> {
+                    try {
+                        action.run();
+                    } catch (Throwable t) {
+                        Log.e(TAG, "postUserCommand [" + reason + "] failed: " + t.getMessage(), t);
+                    } finally {
+                        if (onTerminal != null) onTerminal.run();
+                    }
+                })) {
             Log.e(TAG, "postUserCommand [" + reason + "] was not queued");
             if (onTerminal != null) onTerminal.run();
         }
     }
 
-    private static CycleResult applyInternal(Runnable onDone, long gateGeneration,
-                                      long wakeGeneration, long restoreEpoch, boolean manual) {
+    private static CycleResult applyInternal(
+            Runnable onDone,
+            long gateGeneration,
+            long wakeGeneration,
+            long restoreEpoch,
+            boolean manual) {
         CycleResult result = CycleResult.FAILED;
         try {
             result = runCycle(wakeGeneration, restoreEpoch, manual);
@@ -492,7 +613,10 @@ public final class ApplyEngine {
 
     private static CycleResult runCycle(long wakeGeneration, long restoreEpoch, boolean manual) {
         BooleanSupplier current =
-                () -> RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch);
+                () ->
+                        RESTORE_RUN_STATE.isRestoreCurrent(wakeGeneration, restoreEpoch)
+                                && (!isDriveEntryRestore()
+                                        || DRIVE_ENTRY_GUARD.get().getAsBoolean());
         if (!current.getAsBoolean()) return CycleResult.CANCELLED;
         Context ctx = GlobalVars.SAVE_CONTEXT;
         if (ctx == null) return CycleResult.FAILED;
@@ -510,15 +634,22 @@ public final class ApplyEngine {
             Log.w(TAG, "no saved settings; skipping this restore event");
             return CycleResult.FAILED;
         }
-        final CanRestorePlan plan = MainActivity.createCanRestorePlan(manual || !usesAccHooks());
+        final CanRestorePlan plan =
+                MainActivity.createCanRestorePlan(
+                        manual || !usesAccHooks() || isDriveEntryRestore());
         final CanRestorePlan.AttemptResult[] result = {
-                CanRestorePlan.AttemptResult.TRANSIENT_FAILURE
+            CanRestorePlan.AttemptResult.TRANSIENT_FAILURE
         };
-        boolean accepted = CanSender.runGuardedSend(current, () -> {
-            result[0] = plan.sendPending(
-                    (frames, label) -> MainActivity.setCanValues(1, frames, label));
-            return result[0].isComplete();
-        });
+        boolean accepted =
+                CanSender.runGuardedSend(
+                        current,
+                        () -> {
+                            result[0] =
+                                    plan.sendPending(
+                                            (frames, label) ->
+                                                    MainActivity.setCanValues(1, frames, label));
+                            return result[0].isComplete();
+                        });
         if (!current.getAsBoolean()) return CycleResult.CANCELLED;
         if (!accepted) return CycleResult.FAILED;
 
@@ -533,12 +664,14 @@ public final class ApplyEngine {
         // Preserve the user's configured custom-command count, without restore retry delays.
         for (int i = 0; frames.length > 0 && i < MainActivity.customCommandCount; i++) {
             if (!current.getAsBoolean()) return CycleResult.CANCELLED;
-            CanSender.runGuardedSend(current,
+            CanSender.runGuardedSend(
+                    current,
                     () -> MainActivity.setCanValues(1, frames, "custom command (unlock/wake)"));
         }
         if (!current.getAsBoolean()) return CycleResult.CANCELLED;
         return result[0] == CanRestorePlan.AttemptResult.ACCEPTED_UNCONFIRMED
-                ? CycleResult.ACCEPTED_UNCONFIRMED : CycleResult.SUCCESS;
+                ? CycleResult.ACCEPTED_UNCONFIRMED
+                : CycleResult.SUCCESS;
     }
 
     /** Оставляет только реальные CAN frames; штатный кадр этого протокола всегда ровно 10 bytes. */
@@ -576,21 +709,36 @@ public final class ApplyEngine {
         private long restoreEpoch;
         private boolean active;
 
-        synchronized long currentGeneration() { return generation; }
-        synchronized long currentRestoreEpoch() { return restoreEpoch; }
-        synchronized boolean isCurrent(long candidate) { return candidate == generation; }
+        synchronized long currentGeneration() {
+            return generation;
+        }
+
+        synchronized long currentRestoreEpoch() {
+            return restoreEpoch;
+        }
+
+        synchronized boolean isCurrent(long candidate) {
+            return candidate == generation;
+        }
+
         synchronized boolean isRestoreCurrent(long wakeCandidate, long restoreCandidate) {
             return wakeCandidate == generation && restoreCandidate == restoreEpoch;
         }
+
         synchronized boolean activate(long candidate) {
             if (candidate != generation) return false;
             active = true;
             return true;
         }
+
         synchronized boolean isActionAllowed(long candidate) {
             return active && candidate == generation;
         }
-        synchronized long cancelRestoreAndAdvance() { return ++restoreEpoch; }
+
+        synchronized long cancelRestoreAndAdvance() {
+            return ++restoreEpoch;
+        }
+
         synchronized long cancelAndAdvance() {
             generation++;
             restoreEpoch++;

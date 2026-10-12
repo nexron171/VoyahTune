@@ -185,6 +185,18 @@ mod tests {
         );
     }
     #[test]
+    fn beta_url_and_default_roundtrip_through_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = load(root.path()).unwrap();
+        let beta = "https://updates.example.org/custom-path?channel=beta";
+        assert!(change_settings(root.path(), &mut config, beta, None).unwrap());
+        assert_eq!(load(root.path()).unwrap().catalog_url, beta);
+        assert!(change_settings(root.path(), &mut config, DEFAULT_CATALOG_URL, None).unwrap());
+        assert_eq!(load(root.path()).unwrap().catalog_url, DEFAULT_CATALOG_URL);
+        assert_eq!(config.source_generation, 2);
+    }
+
+    #[test]
     fn invalid_address_does_not_replace_settings() {
         let root = tempfile::tempdir().unwrap();
         let mut config = load(root.path()).unwrap();
