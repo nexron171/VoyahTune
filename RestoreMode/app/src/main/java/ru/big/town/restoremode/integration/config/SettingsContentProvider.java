@@ -13,6 +13,7 @@ import android.os.Bundle;
 import android.util.Log;
 
 import ru.big.town.common.DriveSelectionPolicy;
+import ru.big.town.common.SmartSaveSettings;
 import ru.big.town.restoremode.BuildConfig;
 import ru.big.town.restoremode.integration.hooks.HookStatusContract;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
@@ -22,6 +23,20 @@ import ru.big.town.restoremode.vehicle.FragranceSettings;
 
 public class SettingsContentProvider extends ContentProvider {
     private SharedPreferences sharedPreferences;
+    private final SharedPreferences.OnSharedPreferenceChangeListener smartSaveListener =
+            (preferences, key) -> {
+                if (SmartSaveSettings.ENABLED.equals(key)
+                        || "energy".equals(key)
+                        || "currentTripEnergy".equals(key)
+                        || "forcedEv".equals(key)
+                        || "driveRevision".equals(key)
+                        || "driveAcc".equals(key)) {
+                    getContext()
+                            .sendBroadcast(
+                                    new Intent(SmartSaveSettings.CHANGED)
+                                            .setPackage("ru.big.town.anative"));
+                }
+            };
     private String energy = "SREV";
     private String recycle = "LOW";
     private String customCommand = "";
@@ -79,6 +94,9 @@ public class SettingsContentProvider extends ContentProvider {
     public boolean onCreate() {
         sharedPreferences =
                 getContext().getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
+        if (ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()) {
+            sharedPreferences.registerOnSharedPreferenceChangeListener(smartSaveListener);
+        }
         // Retired option: keep older installations from republishing the Apollo UI hook.
         if (sharedPreferences.contains(ApolloSettings.STOCK_UI)
                 && !sharedPreferences.edit().remove(ApolloSettings.STOCK_UI).commit()) {

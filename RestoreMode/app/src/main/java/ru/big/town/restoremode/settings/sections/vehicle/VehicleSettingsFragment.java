@@ -8,7 +8,6 @@ import android.os.Message;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.View;
-import android.widget.CheckBox;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.Switch;
@@ -32,7 +31,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
 
     private TextView textSensorLevel;
 
-    private CheckBox checkBox34;
+    private Switch threeFuelModesToggle;
 
     static final int MSG_AUTO_LIGHT_ENABLE = 10;
 
@@ -331,6 +330,28 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         bindRememberLastSwitch(R.id.switchRecycleRememberLast, "recycleRememberLast", "recycle");
     }
 
+    private void bindSmartSave() {
+        View row = settingView(R.id.smartSaveRow);
+        if (row == null) {
+            return;
+        }
+        boolean supported =
+                ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks();
+        row.setVisibility(supported ? View.VISIBLE : View.GONE);
+        if (!supported) {
+            return;
+        }
+        Switch toggle = settingView(R.id.switchSmartSave);
+        toggle.setChecked(
+                preferences.getBoolean(ru.big.town.common.SmartSaveSettings.ENABLED, false));
+        toggle.setOnCheckedChangeListener(
+                (button, checked) ->
+                        preferences
+                                .edit()
+                                .putBoolean(ru.big.town.common.SmartSaveSettings.ENABLED, checked)
+                                .apply());
+    }
+
     private void bindRememberLastSwitch(int switchId, String prefKey, String modeKey) {
         Switch visibilitySwitch = settingView(switchId);
         if (visibilitySwitch == null) {
@@ -443,14 +464,13 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         }
     }
 
-    private void initCheckBox34() {
-        checkBox34 = settingView(R.id.checkBox34);
-        checkBox34.setChecked(preferences.getBoolean("checkBox34", false));
-        checkBox34.setText("");
+    private void initThreeFuelModesToggle() {
+        threeFuelModesToggle = settingView(R.id.checkBox34);
+        threeFuelModesToggle.setChecked(preferences.getBoolean("checkBox34", false));
     }
 
-    private void onCheckBox34Click(View view) {
-        boolean hidden = ((CheckBox) view).isChecked();
+    private void onThreeFuelModesClick(View view) {
+        boolean hidden = ((Switch) view).isChecked();
         preferences.edit().putBoolean("checkBox34", hidden).apply();
         View intelligent = settingView(R.id.SMART);
         if (intelligent != null) {
@@ -505,12 +525,13 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         initModeRadios();
         initModeEnableToggles();
         initModeRememberLastToggles();
+        bindSmartSave();
         initFragranceSettings();
         initPedestrianSoundGroup();
         initForcedEvGroup();
         if (settingView(R.id.checkBox34) != null) {
-            initCheckBox34();
-            bindClick(R.id.checkBox34, this::onCheckBox34Click);
+            initThreeFuelModesToggle();
+            bindClick(R.id.checkBox34, this::onThreeFuelModesClick);
         }
         if (settingView(R.id.autoLightGroup) != null) {
             initAutoLight();
@@ -528,8 +549,8 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         if (isDescendant(row, textSensorLevel)) {
             textSensorLevel = null;
         }
-        if (isDescendant(row, checkBox34)) {
-            checkBox34 = null;
+        if (isDescendant(row, threeFuelModesToggle)) {
+            threeFuelModesToggle = null;
         }
     }
 
