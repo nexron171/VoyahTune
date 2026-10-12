@@ -364,8 +364,11 @@ Dashboard сначала восстанавливает сохранённую V
 Пассажирский док и PI-хуки не изменяются.
 
 В выборе приложения для слотов дока доступен `CarPlayTarget.ID` с подписью
-VoyahTune CarPlay. Хук берёт иконку `CarPlayLauncherActivity` через ActivityInfo,
-а OPEN_FREEFORM передаёт стабильный CarPlay target в существующий AppDisplayLauncher:
+VoyahTune CarPlay. OD-хук загружает отдельный ресурс
+[`carplay_dock_logo`](../RestoreMode/app/src/main/res/drawable-nodpi/carplay_dock_logo.png)
+из RestoreMode только для слота дока; при отсутствии ресурса в установленном APK
+использует иконку `CarPlayLauncherActivity`. В All Apps, плитках и экранах CarPlay
+сохраняется `carplay_home_logo`. OPEN_FREEFORM передаёт стабильный CarPlay target в существующий AppDisplayLauncher:
 перенос окна и владение сессией совпадают с ярлыком 1×1. Основной пакет VoyahTune
 по-прежнему открывает Dashboard.
 
