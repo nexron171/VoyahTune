@@ -615,7 +615,16 @@ stop снимает подписку, Siri receiver, retry и navigation tick. �
 
 `CarPlayVehicleController` использует `CanBusEventHub` с interests CONNECTION,
 GEAR, VEHICLE_SPEED, VEHICLE_STATE и фильтром **1072**. Запрашивает скорость/передачу
-раз в секунду, vehicle state каждый десятый тик. Потеря CAN сбрасывает snapshot;
+раз в секунду. При готовности CAN-подписки новой сессии, переподключении CAN и
+повторном WATCH читает текущий `BCM_RSM_lightSWReason` (1072) напрямую через TX57
+существующего `OemVehicleStateTransport`, вне main/IPC-потока. TX20 не гарантирует
+начальное значение: он запрашивает callback, а не возвращает SWReason.
+`CarPlayLightState` доставляет прочитанное значение через обычный STATE, поэтому уже
+активные Dark/Tunnel/Darkstart применяются без ожидания изменения освещённости.
+Дальше SWReason обновляется по событиям CAN; периодического TX20 от CarPlay нет.
+Новое событие, переподключение или закрытие подписки отменяют применение запоздавшего
+результата чтения. Неудачное чтение не подменяется значением Day; сохраняется штатный
+fallback темы до получения данных. Потеря CAN сбрасывает snapshot;
 потеря подписчика останавливает polling и закрывает subscription.
 
 Источник скорости: `CanBusEvent.Kind.VEHICLE_SPEED`, interest **1 << 7**, callback
@@ -695,10 +704,10 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
 
 ## 8. Манёвры на приборке
 
-В OD единицы расстояния локализует ветка `com.qinggan.cluster` в
+В OD латинские единицы расстояния задаёт ветка `com.qinggan.cluster` в
 [app_client.js](../Packaging/od/inject/app_client.js): перехват
-`GuidanceFormat.toDistanceUnit(Context, int)` возвращает «м» до 1000 метров и
-«км» начиная с 1000. OEM Cluster сам кодирует строку UTF-8 и её длину в пакет.
+`GuidanceFormat.toDistanceUnit(Context, int)` возвращает `m` до 1000 метров и
+`km` начиная с 1000. OEM Cluster сам кодирует строку UTF-8 и её длину в пакет.
 Это действует для всех источников манёвров, использующих этот форматтер.
 [Загрузчик OD](../Packaging/od/system/load.bin) подключает агент к уже работающему
 основному процессу Cluster независимо от настроек геометрии, с поддержкой 32/64 bit
@@ -707,7 +716,7 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
 `[cluster-units] hook ready v1`.
 Ограничения по модели автомобиля нет: требуется совместимый OEM метод, при его
 отсутствии сохраняется штатное поведение. Сборка пакета исследована на Cluster
-1.2.0 (7) H97X; другие прошивки и отображение кириллицы на приборке требуют
+1.2.0 (7) H97X; другие прошивки и отображение единиц на приборке требуют
 проверки на автомобиле. PI не изменяется.
 
 `VoyahNavigation` имеет отдельный owner-guarded `VoyahNavigationState`, использует
@@ -1047,6 +1056,7 @@ Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
 | [CarPlayWidgetSettings.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/CarPlayWidgetSettings.java)<br>[settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Включение, Ярлык/Окно, размеры и общий предпросмотр сетки; сохраняет ID и параметры существующей записи (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java)<br>[RestoreMode/app/src/main/res/layout/settings_carplay.xml](../RestoreMode/app/src/main/res/layout/settings_carplay.xml)<br>[RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml](../RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml) | Раздел 9, navigation, живой статус, отключение, SWReason и четыре OEM-ползунка; без общего автоподключения (§5). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java) | Двунаправленный IPC, owner/generation/подписки (§6/8). |
+| [Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java)<br>[Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java](../Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java) | Начальное TX57-чтение SWReason, последующие события; защита от устаревшего snapshot после события/reconnect/close (§6). |
 | [Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java) | Скорость, interests, OEM callback/getter в общем CAN hub (§6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java)<br>[RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml](../RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java](../Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java) | Выбор нажатия Siri, пояснение, экспорт действия и broadcast (§7). |
 | [Native/app/src/main/java/ru/big/town/anative/CarPlayNavigationLease.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayNavigationLease.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayClusterNavigation.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayClusterNavigation.java) | Срок действия snapshot и OEM writer (§8). |
@@ -1190,7 +1200,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Task/component/display | Native `CarPlayTargetTest` (включая выбор home на 0/1 и projection на VD со старым ID), `AppDisplayTaskPlanTest`; common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
 | Автоподключение и настройки | common `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `DefaultConnectionModeTest`, `VoyahEmbeddedEntryPointsTest`, `PhoneBluetoothReceiverTest` |
 | Способ Wi-Fi подключения | common `HotspotModeMigrationTest`, `ExistingWifiSettingsTest`: default Wi-Fi Direct, сохранение выбранного режима и реквизитов сетей |
-| Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest`; Native `CanBusEventRouterTest` |
+| Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp), `CarPlayLightStateTest` (начальный SWReason, события и запоздавшие ответы); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest` |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `CarPlayNavigationLeaseTest` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
@@ -1265,7 +1275,7 @@ process/affinity), итоговые ABI/подписи/наличие assets, н
 | Auto on/off, нет телефона, Back, home/settings | Нет нежелательных циклов запуска; все три UI показывают одно значение, таймера нет. |
 | Раздел CarPlay | Живое состояние; Disconnect завершает сессию, opening home не делает reconnect. |
 | Скорость/передача, отключённый GPS | km/h→m/s, корректные P/R/N/D, stale/unknown не передаются как действительные данные. |
-| SWReason | В VEHICLE только известные 2/3/4 тёмные, 0/1 светлые; восстановление после reconnect, немедленная реакция на переключатель. Оформление DiPlay и другие режимы CarPlay не меняются. |
+| SWReason | В VEHICLE только известные 2/3/4 тёмные, 0/1 светлые; старт при уже активном Dark/Tunnel/Darkstart без нового callback, восстановление после reconnect, последующие CAN-события и немедленная реакция на переключатель. Оформление DiPlay и другие режимы CarPlay не меняются. |
 | Siri | Оба short/long варианта, отключённая опция, фон и виджет; ровно один вызов, сохранённые назначения возвращаются. |
 | Аудио | Музыка/подсказки/телефон/Siri одновременно и отдельно; кнопки руля выбирают текущий канал, после подсказки возвращаются к музыке. Четыре ползунка показывают фактические уровни/максимумы, чтение не меняет фокус. Проверить streams, fallback и потерю Native. |
 | Навигация | Иконка/метры/дорога; end route, disconnect, потеря bridge, смена owner, timeout; отсутствие старой стрелки. |
