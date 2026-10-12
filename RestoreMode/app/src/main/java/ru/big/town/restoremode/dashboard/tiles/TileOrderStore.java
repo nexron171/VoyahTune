@@ -11,7 +11,7 @@ import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
-import ru.big.town.restoremode.widgets.energy.EnergyWidgetView;
+import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -171,7 +171,7 @@ public class TileOrderStore {
 
     /** Проверить, это известный виджет. */
     static boolean isKnownWidget(String widgetId) {
-        if (EnergyWidgetView.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) {
+        if (VehicleWidgets.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) {
             return true;
         }
         // Список всех известных виджетов на главном экране

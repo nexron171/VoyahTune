@@ -82,8 +82,11 @@ import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
+import ru.big.town.restoremode.widgets.energy.CarAppearance;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
-import ru.big.town.restoremode.widgets.energy.EnergyWidgetView;
+import ru.big.town.restoremode.widgets.energy.TripWidgetView;
+import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
+import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.suspension.SuspensionWidgetView;
 import ru.big.town.restoremode.widgets.system.SystemWidgetDashboard;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
@@ -250,7 +253,7 @@ public class DashboardActivity extends AppCompatActivity {
 
     // -------- Drag-and-drop для переупорядочивания плиток --------
     private TileDragController tileDragController;
-    private final java.util.List<EnergyWidgetView> energyWidgetViews = new java.util.ArrayList<>();
+    private final java.util.List<VehicleWidgetView> energyWidgetViews = new java.util.ArrayList<>();
     private Bundle energyWidgetState = new Bundle();
     private final SystemWidgetDashboard systemWidgets =
             new SystemWidgetDashboard(this, this::showSnack);
@@ -269,7 +272,7 @@ public class DashboardActivity extends AppCompatActivity {
                                     return true;
                                 }
                                 energyWidgetState = new Bundle(data);
-                                for (EnergyWidgetView view : energyWidgetViews) {
+                                for (VehicleWidgetView view : energyWidgetViews) {
                                     view.update(energyWidgetState);
                                 }
                                 return true;
@@ -280,7 +283,7 @@ public class DashboardActivity extends AppCompatActivity {
             return;
         }
         boolean show = false;
-        for (String id : EnergyWidgetView.IDS) {
+        for (String id : VehicleWidgets.IDS) {
             show |= sharedPreferences.getBoolean("show_" + id, false);
         }
         try {
@@ -541,8 +544,10 @@ public class DashboardActivity extends AppCompatActivity {
         if (tripActive && tripInDrive) {
             ms += SystemClock.elapsedRealtime() - tripDriveStartElapsed;
         }
-        for (EnergyWidgetView view : energyWidgetViews) {
-            view.timer(tripTimerReceived ? Math.max(0, ms) : -1);
+        for (VehicleWidgetView view : energyWidgetViews) {
+            if (view instanceof TripWidgetView) {
+                ((TripWidgetView) view).timer(tripTimerReceived ? Math.max(0, ms) : -1);
+            }
             view.invalidate(); // expire a silent/stalled Native connection even without messages
         }
         if (tripTimer != null) {
@@ -861,7 +866,7 @@ public class DashboardActivity extends AppCompatActivity {
                     suspensionState = new Bundle();
                     energyWidgetState = new Bundle();
                     tripTimerReceived = false;
-                    for (EnergyWidgetView view : energyWidgetViews) {
+                    for (VehicleWidgetView view : energyWidgetViews) {
                         view.update(energyWidgetState);
                     }
                     if (suspensionWidgetView != null) {
@@ -1590,7 +1595,7 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private boolean isWidgetVisible(String widgetId) {
-        if (EnergyWidgetView.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) {
+        if (VehicleWidgets.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) {
             return sharedPreferences.getBoolean("show_" + widgetId, false);
         }
         switch (widgetId) {
@@ -1655,8 +1660,11 @@ public class DashboardActivity extends AppCompatActivity {
             }
         }
         applyTripHistoryVisibility(splitTilesGrid);
-        for (EnergyWidgetView view : energyWidgetViews) {
-            view.showTripHistory(sharedPreferences.getBoolean("saveTripHistory", true));
+        for (VehicleWidgetView view : energyWidgetViews) {
+            if (view instanceof TripWidgetView) {
+                ((TripWidgetView) view)
+                        .showTripHistory(sharedPreferences.getBoolean("saveTripHistory", true));
+            }
         }
     }
 
@@ -1690,8 +1698,8 @@ public class DashboardActivity extends AppCompatActivity {
         if (SystemWidgetLayout.isWidget(widgetId)) {
             return TileSizeStore.dimensions(sharedPreferences, widgetId, 1, 1);
         }
-        if (EnergyWidgetView.isWidget(widgetId)) {
-            int[] size = EnergyWidgetView.size(widgetId);
+        if (VehicleWidgets.isWidget(widgetId)) {
+            int[] size = VehicleWidgets.size(widgetId);
             return TileSizeStore.dimensions(sharedPreferences, widgetId, size[0], size[1]);
         }
         if (TileSizeStore.SUSPENSION_WIDGET_ID.equals(widgetId)) {
@@ -1920,22 +1928,22 @@ public class DashboardActivity extends AppCompatActivity {
                     case SystemWidgetLayout.CLEAR:
                         widgetView = systemWidgets.create(tile.id, splitTilesGrid);
                         break;
-                    case EnergyWidgetView.ENERGY:
-                    case EnergyWidgetView.CONSUMPTION:
-                    case EnergyWidgetView.TRIP:
-                    case EnergyWidgetView.TIRES:
-                    case EnergyWidgetView.ODO:
-                        EnergyWidgetView energyView =
-                                new EnergyWidgetView(
+                    case VehicleWidgets.ENERGY:
+                    case VehicleWidgets.CONSUMPTION:
+                    case VehicleWidgets.TRIP:
+                    case VehicleWidgets.TIRES:
+                    case VehicleWidgets.ODO:
+                        VehicleWidgetView energyView =
+                                VehicleWidgets.create(
                                         this,
                                         tile.id,
-                                        sharedPreferences.getString("energyCarColor", "burgundy"),
+                                        CarAppearance.savedColor(sharedPreferences),
                                         getWidgetDimensions(tile.id)[0],
                                         getWidgetDimensions(tile.id)[1]);
                         energyView.update(energyWidgetState);
                         energyWidgetViews.add(energyView);
                         updateTripTimer();
-                        if (EnergyWidgetView.TRIP.equals(tile.id)) {
+                        if (VehicleWidgets.TRIP.equals(tile.id)) {
                             FrameLayout tripWidget =
                                     (FrameLayout)
                                             inf.inflate(
@@ -1948,8 +1956,9 @@ public class DashboardActivity extends AppCompatActivity {
                                     new FrameLayout.LayoutParams(
                                             ViewGroup.LayoutParams.MATCH_PARENT,
                                             ViewGroup.LayoutParams.MATCH_PARENT));
-                            energyView.showTripHistory(
-                                    sharedPreferences.getBoolean("saveTripHistory", true));
+                            ((TripWidgetView) energyView)
+                                    .showTripHistory(
+                                            sharedPreferences.getBoolean("saveTripHistory", true));
                             energyView.setOnLongClickListener(v -> tripWidget.performLongClick());
                             widgetView = tripWidget;
                         } else {
@@ -2149,7 +2158,8 @@ public class DashboardActivity extends AppCompatActivity {
                 if (entry.autoStart && !CarPlayTarget.isCarPlay(entry.packageName)) {
                     appWidgetView.postDelayed(
                             () -> {
-                                if (suspensionScreenResumed && !destroyed
+                                if (suspensionScreenResumed
+                                        && !destroyed
                                         && appWidgetTileViews.get(entry.id) == appWidgetView
                                         && !embeddedWidgetSurfaces.containsKey(entry.id)) {
                                     showEmbeddedAppWidget(appWidgetView, entry);
@@ -2399,8 +2409,8 @@ public class DashboardActivity extends AppCompatActivity {
 
     /**
      * Левые края видимых плиток в координатах сетки: границы для режима «По левому краю плитки».
-     * {@code getLeft()} включает отступ карточки, поэтому выравнивается её реальный край,
-     * в том числе у плиток шириной больше одной колонки.
+     * {@code getLeft()} включает отступ карточки, поэтому выравнивается её реальный край, в том
+     * числе у плиток шириной больше одной колонки.
      */
     private int[] visibleTileLefts() {
         int count = 0;
@@ -2732,13 +2742,16 @@ public class DashboardActivity extends AppCompatActivity {
         final boolean carPlayWindow = CarPlayTarget.isCarPlay(packageName);
         if (carPlayWindow) {
             // Clip the tile background as well as the projection's rounded corners.
-            container.setOutlineProvider(new ViewOutlineProvider() {
-                @Override
-                public void getOutline(View view, Outline outline) {
-                    float radius = getResources().getDimension(R.dimen.carplay_widget_corner_radius);
-                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
-                }
-            });
+            container.setOutlineProvider(
+                    new ViewOutlineProvider() {
+                        @Override
+                        public void getOutline(View view, Outline outline) {
+                            float radius =
+                                    getResources()
+                                            .getDimension(R.dimen.carplay_widget_corner_radius);
+                            outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+                        }
+                    });
             container.setClipToOutline(true);
         }
 
@@ -2752,9 +2765,11 @@ public class DashboardActivity extends AppCompatActivity {
                 new ViewOutlineProvider() {
                     @Override
                     public void getOutline(View view, Outline outline) {
-                        float radius = carPlayWindow
-                                ? getResources().getDimension(R.dimen.carplay_widget_corner_radius)
-                                : 18f * getResources().getDisplayMetrics().density;
+                        float radius =
+                                carPlayWindow
+                                        ? getResources()
+                                                .getDimension(R.dimen.carplay_widget_corner_radius)
+                                        : 18f * getResources().getDisplayMetrics().density;
                         outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
                     }
                 });
@@ -3306,8 +3321,10 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void requestCarPlayWidgets() {
-        if (!suspensionScreenResumed || destroyed
-                || !GlobalVars.isBound || GlobalVars.serviceMessenger == null) return;
+        if (!suspensionScreenResumed
+                || destroyed
+                || !GlobalVars.isBound
+                || GlobalVars.serviceMessenger == null) return;
         try {
             Message message = Message.obtain(null, CarPlayWidgetProtocol.MESSAGE);
             Bundle data = new Bundle();
@@ -3322,19 +3339,29 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void restoreCarPlayWidgets(Bundle data) {
-        if (!suspensionScreenResumed || destroyed || data == null
-                || data.getLong(CarPlayWidgetProtocol.GENERATION) != carPlayWidgetGeneration) return;
+        if (!suspensionScreenResumed
+                || destroyed
+                || data == null
+                || data.getLong(CarPlayWidgetProtocol.GENERATION) != carPlayWidgetGeneration)
+            return;
         ArrayList<String> widgets = data.getStringArrayList(CarPlayWidgetProtocol.WIDGETS);
         Bundle dpi = data.getBundle(CarPlayWidgetProtocol.DPI);
         if (widgets == null) return;
         for (String id : widgets) {
             AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, id);
             View view = appWidgetTileViews.get(id);
-            if (entry == null || CarPlayTarget.opensActivity(CarPlayTarget.ID, entry.width, entry.height)) {
-                sendEmbeddedRelease(id); // The user deleted the widget or turned it into a shortcut.
+            if (entry == null
+                    || CarPlayTarget.opensActivity(CarPlayTarget.ID, entry.width, entry.height)) {
+                sendEmbeddedRelease(
+                        id); // The user deleted the widget or turned it into a shortcut.
             } else if (view != null && !embeddedWidgetSurfaces.containsKey(id)) {
-                showEmbeddedAppWidget(view, entry, CarPlayTarget.ID,
-                        dpi != null ? dpi.getInt(id, entry.dpi) : entry.dpi, null, true);
+                showEmbeddedAppWidget(
+                        view,
+                        entry,
+                        CarPlayTarget.ID,
+                        dpi != null ? dpi.getInt(id, entry.dpi) : entry.dpi,
+                        null,
+                        true);
                 Log.i(TAG, "CarPlay widget restored widget=" + id);
             }
         }
@@ -3342,23 +3369,26 @@ public class DashboardActivity extends AppCompatActivity {
         if (com.shilapi.xcertplay.VoyahCarPlayIntegration.isProjectionOnMainDisplay()) return;
         for (Map.Entry<String, View> tile : appWidgetTileViews.entrySet()) {
             AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, tile.getKey());
-            if (entry != null && entry.autoStart && CarPlayTarget.isCarPlay(entry.packageName)
+            if (entry != null
+                    && entry.autoStart
+                    && CarPlayTarget.isCarPlay(entry.packageName)
                     && !CarPlayTarget.opensActivity(entry.packageName, entry.width, entry.height)
                     && tile.getValue().isShown()
                     && !embeddedWidgetSurfaces.containsKey(entry.id)) {
                 showEmbeddedAppWidget(tile.getValue(), entry);
             }
         }
-
     }
 
     /** Обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
     private void launchAppNormally(String pkg) {
         try {
-            Intent i = CarPlayTarget.isCarPlay(pkg)
-                    ? new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-                            .setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.LAUNCHER)
-                    : CarPlayTarget.launchIntent(this, pkg);
+            Intent i =
+                    CarPlayTarget.isCarPlay(pkg)
+                            ? new Intent(Intent.ACTION_MAIN)
+                                    .addCategory(Intent.CATEGORY_LAUNCHER)
+                                    .setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.LAUNCHER)
+                            : CarPlayTarget.launchIntent(this, pkg);
             if (i == null) {
                 showSnack("Не удалось открыть приложение");
                 return;

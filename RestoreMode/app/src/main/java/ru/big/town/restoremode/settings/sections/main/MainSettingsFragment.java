@@ -35,7 +35,6 @@ import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
-import ru.big.town.restoremode.widgets.energy.EnergyWidgetView;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -125,40 +124,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                 R.id.OdometerSettingWidth, R.id.OdometerSettingHeight, "odometerWidget", 4, 1);
     }
 
-    private void bindEnergyAppearance() {
-        if (settingView(R.id.energyCarColor) == null) {
-            return;
-        }
-        android.widget.Spinner carColor = settingView(R.id.energyCarColor);
-        android.widget.ArrayAdapter<String> carColors =
-                new android.widget.ArrayAdapter<>(
-                        requireContext(),
-                        R.layout.settings_spinner_item,
-                        EnergyWidgetView.COLOR_NAMES);
-        carColors.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        carColor.setAdapter(carColors);
-        carColor.setSelection(
-                java.util.Arrays.asList(EnergyWidgetView.COLORS)
-                        .indexOf(
-                                EnergyWidgetView.color(
-                                        preferences.getString("energyCarColor", "burgundy"))));
-        carColor.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long id) {
-                        preferences
-                                .edit()
-                                .putString("energyCarColor", EnergyWidgetView.COLORS[position])
-                                .apply();
-                    }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-                });
+    private void bindEnergyCapacities() {
         bindEnergyCapacity(
                 R.id.energyBatteryCapacity,
                 ru.big.town.common.EnergyWidgetSettings.BATTERY_KEY,
@@ -227,8 +193,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             gridSnapMode.setAdapter(modes);
             gridSnapMode.setSelection(
                     TileScrollSnap.indexOf(
-                            TileScrollSnap.fromKey(
-                                    preferences.getString("gridSnapMode", null))));
+                            TileScrollSnap.fromKey(preferences.getString("gridSnapMode", null))));
             gridSnapMode.setOnItemSelectedListener(
                     new AdapterView.OnItemSelectedListener() {
                         @Override
@@ -816,7 +781,8 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         android.widget.SeekBar delaySeek = row.findViewById(R.id.appWidgetSettingDelay);
         TextView delayText = row.findViewById(R.id.appWidgetSettingDelayText);
 
-        delayContainer.setVisibility(entry.autoStart && !carPlayShortcut ? View.VISIBLE : View.GONE);
+        delayContainer.setVisibility(
+                entry.autoStart && !carPlayShortcut ? View.VISIBLE : View.GONE);
         delaySeek.setProgress(entry.autoStartDelay - 1);
         delayText.setText(entry.autoStartDelay + " сек");
 
@@ -950,7 +916,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
     @Override
     protected void bindSettingsRow() {
         bindMainWidgetSwitches();
-        bindEnergyAppearance();
+        bindEnergyCapacities();
         bindTripHistory();
         bindMainGrid();
         bindShowSwitch(R.id.switchShowTaskManagerTile, "showTaskManagerTile", true);
