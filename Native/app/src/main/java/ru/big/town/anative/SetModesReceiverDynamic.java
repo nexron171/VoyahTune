@@ -587,20 +587,27 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         List<String> actions = SteeringActionSequence.decode(configured);
         if (actions.isEmpty()) return;
         Log.i(TAG, "STEER_ACTION sequence start, count=" + actions.size());
-        runSteerAction(ctx.getApplicationContext(), actions, 0);
+        runConfiguredActions(ctx, actions, accepted -> {});
     }
 
-    private static void runSteerAction(Context ctx, List<String> actions, int index) {
-        if (index >= actions.size()) {
-            Log.i(TAG, "STEER_ACTION sequence complete, count=" + actions.size());
-            return;
-        }
-        String action = actions.get(index);
-        Log.i(TAG, "STEER_ACTION sequence " + (index + 1) + "/" + actions.size() + ": " + action);
-        handleSteerAction(
-                ctx,
-                action,
-                () -> STEER_SEQUENCE_HANDLER.post(() -> runSteerAction(ctx, actions, index + 1)));
+    static void runConfiguredActions(
+            Context context,
+            List<String> actions,
+            java.util.function.Consumer<Boolean> completion) {
+        Context application = context.getApplicationContext();
+        OrderedActionSequence.run(
+                actions,
+                (action, terminal) -> handleSteerAction(application, action, terminal),
+                task -> STEER_SEQUENCE_HANDLER.post(task),
+                accepted -> {
+                    Log.i(
+                            TAG,
+                            "Configured sequence complete, count="
+                                    + actions.size()
+                                    + " accepted="
+                                    + accepted);
+                    completion.accept(accepted);
+                });
     }
 
     /**

@@ -21,6 +21,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.button.MaterialButton;
 
+import ru.big.town.common.CustomVoiceCommandProtocol;
 import ru.big.town.common.ScenarioProtocol;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.integration.GlobalVars;
@@ -863,7 +864,8 @@ public final class ScenarioSettingsPage {
         }
         Set<String> seen = new HashSet<>();
         for (VoiceCommandCatalog.Command command : VoiceCommands.load(activity)) {
-            if (command.action.startsWith(ScenarioProtocol.ACTION_RUN_PREFIX)) {
+            if (command.action.startsWith(ScenarioProtocol.ACTION_RUN_PREFIX)
+                    || CustomVoiceCommandProtocol.isAction(command.action)) {
                 continue;
             }
             if (!seen.add(command.action)) {

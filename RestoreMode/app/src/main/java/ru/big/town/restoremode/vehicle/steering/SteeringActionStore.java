@@ -64,7 +64,7 @@ public final class SteeringActionStore {
             }
             int start = separator + 1;
             int end = start + length;
-            if (length <= 0 || end > stored.length()) {
+            if (length <= 0 || length > stored.length() - start) {
                 return new ArrayList<>();
             }
             String action = stored.substring(start, end);

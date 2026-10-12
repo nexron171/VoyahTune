@@ -7,6 +7,7 @@ import android.os.Looper;
 import android.os.ResultReceiver;
 import android.os.SystemClock;
 
+import ru.big.town.common.CustomVoiceCommandProtocol;
 import ru.big.town.common.InfrastructureProfile;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -53,6 +54,25 @@ final class VoiceCommandController {
             return;
         }
         long deadline = SystemClock.elapsedRealtime() + 7000;
+        if (CustomVoiceCommandProtocol.isAction(action)) {
+            java.util.List<String> actions = SteeringActionSequence.decodeCustomVoice(action);
+            if (actions.isEmpty()) {
+                respond(reply, false, "Собственная команда не содержит доступных действий");
+                return;
+            }
+            // Recognition commits the configured list, including steps after an app changes focus.
+            SetModesReceiverDynamic.runConfiguredActions(
+                    service,
+                    actions,
+                    accepted -> {
+                        if (gate.active(token))
+                            respond(
+                                    reply,
+                                    accepted,
+                                    accepted ? null : "Не удалось выполнить собственную команду");
+                    });
+            return;
+        }
         if (SeatCommand.handles(action) || WindowCommand.handles(action)) {
             // Submission commits this one-shot action. Closing/replacing the voice UI must not
             // cancel a queued write, roll it back or cause a retry; only its reply is
@@ -177,8 +197,19 @@ final class VoiceCommandController {
     }
 
     private static boolean isNavigation(String action) {
+        if (CustomVoiceCommandProtocol.isAction(action)) {
+            for (String step : SteeringActionSequence.decodeCustomVoice(action)) {
+                if (isDirectNavigation(step)) return true;
+            }
+            return false;
+        }
+        return isDirectNavigation(action);
+    }
+
+    private static boolean isDirectNavigation(String action) {
         return "system_back".equals(action)
                 || "open_voyahtune".equals(action)
+                || "open_carplay".equals(action)
                 || action.startsWith("app:")
                 || action.startsWith("split:")
                 || action.startsWith("call:");

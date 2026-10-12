@@ -25,6 +25,7 @@ import android.widget.TextView;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import ru.big.town.common.CustomVoiceCommandProtocol;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.voice.audio.VoiceRecognizer;
 import ru.big.town.restoremode.voice.commands.VoiceCommandCatalog;
@@ -45,8 +46,6 @@ public class VoiceAssistantActivity extends AppCompatActivity {
     private static final int COLOR_REJECTED = 0xffff6b6b;
     private static final int COLOR_REJECTED_NOTE = 0xffffb0b0;
     private static final int COLOR_NOTE = 0xffbbbbbb;
-    private static final long COMMAND_TIMEOUT_MS = 8000;
-    private static final long SEQUENCE_BUDGET_MS = 20000;
     private static final long SEQUENCE_ROW_MS = 1200;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final VoiceRecognizer recognizer = new VoiceRecognizer();
@@ -502,7 +501,8 @@ public class VoiceAssistantActivity extends AppCompatActivity {
         orb.recognized();
         status.setText("Передаю команды…");
         ui.postDelayed(
-                () -> fail("Выполнение команд занимает слишком много времени"), SEQUENCE_BUDGET_MS);
+                () -> fail("Выполнение команд занимает слишком много времени"),
+                VoiceCommandSequence.responseBudgetMillis(segments));
         stepSequence();
     }
 
@@ -551,7 +551,9 @@ public class VoiceAssistantActivity extends AppCompatActivity {
                     }
                     completeStep(at, "Сервис не ответил на команду", null);
                 };
-        ui.postDelayed(commandTimeout, COMMAND_TIMEOUT_MS);
+        ui.postDelayed(
+                commandTimeout,
+                CustomVoiceCommandProtocol.responseTimeoutMillis(sequence.get(at).command.action));
     }
 
     /** A failing segment is reported in place; the remaining commands still run. */
@@ -691,7 +693,9 @@ public class VoiceAssistantActivity extends AppCompatActivity {
             fail("Не удалось отправить команду");
             return;
         }
-        ui.postDelayed(() -> fail("Сервис не ответил на команду"), 8000);
+        ui.postDelayed(
+                () -> fail("Сервис не ответил на команду"),
+                CustomVoiceCommandProtocol.responseTimeoutMillis(command.action));
     }
 
     private boolean send(String op, String action, ResultReceiver reply) {

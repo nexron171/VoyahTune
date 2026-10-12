@@ -19,6 +19,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.button.MaterialButton;
 
+import ru.big.town.common.CustomVoiceCommandProtocol;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.VoiceActivity;
 import ru.big.town.restoremode.VoiceWarmupService;
@@ -83,12 +84,14 @@ public final class VoiceSettingsPage {
     private final java.util.function.BiConsumer<String[], Integer> requestPermissions;
     private final SettingsList viewport;
     private final SettingsComponents components;
+    private final VoiceCustomCommandsSection customCommands;
     private final ExecutorService catalogWorker = Executors.newSingleThreadExecutor();
     private final Map<String, VoiceCommandCatalog.Command> commandsByAction = new LinkedHashMap<>();
     private final Map<String, LinkedHashSet<String>> phrasesByAction = new LinkedHashMap<>();
     private boolean catalogLoading;
     private boolean catalogLoaded;
     private boolean closed;
+    private int catalogRevision;
 
     VoiceSettingsPage(
             AppCompatActivity activity,
@@ -100,6 +103,15 @@ public final class VoiceSettingsPage {
         this.preferences = preferences;
         this.requestPermissions = requestPermissions;
         components = new SettingsComponents(activity);
+        customCommands =
+                new VoiceCustomCommandsSection(
+                        activity,
+                        preferences,
+                        () -> {
+                            catalogRevision++;
+                            catalogLoaded = false;
+                            refresh();
+                        });
     }
 
     void refresh() {
@@ -118,12 +130,15 @@ public final class VoiceSettingsPage {
         addRow(rows, "activation", this::createActivationCard);
         addRow(rows, "audioHeading", () -> components.heading("Звук и распознавание"));
         addRow(rows, "audio", this::createAudioAndTrialCards);
+        addRow(rows, "customHeading", () -> components.heading("Собственные голосовые команды"));
+        addRow(rows, "customCommands", customCommands::create);
         addRow(rows, "commandsHeading", () -> components.heading("Примеры голосовых команд"));
         for (VoiceCommandGroups.Group group : VoiceCommandGroups.Group.values()) {
             List<String> actions = new ArrayList<>();
             for (Map.Entry<String, VoiceCommandCatalog.Command> entry :
                     commandsByAction.entrySet()) {
                 if (VoiceCommandGroups.forAction(entry.getValue().action).contains(group)) {
+                    if (CustomVoiceCommandProtocol.isAction(entry.getValue().action)) continue;
                     actions.add(entry.getKey());
                 }
             }
@@ -163,12 +178,18 @@ public final class VoiceSettingsPage {
             return;
         }
         catalogLoading = true;
+        int revision = catalogRevision;
         catalogWorker.execute(
                 () -> {
                     List<VoiceCommandCatalog.Command> catalog = VoiceCommands.load(activity);
                     activity.runOnUiThread(
                             () -> {
                                 if (closed) {
+                                    return;
+                                }
+                                if (revision != catalogRevision) {
+                                    catalogLoading = false;
+                                    loadCatalog();
                                     return;
                                 }
                                 commandsByAction.clear();

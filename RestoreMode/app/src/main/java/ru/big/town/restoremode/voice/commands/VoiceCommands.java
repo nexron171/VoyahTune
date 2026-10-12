@@ -189,6 +189,7 @@ public final class VoiceCommands {
                             "своя команда " + number(index)));
         }
 
+        VoiceCustomCommandStore.addToCatalog(prefs, out);
         return out;
     }
 

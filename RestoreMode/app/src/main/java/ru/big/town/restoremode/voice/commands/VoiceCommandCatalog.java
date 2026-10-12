@@ -1,5 +1,7 @@
 package ru.big.town.restoremode.voice.commands;
 
+import ru.big.town.common.CustomVoiceCommandProtocol;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -37,6 +39,7 @@ public final class VoiceCommandCatalog {
             this.title = title;
             this.confirm = confirm;
             this.phrases = Collections.unmodifiableList(Arrays.asList(phrases));
+            if (CustomVoiceCommandProtocol.isAction(action)) return;
             for (String phrase : phrases) {
                 Set<String> set = words(phrase);
                 if (set != null) {
@@ -153,6 +156,17 @@ public final class VoiceCommandCatalog {
     }
 
     public static Command match(List<Command> commands, String text) {
+        String normalized = normalize(text);
+        Command custom = null;
+        for (Command command : commands) {
+            if (!CustomVoiceCommandProtocol.isAction(command.action)) continue;
+            for (String phrase : command.phrases) {
+                if (!normalized.equals(normalize(phrase))) continue;
+                if (custom != null && !custom.action.equals(command.action)) return null;
+                custom = command;
+            }
+        }
+        if (custom != null) return custom;
         Set<String> input = words(text);
         if (input == null || input.isEmpty()) {
             return null;
