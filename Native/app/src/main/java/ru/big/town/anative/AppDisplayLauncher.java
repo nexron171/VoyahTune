@@ -60,8 +60,17 @@ final class AppDisplayLauncher {
             boolean fullscreen,
             BooleanSupplier valid,
             Runnable onFailure) {
-        Context app = context.getApplicationContext();
         long generation = next(pkg);
+        if (CarPlayTarget.isCarPlay(pkg) && (displayId == 0 || displayId == 1)) {
+            SplitHostActivity.launchSingle(
+                    context,
+                    pkg,
+                    0,
+                    displayId,
+                    () -> current(pkg, generation) && valid.getAsBoolean());
+            return;
+        }
+        Context app = context.getApplicationContext();
         WORKER.post(() -> prepare(app, pkg, displayId, fullscreen, generation, valid, onFailure));
     }
 
@@ -188,7 +197,20 @@ final class AppDisplayLauncher {
                         if (!current(pkg, generation) || !valid.getAsBoolean()) return;
                         try {
                             // Release the old widget only after task removal has completed.
-                            if (clearWidgetHost) SetModesService.notifyEmbeddedTaskLeft(app, pkg);
+                            if (clearWidgetHost
+                                    || (CarPlayTarget.isCarPlay(pkg)
+                                            && SplitHostActivity.ownsCarPlayDisplay(displayId))) {
+                                SetModesService.notifyEmbeddedTaskLeft(app, pkg);
+                            }
+                            if (CarPlayTarget.isCarPlay(pkg)) {
+                                SplitHostActivity.closeFullscreenCarPlayHostExcept(displayId);
+                                int physicalDisplay =
+                                        SplitHostActivity.physicalCarPlayHostDisplay(displayId);
+                                if (physicalDisplay == 0 || physicalDisplay == 1) {
+                                    intent.putExtra(
+                                            CarPlayTarget.EXTRA_HOST_DISPLAY_ID, physicalDisplay);
+                                }
+                            }
                             ActivityOptions options = ActivityOptions.makeBasic();
                             options.setLaunchDisplayId(displayId);
                             Bundle bundle = options.toBundle();

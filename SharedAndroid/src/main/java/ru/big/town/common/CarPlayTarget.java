@@ -13,6 +13,7 @@ public final class CarPlayTarget {
     public static final String LAUNCHER = "ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
     public static final String ID = PACKAGE + "/" + ACTIVITY;
     public static final String LABEL = "VoyahTune CarPlay";
+    public static final String EXTRA_HOST_DISPLAY_ID = "carPlayHostDisplayId";
 
     private CarPlayTarget() {}
 
