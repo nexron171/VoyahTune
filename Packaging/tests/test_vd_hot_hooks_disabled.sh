@@ -298,9 +298,9 @@ if grep -Fq 'closeActiveSplit' "$RECEIVER" "$HOST"; then
 fi
 grep -Fq 'static boolean closeActiveHost()' "$HOST" \
     || fail "physical launch cannot retire an active VD split"
-grep -Fq 'OemVirtualDisplay.create(displayManager, name, pane.w, pane.h, dpi, surface, true)' "$HOST" \
+tr -d '[:space:]' < "$HOST" | grep -Fq 'OemVirtualDisplay.create(displayManager,name,pane.w,pane.h,dpi,surface,true)' \
     || fail "trusted split VD must use the shared display contract"
-grep -Fq 'OemVirtualDisplay.create(displayManager, name, pane.w, pane.h, dpi, surface, false)' "$HOST" \
+tr -d '[:space:]' < "$HOST" | grep -Fq 'OemVirtualDisplay.create(displayManager,name,pane.w,pane.h,dpi,surface,false)' \
     || fail "fallback split VD must use the shared display contract"
 grep -Fq 'DESTROY_CONTENT_ON_REMOVAL = 1 << 8' "$VD_FACTORY" \
     || fail "shared VD factory changed Android 11 destroy-content flag"
