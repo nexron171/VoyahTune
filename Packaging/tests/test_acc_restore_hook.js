@@ -74,7 +74,8 @@ function fixture(options = {}) {
             this.values[key] = v;
         }
         getLong(key, fallback = 0) {
-            return this.values[key] ?? fallback;
+            const value = this.values[key] ?? fallback;
+            return { toString: () => String(value) };
         }
         putLong(key, v) {
             this.values[key] = v;
@@ -248,7 +249,7 @@ function fixture(options = {}) {
         }
         if (action === "claim") {
             const claimed =
-                scenario.startup === "pending" && args.getLong("revision") === scenario.revision;
+                scenario.startup === "pending" && String(args.getLong("revision")) === String(scenario.revision);
             result.putBoolean("claimed", claimed);
             if (claimed) scenario.startup = "claimed";
         }

@@ -68,6 +68,9 @@ final class SmartSaveController implements AutoCloseable {
         preferences = context.getSharedPreferences("SmartSave", Context.MODE_PRIVATE);
         policy = new SmartSavePolicy(preferences.getBoolean("chargingLocked", false));
         temporaryElectric = preferences.getBoolean("temporaryElectric", false);
+        if (preferences.getBoolean("manualSaveHeld", false)) {
+            policy.holdManualSave();
+        }
         hub = CanBusEventHub.get(context);
         thread.start();
         handler = new Handler(thread.getLooper());
@@ -109,6 +112,20 @@ final class SmartSaveController implements AutoCloseable {
         commandGeneration++;
         requestedMode = -1;
         configuration = readConfiguration();
+        if (configuration != null) {
+            long selection = configuration.getLong("energySelectionRevision", 0);
+            long previousSelection = preferences.getLong("energySelectionRevision", 0);
+            if (selection != previousSelection) {
+                if (saveSelected(configuration)) {
+                    policy.holdManualSave();
+                }
+                preferences
+                        .edit()
+                        .putLong("energySelectionRevision", selection)
+                        .putBoolean("manualSaveHeld", policy.isManualSaveHeld())
+                        .apply();
+            }
+        }
         if (!saveSelected(configuration)) {
             stopWatching();
             if (configuration != null) {
@@ -165,6 +182,7 @@ final class SmartSaveController implements AutoCloseable {
                 return;
             case VEHICLE_SPEED:
                 speed = event.first;
+                policy.onSpeedChanged(speed);
                 break;
             case ENERGY_TELEMETRY:
                 if (event.telemetry.kind != EnergyTelemetrySample.SOC) {
@@ -234,6 +252,7 @@ final class SmartSaveController implements AutoCloseable {
     private void requestMode(int mode) {
         final long generation = ++commandGeneration;
         requestedMode = mode;
+        final long selectionRevision = configuration.getLong("revision", -1);
         if (mode == VehicleRestorePolicy.SOC_EV) {
             // Record ownership before enqueueing so disabling can cancel a pending EV as well.
             temporaryElectric = true;
@@ -247,6 +266,7 @@ final class SmartSaveController implements AutoCloseable {
                     }
                     Bundle current = readConfiguration();
                     if (!saveSelected(current)
+                            || current.getLong("revision", -1) != selectionRevision
                             || current.getInt("acc", -1) != 2
                             || (mode == VehicleRestorePolicy.SOC_EV
                                     && !current.getBoolean(SmartSaveSettings.ENABLED, false))) {
@@ -277,11 +297,13 @@ final class SmartSaveController implements AutoCloseable {
 
     private void persistState() {
         if (preferences.getBoolean("chargingLocked", false) == policy.isChargingLocked()
-                && preferences.getBoolean("temporaryElectric", false) == temporaryElectric) {
+                && preferences.getBoolean("temporaryElectric", false) == temporaryElectric
+                && preferences.getBoolean("manualSaveHeld", false) == policy.isManualSaveHeld()) {
             return;
         }
         preferences
                 .edit()
+                .putBoolean("manualSaveHeld", policy.isManualSaveHeld())
                 .putBoolean("chargingLocked", policy.isChargingLocked())
                 .putBoolean("temporaryElectric", temporaryElectric)
                 .apply();

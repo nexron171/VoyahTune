@@ -103,6 +103,18 @@ public final class AccPreferencesHarness {
             Bundle pi=DriveSelectionPreferences.hook(p,"snapshot",null,1,false);
             equal(false,pi.containsKey("smartSaveEnabled"));
         });
+        scenario("explicit energy choices have an independent durable revision",()->{
+            Memory p=new Memory();acc(p,2,1);
+            equal(0L,action(p,"snapshot",null,1).getLong("energySelectionRevision",-1));
+            DriveSelectionPreferences.selectEnergy(p,"SREV",false);
+            equal(1L,action(p,"snapshot",null,1).getLong("energySelectionRevision",-1));
+            DriveSelectionPreferences.selectRecycle(p,"HIGH");
+            equal(1L,action(p,"snapshot",null,1).getLong("energySelectionRevision",-1));
+            DriveSelectionPreferences.selectEnergy(p,"SREV",true);
+            Memory restarted=new Memory(new HashMap<>(p.disk));
+            equal(2L,action(restarted,"snapshot",null,1).getLong("energySelectionRevision",-1));
+            equal(false,DriveSelectionPreferences.hook(p,"snapshot",null,1,false).containsKey("energySelectionRevision"));
+        });
         scenario("one settings claim per ACC survives provider recreation",()->{
             Memory p=new Memory();Bundle first=acc(p,2,1);
             equal(1L,first.getLong("cycle",-1));equal("pending",first.getString("settingsStartup"));

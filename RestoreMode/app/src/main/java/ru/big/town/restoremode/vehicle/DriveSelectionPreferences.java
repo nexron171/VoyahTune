@@ -45,6 +45,9 @@ public final class DriveSelectionPreferences {
         SharedPreferences.Editor e =
                 prefs.edit()
                         .putString("currentTripEnergy", mode)
+                        .putLong(
+                                "energySelectionRevision",
+                                prefs.getLong("energySelectionRevision", 0) + 1)
                         .putBoolean("forcedEv", "FORCE_EV".equals(mode))
                         .putString(START, "selected")
                         .putLong(REV, prefs.getLong(REV, 0) + 1);
@@ -234,6 +237,7 @@ public final class DriveSelectionPreferences {
         result.putString("energy", energy(prefs));
         if (accHooks) {
             result.putString("recycle", recycle(prefs));
+            result.putLong("energySelectionRevision", prefs.getLong("energySelectionRevision", 0));
             result.putBoolean("smartSaveEnabled", prefs.getBoolean("smartSaveEnabled", false));
             result.putBoolean("forcedEv", prefs.getBoolean("forcedEv", false));
         }

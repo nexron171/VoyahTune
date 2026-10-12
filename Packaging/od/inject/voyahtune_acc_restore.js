@@ -210,8 +210,10 @@ Java.perform(function () {
                 snapshot.getInt("acc", -1) === 2 &&
                 String(snapshot.getString("energy")) === "SREV" &&
                 !snapshot.getBoolean("forcedEv", false) &&
-                snapshot.getLong("revision") === request.getLong("__vt_energy_revision", -1) &&
-                snapshot.getLong("cycle") === request.getLong("__vt_energy_cycle", -1) &&
+                String(snapshot.getLong("revision")) ===
+                    String(request.getLong("__vt_energy_revision", -1)) &&
+                String(snapshot.getLong("cycle")) ===
+                    String(request.getLong("__vt_energy_cycle", -1)) &&
                 (mode === 4 || (mode === 2 && snapshot.getBoolean("smartSaveEnabled", false)))
             );
         }

@@ -60,4 +60,24 @@ public class SmartSavePolicyTest {
         }
         assertEquals(SAVE, policy.desiredMode(25, 25, -1, ELECTRIC));
     }
+
+    @Test
+    public void explicitSaveWaitsForNewSpeedAboveThirtyFive() {
+        SmartSavePolicy policy = new SmartSavePolicy(false);
+        policy.holdManualSave();
+        for (int speed : new int[] {0, 5, 14, 15, 35}) {
+            policy.onSpeedChanged(speed);
+            assertEquals(SAVE, policy.desiredMode(78, 25, speed, ELECTRIC));
+            assertEquals(SAVE, policy.desiredMode(78, 80, speed, SAVE));
+            assertTrue(policy.isManualSaveHeld());
+        }
+        // A stale cached speed in a charge poll cannot release the explicit choice.
+        assertEquals(SAVE, policy.desiredMode(78, 25, 40, SAVE));
+        assertTrue(policy.isManualSaveHeld());
+        policy.onSpeedChanged(36);
+        assertFalse(policy.isManualSaveHeld());
+        assertEquals(SAVE, policy.desiredMode(78, 25, 36, SAVE));
+        policy.onSpeedChanged(14);
+        assertEquals(ELECTRIC, policy.desiredMode(78, 25, 14, SAVE));
+    }
 }

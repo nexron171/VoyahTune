@@ -3,6 +3,21 @@ package ru.big.town.anative;
 /** Charge hysteresis is independent of speed and survives Native restarts. */
 final class SmartSavePolicy {
     private boolean chargingLocked;
+    private boolean manualSaveHeld;
+
+    void holdManualSave() {
+        manualSaveHeld = true;
+    }
+
+    void onSpeedChanged(int speed) {
+        if (speed > 35) {
+            manualSaveHeld = false;
+        }
+    }
+
+    boolean isManualSaveHeld() {
+        return manualSaveHeld;
+    }
 
     SmartSavePolicy(boolean chargingLocked) {
         this.chargingLocked = chargingLocked;
@@ -28,7 +43,7 @@ final class SmartSavePolicy {
             chargingLocked = false;
         }
 
-        if (chargingLocked || speed < 0 || speed > 35) {
+        if (manualSaveHeld || chargingLocked || speed < 0 || speed > 35) {
             return VehicleRestorePolicy.SOC_SREV;
         }
         if (speed < 15) {
