@@ -66,7 +66,7 @@ python3 - "$APPLY_ENGINE" <<'PY_CHECK'
 from pathlib import Path
 import sys
 source = Path(sys.argv[1]).read_text()
-start = source.index('static void persistModeFeedbackIfAllowed(\n')
+start = source.index('static void persistModeFeedbackIfAllowed(')
 end = source.index('private ApplyEngine()', start)
 body = source[start:end]
 assert 'if (usesAccHooks()) {' in body, 'OD observation must be profile-gated'
