@@ -25,6 +25,7 @@ use tauri::{Emitter, Manager, State};
 #[derive(Default)]
 struct Running {
     busy: bool,
+    verification_pending: bool,
     cancel: Option<Arc<AtomicBool>>,
     consent: Option<Arc<RemovalConsent>>,
     operation_dir: Option<PathBuf>,
@@ -356,8 +357,10 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
             dns,
         )?;
         let digest = payload::sha256(&payload.root.join("manifest.json"))?;
-        handle.state::<Runtime>().0.lock().unwrap().prepared =
-            Some((plan.clone(), digest, payload.root.clone()));
+        let runtime = handle.state::<Runtime>();
+        let mut state = runtime.0.lock().unwrap();
+        state.verification_pending = false;
+        state.prepared = Some((plan.clone(), digest, payload.root.clone()));
         Ok(serde_json::to_value(plan)?)
     })
     .await
@@ -373,15 +376,79 @@ async fn apply(app: tauri::AppHandle, request: Request) -> Result<()> {
     }
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || run_operation(&handle, request))
-        .await
-        .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
-        .and_then(|v| v);
-    app.state::<Runtime>().0.lock().unwrap().prepared = None;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || run_operation(&handle, request, false))
+            .await
+            .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
+            .and_then(|v| v);
+    finish_verification_state(&app, &result);
     release(&app.state::<Runtime>());
     result
 }
-fn run_operation(app: &tauri::AppHandle, request: Request) -> Result<()> {
+
+fn finish_verification_state(app: &tauri::AppHandle, result: &Result<()>) {
+    let runtime = app.state::<Runtime>();
+    let mut state = runtime.0.lock().unwrap();
+    state.verification_pending = result
+        .as_ref()
+        .is_err_and(|error| error.code == "READINESS_UNCONFIRMED");
+    if !state.verification_pending {
+        state.prepared = None;
+    }
+}
+
+#[tauri::command]
+async fn retry_verification(app: tauri::AppHandle) -> Result<()> {
+    reserve(&app.state::<Runtime>())?;
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let request = {
+            let runtime = handle.state::<Runtime>();
+            let state = runtime.0.lock().unwrap();
+            if !state.verification_pending {
+                return Err(Error::new(
+                    "VERIFICATION_NOT_ALLOWED",
+                    "Нет незавершённой проверки",
+                ));
+            }
+            let mut request = state
+                .prepared
+                .as_ref()
+                .ok_or_else(|| Error::new("PLAN_REQUIRED", "Нет сохранённой установки"))?
+                .0
+                .request
+                .clone();
+            request.confirmed = true;
+            request
+        };
+        run_operation(&handle, request, true)
+    })
+    .await
+    .map_err(|error| Error::new("WORKER", "Ошибка проверки").detail(error))
+    .and_then(|value| value);
+    // Keep the saved installation available after a transient USB failure.
+    if result.is_ok() {
+        finish_verification_state(&app, &result);
+    }
+    release(&app.state::<Runtime>());
+    result.map_err(|error| {
+        if matches!(
+            error.code.as_str(),
+            "READINESS_UNCONFIRMED" | "CANCELLED" | "VERIFICATION_NOT_ALLOWED"
+        ) {
+            error
+        } else {
+            Error::new(
+                "READINESS_UNCONFIRMED",
+                "Не удалось повторить проверку готовности",
+            )
+            .detail(error)
+            .retry("Проверьте подключение автомобиля и повторите проверку.")
+        }
+    })
+}
+
+fn run_operation(app: &tauri::AppHandle, request: Request, verification_only: bool) -> Result<()> {
     let (mut plan, digest, root) = app
         .state::<Runtime>()
         .0
@@ -429,7 +496,7 @@ fn run_operation(app: &tauri::AppHandle, request: Request) -> Result<()> {
             output_cancel.store(true, Ordering::Relaxed);
         }
     });
-    if request.action != Action::Remove {
+    if !verification_only && request.action != Action::Remove {
         let recovery_root = saved_recovery_root(&request.serial)?;
         payload.save_removal(&recovery_root.join(&digest))?;
         fs::create_dir_all(&recovery_root)?;
@@ -447,6 +514,9 @@ fn run_operation(app: &tauri::AppHandle, request: Request) -> Result<()> {
     app.state::<Runtime>().0.lock().unwrap().operation_dir = Some(engine.operation.dir.clone());
     recovery::write_json(&engine.operation.dir.join("plan.json"), &plan)?;
     engine.canbus_consent = Some(consent);
+    if verification_only {
+        return engine.verify_installed(request);
+    }
     match engine.run(request) {
         Err(e) if e.code == "CANCELLED" => Ok(()),
         result => result,
@@ -534,6 +604,8 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
             "backup.json",
             "after.json",
             "receipt.json",
+            "logcat.txt",
+            "services.txt",
         ] {
             let file = source.join(name);
             if file.is_file() {
@@ -562,6 +634,7 @@ fn main() {
             devices,
             plan,
             apply,
+            retry_verification,
             cancel,
             resolve_canbus_conflict,
             operation_events,

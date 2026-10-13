@@ -34,12 +34,13 @@
     logOpen = $state(false),
     stopRequested = $state(false);
   let outcome = $state<
-      "running" | "success" | "failed" | "cancelled" | "paused"
+      "running" | "success" | "warning" | "failed" | "cancelled" | "paused"
     >("running"),
     reportPath = $state("");
   let closeNotice = $state(false),
     eventsReady = $state(false),
     eventError = $state<Failure | null>(null);
+  let verificationPending = $state(false);
   let completed = $state<string[]>([]),
     current = $state<string | undefined>();
   let canbusNotice = $state(""),
@@ -214,14 +215,21 @@
     if (event.type === "operation-failed") {
       canbusNotice = "";
       error = event.data.report?.error || failure(event.message);
+      verificationPending ||= error?.code === "READINESS_UNCONFIRMED";
       outcome = "failed";
       screen = 4;
       busy = false;
       reportPath = event.data.reportPath || "";
     }
-    if (event.type === "operation-completed") {
+    if (
+      event.type === "operation-completed" ||
+      event.type === "operation-completed-with-warning"
+    ) {
+      verificationPending = false;
       canbusNotice = "";
-      outcome = "success";
+      error = null;
+      outcome =
+        event.type === "operation-completed-with-warning" ? "warning" : "success";
       screen = 4;
       busy = false;
       reportPath = event.data.reportPath || "";
@@ -434,27 +442,35 @@
       busy = false;
     }
   }
-  async function start() {
+  async function start(verificationOnly = false) {
     if (!eventsReady || !plan || (action === "remove" && !removeConfirmed))
       return;
+    verificationPending = verificationOnly;
     busy = true;
     error = null;
     canbusNotice = "";
     canbusAnswerPending = false;
     stopMessage = "";
     events = [];
-    completed = [];
+    completed = verificationOnly
+      ? plan.steps.filter((step) => step.id !== "verify").map((step) => step.id)
+      : [];
     current = undefined;
     reportPath = "";
     stopRequested = false;
     outcome = "running";
     screen = 3;
     try {
-      await command("apply", {
-        request: { ...plan.request, dns, confirmed: true },
-      });
+      if (verificationOnly) {
+        await command("retry_verification");
+      } else {
+        await command("apply", {
+          request: { ...plan.request, dns, confirmed: true },
+        });
+      }
     } catch (e) {
       error = failure(e);
+      verificationPending ||= error.code === "READINESS_UNCONFIRMED";
       outcome = "failed";
       screen = 4;
       busy = false;
@@ -480,6 +496,10 @@
     }
   }
   async function retry() {
+    if (verificationPending) {
+      await start(true);
+      return;
+    }
     screen = 1;
     error = null;
     await refresh();
@@ -966,29 +986,47 @@
         {:else if screen === 4}
           <div class="screen-heading">
             <span class="eyebrow"
-              >{outcome === "success" ? "ГОТОВО" : "ОПЕРАЦИЯ ОСТАНОВЛЕНА"}</span
+              >{["success", "warning"].includes(outcome) ? "ГОТОВО" : "ОПЕРАЦИЯ ОСТАНОВЛЕНА"}</span
             >
             <h1>
-              {outcome === "success"
-                ? action === "remove"
-                  ? "VoyahTune удалён"
-                  : "VoyahTune готов к работе"
-                : outcome === "cancelled"
-                  ? "Операция отменена"
-                  : outcome === "paused"
-                    ? "Требуется ваше решение"
-                    : "Не удалось завершить операцию"}
+              {outcome === "warning"
+                ? "Установка завершена"
+                : outcome === "success"
+                  ? action === "remove"
+                    ? "VoyahTune удалён"
+                    : "VoyahTune готов к работе"
+                  : outcome === "cancelled"
+                    ? "Операция отменена"
+                    : outcome === "paused"
+                      ? "Требуется ваше решение"
+                      : error?.code === "READINESS_UNCONFIRMED"
+                        ? "Файлы установлены, готовность не подтверждена"
+                        : "Не удалось завершить операцию"}
             </h1>
             <p class="subtitle">
-              {outcome === "success"
-                ? action === "remove"
-                  ? "Команды удаления выполнены. Автомобиль перезагружается."
-                  : "Запуск Native проверен после перезагрузки автомобиля."
-                : ["cancelled", "paused"].includes(outcome)
-                  ? stopMessage
-                  : "Завершённые шаги могли изменить автомобиль. После устранения причины выполните новую проверку."}
+              {outcome === "warning"
+                ? "Время ожидания подтверждения истекло."
+                : outcome === "success"
+                  ? action === "remove"
+                    ? "Команды удаления выполнены. Автомобиль перезагружается."
+                    : "Запуск Native проверен после перезагрузки автомобиля."
+                  : ["cancelled", "paused"].includes(outcome)
+                    ? stopMessage
+                    : error?.code === "READINESS_UNCONFIRMED"
+                      ? "Можно повторить проверку без переустановки и перезагрузки автомобиля."
+                      : "Завершённые шаги могли изменить автомобиль. После устранения причины выполните новую проверку."}
             </p>
           </div>
+          {#if outcome === "warning"}
+            <section class="status-panel warning" role="status">
+              <h2>Не удалось проверить целостность установки</h2>
+              <p>
+                Установка завершилась, но проверить целостность установки не
+                удалось. Проверьте самостоятельно, что всё работает. В случае
+                проблем повторите установку.
+              </p>
+            </section>
+          {/if}
           {#if outcome === "success"}<section class="status-panel success">
               <h2>
                 {action === "remove"
@@ -1071,7 +1109,7 @@
             disabled={busy ||
               !eventsReady ||
               (action === "remove" && !removeConfirmed)}
-            onclick={start}
+            onclick={() => start()}
             >{action === "remove"
               ? "Удалить VoyahTune"
               : "Начать установку"}</button
@@ -1093,13 +1131,13 @@
           </div>
           <button
             class="button primary"
-            onclick={outcome === "success"
+            onclick={["success", "warning"].includes(outcome)
               ? () => {
                   screen = 0;
                   error = null;
                 }
               : retry}
-            >{outcome === "success" ? "В начало" : "Проверить заново"}</button
+            >{outcome === "warning" ? "Завершить" : outcome === "success" ? "В начало" : verificationPending ? "Повторить проверку" : "Проверить заново"}</button
           >{/if}
       </footer>
     </main>

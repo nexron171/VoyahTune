@@ -1,6 +1,7 @@
 mod config;
 mod device;
 mod dns;
+mod health;
 mod install;
 mod install_tail;
 mod network;
@@ -168,100 +169,107 @@ fn run() -> io::Result<()> {
         let mut stream = stream?;
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        if authorize(&stream).is_err() {
+        let root_health = restore_ui::enabled() && peer_uid(&stream).is_ok_and(|uid| uid == 0);
+        if !root_health && authorize(&stream).is_err() {
             continue;
         }
-        let response: io::Result<Value> = (|| match protocol::read_request(&mut BufReader::new(
-            &stream,
-        ))? {
-            protocol::Request::Status {} => {
-                let rt = shared.lock().unwrap();
-                Ok(
-                    json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),
+        let response: io::Result<Value> = (|| {
+            let request = protocol::read_request(&mut BufReader::new(&stream))?;
+            if root_health && !health::root_request_allowed(&request) {
+                return Err(config::invalid("Root diagnostics only support status"));
+            }
+            match request {
+                protocol::Request::Status {} => {
+                    let rt = shared.lock().unwrap();
+                    let mut response = json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),
                         "capabilities":restore_ui::capabilities(),"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok().map(config::Config::response),
-                        "settingsError":rt.config.as_ref().err()}),
-                )
-            }
-            protocol::Request::GetSettings {} => {
-                let rt = shared.lock().unwrap();
-                if rt.state.busy() {
-                    return Err(config::invalid("Дождитесь завершения операции"));
+                        "settingsError":rt.config.as_ref().err()});
+                    if restore_ui::enabled() {
+                        response["infrastructure"] = json!("od");
+                    }
+                    Ok(response)
                 }
-                let status = dns::status();
-                Ok(
-                    json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response),
+                protocol::Request::GetSettings {} => {
+                    let rt = shared.lock().unwrap();
+                    if rt.state.busy() {
+                        return Err(config::invalid("Дождитесь завершения операции"));
+                    }
+                    let status = dns::status();
+                    Ok(
+                        json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response),
                     "dnsStatus":status.as_ref().ok(),"dnsError":status.as_ref().err().map(ToString::to_string)}),
-                )
-            }
-            protocol::Request::SetSettings { url, dns_enabled } => {
-                let mut rt = shared.lock().unwrap();
-                if rt.state.busy() || rt.state.repair() {
-                    return Err(config::invalid("Сейчас нельзя менять настройки"));
+                    )
                 }
-                if dns_enabled.is_some() {
-                    dns::plan(&dns::status()?, dns_enabled)?;
-                }
-                let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
-                let changed = config::change_settings(root, current, &url, dns_enabled)?;
-                if changed {
-                    rt.state.clear_od_catalog();
-                    rt.state.selected = None;
-                    rt.state.notice = None;
-                    rt.state.phase = "idle".into();
-                    rt.state.step = "Источник изменён. Проверьте каталог".into();
-                }
-                state::save(root, "state.json", &rt.state)?;
-                Ok(
-                    json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response)}),
-                )
-            }
-            protocol::Request::SetCatalogUrl { url } => {
-                let mut rt = shared.lock().unwrap();
-                if rt.state.busy() {
-                    return Err(config::invalid("Нельзя менять источник во время операции"));
-                }
-                let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
-                if config::change_url(root, current, &url)? {
-                    rt.state.clear_od_catalog();
-                    rt.state.selected = None;
-                    rt.state.notice = None;
-                    if !rt.state.repair() {
+                protocol::Request::SetSettings { url, dns_enabled } => {
+                    let mut rt = shared.lock().unwrap();
+                    if rt.state.busy() || rt.state.repair() {
+                        return Err(config::invalid("Сейчас нельзя менять настройки"));
+                    }
+                    if dns_enabled.is_some() {
+                        dns::plan(&dns::status()?, dns_enabled)?;
+                    }
+                    let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
+                    let changed = config::change_settings(root, current, &url, dns_enabled)?;
+                    if changed {
+                        rt.state.clear_od_catalog();
+                        rt.state.selected = None;
+                        rt.state.notice = None;
                         rt.state.phase = "idle".into();
                         rt.state.step = "Источник изменён. Проверьте каталог".into();
                     }
                     state::save(root, "state.json", &rt.state)?;
-                    log(root, "catalog_source_changed")?;
+                    Ok(
+                        json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response)}),
+                    )
                 }
-                Ok(
-                    json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response)}),
-                )
+                protocol::Request::SetCatalogUrl { url } => {
+                    let mut rt = shared.lock().unwrap();
+                    if rt.state.busy() {
+                        return Err(config::invalid("Нельзя менять источник во время операции"));
+                    }
+                    let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
+                    if config::change_url(root, current, &url)? {
+                        rt.state.clear_od_catalog();
+                        rt.state.selected = None;
+                        rt.state.notice = None;
+                        if !rt.state.repair() {
+                            rt.state.phase = "idle".into();
+                            rt.state.step = "Источник изменён. Проверьте каталог".into();
+                        }
+                        state::save(root, "state.json", &rt.state)?;
+                        log(root, "catalog_source_changed")?;
+                    }
+                    Ok(
+                        json!({"schema":1,"ok":true,"settings":rt.config.as_ref().ok().map(config::Config::response)}),
+                    )
+                }
+                protocol::Request::Check { same_version } => {
+                    workflow::queue(&shared, &jobs, workflow::Job::Check(same_version))?;
+                    Ok(json!({"schema":1,"ok":true}))
+                }
+                protocol::Request::Download {} => {
+                    workflow::queue(&shared, &jobs, workflow::Job::Download)?;
+                    Ok(json!({"schema":1,"ok":true}))
+                }
+                protocol::Request::Apply {} => {
+                    workflow::queue(&shared, &jobs, workflow::Job::Apply)?;
+                    Ok(json!({"schema":1,"ok":true}))
+                }
+                protocol::Request::Finish { reset_errors } => {
+                    workflow::update(&shared, |s| {
+                        s.finish_result(reset_errors);
+                    })?;
+                    Ok(json!({"schema":1,"ok":true}))
+                }
+                protocol::Request::Dismiss {} => {
+                    workflow::update(&shared, |s| {
+                        s.notice = None;
+                        s.notice_opened = true;
+                    })?;
+                    Ok(json!({"schema":1,"ok":true}))
+                }
+                protocol::Request::Logs {} => Ok(json!({"schema":1,"ok":true,"logs":logs(root)?})),
             }
-            protocol::Request::Check { same_version } => {
-                workflow::queue(&shared, &jobs, workflow::Job::Check(same_version))?;
-                Ok(json!({"schema":1,"ok":true}))
-            }
-            protocol::Request::Download {} => {
-                workflow::queue(&shared, &jobs, workflow::Job::Download)?;
-                Ok(json!({"schema":1,"ok":true}))
-            }
-            protocol::Request::Apply {} => {
-                workflow::queue(&shared, &jobs, workflow::Job::Apply)?;
-                Ok(json!({"schema":1,"ok":true}))
-            }
-            protocol::Request::Finish { reset_errors } => {
-                workflow::update(&shared, |s| {
-                    s.finish_result(reset_errors);
-                })?;
-                Ok(json!({"schema":1,"ok":true}))
-            }
-            protocol::Request::Dismiss {} => {
-                workflow::update(&shared, |s| {
-                    s.notice = None;
-                    s.notice_opened = true;
-                })?;
-                Ok(json!({"schema":1,"ok":true}))
-            }
-            protocol::Request::Logs {} => Ok(json!({"schema":1,"ok":true,"logs":logs(root)?})),
         })();
         let response =
             response.unwrap_or_else(|e| json!({"schema":1,"ok":false,"error":e.to_string()}));
@@ -272,6 +280,19 @@ fn run() -> io::Result<()> {
 }
 
 fn main() {
+    if restore_ui::enabled() && std::env::args().nth(1).as_deref() == Some("--health") {
+        if unsafe { libc::geteuid() } != 0 {
+            std::process::exit(1);
+        }
+        match health::query() {
+            Ok(response) => println!("{response}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--update-ui") {
         if let Err(error) = ui_update::run() {
             let _ = log(Path::new(ROOT), &format!("ui_update_error {error}"));

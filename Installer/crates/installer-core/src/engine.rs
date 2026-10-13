@@ -2,6 +2,8 @@
 //! Each checked result below corresponds to a checked branch in those scripts.
 //! GUI steps, diagnostics and journals do not add vehicle preconditions.
 //! The approved VoyahHlCTRL remediation is an opt-in extension to the permission step.
+mod readiness;
+
 use crate::{
     adb::{quote, Adb},
     canbus::{self, RemovalConsent},
@@ -173,10 +175,23 @@ impl Engine {
         if self.restart_loader {
             self.ignore("setprop ctl.start voyahtune_load 2>/dev/null || true\n");
         }
+        self.finish_report(result)
+    }
+
+    fn finish_report(&self, result: Result<()>) -> Result<()> {
+        let readiness_unconfirmed = result
+            .as_ref()
+            .is_err_and(|error| error.code == "READINESS_UNCONFIRMED");
         let mut report = match &result {
             Ok(()) => {
                 json!({"success":true,"operationId":self.operation.id,"releaseVersion":self.payload.manifest.release_version,"installerVersion":env!("CARGO_PKG_VERSION"),"payloadManifest":self.payload.manifest})
             }
+            Err(warning) if readiness_unconfirmed => json!({
+                "success":true,
+                "operationId":self.operation.id,
+                "readinessConfirmed":false,
+                "warning":warning
+            }),
             Err(e) => json!({"success":false,"operationId":self.operation.id,"error":e,
                 "recovery":"Завершённые изменения могли сохраниться. Повторите установку или удаление после устранения указанной причины."}),
         };
@@ -190,7 +205,9 @@ impl Engine {
         }
         recovery::write_json(&self.operation.dir.join("report.json"), &report)?;
         self.adb.events.emit(
-            if result.is_ok() {
+            if readiness_unconfirmed {
+                "operation-completed-with-warning"
+            } else if result.is_ok() {
                 "operation-completed"
             } else if result.as_ref().is_err_and(|e| e.code == "CANCELLED") {
                 "operation-cancelled"
@@ -200,14 +217,18 @@ impl Engine {
                 "operation-failed"
             },
             self.adb.step.as_deref(),
-            if result.is_ok() {
+            if result.is_ok() || readiness_unconfirmed {
                 "Операция завершена"
             } else {
                 "Операция остановлена"
             },
             json!({"report":report,"reportPath":self.operation.dir.join("report.json")}),
         )?;
-        result
+        if readiness_unconfirmed {
+            Ok(())
+        } else {
+            result
+        }
     }
     fn step(
         &mut self,
@@ -232,6 +253,7 @@ impl Engine {
                     match e.code.as_str() {
                         "CANCELLED" => "step-cancelled",
                         "ACTION_REQUIRED" => "step-paused",
+                        "READINESS_UNCONFIRMED" => "step-warning",
                         _ => "step-failed",
                     },
                     Some(id),
@@ -421,7 +443,11 @@ impl Engine {
 
             self.step("native", "Установка Native и разрешений", |e| e.native())?;
             if !self.payload.restoremode_ota() {
-                self.step("packages", "Установка RestoreMode и настроек", |e| e.packages())?;
+                self.step(
+                    "packages",
+                    "Установка RestoreMode и настроек",
+                    |e| e.packages(),
+                )?;
             }
             self.step("dns", "Настройка DNS", |e| e.dns_choice(r.dns))?;
             self.step("updater-bootstrap", "Подготовка первого запуска OTA", |e| {
@@ -432,7 +458,11 @@ impl Engine {
                 Ok(())
             })?;
             if self.payload.restoremode_ota() {
-                self.step("packages", "Установка RestoreMode перед перезагрузкой", |e| e.packages())?;
+                self.step(
+                    "packages",
+                    "Установка RestoreMode перед перезагрузкой",
+                    |e| e.packages(),
+                )?;
             }
             self.step(
                 "reboot",
@@ -449,6 +479,11 @@ impl Engine {
                 "verify",
                 "Проверка Native и готовности OTA",
                 |e| {
+                    if e.payload.manifest.infrastructure
+                        == crate::infrastructure::Infrastructure::Od
+                    {
+                        return e.verify_od_readiness();
+                    }
                     e.wait_boot(true)?;
                     e.native_ready()?;
                     e.updater_ready()?;
@@ -461,8 +496,10 @@ impl Engine {
                     )?;
                     if version["ipcSchema"] != 1
                         || version["infrastructure"] != e.payload.manifest.infrastructure.as_str()
-                        || (e.payload.restoremode_ota() && !version["capabilities"].as_array()
-                            .is_some_and(|caps| caps.iter().any(|c| c == "restoremode-ota-ui-v1")))
+                        || (e.payload.restoremode_ota()
+                            && !version["capabilities"].as_array().is_some_and(|caps| {
+                                caps.iter().any(|c| c == "restoremode-ota-ui-v1")
+                            }))
                     {
                         return Err(e.fail("Несовместимый IPC или инфраструктура updater", version));
                     }
@@ -1078,8 +1115,13 @@ fi
         if self.payload.restoremode_ota() {
             self.verify_active_apk("ru.big.town.restoremode", "restore_mode.apk", None)?;
             let resolved = self.shell("cmd package resolve-activity --brief --user 0 -n ru.big.town.restoremode/.OtaActivity\n")?;
-            if !resolved.lines().any(|line| matches!(line.trim(),
-                "ru.big.town.restoremode/.OtaActivity" | "ru.big.town.restoremode/ru.big.town.restoremode.OtaActivity")) {
+            if !resolved.lines().any(|line| {
+                matches!(
+                    line.trim(),
+                    "ru.big.town.restoremode/.OtaActivity"
+                        | "ru.big.town.restoremode/ru.big.town.restoremode.OtaActivity"
+                )
+            }) {
                 return Err(self.fail("Встроенный экран OTA не зарегистрирован", resolved));
             }
             return Ok(());

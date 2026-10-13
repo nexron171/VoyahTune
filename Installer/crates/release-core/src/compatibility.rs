@@ -41,7 +41,7 @@ impl Requirements {
     }
     pub fn restoremode_ota() -> Self {
         let mut result = Self::infrastructure();
-        result.min_installer_version = "1.7.0".into();
+        result.min_installer_version = "1.7.2".into();
         result
             .required_capabilities
             .push("restoremode-ota-ui-v1".into());
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn embedded_ui_requirement_is_opt_in_and_requires_the_new_installer() {
         let od = Requirements::restoremode_ota();
-        assert_eq!(od.min_installer_version, "1.7.0");
+        assert_eq!(od.min_installer_version, "1.7.2");
         assert!(od
             .required_capabilities
             .iter()
