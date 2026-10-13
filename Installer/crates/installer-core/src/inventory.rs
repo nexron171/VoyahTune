@@ -6,6 +6,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Package {
@@ -14,6 +15,7 @@ pub struct Package {
     pub build: Option<BuildMetadata>,
     pub signers: Vec<String>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Inventory {
@@ -32,6 +34,7 @@ pub struct Inventory {
     pub version: Option<String>,
     pub token: String,
 }
+
 pub fn file_hash(adb: &Adb, path: &str) -> Result<Option<String>> {
     let q = quote(path);
     // Same file test as classic backup_pull: follow a link to a regular file,
@@ -50,6 +53,7 @@ pub fn file_hash(adb: &Adb, path: &str) -> Result<Option<String>> {
     }
     Ok(Some(h.into()))
 }
+
 fn package(adb: &Adb, path: &str, verify_signature: bool) -> Result<Package> {
     let hash = file_hash(adb, path)?.ok_or_else(|| {
         Error::new("PACKAGE_DISAPPEARED", "APK исчез во время проверки").detail(path)
@@ -92,6 +96,7 @@ fn package(adb: &Adb, path: &str, verify_signature: bool) -> Result<Package> {
         signers,
     })
 }
+
 /// Optional ownership evidence for backup/restore. Missing or broken signatures
 /// must never block removal, and APKs are read only into temporary verification files.
 pub fn signed_runtime_hashes(adb: &Adb) -> BTreeSet<(String, String)> {
@@ -112,9 +117,11 @@ pub fn signed_runtime_hashes(adb: &Adb) -> BTreeSet<(String, String)> {
         .flat_map(|b| b.runtime_hashes)
         .collect()
 }
+
 pub fn inspect(adb: &Adb, payload: &Payload) -> Result<Inventory> {
     inspect_for_action(adb, payload, crate::plans::Action::Install)
 }
+
 pub fn inspect_for_action(
     adb: &Adb,
     payload: &Payload,
@@ -195,6 +202,32 @@ pub fn inspect_for_action(
     } else {
         None
     };
+    if action == crate::plans::Action::Install
+        && payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+    {
+        // Only APK signatures are needed for replacement; runtime remnants do not
+        // determine whether the selected release can be installed.
+        return Ok(Inventory {
+            token: hex::encode(Sha256::digest(serde_json::to_vec(&(
+                &device.serial,
+                &props,
+                &payload.manifest,
+            ))?)),
+            serial: device.serial,
+            fingerprint: p[0].into(),
+            model: p[1].into(),
+            sdk,
+            abi: p[3].into(),
+            problems,
+            packages,
+            base_native,
+            files: BTreeMap::new(),
+            foreign_files: BTreeMap::new(),
+            remnants: Vec::new(),
+            state: "unchecked".into(),
+            version: None,
+        });
+    }
     let mut files = BTreeMap::new();
     for file in payload
         .manifest
@@ -283,6 +316,7 @@ pub fn inspect_for_action(
     ))?));
     Ok(i)
 }
+
 fn classify(
     packages: &BTreeMap<String, Package>,
     base: &Option<Package>,
@@ -431,5 +465,65 @@ pub fn diagnose(adb: &Adb, payload: &Payload, action: crate::plans::Action) -> I
                 token: String::new(),
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::{
+        events::Events,
+        infrastructure::Infrastructure,
+        plans::{self, Action, Dns},
+    };
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    #[test]
+    fn od_install_does_not_scan_runtime_files_or_remnants() {
+        let directory = tempfile::tempdir().unwrap();
+        let adb_path = directory.path().join("adb");
+        fs::write(&adb_path, r#"#!/bin/sh
+if [ "$1" = '-s' ]; then shift 2; fi
+if [ "$1" = devices ]; then
+    printf 'List of devices attached\nCAR-001 device\n'
+    exit 0
+fi
+script=$(cat)
+case "$script" in
+    *'getprop ro.build.fingerprint'*) printf 'test\nVoyah Free\n30\narm64-v8a\n' ;;
+    'pm list packages --user 0') printf 'package:android\npackage:com.qinggan.canbus.service\npackage:com.qinggan.keymanager.service\n' ;;
+    *'/system/priv-app/Native/Native.apk'*) echo ABSENT ;;
+    *) echo 'Old runtime files cannot be inspected' >&2; exit 1 ;;
+esac
+"#).unwrap();
+        fs::set_permissions(&adb_path, fs::Permissions::from_mode(0o755)).unwrap();
+        let adb = Adb::new(&adb_path, Events::quiet())
+            .unwrap()
+            .with_device("CAR-001")
+            .unwrap();
+        let mut payload = Payload {
+            root: directory.path().into(),
+            manifest: serde_json::from_value(serde_json::json!({
+                "schema": 1,
+                "infrastructure": "od",
+                "product": "VoyahTune",
+                "releaseVersion": "4.1.0-od",
+                "buildRevision": "test",
+                "artifacts": []
+            }))
+            .unwrap(),
+        };
+        let inventory = inspect_for_action(&adb, &payload, Action::Install).unwrap();
+        assert_eq!(inventory.state, "unchecked");
+        assert!(inventory.files.is_empty());
+        assert!(inventory.remnants.is_empty());
+        let plan = plans::plan(inventory, &payload, Action::Install, Dns::Keep).unwrap();
+        assert_eq!(plan.operation, "install");
+        assert_eq!(plan.warnings.len(), 1);
+
+        // Removal and PI retain their existing inventory requests.
+        assert!(inspect_for_action(&adb, &payload, Action::Remove).is_err());
+        payload.manifest.infrastructure = Infrastructure::Pi;
+        assert!(inspect_for_action(&adb, &payload, Action::Install).is_err());
     }
 }

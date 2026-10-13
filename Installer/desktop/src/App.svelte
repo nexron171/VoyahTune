@@ -838,23 +838,27 @@
                 <strong>Релиз:</strong>
                 {releaseVersion || "Встроенные ресурсы удаления"}
               </p>
-              <p><strong>Сейчас в автомобиле:</strong> {inventoryName}</p>
-              <details>
-                <summary>По каким признакам определено состояние</summary>
-                <p>
-                  {action === "remove"
-                    ? "Проверены наличие и пути приложений, системного Native и файлов VoyahTune. Подписи установленных APK при удалении не проверяются."
-                    : "Проверены активные APK, системный Native, подписанные метаданные релиза, наличие загрузочных файлов и их SHA-256."}
-                </p>
-                <pre>{JSON.stringify(
-                    {
-                      packages: plan.inventory.packages,
-                      files: plan.inventory.files,
-                    },
-                    null,
-                    2,
-                  )}</pre>
-              </details>
+              {#if plan.inventory.state === "unchecked"}
+                <p>Выбранный релиз будет установлен поверх существующих файлов.</p>
+              {:else}
+                <p><strong>Сейчас в автомобиле:</strong> {inventoryName}</p>
+                <details>
+                  <summary>По каким признакам определено состояние</summary>
+                  <p>
+                    {action === "remove"
+                      ? "Проверены наличие и пути приложений, системного Native и файлов VoyahTune. Подписи установленных APK при удалении не проверяются."
+                      : "Проверены активные APK, системный Native, подписанные метаданные релиза, наличие загрузочных файлов и их SHA-256."}
+                  </p>
+                  <pre>{JSON.stringify(
+                      {
+                        packages: plan.inventory.packages,
+                        files: plan.inventory.files,
+                      },
+                      null,
+                      2,
+                    )}</pre>
+                </details>
+              {/if}
               <ol class="plan-list">
                 {#each plan.steps as step}<li>{step.title}</li>{/each}
               </ol>

@@ -1,11 +1,13 @@
 use crate::{inventory::Inventory, payload::Payload, Result};
 use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
     Install,
     Remove,
 }
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Dns {
@@ -13,6 +15,7 @@ pub enum Dns {
     On,
     Off,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
@@ -22,11 +25,13 @@ pub struct Request {
     pub inventory_token: String,
     pub confirmed: bool,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step {
     pub id: String,
     pub title: String,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
@@ -46,6 +51,7 @@ pub struct Plan {
     pub warnings: Vec<String>,
     pub steps: Vec<Step>,
 }
+
 /// Packages whose installed key differs from the selected release. Only our two
 /// applications may be reset automatically; other package failures remain errors.
 pub fn signature_resets(
@@ -81,12 +87,15 @@ pub fn signature_resets(
     }
     Ok(resets)
 }
+
 pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -> Result<Plan> {
     let mut warnings=vec!["Совпадение компонентов не означает проверку всех функций на этой прошивке. Автомобиль должен стоять на парковке; питание нельзя отключать до завершения.".into()];
     warnings.extend(inventory.problems.iter().cloned());
     let operation = if action == Action::Remove {
         "remove"
-    } else if inventory.state == "absent" {
+    } else if payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+        || inventory.state == "absent"
+    {
         "install"
     } else if inventory.state != "complete" {
         warnings.push("Обнаружена старая или неполная установка. Сначала будут сохранены найденные файлы, затем установлены файлы выбранного релиза.".into());

@@ -252,7 +252,7 @@ class InstallerTests(unittest.TestCase):
   parent=self.device/'data';parent.chmod(0o111)
   try:
    self.assertFalse(os.access(parent,os.R_OK));self.assertTrue(os.access(parent,os.X_OK))
-   self.assertEqual(self.plan('install')['inventory']['state'],'absent')
+   self.assertEqual(self.plan('install')['inventory']['state'],'unchecked')
    self.assertEqual(self.plan('remove')['inventory']['state'],'absent')
   finally:parent.chmod(0o755)
  def test_profile_and_release_metadata_do_not_block_classic_flow(self):
