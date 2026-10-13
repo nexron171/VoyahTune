@@ -1,6 +1,6 @@
 //! Common Rust engine; classic commands are derived from Packaging/od/installer/device.
 //! Each checked result below corresponds to a checked branch in those scripts.
-//! GUI steps, diagnostics and journals do not add vehicle preconditions.
+//! OD installation also rejects evidence of conflicting CUNBA hooks.
 //! The approved VoyahHlCTRL remediation is an opt-in extension to the permission step.
 mod readiness;
 
@@ -161,6 +161,12 @@ impl Engine {
             ));
         }
         let mut result = self.execute(request);
+        if result.as_ref().is_err_and(crate::cunba::is_blocking_error)
+            && !self.ota_locked
+            && !self.restart_loader
+        {
+            return self.finish_report(result);
+        }
         if let Err(error) = self.ota_unlock() {
             if result.is_ok() {
                 result = Err(error);
@@ -383,6 +389,11 @@ impl Engine {
             "Получение системного доступа",
             |e| {
                 e.root_sequence(false)?;
+                crate::cunba::check_installation(
+                    &e.adb,
+                    e.payload.manifest.infrastructure,
+                    r.action,
+                )?;
                 Ok(())
             },
         )?;

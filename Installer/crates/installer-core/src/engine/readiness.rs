@@ -98,6 +98,10 @@ impl Engine {
             "[ \"$(getprop sys.boot_completed)\" = 1 ] && service check package | grep -q ': found'",
             deadline,
         )?;
+        crate::cunba::check(
+            &self.adb,
+            deadline.saturating_duration_since(Instant::now()),
+        )?;
         self.readiness_command("[ ! -e /data/local/voyahtune-install.lock ]", deadline)
             .map_err(|error| {
                 Error::new("HEALTH_PENDING", "Идёт другая операция установки или OTA").detail(error)
@@ -226,6 +230,7 @@ impl Engine {
                 }
                 Ok(_) => {}
                 Err(error) if error.code == "CANCELLED" => return Err(error),
+                Err(error) if crate::cunba::is_blocking_error(&error) => return Err(error),
                 Err(error) => {
                     stability.reset();
                     self.adb.events.emit(
@@ -325,6 +330,14 @@ root=$(dirname "$0")
 script=$(cat)
 printf '%s\n' "$script" >> "$root/commands"
 case "$script" in
+    *'CUNBA_FOUND'*)
+        if [ -e "$root/cunba" ]; then
+            printf 'CUNBA_FOUND\tfile: /data/local/bin/frida-inject2\n'
+        elif [ -e "$root/cunba-check-failed" ]; then
+            exit 1
+        else
+            echo CUNBA_CLEAR
+        fi ;;
     *'id -u'*) echo 0 ;;
     *'am broadcast'*) touch "$root/started"; echo sent >> "$root/broadcasts"; exit 124 ;;
     *'--method health'*)
@@ -365,6 +378,23 @@ esac
         .unwrap();
         let mut sent = false;
         let deadline = Instant::now() + Duration::from_secs(60);
+        for (marker, code) in [
+            ("cunba", "CUNBA_DETECTED"),
+            ("cunba-check-failed", "CUNBA_CHECK_FAILED"),
+        ] {
+            fs::write(directory.path().join(marker), "").unwrap();
+            let error = engine.verify_od_readiness_until(deadline).unwrap_err();
+            assert_eq!(error.code, code);
+            assert!(!directory.path().join("broadcasts").exists());
+            assert_eq!(engine.finish_report(Err(error)).unwrap_err().code, code);
+            let report: serde_json::Value = serde_json::from_slice(
+                &fs::read(engine.operation.dir.join("report.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(report["success"], false);
+            assert!(report.get("warning").is_none());
+            fs::remove_file(directory.path().join(marker)).unwrap();
+        }
         assert!(engine.readiness_sample(deadline, &mut sent).is_err());
         assert!(sent);
         assert!(engine.readiness_sample(deadline, &mut sent).is_ok());

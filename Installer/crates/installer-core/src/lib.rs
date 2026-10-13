@@ -3,6 +3,7 @@ pub mod canbus;
 pub mod catalog;
 mod classic_commands;
 pub mod compatibility;
+mod cunba;
 pub mod engine;
 pub mod engineering_menu;
 pub mod error;
@@ -16,5 +17,5 @@ pub mod session;
 
 pub use error::{Error, Result};
 pub const PROTOCOL_VERSION: u32 = 1;
-pub use release_core::ota;
 pub use release_core::infrastructure;
+pub use release_core::ota;
