@@ -1550,3 +1550,28 @@ Fallback звонка в этот тракт запрещён. Опционал�
 Остальные платформы сохраняют upstream-выбор источника и режима.
 При обновлении upstream сохранить условие в `AndroidMediaSink`,
 выбор источника/эффектов в `MicrophoneUplink` и точное имя источника в диагностике.
+
+### Диагностика возврата из OD-дока, 13 октября 2026
+
+На ГУ с Native/RestoreMode **4.1.1-od** воспроизведён сценарий Home → иконка
+CarPlay в назначенном слоте OD-дока. Logcat и dumpsys подтверждают удаление
+`voyah-split-L`, завершение прежней `CarPlayHostActivity` и запуск новой:
+VD 13 → 14, projection task 6758 → 6760. Обработчик `OPEN_FREEFORM` вызывает
+`SetModesReceiverDynamic.openFreeformApp`, который безусловно выполняет
+`SplitHostActivity.closeActiveHost()` перед новым запуском. Это уничтожает VD
+и его проекцию даже при возврате к тому же CarPlay на том же физическом дисплее.
+
+Исправлено в Native: OD возвращает существующий fullscreen CarPlay host через
+`moveTaskToFront`, если совпадают физический дисплей и DPI, а VD ещё действителен.
+Проверка выполняется до закрытия хоста обработчиком дока и при запуске одиночного
+хоста через launcher. `onNewIntent` сохраняет ту же проекцию при неизменной цели.
+Смена дисплея/цели/DPI и явное закрытие сохраняют отдельную семантику teardown;
+поведение PI не меняется.
+
+Локальный Native APK **4.1.1-od** с revision `local-carplay-dock-fix` установлен
+поверх на ГУ, без выпуска payload. После повторных возвратов через док пользователь
+подтвердил отсутствие переподключения; dumpsys подтвердил прежние VD **15**,
+host task **6762**, projection task **6763** и те же Activity instances.
+Пройдены 8 целевых JVM-тестов (`CarPlayTargetTest`, `SplitHostGenerationGateTest`),
+`assembleRelease`, проверка подписи и `git diff --check`. Пересборка Installer
+не требуется. Смена физических дисплеев и PI на автомобиле в эту проверку не входили.
