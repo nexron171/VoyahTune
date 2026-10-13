@@ -11,6 +11,7 @@
     <string name="carplay_home_settings_detail">Экран и подключение</string>
     <string name="carplay_home_open">Открыть CarPlay</string>
     <string name="carplay_home_choose_phone">Выбрать iPhone</string>
+    <string name="carplay_home_exit">Выйти</string>
     <string name="carplay_home_back">Назад</string>
     <string name="carplay_home_disconnect">Отключить</string>
     <string name="carplay_home_hotspot">Настройки точки доступа</string>

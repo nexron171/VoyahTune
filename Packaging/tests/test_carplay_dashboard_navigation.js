@@ -13,7 +13,7 @@ function production(name) {
 }
 const launches = [];
 const c = {
-    RESTORE_PKG: 'ru.big.town.restoremode', TAG: 'test', menuLC: null,
+    RESTORE_PKG: 'ru.big.town.restoremode', TAG: 'test',
     Log: {i() {}, e(_, message) { throw Error(message); }},
     Intent: {ACTION_MAIN: {value: 'MAIN'}, CATEGORY_LAUNCHER: {value: 'LAUNCHER'},
         $new(action) { return {action, addCategory(value) { this.category = value; },
@@ -33,17 +33,26 @@ const c = {
     ctx: () => ({startActivity(intent, bundle) { launches.push({intent, bundle}); }})
 };
 vm.createContext(c);
-vm.runInContext(['openVoyahTune', 'getMenuLongClick'].map(production).join('\n'), c);
+vm.runInContext(['openVoyahTune', 'openVoyahTuneOnDisplay', 'launchFreeform'].map(production).join('\n'), c);
 for (const displayId of [0, 1, 20]) {
-    assert.equal(c.getMenuLongClick().onLongClick({getDisplay: () => ({getDisplayId: () => displayId})}), true);
+    assert.equal(c.openVoyahTune({getDisplay: () => ({getDisplayId: () => displayId})}), true);
     const {intent, bundle} = launches.at(-1);
     assert.equal(intent.activity, 'ru.big.town.restoremode.MainActivity');
-    assert.equal(intent.action, 'MAIN');
-    assert.equal(intent.category, 'LAUNCHER');
+    assert.equal(intent.action, 'ru.big.town.restoremode.OPEN_DASHBOARD');
+    assert.equal(intent.category, undefined);
     assert.equal(intent.flags, 0x10000000 | 0x04000000 | 0x20000000);
     assert.equal(bundle.displayId, displayId === 1 ? 1 : 0);
     assert.equal(bundle['android.activity.windowingMode'], 1);
 }
-assert.equal(c.getMenuLongClick().onLongClick({getDisplay: () => null}), true);
+assert.equal(c.openVoyahTune({getDisplay: () => null}), true);
 assert.equal(launches.at(-1).bundle.displayId, 0);
-console.log('PASS: OD All Apps long press opens the main VoyahTune component with CLEAR_TOP and physical display');
+
+for (const displayId of [0, 1]) {
+    assert.equal(c.launchFreeform(c.RESTORE_PKG, displayId), true);
+    const {intent, bundle} = launches.at(-1);
+    assert.equal(intent.activity, 'ru.big.town.restoremode.MainActivity');
+    assert.equal(intent.action, 'ru.big.town.restoremode.OPEN_DASHBOARD');
+    assert.equal(intent.flags, 0x10000000 | 0x04000000 | 0x20000000);
+    assert.equal(bundle.displayId, displayId);
+}
+console.log('PASS: OD dock gestures and app slots explicitly open Dashboard with CLEAR_TOP on the physical display');

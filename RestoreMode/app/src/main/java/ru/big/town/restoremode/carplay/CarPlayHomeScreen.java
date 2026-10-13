@@ -1,5 +1,6 @@
 package ru.big.town.restoremode.carplay;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.drawable.GradientDrawable;
@@ -120,6 +121,10 @@ public final class CarPlayHomeScreen implements CarPlayHomeUi.Screen {
         disconnect = secondary(R.string.carplay_home_disconnect, () -> stopSession(actions));
         disconnect.setVisibility(View.GONE);
         footer.addView(disconnect);
+        TextView exit = secondary(R.string.carplay_home_exit, () -> ((Activity) context).finish());
+        LinearLayout.LayoutParams exitParams = new LinearLayout.LayoutParams(-2, -2);
+        exitParams.setMarginStart(dp(gap));
+        footer.addView(exit, exitParams);
         addBelow(bottom, footer, 8);
     }
 

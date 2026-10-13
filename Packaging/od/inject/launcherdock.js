@@ -452,7 +452,7 @@ Java.perform(function () {
         }
     }
 
-    // Открыть VoyahTune (UI RestoreMode) — по долгому тапу «меню».
+    // Keep the dashboard on the physical screen of the dock button.
     function openVoyahTune(view) {
         try {
             var displayId = 0;
@@ -462,19 +462,26 @@ Java.perform(function () {
                     displayId = display.getDisplayId();
                 }
             }
-            var i = Intent.$new(Intent.ACTION_MAIN.value);
-            i.addCategory(Intent.CATEGORY_LAUNCHER.value);
+            return openVoyahTuneOnDisplay(displayId);
+        } catch (e) { Log.e(TAG, "[dock] openVoyahTune err: " + e); return false; }
+    }
+
+    function openVoyahTuneOnDisplay(displayId) {
+        try {
+            if (displayId !== 0 && displayId !== 1) displayId = 0;
+            // A distinct intent avoids launcher task-resume semantics when Settings is on top.
+            var i = Intent.$new("ru.big.town.restoremode.OPEN_DASHBOARD");
             i.setClassName(RESTORE_PKG, "ru.big.town.restoremode.MainActivity");
-            // Clear settings above Dashboard instead of merely bringing the previous task forward.
+            // Reuse Dashboard and remove any Settings activities above it.
             i.addFlags(0x10000000 | 0x04000000 | 0x20000000); // NEW_TASK | CLEAR_TOP | SINGLE_TOP
             var options = Java.use("android.app.ActivityOptions").makeBasic();
             options.setLaunchDisplayId(displayId);
             var bundle = options.toBundle();
             bundle.putInt("android.activity.windowingMode", 1);
             ctx().startActivity(i, bundle);
-            try { Java.use("android.util.Log").i("voyahdock", "menu long-press -> VoyahTune"); } catch (ee) {}
-            Log.i(TAG, "[dock] menu long-press -> VoyahTune");
-        } catch (e) { Log.e(TAG, "[dock] openVoyahTune err: " + e); }
+            Log.i(TAG, "[dock] open dashboard display=" + displayId);
+            return true;
+        } catch (e) { Log.e(TAG, "[dock] openVoyahTuneOnDisplay err: " + e); return false; }
     }
 
     var navigationButtonKeys = {};
@@ -768,6 +775,7 @@ Java.perform(function () {
     // Freeform-запуск приложения из слота дока делегируем Native: Native закроет активный VD-сплит и
     // запустит обычную задачу целевого пакета на выбранном физическом display.
     function launchFreeform(pkg, displayId) {
+        if (pkg === RESTORE_PKG) return openVoyahTuneOnDisplay(displayId);
         try {
             var i = Intent.$new("ru.big.town.anative.OPEN_FREEFORM");
             i.setClassName(OUR_PKG, "ru.big.town.anative.SetModesReceiverDynamic");
