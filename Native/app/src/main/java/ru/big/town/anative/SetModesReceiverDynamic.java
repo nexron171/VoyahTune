@@ -785,6 +785,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     static void openFreeformApp(Context context, String pkg, int displayId) {
         if (pkg == null || pkg.isEmpty() || (displayId != 0 && displayId != 1)) return;
         Context app = context.getApplicationContext();
+        if (SplitHostActivity.resumeFullscreenCarPlay(pkg, 0, displayId)) return;
         ClusterMediaHostActivity.closeForPackage(pkg);
         SplitHostActivity.closeActiveHost();
         AppDisplayLauncher.launch(

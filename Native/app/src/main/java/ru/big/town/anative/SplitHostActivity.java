@@ -1,6 +1,7 @@
 package ru.big.town.anative;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -34,6 +35,7 @@ import android.widget.LinearLayout;
 import androidx.core.content.ContextCompat;
 
 import ru.big.town.common.CarPlayTarget;
+import ru.big.town.common.InfrastructureProfile;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
@@ -344,15 +346,19 @@ public class SplitHostActivity extends Activity {
         }
     }
 
-    /**
-     * Хост уже открыт (launchMode=singleTop) и пришёл НОВЫЙ запрос — напр. клик по иконке дока
-     * (одиночный запуск) поверх ранее открытого сплита. Без этого singleTop получил бы onNewIntent,
-     * а старый сплит остался бы на экране. Обновляем интент и пересобираем хост с чистого листа:
-     * старые VirtualDisplay/панели освобождаются в onDestroy → onCreate перечитывает новые extras.
-     */
+    /** Preserve an unchanged CarPlay projection; other requests replace the pane configuration. */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        String rightPackage = intent.getStringExtra(EXTRA_RIGHT);
+        if ((rightPackage == null || rightPackage.isEmpty())
+                && canResumeCarPlay(
+                        intent.getStringExtra(EXTRA_LEFT),
+                        intent.getIntExtra(EXTRA_LEFT_DPI, 0),
+                        getWindowManager().getDefaultDisplay().getDisplayId())) {
+            setIntent(intent);
+            return;
+        }
         // Fence the old package/display before recreate posts a new Activity instance.
         retireAsyncHostWork(false);
         setIntent(intent);
@@ -1537,6 +1543,38 @@ public class SplitHostActivity extends Activity {
         super.onDestroy();
     }
 
+    private boolean canResumeCarPlay(String packageName, int dpi, int displayId) {
+        if (InfrastructureProfile.read(this) != InfrastructureProfile.OD
+                || !CarPlayTarget.isCarPlay(packageName)
+                || !fullscreenCarPlay
+                || hostDestroyed
+                || isFinishing()
+                || isDestroyed()
+                || left.dpi != Math.max(0, dpi)
+                || left.vd == null) {
+            return false;
+        }
+        android.view.Display projectionDisplay = left.vd.getDisplay();
+        return projectionDisplay != null
+                && projectionDisplay.isValid()
+                && physicalCarPlayHostDisplay(projectionDisplay.getDisplayId()) == displayId;
+    }
+
+    /** Resume the parked VD without delivering a new launch intent to its host. */
+    static boolean resumeFullscreenCarPlay(String packageName, int dpi, int displayId) {
+        SplitHostActivity host = activeHost.get();
+        if (host == null || !host.canResumeCarPlay(packageName, dpi, displayId)) return false;
+        try {
+            ActivityManager manager = host.getSystemService(ActivityManager.class);
+            manager.moveTaskToFront(host.getTaskId(), 0);
+            Log.i(TAG, "Resumed CarPlay host task=" + host.getTaskId() + " display=" + displayId);
+            return true;
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Cannot resume CarPlay host", error);
+            return false;
+        }
+    }
+
     /**
      * Finishes the Native VD host before a single application is launched as an ordinary physical
      * task. Destroy-content-on-removal retires its VD activities; vd_bypass then clamps the new
@@ -1584,6 +1622,7 @@ public class SplitHostActivity extends Activity {
 
     /** Called on main only after the process lane has resolved the target package. */
     static void startSingleHost(android.content.Context ctx, String pkg, int dpi, int displayId) {
+        if (resumeFullscreenCarPlay(pkg, dpi, displayId)) return;
         try {
             Intent i = new Intent(ctx, SplitHostActivity.class);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
