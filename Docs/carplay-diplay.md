@@ -207,10 +207,14 @@ OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет VoyahTun
 видимым над зарезервированной ими полосой, как над Dashboard.
 
 Долгое нажатие «Все приложения» в водительском OD-доке открывает явный
-`ru.big.town.restoremode.MainActivity` с MAIN/LAUNCHER и
-NEW_TASK | CLEAR_TOP | SINGLE_TOP: настройки и другие экраны над Dashboard снимаются,
+`ru.big.town.restoremode.MainActivity` с action `ru.big.town.restoremode.OPEN_DASHBOARD`
+без категории LAUNCHER и с флагами NEW_TASK | CLEAR_TOP | SINGLE_TOP:
+настройки и другие экраны над Dashboard снимаются,
 а существующая главная используется повторно. Запуск сохраняет физический displayId
 кнопки (0/1, fallback 0) и fullscreen windowingMode. Короткое нажатие остаётся штатным.
+Отдельный action отличает этот переход от обычного возобновления launcher task.
+Тот же путь используют назначенные на VoyahTune короткие/долгие нажатия Home/All Apps
+и пользовательские слоты дока; сохранённый экран настроек не является целью запуска.
 CarPlay task с отдельной affinity при этом не завершается.
 
 Нажатие кнопки автомобиля **VoyahTune** или прежнего имени **VoyahFree** на iPhone
@@ -364,6 +368,26 @@ surfaceDestroyed; не ставить следом clearSurface(null), кото�
 Сервис START_NOT_STICKY; сохранение в рамках процесса не обещает восстановление
 после force-stop, смерти процесса или перезагрузки.
 
+На OD `Packaging/od/inject/vd_bypass.js` усиливает защиту на время foreground-службы
+`DiPlaySessionService`: перед штатным `OomAdjuster.applyOomAdjLocked` ограничивает
+`curAdj` основного процесса RestoreMode значением 0 (foreground app), не меняя
+raw adj, scheduling или persistent-флаг. После остановки службы следующий штатный
+пересчёт возвращает обычный приоритет. Учитывается конкретная служба, а не любая FGS
+в приложении; процесс `:ota` и чужие пакеты не защищаются.
+Для этого же WindowProcessController `ActivityRecord.isDestroyable` возвращает false
+только у `CarPlayHostActivity`: обычное освобождение фоновой Activity не разбирает
+проекцию. Сопоставление через WeakHashMap не переносит защиту на повторно использованный PID.
+Явные finish/removeTask, смена дисплея и остановка подключения не блокируются.
+
+ABI сверяется с Android 11 ([OomAdjuster](https://github.com/aosp-mirror/platform_frameworks_base/blob/android11-release/services/core/java/com/android/server/am/OomAdjuster.java),
+[ActivityRecord](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-11.0.0_r48/services/core/java/com/android/server/wm/ActivityRecord.java));
+поддерживается коллекция служб через accessors либо поле `services` ранних сборок.
+Несовместимость отключает только эту пару hooks, ошибка во время работы возвращает
+штатное поведение; причины и включение/снятие защиты пишутся в `vt_vdbypass`.
+Это повышение устойчивости, а не гарантия против force-stop, crash или критического
+OOM; после смерти процесса подключение всё равно устанавливается заново.
+Совместимость OEM ABI и реальные переходы в фоне требуют проверки на ГУ.
+
 `MapEmbedService` upstream обслуживает дополнительную карту, не встраивание полного
 экрана. Не подменять им VirtualDisplay-путь.
 
@@ -464,7 +488,10 @@ VoyahTune; скрытие не изменяет сохранённые preferenc
 Слева от логотипа CarPlay расположена кнопка «Назад» с ресурсами
 `settings_back`/`settings_icon_back`, как в Advanced (72dp, в компактном режиме 56dp).
 Она вызывает Actions.back → DiPlayActivity.onBackPressedDispatcher.onBackPressed()
-без disconnect/stop сессии. Отдельной кнопки «Выйти» нет.
+без disconnect/stop сессии. Внизу справа всегда видна отдельная кнопка «Выйти»:
+она напрямую вызывает `Activity.finish()` для host Activity, возвращая предыдущий
+экран либо домашний экран, когда под ней нет другой Activity. Она не зависит от
+обработчика Back и не вызывает disconnect/stop сессии.
 Рядом с «Вернуться в настройки» на экране подключения есть «Отмена»: она блокирует
 повторные попытки и вызывает штатный shutdown без завершения процесса. После
 закрытия транспорта и медиаресурсов открывается home, Activity подключения закрывается.
@@ -1086,6 +1113,7 @@ Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
 | [RestoreMode/app/src/main/AndroidManifest.xml](../RestoreMode/app/src/main/AndroidManifest.xml)<br>[Native/app/src/main/AndroidManifest.xml](../Native/app/src/main/AndroidManifest.xml) | Overrides компонентов/launcher/boot и signature permission (§3). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java) | Установка bridge, home factory и window policy вне :ota (§2). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWindowPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWindowPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlaySafeArea.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlaySafeArea.java) | Физические OEM-отступы, вычитание смещения окна, отсутствие резерва дока на VD; запоминание физического экрана Native-хоста из launch extra для requestUI; darkHostAppearance=true, connectionIcon=carplay_home_logo (§4/5). |
+| [Packaging/od/inject/vd_bypass.js](../Packaging/od/inject/vd_bypass.js) | Приоритет foreground app для процесса с DiPlaySessionService и запрет обычной выгрузки CarPlayHostActivity; защита снимается вместе с FGS (§4). |
 | [Packaging/od/inject/launcherdock.js](../Packaging/od/inject/launcherdock.js) | Отдельные записи VoyahTune и CarPlay, удаление дубликатов CarPlay; ActivityInfo label/icon, явный компонент и сохранение экрана All Apps; восстановление слоёв иконки при recycling; независимая инверсия короткого/долгого нажатия Home и All Apps, штатный callback или главная VoyahTune с CLEAR_TOP/SINGLE_TOP (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayLauncherActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayLauncherActivity.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayTarget.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayTarget.java) | Экспортированный MAIN/LAUNCHER-вход и bind fallback ярлыка, игнорирование позднего callback; стабильный component ID и выбор home/projection по целевому displayId (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/MainSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/MainSettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileOrderStore.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileOrderStore.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java)<br>[RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Отдельные настройки виджета CarPlay; общий picker для остальных приложений, размеры, блокировка autoStart ярлыка, физический displayId и поколения запусков/query (§4). |
@@ -1233,8 +1261,9 @@ UI-тесты и испытания на ГУ выполнять только в
 
 | Контракт | Существующие целевые тесты |
 | --- | --- |
-| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `VoyahSettingsUiTest`: скрытые категории/пункты и поисковый индекс, восстановление AUDIO/ADVANCED, SWReason, Wi-Fi Direct и включённая передача местоположения в UI-контролах; сохранение явного выбора, включая отключение GPS после recreate. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, закрытие controller/sink и блокировка повторной отмены, сохранение сессии при возврате. |
+| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, видимая кнопка «Выйти» под плитками и завершение Activity без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `VoyahSettingsUiTest`: скрытые категории/пункты и поисковый индекс, восстановление AUDIO/ADVANCED, SWReason, Wi-Fi Direct и включённая передача местоположения в UI-контролах; сохранение явного выбора, включая отключение GPS после recreate. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, закрытие controller/sink и блокировка повторной отмены, сохранение сессии при возврате. |
 | Два значка OD и безопасная область | `Packaging/tests/test_carplay_allapps.js`; app `CarPlaySafeAreaTest`; common `CarPlayWindowUiTest`, `CarPlayHostVideoSurfaceTest` |
+| Защита сессии в памяти OD | `Packaging/tests/test_carplay_memory_protection.js`: приоритет только при session FGS, снятие защиты, изоляция Activity/процессов, несовместимый ABI; `test_vd_stability.js`: установка и откат hooks. |
 | Нажатия OD-дока | `Packaging/tests/test_dock_navigation_actions.js`; перенос обоих config extras и OD guards проверить с двух сторон |
 | Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`; отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
 | Возврат на главную и фон | `Packaging/tests/test_carplay_dashboard_navigation.js`; app `carplay.CarPlayDashboardDisplayTest`; common `CarPlayHostUiNavigationTest` (requestUI/controller без Activity), `VoyahSessionTransferTest`; shared `media.VideoSurfaceHandoffTest` |
