@@ -136,6 +136,14 @@ public class SettingsContentProvider extends ContentProvider {
             result.putBoolean("allowed", TripLocationPermission.allowed(getContext()));
             return result;
         }
+        if ("stockEnergyStatistics".equals(method)) {
+            Bundle result = new Bundle();
+            result.putBoolean(
+                    "enabled",
+                    ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()
+                            && sharedPreferences.getBoolean("showStockEnergyStatistics", false));
+            return result;
+        }
         if ("driveHookV2".equals(method)) {
             boolean accHooks =
                     ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks();

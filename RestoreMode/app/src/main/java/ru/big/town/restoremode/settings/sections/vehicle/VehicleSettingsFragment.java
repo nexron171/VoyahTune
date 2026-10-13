@@ -169,6 +169,27 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         }
     }
 
+    private void bindStockEnergyStatistics() {
+        View row = settingView(R.id.stockEnergyStatisticsRow);
+        if (row == null) {
+            return;
+        }
+        boolean supported =
+                ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks();
+        row.setVisibility(supported ? View.VISIBLE : View.GONE);
+        if (!supported) {
+            return;
+        }
+        Switch toggle = settingView(R.id.switchStockEnergyStatistics);
+        toggle.setChecked(preferences.getBoolean("showStockEnergyStatistics", false));
+        toggle.setOnCheckedChangeListener(
+                (button, enabled) ->
+                        preferences
+                                .edit()
+                                .putBoolean("showStockEnergyStatistics", enabled)
+                                .apply());
+    }
+
     private void bindWiperColdMode() {
         if (settingView(R.id.switchWiperCold) == null) {
             return;
@@ -520,6 +541,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
     @Override
     protected void bindSettingsRow() {
         bindBatteryHeating();
+        bindStockEnergyStatistics();
         bindWiperColdMode();
         bindMediaPause();
         initModeRadios();
