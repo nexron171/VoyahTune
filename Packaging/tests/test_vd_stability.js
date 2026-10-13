@@ -152,10 +152,17 @@ test('each replacement installation failure rolls back all prior methods', () =>
     const names = [
         ...new Set(baseline.events.filter((e) => e[0] === 'replacement' && e[2]).map((e) => e[1])),
     ];
-    assert.equal(names.length, 12);
+    assert.equal(names.length, 14);
     for (const name of names) {
         const f = fixture({ failInstall: name });
         f.advance(1500);
+        if (name === 'com.android.server.am.OomAdjuster.applyOomAdjLocked'
+                || name === 'com.android.server.wm.ActivityRecord.isDestroyable') {
+            assert.match(f.status(), /\|active\|/, name);
+            assert.equal(f.methods.get('com.android.server.am.OomAdjuster.applyOomAdjLocked').implementation, null);
+            assert.equal(f.methods.get('com.android.server.wm.ActivityRecord.isDestroyable').implementation, null);
+            continue;
+        }
         assert.match(f.status(), /\|failed\|clean\./, name);
         assert.equal(f.registered.size, 0, name);
         for (const m of f.methods.values()) assert.equal(m.implementation, null, name);

@@ -172,6 +172,117 @@ Java.perform(function () {
         try { installAgent(); } catch (e) { failAgent("install." + e); }
     }
 
+    // BEGIN_CARPLAY_MEMORY_PROTECTION
+    function installCarPlayMemoryProtection() {
+        var hooks = [];
+        try {
+            var processClass = Java.use("com.android.server.am.ProcessRecord");
+            var serviceClass = Java.use("com.android.server.am.ServiceRecord");
+            var activityClass = Java.use("com.android.server.wm.ActivityRecord");
+            var applyAdjustment = Java.use("com.android.server.am.OomAdjuster")
+                .applyOomAdjLocked.overload("com.android.server.am.ProcessRecord", "boolean", "long", "long");
+            var isDestroyable = activityClass.isDestroyable.overload();
+            ["processName", "curAdj"].forEach(function (field) {
+                processClass.class.getDeclaredField(field);
+            });
+            ["name", "isForeground"].forEach(function (field) {
+                serviceClass.class.getDeclaredField(field);
+            });
+            ["app", "mActivityComponent", "finishing"].forEach(function (field) {
+                activityClass.class.getDeclaredField(field);
+            });
+            var serviceCount;
+            var serviceAt;
+            try {
+                processClass.numberOfRunningServices.overload();
+                processClass.getRunningServiceAt.overload("int");
+                serviceCount = function (process) { return process.numberOfRunningServices(); };
+                serviceAt = function (process, index) { return process.getRunningServiceAt(index); };
+            } catch (missingAccessors) {
+                // Earlier Android 11 builds expose the same collection as a field.
+                var servicesField = processClass.class.getDeclaredField("services");
+                servicesField.setAccessible(true);
+                var arraySetClass = Java.use("android.util.ArraySet");
+                serviceCount = function (process) {
+                    return Java.cast(servicesField.get(process), arraySetClass).size();
+                };
+                serviceAt = function (process, index) {
+                    return Java.cast(servicesField.get(process), arraySetClass).valueAt(index);
+                };
+            }
+            processClass.getWindowProcessController.overload();
+            var protectedWindows = Java.use("java.util.WeakHashMap").$new();
+            var restorePackage = "ru.big.town.restoremode";
+            var sessionService = "com.shilapi.xcertplay.DiPlaySessionService";
+            var projectionActivity = "com.shilapi.xcertplay.CarPlayHostActivity";
+            var runtimeFailureReported = false;
+
+            function reportFailure(error) {
+                if (runtimeFailureReported) return;
+                runtimeFailureReported = true;
+                Log.e(TAG, "CarPlay memory protection unavailable: " + error);
+            }
+
+            function hasSessionService(process) {
+                for (var index = 0; index < serviceCount(process); index++) {
+                    var service = Java.cast(serviceAt(process, index), serviceClass);
+                    var component = service.name.value;
+                    if (service.isForeground.value && component !== null
+                            && String(component.getPackageName()) === restorePackage
+                            && String(component.getClassName()) === sessionService) return true;
+                }
+                return false;
+            }
+
+            hooks.push(applyAdjustment);
+            trackReplacement(applyAdjustment);
+            applyAdjustment.implementation = function (process, doingAll, now, nowElapsed) {
+                try {
+                    if (!runtimeFailureReported && String(process.processName.value) === restorePackage) {
+                        var windowProcess = process.getWindowProcessController();
+                        var protect = hasSessionService(process);
+                        var wasProtected = protectedWindows.containsKey(windowProcess);
+                        if (protect) {
+                            protectedWindows.put(windowProcess, Java.use("java.lang.Boolean").TRUE.value);
+                            // Leave raw adjustment, scheduling and system-level priorities intact.
+                            if (process.curAdj.value > 0) process.curAdj.value = 0;
+                        } else {
+                            protectedWindows.remove(windowProcess);
+                        }
+                        if (protect !== wasProtected) {
+                            Log.i(TAG, "CarPlay memory protection " + (protect ? "active" : "released"));
+                        }
+                    }
+                } catch (error) { reportFailure(error); }
+                return applyAdjustment.call(this, process, doingAll, now, nowElapsed);
+            };
+
+            hooks.push(isDestroyable);
+            trackReplacement(isDestroyable);
+            isDestroyable.implementation = function () {
+                try {
+                    var component = this.mActivityComponent.value;
+                    if (!runtimeFailureReported && component !== null && !this.finishing.value
+                            && String(component.getPackageName()) === restorePackage
+                            && String(component.getClassName()) === projectionActivity
+                            && this.app.value !== null
+                            && protectedWindows.containsKey(this.app.value)) return false;
+                } catch (error) { reportFailure(error); }
+                return isDestroyable.call(this);
+            };
+            installed.push("CarPlay.session-memory-protection");
+        } catch (error) {
+            var rollbackFailed = false;
+            hooks.forEach(function (hook) {
+                try { hook.implementation = null; }
+                catch (rollbackError) { rollbackFailed = true; }
+            });
+            if (rollbackFailed) throw error;
+            Log.e(TAG, "CarPlay memory protection unsupported: " + error);
+        }
+    }
+    // END_CARPLAY_MEMORY_PROTECTION
+
     function installAgent() {
         // BEGIN_NATIVE_TASK_REMOVAL
         // REMOVE_TASKS is signature|documenter on the OEM ROM, not signature|privileged.
@@ -1055,6 +1166,8 @@ Java.perform(function () {
         } else {
             setFreeformHookState(FF.on ? "sleeping" : "disabled");
         }
+
+        installCarPlayMemoryProtection();
 
         // Root loader converts this generation-specific result to the compatible v1 worker snapshot.
         Log.i(TAG, "hooks installed [" + installed.join(", ") + "] uid=" + ourUid);
