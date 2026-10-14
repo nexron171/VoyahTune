@@ -39,7 +39,6 @@ dependencies {
     implementation(diplayLibs.androidx.compose.ui.tooling.preview)
     implementation(diplayLibs.androidx.core.ktx)
     implementation(diplayLibs.androidx.lifecycle.runtime.ktx)
-    implementation(diplayLibs.androidx.work.runtime)
     implementation(diplayLibs.androidx.media3.exoplayer)
     implementation(diplayLibs.androidx.media3.exoplayer.hls)
     implementation(diplayLibs.androidx.media3.ui)

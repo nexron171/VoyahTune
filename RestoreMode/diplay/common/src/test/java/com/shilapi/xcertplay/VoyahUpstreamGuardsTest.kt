@@ -4,7 +4,6 @@ import android.content.Context
 import com.shilapi.xcertplay.hud.BydBluetoothSuspend
 import com.shilapi.xcertplay.hud.BydCallPopupGuard
 import com.shilapi.xcertplay.media.AmbientMusicSettings
-import com.shilapi.xcertplay.update.BackgroundUpdateScheduler
 import com.shilapi.xcertplay.update.UpdateAvailability
 import org.junit.Assert.*
 import org.junit.Test
@@ -30,11 +29,10 @@ class VoyahUpstreamGuardsTest {
         assertFalse(AirPlayPersistence.loadLocationReportingEnabled(context))
     }
 
-    @Test fun standaloneUpdatesDoNotInitializeWorkManager() {
+    @Test fun standaloneUpdateChecksAndOffersStayDisabled() {
         UpdateAvailability.saveBackgroundChecksEnabled(context, true)
         assertFalse(UpdateAvailability.backgroundChecksEnabled(context))
         assertNull(UpdateAvailability.available(context, "0.0.0"))
-        BackgroundUpdateScheduler.schedule(context)
     }
 
     @Test fun savedOemOptInsCannotEnableBydActions() {

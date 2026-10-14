@@ -72,7 +72,6 @@ import com.shilapi.xcertplay.settings.SettingsWidgets
 import com.shilapi.xcertplay.setup.DiLinkGeneration
 import com.shilapi.xcertplay.setup.SetupGuide
 import com.shilapi.xcertplay.transport.EvChargingConnectors
-import com.shilapi.xcertplay.update.BackgroundUpdateScheduler
 import com.shilapi.xcertplay.update.UpdateApkExport
 import com.shilapi.xcertplay.update.UpdateAvailability
 import com.shilapi.xcertplay.update.UpdateCatalog
@@ -351,7 +350,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (savedInstanceState == null && isLauncherIntent(intent) && CarPlayBackgroundSession.hasSession()) {
             openProjection(); finish(); return
         }
-        scheduleBackgroundUpdateChecks()
         availableUpdate = UpdateAvailability.available(this, version())
         enforceInterfaceSize()
         refreshAppearance()
@@ -2330,12 +2328,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         updateStage = UpdateStage.AVAILABLE
         page = "about"
         render()
-    }
-
-    private fun scheduleBackgroundUpdateChecks() {
-        if (!VoyahPlatformPolicy.standaloneAppEnabled) return
-        runCatching { BackgroundUpdateScheduler.schedule(applicationContext) }
-            .onFailure { Log.i("DiPlay-Update", "background update scheduling unavailable", it) }
     }
 
     private fun downloadUpdate() {
