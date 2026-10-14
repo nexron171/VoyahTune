@@ -4,6 +4,7 @@ pub mod catalog;
 mod classic_commands;
 pub mod compatibility;
 mod cunba;
+pub mod cunba_recovery;
 pub mod engine;
 pub mod engineering_menu;
 pub mod error;

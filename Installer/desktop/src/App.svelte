@@ -41,6 +41,13 @@
     eventsReady = $state(false),
     eventError = $state<Failure | null>(null);
   let verificationPending = $state(false);
+  let cunbaConfirmed = $state(false);
+  let cunbaRunning = $state(false);
+  let cunbaReady = $state(false);
+  let cunbaProgress = $state("");
+  const cunbaChoice = $derived(
+    action === "install" && ["CUNBA_DETECTED", "CUNBA_ROLLBACK_REQUIRED"].includes(error?.code || ""),
+  );
   let completed = $state<string[]>([]),
     current = $state<string | undefined>();
   let canbusNotice = $state(""),
@@ -180,6 +187,8 @@
       : "",
   );
   function acceptEvent(event: Event) {
+    if (event.type === "cunba-progress") cunbaProgress = event.message;
+    if (event.type === "cunba-finished") reportPath = event.data.reportPath || "";
     if (
       events.some(
         (e) =>
@@ -399,6 +408,8 @@
     }
   }
   function choose(value: Action) {
+    cunbaReady = false;
+    cunbaConfirmed = false;
     action = value;
     plan = null;
     confirmed = false;
@@ -421,6 +432,47 @@
       error = failure(e);
     } finally {
       busy = false;
+    }
+  }
+  async function disableCunba() {
+    if (!cunbaConfirmed || !connected || busy) return;
+    busy = true;
+    cunbaRunning = true;
+    cunbaReady = false;
+    cunbaProgress = "Проверяем состояние Cunba";
+    error = null;
+    plan = null;
+    verificationPending = false;
+    try {
+      const result = await command<{ reportPath: string }>("disable_cunba", {
+        serial: devices[0].serial,
+        confirmed: true,
+      });
+      reportPath = result.reportPath;
+      cunbaReady = true;
+      screen = 1;
+    } catch (caught) {
+      error = failure(caught);
+    } finally {
+      cunbaRunning = false;
+      cunbaConfirmed = false;
+      busy = false;
+    }
+  }
+  function stopCunbaInstallation() {
+    error = null;
+    plan = null;
+    confirmed = false;
+    cunbaConfirmed = false;
+    cunbaReady = false;
+    screen = 0;
+  }
+  async function continueAfterCunba() {
+    cunbaReady = false;
+    await refresh();
+    if (connected) {
+      confirmed = true;
+      await review();
     }
   }
   async function review() {
@@ -1052,6 +1104,24 @@
             <p>{eventError.nextAction}</p>
             <pre>{eventError.detail}</pre>
           </section>{/if}
+        {#if cunbaChoice || cunbaRunning || cunbaReady}
+          <section class="status-panel warning" role="status">
+            <h2>{cunbaReady ? "Cunba отключена" : "Отключение Cunba перед установкой"}</h2>
+            {#if cunbaRunning}
+              <p>{cunbaProgress}</p>
+              <p>Не отключайте USB и питание ГУ. Идёт отключение, перезагрузка или восстановление.</p>
+            {:else if cunbaReady}
+              <p>После перезагрузки активная Cunba не обнаружена. Android и лаунчер прошли проверку стабильности. Можно заново проверить автомобиль и продолжить установку.</p>
+              <button class="button primary" disabled={busy} onclick={continueAfterCunba}>Продолжить установку VoyahTune</button>
+            {:else}
+              <p>Можно остановить установку или отключить поддерживаемые компоненты Cunba. Её функции станут недоступны. Исходные файлы и настройки будут сохранены.</p>
+              <p>ГУ перезагрузится. Если Cunba останется активной, изменения будут восстановлены, а установка заблокирована. Неизвестные компоненты автоматически не изменяются.</p>
+              <label><input type="checkbox" bind:checked={cunbaConfirmed} disabled={busy} /> Согласен на отключение Cunba и перезагрузку ГУ</label>
+              <button class="button secondary" disabled={busy} onclick={stopCunbaInstallation}>Остановить установку</button>
+              <button class="button primary" disabled={busy || !cunbaConfirmed || !connected} onclick={disableCunba}>{error?.code === "CUNBA_ROLLBACK_REQUIRED" ? "Повторить восстановление" : "Отключить Cunba"}</button>
+            {/if}
+          </section>
+        {/if}
         {#if error}<section class="status-panel danger error-box" role="alert">
             <h2>{error.message}</h2>
             {#if screen === 4 && current}<p>
@@ -1071,7 +1141,8 @@
         {#if reportPath}<p class="report-path">Отчёт: {reportPath}</p>{/if}
       </div>
       <footer class="footer">
-        {#if screen === 0}<span
+        {#if cunbaRunning || cunbaReady || cunbaChoice}<span class="footer-note">{cunbaRunning ? "Дождитесь завершения операции" : "Выберите действие в разделе Cunba"}</span>
+        {:else if screen === 0}<span
             class="footer-note next-reason"
             id="next-reason"
             role="status"

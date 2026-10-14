@@ -370,6 +370,48 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
     result
 }
 #[tauri::command]
+async fn disable_cunba(app: tauri::AppHandle, serial: String, confirmed: bool) -> Result<Value> {
+    if !confirmed {
+        return Err(Error::new(
+            "CONFIRMATION_REQUIRED",
+            "Подтвердите отключение Cunba",
+        ));
+    }
+    reserve(&app.state::<Runtime>())?;
+    {
+        let runtime = app.state::<Runtime>();
+        let mut state = runtime.0.lock().unwrap();
+        state.prepared = None;
+        state.verification_pending = false;
+    }
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let payload = operation_payload(&handle, &serial, Action::Install)?;
+        let emitter = handle.clone();
+        let result = installer_core::cunba_recovery::disable(
+            &default_adb(&bundle(&handle)?),
+            &payload,
+            &serial,
+            confirmed,
+            &recovery::data_dir()?,
+            Arc::new(move |event| {
+                if let Some(report) = event.data.get("reportPath").and_then(Value::as_str) {
+                    emitter.state::<Runtime>().0.lock().unwrap().operation_dir =
+                        PathBuf::from(report).parent().map(PathBuf::from);
+                }
+                let _ = emitter.emit("installer-event", event);
+            }),
+        )?;
+        Ok(serde_json::to_value(result)?)
+    })
+    .await
+    .map_err(|error| Error::new("WORKER", "Ошибка отключения Cunba").detail(error))
+    .and_then(|result| result);
+    release(&app.state::<Runtime>());
+    result
+}
+
+#[tauri::command]
 async fn apply(app: tauri::AppHandle, request: Request) -> Result<()> {
     if !request.confirmed {
         return Err(Error::new("CONFIRMATION_REQUIRED", "Подтвердите план"));
@@ -635,6 +677,7 @@ fn main() {
             plan,
             apply,
             retry_verification,
+            disable_cunba,
             cancel,
             resolve_canbus_conflict,
             operation_events,

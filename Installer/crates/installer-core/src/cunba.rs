@@ -4,7 +4,7 @@ use std::time::Duration;
 const TIMEOUT: Duration = Duration::from_secs(15);
 
 // Feed this through stdin: putting the probe in argv would match its own process.
-const PROBE: &str = include_str!("cunba_probe.sh");
+pub(crate) const PROBE: &str = include_str!("cunba_probe.sh");
 
 pub(crate) fn check_installation(
     adb: &Adb,
@@ -41,7 +41,7 @@ fn validate(output: &str) -> Result<()> {
                 "Обнаружены признаки CUNBA. Установка VoyahTune заблокирована.",
             )
             .detail(evidence)
-            .retry("Удалите CUNBA и её остаточные файлы штатным способом, перезагрузите автомобиль и повторите проверку. Совместная работа хуков может вызывать перезапуски оболочки."));
+            .retry("Остановите установку или согласитесь на отключение Cunba с перезагрузкой и повторной проверкой."));
         }
     }
     if output.trim() == "CUNBA_CLEAR" {
