@@ -39,7 +39,7 @@ class UpdateHomeAvailabilityTest {
         assertEquals(DiPlayPalette.DARK.warning, update.currentTextColor)
         update.performClick()
 
-        assertEquals("about", ReflectionHelpers.getField<String>(activity, "page"))
+        assertEquals(SettingsCategory.ABOUT, ReflectionHelpers.getField<SettingsCategory>(activity, "settingsCategory"))
         assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>().any {
             it.text == activity.getString(R.string.update_download)
         })

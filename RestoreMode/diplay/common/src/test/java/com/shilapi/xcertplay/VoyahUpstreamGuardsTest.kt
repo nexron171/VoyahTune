@@ -50,6 +50,30 @@ class VoyahUpstreamGuardsTest {
         assertEquals("OFF", BydCallPopupGuard.status)
     }
 
+    @Test fun newVendorRoutesIgnoreSavedOptIns() {
+        val outputs = com.shilapi.xcertplay.hud.BydOutputSettings
+        outputs.setPhoneAudioRoute(context, true)
+        outputs.setPhoneAudioRouteApps(context, true)
+        outputs.setFceCluster(context, true)
+        assertFalse(outputs.phoneAudioRoute(context))
+        assertFalse(outputs.phoneAudioRouteApps(context))
+        assertFalse(outputs.fceCluster(context))
+        assertFalse(outputs.fceClusterAvailable())
+        com.shilapi.xcertplay.telecom.PhoneAudioRoute.attach(context)
+        com.shilapi.xcertplay.telecom.PhoneAudioRoute.carPlayCall(true)
+        assertFalse(com.shilapi.xcertplay.telecom.PhoneAudioRoute.carPlayCallsUseCarAudio())
+        com.shilapi.xcertplay.telecom.PhoneAudioRoute.carPlayCall(false)
+        val hotspot = com.shilapi.xcertplay.network.CarHotspotSettings
+        hotspot.setEnabled(context, true)
+        assertFalse(hotspot.enabled(context))
+        assertTrue(context.getSharedPreferences("diplay_car_hotspot", Context.MODE_PRIVATE)
+            .getBoolean("auto_enable", false))
+        assertEquals(com.shilapi.xcertplay.network.CarHotspotTethering.Result.UNSUPPORTED,
+            com.shilapi.xcertplay.network.CarHotspotTethering.enable(context,
+                isCancelled = { error("Must not attempt hotspot startup") },
+                log = { error("Must not attempt hotspot startup") }))
+    }
+
     @Test fun nativeKeepsNavigationWheelOwnership() {
         VoyahCarPlayIntegration.install(object : VoyahCarPlayIntegration.Host {
             override fun start() = Unit

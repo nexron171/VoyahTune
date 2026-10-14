@@ -130,7 +130,10 @@ class WifiP2pGroupManager(
         try {
             val station = readStation()
             val stationFrequency = station.alignmentFrequency
-            checkPrerequisites(station)
+            val fiveGhz = checkPrerequisites(station)
+            if (!fiveGhz && preferredChannel == WifiP2pChannels.AUTO) {
+                diagnostic("Wi-Fi P2P 5 GHz skipped: the Wi-Fi chip reports no 5 GHz band")
+            }
             val remembered = configurationMemory.read()
             val preferred = remembered?.takeIf {
                 preferredChannel == WifiP2pChannels.AUTO && it.stationMHz == stationFrequency
@@ -184,6 +187,7 @@ class WifiP2pGroupManager(
                 preferredChannel = preferredChannel,
                 // Band-only requests need the API 29 WifiP2pConfig; the legacy path pins channels.
                 bandRequests = !legacyChannels,
+                fiveGhz = fiveGhz,
                 beforeRetry = {
                     ensureStartActive(attempt)
                     // Do not cancel discovery, toggle Wi-Fi, or remove a newly observed group.
@@ -731,7 +735,8 @@ class WifiP2pGroupManager(
         Station(info?.supplicantState, info?.frequency?.takeIf { it > 0 })
     }.getOrDefault(Station(null, null))
 
-    private fun checkPrerequisites(station: Station) {
+    /** Returns false only when Wi-Fi is on and reports no 5 GHz band; it also reads false while Wi-Fi is off. */
+    private fun checkPrerequisites(station: Station): Boolean {
         val wifi = appContext.getSystemService(WifiManager::class.java)
         val fiveGhzSupported = runCatching { wifi?.is5GHzBandSupported }.getOrNull()
         val wifiEnabled = runCatching { wifi?.isWifiEnabled }.getOrNull()
@@ -752,6 +757,7 @@ class WifiP2pGroupManager(
         if (wifiEnabled == false) throw IOException("Turn on Wi-Fi in the head unit's settings, then reconnect")
         // Location mode is diagnostic only: AOSP createGroup does not require it to be on.
         // Do not block firmware where Wi-Fi Direct works with Location services disabled.
+        return !(wifiEnabled == true && fiveGhzSupported == false)
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)

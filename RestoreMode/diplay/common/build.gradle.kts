@@ -42,6 +42,7 @@ dependencies {
     implementation(diplayLibs.androidx.media3.exoplayer)
     implementation(diplayLibs.androidx.media3.exoplayer.hls)
     implementation(diplayLibs.androidx.media3.ui)
+    implementation(diplayLibs.zxing.core)
     testImplementation(diplayLibs.junit)
     testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("org.mockito:mockito-core:5.20.0")
