@@ -17,13 +17,13 @@ public class ScenarioPauseInputTest {
         assertEquals(Integer.valueOf(10), ScenarioSettingsPage.parsePauseSeconds(" 10 "));
         assertEquals(
                 Integer.valueOf(ScenarioProtocol.MAX_PAUSE_SECONDS),
-                ScenarioSettingsPage.parsePauseSeconds("600"));
+                ScenarioSettingsPage.parsePauseSeconds(String.valueOf(ScenarioProtocol.MAX_PAUSE_SECONDS)));
     }
 
     @Test
     public void rejectsOutOfRangeAndGarbage() {
         assertNull("ниже минимума", ScenarioSettingsPage.parsePauseSeconds("0"));
-        assertNull("выше максимума", ScenarioSettingsPage.parsePauseSeconds("601"));
+        assertNull("выше максимума", ScenarioSettingsPage.parsePauseSeconds(String.valueOf(ScenarioProtocol.MAX_PAUSE_SECONDS + 1)));
         assertNull("не число", ScenarioSettingsPage.parsePauseSeconds("abc"));
         assertNull("дробное", ScenarioSettingsPage.parsePauseSeconds("2.5"));
         assertNull("пусто", ScenarioSettingsPage.parsePauseSeconds("   "));

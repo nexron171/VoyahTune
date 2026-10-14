@@ -597,6 +597,24 @@ public final class ScenarioSettingsPage {
         secondRow.topMargin = dp(12);
         buttons2.setLayoutParams(secondRow);
         buttons2.setGravity(Gravity.CENTER_VERTICAL);
+        MaterialButton gear = actionButton("Селектор");
+        gear.setOnClickListener(
+                view ->
+                        pickOne(
+                                "Положение селектора",
+                                ScenarioProtocol.GEARS.toArray(new String[0]),
+                                index -> {
+                                    ScenarioStore.Condition condition =
+                                            new ScenarioStore.Condition();
+                                    condition.type = ScenarioProtocol.CONDITION_GEAR;
+                                    condition.op = ScenarioProtocol.OP_EQ;
+                                    condition.value =
+                                            ScenarioProtocol.gearValue(
+                                                    ScenarioProtocol.GEARS.get(index));
+                                    scenario.conditions.add(condition);
+                                    save();
+                                }));
+        buttons2.addView(gear);
         MaterialButton mode = actionButton("Режим движения");
         mode.setOnClickListener(
                 v ->
@@ -729,6 +747,9 @@ public final class ScenarioSettingsPage {
     }
 
     private static String describe(ScenarioStore.Condition condition) {
+        if (ScenarioProtocol.CONDITION_GEAR.equals(condition.type)) {
+            return "Селектор: " + ScenarioProtocol.gearName(condition.value);
+        }
         if (ScenarioProtocol.CONDITION_DRIVE_MODE.equals(condition.type)) {
             return "Режим движения: " + condition.mode;
         }
@@ -961,7 +982,13 @@ public final class ScenarioSettingsPage {
         EditText input = new EditText(activity);
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
         input.setText(String.valueOf(DEFAULT_PAUSE_SECONDS));
-        input.setSelectAllOnFocus(true);
+        input.setFocusable(false);
+        input.setClickable(true);
+        input.setOnClickListener(view -> {
+            Integer seconds = parsePauseSeconds(input.getText().toString());
+            pauseDurationDialog(seconds == null ? DEFAULT_PAUSE_SECONDS : seconds,
+                    selectedSeconds -> input.setText(String.valueOf(selectedSeconds)));
+        });
         input.setTextColor(0xfff3f5fa);
         input.setBackgroundResource(R.drawable.settings_field);
         input.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -1007,6 +1034,59 @@ public final class ScenarioSettingsPage {
                                             onPicked.accept(seconds);
                                         }));
         dialog.show();
+    }
+
+    private void pauseDurationDialog(int initialSeconds, java.util.function.IntConsumer onPicked) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(dp(24), dp(8), dp(24), dp(8));
+        NumberPicker hours = durationPicker(23, initialSeconds / 3600, "Часы");
+        NumberPicker minutes = durationPicker(59, initialSeconds / 60 % 60, "Минуты");
+        NumberPicker seconds = durationPicker(59, initialSeconds % 60, "Секунды");
+        addDurationColumn(row, hours, "ч");
+        addDurationColumn(row, minutes, "мин");
+        addDurationColumn(row, seconds, "сек");
+        SettingsDesign.styleTree(row);
+
+        androidx.appcompat.app.AlertDialog dialog =
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                                activity, R.style.SettingsDialog)
+                        .setTitle("Длительность паузы")
+                        .setView(row)
+                        .setPositiveButton("Готово", null)
+                        .setNegativeButton("Отмена", null)
+                        .create();
+        dialog.setOnShowListener(ignored ->
+                dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(view -> {
+                    int totalSeconds = hours.getValue() * 3600 + minutes.getValue() * 60 + seconds.getValue();
+                    if (totalSeconds < ScenarioProtocol.MIN_PAUSE_SECONDS) {
+                        Toast.makeText(activity, "Выберите длительность не менее 1 секунды", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    onPicked.accept(totalSeconds);
+                    dialog.dismiss();
+                }));
+        dialog.show();
+    }
+
+    private NumberPicker durationPicker(int maximum, int value, String description) {
+        NumberPicker picker = new NumberPicker(activity);
+        picker.setMinValue(0);
+        picker.setMaxValue(maximum);
+        picker.setValue(value);
+        picker.setWrapSelectorWheel(false);
+        picker.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
+        picker.setContentDescription(description);
+        return picker;
+    }
+
+    private void addDurationColumn(LinearLayout row, NumberPicker picker, String label) {
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER);
+        column.addView(text(label, 24, 0xfff3f5fa));
+        column.addView(picker);
+        row.addView(column, new LinearLayout.LayoutParams(0, -2, 1));
     }
 
     static Integer parsePauseSeconds(String value) {

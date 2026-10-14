@@ -256,7 +256,10 @@ public final class ScenarioStore {
                 Condition condition = new Condition();
                 condition.type = value.optString(ScenarioProtocol.KEY_TYPE, "");
                 condition.op = value.optString(ScenarioProtocol.KEY_OP, ScenarioProtocol.OP_LE);
-                condition.value = value.optInt(ScenarioProtocol.KEY_VALUE, 0);
+                condition.value =
+                        value.optInt(
+                                ScenarioProtocol.KEY_VALUE,
+                                ScenarioProtocol.CONDITION_GEAR.equals(condition.type) ? -1 : 0);
                 condition.mode = value.optString(ScenarioProtocol.KEY_MODE, "");
                 condition.from = value.optString(ScenarioProtocol.KEY_FROM, "00:00");
                 condition.to = value.optString(ScenarioProtocol.KEY_TO, "23:59");
@@ -388,6 +391,10 @@ public final class ScenarioStore {
     static boolean validCondition(Condition condition) {
         if (condition == null) {
             return false;
+        }
+        if (ScenarioProtocol.CONDITION_GEAR.equals(condition.type)) {
+            return ScenarioProtocol.OP_EQ.equals(condition.op)
+                    && ScenarioProtocol.gearName(condition.value) != null;
         }
         if (ScenarioProtocol.CONDITION_DRIVE_MODE.equals(condition.type)) {
             return ScenarioProtocol.validDriveMode(condition.mode);

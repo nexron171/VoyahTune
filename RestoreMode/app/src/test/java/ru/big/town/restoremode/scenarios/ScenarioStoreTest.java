@@ -23,6 +23,20 @@ public class ScenarioStoreTest {
     }
 
     @Test
+    public void gearConditionRequiresKnownPositionAndEquality() {
+        ScenarioStore.Condition condition = new ScenarioStore.Condition();
+        condition.type = ScenarioProtocol.CONDITION_GEAR;
+        condition.op = ScenarioProtocol.OP_EQ;
+        for (int position = -1; position <= 4; position++) {
+            condition.value = position;
+            assertEquals(position >= 0 && position <= 3, ScenarioStore.validCondition(condition));
+        }
+        condition.value = ScenarioProtocol.GEAR_VALUE_P;
+        condition.op = ScenarioProtocol.OP_LE;
+        assertFalse(ScenarioStore.validCondition(condition));
+    }
+
+    @Test
     public void gearTriggerRequiresKnownGear() {
         assertTrue(
                 ScenarioStore.validTrigger(
@@ -100,7 +114,7 @@ public class ScenarioStoreTest {
 
         ScenarioStore.Step pause = new ScenarioStore.Step();
         pause.type = ScenarioProtocol.STEP_PAUSE;
-        pause.seconds = 9999;
+        pause.seconds = ScenarioProtocol.MAX_PAUSE_SECONDS + 1;
         scenario.steps.add(pause);
 
         ScenarioStore.Step broken = new ScenarioStore.Step();
