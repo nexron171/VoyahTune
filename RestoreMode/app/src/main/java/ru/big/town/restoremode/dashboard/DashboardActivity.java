@@ -2877,12 +2877,14 @@ public class DashboardActivity extends AppCompatActivity {
                     @Override
                     public void onSurfaceTextureUpdated(SurfaceTexture texture) {}
                 });
-        textureView.setOnTouchListener(
+        View.OnTouchListener embeddedTouchListener =
                 (v, event) -> {
                     longClickDetector.onTouchEvent(event);
 
                     // Проверяем, попал ли touch в область кнопок управления
-                    if (controls != null && controls.getVisibility() == View.VISIBLE) {
+                    if (event.getActionMasked() != MotionEvent.ACTION_CANCEL
+                            && controls != null
+                            && controls.getVisibility() == View.VISIBLE) {
                         int[] location = new int[2];
                         controls.getLocationOnScreen(location);
                         int touchX = (int) event.getRawX();
@@ -2902,7 +2904,14 @@ public class DashboardActivity extends AppCompatActivity {
                     v.getParent().requestDisallowInterceptTouchEvent(!gestureFinished);
                     sendEmbeddedTouch(widgetId, event);
                     return true;
-                });
+                };
+        textureView.setOnTouchListener(
+                new ru.big.town.restoremode.carplay.CarPlayDashboardScrollTouchListener(
+                        contentScroll,
+                        () -> CarPlayTarget.isCarPlay(embeddedWidgetPackages.get(widgetId)),
+                        embeddedTouchListener,
+                        this::stopGridSnapAnimation,
+                        () -> contentScroll.post(this::snapPageOnRelease)));
 
         if (controls != null) {
             controls.bringToFront();
