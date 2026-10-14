@@ -185,9 +185,14 @@ RestoreMode: пакетная фильтрация без имени Activity з
 Для обычного `PACKAGE` тот же helper явно открывает `MainActivity`, а не случайный
 первый launcher-компонент пакета.
 
-OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет VoyahTune с явным
-`MainActivity` и отдельный `CarPlayLauncherActivity`. Дубликаты CarPlay удаляются.
-Название и иконка каждой записи берутся из ActivityInfo соответствующего компонента.
+OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет только VoyahTune с
+явным `MainActivity`. CarPlay скрыт из списков обоих физических экранов: отдельная
+запись не добавляется, а сохранённые synthetic-записи CarPlay удаляются при обновлении
+списка. Сам `CarPlayLauncherActivity` остаётся включённым и экспортированным;
+`SettingsAppPicker` отдельно добавляет `CarPlayTarget.ID` для выбора в доке,
+а док сохраняет явный запуск компонента и его иконку. MAIN/LAUNCHER-регистрация
+сохраняется; скрытие относится к OD All Apps, не к сторонним лаунчерам.
+Название и иконка VoyahTune берутся из ActivityInfo компонента.
 После OEM bind для добавленной записи скрывается шаблонный ImageView drawable,
 а настоящая иконка устанавливается в background. Исходные background/drawable
 хранятся в WeakHashMap и восстанавливаются перед обычным и payload bind: при
@@ -195,7 +200,7 @@ OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет VoyahTun
 приложения. Обновление/удаление пакета сбрасывает кэш иконок и пересобирает списки.
 Клик сохраняет физический экран владельца All Apps (0/1) и явный компонент,
 включая пассажирскую ленту. PI-хуки этим изменением не затрагиваются.
-Для обновления отдельной записи CarPlay на OD требуется обновить APK и
+Для применения скрытия CarPlay на OD требуется обновить
 `Packaging/od/inject/launcherdock.js` в
 `/data/local/bin/launcherdock.js`. Файл публикуется атомарно с правами `0644`.
 Загруженный Frida-агент остаётся в текущем процессе лаунчера после замены файла,
@@ -1138,7 +1143,7 @@ Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
 | [AppWidgetStore.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/widgets/apps/AppWidgetStore.java)<br>[AppWidgetStoreTest.java](../RestoreMode/app/src/test/java/ru/big/town/restoremode/widgets/apps/AppWidgetStoreTest.java)<br>[TileSizeStore.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileSizeStore.java) | Дедупликация только чистого CarPlay, стабильный ID, сохранение смешанных профилей и размера окна (§4, §11.3). |
 | [OtherSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/other/OtherSettingsFragment.java)<br>[settings_other_appearance_behavior.xml](../RestoreMode/app/src/main/res/layout/settings_other_appearance_behavior.xml)<br>[SplitConfigSync.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java)<br>[SetModesConfigReceiver.java](../Native/app/src/main/java/ru/big/town/anative/SetModesConfigReceiver.java) | Два независимых OD-only переключателя Home/All Apps, signature-конфигурация и Settings.Global; default false (§4). |
 | [AppsSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/apps/AppsSettingsFragment.java)<br>[SettingsAppPicker.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java) | includeCarPlay только для выбора слота дока; хранится CarPlayTarget.ID, а не package или launcher component. Общий picker исключает отдельный launcher, чтобы не дублировать VoyahTune (§4). |
-| [test_dock_navigation_actions.js](../Packaging/tests/test_dock_navigation_actions.js)<br>[test_carplay_allapps.js](../Packaging/tests/test_carplay_allapps.js) | Инверсия, stock bypass и сброс guard после ошибки; изоляция пассажирского дока; уникальные записи MainActivity/CarPlayLauncherActivity, тёмная ActivityInfo-иконка и displayId 0/1. |
+| [test_dock_navigation_actions.js](../Packaging/tests/test_dock_navigation_actions.js)<br>[test_carplay_allapps.js](../Packaging/tests/test_carplay_allapps.js) | Инверсия, stock bypass и сброс guard после ошибки; изоляция пассажирского дока; запись MainActivity без CarPlay в All Apps, очистка cached-записей CarPlay, сохранение ActivityInfo-иконки и явного запуска на displayId 0/1. |
 
 ## 11. Восстановление после полной замены upstream
 
