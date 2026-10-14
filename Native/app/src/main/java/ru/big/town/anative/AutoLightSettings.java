@@ -5,19 +5,28 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 
+import ru.big.town.common.InfrastructureProfile;
+import ru.big.town.common.ScreenBrightnessSettings;
+
 /** Restores the service switch from RestoreMode, with NativePrefs as an offline fallback. */
 final class AutoLightSettings {
     interface Runtime {
         Boolean saved();
+
         boolean cached();
+
         void cache(boolean enabled);
+
         void apply(boolean enabled);
     }
 
     static synchronized void restore(Runtime runtime) {
         Boolean saved;
-        try { saved = runtime.saved(); }
-        catch (RuntimeException unavailable) { saved = null; }
+        try {
+            saved = runtime.saved();
+        } catch (RuntimeException unavailable) {
+            saved = null;
+        }
         boolean enabled = saved != null ? saved : runtime.cached();
         runtime.cache(enabled);
         runtime.apply(enabled); // An explicit false must stop a previously running service too.
@@ -44,10 +53,17 @@ final class AutoLightSettings {
 
     private static Runtime runtime(Context context) {
         return new Runtime() {
-            @Override public Boolean saved() {
-                try (Cursor cursor = context.getContentResolver().query(Uri.parse(
-                        "content://ru.big.town.restoremode.restoremodecontentprovider/"),
-                        null, null, null, null)) {
+            @Override
+            public Boolean saved() {
+                try (Cursor cursor =
+                        context.getContentResolver()
+                                .query(
+                                        Uri.parse(
+                                                "content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                                        null,
+                                        null,
+                                        null,
+                                        null)) {
                     if (cursor == null || !cursor.moveToFirst()) return null;
                     int column = cursor.getColumnIndex("autoLight");
                     if (column < 0 || cursor.isNull(column)) return null;
@@ -56,28 +72,47 @@ final class AutoLightSettings {
                 }
             }
 
-            @Override public boolean cached() {
+            @Override
+            public boolean cached() {
                 return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
                         .getBoolean("autoLight", false);
             }
 
-            @Override public void cache(boolean enabled) {
+            @Override
+            public void cache(boolean enabled) {
                 context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
-                        .edit().putBoolean("autoLight", enabled).apply();
+                        .edit()
+                        .putBoolean("autoLight", enabled)
+                        .apply();
             }
 
-            @Override public void apply(boolean enabled) {
+            @Override
+            public void apply(boolean enabled) {
                 boolean scenarioNeedsLight = false;
-                for (ScenarioDefinition scenario : ScenarioDefinition.parse(ScenarioConfigReceiver.loadPersisted(context))) {
-                    if (scenario.enabled && scenario.usesLight()) { scenarioNeedsLight = true; break; }
+                for (ScenarioDefinition scenario :
+                        ScenarioDefinition.parse(ScenarioConfigReceiver.loadPersisted(context))) {
+                    if (scenario.enabled && scenario.usesLight()) {
+                        scenarioNeedsLight = true;
+                        break;
+                    }
                 }
-                LightSensorService.setObserveOnly(context, !enabled && scenarioNeedsLight);
+                boolean brightnessEnabled =
+                        InfrastructureProfile.read(context) == InfrastructureProfile.OD
+                                && context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                                        .getBoolean(ScreenBrightnessSettings.ENABLED, false);
+                boolean needsSensor = scenarioNeedsLight || brightnessEnabled;
+                // Keep headlight commands disabled until an unused sensor service has stopped.
+                LightSensorService.setObserveOnly(context, !enabled);
                 Intent service = new Intent(context, LightSensorService.class);
-                if (enabled || scenarioNeedsLight) {
+                if (enabled || needsSensor) {
                     if (context.startForegroundService(service) == null) {
-                        throw new IllegalStateException("Auto light service start was not accepted");
+                        throw new IllegalStateException(
+                                "Auto light service start was not accepted");
                     }
                 } else context.stopService(service);
+                Intent brightness = new Intent(context, ScreenBrightnessService.class);
+                if (brightnessEnabled) context.startForegroundService(brightness);
+                else context.stopService(brightness);
             }
         };
     }

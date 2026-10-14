@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 
 import ru.big.town.common.DockIconStyle;
 import ru.big.town.common.ScenarioProtocol;
+import ru.big.town.common.ScreenBrightnessSettings;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.DockLongPressAction;
 import ru.big.town.restoremode.apps.FullscreenAppStore;
@@ -35,6 +36,7 @@ public final class SplitConfigSync {
         pushSteering(context, prefs);
         pushKeyboard(context, prefs);
         pushScenarios(context, prefs);
+        pushScreenBrightness(context, prefs);
     }
 
     /** Полный снимок сценариев; движок Native перечитывает его при изменении и на старте. */
@@ -43,6 +45,21 @@ public final class SplitConfigSync {
         i.setClassName(NATIVE_PKG, "ru.big.town.anative.ScenarioConfigReceiver");
         i.putExtra(ScenarioProtocol.EXTRA_JSON, ScenarioStore.toJson(ScenarioStore.load(prefs)));
         context.sendBroadcast(i);
+    }
+
+    public static void pushScreenBrightness(Context context, SharedPreferences prefs) {
+        if (ru.big.town.common.InfrastructureProfile.read(context)
+                != ru.big.town.common.InfrastructureProfile.OD) return;
+        Intent intent = new Intent(ScreenBrightnessSettings.ACTION_CONFIG);
+        intent.setClassName(NATIVE_PKG, "ru.big.town.anative.ScreenBrightnessConfigReceiver");
+        intent.putExtra(
+                ScreenBrightnessSettings.ENABLED,
+                prefs.getBoolean(ScreenBrightnessSettings.ENABLED, false));
+        intent.putExtra(
+                ScreenBrightnessSettings.RULES,
+                prefs.getString(
+                        ScreenBrightnessSettings.RULES, ScreenBrightnessSettings.DEFAULT_RULES));
+        context.sendBroadcast(intent);
     }
 
     public static void pushFullscreenApps(Context context, SharedPreferences prefs) {

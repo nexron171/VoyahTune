@@ -13,18 +13,55 @@ import android.widget.RadioGroup;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import ru.big.town.common.ScreenBrightnessSettings;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.integration.GlobalVars;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
+import ru.big.town.restoremode.settings.core.SettingsSectionLayouts;
 import ru.big.town.restoremode.settings.ui.controls.SettingsControls;
+import ru.big.town.restoremode.settings.ui.list.SettingsList;
 import ru.big.town.restoremode.vehicle.DriveSelectionPreferences;
 import ru.big.town.restoremode.vehicle.FragranceSettings;
+
+import java.util.List;
 
 public final class VehicleSettingsFragment extends SettingsSectionFragment {
     @Override
     public SettingsSection section() {
         return SettingsSection.VEHICLE;
+    }
+
+    private ScreenBrightnessSettingsPage brightnessPage;
+
+    private final BroadcastReceiver brightnessReceiver =
+            new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (brightnessPage != null) brightnessPage.update(intent);
+                }
+            };
+
+    @Override
+    protected void addDynamicRows(
+            List<SettingsList.Row> rows, SettingsSectionLayouts.DynamicContent kind) {
+        if (kind != SettingsSectionLayouts.DynamicContent.SCREEN_BRIGHTNESS) {
+            super.addDynamicRows(rows, kind);
+            return;
+        }
+        if (ru.big.town.common.InfrastructureProfile.read(requireContext())
+                != ru.big.town.common.InfrastructureProfile.OD) return;
+        if (brightnessPage == null) {
+            brightnessPage =
+                    new ScreenBrightnessSettingsPage(
+                            requireActivity(), preferences, this::refreshSettingsRows);
+        }
+        brightnessPage.addRows(rows);
+    }
+
+    @Override
+    protected void onSectionViewDestroyed() {
+        brightnessPage = null;
     }
 
     private RadioGroup autoLightGroup;
@@ -577,6 +614,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected void releaseSettingsRow(View row) {
+        if (brightnessPage != null) brightnessPage.release(row);
         if (isDescendant(row, autoLightGroup)) {
             autoLightGroup = null;
         }
@@ -601,6 +639,14 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         }
         Context context = requireContext();
         context.registerReceiver(
+                brightnessReceiver,
+                new IntentFilter(ScreenBrightnessSettings.ACTION_STATUS),
+                "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE",
+                null,
+                Context.RECEIVER_EXPORTED);
+        context.sendBroadcast(
+                new Intent(ScreenBrightnessSettings.ACTION_REQUEST).setPackage(NATIVE_PACKAGE));
+        context.registerReceiver(
                 luxReceiver,
                 new IntentFilter("ru.big.town.anative.LUX_UPDATE"),
                 Context.RECEIVER_EXPORTED);
@@ -621,6 +667,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
     @Override
     public void onPause() {
         Context context = requireContext();
+        context.unregisterReceiver(brightnessReceiver);
         context.unregisterReceiver(luxReceiver);
         context.unregisterReceiver(modeSyncReceiver);
         context.unregisterReceiver(settingSyncReceiver);
