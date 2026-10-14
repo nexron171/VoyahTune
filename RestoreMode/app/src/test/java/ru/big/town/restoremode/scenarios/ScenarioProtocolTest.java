@@ -16,7 +16,7 @@ public class ScenarioProtocolTest {
         assertEquals(ScenarioProtocol.MIN_PAUSE_SECONDS, ScenarioProtocol.clampPauseSeconds(0));
         assertEquals(ScenarioProtocol.MIN_PAUSE_SECONDS, ScenarioProtocol.clampPauseSeconds(-5));
         assertEquals(30, ScenarioProtocol.clampPauseSeconds(30));
-        assertEquals(ScenarioProtocol.MAX_PAUSE_SECONDS, ScenarioProtocol.clampPauseSeconds(9999));
+        assertEquals(ScenarioProtocol.MAX_PAUSE_SECONDS, ScenarioProtocol.clampPauseSeconds(ScenarioProtocol.MAX_PAUSE_SECONDS + 1));
     }
 
     @Test

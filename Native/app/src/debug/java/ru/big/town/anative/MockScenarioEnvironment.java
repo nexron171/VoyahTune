@@ -3,11 +3,13 @@ package ru.big.town.anative;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+
+import ru.big.town.common.ScenarioProtocol;
+
 import java.util.Collections;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
-import ru.big.town.common.ScenarioProtocol;
 
 /** Uses real event controllers and OEM command encoding against the simulated car. */
 final class MockScenarioEnvironment implements ScenarioEnvironment {
@@ -26,31 +28,48 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
         this.vehicle = vehicle;
         this.trace = trace;
         actions = new ScenarioActionExecutor(service);
-        subscription = vehicle.subscribe(CanBusEventRouter.INTEREST_GEAR | CanBusEventRouter.INTEREST_DOOR,
-                new int[0], main, event -> {
-                    if (event.kind == CanBusEvent.Kind.CONNECTION) {
-                        gears.accept(vehicle.gear);
-                        doors.accept(vehicle.doors);
-                    } else if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
-                        gears.reset(); doors.reset();
-                    } else if (event.kind == CanBusEvent.Kind.GEAR) gears.accept(event.first);
-                    else if (event.kind == CanBusEvent.Kind.DOOR) doors.accept(event.second);
-                });
+        subscription =
+                vehicle.subscribe(
+                        CanBusEventRouter.INTEREST_GEAR | CanBusEventRouter.INTEREST_DOOR,
+                        new int[0],
+                        main,
+                        event -> {
+                            if (event.kind == CanBusEvent.Kind.CONNECTION) {
+                                gears.accept(vehicle.gear);
+                                doors.accept(vehicle.doors);
+                            } else if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
+                                gears.reset();
+                                doors.reset();
+                            } else if (event.kind == CanBusEvent.Kind.GEAR)
+                                gears.accept(event.first);
+                            else if (event.kind == CanBusEvent.Kind.DOOR)
+                                doors.accept(event.second);
+                        });
     }
-    @Override public Subscription gear(Handler handler, IntConsumer listener) {
+
+    @Override
+    public Subscription gear(Handler handler, IntConsumer listener) {
         GearStateController.Subscription registration = gears.subscribe(handler, listener::accept);
         return registration::close;
     }
-    @Override public Subscription doors(Handler handler, IntConsumer listener) {
+
+    @Override
+    public Subscription doors(Handler handler, IntConsumer listener) {
         DoorsStateController.Subscription registration = doors.subscribe(handler, listener::accept);
         return registration::close;
     }
-    @Override public Subscription light(IntConsumer listener) {
+
+    @Override
+    public Subscription light(IntConsumer listener) {
         lightListeners.add(listener);
         listener.accept(light);
         event("scenarioLightSubscription", null, lightListeners.size());
-        return () -> { lightListeners.remove(listener); event("scenarioLightSubscription", null, lightListeners.size()); };
+        return () -> {
+            lightListeners.remove(listener);
+            event("scenarioLightSubscription", null, lightListeners.size());
+        };
     }
+
     void configure(Bundle data) {
         temperature = data.getInt("temperature", temperature);
         minutes = data.getInt("minutes", minutes);
@@ -61,31 +80,59 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
             for (IntConsumer listener : lightListeners) listener.accept(light);
         }
     }
-    @Override public ScenarioPolicy.Snapshot snapshot(ScenarioDefinition scenario) {
+
+    @Override
+    public ScenarioPolicy.Snapshot snapshot(ScenarioDefinition scenario) {
         Integer soc = null;
         if (ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_SOC)) {
-            OemVehicleStateTransport.StateKey key = new OemVehicleStateTransport.StateKey("BMS_SOC_DISPLAY", 615);
-            soc = vehicle.session(Collections.singletonList(key), session -> session.readVehicleState(key));
+            OemVehicleStateTransport.StateKey key =
+                    new OemVehicleStateTransport.StateKey("BMS_SOC_DISPLAY", 615);
+            soc =
+                    vehicle.session(
+                            Collections.singletonList(key),
+                            session -> session.readVehicleState(key));
         }
         event("scenarioSnapshot", scenario.id, soc == null ? -1 : soc);
-        return new ScenarioPolicy.Snapshot(vehicle.connected ? light : -1,
+        return new ScenarioPolicy.Snapshot(
+                vehicle.connected ? light : -1,
                 vehicle.connected ? temperature : ScenarioPolicy.Snapshot.UNKNOWN,
-                soc == null ? -1 : soc, vehicle.connected ? drive : null, minutes, day);
+                soc == null ? -1 : soc,
+                vehicle.connected ? drive : null,
+                minutes,
+                day,
+                vehicle.connected ? gears.currentGear() : -1);
     }
-    @Override public void execute(String action, ScenarioActionExecutor.Completion completion) {
+
+    @Override
+    public void execute(String action, ScenarioActionExecutor.Completion completion) {
         event("scenarioAction", action, 0);
-        ScenarioActionExecutor.Completion reply = (accepted, error) -> {
-            event("scenarioActionResult", action, accepted ? 1 : 0);
-            completion.onFinished(accepted, error);
-        };
-        if (SeatCommand.handles(action) || WindowCommand.handles(action)) actions.execute(action, reply);
-        else reply.onFinished(vehicle.connected && vehicle.accepted, "Simulated platform operation");
+        ScenarioActionExecutor.Completion reply =
+                (accepted, error) -> {
+                    event("scenarioActionResult", action, accepted ? 1 : 0);
+                    completion.onFinished(accepted, error);
+                };
+        if (SeatCommand.handles(action) || WindowCommand.handles(action))
+            actions.execute(action, reply);
+        else
+            reply.onFinished(vehicle.connected && vehicle.accepted, "Simulated platform operation");
     }
-    @Override public void notifyUser(String text) { event("scenarioNotice", text, 0); }
+
+    @Override
+    public void notifyUser(String text) {
+        event("scenarioNotice", text, 0);
+    }
+
     private void event(String op, String text, int value) {
-        Bundle data = new Bundle(); data.putString("op", op); data.putString("text", text);
-        data.putInt("value", value); data.putLong("elapsed", android.os.SystemClock.elapsedRealtime());
+        Bundle data = new Bundle();
+        data.putString("op", op);
+        data.putString("text", text);
+        data.putInt("value", value);
+        data.putLong("elapsed", android.os.SystemClock.elapsedRealtime());
         trace.accept(data);
     }
-    void close() { subscription.close(); lightListeners.clear(); }
+
+    void close() {
+        subscription.close();
+        lightListeners.clear();
+    }
 }

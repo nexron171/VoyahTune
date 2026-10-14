@@ -9,15 +9,23 @@ final class ScenarioPolicy {
         /** Нет данных. */
         static final int UNKNOWN = Integer.MIN_VALUE;
 
-        final int lightLevel;   // 0..7 или -1
-        final int ambientTemp;  // °C или UNKNOWN
-        final int socPercent;   // 0..100 или -1
+        final int gearValue;
+        final int lightLevel; // 0..7 или -1
+        final int ambientTemp; // °C или UNKNOWN
+        final int socPercent; // 0..100 или -1
         final String driveMode; // ECO/COMFORT/SPORT/OUTING/INDIVIDUAL/SNOW или null
         final int minutesOfDay; // 0..1439
-        final int dayOfWeek;    // 1 = понедельник … 7 = воскресенье
+        final int dayOfWeek; // 1 = понедельник … 7 = воскресенье
 
-        Snapshot(int lightLevel, int ambientTemp, int socPercent, String driveMode,
-                 int minutesOfDay, int dayOfWeek) {
+        Snapshot(
+                int lightLevel,
+                int ambientTemp,
+                int socPercent,
+                String driveMode,
+                int minutesOfDay,
+                int dayOfWeek,
+                int gearValue) {
+            this.gearValue = gearValue;
             this.lightLevel = lightLevel;
             this.ambientTemp = ambientTemp;
             this.socPercent = socPercent;
@@ -68,14 +76,16 @@ final class ScenarioPolicy {
     }
 
     /** Триггер по освещённости: только на ребро перехода в тёмное или светлое состояние. */
-    static boolean matchesLight(ScenarioDefinition scenario, LightState previous, LightState current) {
+    static boolean matchesLight(
+            ScenarioDefinition scenario, LightState previous, LightState current) {
         if (current == LightState.HOLD || current == previous) return false;
         for (ScenarioDefinition.Trigger trigger : scenario.triggers) {
             if (!ScenarioProtocol.TRIGGER_LIGHT.equals(trigger.type)) continue;
             if (ScenarioProtocol.LIGHT_DARK.equals(trigger.value) && current == LightState.DARK) {
                 return true;
             }
-            if (ScenarioProtocol.LIGHT_BRIGHT.equals(trigger.value) && current == LightState.BRIGHT) {
+            if (ScenarioProtocol.LIGHT_BRIGHT.equals(trigger.value)
+                    && current == LightState.BRIGHT) {
                 return true;
             }
         }
@@ -102,6 +112,11 @@ final class ScenarioPolicy {
     }
 
     private static String describeFailure(ScenarioDefinition.Condition condition, Snapshot snapshot) {
+        if (ScenarioProtocol.CONDITION_GEAR.equals(condition.type)) {
+            String currentGear = ScenarioProtocol.gearName(snapshot.gearValue);
+            return "селектор (нужно " + ScenarioProtocol.gearName(condition.value) + ", "
+                    + (currentGear == null ? "данных нет" : "сейчас " + currentGear) + ")";
+        }
         if (ScenarioProtocol.CONDITION_LIGHT.equals(condition.type)) {
             return "освещённость (нужно " + symbol(condition.op) + " " + condition.value + ", "
                     + current(snapshot.lightLevel, "") + ")";
@@ -109,7 +124,7 @@ final class ScenarioPolicy {
         if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)) {
             return "уличная температура (нужно " + symbol(condition.op) + " " + condition.value + " °C, "
                     + (snapshot.ambientTemp == Snapshot.UNKNOWN
-                    ? "данных нет" : "сейчас " + snapshot.ambientTemp + " °C") + ")";
+                            ? "данных нет" : "сейчас " + snapshot.ambientTemp + " °C") + ")";
         }
         if (ScenarioProtocol.CONDITION_SOC.equals(condition.type)) {
             return "заряд (нужно " + symbol(condition.op) + " " + condition.value + " %, "
@@ -122,7 +137,7 @@ final class ScenarioPolicy {
         if (ScenarioProtocol.CONDITION_TIME.equals(condition.type)) {
             return "время (нужно " + condition.from + "–" + condition.to
                     + (condition.days == null || condition.days.trim().isEmpty()
-                    ? ", ежедневно" : ", дни " + condition.days)
+                            ? ", ежедневно" : ", дни " + condition.days)
                     + ", сейчас " + clock(snapshot.minutesOfDay) + ")";
         }
         return condition.type;
@@ -140,17 +155,24 @@ final class ScenarioPolicy {
 
     private static String clock(int minutesOfDay) {
         if (minutesOfDay < 0) return "—";
-        return String.format(java.util.Locale.ROOT, "%02d:%02d", minutesOfDay / 60, minutesOfDay % 60);
+        return String.format(
+                java.util.Locale.ROOT, "%02d:%02d", minutesOfDay / 60, minutesOfDay % 60);
     }
 
     private static boolean conditionMet(ScenarioDefinition.Condition condition, Snapshot snapshot) {
+        if (ScenarioProtocol.CONDITION_GEAR.equals(condition.type)) {
+            return ScenarioProtocol.gearName(snapshot.gearValue) != null
+                    && ScenarioProtocol.OP_EQ.equals(condition.op)
+                    && condition.value == snapshot.gearValue;
+        }
         if (ScenarioProtocol.CONDITION_LIGHT.equals(condition.type)) {
             return snapshot.lightLevel >= 0
                     && ScenarioProtocol.compare(snapshot.lightLevel, condition.op, condition.value);
         }
         if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)) {
             return snapshot.ambientTemp != Snapshot.UNKNOWN
-                    && ScenarioProtocol.compare(snapshot.ambientTemp, condition.op, condition.value);
+                    && ScenarioProtocol.compare(
+                            snapshot.ambientTemp, condition.op, condition.value);
         }
         if (ScenarioProtocol.CONDITION_SOC.equals(condition.type)) {
             return snapshot.socPercent >= 0
