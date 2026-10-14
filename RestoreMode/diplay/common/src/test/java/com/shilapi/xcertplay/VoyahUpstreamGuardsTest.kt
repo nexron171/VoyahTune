@@ -4,7 +4,6 @@ import android.content.Context
 import com.shilapi.xcertplay.hud.BydBluetoothSuspend
 import com.shilapi.xcertplay.hud.BydCallPopupGuard
 import com.shilapi.xcertplay.media.AmbientMusicSettings
-import com.shilapi.xcertplay.update.BackgroundUpdateScheduler
 import com.shilapi.xcertplay.update.UpdateAvailability
 import org.junit.Assert.*
 import org.junit.Test
@@ -30,11 +29,10 @@ class VoyahUpstreamGuardsTest {
         assertFalse(AirPlayPersistence.loadLocationReportingEnabled(context))
     }
 
-    @Test fun standaloneUpdatesDoNotInitializeWorkManager() {
+    @Test fun standaloneUpdateChecksAndOffersStayDisabled() {
         UpdateAvailability.saveBackgroundChecksEnabled(context, true)
         assertFalse(UpdateAvailability.backgroundChecksEnabled(context))
         assertNull(UpdateAvailability.available(context, "0.0.0"))
-        BackgroundUpdateScheduler.schedule(context)
     }
 
     @Test fun savedOemOptInsCannotEnableBydActions() {
@@ -50,6 +48,30 @@ class VoyahUpstreamGuardsTest {
         assertFalse(BydBluetoothSuspend.isSuspendedByUs(context))
         BydCallPopupGuard.update(context, owner, true) { error("BYD popup lease must not start") }
         assertEquals("OFF", BydCallPopupGuard.status)
+    }
+
+    @Test fun newVendorRoutesIgnoreSavedOptIns() {
+        val outputs = com.shilapi.xcertplay.hud.BydOutputSettings
+        outputs.setPhoneAudioRoute(context, true)
+        outputs.setPhoneAudioRouteApps(context, true)
+        outputs.setFceCluster(context, true)
+        assertFalse(outputs.phoneAudioRoute(context))
+        assertFalse(outputs.phoneAudioRouteApps(context))
+        assertFalse(outputs.fceCluster(context))
+        assertFalse(outputs.fceClusterAvailable())
+        com.shilapi.xcertplay.telecom.PhoneAudioRoute.attach(context)
+        com.shilapi.xcertplay.telecom.PhoneAudioRoute.carPlayCall(true)
+        assertFalse(com.shilapi.xcertplay.telecom.PhoneAudioRoute.carPlayCallsUseCarAudio())
+        com.shilapi.xcertplay.telecom.PhoneAudioRoute.carPlayCall(false)
+        val hotspot = com.shilapi.xcertplay.network.CarHotspotSettings
+        hotspot.setEnabled(context, true)
+        assertFalse(hotspot.enabled(context))
+        assertTrue(context.getSharedPreferences("diplay_car_hotspot", Context.MODE_PRIVATE)
+            .getBoolean("auto_enable", false))
+        assertEquals(com.shilapi.xcertplay.network.CarHotspotTethering.Result.UNSUPPORTED,
+            com.shilapi.xcertplay.network.CarHotspotTethering.enable(context,
+                isCancelled = { error("Must not attempt hotspot startup") },
+                log = { error("Must not attempt hotspot startup") }))
     }
 
     @Test fun nativeKeepsNavigationWheelOwnership() {

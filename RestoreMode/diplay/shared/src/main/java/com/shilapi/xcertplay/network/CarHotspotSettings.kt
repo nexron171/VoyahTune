@@ -7,7 +7,8 @@ import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 object CarHotspotSettings {
     private fun prefs(context: Context) = context.getSharedPreferences("diplay_car_hotspot", Context.MODE_PRIVATE)
 
-    fun enabled(context: Context): Boolean = prefs(context).getBoolean("auto_enable", false)
+    fun enabled(context: Context): Boolean =
+        com.shilapi.xcertplay.VoyahPlatformPolicy.vehicleIntegrationEnabled && prefs(context).getBoolean("auto_enable", false)
 
     fun setEnabled(context: Context, enabled: Boolean) =
         prefs(context).edit().putBoolean("auto_enable", enabled).apply()

@@ -11,6 +11,8 @@ import java.math.BigInteger
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /** Identity of one CarPlay audio stream: the stream type plus its CarPlay audio type. */
 data class AudioStreamId(val type: Int, val audioType: String)
@@ -73,7 +75,9 @@ class CarPlayMediaEngine(
         val playoutLatencyMs: Int,
         @Volatile var firstSample: Int? = null,
         @Volatile var originNs: Long? = null,
-    )
+    ) {
+        val position = FeedbackPositionMonitor(format.rtpClockRate)
+    }
 
     private data class PendingIapTunnel(
         val bridge: AirPlayIapTunnelStream,
@@ -87,6 +91,13 @@ class CarPlayMediaEngine(
     private val pendingIapTunnels = ConcurrentHashMap<AirPlaySession, PendingIapTunnel>()
     private val videoSettingsChannels = ConcurrentHashMap<AirPlaySession, VideoSettingsChannel>()
     private val bufferedStreams = ConcurrentHashMap<AirPlaySession, BufferedStream>()
+    private val microphoneScheduler by lazy {
+        ScheduledThreadPoolExecutor(1) { task -> Thread(task, "carplay-mic-start").apply { isDaemon = true } }.apply {
+            removeOnCancelPolicy = true
+            setKeepAliveTime(MICROPHONE_SCHEDULER_IDLE_SECONDS, TimeUnit.SECONDS)
+            allowCoreThreadTimeOut(true)
+        }
+    }
 
     private class BufferedStream(val stream: BufferedAudioStream, val connectionId: Any?)
 
@@ -189,13 +200,16 @@ class CarPlayMediaEngine(
             session.logDebug(
                 "Audio: setup type=$type audioType=$audioType input=${stream["input"] ?: "none"} " +
                     "micPort=${if ((stream["dataPort"] as? Number)?.toInt()?.let { it > 0 } == true) "yes" else "no"} " +
-                    "microphone=${if (microphone != null) "on" else "off"} keys=${stream.keys.sorted().joinToString(",")}",
+                    "microphone=${if (microphone != null) "on" else "off"} keys=${stream.keys.sorted().joinToString(",")}" +
+                    // An app call (WeChat, #718) carried vocoderInfo; the report showed only its name.
+                    (stream["vocoderInfo"]?.let { " vocoderInfo=${it.toString().take(200)}" } ?: ""),
             )
         }
 
         val capture = audioCaptureDirectory?.let { AudioPacketCapture(it, type) }
         if (capture != null) audioCaptures[streamKey] = capture
         val clockProbe = RtpClockProbe()
+        val microphoneStart = microphone?.let { config -> MicrophoneStart { sink.onMicrophoneStarted(streamId, config) } }
         val audio = AudioStream(key, type, session::logDebug)
         val (dataPort, controlPort) = audio.listen(
             object : AudioStream.Listener {
@@ -203,10 +217,11 @@ class CarPlayMediaEngine(
                     meta.firstSample = firstSample
                     meta.originNs = System.nanoTime()
                     sink.onAudioStarted(streamId, format, firstSample)
-                    microphone?.let { sink.onMicrophoneStarted(streamId, it) }
+                    microphoneStart?.onDownlink()
                 }
 
                 override fun onRtp(rtp: ByteArray, sample: Int) {
+                    meta.position.observeRtp(sample)
                     clockProbe.observe(sample, System.nanoTime())?.let { hz ->
                         session.logDebug(
                             "Audio: rtp clock type=$type audioType=$audioType " +
@@ -229,6 +244,22 @@ class CarPlayMediaEngine(
         )
         streams[streamKey] = audio
         audioMeta[streamKey] = meta
+        if (microphoneStart != null && MicrophoneStart.startsWithoutDownlink(audioType)) {
+            microphoneStart.scheduleSilentStart(microphoneScheduler, MicrophoneStart.SILENT_START_MILLIS) { startNow ->
+                // Atomic with TEARDOWN, which removes the pending entry before it stops the microphone.
+                var started = false
+                pendingMicrophone.computeIfPresent(streamKey) { _, pending ->
+                    if (pending === microphone) started = startNow()
+                    pending
+                }
+                if (started) {
+                    session.logDebug(
+                        "Audio: microphone started without downlink audio type=$type audioType=$audioType " +
+                            "afterMs=${MicrophoneStart.SILENT_START_MILLIS}",
+                    )
+                }
+            }
+        }
         return linkedMapOf(
             "type" to type,
             "dataPort" to dataPort,
@@ -449,9 +480,13 @@ class CarPlayMediaEngine(
         val buffered = bufferedStreams[session]
         if (active.isEmpty() && buffered == null) return null
         val streams = active.map { meta ->
+            // sampleTime counts on the stream's RTP clock. Counted at the 48 kHz Opus decode rate,
+            // a 16 kHz call stream ran 3x ahead of the audio that had arrived, 14.5 s ahead after
+            // 20 s, in a call whose far end the driver could not understand (#473).
+            val clockRate = meta.format.rtpClockRate
             val entry = linkedMapOf<String, Any?>(
                 "type" to meta.type,
-                "sampleRate" to meta.format.sampleRate,
+                "sampleRate" to clockRate,
             )
             val firstSample = meta.firstSample
             val originNs = meta.originNs
@@ -462,12 +497,14 @@ class CarPlayMediaEngine(
                     (nowNs - originNs) / 1e9 - meta.playoutLatencyMs / 1000.0,
                 )
                 val firstUnsigned = firstSample.toLong() and 0xffff_ffffL
-                val sampleTime = (firstUnsigned + Math.round(elapsedSec * meta.format.sampleRate)) and
+                val sampleTime = (firstUnsigned + Math.round(elapsedSec * clockRate)) and
                     0xffff_ffffL
                 entry["streamConnectionID"] = unsignedPlistInteger(meta.connectionId ?: 0L)
                 entry["timestamp"] = session.syncedNtp()
                 entry["timestampRawNs"] = nowNs
                 entry["sampleTime"] = sampleTime
+                meta.position.onFeedback(meta.type, entry["streamConnectionID"], sampleTime, nowNs)
+                    ?.let(session::logDebug)
             }
             entry
         } + listOfNotNull(buffered?.let { it.stream.feedback(session.syncedNtp(), it.connectionId) })
@@ -656,6 +693,7 @@ class CarPlayMediaEngine(
         }
 
         private const val TAG = "xcertplay-usb"
+        private const val MICROPHONE_SCHEDULER_IDLE_SECONDS = 5L
         private const val STREAM_TYPE_MAIN_SCREEN = 110
         private const val STREAM_TYPE_ALT_SCREEN = 111
         private const val STREAM_TYPE_MAIN_AUDIO = 100

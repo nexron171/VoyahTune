@@ -1004,10 +1004,6 @@ Java.perform(function () {
                                 || pkg === "com.qinggan.app.launcher" || !ai.enabled.value) continue;
                         if (pm.getLaunchIntentForPackage(pkg) === null) continue;
                         result.push(pkg);
-                        if (pkg === RESTORE_PKG) {
-                            var carPlayActivity = pm.getActivityInfo(entryComponent(CARPLAY_ENTRY), 0);
-                            if (carPlayActivity.enabled.value && carPlayActivity.exported.value) result.push(CARPLAY_ENTRY);
-                        }
                     } catch (ignored) {}
                 }
                 installedSnapshot = result;
@@ -1055,7 +1051,7 @@ Java.perform(function () {
                     try {
                         var current = Java.cast(list.get(i), AppBean);
                         var existingTarget = syntheticPackage(current) || "" + current.getPackageName();
-                        if (existingTarget === CARPLAY_ENTRY && existing["pkg:" + existingTarget]) {
+                        if (existingTarget === CARPLAY_ENTRY) {
                             list.remove(i);
                             continue;
                         }

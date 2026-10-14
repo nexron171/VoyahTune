@@ -1,7 +1,7 @@
 # DiPlay в VoyahTune: спецификация интеграции и восстановления
 
 Этот документ — контракт адаптации, по которому восстанавливают интеграцию после
-полной замены исходников DiPlay. Он описывает исходники на **10 октября 2026**;
+полной замены исходников DiPlay. Он описывает исходники на **14 октября 2026**;
 состав конкретного опубликованного релиза определяется его manifest и revision.
 Имена upstream-классов могут измениться: при обновлении сохранять поведение
 и границы ответственности, а не только переносить строки патча.
@@ -12,7 +12,8 @@
 
 ## 1. Происхождение и границы
 
-- База: **DiPlay 0.2.17**, tag `v0.2.17`, commit **`391c90f80b4d54b2732dbbb3e51bf56910768ceb`**,
+- База: **DiPlay 0.2.19 + изменения main до 14 октября 2026**,
+  commit **`0919997b8645b825e4370866d66d455678d2b9da`** (после tag `v0.2.19`),
   репозиторий [shihabal3amri/DiPlay](https://github.com/shihabal3amri/DiPlay).
 - Копия [RestoreMode/diplay](../RestoreMode/diplay/README.md) — vendored source,
   не submodule. Модули `common` и `shared` импортированы; `mobile` не используется.
@@ -27,8 +28,8 @@
   не устанавливается, официальное обновление его APK не обновляет встроенную копию.
 - Протоколы AirPlay/iAP2/MFi, кодеки и JNI целиком не переписаны: наши изменения
   подключают UI, источники автомобиля, маршруты аудио и жизненный цикл сессии.
-- Java-база Native/RestoreMode общая. OD-хук `launcherdock.js` показывает отдельные записи
-  VoyahTune и CarPlay; изменение loader или root-службы не требуется.
+- Java-база Native/RestoreMode общая. OD-хук `launcherdock.js` показывает VoyahTune; CarPlay скрыт
+  из All Apps, но доступен для назначения в док; изменение loader или root-службы не требуется.
   Не переносить эти изменения в `Packaging/pi/` и не создавать второй CAN-клиент.
 
 ## 2. Архитектура и обязательные границы
@@ -185,9 +186,14 @@ RestoreMode: пакетная фильтрация без имени Activity з
 Для обычного `PACKAGE` тот же helper явно открывает `MainActivity`, а не случайный
 первый launcher-компонент пакета.
 
-OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет VoyahTune с явным
-`MainActivity` и отдельный `CarPlayLauncherActivity`. Дубликаты CarPlay удаляются.
-Название и иконка каждой записи берутся из ActivityInfo соответствующего компонента.
+OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет только VoyahTune с
+явным `MainActivity`. CarPlay скрыт из списков обоих физических экранов: отдельная
+запись не добавляется, а сохранённые synthetic-записи CarPlay удаляются при обновлении
+списка. Сам `CarPlayLauncherActivity` остаётся включённым и экспортированным;
+`SettingsAppPicker` отдельно добавляет `CarPlayTarget.ID` для выбора в доке,
+а док сохраняет явный запуск компонента и его иконку. MAIN/LAUNCHER-регистрация
+сохраняется; скрытие относится к OD All Apps, не к сторонним лаунчерам.
+Название и иконка VoyahTune берутся из ActivityInfo компонента.
 После OEM bind для добавленной записи скрывается шаблонный ImageView drawable,
 а настоящая иконка устанавливается в background. Исходные background/drawable
 хранятся в WeakHashMap и восстанавливаются перед обычным и payload bind: при
@@ -195,7 +201,7 @@ OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет VoyahTun
 приложения. Обновление/удаление пакета сбрасывает кэш иконок и пересобирает списки.
 Клик сохраняет физический экран владельца All Apps (0/1) и явный компонент,
 включая пассажирскую ленту. PI-хуки этим изменением не затрагиваются.
-Для обновления отдельной записи CarPlay на OD требуется обновить APK и
+Для применения скрытия CarPlay на OD требуется обновить
 `Packaging/od/inject/launcherdock.js` в
 `/data/local/bin/launcherdock.js`. Файл публикуется атомарно с правами `0644`.
 Загруженный Frida-агент остаётся в текущем процессе лаунчера после замены файла,
@@ -955,8 +961,17 @@ brightness −50…50, warmth −100…100. Настройки хранятся 
 - мастер DiLink не открывается ни при первом запуске, ни через `page=setup`, ни из
   настроек. Запрошенная setup-страница заменяется на home;
 - About не показывает upstream updater; check/download/install дополнительно
-  защищены policy. С 0.2.17 блокируются также BackgroundUpdateScheduler, worker и
-  UpdateAvailability: скрыть кнопку недостаточно для запрета фонового запроса. Исходники update оставлены для сопровождения, но недоступны в APK UI;
+  защищены policy. `UpdateAvailability` возвращает false для фоновых проверок и
+  не предлагает релизы. WorkManager полностью исключён из embedded-сборки:
+  удалены зависимость `androidx.work:work-runtime`, записи version catalog,
+  `BackgroundUpdateWorker.kt` (worker, scheduler и policy), его вызов из
+  `DiPlayActivity` и тест `BackgroundUpdatePolicyTest`. Остальной upstream updater
+  сохранён для сопровождения, но закрыт policy и недоступен в UI.
+  WorkManager использовался только для обновлений отдельного DiPlay, не CarPlay-сессии.
+  Удаление исключает также manifest auto-initializer, обходивший guards: в логах
+  4.1.1-od был crash `ForceStopRunnable` при недоступном CE storage после рестарта.
+  При обновлении upstream не возвращать worker, зависимость или initializer;
+  проверять runtime dependencies и merged manifest, сохраняя остальные AndroidX initializers;
 - `BydOutputSettings` запрещает enabled/available/navigationAvailable, battery,
   wheel speed, cluster stream pause, video-while-parked, cluster song и call controls;
 - `BydNavigationOutputs` не выполняет OEM recovery/start/map-shown/route outputs и
@@ -977,8 +992,8 @@ points нужно проверять отдельно: эти guards не пок
 Другие штатные настройки hotspot могут оставаться видимыми, но LocalAdb-зависимые
 операции недоступны. На публичные Android USB/wireless transport этот запрет не распространяется.
 
-Пользовательские строки во всех семи локалях (default, ru, uk, es, ar, zh-rCN,
-zh-rTW) не содержат BYD/比亚迪/比亞迪. Формулировки нейтральные; подсказка теста звука
+Пользовательские строки во в восьми основных `strings.xml` (default, ru, uk, es, ar, zh-rCN,
+zh-rTW, ja) не содержат BYD/比亚迪/比亞迪. Формулировки нейтральные; подсказка теста звука
 не обещает назначение stream 14, подсказка жестов не привязана к климату другой марки.
 DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе при сбросе
 значения. Кнопка возврата к автомобилю в меню CarPlay использует
@@ -994,14 +1009,14 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 
 ### 10.1. Изменённые файлы vendored upstream
 
-Карта относительно чистого commit из §1: **56 изменённых upstream-файлов**, включая
+Карта относительно чистого commit из §1: **69 изменённых upstream-файлов**, включая
 сборку, тесты и изображение (без собственных AGENTS/README). Пути ниже относительно `RestoreMode/diplay`. Эта таблица
 дополняет поведенческие контракты выше; удаление/переименование upstream-файла
 требует найти новую точку подключения с той же ролью.
 
 | Файл | Что восстановить |
 | --- | --- |
-| [common/build.gradle.kts](../RestoreMode/diplay/common/build.gradle.kts) | Переименовать catalog → diplayLibs, dependency → :diplay-shared; сохранить Compose/тестовое окружение и WorkManager 2.12.0, используемый upstream updater. Сам updater заблокирован policy. |
+| [common/build.gradle.kts](../RestoreMode/diplay/common/build.gradle.kts) | Переименовать catalog → diplayLibs, dependency → :diplay-shared; сохранить Compose/тестовое окружение; исключить WorkManager. Из gradle/libs.versions.toml удалить work и androidx-work-runtime; не возвращать при обновлении upstream. |
 | [shared/build.gradle](../RestoreMode/diplay/shared/build.gradle) | Использовать diplayLibs; сохранить JNI/NDK и library namespace. |
 | [common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt) | initializeAutomaticNavigationAudioChannel: 0 только при отсутствии нового ключа; DEFAULT_OEM_LABEL=Voyah Free; location_reporting_enabled по умолчанию true; carplay_night_mode по умолчанию VEHICLE/voyah_light без перезаписи явного выбора; observer изменения carplay_night_mode; wireless_hotspot_mode по умолчанию WIFI_P2P без перезаписи сохранённого выбора (§5). |
 | [common/src/test/java/com/shilapi/xcertplay/HotspotModeMigrationTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/HotspotModeMigrationTest.kt) | Ожидание Wi-Fi Direct для новой установки; сохранить проверки legacy-миграции и ранее выбранного режима. |
@@ -1034,18 +1049,32 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydOutputSettings.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydOutputSettings.kt) | Guards вычисляемых enabled/available и OEM-настроек независимо от старых preferences. |
 | [shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt) | Voyah routing, explicit override, stream validation/fallback; временный PCM navigation focus, приоритет ролей и callback фактического OEM stream (§9). |
 | [shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt) | setVehicleNightMode с проверкой activeSession; begin/end/onFrame владельца VoyahNavigation; app-owned openHostUi для requestUI на main thread с повторной проверкой владельца (§4). |
-| [common/src/main/res/values/strings.xml](../RestoreMode/diplay/common/src/main/res/values/strings.xml)<br>[common/src/main/res/values-ru/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings.xml)<br>[common/src/main/res/values-uk/strings.xml](../RestoreMode/diplay/common/src/main/res/values-uk/strings.xml)<br>[common/src/main/res/values-es/strings.xml](../RestoreMode/diplay/common/src/main/res/values-es/strings.xml)<br>[common/src/main/res/values-ar/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ar/strings.xml)<br>[common/src/main/res/values-zh-rCN/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rCN/strings.xml)<br>[common/src/main/res/values-zh-rTW/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rTW/strings.xml) | Семь локализаций: нейтральные тексты без BYD, достоверные подсказки аудиоканалов и жестов; сохранить resource IDs и placeholders; полный русский перевод common (§5). |
+| [common/src/main/res/values/strings.xml](../RestoreMode/diplay/common/src/main/res/values/strings.xml)<br>[common/src/main/res/values-ru/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings.xml)<br>[common/src/main/res/values-uk/strings.xml](../RestoreMode/diplay/common/src/main/res/values-uk/strings.xml)<br>[common/src/main/res/values-es/strings.xml](../RestoreMode/diplay/common/src/main/res/values-es/strings.xml)<br>[common/src/main/res/values-ar/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ar/strings.xml)<br>[common/src/main/res/values-zh-rCN/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rCN/strings.xml)<br>[common/src/main/res/values-zh-rTW/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rTW/strings.xml) <br>[common/src/main/res/values-ja/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ja/strings.xml) | Восемь локализаций: нейтральные тексты без BYD, достоверные подсказки аудиоканалов и жестов; сохранить resource IDs и placeholders; полный русский перевод common (§5). |
 
 | [common/src/main/java/com/shilapi/xcertplay/NavigationWheelSettings.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/NavigationWheelSettings.kt) | При available интеграции Voyah новое upstream управление громкостью навигации выключено даже при сохранённом opt-in; владелец кнопок — Native. |
-| [common/src/main/java/com/shilapi/xcertplay/update/BackgroundUpdateWorker.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/update/BackgroundUpdateWorker.kt)<br>[common/src/main/java/com/shilapi/xcertplay/update/UpdateAvailability.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/update/UpdateAvailability.kt) | standaloneAppEnabled проверяется до WorkManager scheduling, исполнения worker, чтения предложения релиза; фоновые проверки false, баннер отсутствует. |
+| `common/src/main/java/com/shilapi/xcertplay/update/BackgroundUpdateWorker.kt`, `common/src/test/java/com/shilapi/xcertplay/update/BackgroundUpdatePolicyTest.kt` | Намеренно удалены вместе с вызовом scheduler из DiPlayActivity; не импортировать из upstream. |
+| [common/src/main/java/com/shilapi/xcertplay/update/UpdateAvailability.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/update/UpdateAvailability.kt) | standaloneAppEnabled проверяется до чтения предложения релиза; фоновые проверки false, баннер отсутствует. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydBluetoothSuspend.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydBluetoothSuspend.kt) | Никаких BYD suspend/resume/recovery/lease при выключенном vehicleIntegrationEnabled. resumeAndWait лишь возвращает текущее состояние адаптера; радио не меняет. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydCallPopupGuard.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydCallPopupGuard.kt) | Guard до регистрации owner/worker/ADB: запрет скрытия штатного BYD popup при любой сохранённой настройке. |
 | [shared/src/main/java/com/shilapi/xcertplay/media/AmbientMusicSettings.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AmbientMusicSettings.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/media/AmbientMusicController.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AmbientMusicController.kt) | Effective enabled=false без стирания preference; checkSupport возвращает false до OEM/ADB worker. |
 | [shared/src/main/java/com/shilapi/xcertplay/network/WifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/WifiScanPause.kt) | localAdbEnabled проверяется до pause lease и restoreIfNeeded; не менять autojoin через upstream shell helper на Voyah. |
 
+Дополнительные контракты относительно текущей базы:
+
+| Файл | Что сохранить |
+| --- | --- |
+| `common/src/main/AndroidManifest.xml` | Собственный `CarPlayEntryActivity` с отдельной affinity; новый закрытый `CrashRecordInstaller` остаётся для записи Java-падений. |
+| `common/src/main/java/com/shilapi/xcertplay/GeelyWheelKeys.kt` | Guard vehicleIntegrationEnabled до проверки модели и bind к Geely input service. |
+| `shared/src/main/java/com/shilapi/xcertplay/telecom/PhoneAudioRoute.kt` | Guard до создания Telecom backend, executor и VoIP watcher. В BydOutputSettings phoneAudioRoute/phoneAudioRouteApps/fceCluster/fceClusterAvailable также закрыты policy, даже при сохранённом opt-in. |
+| `shared/src/main/java/com/shilapi/xcertplay/network/CarHotspotSettings.kt`, `CarHotspotTethering.kt` в той же папке | Effective enabled=false и UNSUPPORTED до запуска hotspot. Новый путь через Android без ADB не должен обходить запрет; preference не стирается. |
+| `shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlaySession.kt`, `CarPlayMediaEngine.kt` | Сохранить передачу duckAudio/unduckAudio до sink и её сброс по завершении сессии (§9). |
+| `shared/src/main/java/com/shilapi/xcertplay/media/MicrophoneUplink.kt`, `MicrophoneCaptureStats.kt` | VOICE_RECOGNITION для Voyah telephony, запрет VOIP fallback/аппаратных эффектов; точное имя источника в отчёте. Upstream restart при ошибке/пустом чтении сохраняется. |
+| `common/src/test/java/com/shilapi/xcertplay/LauncherIntentTest.kt` | Учитывать собственный CarPlayEntryActivity. |
+| `shared/src/test/java/com/shilapi/xcertplay/media/MicrophoneSourceFallbackTest.kt`, `TelephonyMicrophoneTest.kt` | Проверять сохранность источника, отсутствие MODE_IN_COMMUNICATION и аппаратных эффектов на Voyah. |
+
 Дополнительно адаптированы шесть `common/src/main/res/values-*/strings_settings_layout.xml`
 (ru, uk, es, ar, zh-rCN, zh-rTW): нейтральное сообщение о недоступности штатной
-навигации без названия BYD. Они входят в указанные 56 файлов.
+навигации без названия BYD. Они входят в указанные 69 файлов.
 
 Не импортированы из дерева common/shared/gradle baseline:
 `gradle/gradle-daemon-jvm.properties`, `gradle/wrapper/gradle-wrapper.jar`,
@@ -1053,8 +1082,8 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 `shared/.gitignore` и дублирующий `shared/BYD_HUD_ICONS_NOTICE.md`.
 Содержание последнего сохранено в
 [assets/byd-hud-icons/NOTICE.txt](../RestoreMode/diplay/shared/src/main/assets/byd-hud-icons/NOTICE.txt),
-рядом с лицензией этих assets. Удалённых Kotlin/Java/JNI-файлов в common/shared
-относительно baseline при этой сверке нет.
+рядом с лицензией этих assets. Отдельно удалены два файла WorkManager, перечисленные выше; остальные
+Kotlin/Java/JNI-файлы baseline импортированы.
 
 В `docs/` сохранены THIRD_PARTY_NOTICES, исходный `UPSTREAM-README.md` и
 `licenses/` (AGPL DiAuto и лицензии зависимостей). При следующем импорте сохранять
@@ -1062,7 +1091,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 
 ### 10.2. Собственные файлы внутри DiPlay
 
-Эти **11 файлов реализации** не придут из upstream; их нужно сохранить/перенести
+Эти **14 файлов реализации** не придут из upstream; их нужно сохранить/перенести
 вместе с собственными тестами. `AGENTS.md` и наш `README.md` также не заменять upstream-версией.
 
 | Файл | Назначение |
@@ -1079,6 +1108,12 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [shared/src/main/java/com/shilapi/xcertplay/media/VoyahAudioRouting.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/VoyahAudioRouting.kt) | OEM streams и критерий accepted. |
 | [shared/src/main/java/com/shilapi/xcertplay/media/NavigationAudioFocus.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/NavigationAudioFocus.kt) | Lease ненулевого PCM: фокус до drain и 500ms, освобождение между подсказками (§9). |
 
+Также сохранять собственные `CarPlayEntryActivity.kt` (маршрутизатор запуска),
+`shared/.../airplay/AudioDuckingCommand.kt` (команды приглушения) и
+`shared/.../media/CarPlayAudioSettings.kt` (переключатель приглушения).
+Их тесты `CarPlayEntryActivityTest` и `AudioDuckingCommandTest`, а также
+`DiPlayProjectionLaunchTest` остаются частью адаптации.
+
 Собственные ресурсы локализации:
 [values/strings_voyah_ui.xml](../RestoreMode/diplay/common/src/main/res/values/strings_voyah_ui.xml)
 и [values-ru/strings_voyah_ui.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings_voyah_ui.xml).
@@ -1093,11 +1128,11 @@ Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
 `VoyahUpstreamGuardsTest` (defaults, updater, BYD opt-ins и Native wheel ownership без UI); shared: `VoyahNavigationTest`, `VoyahAudioRoutingTest`,
 `NavigationAudioFocusTest`, `VoyahAudioFocusTest`. Они перечислены с путями в §12.
 
-Сверка дерева с чистым Git blob baseline из §1 на 10 октября 2026:
-55 изменённых файла, 31 собственный файл внутри common/shared/gradle
-(11 файлов реализации, 2 ресурса и 18 тестов), 5 намеренно не импортированных
-файлов из списка выше. Это контроль полноты, а не число строк для механического
-переноса; собственные app/Native/OD-файлы дополнительно перечислены в §10.3.
+Сверка дерева с чистым baseline из §1 на 14 октября 2026:
+69 изменённых upstream-файлов, 36 собственных файлов внутри common/shared/gradle
+(14 файлов реализации, 2 ресурса и 20 тестов), 5 инфраструктурных исключений
+и 2 удалённых WorkManager-файла. Это контроль полноты; собственные
+app/Native/OD-файлы дополнительно перечислены в §10.3.
 
 ### 10.3. Код вне vendored дерева
 
@@ -1138,7 +1173,27 @@ Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
 | [AppWidgetStore.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/widgets/apps/AppWidgetStore.java)<br>[AppWidgetStoreTest.java](../RestoreMode/app/src/test/java/ru/big/town/restoremode/widgets/apps/AppWidgetStoreTest.java)<br>[TileSizeStore.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileSizeStore.java) | Дедупликация только чистого CarPlay, стабильный ID, сохранение смешанных профилей и размера окна (§4, §11.3). |
 | [OtherSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/other/OtherSettingsFragment.java)<br>[settings_other_appearance_behavior.xml](../RestoreMode/app/src/main/res/layout/settings_other_appearance_behavior.xml)<br>[SplitConfigSync.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java)<br>[SetModesConfigReceiver.java](../Native/app/src/main/java/ru/big/town/anative/SetModesConfigReceiver.java) | Два независимых OD-only переключателя Home/All Apps, signature-конфигурация и Settings.Global; default false (§4). |
 | [AppsSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/apps/AppsSettingsFragment.java)<br>[SettingsAppPicker.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java) | includeCarPlay только для выбора слота дока; хранится CarPlayTarget.ID, а не package или launcher component. Общий picker исключает отдельный launcher, чтобы не дублировать VoyahTune (§4). |
-| [test_dock_navigation_actions.js](../Packaging/tests/test_dock_navigation_actions.js)<br>[test_carplay_allapps.js](../Packaging/tests/test_carplay_allapps.js) | Инверсия, stock bypass и сброс guard после ошибки; изоляция пассажирского дока; уникальные записи MainActivity/CarPlayLauncherActivity, тёмная ActivityInfo-иконка и displayId 0/1. |
+| [test_dock_navigation_actions.js](../Packaging/tests/test_dock_navigation_actions.js)<br>[test_carplay_allapps.js](../Packaging/tests/test_carplay_allapps.js) | Инверсия, stock bypass и сброс guard после ошибки; изоляция пассажирского дока; запись MainActivity без CarPlay в All Apps, очистка cached-записей CarPlay, сохранение ActivityInfo-иконки и явного запуска на displayId 0/1. |
+
+### Прокрутка Dashboard поверх CarPlay
+
+[CarPlayDashboardScrollTouchListener](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayDashboardScrollTouchListener.java) оборачивает
+обработчик касаний TextureView в DashboardActivity. Один палец передаётся в
+проекцию без изменений. При втором пальце отправляется ACTION_CANCEL в прежний
+обработчик (включая long-press detector), а горизонтальный drag прокручивает
+HorizontalScrollView главной с существующим выравниванием по страницам при отпускании.
+Это позволяет выйти за пределы виджета шириной
+12 плиток. Жест захвачен до UP/CANCEL последнего пальца: оставшийся один палец
+не возобновляет ввод в CarPlay. Смена числа пальцев переустанавливает опорную
+координату без скачка; смещение считается в экранных координатах, чтобы движение
+самого виджета при прокрутке не создавало обратную связь. Обычный touch slop
+отсекает дрожание. Для других приложений multi-touch остаётся прежним; тип
+текущего приложения читается из embeddedWidgetPackages, включая смену профиля.
+Полноэкранная Activity CarPlay и виджет-ярлык 1×1 этим обработчиком не затронуты.
+При переносе адаптации сохранять helper и его подключение в DashboardActivity.
+Проверка: `CarPlayDashboardScrollTouchListenerTest` (один/два пальца, смена числа
+пальцев, CANCEL, следующий жест, обычное приложение). Проверка на ГУ обязательна
+для подтверждения UX и маршрута касаний через Native; локальный тест её не заменяет.
 
 ## 11. Восстановление после полной замены upstream
 
@@ -1360,11 +1415,43 @@ IPC/CAN/cluster/запуска нужен согласованный Native APK.
 
 ## 13. Подтверждённое состояние и ограничения
 
+### Обновление до 0.2.19 и последующих исправлений, 14 октября 2026
+
+Трёхсторонний перенос выполнен с чистой базы 0.2.17 на commit §1. Сохранены
+собственные адаптеры, identity/bootstrap, настройки, локальный UI, владение
+сессией/VD, SWReason, Native audio routing, duckAudio и микрофон Voyah.
+Жест Dashboard двумя пальцами и скрытый ярлык OD остаются без изменений.
+
+Включены исправления RTP clock речевого аудио, буферизации музыки, перезапуска
+микрофона и приоритета аудиопотоков, USB/USBMUX/reconnect, восстановления SurfaceView
+и геометрии после камеры. USB и Wi-Fi имеют раздельные музыкальные буферы;
+до первого явного USB-значения применяется прежнее сохранённое общее значение.
+Новое меню проекции разбито на категории; About встроен в иерархию настроек.
+Резервная копия и отчёт доступны через локальную страницу телефона, только пока
+открыта соответствующая страница. Это backup настроек DiPlay, не всех настроек
+VoyahTune, и не перенос identity/ключей. Для QR добавлен ZXing Core 3.5.3.
+
+Новые OEM-пути закрыты guards из §10: Telecom/VoIP watcher, Geely input service,
+FCE и запуск hotspot без ADB. В app manifest удалены PhoneAudioConnectionService
+и MANAGE_OWN_CALLS. WorkManager не возвращён: runtime dependency отсутствует,
+в merged manifest нет его initializer/services. BootReceiver остаётся disabled;
+PhoneBluetoothReceiver и UpdateApkProvider отсутствуют.
+CrashRecordInstaller не экспортирован, не directBootAware; пишет ограниченную
+запись Java exception, передаёт исключение прежнему обработчику и редактирует
+чувствительные строки при экспорте. Это не сборщик падений system_server.
+
+Локально прошли компиляция RestoreMode и **186 целевых JVM-тестов**:
+34 common, 145 shared и 7 app (включая скорость через Messenger и жест виджета).
+Проверены переводы ru, манифест и отсутствие WorkManager. UI-тесты, сборка APK,
+установка и проверки связи/камеры/OEM-аудио на ГУ не выполнялись. Версии приложения
+не менялись, коммит/релиз/публикация не выполнялись. Пересборка Installer не нужна:
+его код, ресурсы и контракт установки не изменены.
+
 ### Обновление встроенного движка до 0.2.17
 
 10 октября 2026 выполнено трёхстороннее сравнение с чистой базой 0.2.15
 (`b940efe81ebe6fe930caac71e19d9624723e6b7f`), текущим рабочим деревом VoyahTune
-и тегом 0.2.17 из §1. Изменились 389 путей импортируемых модулей/каталога;
+и тегом 0.2.17 (`391c90f80b4d54b2732dbbb3e51bf56910768ceb`). Изменились 389 путей импортируемых модулей/каталога;
 22 файла имели текстовые конфликты. Собственные файлы и незакоммиченные изменения
 сохранены. Конфликты разрешались по поведению, а не заменой на ours/theirs:
 
@@ -1384,8 +1471,8 @@ IPC/CAN/cluster/запуска нужен согласованный Native APK.
   формулировки сохранены, новые upstream строки добавлены. Проверка переводов
   исключает непереводимые FPS-строки с translatable=false.
 - Импортирован программный Opus Concentus с его LICENSE; сохранены notices.
-  WorkManager 2.12.0 добавлен как upstream зависимость, но самостоятельные обновления
-  DiPlay не планируются и не выполняются. Новые manifest permissions
+  WorkManager 2.12.0 был импортирован с upstream; при последующей адаптации
+  удалён вместе с фоновым scheduler/worker, чтобы исключить auto-init при запуске RestoreMode. Новые manifest permissions
   ACCESS_LOCAL_NETWORK и WRITE_EXTERNAL_STORAGE(maxSdkVersion=28) сохранены;
   targetSdk/minSdk приложения, подпись и MFi bootstrap не менялись.
 

@@ -17,6 +17,7 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.telecom.PhoneAudioRoute
 
 /**
  * Captures one PCM microphone stream and sends it back to the phone as sealed CarPlay RTP.
@@ -42,6 +43,7 @@ internal class MicrophoneUplink(
             },
         )
     },
+    private val noAudioRestartMillis: Long = NO_AUDIO_RESTART_MILLIS,
 ) : Closeable {
     private val running = AtomicBoolean(false)
     private val stats = MicrophoneCaptureStats(config, report = { message ->
@@ -79,7 +81,14 @@ internal class MicrophoneUplink(
             voyahCallCapture -> MediaRecorder.AudioSource.VOICE_RECOGNITION
             config.audioType == "telephony" && speakerphoneCall -> MediaRecorder.AudioSource.MIC
             config.audioType == "telephony" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
-            config.audioType == "speechrecognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+            // The Geely/Lynk head unit only opens the microphone for the voice-communication
+            // source; its voice-recognition source records silence, so Siri never hears.
+            config.audioType == "speechrecognition" ->
+                if (com.shilapi.xcertplay.network.GeelyHeadUnit.detected) {
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION
+                } else {
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION
+                }
             else -> MediaRecorder.AudioSource.MIC
         }
         if (voyahCallCapture) stats.useVoiceRecognitionSource()
@@ -195,6 +204,12 @@ internal class MicrophoneUplink(
     }
 
     private fun voiceEffects(sessionId: Int): List<AudioEffect> {
+        if (PhoneAudioRoute.carPlayCallsUseCarAudio()) {
+            // In the car's phone audio state its own processing handles echo and noise, and was only measured
+            // with the platform effects off.
+            Log.i(TAG, "microphone effects left to the car's phone audio state")
+            return emptyList()
+        }
         var aec: AudioEffect? = null
         if (echoCanceller != null) {
             // VOICE_COMMUNICATION can enable AEC by default. Keep its controller alive and
@@ -262,6 +277,7 @@ internal class MicrophoneUplink(
     }
 
     private fun capture(recorder: AudioRecord, socket: DatagramSocket) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
         val frame = ByteArray(config.frameBytes)
         val readBuffer = ByteArray(maxOf(frame.size, MIN_READ_BYTES))
         val counters = MicrophoneCounters()
@@ -270,6 +286,9 @@ internal class MicrophoneUplink(
         val clock = canceller?.let { CaptureClock(config.sampleRate) }
         val reference = canceller?.let { ShortArray(it.frameSamples) }
         var filled = 0
+        var readRestarts = 0
+        var noAudioRestarts = 0
+        var lastAudioNs = System.nanoTime()
         try {
             while (running.get()) {
                 stats.reading()
@@ -281,12 +300,40 @@ internal class MicrophoneUplink(
                         Log.e(TAG, "microphone read failed code=$count")
                         stats.failure(MicrophoneFailureStage.READ, code = count)
                     }
+                    // The first read after a head unit enters call mode can fail with
+                    // ERROR_INVALID_OPERATION, and capture used to end there for the whole call
+                    // (#647). Restart recording a few times before giving up.
+                    if (running.get() && count != AudioRecord.ERROR_DEAD_OBJECT &&
+                        readRestarts < MAX_READ_RESTARTS && restartRecording(recorder)
+                    ) {
+                        readRestarts++
+                        stats.restarted(readRestarts, "read-error", routeType(recorder))
+                        continue
+                    }
                     return
                 }
                 if (count == 0) {
                     stats.flush(routeType = routeInfo)
+                    // A recorder that starts with no input device routed returns 0 bytes at once, for
+                    // as long as it runs: a Leapmotor T03 (Android 7.1) did this for minutes of Siri and
+                    // call capture (#566). Restart it, and pause between empty reads instead of spinning.
+                    val now = System.nanoTime()
+                    if (running.get() && noAudioRestarts < MAX_NO_AUDIO_RESTARTS &&
+                        now - lastAudioNs >= noAudioRestartMillis * 1_000_000L
+                    ) {
+                        noAudioRestarts++
+                        lastAudioNs = now
+                        if (restartRecording(recorder)) {
+                            stats.restarted(noAudioRestarts, "no-audio", routeType(recorder))
+                        } else {
+                            stats.failure(MicrophoneFailureStage.RECORDING, code = recorder.recordingState)
+                        }
+                    } else {
+                        Thread.sleep(EMPTY_READ_PAUSE_MILLIS)
+                    }
                     continue
                 }
+                lastAudioNs = System.nanoTime()
                 var offset = 0
                 while (offset < count && running.get()) {
                     val copied = minOf(frame.size - filled, count - offset)
@@ -311,6 +358,7 @@ internal class MicrophoneUplink(
                                 canceller = null
                             }
                         }
+                        stats.level(frame)
                         sendFrame(socket, counters, frame)
                         filled = 0
                     }
@@ -327,6 +375,15 @@ internal class MicrophoneUplink(
             running.set(false)
             release()
         }
+    }
+
+    private fun restartRecording(recorder: AudioRecord): Boolean = try {
+        runCatching { recorder.stop() }
+        Thread.sleep(READ_RESTART_PAUSE_MILLIS)
+        recorder.startRecording()
+        recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING
+    } catch (error: IllegalStateException) {
+        false
     }
 
     private fun sendFrame(socket: DatagramSocket, counters: MicrophoneCounters, frame: ByteArray) {
@@ -456,6 +513,11 @@ internal class MicrophoneUplink(
         const val CLOSE_JOIN_MILLIS = 500L
         const val ECHO_TAIL_MILLIS = 250
         const val ECHO_REFERENCE_LEAD_NS = 30_000_000L
+        const val MAX_READ_RESTARTS = 3
+        const val READ_RESTART_PAUSE_MILLIS = 50L
+        const val NO_AUDIO_RESTART_MILLIS = 1_000L
+        const val MAX_NO_AUDIO_RESTARTS = 3
+        const val EMPTY_READ_PAUSE_MILLIS = 5L
     }
 }
 
