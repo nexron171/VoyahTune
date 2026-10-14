@@ -62,8 +62,8 @@ vm.runInContext(['cleanJavaString', 'ourInsetActivity', 'entryPackage', 'entryCo
 const apps = list([bean(10, 20, 'oem.app')]);
 c.addMissingAppsImpl(apps);
 c.addMissingAppsImpl(apps);
-assert.equal(apps.size(), 4); // OEM + VoyahTune + CarPlay + music.
-assert.deepEqual(apps.items.slice(1).map(b => c.syntheticPackage(b)), [restore, carplay, 'app.music']);
+assert.equal(apps.size(), 3); // OEM + VoyahTune + music.
+assert.deepEqual(apps.items.slice(1).map(b => c.syntheticPackage(b)), [restore, 'app.music']);
 assert.equal(apps.get(1).getPackageName(), restore);
 assert.equal(c.loadLabel(restore), 'VoyahTune');
 assert.equal(c.loadIcon(restore), 'grey');
@@ -79,7 +79,7 @@ for (const screen of [0, 1]) {
 }
 const existing = list([bean(10, 20, restore)]);
 c.addMissingAppsImpl(existing);
-assert.equal(existing.size(), 3);
+assert.equal(existing.size(), 2);
 assert.equal(c.syntheticPackage(existing.get(0)), restore);
 const legacy = [bean(10, 20, restore), bean(10, 20, restore)];
 for (const entry of legacy) entry.setSubType(prefix + carplay);
@@ -87,11 +87,11 @@ const cached = list([bean(10, 20, 'oem.app'), ...legacy, bean(10, 20, restore)])
 c.addMissingAppsImpl(cached);
 c.addMissingAppsImpl(cached);
 assert.deepEqual(cached.items.map(b => c.syntheticPackage(b) || b.getPackageName()),
-    ['oem.app', carplay, restore, 'app.music']);
+    ['oem.app', restore, 'app.music']);
 assert.equal(c.loadIcon(carplay), 'dark-carplay');
 for (const screen of [0, 1]) {
     assert.equal(c.launchAllApp(carplay, screen), true);
     assert.equal(launches.at(-1).intent.component.activity, restore + '.carplay.CarPlayLauncherActivity');
     assert.equal(launches.at(-1).screen, screen);
 }
-console.log('PASS: OD All Apps preserves unique Dashboard and CarPlay entries on both displays');
+console.log('PASS: OD All Apps hides CarPlay, removes cached entries and preserves explicit launch routing');
