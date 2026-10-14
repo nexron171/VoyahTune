@@ -960,8 +960,17 @@ brightness −50…50, warmth −100…100. Настройки хранятся 
 - мастер DiLink не открывается ни при первом запуске, ни через `page=setup`, ни из
   настроек. Запрошенная setup-страница заменяется на home;
 - About не показывает upstream updater; check/download/install дополнительно
-  защищены policy. С 0.2.17 блокируются также BackgroundUpdateScheduler, worker и
-  UpdateAvailability: скрыть кнопку недостаточно для запрета фонового запроса. Исходники update оставлены для сопровождения, но недоступны в APK UI;
+  защищены policy. `UpdateAvailability` возвращает false для фоновых проверок и
+  не предлагает релизы. WorkManager полностью исключён из embedded-сборки:
+  удалены зависимость `androidx.work:work-runtime`, записи version catalog,
+  `BackgroundUpdateWorker.kt` (worker, scheduler и policy), его вызов из
+  `DiPlayActivity` и тест `BackgroundUpdatePolicyTest`. Остальной upstream updater
+  сохранён для сопровождения, но закрыт policy и недоступен в UI.
+  WorkManager использовался только для обновлений отдельного DiPlay, не CarPlay-сессии.
+  Удаление исключает также manifest auto-initializer, обходивший guards: в логах
+  4.1.1-od был crash `ForceStopRunnable` при недоступном CE storage после рестарта.
+  При обновлении upstream не возвращать worker, зависимость или initializer;
+  проверять runtime dependencies и merged manifest, сохраняя остальные AndroidX initializers;
 - `BydOutputSettings` запрещает enabled/available/navigationAvailable, battery,
   wheel speed, cluster stream pause, video-while-parked, cluster song и call controls;
 - `BydNavigationOutputs` не выполняет OEM recovery/start/map-shown/route outputs и
@@ -1006,7 +1015,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 
 | Файл | Что восстановить |
 | --- | --- |
-| [common/build.gradle.kts](../RestoreMode/diplay/common/build.gradle.kts) | Переименовать catalog → diplayLibs, dependency → :diplay-shared; сохранить Compose/тестовое окружение и WorkManager 2.12.0, используемый upstream updater. Сам updater заблокирован policy. |
+| [common/build.gradle.kts](../RestoreMode/diplay/common/build.gradle.kts) | Переименовать catalog → diplayLibs, dependency → :diplay-shared; сохранить Compose/тестовое окружение; исключить WorkManager. Из gradle/libs.versions.toml удалить work и androidx-work-runtime; не возвращать при обновлении upstream. |
 | [shared/build.gradle](../RestoreMode/diplay/shared/build.gradle) | Использовать diplayLibs; сохранить JNI/NDK и library namespace. |
 | [common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt) | initializeAutomaticNavigationAudioChannel: 0 только при отсутствии нового ключа; DEFAULT_OEM_LABEL=Voyah Free; location_reporting_enabled по умолчанию true; carplay_night_mode по умолчанию VEHICLE/voyah_light без перезаписи явного выбора; observer изменения carplay_night_mode; wireless_hotspot_mode по умолчанию WIFI_P2P без перезаписи сохранённого выбора (§5). |
 | [common/src/test/java/com/shilapi/xcertplay/HotspotModeMigrationTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/HotspotModeMigrationTest.kt) | Ожидание Wi-Fi Direct для новой установки; сохранить проверки legacy-миграции и ранее выбранного режима. |
@@ -1042,7 +1051,8 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [common/src/main/res/values/strings.xml](../RestoreMode/diplay/common/src/main/res/values/strings.xml)<br>[common/src/main/res/values-ru/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings.xml)<br>[common/src/main/res/values-uk/strings.xml](../RestoreMode/diplay/common/src/main/res/values-uk/strings.xml)<br>[common/src/main/res/values-es/strings.xml](../RestoreMode/diplay/common/src/main/res/values-es/strings.xml)<br>[common/src/main/res/values-ar/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ar/strings.xml)<br>[common/src/main/res/values-zh-rCN/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rCN/strings.xml)<br>[common/src/main/res/values-zh-rTW/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rTW/strings.xml) | Семь локализаций: нейтральные тексты без BYD, достоверные подсказки аудиоканалов и жестов; сохранить resource IDs и placeholders; полный русский перевод common (§5). |
 
 | [common/src/main/java/com/shilapi/xcertplay/NavigationWheelSettings.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/NavigationWheelSettings.kt) | При available интеграции Voyah новое upstream управление громкостью навигации выключено даже при сохранённом opt-in; владелец кнопок — Native. |
-| [common/src/main/java/com/shilapi/xcertplay/update/BackgroundUpdateWorker.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/update/BackgroundUpdateWorker.kt)<br>[common/src/main/java/com/shilapi/xcertplay/update/UpdateAvailability.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/update/UpdateAvailability.kt) | standaloneAppEnabled проверяется до WorkManager scheduling, исполнения worker, чтения предложения релиза; фоновые проверки false, баннер отсутствует. |
+| `common/src/main/java/com/shilapi/xcertplay/update/BackgroundUpdateWorker.kt`, `common/src/test/java/com/shilapi/xcertplay/update/BackgroundUpdatePolicyTest.kt` | Намеренно удалены вместе с вызовом scheduler из DiPlayActivity; не импортировать из upstream. |
+| [common/src/main/java/com/shilapi/xcertplay/update/UpdateAvailability.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/update/UpdateAvailability.kt) | standaloneAppEnabled проверяется до чтения предложения релиза; фоновые проверки false, баннер отсутствует. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydBluetoothSuspend.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydBluetoothSuspend.kt) | Никаких BYD suspend/resume/recovery/lease при выключенном vehicleIntegrationEnabled. resumeAndWait лишь возвращает текущее состояние адаптера; радио не меняет. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydCallPopupGuard.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydCallPopupGuard.kt) | Guard до регистрации owner/worker/ADB: запрет скрытия штатного BYD popup при любой сохранённой настройке. |
 | [shared/src/main/java/com/shilapi/xcertplay/media/AmbientMusicSettings.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AmbientMusicSettings.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/media/AmbientMusicController.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AmbientMusicController.kt) | Effective enabled=false без стирания preference; checkSupport возвращает false до OEM/ADB worker. |
@@ -1389,8 +1399,8 @@ IPC/CAN/cluster/запуска нужен согласованный Native APK.
   формулировки сохранены, новые upstream строки добавлены. Проверка переводов
   исключает непереводимые FPS-строки с translatable=false.
 - Импортирован программный Opus Concentus с его LICENSE; сохранены notices.
-  WorkManager 2.12.0 добавлен как upstream зависимость, но самостоятельные обновления
-  DiPlay не планируются и не выполняются. Новые manifest permissions
+  WorkManager 2.12.0 был импортирован с upstream; при последующей адаптации
+  удалён вместе с фоновым scheduler/worker, чтобы исключить auto-init при запуске RestoreMode. Новые manifest permissions
   ACCESS_LOCAL_NETWORK и WRITE_EXTERNAL_STORAGE(maxSdkVersion=28) сохранены;
   targetSdk/minSdk приложения, подпись и MFi bootstrap не менялись.
 
