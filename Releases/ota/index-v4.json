@@ -5,7 +5,7 @@
       "url": "https://storage.yandexcloud.net/voyahtune/v4.0.0-od/payload_4.0.0-od.zip",
       "size": 134159298,
       "sha256": "877da1ad715b097e9de4b4e8f09158ace5d84f15b772a9749d2f9558bb30879e",
-      "minimumInstallerVersion": "1.7.3",
+      "minimumInstallerVersion": "1.7.7",
       "minimumOtaVersion": "4.0.0"
     },
     {
@@ -13,7 +13,7 @@
       "url": "https://storage.yandexcloud.net/voyahtune/v4.0.1-od/payload_4.0.1-od.zip",
       "size": 134159725,
       "sha256": "6c58fbcda23f1bc51d95449250fb49c00ae904be9871da9969f1650643a7f7a3",
-      "minimumInstallerVersion": "1.7.3",
+      "minimumInstallerVersion": "1.7.7",
       "minimumOtaVersion": "4.0.0"
     },
     {
@@ -21,7 +21,7 @@
       "url": "https://storage.yandexcloud.net/voyahtune/v4.1.0-od/payload_4.1.0-od.zip",
       "size": 148441646,
       "sha256": "0577112fe0c1c3baa0a058dad3a039c7d741374123bbe2e155b4a78e0b1249e5",
-      "minimumInstallerVersion": "1.7.3",
+      "minimumInstallerVersion": "1.7.7",
       "minimumOtaVersion": "4.1.0"
     },
     {
@@ -29,7 +29,7 @@
       "url": "https://storage.yandexcloud.net/voyahtune/v4.1.1-od/payload_4.1.1-od.zip",
       "size": 148444620,
       "sha256": "8e11e386266ef2cc37f5e04e8ba0fdd576a5d536646bb44f5acc4e98eb0ceea9",
-      "minimumInstallerVersion": "1.7.3",
+      "minimumInstallerVersion": "1.7.7",
       "minimumOtaVersion": "4.1.0"
     }
   ]
