@@ -17,6 +17,7 @@ use std::{
 };
 
 const SCRIPT: &str = include_str!("cunba_recovery.sh");
+const RESTORE_SCRIPT: &str = include_str!("cunba_restore.sh");
 const JOURNAL: &str = "/data/local/voyahtune-cunba-recovery";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -57,6 +58,10 @@ fn root(adb: &Adb) -> Result<()> {
 }
 
 fn verify(adb: &Adb, previous_boot: &str) -> Result<()> {
+    observe_boot(adb, previous_boot, false)
+}
+
+fn observe_boot(adb: &Adb, previous_boot: &str, restoring: bool) -> Result<()> {
     progress(adb, "Ожидаем новую загрузку Android")?;
     let deadline = Instant::now() + BOOT_TIMEOUT;
     let mut stable: Option<(String, Instant)> = None;
@@ -73,16 +78,20 @@ fn verify(adb: &Adb, previous_boot: &str) -> Result<()> {
                     "Полная перезагрузка ещё не подтверждена",
                 ));
             }
-            let output = adb.shell(
-                &format!("CUNBA_RECOVERY_VERIFY=1\n{}", cunba::PROBE),
-                Duration::from_secs(20),
-            )?;
-            if output.trim() != "CUNBA_CLEAR" {
-                return Err(Error::new(
-                    "CUNBA_STILL_ACTIVE",
-                    "После перезагрузки обнаружены компоненты Cunba",
-                )
-                .detail(output));
+            if restoring {
+                adb.shell(&format!("action=verify\n{RESTORE_SCRIPT}"), COMMAND_TIMEOUT)?;
+            } else {
+                let output = adb.shell(
+                    &format!("CUNBA_RECOVERY_VERIFY=1\n{}", cunba::PROBE),
+                    Duration::from_secs(20),
+                )?;
+                if output.trim() != "CUNBA_CLEAR" {
+                    return Err(Error::new(
+                        "CUNBA_STILL_ACTIVE",
+                        "После перезагрузки обнаружены компоненты Cunba",
+                    )
+                    .detail(output));
+                }
             }
             // /proc/stat includes counters; only PID and process start time identify a generation.
             let identity = identity
@@ -125,7 +134,11 @@ fn verify(adb: &Adb, previous_boot: &str) -> Result<()> {
     }
     Err(Error::new(
         "CUNBA_VERIFY_TIMEOUT",
-        "Не удалось подтвердить отсутствие Cunba и стабильную загрузку Android",
+        if restoring {
+            "Не удалось подтвердить восстановление Cunba и стабильную загрузку Android"
+        } else {
+            "Не удалось подтвердить отсутствие Cunba и стабильную загрузку Android"
+        },
     ))
 }
 
@@ -244,4 +257,82 @@ pub fn disable(
     Ok(Outcome {
         report_path: report.to_string_lossy().into_owned(),
     })
+}
+
+pub fn restoration_available(adb: &Adb, infrastructure: Infrastructure) -> Result<bool> {
+    if infrastructure != Infrastructure::Od {
+        return Ok(false);
+    }
+    Ok(adb.shell(
+        &format!("action=available\n{RESTORE_SCRIPT}"),
+        COMMAND_TIMEOUT,
+    )? == "RESTORE_AVAILABLE")
+}
+
+pub fn restore_after_removal(
+    adb: &Adb,
+    infrastructure: Infrastructure,
+    removal_boot: &str,
+) -> Result<()> {
+    if infrastructure != Infrastructure::Od {
+        return Err(Error::new(
+            "CUNBA_RESTORE_UNAVAILABLE",
+            "Восстановление Cunba доступно только после удаления OD",
+        ));
+    }
+    let result = (|| {
+        progress(adb, "Ожидаем загрузку Android после удаления VoyahTune")?;
+        let deadline = Instant::now() + BOOT_TIMEOUT;
+        loop {
+            let ready = (|| {
+                root(adb)?;
+                if adb.shell("cat /proc/sys/kernel/random/boot_id", COMMAND_TIMEOUT)?
+                    == removal_boot
+                {
+                    return Err(Error::new(
+                        "CUNBA_BOOT_PENDING",
+                        "Ожидаем перезагрузку после удаления",
+                    ));
+                }
+
+                adb.shell("[ \"$(getprop sys.boot_completed)\" = 1 ] && service check package | grep -q ': found'", COMMAND_TIMEOUT)?;
+                adb.shell(
+                    &format!("action=removed\n{RESTORE_SCRIPT}"),
+                    COMMAND_TIMEOUT,
+                )?;
+                Ok::<_, Error>(())
+            })();
+            if ready.is_ok() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return ready;
+            }
+            thread::sleep(Duration::from_secs(3));
+        }
+        if !restoration_available(adb, infrastructure)? {
+            return Err(Error::new(
+                "CUNBA_RESTORE_UNAVAILABLE",
+                "Пригодная резервная копия Cunba не найдена",
+            ));
+        }
+        progress(
+            adb,
+            "Восстанавливаем файлы, автозапуск и состояние пакета Cunba",
+        )?;
+        // The remover has already requested writable system access; retry after its reboot.
+        let _ = adb.run(&["remount"], None, COMMAND_TIMEOUT);
+        adb.shell(
+            &format!("action=restore\n{RESTORE_SCRIPT}"),
+            Duration::from_secs(90),
+        )?;
+        let boot = adb.shell("cat /proc/sys/kernel/random/boot_id", COMMAND_TIMEOUT)?;
+        progress(adb, "Перезагружаем ГУ после восстановления Cunba")?;
+        adb.run(&["reboot"], None, Duration::from_secs(15))?
+            .checked("Не удалось перезагрузить ГУ")?;
+        observe_boot(adb, &boot, true)?;
+        adb.shell(&format!("action=finish\n{RESTORE_SCRIPT}"), COMMAND_TIMEOUT)?;
+        Ok(())
+    })();
+    result.map_err(|error: Error| Error::new("CUNBA_RESTORE_FAILED", "VoyahTune удалён, но восстановление Cunba не подтверждено. Сохранённые данные оставлены на ГУ; повторите удаление с восстановлением после устранения причины.").detail(error))
 }

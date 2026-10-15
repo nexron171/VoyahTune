@@ -57,12 +57,12 @@ case "$action" in
         [ ! -L "$source_directory" ] && [ ! -L "$injector" ] && [ ! -L "$startup" ] || fail 'Unsupported symbolic link'
         [ ! -L /data/media/0/Download ] && [ ! -L /data/local/bin ] || fail 'Unsupported parent link'
         ! exists "$saved_directory" || fail 'Quarantine already exists'
-        if [ -e "$source_directory/patch/load.bin" ]; then
+        if exists "$source_directory/patch/load.bin"; then
             [ ! -L "$source_directory/patch" ] && [ ! -L "$source_directory/patch/load.bin" ] || fail 'Unsupported loader link'
-            [ "$(digest "$source_directory/patch/load.bin")" = '8470f74751ceebff7697a12fadd11d4bd213b8c630549a19f2c739c140118fc2' ] || fail 'Unknown Cunba loader; automatic changes are not supported'
+            [ -f "$source_directory/patch/load.bin" ] || fail 'Loader is not a regular file'
         fi
         if exists "$injector"; then
-            [ "$(digest "$injector")" = '8906e493dac0f92220710634e412ec03f564ff32a24d49961fda1930f3e9e8f8' ] || fail 'Unknown frida-inject2; automatic changes are not supported'
+            [ -f "$injector" ] || fail 'Injector is not a regular file'
         fi
         # A shared OEM startup script is editable only when every matching line is understood.
         if [ -f "$startup" ] && grep -Eiq 'cunba|frida-inject2|launcher2[.]bin|systemserver[.]bin' "$startup"; then

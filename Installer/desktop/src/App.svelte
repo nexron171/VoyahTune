@@ -14,10 +14,11 @@
     type Action,
     type Dns,
     type Device,
-    type Plan,
+    type Plan as InstallationPlan,
     type Event,
     type Failure,
   } from "./api";
+  type Plan = InstallationPlan & { cunbaRestorationAvailable?: boolean };
   let screen = $state(0),
     action = $state<Action | null>(null),
     dns = $state<Dns>("keep");
@@ -41,6 +42,8 @@
     eventsReady = $state(false),
     eventError = $state<Failure | null>(null);
   let verificationPending = $state(false);
+  let restoreCunba = $state(false);
+  let cunbaRestored = $state(false);
   let cunbaConfirmed = $state(false);
   let cunbaRunning = $state(false);
   let cunbaReady = $state(false);
@@ -215,6 +218,7 @@
       reportPath = event.data.reportPath || "";
     }
     if (event.type === "step-started") current = event.stepId;
+    if (event.type === "step-completed" && event.stepId === "cunba-restore") cunbaRestored = true;
     if (
       event.type === "step-completed" &&
       event.stepId &&
@@ -488,6 +492,8 @@
       });
       screen = 2;
       removeConfirmed = false;
+      restoreCunba = false;
+      cunbaRestored = false;
     } catch (e) {
       error = failure(e);
     } finally {
@@ -497,6 +503,10 @@
   async function start(verificationOnly = false) {
     if (!eventsReady || !plan || (action === "remove" && !removeConfirmed))
       return;
+    if (action === "remove") {
+      plan.steps = plan.steps.filter((step) => step.id !== "cunba-restore");
+      if (restoreCunba) plan.steps.push({ id: "cunba-restore", title: "Восстановление Cunba и проверка после перезагрузки" });
+    }
     verificationPending = verificationOnly;
     busy = true;
     error = null;
@@ -511,6 +521,8 @@
     reportPath = "";
     stopRequested = false;
     outcome = "running";
+    cunbaRestored = false;
+    cunbaProgress = "";
     screen = 3;
     try {
       if (verificationOnly) {
@@ -518,6 +530,7 @@
       } else {
         await command("apply", {
           request: { ...plan.request, dns, confirmed: true },
+          restoreCunba: action === "remove" && restoreCunba,
         });
       }
     } catch (e) {
@@ -956,6 +969,14 @@
           {#each plan.warnings as warning}<p class="info-note">
               ⓘ {warning}
             </p>{/each}
+          {#if action === "remove" && plan.cunbaRestorationAvailable}
+            <section class="status-panel warning">
+              <h2>Доступно восстановление Cunba</h2>
+              <p>На ГУ найдены сохранённые данные Cunba. По вашему выбору после удаления VoyahTune установщик восстановит её файлы, автозапуск и прежнее состояние приложения, затем перезагрузит ГУ и проверит результат.</p>
+              <label class="confirmation"><input type="checkbox" bind:checked={restoreCunba} /> Восстановить Cunba после удаления VoyahTune</label>
+              <p>Если не выбирать восстановление, Cunba останется отключённой.</p>
+            </section>
+          {/if}
           {#if action === "remove"}<label class="confirmation"
               ><input type="checkbox" bind:checked={removeConfirmed} /> Подтверждаю
               удаление обоих наборов VoyahTune, их настроек и данных</label
@@ -966,7 +987,7 @@
               >{action === "remove" ? "УДАЛЕНИЕ" : "УСТАНОВКА"} VOYAHTUNE</span
             >
             <h1>
-              {plan.steps.find((s) => s.id === current)?.title ||
+              {(current === "cunba-restore" ? "Восстановление Cunba" : plan.steps.find((s) => s.id === current)?.title) ||
                 "Повторная проверка"}
             </h1>
             <p class="subtitle">
@@ -974,6 +995,7 @@
               результат каждого шага.
             </p>
           </div>
+          {#if current === "cunba-restore"}<p class="info-note">{cunbaProgress}</p>{/if}
           {#if canbusNotice}<section
               class="status-panel warning"
               role="alert"
@@ -1060,7 +1082,7 @@
                 ? "Время ожидания подтверждения истекло."
                 : outcome === "success"
                   ? action === "remove"
-                    ? "Команды удаления выполнены. Автомобиль перезагружается."
+                    ? cunbaRestored ? "VoyahTune удалён. Файлы и настройки Cunba восстановлены, загрузка Android проверена." : "Команды удаления выполнены. Автомобиль перезагружается."
                     : "Запуск Native проверен после перезагрузки автомобиля."
                   : ["cancelled", "paused"].includes(outcome)
                     ? stopMessage
@@ -1087,7 +1109,7 @@
               </h2>
               <p>
                 {action === "remove"
-                  ? "Резервные копии и журнал сохранены на компьютере."
+                  ? cunbaRestored ? "Восстановлено прежнее состояние Cunba. Работу её функций проверьте на ГУ." : "Резервные копии и журнал сохранены на компьютере."
                   : "Откройте VoyahTune на автомобиле, чтобы настроить доступные функции."}
               </p>
             </section>{/if}

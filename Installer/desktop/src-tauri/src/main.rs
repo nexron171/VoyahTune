@@ -356,12 +356,25 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
             action,
             dns,
         )?;
+        let restoration_available = if action == Action::Remove {
+            let adb =
+                Adb::new(default_adb(&bundle(&handle)?), Events::quiet())?.with_device(&serial)?;
+            installer_core::cunba_recovery::restoration_available(
+                &adb,
+                payload.manifest.infrastructure,
+            )
+            .unwrap_or(false)
+        } else {
+            false
+        };
         let digest = payload::sha256(&payload.root.join("manifest.json"))?;
         let runtime = handle.state::<Runtime>();
         let mut state = runtime.0.lock().unwrap();
         state.verification_pending = false;
         state.prepared = Some((plan.clone(), digest, payload.root.clone()));
-        Ok(serde_json::to_value(plan)?)
+        let mut value = serde_json::to_value(plan)?;
+        value["cunbaRestorationAvailable"] = json!(restoration_available);
+        Ok(value)
     })
     .await
     .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
@@ -412,17 +425,18 @@ async fn disable_cunba(app: tauri::AppHandle, serial: String, confirmed: bool) -
 }
 
 #[tauri::command]
-async fn apply(app: tauri::AppHandle, request: Request) -> Result<()> {
+async fn apply(app: tauri::AppHandle, request: Request, restore_cunba: Option<bool>) -> Result<()> {
     if !request.confirmed {
         return Err(Error::new("CONFIRMATION_REQUIRED", "Подтвердите план"));
     }
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
-    let result =
-        tauri::async_runtime::spawn_blocking(move || run_operation(&handle, request, false))
-            .await
-            .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
-            .and_then(|v| v);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        run_operation(&handle, request, false, restore_cunba.unwrap_or(false))
+    })
+    .await
+    .map_err(|e| Error::new("WORKER", "Ошибка рабочего процесса").detail(e))
+    .and_then(|v| v);
     finish_verification_state(&app, &result);
     release(&app.state::<Runtime>());
     result
@@ -463,7 +477,7 @@ async fn retry_verification(app: tauri::AppHandle) -> Result<()> {
             request.confirmed = true;
             request
         };
-        run_operation(&handle, request, true)
+        run_operation(&handle, request, true, false)
     })
     .await
     .map_err(|error| Error::new("WORKER", "Ошибка проверки").detail(error))
@@ -490,7 +504,12 @@ async fn retry_verification(app: tauri::AppHandle) -> Result<()> {
     })
 }
 
-fn run_operation(app: &tauri::AppHandle, request: Request, verification_only: bool) -> Result<()> {
+fn run_operation(
+    app: &tauri::AppHandle,
+    request: Request,
+    verification_only: bool,
+    restore_cunba: bool,
+) -> Result<()> {
     let (mut plan, digest, root) = app
         .state::<Runtime>()
         .0
@@ -521,6 +540,12 @@ fn run_operation(app: &tauri::AppHandle, request: Request, verification_only: bo
     }
     // DNS is an explicit choice on the review page, after initial diagnosis.
     plan.request = request.clone();
+    if restore_cunba {
+        plan.steps.push(installer_core::plans::Step {
+            id: "cunba-restore".into(),
+            title: "Восстановление Cunba и проверка после перезагрузки".into(),
+        });
+    }
     let cancel = app
         .state::<Runtime>()
         .0
@@ -556,6 +581,7 @@ fn run_operation(app: &tauri::AppHandle, request: Request, verification_only: bo
     app.state::<Runtime>().0.lock().unwrap().operation_dir = Some(engine.operation.dir.clone());
     recovery::write_json(&engine.operation.dir.join("plan.json"), &plan)?;
     engine.canbus_consent = Some(consent);
+    engine.restore_cunba = restore_cunba;
     if verification_only {
         return engine.verify_installed(request);
     }
