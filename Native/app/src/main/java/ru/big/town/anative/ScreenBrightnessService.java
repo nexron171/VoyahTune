@@ -76,25 +76,19 @@ public final class ScreenBrightnessService extends Service {
                                 throw new IllegalStateException("Cannot persist mode ownership");
                             }
                         }
-                        int mode =
-                                enabled
-                                        ? ScreenBrightnessModeController.DAY
-                                        : ScreenBrightnessModeController.AUTO;
-                        boolean confirmed =
-                                ScreenBrightnessModeController.apply(
-                                        transport,
-                                        mode,
-                                        () ->
-                                                active
-                                                        && preferences.getBoolean(
-                                                                        ScreenBrightnessSettings
-                                                                                .ENABLED,
-                                                                        false)
-                                                                == enabled);
-                        if (!confirmed) {
-                            throw new IllegalStateException("OEM brightness mode not confirmed");
-                        }
                         if (!enabled) {
+                            boolean confirmed =
+                                    ScreenBrightnessModeController.apply(
+                                            transport,
+                                            ScreenBrightnessModeController.AUTO,
+                                            () ->
+                                                    active
+                                                            && !preferences.getBoolean(
+                                                                    ScreenBrightnessSettings.ENABLED,
+                                                                    false));
+                            if (!confirmed) {
+                                throw new IllegalStateException("OEM brightness mode not confirmed");
+                            }
                             if (preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false))
                                 return;
                             if (!preferences
@@ -133,11 +127,12 @@ public final class ScreenBrightnessService extends Service {
                                                                 ScreenBrightnessSettings.ENABLED,
                                                                 false));
                         status =
-                                result.target < 1
+                                result.target < 0
                                         ? "Основной экран: яркость недоступна"
-                                        : "Цель: "
-                                                + result.target
-                                                + "% · подтверждено экранов: "
+                                        : (result.target == ScreenBrightnessSettings.NIGHT_TARGET
+                                                ? "Ночь"
+                                                : "Цель: " + result.target + "%")
+                                                + " · подтверждено экранов: "
                                                 + result.confirmed
                                                 + "/3";
                     } catch (Exception | LinkageError error) {

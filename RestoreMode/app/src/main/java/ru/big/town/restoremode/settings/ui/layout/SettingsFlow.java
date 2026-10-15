@@ -11,56 +11,68 @@ import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Content-sized chips wrapping with the same 12dp gap as the HTML. */
+/** Content-sized chips with wrapping and a configurable gap, defaulting to 12dp. */
 public final class SettingsFlow extends LinearLayout {
     private final List<View> visible = new ArrayList<>();
     private final List<Rect> bounds = new ArrayList<>();
+
+    private int gapDp = 12;
 
     public SettingsFlow(Context context, AttributeSet attrs) {
         super(context, attrs);
     }
 
-    @Override
-    protected void onMeasure(int w, int h) {
-        int width = MeasureSpec.getSize(w),
-                gap = SettingsDesign.dp(this, 12),
-                x = 0,
-                y = 0,
-                row = 0;
-        visible.clear();
-        bounds.clear();
-        for (int i = 0; i < getChildCount(); i++) {
-            View child = getChildAt(i);
-            if (child.getVisibility() == GONE) {
-                continue;
-            }
-            android.view.ViewGroup.LayoutParams lp = child.getLayoutParams();
-            child.measure(
-                    MeasureSpec.makeMeasureSpec(
-                            lp.width > 0 ? lp.width : width,
-                            lp.width > 0 ? MeasureSpec.EXACTLY : MeasureSpec.AT_MOST),
-                    MeasureSpec.makeMeasureSpec(
-                            lp.height > 0 ? lp.height : 0,
-                            lp.height > 0 ? MeasureSpec.EXACTLY : MeasureSpec.UNSPECIFIED));
-            int cw = child.getMeasuredWidth(), ch = child.getMeasuredHeight();
-            if (x > 0 && x + cw > width) {
-                x = 0;
-                y += row + gap;
-                row = 0;
-            }
-            visible.add(child);
-            bounds.add(new Rect(x, y, x + cw, y + ch));
-            x += cw + gap;
-            row = Math.max(row, ch);
-        }
-        setMeasuredDimension(resolveSize(width, w), resolveSize(y + row, h));
+    public void setGapDp(int gapDp) {
+        this.gapDp = Math.max(0, gapDp);
+        requestLayout();
     }
 
     @Override
-    protected void onLayout(boolean changed, int l, int t, int r, int b) {
-        for (int i = 0; i < visible.size(); i++) {
-            Rect box = bounds.get(i);
-            visible.get(i).layout(box.left, box.top, box.right, box.bottom);
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        int width = MeasureSpec.getSize(widthMeasureSpec);
+        int gap = SettingsDesign.dp(this, gapDp);
+        int horizontalOffset = 0;
+        int verticalOffset = 0;
+        int rowHeight = 0;
+        visible.clear();
+        bounds.clear();
+        for (int index = 0; index < getChildCount(); index++) {
+            View child = getChildAt(index);
+            if (child.getVisibility() == GONE) {
+                continue;
+            }
+            android.view.ViewGroup.LayoutParams parameters = child.getLayoutParams();
+            child.measure(
+                    MeasureSpec.makeMeasureSpec(
+                            parameters.width > 0 ? parameters.width : width,
+                            parameters.width > 0 ? MeasureSpec.EXACTLY : MeasureSpec.AT_MOST),
+                    MeasureSpec.makeMeasureSpec(
+                            parameters.height > 0 ? parameters.height : 0,
+                            parameters.height > 0 ? MeasureSpec.EXACTLY : MeasureSpec.UNSPECIFIED));
+            int childWidth = child.getMeasuredWidth();
+            int childHeight = child.getMeasuredHeight();
+            if (horizontalOffset > 0 && horizontalOffset + childWidth > width) {
+                horizontalOffset = 0;
+                verticalOffset += rowHeight + gap;
+                rowHeight = 0;
+            }
+            visible.add(child);
+            bounds.add(new Rect(
+                    horizontalOffset, verticalOffset,
+                    horizontalOffset + childWidth, verticalOffset + childHeight));
+            horizontalOffset += childWidth + gap;
+            rowHeight = Math.max(rowHeight, childHeight);
+        }
+        setMeasuredDimension(
+                resolveSize(width, widthMeasureSpec),
+                resolveSize(verticalOffset + rowHeight, heightMeasureSpec));
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        for (int index = 0; index < visible.size(); index++) {
+            Rect box = bounds.get(index);
+            visible.get(index).layout(box.left, box.top, box.right, box.bottom);
         }
     }
 }

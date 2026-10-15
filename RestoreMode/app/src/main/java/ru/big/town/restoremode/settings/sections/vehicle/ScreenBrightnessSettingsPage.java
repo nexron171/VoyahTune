@@ -3,12 +3,18 @@ package ru.big.town.restoremode.settings.sections.vehicle;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.ToggleButton;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
@@ -96,6 +102,11 @@ final class ScreenBrightnessSettingsPage {
                             "brightness:rule:" + rule.id,
                             parent -> {
                                 SettingsFlow actions = new SettingsFlow(activity, null);
+                                actions.setGapDp(16);
+                                ToggleButton night = nightButton(rule.night);
+                                night.setOnCheckedChangeListener(
+                                        (button, checked) -> setNight(rule.id, checked));
+                                actions.addView(night);
                                 actions.addView(button("Изменить", () -> edit(rule)));
                                 Button up = button("Выше", () -> move(rule.id, -1));
                                 up.setEnabled(position > 0);
@@ -111,6 +122,10 @@ final class ScreenBrightnessSettingsPage {
                                                         22,
                                                         0xfff3f5fa),
                                                 actions);
+                                LinearLayout.LayoutParams actionLayout =
+                                        (LinearLayout.LayoutParams) actions.getLayoutParams();
+                                actionLayout.topMargin = components.dp(16);
+                                actions.setLayoutParams(actionLayout);
                                 SettingsDesign.bindRow(activity, card);
                                 return SettingsPanels.spaced(card);
                             }));
@@ -170,6 +185,66 @@ final class ScreenBrightnessSettingsPage {
         return button;
     }
 
+    private ToggleButton nightButton(boolean checked) {
+        ToggleButton button = new ToggleButton(activity);
+        button.setTextOn("Ночь");
+        button.setTextOff("Ночь");
+        button.setAllCaps(false);
+        button.setLetterSpacing(0);
+        button.setStateListAnimator(null);
+        button.setBackgroundTintList(null);
+        button.setButtonDrawable(null);
+        button.setMinHeight(SettingsDesign.dp(button, 48));
+        button.setMinimumHeight(SettingsDesign.dp(button, 48));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setPadding(
+                SettingsDesign.dp(button, 19), SettingsDesign.dp(button, 15),
+                SettingsDesign.dp(button, 19), SettingsDesign.dp(button, 15));
+        ColorStateList colors = new ColorStateList(
+                new int[][] {{android.R.attr.state_checked}, {}},
+                new int[] {0xff102541, 0xffbbd1ef});
+        button.setTextColor(colors);
+        Drawable moon = activity.getDrawable(R.drawable.settings_moon).mutate();
+        moon.setTintList(colors);
+        moon.setBounds(0, 0, SettingsDesign.dp(button, 22), SettingsDesign.dp(button, 22));
+        button.setCompoundDrawablesRelative(moon, null, null, null);
+        button.setCompoundDrawablePadding(SettingsDesign.dp(button, 9));
+        StateListDrawable background = new StateListDrawable();
+        background.addState(
+                new int[] {android.R.attr.state_checked},
+                nightButtonBackground(button, 0xffa5c8ff, 0xffa5c8ff));
+        background.addState(new int[] {}, nightButtonBackground(button, 0xff233247, 0xff435874));
+        button.setBackground(new RippleDrawable(
+                ColorStateList.valueOf(0x20ffffff), background, null));
+        button.setContentDescription("Ночной режим яркости дисплея");
+        button.setChecked(checked);
+        return button;
+    }
+
+    private GradientDrawable nightButtonBackground(View view, int fill, int stroke) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(fill);
+        background.setCornerRadius(SettingsDesign.dp(view, 12));
+        background.setStroke(SettingsDesign.dp(view, 1), stroke);
+        return background;
+    }
+
+    private void setNight(String id, boolean night) {
+        List<ScreenBrightnessSettings.Rule> rules = load();
+        for (int index = 0; index < rules.size(); index++) {
+            ScreenBrightnessSettings.Rule rule = rules.get(index);
+            if (rule.id.equals(id)) {
+                rules.set(
+                        index,
+                        new ScreenBrightnessSettings.Rule(
+                                rule.id, rule.operator, rule.threshold, rule.percent, night));
+                save(rules);
+                return;
+            }
+        }
+    }
+
     private void edit(ScreenBrightnessSettings.Rule existing) {
         Spinner operator = new Spinner(activity);
         operator.setAdapter(
@@ -194,11 +269,23 @@ final class ScreenBrightnessSettingsPage {
         percent.setMinValue(1);
         percent.setMaxValue(100);
         percent.setValue(existing == null ? 80 : existing.percent);
+        ToggleButton night = nightButton(existing != null && existing.night);
+        percent.setEnabled(!night.isChecked());
+        percent.setAlpha(night.isChecked() ? 0.4f : 1f);
+        night.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    percent.setEnabled(!checked);
+                    percent.setAlpha(checked ? 0.4f : 1f);
+                });
         LinearLayout form =
                 components.card(
                         components.row("Условие", "Сравнение с показанием датчика", operator),
                         components.row("Порог датчика", "От 0 до 7", threshold),
-                        components.row("Яркость экранов", "От 1 до 100%", percent));
+                        components.row("Яркость экранов", "От 1 до 100%", percent),
+                        components.row(
+                                "Ночной режим",
+                                "Минимальная яркость без регулировки; выбранный процент игнорируется",
+                                night));
         new MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                 .setTitle(existing == null ? "Добавить правило" : "Изменить правило")
                 .setView(form)
@@ -215,7 +302,8 @@ final class ScreenBrightnessSettingsPage {
                                             ScreenBrightnessSettings.OPERATORS[
                                                     operator.getSelectedItemPosition()],
                                             threshold.getValue(),
-                                            percent.getValue());
+                                            percent.getValue(),
+                                            night.isChecked());
                             if (existing == null) rules.add(replacement);
                             else {
                                 for (int index = 0; index < rules.size(); index++) {

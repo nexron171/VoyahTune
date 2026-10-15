@@ -3,6 +3,7 @@ package ru.big.town.anative;
 /** OEM dimmer modes use screen flags, independently of brightness percentages. */
 final class ScreenBrightnessModeController {
     static final String RESTORE_PENDING = "screenBrightnessRestoreAutoPending";
+    static final int NIGHT = 0;
     static final int DAY = 1;
     static final int AUTO = 2;
 

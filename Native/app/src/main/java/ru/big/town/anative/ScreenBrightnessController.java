@@ -7,7 +7,7 @@ import java.util.function.BooleanSupplier;
 
 /** Serial reconciliation with independent readback for each physical screen. */
 final class ScreenBrightnessController {
-    interface Screens {
+    interface Screens extends ScreenBrightnessModeController.Modes {
         int read(int screen) throws Exception;
 
         boolean write(int screen, int percent) throws Exception;
@@ -35,10 +35,21 @@ final class ScreenBrightnessController {
         if (!active.getAsBoolean()) return new Result(-1, 0);
         int target = policy.next(rules, sensor, screens.read(1));
         int confirmed = 0;
-        if (target < 1) return new Result(target, confirmed);
+        if (target < 0) return new Result(target, confirmed);
+        boolean night = target == ScreenBrightnessSettings.NIGHT_TARGET;
+        int mode = night ? ScreenBrightnessModeController.NIGHT : ScreenBrightnessModeController.DAY;
         for (int screen : SCREENS) {
             if (!active.getAsBoolean()) break;
             try {
+                if (screens.readMode(screen) != mode && active.getAsBoolean()) {
+                    screens.writeMode(screen, mode);
+                }
+                if (!active.getAsBoolean()) break;
+                if (screens.readMode(screen) != mode) continue;
+                if (night) {
+                    confirmed++;
+                    continue;
+                }
                 int actual = screens.read(screen);
                 if (actual != target && active.getAsBoolean()) screens.write(screen, target);
                 if (!active.getAsBoolean()) break;

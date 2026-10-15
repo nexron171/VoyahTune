@@ -8,6 +8,7 @@ import java.util.Set;
 
 /** Ordered rules shared by the editor and the Native controller. */
 public final class ScreenBrightnessSettings {
+    public static final int NIGHT_TARGET = 0;
     public static final String ENABLED = "screenBrightnessEnabled";
     public static final String RULES = "screenBrightnessRules";
     public static final String ACTION_CONFIG = "ru.big.town.anative.SCREEN_BRIGHTNESS_CONFIG";
@@ -25,8 +26,13 @@ public final class ScreenBrightnessSettings {
         public final String operator;
         public final int threshold;
         public final int percent;
+        public final boolean night;
 
         public Rule(String id, String operator, int threshold, int percent) {
+            this(id, operator, threshold, percent, false);
+        }
+
+        public Rule(String id, String operator, int threshold, int percent, boolean night) {
             if (id == null
                     || !id.matches("[A-Za-z0-9_-]+")
                     || !validOperator(operator)
@@ -40,6 +46,7 @@ public final class ScreenBrightnessSettings {
             this.operator = operator;
             this.threshold = threshold;
             this.percent = percent;
+            this.night = night;
         }
 
         public boolean matches(int level) {
@@ -60,7 +67,8 @@ public final class ScreenBrightnessSettings {
         public String label() {
             for (int index = 0; index < OPERATORS.length; index++) {
                 if (operator.equals(OPERATORS[index])) {
-                    return "Датчик " + SYMBOLS[index] + " " + threshold + " → " + percent + "%";
+                    return "Датчик " + SYMBOLS[index] + " " + threshold + " → "
+                            + (night ? "☾ Ночь" : percent + "%");
                 }
             }
             throw new IllegalStateException(operator);
@@ -70,7 +78,7 @@ public final class ScreenBrightnessSettings {
     public static int target(List<Rule> rules, int level) {
         if (level < 0 || level > 7) return -1;
         for (Rule rule : rules) {
-            if (rule.matches(level)) return rule.percent;
+            if (rule.matches(level)) return rule.night ? NIGHT_TARGET : rule.percent;
         }
         return -1;
     }
@@ -82,15 +90,19 @@ public final class ScreenBrightnessSettings {
         Set<String> identifiers = new HashSet<>();
         for (String line : encoded.split("\n", -1)) {
             String[] fields = line.split(",", -1);
-            if (fields.length != 4 || !identifiers.add(fields[0])) {
+            if ((fields.length != 4 && fields.length != 5) || !identifiers.add(fields[0])) {
                 throw new IllegalArgumentException("Invalid brightness rule record");
+            }
+            if (fields.length == 5 && !fields[4].equals("night")) {
+                throw new IllegalArgumentException("Invalid brightness mode");
             }
             rules.add(
                     new Rule(
                             fields[0],
                             fields[1],
                             Integer.parseInt(fields[2]),
-                            Integer.parseInt(fields[3])));
+                            Integer.parseInt(fields[3]),
+                            fields.length == 5));
         }
         return Collections.unmodifiableList(rules);
     }
@@ -106,6 +118,7 @@ public final class ScreenBrightnessSettings {
                     .append(rule.threshold)
                     .append(',')
                     .append(rule.percent);
+            if (rule.night) result.append(",night");
         }
         String encoded = result.toString();
         decode(encoded);

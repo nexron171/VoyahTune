@@ -155,15 +155,90 @@ public class ScreenBrightnessControllerTest {
                         .target);
     }
 
+    @Test
+    public void nightRoundTripPreservesPercentAndOldRulesRemainDay() {
+        List<ScreenBrightnessSettings.Rule> rules =
+                ScreenBrightnessSettings.decode("night,lt,2,75,night\nday,ge,2,45");
+        assertTrue(rules.get(0).night);
+        assertEquals(75, rules.get(0).percent);
+        assertFalse(rules.get(1).night);
+        assertEquals("night,lt,2,75,night\nday,ge,2,45", ScreenBrightnessSettings.encode(rules));
+        assertEquals(ScreenBrightnessSettings.NIGHT_TARGET, ScreenBrightnessSettings.target(rules, 1));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ScreenBrightnessSettings.decode("bad,ge,2,75,unknown"));
+    }
+
+    @Test
+    public void nightSkipsPercentWritesRetainsModeDuringOutageAndReturnsToDay() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        List<ScreenBrightnessSettings.Rule> rules =
+                ScreenBrightnessSettings.decode("night,lt,2,75,night\nday,ge,2,45");
+        ScreenBrightnessController controller = new ScreenBrightnessController();
+        ScreenBrightnessController.Result night =
+                controller.reconcile(screens, rules, 1, () -> true);
+        assertEquals(ScreenBrightnessSettings.NIGHT_TARGET, night.target);
+        assertEquals(3, night.confirmed);
+        assertTrue(screens.writes.isEmpty());
+        assertEquals(Arrays.asList("1=0", "2=0", "16=0"), screens.modeWrites);
+        screens.modeWrites.clear();
+        assertEquals(0, controller.reconcile(screens, rules, -1, () -> true).target);
+        assertEquals(0, controller.reconcile(screens, new ArrayList<>(), 5, () -> true).target);
+        assertTrue(screens.writes.isEmpty());
+        assertTrue(screens.modeWrites.isEmpty());
+        ScreenBrightnessController.Result day = controller.reconcile(screens, rules, 3, () -> true);
+        assertEquals(45, day.target);
+        assertEquals(3, day.confirmed);
+        assertEquals(Arrays.asList("1=1", "2=1", "16=1"), screens.modeWrites);
+        assertEquals(Arrays.asList("1=45", "2=45", "16=45"), screens.writes);
+    }
+
+    @Test
+    public void rejectedModeDoesNotWritePercentOrClaimConfirmation() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        screens.rejectModes = true;
+        ScreenBrightnessController controller = new ScreenBrightnessController();
+        ScreenBrightnessController.Result result =
+                controller.reconcile(
+                        screens,
+                        ScreenBrightnessSettings.decode("night,ge,0,75,night"),
+                        1,
+                        () -> true);
+        assertEquals(0, result.confirmed);
+        assertTrue(screens.writes.isEmpty());
+        screens.modes.put(1, 0);
+        screens.modes.put(2, 0);
+        screens.modes.put(16, 0);
+        result = controller.reconcile(screens, defaults, 3, () -> true);
+        assertEquals(0, result.confirmed);
+        assertTrue(screens.writes.isEmpty());
+    }
+
     private static final class FakeScreens implements ScreenBrightnessController.Screens {
         final Map<Integer, Integer> values = new HashMap<>();
         final List<String> writes = new ArrayList<>();
+        final Map<Integer, Integer> modes = new HashMap<>();
+        final List<String> modeWrites = new ArrayList<>();
+        boolean rejectModes;
         boolean rejectCluster;
 
         FakeScreens() {
+            for (int screen : new int[] {1, 2, 16}) modes.put(screen, 1);
             values.put(1, 60);
             values.put(2, 40);
             values.put(16, 30);
+        }
+
+        @Override
+        public int readMode(int screen) {
+            return modes.get(screen);
+        }
+
+        @Override
+        public boolean writeMode(int screen, int mode) {
+            modeWrites.add(screen + "=" + mode);
+            if (!rejectModes) modes.put(screen, mode);
+            return !rejectModes;
         }
 
         @Override
