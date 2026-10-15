@@ -5,6 +5,7 @@ mod health;
 mod install;
 mod install_tail;
 mod network;
+mod od_command;
 mod protocol;
 mod restore_ui;
 mod state;
@@ -280,18 +281,27 @@ fn run() -> io::Result<()> {
 }
 
 fn main() {
-    if restore_ui::enabled() && std::env::args().nth(1).as_deref() == Some("--health") {
-        if unsafe { libc::geteuid() } != 0 {
-            std::process::exit(1);
-        }
-        match health::query() {
-            Ok(response) => println!("{response}"),
+    if restore_ui::enabled() {
+        let command = match od_command::parse(std::env::args().skip(1)) {
+            Ok(command) => command,
             Err(error) => {
                 eprintln!("{error}");
+                std::process::exit(2);
+            }
+        };
+        if command == od_command::Command::Health {
+            if unsafe { libc::geteuid() } != 0 {
                 std::process::exit(1);
             }
+            match health::query() {
+                Ok(response) => println!("{response}"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+            return;
         }
-        return;
     }
     if std::env::args().nth(1).as_deref() == Some("--update-ui") {
         if let Err(error) = ui_update::run() {
