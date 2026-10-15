@@ -11,6 +11,7 @@ import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
@@ -36,6 +37,8 @@ public final class ScreenBrightnessService extends Service {
 
     private final OemScreenBrightnessTransport transport = new OemScreenBrightnessTransport();
     private final ScreenBrightnessController controller = new ScreenBrightnessController();
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private volatile int latestStartId;
     private SharedPreferences preferences;
     private volatile boolean active;
     private volatile int sensor = -1;
@@ -60,6 +63,63 @@ public final class ScreenBrightnessService extends Service {
                     if (!active) return;
                     try {
                         transport.connect(getApplicationContext());
+                        boolean enabled =
+                                preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false);
+                        if (enabled
+                                && !preferences.getBoolean(
+                                        ScreenBrightnessModeController.RESTORE_PENDING, false)) {
+                            if (!preferences
+                                    .edit()
+                                    .putBoolean(
+                                            ScreenBrightnessModeController.RESTORE_PENDING, true)
+                                    .commit()) {
+                                throw new IllegalStateException("Cannot persist mode ownership");
+                            }
+                        }
+                        int mode =
+                                enabled
+                                        ? ScreenBrightnessModeController.DAY
+                                        : ScreenBrightnessModeController.AUTO;
+                        boolean confirmed =
+                                ScreenBrightnessModeController.apply(
+                                        transport,
+                                        mode,
+                                        () ->
+                                                active
+                                                        && preferences.getBoolean(
+                                                                        ScreenBrightnessSettings
+                                                                                .ENABLED,
+                                                                        false)
+                                                                == enabled);
+                        if (!confirmed) {
+                            throw new IllegalStateException("OEM brightness mode not confirmed");
+                        }
+                        if (!enabled) {
+                            if (preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false))
+                                return;
+                            if (!preferences
+                                    .edit()
+                                    .putBoolean(
+                                            ScreenBrightnessModeController.RESTORE_PENDING, false)
+                                    .commit()) {
+                                throw new IllegalStateException("Cannot persist mode restoration");
+                            }
+                            status = "Автоматический режим восстановлен";
+                            publishStatus();
+                            int completedStart = latestStartId;
+                            main.post(
+                                    () -> {
+                                        if (!preferences.getBoolean(
+                                                        ScreenBrightnessSettings.ENABLED, false)
+                                                && !preferences.getBoolean(
+                                                        ScreenBrightnessModeController
+                                                                .RESTORE_PENDING,
+                                                        false)) {
+                                            stopSelfResult(completedStart);
+                                        }
+                                    });
+                            return;
+                        }
                         List<ScreenBrightnessSettings.Rule> snapshot = rules;
                         ScreenBrightnessController.Result result =
                                 controller.reconcile(
@@ -119,18 +179,24 @@ public final class ScreenBrightnessService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        latestStartId = startId;
+        boolean enabled = preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false);
         if (InfrastructureProfile.read(this) != InfrastructureProfile.OD
-                || !preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false)) {
+                || (!enabled
+                        && !preferences.getBoolean(
+                                ScreenBrightnessModeController.RESTORE_PENDING, false))) {
             active = false;
             stopSelf();
             return START_NOT_STICKY;
         }
         try {
             rules =
-                    ScreenBrightnessSettings.decode(
-                            preferences.getString(
-                                    ScreenBrightnessSettings.RULES,
-                                    ScreenBrightnessSettings.DEFAULT_RULES));
+                    !enabled
+                            ? java.util.Collections.emptyList()
+                            : ScreenBrightnessSettings.decode(
+                                    preferences.getString(
+                                            ScreenBrightnessSettings.RULES,
+                                            ScreenBrightnessSettings.DEFAULT_RULES));
         } catch (IllegalArgumentException error) {
             Log.w(TAG, "Invalid saved brightness rules", error);
             active = false;
@@ -138,8 +204,13 @@ public final class ScreenBrightnessService extends Service {
             return START_NOT_STICKY;
         }
         active = true;
-        LightSensorService.addLevelListener(sensorListener);
-        sensor = LightSensorService.lastKnownLevel();
+        if (enabled) {
+            LightSensorService.addLevelListener(sensorListener);
+            sensor = LightSensorService.lastKnownLevel();
+        } else {
+            LightSensorService.removeLevelListener(sensorListener);
+            sensor = -1;
+        }
         schedule();
         return START_STICKY;
     }

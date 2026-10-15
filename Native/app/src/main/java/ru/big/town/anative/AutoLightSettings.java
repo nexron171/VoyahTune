@@ -111,8 +111,14 @@ final class AutoLightSettings {
                     }
                 } else context.stopService(service);
                 Intent brightness = new Intent(context, ScreenBrightnessService.class);
-                if (brightnessEnabled) context.startForegroundService(brightness);
-                else context.stopService(brightness);
+                if (brightnessEnabled
+                        || (InfrastructureProfile.read(context) == InfrastructureProfile.OD
+                                && context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                                        .getBoolean(
+                                                ScreenBrightnessModeController.RESTORE_PENDING,
+                                                false))) {
+                    context.startForegroundService(brightness);
+                } else context.stopService(brightness);
             }
         };
     }

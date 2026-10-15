@@ -8,11 +8,14 @@ import android.os.IBinder;
 import java.lang.reflect.Method;
 
 /** Uses the installed SDK's Binder proxy so transaction numbers follow the vehicle firmware. */
-final class OemScreenBrightnessTransport implements ScreenBrightnessController.Screens {
+final class OemScreenBrightnessTransport
+        implements ScreenBrightnessController.Screens, ScreenBrightnessModeController.Modes {
     private IBinder binder;
     private Object service;
     private Method getter;
     private Method setter;
+    private Method modeGetter;
+    private Method modeSetter;
 
     void connect(Context context) throws Exception {
         if (binder != null && binder.isBinderAlive()) return;
@@ -34,6 +37,8 @@ final class OemScreenBrightnessTransport implements ScreenBrightnessController.S
                         .invoke(null, candidate);
         getter = api.getMethod("getBackLight", int.class);
         setter = api.getMethod("setBackLight", int.class, int.class, int.class, boolean.class);
+        modeGetter = api.getMethod("getDimmer", int.class);
+        modeSetter = api.getMethod("setDimmer", int.class, int.class, int.class, boolean.class);
         binder = candidate;
     }
 
@@ -46,6 +51,16 @@ final class OemScreenBrightnessTransport implements ScreenBrightnessController.S
     public boolean write(int screen, int percent) throws Exception {
         // FLAG_DEFAULT notifies stock UI; background retries must not open warning dialogs.
         return Boolean.TRUE.equals(setter.invoke(service, percent, 0, screen, false));
+    }
+
+    @Override
+    public int readMode(int screen) throws Exception {
+        return (Integer) modeGetter.invoke(service, screen);
+    }
+
+    @Override
+    public boolean writeMode(int screen, int mode) throws Exception {
+        return Boolean.TRUE.equals(modeSetter.invoke(service, mode, 0, screen, false));
     }
 
     private static Class<?> loadApi(Context context) throws Exception {

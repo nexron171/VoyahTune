@@ -22,6 +22,15 @@ public final class ScreenBrightnessConfigReceiver extends BroadcastReceiver {
             Log.w("ScreenBrightness", "Rejected invalid configuration", error);
             return;
         }
+        android.content.SharedPreferences preferences =
+                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+        if (preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false)
+                && !intent.getBooleanExtra(ScreenBrightnessSettings.ENABLED, false)) {
+            preferences
+                    .edit()
+                    .putBoolean(ScreenBrightnessModeController.RESTORE_PENDING, true)
+                    .apply();
+        }
         context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(
