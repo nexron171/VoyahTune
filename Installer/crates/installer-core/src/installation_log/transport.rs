@@ -14,8 +14,8 @@ pub(super) trait Transport {
     fn send(&mut self, chunk: &Chunk, timeout: Duration) -> std::result::Result<(), String>;
 }
 
-const SESSION_URL: &str = "https://155.212.170.149/api/v1/installation_sessions";
-const CHUNK_URL: &str = "https://155.212.170.149/api/v1/installation_log_chunks";
+const SESSION_URL: &str = "https://voyahtune.ru/api/v1/installation_sessions";
+const CHUNK_URL: &str = "https://voyahtune.ru/api/v1/installation_log_chunks";
 
 struct HttpTransport {
     agent: ureq::Agent,
