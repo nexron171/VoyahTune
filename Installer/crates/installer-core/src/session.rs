@@ -16,6 +16,17 @@ pub fn plan(
     action: Action,
     dns: Dns,
 ) -> Result<Plan> {
+    plan_with_events(adb_path, payload, serial, action, dns, Events::quiet())
+}
+
+pub fn plan_with_events(
+    adb_path: &Path,
+    payload: &Payload,
+    serial: &str,
+    action: Action,
+    dns: Dns,
+    events: Events,
+) -> Result<Plan> {
     if action != Action::Remove && payload.manifest.removal_only {
         return Err(crate::Error::new(
             "PAYLOAD_REQUIRED",
@@ -23,7 +34,7 @@ pub fn plan(
         ));
     }
     payload.verify()?;
-    let adb = Adb::new(adb_path, Events::quiet())?.with_device(serial)?;
+    let adb = Adb::new(adb_path, events)?.with_device(serial)?;
     adb.require_single()?;
     for args in [&["root"][..], &["wait-for-device"][..], &["root"][..]] {
         let _ = adb.run(args, None, Duration::from_secs(20));

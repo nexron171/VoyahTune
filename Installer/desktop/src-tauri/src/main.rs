@@ -6,6 +6,7 @@ use installer_core::{
     engine::{default_adb, Engine},
     engineering_menu,
     events::{Event, Events},
+    installation_log::{InstallationLog, Status as SessionStatus},
     payload::{self, Payload},
     plans::{Action, Dns, Plan, Request},
     recovery, session, Error, Result,
@@ -24,6 +25,7 @@ use tauri::{Emitter, Manager, State};
 
 #[derive(Default)]
 struct Running {
+    installation_log: Option<InstallationLog>,
     busy: bool,
     verification_pending: bool,
     cancel: Option<Arc<AtomicBool>>,
@@ -35,6 +37,92 @@ struct Running {
 }
 #[derive(Default)]
 struct Runtime(Mutex<Running>);
+fn installation_log(app: &tauri::AppHandle) -> Option<InstallationLog> {
+    app.state::<Runtime>()
+        .0
+        .lock()
+        .unwrap()
+        .installation_log
+        .clone()
+}
+
+fn session_logs_root() -> Result<PathBuf> {
+    Ok(recovery::data_dir()?
+        .parent()
+        .unwrap()
+        .join("installation-sessions"))
+}
+
+#[tauri::command]
+async fn log_session_begin(app: tauri::AppHandle) -> Result<Value> {
+    if let Some(session) = installation_log(&app).filter(InstallationLog::active) {
+        return Ok(serde_json::to_value(session.info())?);
+    }
+    let selected = app.state::<Runtime>().0.lock().unwrap().payload.clone();
+    let release = selected
+        .and_then(|path| Payload::open(&path).ok())
+        .map(|p| {
+            json!({
+                "version":p.manifest.release_version,"infrastructure":p.manifest.infrastructure,
+                "manifestSha256":payload::sha256(&p.root.join("manifest.json")).ok()
+            })
+        });
+    let session =
+        InstallationLog::begin(&session_logs_root()?, &default_adb(&bundle(&app)?), release)?;
+    let info = serde_json::to_value(session.info())?;
+    app.state::<Runtime>().0.lock().unwrap().installation_log = Some(session);
+    Ok(info)
+}
+
+#[tauri::command]
+fn log_session_record(
+    app: tauri::AppHandle,
+    session_id: String,
+    kind: String,
+    name: String,
+    data: Value,
+    selected_release: Option<Value>,
+    dns: Option<String>,
+) -> Result<()> {
+    if let Some(session) = installation_log(&app) {
+        if session.info().session_id != session_id {
+            return Err(Error::new("SESSION_CHANGED", "Сессия журнала изменилась"));
+        }
+        session.metadata(selected_release, dns.as_deref())?;
+        session.record(&kind, &name, Some(&name), None, data)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn log_session_finish(
+    app: tauri::AppHandle,
+    session_id: String,
+    status: SessionStatus,
+    reason: Option<Value>,
+) -> Result<()> {
+    let session = installation_log(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(session) = session {
+            if session.info().session_id != session_id {
+                return Err(Error::new("SESSION_CHANGED", "Сессия журнала изменилась"));
+            }
+            session.finish(status, reason)?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| Error::new("SESSION_FINISH", "Не удалось завершить журнал сессии").detail(e))?
+}
+
+fn record_engine_event(session: &Option<InstallationLog>, event: &Event) {
+    if let Some(session) = session {
+        if let Err(error) = session.event(event) {
+            eprintln!("Session journal failed: {error}");
+        }
+    }
+}
+
 fn bundle(app: &tauri::AppHandle) -> Result<PathBuf> {
     let resources = app
         .path()
@@ -349,12 +437,22 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let payload = operation_payload(&handle, &serial, action)?;
-        let plan = session::plan(
+        let session_log = installation_log(&handle);
+        if let Some(session) = &session_log {
+            session.bind_device(&serial)?;
+        }
+        let diagnostic_events = Events::new(
+            "vehicle-check".into(),
+            None,
+            Arc::new(move |event| record_engine_event(&session_log, event)),
+        )?;
+        let plan = session::plan_with_events(
             &default_adb(&bundle(&handle)?),
             &payload,
             &serial,
             action,
             dns,
+            diagnostic_events,
         )?;
         let restoration_available = if action == Action::Remove {
             let adb =
@@ -401,6 +499,10 @@ async fn disable_cunba(app: tauri::AppHandle, serial: String, confirmed: bool) -
     let result = tauri::async_runtime::spawn_blocking(move || {
         let payload = operation_payload(&handle, &serial, Action::Install)?;
         let emitter = handle.clone();
+        let session_log = installation_log(&handle);
+        if let Some(session) = &session_log {
+            session.bind_device(&serial)?;
+        }
         let result = installer_core::cunba_recovery::disable(
             &default_adb(&bundle(&handle)?),
             &payload,
@@ -408,6 +510,7 @@ async fn disable_cunba(app: tauri::AppHandle, serial: String, confirmed: bool) -
             confirmed,
             &recovery::data_dir()?,
             Arc::new(move |event| {
+                record_engine_event(&session_log, event);
                 if let Some(report) = event.data.get("reportPath").and_then(Value::as_str) {
                     emitter.state::<Runtime>().0.lock().unwrap().operation_dir =
                         PathBuf::from(report).parent().map(PathBuf::from);
@@ -556,9 +659,15 @@ fn run_operation(
         .unwrap();
     let consent = Arc::new(RemovalConsent::new(false));
     app.state::<Runtime>().0.lock().unwrap().consent = Some(consent.clone());
+    let session_log = installation_log(app);
+    if let Some(session) = &session_log {
+        session.bind_device(&request.serial)?;
+        session.metadata(Some(json!({"version":payload.manifest.release_version,"infrastructure":payload.manifest.infrastructure,"manifestSha256":digest})), Some(match request.dns { Dns::Keep => "keep", Dns::On => "on", Dns::Off => "off" }))?;
+    }
     let handle = app.clone();
     let output_cancel = cancel.clone();
     let callback = Arc::new(move |event: &Event| {
+        record_engine_event(&session_log, event);
         if handle.emit("installer-event", event).is_err() {
             output_cancel.store(true, Ordering::Relaxed);
         }
@@ -647,6 +756,52 @@ fn operation_events(runtime: State<Runtime>) -> Result<Vec<Value>> {
     Ok(milestones)
 }
 #[tauri::command]
+async fn open_logs_folder(app: tauri::AppHandle) -> Result<String> {
+    let directory = {
+        let runtime = app.state::<Runtime>();
+        let running = runtime.0.lock().unwrap();
+        running
+            .installation_log
+            .as_ref()
+            .map(InstallationLog::directory)
+            .or_else(|| running.operation_dir.clone())
+    }
+    .map(Ok)
+    .unwrap_or_else(session_logs_root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::create_dir_all(&directory)?;
+        #[cfg(target_os = "macos")]
+        let status = std::process::Command::new("open")
+            .arg(&directory)
+            .status()?;
+        #[cfg(target_os = "linux")]
+        let status = std::process::Command::new("xdg-open")
+            .arg(&directory)
+            .status()?;
+        #[cfg(not(windows))]
+        if !status.success() {
+            return Err(
+                Error::new("LOGS_FOLDER_OPEN", "Не удалось открыть папку с логами")
+                    .detail(directory.display()),
+            );
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("explorer.exe")
+                .arg(&directory)
+                .creation_flags(0x08000000)
+                .spawn()?;
+        }
+        Ok(directory.display().to_string())
+    })
+    .await
+    .map_err(|error| {
+        Error::new("LOGS_FOLDER_OPEN", "Не удалось открыть папку с логами").detail(error)
+    })?
+}
+
+#[tauri::command]
 fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
     let dir = recovery::data_dir()?.join("exports");
     fs::create_dir_all(&dir)?;
@@ -681,6 +836,9 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
             }
         }
     }
+    if let Some(session) = runtime.0.lock().unwrap().installation_log.clone() {
+        session.export(&path.join("installation-session"))?;
+    }
     recovery::write_json(
         &path.join("gui.json"),
         &json!({"schema":1,"events":events,"originalOperationDirectory":operation_dir,"note":"Резервные копии файлов остаются в исходной папке операции."}),
@@ -690,7 +848,14 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
 fn main() {
     tauri::Builder::default()
         .manage(Runtime::default())
+        .setup(|_| {
+            InstallationLog::recover_interrupted(&session_logs_root()?)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            log_session_begin,
+            log_session_record,
+            log_session_finish,
             engineering_code,
             release_catalog,
             catalog_settings,
@@ -707,7 +872,8 @@ fn main() {
             cancel,
             resolve_canbus_conflict,
             operation_events,
-            save_report
+            save_report,
+            open_logs_folder
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -724,6 +890,8 @@ fn main() {
                 if operation_busy(&app.state::<Runtime>()) {
                     api.prevent_exit();
                     let _ = app.emit("installer-close-blocked", ());
+                } else if let Some(session) = installation_log(app).filter(InstallationLog::active) {
+                    let _ = session.finish(SessionStatus::Error, Some(json!({"code":"USER_CLOSED","message":"Пользователь закрыл установщик до завершения установки","source":"lifecycle"})));
                 }
             }
         });

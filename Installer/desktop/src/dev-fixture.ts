@@ -334,6 +334,7 @@ export async function command(
     emit("operation-completed", undefined, "Результат проверен");
     return;
   }
+  if (name === "open_logs_folder") return "Тестовая папка логов · браузерная проверка";
   if (name === "save_report") return "Тестовый отчёт · браузерная проверка";
   throw Error(`Unknown fixture command: ${name}`);
 }

@@ -3,6 +3,10 @@
   import CatalogSettings from "./CatalogSettings.svelte";
   import {
     command,
+    beginInstallationSession,
+    finishInstallationSession,
+    recordChoice,
+    recordStep,
     subscribe,
     onCloseBlocked,
     onPayloadProgress,
@@ -19,6 +23,11 @@
     type Failure,
   } from "./api";
   type Plan = InstallationPlan & { cunbaRestorationAvailable?: boolean };
+  let installationSessionId = $state("");
+  let loggingWarning = $state("");
+  let logsFolderOpening = $state(false);
+  let logsFolderError = $state("");
+  let sessionStarting = $state(false);
   let screen = $state(0),
     action = $state<Action | null>(null),
     dns = $state<Dns>("keep");
@@ -48,6 +57,9 @@
   let cunbaRunning = $state(false);
   let cunbaReady = $state(false);
   let cunbaProgress = $state("");
+  $effect(() => {
+    if (error && installationSessionId) void recordStep("gui-error", { error, screen });
+  });
   const cunbaChoice = $derived(
     action === "install" && ["CUNBA_DETECTED", "CUNBA_ROLLBACK_REQUIRED"].includes(error?.code || ""),
   );
@@ -88,7 +100,7 @@
     return rows;
   });
   const nextBlocked = $derived(
-    busy
+    sessionStarting ? "Создаём журнал сессии" : busy
       ? downloadBusy
         ? "Дождитесь загрузки релиза"
         : "Дождитесь завершения проверки"
@@ -257,6 +269,8 @@
     }
   }
   onMount(() => {
+    const loggingFailed = (event: globalThis.Event) => { loggingWarning = (event as CustomEvent<string>).detail; };
+    window.addEventListener("installation-log-error", loggingFailed);
     let disposed = false,
       unsubscribe = () => {},
       unsubscribeClose = () => {},
@@ -295,6 +309,7 @@
     updateCatalog(true);
     return () => {
       disposed = true;
+      window.removeEventListener("installation-log-error", loggingFailed);
       unsubscribe();
       unsubscribeClose();
       unsubscribeDownload();
@@ -321,6 +336,7 @@
     confirmed = false;
   }
   async function loadRelease(path = localPath) {
+    await recordChoice("local-release-selected", { path });
     busy = true;
     downloadBusy = true;
     downloadProgress = null;
@@ -336,6 +352,7 @@
   }
   async function selectRelease(row: ReleaseRow) {
     if (busy) return;
+    await recordChoice("release-selected", { version: row.version, source: row.cached ? "cache" : "catalog" }, { version: row.version });
     if (row.release?.compatible === false) {
       error = {
         code: "INSTALLER_UPDATE_REQUIRED",
@@ -367,6 +384,7 @@
   }
   async function deleteRelease(cached: CachedPayload) {
     if (busy || !cached.deletable) return;
+    await recordChoice("cached-release-delete", { version: cached.version });
     busy = true;
     error = null;
     try {
@@ -376,6 +394,7 @@
       if (result.deselected || releasePath === cached.path) {
         releasePath = "";
         releaseVersion = "";
+        await recordChoice("release-cleared", {}, null);
         plan = null;
         confirmed = false;
       }
@@ -393,6 +412,7 @@
     }
   }
   async function cancelDownload() {
+    await recordChoice("download-cancelled", {});
     try {
       await command("cancel");
     } catch (e) {
@@ -411,16 +431,40 @@
       error = failure(e);
     }
   }
-  function choose(value: Action) {
-    cunbaReady = false;
-    cunbaConfirmed = false;
-    action = value;
-    plan = null;
-    confirmed = false;
-    error = null;
+  async function ensureInstallationSession() {
+    if (action !== "install") return;
+    installationSessionId = await beginInstallationSession();
+  }
+  async function finishSession(status: "success" | "error", reason: unknown = null) {
+    sessionStarting = true;
+    try { await finishInstallationSession(status, reason); }
+    catch (caught) { loggingWarning = failure(caught).message; }
+    finally { sessionStarting = false; }
+  }
+  async function choose(value: Action) {
+    if (sessionStarting) return;
+    sessionStarting = true;
+    try {
+      if (value === "install") {
+        installationSessionId = await beginInstallationSession();
+        await recordChoice("action-selected", { action: value }, releaseVersion ? { version: releaseVersion } : undefined, dns);
+      } else {
+        await recordChoice("action-selected", { action: value });
+        await finishSession("error", { code: "ACTION_CHANGED", message: "Пользователь переключился с установки на удаление", source: "user" });
+        installationSessionId = "";
+      }
+      cunbaReady = false;
+      cunbaConfirmed = false;
+      action = value;
+      plan = null;
+      confirmed = false;
+      error = null;
+    } catch (caught) { error = failure(caught); }
+    finally { sessionStarting = false; }
   }
   async function next() {
     if (nextBlocked) return;
+    await ensureInstallationSession();
     screen = 1;
     await refresh();
   }
@@ -448,6 +492,8 @@
     plan = null;
     verificationPending = false;
     try {
+      await ensureInstallationSession();
+      await recordChoice("cunba-disable-approved", { confirmed: true });
       const result = await command<{ reportPath: string }>("disable_cunba", {
         serial: devices[0].serial,
         confirmed: true,
@@ -457,13 +503,16 @@
       screen = 1;
     } catch (caught) {
       error = failure(caught);
+      await finishSession("error", { ...error, displayTitle: error.message, source: "gui" });
     } finally {
       cunbaRunning = false;
       cunbaConfirmed = false;
       busy = false;
     }
   }
-  function stopCunbaInstallation() {
+  async function stopCunbaInstallation() {
+    await recordChoice("cunba-disable-declined", {});
+    await finishSession("error", { code: "USER_STOPPED", message: "Пользователь остановил установку при обнаружении Cunba", source: "user" });
     error = null;
     plan = null;
     confirmed = false;
@@ -472,6 +521,7 @@
     screen = 0;
   }
   async function continueAfterCunba() {
+    await recordChoice("continue-after-cunba", { approved: true });
     cunbaReady = false;
     await refresh();
     if (connected) {
@@ -485,6 +535,8 @@
     error = null;
     plan = null;
     try {
+      await ensureInstallationSession();
+      await recordChoice("vehicle-check-requested", { serial: devices[0].serial, deviceConfirmed: confirmed });
       plan = await command<Plan>("plan", {
         serial: devices[0].serial,
         action,
@@ -525,6 +577,8 @@
     cunbaProgress = "";
     screen = 3;
     try {
+      await ensureInstallationSession();
+      await recordChoice(verificationOnly ? "verification-retry" : "plan-approved", { action, dns, restoreCunba, deviceConfirmed: confirmed }, undefined, dns);
       if (verificationOnly) {
         await command("retry_verification");
       } else {
@@ -541,9 +595,11 @@
       busy = false;
     } finally {
       await recoverEvents();
+      await completeVisibleSession();
     }
   }
   async function resolveCanbus(approved: boolean) {
+    await recordChoice("canbus-removal-consent", { approved });
     canbusAnswerPending = true;
     try {
       await command("resolve_canbus_conflict", { approved });
@@ -553,6 +609,7 @@
     }
   }
   async function stop() {
+    await recordChoice("stop-requested", { step: current });
     try {
       await command("cancel");
       stopRequested = true;
@@ -561,6 +618,8 @@
     }
   }
   async function retry() {
+    await ensureInstallationSession();
+    await recordChoice("installation-retry", { verificationOnly: verificationPending });
     if (verificationPending) {
       await start(true);
       return;
@@ -569,6 +628,18 @@
     error = null;
     await refresh();
   }
+  async function openLogsFolder() {
+    if (logsFolderOpening) return;
+    logsFolderOpening = true;
+    logsFolderError = "";
+    try {
+      await command<string>("open_logs_folder");
+    } catch (caught) {
+      logsFolderError = failure(caught).message;
+    } finally {
+      logsFolderOpening = false;
+    }
+  }
   async function saveReport() {
     try {
       const path = await command<string>("save_report", { events });
@@ -576,6 +647,28 @@
     } catch (e) {
       error = failure(e);
     }
+  }
+  async function completeVisibleSession() {
+    if (action !== "install" || screen !== 4) return;
+    const succeeded = outcome === "success";
+    await finishSession(succeeded ? "success" : "error", succeeded ? null : {
+      ...(error || {}),
+      code: error?.code || (outcome === "cancelled" ? "USER_CANCELLED" : "INSTALLATION_INCOMPLETE"),
+      message: error?.message || stopMessage || "Установка не подтверждена",
+      displayTitle: finalTitle(),
+      source: "gui",
+    });
+  }
+  function finalTitle() {
+    if (outcome === "warning") return "Установка завершена";
+    if (outcome === "success") {
+      return action === "remove" ? "VoyahTune удалён" : "VoyahTune готов к работе";
+    }
+    if (outcome === "cancelled") return "Операция отменена";
+    if (outcome === "paused") return "Требуется ваше решение";
+    return error?.code === "READINESS_UNCONFIRMED"
+      ? "Файлы установлены, готовность не подтверждена"
+      : "Не удалось завершить операцию";
   }
 </script>
 
@@ -601,10 +694,12 @@
         <span class="offline-dot"></span> Установка из загруженного релиза<small
           >Установщик {catalog?.installerVersion || "…"}</small
         >
+        {#if installationSessionId}<small style="overflow-wrap: anywhere">Сессия: {installationSessionId}</small>{/if}
       </div>
     </aside>
     <main id="main" aria-busy={busy && !canbusNotice}>
       <div class="screen">
+        {#if loggingWarning}<p class="info-note" role="alert">Не удалось записать часть журнала: {loggingWarning}</p>{/if}
         {#if screen === 0}
           <div class="screen-heading">
             <span class="eyebrow">НАЧАЛО РАБОТЫ</span>
@@ -623,10 +718,10 @@
               <div class="catalog-actions">
                 <button
                   class="button secondary"
-                  disabled={busy}
+                  disabled={busy || sessionStarting}
                   onclick={() => updateCatalog(true)}>Обновить список</button
                 ><CatalogSettings
-                  disabled={busy}
+                  disabled={busy || sessionStarting}
                   onsaved={async () => {
                     catalog = null;
                     await updateCatalog(true);
@@ -769,7 +864,7 @@
                   aria-label="Путь к релизу"
                   type="text"
                   bind:value={localPath}
-                  disabled={busy}
+                  disabled={busy || sessionStarting}
                   placeholder="/путь/payload_3.13.0.zip"
                 /></label
               ><button
@@ -791,7 +886,7 @@
                     name="action"
                     value={v.id}
                     checked={action === v.id}
-                    disabled={busy}
+                    disabled={busy || sessionStarting}
                     onchange={() => choose(v.id)}
                   /><span
                     ><strong>{v.name}</strong><small>{v.subtitle}</small></span
@@ -849,14 +944,15 @@
                     <span class="device-status">{d.state}</span>
                   </div>{/each}
               </div>
-              <button class="button secondary" onclick={refresh} disabled={busy}
+              <button class="button secondary" onclick={refresh} disabled={busy || sessionStarting}
                 >↻ Обновить</button
               >
               {#if connected}<label class="confirmation"
                   ><input
                     type="checkbox"
                     bind:checked={confirmed}
-                    disabled={busy}
+                    onchange={() => recordChoice("device-confirmation", { confirmed, serial: devices[0]?.serial })}
+                    disabled={busy || sessionStarting}
                   />
                   Это мой автомобиль, подключённый для {action === "remove"
                     ? "удаления"
@@ -962,6 +1058,7 @@
                       name="dns"
                       value={item.id}
                       bind:group={dns}
+                      onchange={() => recordChoice("dns-selected", { dns }, undefined, dns)}
                     />{item.label}</label
                   >{/each}
               </div>
@@ -973,7 +1070,7 @@
             <section class="status-panel warning">
               <h2>Доступно восстановление Cunba</h2>
               <p>На ГУ найдены сохранённые данные Cunba. По вашему выбору после удаления VoyahTune установщик восстановит её файлы, автозапуск и прежнее состояние приложения, затем перезагрузит ГУ и проверит результат.</p>
-              <label class="confirmation"><input type="checkbox" bind:checked={restoreCunba} /> Восстановить Cunba после удаления VoyahTune</label>
+              <label class="confirmation"><input type="checkbox" bind:checked={restoreCunba} onchange={() => recordChoice("cunba-restore-consent", { approved: restoreCunba })} /> Восстановить Cunba после удаления VoyahTune</label>
               <p>Если не выбирать восстановление, Cunba останется отключённой.</p>
             </section>
           {/if}
@@ -1063,19 +1160,7 @@
               >{["success", "warning"].includes(outcome) ? "ГОТОВО" : "ОПЕРАЦИЯ ОСТАНОВЛЕНА"}</span
             >
             <h1>
-              {outcome === "warning"
-                ? "Установка завершена"
-                : outcome === "success"
-                  ? action === "remove"
-                    ? "VoyahTune удалён"
-                    : "VoyahTune готов к работе"
-                  : outcome === "cancelled"
-                    ? "Операция отменена"
-                    : outcome === "paused"
-                      ? "Требуется ваше решение"
-                      : error?.code === "READINESS_UNCONFIRMED"
-                        ? "Файлы установлены, готовность не подтверждена"
-                        : "Не удалось завершить операцию"}
+{finalTitle()}
             </h1>
             <p class="subtitle">
               {outcome === "warning"
@@ -1134,12 +1219,12 @@
               <p>Не отключайте USB и питание ГУ. Идёт отключение, перезагрузка или восстановление.</p>
             {:else if cunbaReady}
               <p>После перезагрузки активная Cunba не обнаружена. Android и лаунчер прошли проверку стабильности. Можно заново проверить автомобиль и продолжить установку.</p>
-              <button class="button primary" disabled={busy} onclick={continueAfterCunba}>Продолжить установку VoyahTune</button>
+              <button class="button primary" disabled={busy || sessionStarting} onclick={continueAfterCunba}>Продолжить установку VoyahTune</button>
             {:else}
               <p>Можно остановить установку или отключить поддерживаемые компоненты Cunba. Её функции станут недоступны. Исходные файлы и настройки будут сохранены.</p>
               <p>ГУ перезагрузится. Если Cunba останется активной, изменения будут восстановлены, а установка заблокирована. Неизвестные компоненты автоматически не изменяются.</p>
-              <label><input type="checkbox" bind:checked={cunbaConfirmed} disabled={busy} /> Согласен на отключение Cunba и перезагрузку ГУ</label>
-              <button class="button secondary" disabled={busy} onclick={stopCunbaInstallation}>Остановить установку</button>
+              <label><input type="checkbox" bind:checked={cunbaConfirmed} onchange={() => recordChoice("cunba-disable-consent", { approved: cunbaConfirmed })} disabled={busy || sessionStarting} /> Согласен на отключение Cunba и перезагрузку ГУ</label>
+              <button class="button secondary" disabled={busy || sessionStarting} onclick={stopCunbaInstallation}>Остановить установку</button>
               <button class="button primary" disabled={busy || !cunbaConfirmed || !connected} onclick={disableCunba}>{error?.code === "CUNBA_ROLLBACK_REQUIRED" ? "Повторить восстановление" : "Отключить Cunba"}</button>
             {/if}
           </section>
@@ -1161,6 +1246,10 @@
             </details>
           </section>{/if}
         {#if reportPath}<p class="report-path">Отчёт: {reportPath}</p>{/if}
+        <button class="button secondary" disabled={logsFolderOpening} onclick={openLogsFolder}>
+          Открыть папку с логами
+        </button>
+        {#if logsFolderError}<p class="info-note" role="alert">{logsFolderError}</p>{/if}
       </div>
       <footer class="footer">
         {#if cunbaRunning || cunbaReady || cunbaChoice}<span class="footer-note">{cunbaRunning ? "Дождитесь завершения операции" : "Выберите действие в разделе Cunba"}</span>
@@ -1178,7 +1267,7 @@
           >
         {:else if screen === 1}<button
             class="button secondary"
-            disabled={busy}
+            disabled={busy || sessionStarting}
             onclick={() => {
               screen = 0;
               error = null;
@@ -1199,7 +1288,7 @@
             class="button"
             class:primary={action !== "remove"}
             class:danger={action === "remove"}
-            disabled={busy ||
+            disabled={busy || sessionStarting ||
               !eventsReady ||
               (action === "remove" && !removeConfirmed)}
             onclick={() => start()}
@@ -1224,9 +1313,11 @@
           </div>
           <button
             class="button primary"
+            disabled={sessionStarting}
             onclick={["success", "warning"].includes(outcome)
               ? () => {
                   screen = 0;
+                  action = null;
                   error = null;
                 }
               : retry}
@@ -1260,7 +1351,13 @@
         (screen === 4
           ? "События не получены. Ошибка выше содержит подробности; сохраните отчёт."
           : "Операция ещё не запускалась.")}</pre>
-    <button class="button primary" onclick={saveReport}>Сохранить отчёт</button>
+    <div class="footer-actions">
+      <button class="button primary" onclick={saveReport}>Сохранить отчёт</button>
+      <button class="button secondary" disabled={logsFolderOpening} onclick={openLogsFolder}>
+        Открыть папку с логами
+      </button>
+    </div>
+    {#if logsFolderError}<p class="info-note" role="alert">{logsFolderError}</p>{/if}
   </dialog>{/if}
 
 <style>

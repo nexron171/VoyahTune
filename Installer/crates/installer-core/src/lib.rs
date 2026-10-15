@@ -10,6 +10,7 @@ pub mod engineering_menu;
 pub mod error;
 pub mod events;
 pub mod inventory;
+pub mod installation_log;
 pub mod payload;
 pub mod plans;
 pub mod recipe;

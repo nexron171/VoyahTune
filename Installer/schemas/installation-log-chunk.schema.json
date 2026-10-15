@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.voyahtune.invalid/installation-log-chunk.schema.json",
+  "title": "Installation log chunk v1",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "sessionId",
+    "chunkId",
+    "chunkIndex",
+    "createdAt",
+    "finalChunk",
+    "firstSequence",
+    "lastSequence",
+    "session",
+    "logs"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "chunkId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "chunkIndex": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finalChunk": {
+      "type": "boolean"
+    },
+    "firstSequence": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "lastSequence": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "session": {
+      "$ref": "installation-session.schema.json"
+    },
+    "logs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/log"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "log": {
+      "type": "object",
+      "required": [
+        "sessionId",
+        "sequence",
+        "timestamp",
+        "kind",
+        "name",
+        "stepId",
+        "operationId",
+        "data"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "kind": {
+          "enum": [
+            "step",
+            "user_choice",
+            "logcat"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stepId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
