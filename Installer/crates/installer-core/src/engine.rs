@@ -119,6 +119,7 @@ pub struct Engine {
     pub payload: Payload,
     pub operation: Operation,
     pub cancel: Arc<AtomicBool>,
+    pub restore_cunba: bool,
     pub canbus_consent: Option<Arc<RemovalConsent>>,
     restart_loader: bool,
     legacy_migrated: bool,
@@ -147,6 +148,7 @@ impl Engine {
             operation,
             cancel,
             canbus_consent: None,
+            restore_cunba: false,
             restart_loader: false,
             legacy_migrated: false,
             ota_locked: false,
@@ -201,6 +203,7 @@ impl Engine {
             Err(e) => json!({"success":false,"operationId":self.operation.id,"error":e,
                 "recovery":"Завершённые изменения могли сохраниться. Повторите установку или удаление после устранения указанной причины."}),
         };
+        report["cunbaRestorationRequested"] = json!(self.restore_cunba);
         report["releaseVersion"] = json!(self.payload.manifest.release_version);
         report["installerVersion"] = json!(crate::compatibility::INSTALLER_VERSION);
         report["manifestSha256"] =
@@ -370,6 +373,17 @@ impl Engine {
         Ok(())
     }
     fn execute(&mut self, r: Request) -> Result<()> {
+        if self.restore_cunba
+            && (r.action != Action::Remove
+                || self.payload.manifest.infrastructure
+                    != crate::infrastructure::Infrastructure::Od)
+        {
+            return Err(Error::new(
+                "CUNBA_RESTORE_UNAVAILABLE",
+                "Восстановление Cunba доступно только при удалении OD",
+            ));
+        }
+
         self.adb.events.emit(
             "operation-started",
             None,
@@ -389,6 +403,9 @@ impl Engine {
             "Получение системного доступа",
             |e| {
                 e.root_sequence(false)?;
+                if e.restore_cunba && !crate::cunba_recovery::restoration_available(&e.adb, e.payload.manifest.infrastructure)? {
+                    return Err(Error::new("CUNBA_RESTORE_UNAVAILABLE", "Резервные данные Cunba недоступны. Повторите проверку или удалите VoyahTune без восстановления Cunba."));
+                }
                 crate::cunba::check_installation(
                     &e.adb,
                     e.payload.manifest.infrastructure,
@@ -558,7 +575,12 @@ impl Engine {
                 e.shell(c::REMOVE_SYSTEM)?;
                 Ok(())
             })?;
-            // The classic remover ends with adb reboot, without postflight inventory.
+            let removal_boot = if self.restore_cunba {
+                Some(self.shell("cat /proc/sys/kernel/random/boot_id")?)
+            } else {
+                None
+            };
+            // Cunba restoration requires a verified new boot after removal.
             self.step(
                 "reboot",
                 "Перезагрузка автомобиля",
@@ -568,6 +590,19 @@ impl Engine {
                     Ok(())
                 },
             )?;
+            if self.restore_cunba {
+                self.step(
+                    "cunba-restore",
+                    "Восстановление Cunba и проверка после перезагрузки",
+                    |e| {
+                        crate::cunba_recovery::restore_after_removal(
+                            &e.adb,
+                            e.payload.manifest.infrastructure,
+                            removal_boot.as_deref().unwrap_or_default(),
+                        )
+                    },
+                )?;
+            }
         }
         Ok(())
     }

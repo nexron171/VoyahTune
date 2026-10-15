@@ -5,6 +5,14 @@ found() {
     exit 0
 }
 
+recovery=/data/local/voyahtune-cunba-recovery
+if [ -L "$recovery" ]; then
+    found 'recovery: unsafe journal'
+fi
+if [ -d "$recovery" ] && [ "${CUNBA_RECOVERY_VERIFY:-0}" != 1 ]; then
+    [ "$(cat "$recovery/state" 2>/dev/null)" = verified ] || found 'recovery: pending or failed; installation is blocked'
+fi
+
 # A single remnant is enough; a detached agent may outlive its injector.
 for location in \
     /sdcard/Download/cunba \
@@ -25,6 +33,17 @@ packages=$(printf '%s\n' "$packages" | tr '[:upper:]' '[:lower:]')
 printf '%s\n' "$packages" | grep -qx 'package:android' || exit 1
 while IFS= read -r package; do
     case "$package" in
+        package:com.cunba.lantu.otan.motorstore)
+            recorded_state=$(cat "$recovery/package-state" 2>/dev/null || true)
+            case "$recorded_state" in 0|1|2|3|4) recorded_package=1 ;; *) recorded_package=0 ;; esac
+            if [ -d "$recovery" ] && [ "$recorded_package" = 1 ] && { [ "${CUNBA_RECOVERY_VERIFY:-0}" = 1 ] || [ "$(cat "$recovery/state" 2>/dev/null)" = verified ]; }; then
+                disabled=$(pm list packages -d --user 0) || exit 1
+                if printf '%s\n' "$disabled" | grep -qx "$package"; then
+                    continue
+                fi
+            fi
+            found "package: $package"
+            ;;
         *cunba*) found "package: $package" ;;
     esac
 done <<EOF

@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.voyahtune.invalid/installation-session.schema.json",
+  "title": "Installation session v1",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "sessionId",
+    "installerVersion",
+    "startedAt",
+    "updatedAt",
+    "endedAt",
+    "status",
+    "selectedRelease",
+    "dns",
+    "deviceSerial",
+    "finalReason",
+    "vehicleCheckErrors",
+    "transport"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "installerVersion": {
+      "type": "string"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "endedAt": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "in_progress",
+        "success",
+        "error"
+      ]
+    },
+    "selectedRelease": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "version"
+          ],
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "infrastructure": {
+              "enum": [
+                "od",
+                "pi"
+              ]
+            },
+            "manifestSha256": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "dns": {
+      "enum": [
+        "keep",
+        "on",
+        "off"
+      ]
+    },
+    "deviceSerial": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finalReason": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "displayTitle": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            },
+            "nextAction": {
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "gui",
+                "user",
+                "lifecycle"
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "vehicleCheckErrors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "timestamp",
+          "step",
+          "error"
+        ],
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "step": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "transport": {
+      "enum": [
+        "stub_not_configured",
+        "https"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "in_progress"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "endedAt": {
+            "type": "null"
+          },
+          "finalReason": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "success",
+              "error"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "success"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "finalReason": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "error"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "finalReason": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "displayTitle": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              },
+              "nextAction": {
+                "type": "string"
+              },
+              "source": {
+                "enum": [
+                  "gui",
+                  "user",
+                  "lifecycle"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  ]
+}
