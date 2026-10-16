@@ -115,6 +115,10 @@ impl Engine {
             &self.adb,
             deadline.saturating_duration_since(Instant::now()),
         )?;
+        crate::voyahtweaks::check(
+            &self.adb,
+            deadline.saturating_duration_since(Instant::now()),
+        )?;
         self.readiness_command("[ ! -e /data/local/voyahtune-install.lock ]", deadline)
             .map_err(|error| {
                 Error::new("HEALTH_PENDING", "Идёт другая операция установки или OTA").detail(error)
@@ -252,7 +256,12 @@ impl Engine {
                     )?;
                 }
                 Err(error) if error.code == "CANCELLED" => return Err(error),
-                Err(error) if crate::cunba::is_blocking_error(&error) => return Err(error),
+                Err(error)
+                    if crate::cunba::is_blocking_error(&error)
+                        || crate::voyahtweaks::is_blocking_error(&error) =>
+                {
+                    return Err(error)
+                }
                 Err(error) => {
                     stability.reset();
                     self.adb.events.emit(
@@ -361,6 +370,12 @@ root=$(dirname "$0")
 script=$(cat)
 printf '%s\n' "$script" >> "$root/commands"
 case "$script" in
+    *'VOYAHTWEAKS_FOUND'*)
+        if [ -e "$root/voyahtweaks" ]; then
+            printf 'VOYAHTWEAKS_FOUND\tloader\n'
+        else
+            echo VOYAHTWEAKS_CLEAR
+        fi ;;
     *'CUNBA_FOUND'*)
         if [ -e "$root/cunba" ]; then
             printf 'CUNBA_FOUND\tfile: /data/local/bin/frida-inject2\n'
@@ -413,6 +428,7 @@ esac
         let deadline = Instant::now() + Duration::from_secs(60);
         for (marker, code) in [
             ("cunba", "CUNBA_DETECTED"),
+            ("voyahtweaks", "VOYAHTWEAKS_DETECTED"),
             ("cunba-check-failed", "CUNBA_CHECK_FAILED"),
         ] {
             fs::write(directory.path().join(marker), "").unwrap();

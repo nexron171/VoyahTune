@@ -63,6 +63,10 @@
   let cunbaRunning = $state(false);
   let cunbaReady = $state(false);
   let cunbaProgress = $state("");
+  let voyahTweaksConfirmed = $state(false);
+  let voyahTweaksRunning = $state(false);
+  let voyahTweaksReady = $state(false);
+  let voyahTweaksProgress = $state("");
   $effect(() => {
     if (error && installationSessionId)
       void recordStep("gui-error", { error, screen });
@@ -70,6 +74,10 @@
   const cunbaChoice = $derived(
     action === "install" &&
       ["CUNBA_DETECTED", "CUNBA_ROLLBACK_REQUIRED"].includes(error?.code || ""),
+  );
+  const voyahTweaksChoice = $derived(
+    action === "install" &&
+      ["VOYAHTWEAKS_DETECTED", "VOYAHTWEAKS_ROLLBACK_REQUIRED"].includes(error?.code || ""),
   );
   let completed = $state<string[]>([]),
     current = $state<string | undefined>();
@@ -224,6 +232,10 @@
     }
     if (event.type === "cunba-progress") cunbaProgress = event.message;
     if (event.type === "cunba-finished")
+      reportPath = event.data.reportPath || "";
+    if (event.type === "voyahtweaks-progress")
+      voyahTweaksProgress = event.message;
+    if (event.type === "voyahtweaks-finished")
       reportPath = event.data.reportPath || "";
     if (
       events.some(
@@ -469,7 +481,15 @@
     installationSessionId = await beginInstallationSession();
   }
   async function finishBlockedPreparation(reason: Failure) {
-    if (reason.retryable || ["CUNBA_DETECTED", "CUNBA_ROLLBACK_REQUIRED"].includes(reason.code)) return;
+    if (
+      reason.retryable ||
+      [
+        "CUNBA_DETECTED",
+        "CUNBA_ROLLBACK_REQUIRED",
+        "VOYAHTWEAKS_DETECTED",
+        "VOYAHTWEAKS_ROLLBACK_REQUIRED",
+      ].includes(reason.code)
+    ) return;
     await finishSession("error", { ...reason, displayTitle: reason.message, source: "gui" });
   }
   async function finishSession(
@@ -508,6 +528,8 @@
       }
       cunbaReady = false;
       cunbaConfirmed = false;
+      voyahTweaksReady = false;
+      voyahTweaksConfirmed = false;
       action = value;
       plan = null;
       confirmed = false;
@@ -587,6 +609,61 @@
   async function continueAfterCunba() {
     await recordChoice("continue-after-cunba", { approved: true });
     cunbaReady = false;
+    await refresh();
+    if (connected) {
+      confirmed = true;
+      await review();
+    }
+  }
+  async function disableVoyahTweaks() {
+    if (!voyahTweaksConfirmed || !connected || busy) return;
+    busy = true;
+    voyahTweaksRunning = true;
+    voyahTweaksReady = false;
+    voyahTweaksProgress = "Проверяем состояние VoyahTweaks";
+    error = null;
+    plan = null;
+    verificationPending = false;
+    try {
+      await ensureInstallationSession();
+      await recordChoice("voyahtweaks-disable-approved", { confirmed: true });
+      const result = await command<{ reportPath: string }>("disable_voyahtweaks", {
+        serial: devices[0].serial,
+        confirmed: true,
+      });
+      reportPath = result.reportPath;
+      voyahTweaksReady = true;
+      screen = 1;
+    } catch (caught) {
+      error = failure(caught);
+      await finishSession("error", {
+        ...error,
+        displayTitle: error.message,
+        source: "gui",
+      });
+    } finally {
+      voyahTweaksRunning = false;
+      voyahTweaksConfirmed = false;
+      busy = false;
+    }
+  }
+  async function stopVoyahTweaksInstallation() {
+    await recordChoice("voyahtweaks-disable-declined", {});
+    await finishSession("error", {
+      code: "USER_STOPPED",
+      message: "Пользователь остановил установку при обнаружении VoyahTweaks",
+      source: "user",
+    });
+    error = null;
+    plan = null;
+    confirmed = false;
+    voyahTweaksConfirmed = false;
+    voyahTweaksReady = false;
+    screen = 0;
+  }
+  async function continueAfterVoyahTweaks() {
+    await recordChoice("continue-after-voyahtweaks", { approved: true });
+    voyahTweaksReady = false;
     await refresh();
     if (connected) {
       confirmed = true;
@@ -1404,6 +1481,69 @@
                 >{error?.code === "CUNBA_ROLLBACK_REQUIRED"
                   ? "Повторить восстановление"
                   : "Отключить Cunba"}</button
+              >
+            {/if}
+          </section>
+        {/if}
+        {#if voyahTweaksChoice || voyahTweaksRunning || voyahTweaksReady}
+          <section class="status-panel warning" role="status">
+            <h2>
+              {voyahTweaksReady
+                ? "VoyahTweaks отключён"
+                : "Найдены признаки VoyahTweaks"}
+            </h2>
+            {#if voyahTweaksRunning}
+              <p>{voyahTweaksProgress}</p>
+              <p>
+                Не отключайте USB и питание ГУ. Идёт отключение, перезагрузка
+                или восстановление.
+              </p>
+            {:else if voyahTweaksReady}
+              <p>
+                После перезагрузки активный VoyahTweaks не обнаружен. Android и
+                лаунчер прошли проверку стабильности. Можно заново проверить
+                автомобиль и продолжить установку.
+              </p>
+              <button
+                class="button primary"
+                disabled={busy || sessionStarting}
+                onclick={continueAfterVoyahTweaks}
+                >Продолжить установку VoyahTune</button
+              >
+            {:else}
+              <p>
+                Можно остановить установку или отключить поддерживаемые
+                компоненты VoyahTweaks. Его функции станут недоступны. Исходные файлы и
+                настройки будут сохранены.
+              </p>
+              <p>
+                ГУ перезагрузится. Если VoyahTweaks останется активным, изменения
+                будут восстановлены, а установка заблокирована. Неизвестные
+                компоненты автоматически не изменяются.
+              </p>
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={voyahTweaksConfirmed}
+                  onchange={() =>
+                    recordChoice("voyahtweaks-disable-consent", {
+                      approved: voyahTweaksConfirmed,
+                    })}
+                  disabled={busy || sessionStarting}
+                /> Согласен на отключение VoyahTweaks и перезагрузку ГУ</label
+              >
+              <button
+                class="button secondary"
+                disabled={busy || sessionStarting}
+                onclick={stopVoyahTweaksInstallation}>Остановить установку</button
+              >
+              <button
+                class="button primary"
+                disabled={busy || !voyahTweaksConfirmed || !connected}
+                onclick={disableVoyahTweaks}
+                >{error?.code === "VOYAHTWEAKS_ROLLBACK_REQUIRED"
+                  ? "Повторить восстановление"
+                  : "Отключить VoyahTweaks"}</button
               >
             {/if}
           </section>

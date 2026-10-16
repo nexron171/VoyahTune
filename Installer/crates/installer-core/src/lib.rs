@@ -9,13 +9,16 @@ pub mod engine;
 pub mod engineering_menu;
 pub mod error;
 pub mod events;
-pub mod inventory;
 pub mod installation_log;
+pub mod inventory;
 pub mod payload;
 pub mod plans;
 pub mod recipe;
 pub mod recovery;
 pub mod session;
+
+mod voyahtweaks;
+pub mod voyahtweaks_recovery;
 
 pub use error::{Error, Result};
 pub const PROTOCOL_VERSION: u32 = 1;

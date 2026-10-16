@@ -163,8 +163,9 @@ impl Engine {
             ));
         }
         let mut result = self.execute(request);
-        if result.as_ref().is_err_and(crate::cunba::is_blocking_error)
-            && !self.ota_locked
+        if result.as_ref().is_err_and(|error| {
+            crate::cunba::is_blocking_error(error) || crate::voyahtweaks::is_blocking_error(error)
+        }) && !self.ota_locked
             && !self.restart_loader
         {
             return self.finish_report(result);
@@ -407,6 +408,11 @@ impl Engine {
                     return Err(Error::new("CUNBA_RESTORE_UNAVAILABLE", "Резервные данные Cunba недоступны. Повторите проверку или удалите VoyahTune без восстановления Cunba."));
                 }
                 crate::cunba::check_installation(
+                    &e.adb,
+                    e.payload.manifest.infrastructure,
+                    r.action,
+                )?;
+                crate::voyahtweaks::check_installation(
                     &e.adb,
                     e.payload.manifest.infrastructure,
                     r.action,
