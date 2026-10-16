@@ -11,3 +11,5 @@ mod storage;
 pub use error::{Error, Result};
 pub mod apk_identity;
 pub mod ota;
+
+pub mod installation_logcat;

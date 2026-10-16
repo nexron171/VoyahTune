@@ -16,7 +16,8 @@ class CunbaRecoveryTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.environment = dict(os.environ, FAKE_DEVICE=str(self.root))
         self.environment["PATH"] = f"{self.root}/bin:/usr/bin:/bin"
-        self.script = (SOURCE / "cunba_recovery.sh").read_text()
+        self.clean_startup = (SOURCE.parents[3] / "Packaging/od/system/init.logcat.original.sh").read_text().rstrip() + "\n"
+        self.script = (SOURCE / "cunba_recovery.sh").read_text().replace("__CUNBA_CLEAN_STARTUP__", self.clean_startup.rstrip())
         self.script = self.script.replace("/system/bin/sh -n", "/bin/sh -n")
         for name in ["data", "system", "proc", "sdcard", "storage"]:
             self.script = self.script.replace(f"/{name}/", f"{self.root}/{name}/")
@@ -27,6 +28,8 @@ class CunbaRecoveryTests(unittest.TestCase):
         self.write("package-state", "1")
         self.command("id", "echo 0")
         self.command("sync", ":")
+        self.command("ls", 'if [ "$1" = -Zd ]; then echo "u:object_r:system_file:s0 $2"; else /bin/ls "$@"; fi')
+        self.command("chcon", ':')
         self.command("sha256sum", 'shasum -a 256 "$1"')
         self.command("pm", '''case "$1" in
  list)
@@ -112,10 +115,36 @@ esac''')
         self.assert_original()
         self.assertFalse((self.root / "data/local/voyahtune-install.lock").exists())
 
-    def test_unknown_startup_is_rejected_without_changes(self):
-        self.write("system/etc/init.logcat.sh", "exec /unknown/cunba-loader --watch\n")
-        self.run_action("prepare", success=False)
+    def test_unknown_startup_is_replaced_and_restored_whole(self):
+        original = "# custom cunba boot\nexec /unknown/cunba-loader --watch\n"
+        startup = self.write("system/etc/init.logcat.sh", original)
+        startup.chmod(0o750)
+        self.run_action("prepare")
+        self.run_action("apply")
+        self.assertNotIn("cunba", startup.read_text())
+        self.assertIn("start_logcat", startup.read_text())
+        self.assertEqual(startup.stat().st_mode & 0o777, 0o750)
+        self.run_action("rollback")
+        self.assertEqual(startup.read_text(), original)
         self.assert_original()
+
+    def test_failed_atomic_replacement_keeps_original(self):
+        startup = self.root / "system/etc/init.logcat.sh"
+        original = startup.read_text()
+        self.run_action("prepare")
+        self.command("chcon", 'exit 1')
+        self.run_action("apply", success=False)
+        self.assertEqual(startup.read_text(), original)
+        self.assertFalse(Path(str(startup) + ".voyahtune-cunba-new").exists())
+        self.run_action("rollback")
+        self.assert_original()
+
+    def test_changed_backup_blocks_rollback(self):
+        self.run_action("prepare")
+        self.run_action("apply")
+        self.write("data/local/voyahtune-cunba-recovery/startup", "corrupt")
+        self.run_action("rollback", success=False)
+        self.assertIn("start_logcat", (self.root / "system/etc/init.logcat.sh").read_text())
 
     def test_foreign_lock_is_not_removed(self):
         self.write("data/local/voyahtune-install.lock/owner", "ota:other")
@@ -134,8 +163,8 @@ esac''')
         self.run_action("prepare")
         self.run_action("apply")
         self.assertNotIn("cunba/patch", startup.read_text())
-        self.assertIn("echo OEM\n", startup.read_text())
-        self.assertIn("echo keep\n", startup.read_text())
+        self.assertIn("start_logcat", startup.read_text())
+        self.assertNotIn("echo keep\n", startup.read_text())
         self.run_action("rollback")
         self.assertEqual(startup.read_text(), original)
         self.assert_original()
@@ -213,15 +242,14 @@ esac''')
         self.run_restore("finish")
         self.assertEqual(self.run_restore("available").stdout.strip(), "RESTORE_UNAVAILABLE")
 
-    def test_restore_preserves_current_oem_startup(self):
+    def test_restore_returns_complete_original_startup(self):
         self.write("system/etc/init.logcat.sh", f"#!/system/bin/sh\necho old OEM\nsh {self.root}/sdcard/Download/cunba/patch/load.bin &\n")
         self.disable_for_restore()
         startup = self.write("system/etc/init.logcat.sh", "#!/system/bin/sh\necho new OEM\nexit 0\n")
         self.run_restore("restore")
         content = startup.read_text()
-        self.assertIn("echo new OEM", content)
-        self.assertNotIn("echo old OEM", content)
-        self.assertLess(content.index("cunba/patch/load.bin"), content.index("exit 0"))
+        self.assertNotIn("echo new OEM", content)
+        self.assertEqual(content, (self.root / "data/local/voyahtune-cunba-recovery/startup").read_text())
         self.run_restore("restore")
         self.assertEqual(startup.read_text(), content)
 
@@ -239,12 +267,12 @@ esac''')
         self.assertEqual(current.read_text(), "new data")
         self.assertTrue((self.root / "data/local/voyahtune-cunba-recovery/directory").exists())
 
-    def test_restore_refuses_unrecognized_current_startup(self):
+    def test_restore_replaces_unrecognized_current_startup(self):
         self.disable_for_restore()
         startup = self.write("system/etc/init.logcat.sh", "exec /sdcard/Download/cunba/patch/load.bin --custom\n")
-        self.run_restore("restore", success=False)
-        self.assertIn("--custom", startup.read_text())
-        self.assertFalse((self.root / "data/local/bin/frida-inject2").exists())
+        self.run_restore("restore")
+        self.assertEqual(startup.read_text(), (self.root / "data/local/voyahtune-cunba-recovery/startup").read_text())
+        self.assert_original()
 
     def test_restore_retries_after_package_manager_failure(self):
         self.disable_for_restore()

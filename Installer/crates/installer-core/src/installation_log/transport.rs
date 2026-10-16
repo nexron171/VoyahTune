@@ -1,23 +1,20 @@
+#[cfg(test)]
+use std::fs;
 use super::{Chunk, SessionInfo, SpoolItem};
 use chrono::Utc;
 #[cfg(not(test))]
 use fs2::FileExt;
 use serde_json::json;
 use std::{
-    collections::BTreeMap,
-    fs::{self, File, OpenOptions},
+    fs::{File, OpenOptions},
     io::{BufReader, Write},
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
-const RETRY_DELAY: Duration = Duration::from_millis(300);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-#[cfg(not(test))]
-const RETRY_INTERVAL: Duration = Duration::from_secs(15);
-const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(super) trait Transport {
     // Implementations must honor this deadline, including connection and response reads.
@@ -102,30 +99,14 @@ impl Transport for HttpTransport {
 pub(super) fn deliver(
     transport: &mut dyn Transport,
     chunk: &Chunk,
-    delay: impl Fn(Duration),
     mut observe: impl FnMut(u32, &std::result::Result<(), String>),
 ) -> bool {
-    for attempt in 1..=4 {
-        let result = transport.send(chunk, REQUEST_TIMEOUT);
-        observe(attempt, &result);
-        if result.is_ok() {
-            return true;
-        }
-        if attempt < 4 {
-            delay(RETRY_DELAY);
-        }
-    }
-    false
+    let result = transport.send(chunk, REQUEST_TIMEOUT);
+    observe(1, &result);
+    result.is_ok()
 }
 
-pub(super) fn resume(directory: &Path) -> crate::Result<()> {
-    let initial = serde_json::from_reader(BufReader::new(File::open(
-        directory.join("session-request.json"),
-    )?))?;
-    let (_sender, receiver) = mpsc::channel();
-    start(receiver, directory.to_owned(), initial);
-    Ok(())
-}
+#[cfg(test)]
 
 fn pending_chunks(directory: &Path) -> crate::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
@@ -154,14 +135,13 @@ fn deliver_file(
     transport: &mut dyn Transport,
     directory: &Path,
     path: &Path,
-    delay: impl Fn(Duration),
 ) -> crate::Result<bool> {
     let item: SpoolItem = serde_json::from_reader(BufReader::new(File::open(path)?))?;
     let mut attempts = OpenOptions::new()
         .create(true)
         .append(true)
         .open(directory.join("delivery-attempts.jsonl"))?;
-    let delivered = deliver(transport, &item.request, delay, |attempt, result| {
+    let delivered = deliver(transport, &item.request, |attempt, result| {
         let record = json!({
             "sessionId": item.request.session_id,
             "chunkId": item.request.chunk_id,
@@ -215,58 +195,21 @@ fn run_sender(
             "error": registered.err()
         })
     )?;
-    run_delivery_loop(&mut transport, receiver, &directory, RETRY_INTERVAL)
+    run_delivery_loop(&mut transport, receiver, &directory)
 }
 
 fn run_delivery_loop(
     transport: &mut dyn Transport,
     receiver: mpsc::Receiver<PathBuf>,
     directory: &Path,
-    retry_interval: Duration,
 ) -> crate::Result<()> {
-    let mut retries: BTreeMap<PathBuf, (Instant, Duration)> = BTreeMap::new();
-    let mut disconnected = false;
-    loop {
-        let paths = pending_chunks(&directory)?;
-        if disconnected && paths.is_empty() {
-            return Ok(());
-        }
-        let now = Instant::now();
-        if let Some(path) = paths
-            .iter()
-            .find(|path| retries.get(*path).is_none_or(|(due, _)| *due <= now))
-        {
-            match deliver_file(transport, directory, path, thread::sleep) {
-                Ok(true) => {
-                    retries.remove(path);
-                }
-                result => {
-                    if let Err(error) = result {
-                        eprintln!("Session delivery failed: {error}");
-                    }
-                    let delay = retries.get(path).map_or(retry_interval, |(_, delay)| {
-                        (*delay * 2).min(MAX_RETRY_INTERVAL)
-                    });
-                    retries.insert(path.clone(), (Instant::now() + delay, delay));
-                }
-            }
-            continue;
-        }
-        let wait = retries
-            .values()
-            .map(|(due, _)| due.saturating_duration_since(Instant::now()))
-            .min()
-            .unwrap_or(retry_interval)
-            .min(retry_interval);
-        if disconnected {
-            thread::sleep(wait);
-        } else {
-            match receiver.recv_timeout(wait) {
-                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => disconnected = true,
-            }
+    // Only newly announced packets are eligible; disk outboxes are local diagnostics.
+    while let Ok(path) = receiver.recv() {
+        if let Err(error) = deliver_file(transport, directory, &path) {
+            eprintln!("Session delivery failed: {error}");
         }
     }
+    Ok(())
 }
 
 // Tests drive the sender explicitly against loopback or an in-memory transport.
@@ -316,7 +259,7 @@ mod tests {
             failing: true,
             requests: vec![],
         };
-        assert!(!deliver_file(&mut sender, &directory, &first, |_| {}).unwrap());
+        assert!(!deliver_file(&mut sender, &directory, &first).unwrap());
         assert!(!first.with_extension("ack").exists());
         session.finish(Status::Success, None).unwrap();
         drop(session);
@@ -330,7 +273,7 @@ mod tests {
         assert_eq!(final_item.request.session.status, Status::Success);
         sender.failing = false;
         for path in pending {
-            assert!(deliver_file(&mut sender, &directory, &path, |_| {}).unwrap());
+            assert!(deliver_file(&mut sender, &directory, &path).unwrap());
         }
         assert!(pending_chunks(&directory).unwrap().is_empty());
         assert_eq!(fs::read(first).unwrap(), original);
@@ -338,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn sender_retries_without_new_events_after_the_session_is_closed() {
+    fn sender_does_not_replay_saved_or_failed_packets() {
         struct Recovering {
             calls: usize,
             first_request: Option<String>,
@@ -361,20 +304,21 @@ mod tests {
         let directory = session.directory();
         drop(session);
         let (sender, receiver) = mpsc::channel();
+        sender
+            .send(pending_chunks(&directory).unwrap()[0].clone())
+            .unwrap();
         drop(sender);
         let mut transport = Recovering {
             calls: 0,
             first_request: None,
         };
-        run_delivery_loop(
-            &mut transport,
-            receiver,
-            &directory,
-            Duration::from_millis(1),
-        )
-        .unwrap();
-        assert_eq!(transport.calls, 5);
-        assert!(pending_chunks(&directory).unwrap().is_empty());
+        run_delivery_loop(&mut transport, receiver, &directory).unwrap();
+        assert_eq!(transport.calls, 1);
+        assert!(!pending_chunks(&directory).unwrap().is_empty());
+        let (sender, receiver) = mpsc::channel();
+        drop(sender);
+        run_delivery_loop(&mut transport, receiver, &directory).unwrap();
+        assert_eq!(transport.calls, 1);
     }
 
     fn server(

@@ -8,6 +8,25 @@ package=com.cunba.lantu.otan.motorstore
 fail() { echo "$*" >&2; exit 1; }
 exists() { [ -e "$1" ] || [ -L "$1" ]; }
 digest() { sha256sum "$1" | cut -d ' ' -f 1; }
+replace_startup() (
+    replacement=$startup.voyahtune-cunba-new
+    [ ! -L "$startup" ] && [ -f "$startup" ] || fail 'Unsafe startup target'
+    [ ! -L "$replacement" ] || fail 'Unsafe startup replacement'
+    if exists "$replacement"; then
+        [ -f "$replacement" ] || fail 'Unsafe startup replacement'
+        rm "$replacement"
+    fi
+    trap 'rm -f "$replacement"' EXIT
+    cp -p "$journal/startup" "$replacement"
+    cat "$1" > "$replacement"
+    context=$(cat "$journal/startup-context" 2>/dev/null || ls -Zd "$startup" | awk '{print $1}')
+    case "$context" in u:object_r:*:*) ;; *) fail 'Startup SELinux context unavailable' ;; esac
+    chcon "$context" "$replacement"
+    [ "$(digest "$replacement")" = "$(digest "$1")" ] || fail 'Startup replacement verification failed'
+    sync
+    mv -f "$replacement" "$startup"
+    sync
+)
 state() { printf '%s\n' "$1" > "$journal/state.new"; mv "$journal/state.new" "$journal/state"; sync; }
 package_state() { dumpsys package "$package" | sed -n 's/.*User 0:.* enabled=\([0-4]\).*/\1/p'; }
 require_backup() {
@@ -70,13 +89,6 @@ case "$action" in
         fi
         [ ! -L "$source_directory" ] && [ ! -L "$injector" ] && [ ! -L "$startup" ] || fail 'Unsupported target link'
         [ ! -L /data/media/0/Download ] && [ ! -L /data/local/bin ] || fail 'Unsupported parent link'
-        if [ -f "$startup" ]; then
-            awk '
-                /\/cunba\/patch\/load[.]bin/ {
-                    if ($0 !~ /^[ \t]*(\/system\/bin\/sh|sh) \/sdcard\/Download\/cunba\/patch\/load[.]bin[ \t]*&?[ \t]*$/) exit 1
-                }
-            ' "$startup" || fail 'Unrecognized current Cunba startup command'
-        fi
         if exists "$source_directory" && [ ! -f "$journal/restore-directory-started" ]; then fail 'Cunba directory already occupies target'; fi
         if exists "$injector"; then
             [ -f "$journal/injector-before" ] && [ "$(digest "$injector")" = "$(cat "$journal/injector-before")" ] || fail 'Another injector occupies target'
@@ -89,22 +101,16 @@ case "$action" in
         state reactivating
         if [ -f "$journal/startup-write-started" ]; then
             [ -f "$startup" ] || fail 'Current startup script missing'
-            # Restore only the saved Cunba launch line, preserving the current OEM script.
             if [ ! -f "$journal/restore-startup-after" ]; then
-                awk '/^[ \t]*(\/system\/bin\/sh|sh) \/sdcard\/Download\/cunba\/patch\/load[.]bin[ \t]*&?[ \t]*$/' "$journal/startup" > "$journal/restore-startup-lines"
-                [ -s "$journal/restore-startup-lines" ] || fail 'Supported Cunba startup line missing'
                 cp -p "$startup" "$journal/restore-startup-before"
-                printf '#!/system/bin/sh\n' > "$journal/restore-startup-new"
-                cat "$journal/restore-startup-lines" >> "$journal/restore-startup-new"
-                awk '!/\/cunba\/patch\/load[.]bin/' "$startup" >> "$journal/restore-startup-new"
-                /system/bin/sh -n "$journal/restore-startup-new"
+                cp -p "$journal/startup" "$journal/restore-startup-new"
                 digest "$journal/restore-startup-new" > "$journal/restore-startup-after"
                 sync
             fi
             current_hash=$(digest "$startup")
             if [ "$current_hash" != "$(cat "$journal/restore-startup-after")" ]; then
                 [ "$current_hash" = "$(digest "$journal/restore-startup-before")" ] || fail 'Startup changed during restoration'
-                cat "$journal/restore-startup-new" > "$startup"
+                replace_startup "$journal/restore-startup-new"
             fi
         fi
         if [ -f "$journal/directory-present" ] && [ -d "$journal/directory" ]; then

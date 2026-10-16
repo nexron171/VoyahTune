@@ -22,6 +22,9 @@ pub enum Request {
         #[serde(default)]
         same_version: bool,
     },
+    SelectRelease {
+        version: String,
+    },
     Download {},
     Apply {},
     Finish {
@@ -67,10 +70,7 @@ pub fn package_uid(packages: &str, package: &str) -> Option<u32> {
             Some((parts.next()?, parts.next()?.parse::<u32>().ok()?))
         })
         .collect();
-    let matches: Vec<_> = rows
-        .iter()
-        .filter(|(name, _)| *name == package)
-        .collect();
+    let matches: Vec<_> = rows.iter().filter(|(name, _)| *name == package).collect();
     if matches.len() != 1 {
         return None;
     }

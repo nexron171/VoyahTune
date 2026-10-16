@@ -45,6 +45,7 @@ public class UpdaterActivity extends Activity {
             resumed,
             connected,
             dnsSupported,
+            releaseSelectionSupported,
             resetCompletedOnOpen,
             hideCompletedResult,
             hideConnectionError,
@@ -83,6 +84,7 @@ public class UpdaterActivity extends Activity {
         secondary = findViewById(R.id.ota_secondary);
         primary.setOnClickListener(v -> primaryAction());
         secondary.setOnClickListener(v -> perform("check", false));
+        findViewById(R.id.ota_choose_release).setOnClickListener(v -> chooseRelease());
         findViewById(R.id.ota_back).setOnClickListener(v -> finish());
         findViewById(R.id.ota_settings).setOnClickListener(v -> openSettings());
         render();
@@ -162,9 +164,13 @@ public class UpdaterActivity extends Activity {
         if (config != null) settings = config;
         JSONArray capabilities = response.optJSONArray("capabilities");
         dnsSupported = false;
+        releaseSelectionSupported = false;
         if (capabilities != null)
-            for (int i = 0; i < capabilities.length(); i++)
+            for (int i = 0; i < capabilities.length(); i++) {
                 if ("dns-settings".equals(capabilities.optString(i))) dnsSupported = true;
+                if ("select-release".equals(capabilities.optString(i)))
+                    releaseSelectionSupported = true;
+            }
         connected = true;
         connectionError = "";
         hideConnectionError = false;
@@ -379,6 +385,31 @@ public class UpdaterActivity extends Activity {
         }
     }
 
+    private void chooseRelease() {
+        JSONArray versions = state.optJSONArray("catalogVersions");
+        if (!releaseSelectionSupported || versions == null || versions.length() == 0) return;
+        String[] labels = new String[versions.length()];
+        for (int index = 0; index < labels.length; index++)
+            labels[index] = versions.optString(index);
+        new AlertDialog.Builder(this)
+                .setTitle("Выберите релиз")
+                .setItems(
+                        labels,
+                        (dialog, index) -> {
+                            beginAction();
+                            try {
+                                command(
+                                        request("select_release").put("version", labels[index]),
+                                        result -> {});
+                            } catch (Exception error) {
+                                commandError = reason(error);
+                                render();
+                            }
+                        })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
     private void confirmInstall() {
         String dns = "";
         if (dnsSupported && !settings.isNull("dnsEnabled"))
@@ -388,7 +419,10 @@ public class UpdaterActivity extends Activity {
                             + ".";
         AlertDialog dialog =
                 new AlertDialog.Builder(this)
-                        .setTitle("Установить обновление?")
+                        .setTitle(
+                                state.optBoolean("sameVersion")
+                                        ? "Переустановить VoyahTune?"
+                                        : "Установить обновление?")
                         .setMessage(
                                 "Автомобиль должен стоять в P с включённым питанием. Головное"
                                     + " устройство перезагрузится. Сохраняйте питание до завершения"
@@ -431,6 +465,7 @@ public class UpdaterActivity extends Activity {
                         state.optLong("completedSteps"),
                         state.optLong("totalSteps"));
         UpdatePresentation p = presentation;
+        p.offerReinstall(releaseSelectionSupported && state.optBoolean("sameVersion"));
         String installed = state.optString("installedVersion", "—");
         boolean failed = "repair-required".equals(phase) || "failed".equals(phase);
         String error =
@@ -484,6 +519,15 @@ public class UpdaterActivity extends Activity {
                             + "\nВерсии OD: "
                             + (versions.isEmpty() ? "нет" : TextUtils.join(", ", versions));
         }
+        visible(
+                R.id.ota_choose_release,
+                connected
+                        && releaseSelectionSupported
+                        && catalogVersions != null
+                        && catalogVersions.length() > 0);
+        enabled(
+                findViewById(R.id.ota_choose_release),
+                !actionBusy && !p.busy && !"repair-required".equals(phase));
         text(R.id.ota_catalog_versions, catalogText);
         visible(R.id.ota_catalog_versions, !catalogText.isEmpty());
         text(R.id.ota_badge, !connected ? "Нет связи" : p.badge);
@@ -619,7 +663,7 @@ public class UpdaterActivity extends Activity {
                 content,
                 settings.has("defaultCatalogUrl")
                         ? "Сохранение обновит список релизов по указанному адресу. Скачивание и"
-                              + " установка запускаются отдельно."
+                                + " установка запускаются отдельно."
                         : "Смена адреса не запускает скачивание или установку.",
                 15);
         Switch dns = new Switch(this);

@@ -17,6 +17,7 @@ use std::{
 };
 
 const SCRIPT: &str = include_str!("cunba_recovery.sh");
+const CLEAN_STARTUP: &str = include_str!("../../../../Packaging/od/system/init.logcat.original.sh");
 const RESTORE_SCRIPT: &str = include_str!("cunba_restore.sh");
 const JOURNAL: &str = "/data/local/voyahtune-cunba-recovery";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
@@ -37,7 +38,10 @@ fn progress(adb: &Adb, message: &str) -> Result<()> {
 fn execute(adb: &Adb, action: &str) -> Result<()> {
     // action is selected by the orchestrator, never supplied by the caller.
     adb.shell(
-        &format!("action={action}\n{SCRIPT}"),
+        &format!(
+            "action={action}\n{}",
+            SCRIPT.replace("__CUNBA_CLEAN_STARTUP__", CLEAN_STARTUP.trim_end())
+        ),
         Duration::from_secs(90),
     )?;
     Ok(())

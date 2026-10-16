@@ -1,11 +1,12 @@
 use super::{InstallationLog, Shared};
 use crate::{adb::Adb, events::Events};
+use release_core::installation_logcat as policy;
 use serde_json::json;
 use std::{
     io::{BufRead, BufReader},
     path::PathBuf,
     process::{Command, Stdio},
-    sync::{atomic::Ordering, Arc, Mutex, Weak},
+    sync::{atomic::Ordering, Weak},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -35,8 +36,6 @@ fn pause(shared: &Weak<Shared>) {
 
 pub(super) fn start(shared: Weak<Shared>, adb_path: PathBuf) -> JoinHandle<()> {
     thread::spawn(move || {
-        let mut previous_boot = String::new();
-        let cursor = Arc::new(Mutex::new(String::new()));
         let mut segment = 0;
         let mut disconnected = false;
         while !stopped(&shared) {
@@ -95,22 +94,16 @@ pub(super) fn start(shared: Weak<Shared>, adb_path: PathBuf) -> JoinHandle<()> {
                 }
             };
             segment += 1;
-            let same_boot = previous_boot == boot;
-            let since = if same_boot {
-                cursor.lock().unwrap().clone()
-            } else {
-                String::new()
+            let since = match adb.shell(policy::NOW_COMMAND, Duration::from_secs(3)) {
+                Ok(value) if policy::valid_boundary(value.trim()) => value.trim().to_owned(),
+                _ => {
+                    pause(&shared);
+                    continue;
+                }
             };
-            if !same_boot {
-                cursor.lock().unwrap().clear();
-            }
-            previous_boot = boot.clone();
             let mut command = Command::new(&adb_path);
-            command.args(["-s", &serial, "logcat", "-b", "all", "-v", "threadtime"]);
-            // On a new boot read the available ring buffers, including early startup failures.
-            if !since.is_empty() {
-                command.args(["-T", &since]);
-            }
+            command.args(["-s", &serial, "logcat"]);
+            command.args(policy::BUFFERS).args(["-T", &since]);
             command
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -145,7 +138,7 @@ pub(super) fn start(shared: Weak<Shared>, adb_path: PathBuf) -> JoinHandle<()> {
                 ),
             ] {
                 let weak = shared.clone();
-                let cursor = cursor.clone();
+                let since = since.clone();
                 let boot = boot.clone();
                 readers.push(thread::spawn(move || {
                     let mut reader = BufReader::new(pipe);
@@ -176,14 +169,11 @@ pub(super) fn start(shared: Weak<Shared>, adb_path: PathBuf) -> JoinHandle<()> {
                             break;
                         }
                         let text = String::from_utf8_lossy(&bytes).into_owned();
-                        if stream == "stdout"
-                            && text.as_bytes().get(2) == Some(&b'-')
-                            && text.as_bytes().get(5) == Some(&b' ')
-                            && text.as_bytes().get(8) == Some(&b':')
-                        {
-                            if let Some(timestamp) = text.get(..18) {
-                                *cursor.lock().unwrap() = timestamp.into();
-                            }
+                        if stopped(&weak) {
+                            break;
+                        }
+                        if stream == "stdout" && !policy::relevant(&text, &since) {
+                            continue;
                         }
                         record(
                             &weak,
@@ -237,10 +227,12 @@ mod tests {
 root=$(dirname "$0")
 case "$*" in
     'devices -l') printf 'List of devices attached\nCAR device model:Voyah\n' ;;
-    *'shell sh -s') cat >/dev/null; cat "$root/boot" ;;
+    *'shell sh -s') input=$(cat); case "$input" in *date*) echo '10-15 11:59:59.000';; *) cat "$root/boot";; esac ;;
     *logcat*)
         boot=$(cat "$root/boot")
-        printf '10-15 12:00:00.000  100  100 I TEST: %s\n' "$boot"
+        printf '10-15 11:59:58.000  100  100 E AndroidRuntime: old-history\n'
+        printf '10-15 12:00:00.000  100  100 D CanBusService: can-noise\n'
+        printf '10-15 12:00:00.000  100  100 I VoyahTune: %s\n' "$boot"
         echo logcat-stderr >&2
         echo boot-two > "$root/boot"
         ;;
@@ -271,6 +263,10 @@ esac
             thread::sleep(Duration::from_millis(30));
         };
         session.finish(Status::Success, None).unwrap();
+        assert!(!records
+            .iter()
+            .any(|record| record.data.to_string().contains("old-history")
+                || record.data.to_string().contains("can-noise")));
         assert!(records
             .iter()
             .all(|r| r.session_id == session.info().session_id));

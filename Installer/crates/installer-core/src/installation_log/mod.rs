@@ -454,7 +454,6 @@ impl InstallationLog {
                 }
             }
             if !was_active && final_saved {
-                transport::resume(&directory)?;
                 continue;
             }
             let reason = json!({"code":"SESSION_INTERRUPTED","message":"Установщик завершился до фиксации результата","displayTitle":"Сессия прервана"});
@@ -474,7 +473,6 @@ impl InstallationLog {
                 |_| {},
             )?;
             recovery::write_json(&metadata, &info)?;
-            transport::resume(&directory)?;
         }
         Ok(())
     }
@@ -483,7 +481,7 @@ impl InstallationLog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{sync::atomic::AtomicUsize, time::Duration};
+    use std::time::Duration;
 
     fn begin(root: &Path) -> InstallationLog {
         InstallationLog::begin(
@@ -566,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn retries_reuse_the_exact_chunk_and_wait_three_times() {
+    fn failed_chunk_is_attempted_once_and_kept_locally() {
         struct Failing {
             ids: Vec<String>,
         }
@@ -585,19 +583,11 @@ mod tests {
         let session = begin(root.path());
         let chunk = read_chunk(session.cut_with(true, |_| {}).unwrap());
         let mut sender = Failing { ids: vec![] };
-        let sleeps = AtomicUsize::new(0);
         let mut attempts = vec![];
-        assert!(!transport::deliver(
-            &mut sender,
-            &chunk,
-            |duration| {
-                assert_eq!(duration, Duration::from_millis(300));
-                sleeps.fetch_add(1, Ordering::Relaxed);
-            },
-            |attempt, _| attempts.push(attempt)
-        ));
-        assert_eq!(attempts, vec![1, 2, 3, 4]);
-        assert_eq!(sleeps.load(Ordering::Relaxed), 3);
+        assert!(!transport::deliver(&mut sender, &chunk, |attempt, _| {
+            attempts.push(attempt)
+        }));
+        assert_eq!(attempts, vec![1]);
         assert!(sender.ids.iter().all(|id| id == &sender.ids[0]));
         session.finish(Status::Success, None).unwrap();
     }

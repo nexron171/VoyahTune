@@ -10,6 +10,25 @@ package=com.cunba.lantu.otan.motorstore
 fail() { echo "$*" >&2; exit 1; }
 exists() { [ -e "$1" ] || [ -L "$1" ]; }
 digest() { sha256sum "$1" | cut -d ' ' -f 1; }
+replace_startup() (
+    replacement=$startup.voyahtune-cunba-new
+    [ ! -L "$startup" ] && [ -f "$startup" ] || fail 'Unsafe startup target'
+    [ ! -L "$replacement" ] || fail 'Unsafe startup replacement'
+    if exists "$replacement"; then
+        [ -f "$replacement" ] || fail 'Unsafe startup replacement'
+        rm "$replacement"
+    fi
+    trap 'rm -f "$replacement"' EXIT
+    cp -p "$journal/startup" "$replacement"
+    cat "$1" > "$replacement"
+    context=$(cat "$journal/startup-context" 2>/dev/null || ls -Zd "$startup" | awk '{print $1}')
+    case "$context" in u:object_r:*:*) ;; *) fail 'Startup SELinux context unavailable' ;; esac
+    chcon "$context" "$replacement"
+    [ "$(digest "$replacement")" = "$(digest "$1")" ] || fail 'Startup replacement verification failed'
+    sync
+    mv -f "$replacement" "$startup"
+    sync
+)
 state() { printf '%s\n' "$1" > "$journal/state.new"; mv "$journal/state.new" "$journal/state"; sync; }
 require_root() { [ "$(id -u)" = 0 ] || fail 'Root access required'; }
 require_lock() {
@@ -64,14 +83,7 @@ case "$action" in
         if exists "$injector"; then
             [ -f "$injector" ] || fail 'Injector is not a regular file'
         fi
-        # A shared OEM startup script is editable only when every matching line is understood.
-        if [ -f "$startup" ] && grep -Eiq 'cunba|frida-inject2|launcher2[.]bin|systemserver[.]bin' "$startup"; then
-            awk '
-                tolower($0) ~ /cunba|frida-inject2|launcher2[.]bin|systemserver[.]bin/ {
-                    if ($0 !~ /^[ \t]*(\/system\/bin\/sh|sh) \/sdcard\/Download\/cunba\/patch\/load[.]bin[ \t]*&?[ \t]*$/) exit 1
-                }
-            ' "$startup" || fail 'Unknown Cunba startup commands; automatic changes are not supported'
-        fi
+        [ -f "$startup" ] || fail 'Startup script missing'
         packages=$(pm list packages --user 0) || fail 'Package Manager unavailable'
         printf '%s\n' "$packages" | grep -qx 'package:android' || fail 'Incomplete package inventory'
         package_state=absent
@@ -91,13 +103,15 @@ case "$action" in
         printf '%s\n' "$package_state" > "$journal/package-state"
         cat /proc/sys/kernel/random/boot_id > "$journal/boot-before"
         state preparing
-        if [ -f "$startup" ] && grep -Fq '/cunba/patch/load.bin' "$startup"; then
-            cp -p "$startup" "$journal/startup"
-            digest "$startup" > "$journal/startup-before"
-            awk '!/\/cunba\/patch\/load[.]bin/' "$startup" > "$journal/startup-disabled"
-            /system/bin/sh -n "$journal/startup-disabled"
-            digest "$journal/startup-disabled" > "$journal/startup-after"
-        fi
+        cp -p "$startup" "$journal/startup"
+        digest "$startup" > "$journal/startup-before"
+        [ "$(digest "$journal/startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup backup verification failed'
+        ls -Zd "$startup" | awk '{print $1}' > "$journal/startup-context"
+        cat > "$journal/startup-disabled" <<'VOYAHTUNE_CLEAN_STARTUP'
+__CUNBA_CLEAN_STARTUP__
+VOYAHTUNE_CLEAN_STARTUP
+        /system/bin/sh -n "$journal/startup-disabled"
+        digest "$journal/startup-disabled" > "$journal/startup-after"
         if [ -d "$source_directory" ]; then : > "$journal/directory-present"; fi
         if [ -f "$injector" ]; then digest "$injector" > "$journal/injector-before"; fi
         state prepared
@@ -114,10 +128,9 @@ case "$action" in
         stop_processes
         if [ -f "$journal/startup" ]; then
             [ "$(digest "$startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup changed after inspection'
-            # Write through the existing inode to preserve ownership, mode and SELinux label.
             : > "$journal/startup-write-started"
             sync
-            cat "$journal/startup-disabled" > "$startup"
+            replace_startup "$journal/startup-disabled"
             [ "$(digest "$startup")" = "$(cat "$journal/startup-after")" ] || fail 'Startup verification failed'
         fi
         if [ -f "$journal/directory-present" ]; then
@@ -157,7 +170,8 @@ case "$action" in
         fi
         if [ -f "$journal/startup-write-started" ]; then
             if [ "$(digest "$startup")" != "$(cat "$journal/startup-before")" ]; then
-                cat "$journal/startup" > "$startup"
+                [ "$(digest "$journal/startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup backup changed'
+                replace_startup "$journal/startup"
             fi
             [ "$(digest "$startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup rollback verification failed'
         fi

@@ -493,15 +493,6 @@
     installationSessionId = await beginInstallationSession();
   }
   async function finishBlockedPreparation(reason: Failure) {
-    if (
-      reason.retryable ||
-      [
-        "CUNBA_DETECTED",
-        "CUNBA_ROLLBACK_REQUIRED",
-        "VOYAHTWEAKS_DETECTED",
-        "VOYAHTWEAKS_ROLLBACK_REQUIRED",
-      ].includes(reason.code)
-    ) return;
     await finishSession("error", { ...reason, displayTitle: reason.message, source: "gui" });
   }
   async function finishSession(
@@ -568,6 +559,7 @@
       devices = (await command<{ devices: Device[] }>("devices")).devices;
     } catch (e) {
       error = failure(e);
+      await finishBlockedPreparation(error);
     } finally {
       busy = false;
     }
