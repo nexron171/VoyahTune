@@ -18,7 +18,10 @@ use std::{
     time::Duration,
 };
 
-pub use release_core::catalog::CATALOG_URL;
+pub const CATALOG_URL: &str = match option_env!("VOYAH_DESKTOP_CATALOG_URL") {
+    Some(url) => url,
+    None => "https://voyahtune.ru/api/v1/releases",
+};
 const MAX_CATALOG: u64 = 4 * 1024 * 1024;
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED: u64 = 4 * 1024 * 1024 * 1024;
@@ -212,6 +215,9 @@ impl Cache {
     /// Imported source ZIPs, external folders and bundled recovery are untouched.
     pub fn remove(&self, path: &Path) -> Result<()> {
         let _lock = self.lock()?;
+        self.remove_unlocked(path)
+    }
+    fn remove_unlocked(&self, path: &Path) -> Result<()> {
         let folder = self.root.join("payloads");
         let digest = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if !digest_valid(digest) || path.parent() != Some(folder.as_path()) {
@@ -221,9 +227,9 @@ impl Cache {
             ));
         }
         let root = self.root.canonicalize()?;
-        if folder.canonicalize()? != root.join("payloads")
-            || fs::symlink_metadata(path)?.file_type().is_symlink()
-            || path.canonicalize()? != root.join("payloads").join(digest)
+        if (folder.exists() && folder.canonicalize()? != root.join("payloads"))
+            || fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+            || (path.exists() && path.canonicalize()? != root.join("payloads").join(digest))
         {
             return Err(Error::new("CACHE_PATH", "Небезопасный путь релиза в кэше"));
         }
@@ -238,12 +244,34 @@ impl Cache {
                 Err(e) => return Err(e.into()),
             }
         }
-        fs::remove_dir_all(path)?;
+        if path.exists() {
+            fs::remove_dir_all(path)?;
+        }
+        let partials = self.root.join("partial");
+        if partials.exists() {
+            if partials.canonicalize()? != root.join("partial") {
+                return Err(Error::new("CACHE_PATH", "Небезопасный путь архива в кэше"));
+            }
+            match fs::remove_file(partials.join(format!("{digest}.part"))) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
         Ok(())
     }
     pub fn download(
         &self,
         release: &Release,
+        cancel: &AtomicBool,
+        progress: ProgressCallback,
+    ) -> Result<Payload> {
+        self.download_with_refresh(release, false, cancel, progress)
+    }
+    pub fn download_with_refresh(
+        &self,
+        release: &Release,
+        refresh: bool,
         cancel: &AtomicBool,
         progress: ProgressCallback,
     ) -> Result<Payload> {
@@ -260,6 +288,9 @@ impl Cache {
         }
         let _lock = self.lock()?;
         let target = self.root.join("payloads").join(&release.payload.sha256);
+        if refresh {
+            self.remove_unlocked(&target)?;
+        }
         let receipt = self.root.join("receipts").join(&release.payload.sha256);
         if let Ok(payload) = Payload::open(&target) {
             if fs::read_to_string(&receipt).ok().as_deref()
@@ -273,7 +304,14 @@ impl Cache {
         let partials = self.root.join("partial");
         fs::create_dir_all(&partials)?;
         let archive = partials.join(format!("{}.part", release.payload.sha256));
-        download::fetch(&agent(120), &release.payload, &archive, cancel, progress)?;
+        let client = agent(120);
+        if let Err(error) = download::fetch(&client, &release.payload, &archive, cancel, progress) {
+            if error.code != "DOWNLOAD_HASH" {
+                return Err(error);
+            }
+            // Hash failure removes the corrupt archive; retry once from the server.
+            download::fetch(&client, &release.payload, &archive, cancel, progress)?;
+        }
         let payload = self.accept(&archive, Some(release), cancel, progress)?;
         fs::remove_file(archive)?;
         Ok(payload)
@@ -310,6 +348,14 @@ impl Cache {
             total: 0,
         });
         cancelled(cancel)?;
+        if !stage.path().join("manifest.json").is_file() {
+            return Err(Error::new(
+                "PAYLOAD_FORMAT",
+                "Архив не подходит для GUI-установщика: отсутствует manifest.json",
+            )
+            .detail("В каталоге должен быть указан installer payload ZIP, а не классический комплект со скриптами.")
+            .retry("Обновите список после исправления архива на сервере и скачайте релиз заново."));
+        }
         let payload = Payload::open(stage.path())?;
         if payload.manifest.removal_only {
             return Err(Error::new(
@@ -373,9 +419,7 @@ fn fetch_catalog(client: &ureq::Agent, url: &str) -> Result<Catalog> {
     catalog.resolve()
 }
 fn verify_release(payload: &Payload, release: &Release) -> Result<()> {
-    if payload.manifest.release_version != release.version
-        || payload.manifest.schema != release.payload.manifest_schema
-    {
+    if payload.manifest.schema != release.payload.manifest_schema {
         return Err(Error::new(
             "CATALOG_MISMATCH",
             "Манифест архива не соответствует выбранному релизу",
@@ -676,6 +720,49 @@ mod tests {
         assert!(outside.join("keep").exists());
     }
     #[test]
+    fn remove_missing_payload_also_clears_download_and_receipt() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Cache {
+            root: directory.path().join("downloads"),
+        };
+        let digest = "a".repeat(64);
+        fs::create_dir_all(cache.root.join("partial")).unwrap();
+        fs::create_dir_all(cache.root.join("receipts")).unwrap();
+        let archive = cache.root.join("partial").join(format!("{digest}.part"));
+        fs::write(&archive, "broken archive").unwrap();
+        fs::write(cache.root.join("receipts").join(&digest), "stale receipt").unwrap();
+        let target = cache.root.join("payloads").join(&digest);
+        cache.remove(&target).unwrap();
+        cache.remove(&target).unwrap();
+        assert!(!archive.exists());
+        assert!(!cache.root.join("receipts").join(&digest).exists());
+    }
+
+    #[test]
+    fn classic_archive_reports_payload_format_instead_of_local_io() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Cache {
+            root: directory.path().join("downloads"),
+        };
+        let archive = directory.path().join("classic.zip");
+        let mut writer = zip::ZipWriter::new(File::create(&archive).unwrap());
+        writer
+            .start_file(
+                "VoyahTune-4.2.0-od/install.sh",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        writer.write_all(b"#!/bin/sh").unwrap();
+        writer.finish().unwrap();
+        let error = cache
+            .import(&archive, &AtomicBool::new(false), &|_| {})
+            .err()
+            .unwrap();
+        assert_eq!(error.code, "PAYLOAD_FORMAT");
+        assert!(error.message.contains("manifest.json"));
+    }
+
+    #[test]
     fn cancellation_and_writer_errors_do_not_succeed() {
         struct FullDisk;
         impl Write for FullDisk {
@@ -731,7 +818,7 @@ mod tests {
         );
         payload.manifest.requirements = Some(release.requirements.clone());
         payload.manifest.release_version = "3.13.1".into();
-        assert!(verify_release(&payload, &release).is_err());
+        assert!(verify_release(&payload, &release).is_ok());
     }
     #[test]
     fn rejects_nonportable_archive_paths() {

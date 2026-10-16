@@ -20,7 +20,7 @@ const payloadPath=option('--payload')?resolve(option('--payload')):undefined;
 const payloadManifest=payloadPath?JSON.parse(await readFile(join(payloadPath,'manifest.json'),'utf8')):undefined;
 const toolingVersion=(await readFile(join(root,'Installer/Cargo.toml'),'utf8')).match(/version = "([^"]+)"/)[1];
 const packageVersion=toolingVersion;
-const env={...process.env,VOYAH_INFRASTRUCTURE:'od',VOYAH_CATALOG_URL:catalogUrl};
+const env={...process.env,VOYAH_INFRASTRUCTURE:'od',VOYAH_CATALOG_URL:catalogUrl,VOYAH_DESKTOP_CATALOG_URL:catalogUrl||'https://voyahtune.ru/api/v1/releases'};
 const cachedCargo=join(root,'Releases/cache/cargo');
 if(!env.CARGO_HOME&&existsSync(cachedCargo)){
   env.CARGO_HOME=cachedCargo;

@@ -1,13 +1,23 @@
 use super::{Chunk, SessionInfo, SpoolItem};
 use chrono::Utc;
-use serde_json::json;
-use std::{fs::File, io::Write, path::PathBuf, sync::mpsc, thread, time::Duration};
-
 #[cfg(not(test))]
-use std::fs::OpenOptions;
+use fs2::FileExt;
+use serde_json::json;
+use std::{
+    collections::BTreeMap,
+    fs::{self, File, OpenOptions},
+    io::{BufReader, Write},
+    path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
 const RETRY_DELAY: Duration = Duration::from_millis(300);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(not(test))]
+const RETRY_INTERVAL: Duration = Duration::from_secs(15);
+const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(super) trait Transport {
     // Implementations must honor this deadline, including connection and response reads.
@@ -108,67 +118,166 @@ pub(super) fn deliver(
     false
 }
 
-// Unit tests exercise HTTP explicitly against loopback, never against production.
+pub(super) fn resume(directory: &Path) -> crate::Result<()> {
+    let initial = serde_json::from_reader(BufReader::new(File::open(
+        directory.join("session-request.json"),
+    )?))?;
+    let (_sender, receiver) = mpsc::channel();
+    start(receiver, directory.to_owned(), initial);
+    Ok(())
+}
+
+fn pending_chunks(directory: &Path) -> crate::Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(directory.join("outbox"))? {
+        let path = entry?.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+            && !path.with_extension("ack").exists()
+        {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    if let Some(last) = paths.last() {
+        let item: SpoolItem = serde_json::from_reader(BufReader::new(File::open(last)?))?;
+        if item.request.final_chunk {
+            // Final status must not wait behind a large logcat backlog.
+            paths.rotate_right(1);
+        }
+    }
+    Ok(paths)
+}
+
+fn deliver_file(
+    transport: &mut dyn Transport,
+    directory: &Path,
+    path: &Path,
+    delay: impl Fn(Duration),
+) -> crate::Result<bool> {
+    let item: SpoolItem = serde_json::from_reader(BufReader::new(File::open(path)?))?;
+    let mut attempts = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(directory.join("delivery-attempts.jsonl"))?;
+    let delivered = deliver(transport, &item.request, delay, |attempt, result| {
+        let record = json!({
+            "sessionId": item.request.session_id,
+            "chunkId": item.request.chunk_id,
+            "attempt": attempt,
+            "timestamp": Utc::now().to_rfc3339(),
+            "success": result.is_ok(),
+            "error": result.as_ref().err()
+        });
+        let _ = serde_json::to_writer(&mut attempts, &record);
+        let _ = attempts.write_all(b"\n");
+        let _ = attempts.flush();
+    });
+    if delivered {
+        crate::recovery::write_json(
+            &path.with_extension("ack"),
+            &json!({"chunkId": item.request.chunk_id, "acknowledgedAt": Utc::now().to_rfc3339()}),
+        )?;
+    }
+    Ok(delivered)
+}
+
+#[cfg(not(test))]
+fn run_sender(
+    receiver: mpsc::Receiver<PathBuf>,
+    directory: PathBuf,
+    initial_session: SessionInfo,
+) -> crate::Result<()> {
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.join("delivery.lock"))?;
+    if lock.try_lock_exclusive().is_err() {
+        return Ok(());
+    }
+    let mut transport = HttpTransport::new(directory.clone(), initial_session);
+    let registered = transport.register();
+    let mut attempts = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(directory.join("delivery-attempts.jsonl"))?;
+    writeln!(
+        attempts,
+        "{}",
+        json!({
+            "sessionId": transport.initial_session.session_id,
+            "endpoint": "installation_sessions",
+            "timestamp": Utc::now().to_rfc3339(),
+            "success": registered.is_ok(),
+            "error": registered.err()
+        })
+    )?;
+    run_delivery_loop(&mut transport, receiver, &directory, RETRY_INTERVAL)
+}
+
+fn run_delivery_loop(
+    transport: &mut dyn Transport,
+    receiver: mpsc::Receiver<PathBuf>,
+    directory: &Path,
+    retry_interval: Duration,
+) -> crate::Result<()> {
+    let mut retries: BTreeMap<PathBuf, (Instant, Duration)> = BTreeMap::new();
+    let mut disconnected = false;
+    loop {
+        let paths = pending_chunks(&directory)?;
+        if disconnected && paths.is_empty() {
+            return Ok(());
+        }
+        let now = Instant::now();
+        if let Some(path) = paths
+            .iter()
+            .find(|path| retries.get(*path).is_none_or(|(due, _)| *due <= now))
+        {
+            match deliver_file(transport, directory, path, thread::sleep) {
+                Ok(true) => {
+                    retries.remove(path);
+                }
+                result => {
+                    if let Err(error) = result {
+                        eprintln!("Session delivery failed: {error}");
+                    }
+                    let delay = retries.get(path).map_or(retry_interval, |(_, delay)| {
+                        (*delay * 2).min(MAX_RETRY_INTERVAL)
+                    });
+                    retries.insert(path.clone(), (Instant::now() + delay, delay));
+                }
+            }
+            continue;
+        }
+        let wait = retries
+            .values()
+            .map(|(due, _)| due.saturating_duration_since(Instant::now()))
+            .min()
+            .unwrap_or(retry_interval)
+            .min(retry_interval);
+        if disconnected {
+            thread::sleep(wait);
+        } else {
+            match receiver.recv_timeout(wait) {
+                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => disconnected = true,
+            }
+        }
+    }
+}
+
+// Tests drive the sender explicitly against loopback or an in-memory transport.
 #[cfg(test)]
 pub(super) fn start(_: mpsc::Receiver<PathBuf>, _: PathBuf, _: SessionInfo) {}
 
 #[cfg(not(test))]
-pub(super) fn start(
-    receiver: mpsc::Receiver<PathBuf>,
-    directory: PathBuf,
-    initial_session: SessionInfo,
-) {
+pub(super) fn start(receiver: mpsc::Receiver<PathBuf>, directory: PathBuf, initial: SessionInfo) {
     thread::spawn(move || {
-        let mut transport = HttpTransport::new(directory.clone(), initial_session);
-        for attempt in 1..=4 {
-            let result = transport.register();
-            if let Ok(mut file) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(directory.join("delivery-attempts.jsonl"))
-            {
-                let record = json!({"sessionId":transport.initial_session.session_id,"endpoint":"installation_sessions",
-                    "attempt":attempt,"timestamp":Utc::now().to_rfc3339(),"success":result.is_ok(),"error":result.as_ref().err()});
-                let _ = writeln!(file, "{record}");
-            }
-            if result.is_ok() {
-                break;
-            }
-            if attempt < 4 {
-                thread::sleep(RETRY_DELAY);
-            }
-        }
-        for path in receiver {
-            let result = (|| -> crate::Result<()> {
-                let item: SpoolItem = serde_json::from_reader(File::open(&path)?)?;
-                let mut attempts = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(directory.join("delivery-attempts.jsonl"))?;
-                let delivered = deliver(
-                    &mut transport,
-                    &item.request,
-                    thread::sleep,
-                    |attempt, result| {
-                        let record = json!({"sessionId":item.request.session_id,"chunkId":item.request.chunk_id,
-                        "attempt":attempt,"timestamp":Utc::now().to_rfc3339(),"success":result.is_ok(),"error":result.as_ref().err()});
-                        let _ = serde_json::to_writer(&mut attempts, &record);
-                        let _ = attempts.write_all(b"\n");
-                        let _ = attempts.flush();
-                    },
-                );
-                if delivered {
-                    // ACKs are separate: immutable chunks remain available for diagnostics.
-                    crate::recovery::write_json(
-                        &path.with_extension("ack"),
-                        &json!({"chunkId":item.request.chunk_id,"acknowledgedAt":Utc::now().to_rfc3339()}),
-                    )?;
-                }
-                Ok(())
-            })();
-            if let Err(error) = result {
-                eprintln!("Session delivery failed: {error}");
-            }
+        if let Err(error) = run_sender(receiver, directory, initial) {
+            eprintln!("Session sender stopped: {error}");
         }
     });
 }
@@ -181,6 +290,92 @@ mod tests {
         io::{BufRead, BufReader, Read},
         net::TcpListener,
     };
+
+    #[test]
+    fn failed_outbox_survives_restart_and_final_status_is_delivered_first() {
+        struct Sender {
+            failing: bool,
+            requests: Vec<String>,
+        }
+        impl Transport for Sender {
+            fn send(&mut self, chunk: &Chunk, _: Duration) -> Result<(), String> {
+                self.requests.push(serde_json::to_string(chunk).unwrap());
+                if self.failing {
+                    Err("offline".into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let session = InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
+        let directory = session.directory();
+        let first = session.cut_with(true, |_| {}).unwrap();
+        let original = fs::read(&first).unwrap();
+        let mut sender = Sender {
+            failing: true,
+            requests: vec![],
+        };
+        assert!(!deliver_file(&mut sender, &directory, &first, |_| {}).unwrap());
+        assert!(!first.with_extension("ack").exists());
+        session.finish(Status::Success, None).unwrap();
+        drop(session);
+        InstallationLog::recover_interrupted(root.path()).unwrap();
+        let pending = pending_chunks(&directory).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].file_name().unwrap(), "000000000002.json");
+        let final_item: SpoolItem =
+            serde_json::from_reader(File::open(&pending[0]).unwrap()).unwrap();
+        assert!(final_item.request.final_chunk);
+        assert_eq!(final_item.request.session.status, Status::Success);
+        sender.failing = false;
+        for path in pending {
+            assert!(deliver_file(&mut sender, &directory, &path, |_| {}).unwrap());
+        }
+        assert!(pending_chunks(&directory).unwrap().is_empty());
+        assert_eq!(fs::read(first).unwrap(), original);
+        assert_eq!(sender.requests[0], *sender.requests.last().unwrap());
+    }
+
+    #[test]
+    fn sender_retries_without_new_events_after_the_session_is_closed() {
+        struct Recovering {
+            calls: usize,
+            first_request: Option<String>,
+        }
+        impl Transport for Recovering {
+            fn send(&mut self, chunk: &Chunk, _: Duration) -> Result<(), String> {
+                let request = serde_json::to_string(chunk).unwrap();
+                assert_eq!(self.first_request.get_or_insert(request.clone()), &request);
+                self.calls += 1;
+                if self.calls <= 4 {
+                    Err("temporary failure".into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let session = InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
+        session.finish(Status::Success, None).unwrap();
+        let directory = session.directory();
+        drop(session);
+        let (sender, receiver) = mpsc::channel();
+        drop(sender);
+        let mut transport = Recovering {
+            calls: 0,
+            first_request: None,
+        };
+        run_delivery_loop(
+            &mut transport,
+            receiver,
+            &directory,
+            Duration::from_millis(1),
+        )
+        .unwrap();
+        assert_eq!(transport.calls, 5);
+        assert!(pending_chunks(&directory).unwrap().is_empty());
+    }
 
     fn server(
         statuses: Vec<u16>,

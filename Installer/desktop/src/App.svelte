@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import CatalogSettings from "./CatalogSettings.svelte";
+  import ReadinessStatus from "./ReadinessStatus.svelte";
+  import { compareReleaseVersionsNewestFirst } from "./release-version";
   import {
     command,
     beginInstallationSession,
@@ -51,17 +53,31 @@
     eventsReady = $state(false),
     eventError = $state<Failure | null>(null);
   let verificationPending = $state(false);
+  let readinessStatus = $state<{
+    message: string;
+    deadlineUnixMs: number;
+  } | null>(null);
   let restoreCunba = $state(false);
   let cunbaRestored = $state(false);
   let cunbaConfirmed = $state(false);
   let cunbaRunning = $state(false);
   let cunbaReady = $state(false);
   let cunbaProgress = $state("");
+  let voyahTweaksConfirmed = $state(false);
+  let voyahTweaksRunning = $state(false);
+  let voyahTweaksReady = $state(false);
+  let voyahTweaksProgress = $state("");
   $effect(() => {
-    if (error && installationSessionId) void recordStep("gui-error", { error, screen });
+    if (error && installationSessionId)
+      void recordStep("gui-error", { error, screen });
   });
   const cunbaChoice = $derived(
-    action === "install" && ["CUNBA_DETECTED", "CUNBA_ROLLBACK_REQUIRED"].includes(error?.code || ""),
+    action === "install" &&
+      ["CUNBA_DETECTED", "CUNBA_ROLLBACK_REQUIRED"].includes(error?.code || ""),
+  );
+  const voyahTweaksChoice = $derived(
+    action === "install" &&
+      ["VOYAHTWEAKS_DETECTED", "VOYAHTWEAKS_ROLLBACK_REQUIRED"].includes(error?.code || ""),
   );
   let completed = $state<string[]>([]),
     current = $state<string | undefined>();
@@ -88,7 +104,6 @@
       release,
       cached: cached.find(
         (entry) =>
-          entry.version === release.version &&
           entry.path
             .replaceAll("\\", "/")
             .endsWith("/" + release.payload.sha256),
@@ -97,20 +112,24 @@
     for (const entry of cached)
       if (!rows.some((row) => row.cached?.path === entry.path))
         rows.push({ version: entry.version, cached: entry });
-    return rows;
+    return rows.sort((left, right) =>
+      compareReleaseVersionsNewestFirst(left.version, right.version),
+    );
   });
   const nextBlocked = $derived(
-    sessionStarting ? "Создаём журнал сессии" : busy
-      ? downloadBusy
-        ? "Дождитесь загрузки релиза"
-        : "Дождитесь завершения проверки"
-      : !action
-        ? "Не выбрано действие"
-        : action !== "remove" && !releaseVersion
-          ? "Не выбран релиз"
-          : !eventsReady
-            ? "Журнал установки недоступен"
-            : "",
+    sessionStarting
+      ? "Создаём журнал сессии"
+      : busy
+        ? downloadBusy
+          ? "Дождитесь загрузки релиза"
+          : "Дождитесь завершения проверки"
+        : !action
+          ? "Не выбрано действие"
+          : action !== "remove" && !releaseVersion
+            ? "Не выбран релиз"
+            : !eventsReady
+              ? "Журнал установки недоступен"
+              : "",
   );
   const downloadPercent = $derived(
     (downloadProgress?.stage === "download" ||
@@ -202,8 +221,22 @@
       : "",
   );
   function acceptEvent(event: Event) {
+    if (
+      ["readiness-progress", "readiness-pending"].includes(event.type) &&
+      Number.isFinite(event.data.deadlineUnixMs)
+    ) {
+      readinessStatus = {
+        message: event.message,
+        deadlineUnixMs: event.data.deadlineUnixMs,
+      };
+    }
     if (event.type === "cunba-progress") cunbaProgress = event.message;
-    if (event.type === "cunba-finished") reportPath = event.data.reportPath || "";
+    if (event.type === "cunba-finished")
+      reportPath = event.data.reportPath || "";
+    if (event.type === "voyahtweaks-progress")
+      voyahTweaksProgress = event.message;
+    if (event.type === "voyahtweaks-finished")
+      reportPath = event.data.reportPath || "";
     if (
       events.some(
         (e) =>
@@ -230,7 +263,8 @@
       reportPath = event.data.reportPath || "";
     }
     if (event.type === "step-started") current = event.stepId;
-    if (event.type === "step-completed" && event.stepId === "cunba-restore") cunbaRestored = true;
+    if (event.type === "step-completed" && event.stepId === "cunba-restore")
+      cunbaRestored = true;
     if (
       event.type === "step-completed" &&
       event.stepId &&
@@ -254,7 +288,9 @@
       canbusNotice = "";
       error = null;
       outcome =
-        event.type === "operation-completed-with-warning" ? "warning" : "success";
+        event.type === "operation-completed-with-warning"
+          ? "warning"
+          : "success";
       screen = 4;
       busy = false;
       reportPath = event.data.reportPath || "";
@@ -269,7 +305,9 @@
     }
   }
   onMount(() => {
-    const loggingFailed = (event: globalThis.Event) => { loggingWarning = (event as CustomEvent<string>).detail; };
+    const loggingFailed = (event: globalThis.Event) => {
+      loggingWarning = (event as CustomEvent<string>).detail;
+    };
     window.addEventListener("installation-log-error", loggingFailed);
     let disposed = false,
       unsubscribe = () => {},
@@ -345,14 +383,19 @@
       selectInfo(await command("release_info", { path }));
     } catch (e) {
       error = failure(e);
+      await finishBlockedPreparation(error);
     } finally {
       downloadBusy = false;
       await updateCatalog(false);
     }
   }
-  async function selectRelease(row: ReleaseRow) {
+  async function selectRelease(row: ReleaseRow, refresh = false) {
     if (busy) return;
-    await recordChoice("release-selected", { version: row.version, source: row.cached ? "cache" : "catalog" }, { version: row.version });
+    await recordChoice(
+      "release-selected",
+      { version: row.version, source: row.cached ? "cache" : "catalog" },
+      { version: row.version },
+    );
     if (row.release?.compatible === false) {
       error = {
         code: "INSTALLER_UPDATE_REQUIRED",
@@ -362,10 +405,17 @@
           "Скачайте и запустите требуемую версию установщика или новее.",
         retryable: false,
       };
+      await finishBlockedPreparation(error);
       return;
     }
     selectedVersion = row.version;
-    if (row.cached) {
+    if (row.cached?.path === releasePath) {
+      releasePath = "";
+      releaseVersion = "";
+      plan = null;
+      confirmed = false;
+    }
+    if (!row.release && row.cached) {
       await loadRelease(row.cached.path);
       return;
     }
@@ -374,24 +424,29 @@
     downloadProgress = null;
     error = null;
     try {
-      selectInfo(await command("download_payload", { version: row.version }));
+      selectInfo(await command("download_payload", {
+        version: row.version,
+        refresh,
+      }));
     } catch (e) {
       error = failure(e);
+      await finishBlockedPreparation(error);
     } finally {
       downloadBusy = false;
       await updateCatalog(false);
     }
   }
-  async function deleteRelease(cached: CachedPayload) {
-    if (busy || !cached.deletable) return;
-    await recordChoice("cached-release-delete", { version: cached.version });
+  async function deleteRelease(row: ReleaseRow) {
+    if (busy || (!row.release && !row.cached?.deletable)) return;
+    await recordChoice("cached-release-delete", { version: row.version });
     busy = true;
     error = null;
     try {
       const result = await command<{ deselected: boolean }>("delete_payload", {
-        path: cached.path,
+        path: row.cached?.path,
+        version: row.release?.version,
       });
-      if (result.deselected || releasePath === cached.path) {
+      if (result.deselected || releasePath === row.cached?.path) {
         releasePath = "";
         releaseVersion = "";
         await recordChoice("release-cleared", {}, null);
@@ -435,11 +490,30 @@
     if (action !== "install") return;
     installationSessionId = await beginInstallationSession();
   }
-  async function finishSession(status: "success" | "error", reason: unknown = null) {
+  async function finishBlockedPreparation(reason: Failure) {
+    if (
+      reason.retryable ||
+      [
+        "CUNBA_DETECTED",
+        "CUNBA_ROLLBACK_REQUIRED",
+        "VOYAHTWEAKS_DETECTED",
+        "VOYAHTWEAKS_ROLLBACK_REQUIRED",
+      ].includes(reason.code)
+    ) return;
+    await finishSession("error", { ...reason, displayTitle: reason.message, source: "gui" });
+  }
+  async function finishSession(
+    status: "success" | "error",
+    reason: unknown = null,
+  ) {
     sessionStarting = true;
-    try { await finishInstallationSession(status, reason); }
-    catch (caught) { loggingWarning = failure(caught).message; }
-    finally { sessionStarting = false; }
+    try {
+      await finishInstallationSession(status, reason);
+    } catch (caught) {
+      loggingWarning = failure(caught).message;
+    } finally {
+      sessionStarting = false;
+    }
   }
   async function choose(value: Action) {
     if (sessionStarting) return;
@@ -447,20 +521,34 @@
     try {
       if (value === "install") {
         installationSessionId = await beginInstallationSession();
-        await recordChoice("action-selected", { action: value }, releaseVersion ? { version: releaseVersion } : undefined, dns);
+        await recordChoice(
+          "action-selected",
+          { action: value },
+          releaseVersion ? { version: releaseVersion } : undefined,
+          dns,
+        );
       } else {
         await recordChoice("action-selected", { action: value });
-        await finishSession("error", { code: "ACTION_CHANGED", message: "Пользователь переключился с установки на удаление", source: "user" });
+        await finishSession("error", {
+          code: "ACTION_CHANGED",
+          message: "Пользователь переключился с установки на удаление",
+          source: "user",
+        });
         installationSessionId = "";
       }
       cunbaReady = false;
       cunbaConfirmed = false;
+      voyahTweaksReady = false;
+      voyahTweaksConfirmed = false;
       action = value;
       plan = null;
       confirmed = false;
       error = null;
-    } catch (caught) { error = failure(caught); }
-    finally { sessionStarting = false; }
+    } catch (caught) {
+      error = failure(caught);
+    } finally {
+      sessionStarting = false;
+    }
   }
   async function next() {
     if (nextBlocked) return;
@@ -503,7 +591,11 @@
       screen = 1;
     } catch (caught) {
       error = failure(caught);
-      await finishSession("error", { ...error, displayTitle: error.message, source: "gui" });
+      await finishSession("error", {
+        ...error,
+        displayTitle: error.message,
+        source: "gui",
+      });
     } finally {
       cunbaRunning = false;
       cunbaConfirmed = false;
@@ -512,7 +604,11 @@
   }
   async function stopCunbaInstallation() {
     await recordChoice("cunba-disable-declined", {});
-    await finishSession("error", { code: "USER_STOPPED", message: "Пользователь остановил установку при обнаружении Cunba", source: "user" });
+    await finishSession("error", {
+      code: "USER_STOPPED",
+      message: "Пользователь остановил установку при обнаружении Cunba",
+      source: "user",
+    });
     error = null;
     plan = null;
     confirmed = false;
@@ -529,6 +625,61 @@
       await review();
     }
   }
+  async function disableVoyahTweaks() {
+    if (!voyahTweaksConfirmed || !connected || busy) return;
+    busy = true;
+    voyahTweaksRunning = true;
+    voyahTweaksReady = false;
+    voyahTweaksProgress = "Проверяем состояние VoyahTweaks";
+    error = null;
+    plan = null;
+    verificationPending = false;
+    try {
+      await ensureInstallationSession();
+      await recordChoice("voyahtweaks-disable-approved", { confirmed: true });
+      const result = await command<{ reportPath: string }>("disable_voyahtweaks", {
+        serial: devices[0].serial,
+        confirmed: true,
+      });
+      reportPath = result.reportPath;
+      voyahTweaksReady = true;
+      screen = 1;
+    } catch (caught) {
+      error = failure(caught);
+      await finishSession("error", {
+        ...error,
+        displayTitle: error.message,
+        source: "gui",
+      });
+    } finally {
+      voyahTweaksRunning = false;
+      voyahTweaksConfirmed = false;
+      busy = false;
+    }
+  }
+  async function stopVoyahTweaksInstallation() {
+    await recordChoice("voyahtweaks-disable-declined", {});
+    await finishSession("error", {
+      code: "USER_STOPPED",
+      message: "Пользователь остановил установку при обнаружении VoyahTweaks",
+      source: "user",
+    });
+    error = null;
+    plan = null;
+    confirmed = false;
+    voyahTweaksConfirmed = false;
+    voyahTweaksReady = false;
+    screen = 0;
+  }
+  async function continueAfterVoyahTweaks() {
+    await recordChoice("continue-after-voyahtweaks", { approved: true });
+    voyahTweaksReady = false;
+    await refresh();
+    if (connected) {
+      confirmed = true;
+      await review();
+    }
+  }
   async function review() {
     if (!connected || !confirmed) return;
     busy = true;
@@ -536,7 +687,10 @@
     plan = null;
     try {
       await ensureInstallationSession();
-      await recordChoice("vehicle-check-requested", { serial: devices[0].serial, deviceConfirmed: confirmed });
+      await recordChoice("vehicle-check-requested", {
+        serial: devices[0].serial,
+        deviceConfirmed: confirmed,
+      });
       plan = await command<Plan>("plan", {
         serial: devices[0].serial,
         action,
@@ -548,6 +702,7 @@
       cunbaRestored = false;
     } catch (e) {
       error = failure(e);
+      await finishBlockedPreparation(error);
     } finally {
       busy = false;
     }
@@ -557,9 +712,14 @@
       return;
     if (action === "remove") {
       plan.steps = plan.steps.filter((step) => step.id !== "cunba-restore");
-      if (restoreCunba) plan.steps.push({ id: "cunba-restore", title: "Восстановление Cunba и проверка после перезагрузки" });
+      if (restoreCunba)
+        plan.steps.push({
+          id: "cunba-restore",
+          title: "Восстановление Cunba и проверка после перезагрузки",
+        });
     }
     verificationPending = verificationOnly;
+    readinessStatus = null;
     busy = true;
     error = null;
     canbusNotice = "";
@@ -578,7 +738,12 @@
     screen = 3;
     try {
       await ensureInstallationSession();
-      await recordChoice(verificationOnly ? "verification-retry" : "plan-approved", { action, dns, restoreCunba, deviceConfirmed: confirmed }, undefined, dns);
+      await recordChoice(
+        verificationOnly ? "verification-retry" : "plan-approved",
+        { action, dns, restoreCunba, deviceConfirmed: confirmed },
+        undefined,
+        dns,
+      );
       if (verificationOnly) {
         await command("retry_verification");
       } else {
@@ -619,7 +784,9 @@
   }
   async function retry() {
     await ensureInstallationSession();
-    await recordChoice("installation-retry", { verificationOnly: verificationPending });
+    await recordChoice("installation-retry", {
+      verificationOnly: verificationPending,
+    });
     if (verificationPending) {
       await start(true);
       return;
@@ -651,18 +818,30 @@
   async function completeVisibleSession() {
     if (action !== "install" || screen !== 4) return;
     const succeeded = outcome === "success";
-    await finishSession(succeeded ? "success" : "error", succeeded ? null : {
-      ...(error || {}),
-      code: error?.code || (outcome === "cancelled" ? "USER_CANCELLED" : "INSTALLATION_INCOMPLETE"),
-      message: error?.message || stopMessage || "Установка не подтверждена",
-      displayTitle: finalTitle(),
-      source: "gui",
-    });
+    await finishSession(
+      succeeded ? "success" : "error",
+      succeeded
+        ? null
+        : {
+            ...(error || {}),
+            code:
+              error?.code ||
+              (outcome === "cancelled"
+                ? "USER_CANCELLED"
+                : "INSTALLATION_INCOMPLETE"),
+            message:
+              error?.message || stopMessage || "Установка не подтверждена",
+            displayTitle: finalTitle(),
+            source: "gui",
+          },
+    );
   }
   function finalTitle() {
     if (outcome === "warning") return "Установка завершена";
     if (outcome === "success") {
-      return action === "remove" ? "VoyahTune удалён" : "VoyahTune готов к работе";
+      return action === "remove"
+        ? "VoyahTune удалён"
+        : "VoyahTune готов к работе";
     }
     if (outcome === "cancelled") return "Операция отменена";
     if (outcome === "paused") return "Требуется ваше решение";
@@ -694,12 +873,16 @@
         <span class="offline-dot"></span> Установка из загруженного релиза<small
           >Установщик {catalog?.installerVersion || "…"}</small
         >
-        {#if installationSessionId}<small style="overflow-wrap: anywhere">Сессия: {installationSessionId}</small>{/if}
+        {#if installationSessionId}<small style="overflow-wrap: anywhere"
+            >Сессия: {installationSessionId}</small
+          >{/if}
       </div>
     </aside>
     <main id="main" aria-busy={busy && !canbusNotice}>
       <div class="screen">
-        {#if loggingWarning}<p class="info-note" role="alert">Не удалось записать часть журнала: {loggingWarning}</p>{/if}
+        {#if loggingWarning}<p class="info-note" role="alert">
+            Не удалось записать часть журнала: {loggingWarning}
+          </p>{/if}
         {#if screen === 0}
           <div class="screen-heading">
             <span class="eyebrow">НАЧАЛО РАБОТЫ</span>
@@ -812,15 +995,19 @@
                               >{downloadBusy && selectedVersion === row.version
                                 ? "Загрузка…"
                                 : "Выбрать"}</button
-                            ><button
+                            >{#if row.release}<button
+                              class="button secondary"
+                              disabled={busy}
+                              onclick={() => selectRelease(row, true)}
+                              >Скачать заново</button
+                            >{/if}<button
                               class="button delete-cache"
                               aria-label={`Удалить скачанный релиз ${row.version}`}
-                              title={row.cached?.deletable
+                              title={row.release || row.cached?.deletable
                                 ? "Удалить релиз с компьютера"
                                 : "Нет скачанного релиза для удаления"}
-                              disabled={busy || !row.cached?.deletable}
-                              onclick={() =>
-                                row.cached && deleteRelease(row.cached)}
+                              disabled={busy || (!row.release && !row.cached?.deletable)}
+                              onclick={() => deleteRelease(row)}
                               >Удалить</button
                             >
                           </div></td
@@ -944,14 +1131,20 @@
                     <span class="device-status">{d.state}</span>
                   </div>{/each}
               </div>
-              <button class="button secondary" onclick={refresh} disabled={busy || sessionStarting}
-                >↻ Обновить</button
+              <button
+                class="button secondary"
+                onclick={refresh}
+                disabled={busy || sessionStarting}>↻ Обновить</button
               >
               {#if connected}<label class="confirmation"
                   ><input
                     type="checkbox"
                     bind:checked={confirmed}
-                    onchange={() => recordChoice("device-confirmation", { confirmed, serial: devices[0]?.serial })}
+                    onchange={() =>
+                      recordChoice("device-confirmation", {
+                        confirmed,
+                        serial: devices[0]?.serial,
+                      })}
                     disabled={busy || sessionStarting}
                   />
                   Это мой автомобиль, подключённый для {action === "remove"
@@ -1020,7 +1213,9 @@
                 {releaseVersion || "Встроенные ресурсы удаления"}
               </p>
               {#if plan.inventory.state === "unchecked"}
-                <p>Выбранный релиз будет установлен поверх существующих файлов.</p>
+                <p>
+                  Выбранный релиз будет установлен поверх существующих файлов.
+                </p>
               {:else}
                 <p><strong>Сейчас в автомобиле:</strong> {inventoryName}</p>
                 <details>
@@ -1058,7 +1253,8 @@
                       name="dns"
                       value={item.id}
                       bind:group={dns}
-                      onchange={() => recordChoice("dns-selected", { dns }, undefined, dns)}
+                      onchange={() =>
+                        recordChoice("dns-selected", { dns }, undefined, dns)}
                     />{item.label}</label
                   >{/each}
               </div>
@@ -1069,9 +1265,25 @@
           {#if action === "remove" && plan.cunbaRestorationAvailable}
             <section class="status-panel warning">
               <h2>Доступно восстановление Cunba</h2>
-              <p>На ГУ найдены сохранённые данные Cunba. По вашему выбору после удаления VoyahTune установщик восстановит её файлы, автозапуск и прежнее состояние приложения, затем перезагрузит ГУ и проверит результат.</p>
-              <label class="confirmation"><input type="checkbox" bind:checked={restoreCunba} onchange={() => recordChoice("cunba-restore-consent", { approved: restoreCunba })} /> Восстановить Cunba после удаления VoyahTune</label>
-              <p>Если не выбирать восстановление, Cunba останется отключённой.</p>
+              <p>
+                На ГУ найдены сохранённые данные Cunba. По вашему выбору после
+                удаления VoyahTune установщик восстановит её файлы, автозапуск и
+                прежнее состояние приложения, затем перезагрузит ГУ и проверит
+                результат.
+              </p>
+              <label class="confirmation"
+                ><input
+                  type="checkbox"
+                  bind:checked={restoreCunba}
+                  onchange={() =>
+                    recordChoice("cunba-restore-consent", {
+                      approved: restoreCunba,
+                    })}
+                /> Восстановить Cunba после удаления VoyahTune</label
+              >
+              <p>
+                Если не выбирать восстановление, Cunba останется отключённой.
+              </p>
             </section>
           {/if}
           {#if action === "remove"}<label class="confirmation"
@@ -1084,7 +1296,9 @@
               >{action === "remove" ? "УДАЛЕНИЕ" : "УСТАНОВКА"} VOYAHTUNE</span
             >
             <h1>
-              {(current === "cunba-restore" ? "Восстановление Cunba" : plan.steps.find((s) => s.id === current)?.title) ||
+              {(current === "cunba-restore"
+                ? "Восстановление Cunba"
+                : plan.steps.find((s) => s.id === current)?.title) ||
                 "Повторная проверка"}
             </h1>
             <p class="subtitle">
@@ -1092,7 +1306,12 @@
               результат каждого шага.
             </p>
           </div>
-          {#if current === "cunba-restore"}<p class="info-note">{cunbaProgress}</p>{/if}
+          {#if current === "verify" && readinessStatus}
+            <ReadinessStatus {...readinessStatus} />
+          {/if}
+          {#if current === "cunba-restore"}<p class="info-note">
+              {cunbaProgress}
+            </p>{/if}
           {#if canbusNotice}<section
               class="status-panel warning"
               role="alert"
@@ -1157,17 +1376,21 @@
         {:else if screen === 4}
           <div class="screen-heading">
             <span class="eyebrow"
-              >{["success", "warning"].includes(outcome) ? "ГОТОВО" : "ОПЕРАЦИЯ ОСТАНОВЛЕНА"}</span
+              >{["success", "warning"].includes(outcome)
+                ? "ГОТОВО"
+                : "ОПЕРАЦИЯ ОСТАНОВЛЕНА"}</span
             >
             <h1>
-{finalTitle()}
+              {finalTitle()}
             </h1>
             <p class="subtitle">
               {outcome === "warning"
                 ? "Время ожидания подтверждения истекло."
                 : outcome === "success"
                   ? action === "remove"
-                    ? cunbaRestored ? "VoyahTune удалён. Файлы и настройки Cunba восстановлены, загрузка Android проверена." : "Команды удаления выполнены. Автомобиль перезагружается."
+                    ? cunbaRestored
+                      ? "VoyahTune удалён. Файлы и настройки Cunba восстановлены, загрузка Android проверена."
+                      : "Команды удаления выполнены. Автомобиль перезагружается."
                     : "Запуск Native проверен после перезагрузки автомобиля."
                   : ["cancelled", "paused"].includes(outcome)
                     ? stopMessage
@@ -1194,7 +1417,9 @@
               </h2>
               <p>
                 {action === "remove"
-                  ? cunbaRestored ? "Восстановлено прежнее состояние Cunba. Работу её функций проверьте на ГУ." : "Резервные копии и журнал сохранены на компьютере."
+                  ? cunbaRestored
+                    ? "Восстановлено прежнее состояние Cunba. Работу её функций проверьте на ГУ."
+                    : "Резервные копии и журнал сохранены на компьютере."
                   : "Откройте VoyahTune на автомобиле, чтобы настроить доступные функции."}
               </p>
             </section>{/if}
@@ -1213,19 +1438,127 @@
           </section>{/if}
         {#if cunbaChoice || cunbaRunning || cunbaReady}
           <section class="status-panel warning" role="status">
-            <h2>{cunbaReady ? "Cunba отключена" : "Отключение Cunba перед установкой"}</h2>
+            <h2>
+              {cunbaReady
+                ? "Cunba отключена"
+                : "Отключение Cunba перед установкой"}
+            </h2>
             {#if cunbaRunning}
               <p>{cunbaProgress}</p>
-              <p>Не отключайте USB и питание ГУ. Идёт отключение, перезагрузка или восстановление.</p>
+              <p>
+                Не отключайте USB и питание ГУ. Идёт отключение, перезагрузка
+                или восстановление.
+              </p>
             {:else if cunbaReady}
-              <p>После перезагрузки активная Cunba не обнаружена. Android и лаунчер прошли проверку стабильности. Можно заново проверить автомобиль и продолжить установку.</p>
-              <button class="button primary" disabled={busy || sessionStarting} onclick={continueAfterCunba}>Продолжить установку VoyahTune</button>
+              <p>
+                После перезагрузки активная Cunba не обнаружена. Android и
+                лаунчер прошли проверку стабильности. Можно заново проверить
+                автомобиль и продолжить установку.
+              </p>
+              <button
+                class="button primary"
+                disabled={busy || sessionStarting}
+                onclick={continueAfterCunba}
+                >Продолжить установку VoyahTune</button
+              >
             {:else}
-              <p>Можно остановить установку или отключить поддерживаемые компоненты Cunba. Её функции станут недоступны. Исходные файлы и настройки будут сохранены.</p>
-              <p>ГУ перезагрузится. Если Cunba останется активной, изменения будут восстановлены, а установка заблокирована. Неизвестные компоненты автоматически не изменяются.</p>
-              <label><input type="checkbox" bind:checked={cunbaConfirmed} onchange={() => recordChoice("cunba-disable-consent", { approved: cunbaConfirmed })} disabled={busy || sessionStarting} /> Согласен на отключение Cunba и перезагрузку ГУ</label>
-              <button class="button secondary" disabled={busy || sessionStarting} onclick={stopCunbaInstallation}>Остановить установку</button>
-              <button class="button primary" disabled={busy || !cunbaConfirmed || !connected} onclick={disableCunba}>{error?.code === "CUNBA_ROLLBACK_REQUIRED" ? "Повторить восстановление" : "Отключить Cunba"}</button>
+              <p>
+                Можно остановить установку или отключить поддерживаемые
+                компоненты Cunba. Её функции станут недоступны. Исходные файлы и
+                настройки будут сохранены.
+              </p>
+              <p>
+                ГУ перезагрузится. Если Cunba останется активной, изменения
+                будут восстановлены, а установка заблокирована. Неизвестные
+                компоненты автоматически не изменяются.
+              </p>
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={cunbaConfirmed}
+                  onchange={() =>
+                    recordChoice("cunba-disable-consent", {
+                      approved: cunbaConfirmed,
+                    })}
+                  disabled={busy || sessionStarting}
+                /> Согласен на отключение Cunba и перезагрузку ГУ</label
+              >
+              <button
+                class="button secondary"
+                disabled={busy || sessionStarting}
+                onclick={stopCunbaInstallation}>Остановить установку</button
+              >
+              <button
+                class="button primary"
+                disabled={busy || !cunbaConfirmed || !connected}
+                onclick={disableCunba}
+                >{error?.code === "CUNBA_ROLLBACK_REQUIRED"
+                  ? "Повторить восстановление"
+                  : "Отключить Cunba"}</button
+              >
+            {/if}
+          </section>
+        {/if}
+        {#if voyahTweaksChoice || voyahTweaksRunning || voyahTweaksReady}
+          <section class="status-panel warning" role="status">
+            <h2>
+              {voyahTweaksReady
+                ? "VoyahTweaks отключён"
+                : "Найдены признаки VoyahTweaks"}
+            </h2>
+            {#if voyahTweaksRunning}
+              <p>{voyahTweaksProgress}</p>
+              <p>
+                Не отключайте USB и питание ГУ. Идёт отключение, перезагрузка
+                или восстановление.
+              </p>
+            {:else if voyahTweaksReady}
+              <p>
+                После перезагрузки активный VoyahTweaks не обнаружен. Android и
+                лаунчер прошли проверку стабильности. Можно заново проверить
+                автомобиль и продолжить установку.
+              </p>
+              <button
+                class="button primary"
+                disabled={busy || sessionStarting}
+                onclick={continueAfterVoyahTweaks}
+                >Продолжить установку VoyahTune</button
+              >
+            {:else}
+              <p>
+                Можно остановить установку или отключить поддерживаемые
+                компоненты VoyahTweaks. Его функции станут недоступны. Исходные файлы и
+                настройки будут сохранены.
+              </p>
+              <p>
+                ГУ перезагрузится. Если VoyahTweaks останется активным, изменения
+                будут восстановлены, а установка заблокирована. Неизвестные
+                компоненты автоматически не изменяются.
+              </p>
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={voyahTweaksConfirmed}
+                  onchange={() =>
+                    recordChoice("voyahtweaks-disable-consent", {
+                      approved: voyahTweaksConfirmed,
+                    })}
+                  disabled={busy || sessionStarting}
+                /> Согласен на отключение VoyahTweaks и перезагрузку ГУ</label
+              >
+              <button
+                class="button secondary"
+                disabled={busy || sessionStarting}
+                onclick={stopVoyahTweaksInstallation}>Остановить установку</button
+              >
+              <button
+                class="button primary"
+                disabled={busy || !voyahTweaksConfirmed || !connected}
+                onclick={disableVoyahTweaks}
+                >{error?.code === "VOYAHTWEAKS_ROLLBACK_REQUIRED"
+                  ? "Повторить восстановление"
+                  : "Отключить VoyahTweaks"}</button
+              >
             {/if}
           </section>
         {/if}
@@ -1246,13 +1579,23 @@
             </details>
           </section>{/if}
         {#if reportPath}<p class="report-path">Отчёт: {reportPath}</p>{/if}
-        <button class="button secondary" disabled={logsFolderOpening} onclick={openLogsFolder}>
+        <button
+          class="button secondary"
+          disabled={logsFolderOpening}
+          onclick={openLogsFolder}
+        >
           Открыть папку с логами
         </button>
-        {#if logsFolderError}<p class="info-note" role="alert">{logsFolderError}</p>{/if}
+        {#if logsFolderError}<p class="info-note" role="alert">
+            {logsFolderError}
+          </p>{/if}
       </div>
       <footer class="footer">
-        {#if cunbaRunning || cunbaReady || cunbaChoice}<span class="footer-note">{cunbaRunning ? "Дождитесь завершения операции" : "Выберите действие в разделе Cunba"}</span>
+        {#if cunbaRunning || cunbaReady || cunbaChoice}<span class="footer-note"
+            >{cunbaRunning
+              ? "Дождитесь завершения операции"
+              : "Выберите действие в разделе Cunba"}</span
+          >
         {:else if screen === 0}<span
             class="footer-note next-reason"
             id="next-reason"
@@ -1288,7 +1631,8 @@
             class="button"
             class:primary={action !== "remove"}
             class:danger={action === "remove"}
-            disabled={busy || sessionStarting ||
+            disabled={busy ||
+              sessionStarting ||
               !eventsReady ||
               (action === "remove" && !removeConfirmed)}
             onclick={() => start()}
@@ -1321,7 +1665,13 @@
                   error = null;
                 }
               : retry}
-            >{outcome === "warning" ? "Завершить" : outcome === "success" ? "В начало" : verificationPending ? "Повторить проверку" : "Проверить заново"}</button
+            >{outcome === "warning"
+              ? "Завершить"
+              : outcome === "success"
+                ? "В начало"
+                : verificationPending
+                  ? "Повторить проверку"
+                  : "Проверить заново"}</button
           >{/if}
       </footer>
     </main>
@@ -1352,12 +1702,20 @@
           ? "События не получены. Ошибка выше содержит подробности; сохраните отчёт."
           : "Операция ещё не запускалась.")}</pre>
     <div class="footer-actions">
-      <button class="button primary" onclick={saveReport}>Сохранить отчёт</button>
-      <button class="button secondary" disabled={logsFolderOpening} onclick={openLogsFolder}>
+      <button class="button primary" onclick={saveReport}
+        >Сохранить отчёт</button
+      >
+      <button
+        class="button secondary"
+        disabled={logsFolderOpening}
+        onclick={openLogsFolder}
+      >
         Открыть папку с логами
       </button>
     </div>
-    {#if logsFolderError}<p class="info-note" role="alert">{logsFolderError}</p>{/if}
+    {#if logsFolderError}<p class="info-note" role="alert">
+        {logsFolderError}
+      </p>{/if}
   </dialog>{/if}
 
 <style>

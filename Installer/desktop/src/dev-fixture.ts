@@ -21,7 +21,8 @@ export function onPayloadProgress(callback: (event: PayloadProgress) => void) {
 }
 const scenario = new URLSearchParams(location.search).get("fixture");
 export function subscribe(callback: (event: Event) => void) {
-  if (scenario === "events-error") throw Error("core:event:allow-listen denied");
+  if (scenario === "events-error")
+    throw Error("core:event:allow-listen denied");
   listeners.add(callback);
   return () => {
     listeners.delete(callback);
@@ -122,7 +123,8 @@ export async function command(
             : [
                 {
                   serial: "CAR-001",
-                  state: scenario === "unauthorized" ? "unauthorized" : "device",
+                  state:
+                    scenario === "unauthorized" ? "unauthorized" : "device",
                   model: "Voyah Free",
                 },
               ],
@@ -260,6 +262,20 @@ export async function command(
       await new Promise((resolve) =>
         setTimeout(resolve, scenario === "progress" ? 5000 : 350),
       );
+      if (scenario === "readiness" && step.id === "verify") {
+        const deadlineUnixMs = Date.now() + 180_000;
+        emit(
+          "readiness-progress",
+          "verify",
+          "Проверяем работу службы обновлений",
+          { deadlineUnixMs },
+        );
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        emit("readiness-pending", "verify", "OTA-служба не отвечает", {
+          deadlineUnixMs,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 180_000));
+      }
       if (scenario === "root-error" && step.id === "root") {
         const error = {
           code: "ROOT_UNAVAILABLE",
@@ -334,7 +350,8 @@ export async function command(
     emit("operation-completed", undefined, "Результат проверен");
     return;
   }
-  if (name === "open_logs_folder") return "Тестовая папка логов · браузерная проверка";
+  if (name === "open_logs_folder")
+    return "Тестовая папка логов · браузерная проверка";
   if (name === "save_report") return "Тестовый отчёт · браузерная проверка";
   throw Error(`Unknown fixture command: ${name}`);
 }

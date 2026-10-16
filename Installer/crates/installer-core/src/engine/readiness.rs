@@ -51,6 +51,16 @@ impl Stability {
 }
 
 impl Engine {
+    fn readiness_progress(&self, message: &str, deadline: Instant) -> Result<()> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        self.adb.events.emit(
+            "readiness-progress",
+            Some("verify"),
+            message,
+            json!({"deadlineUnixMs": chrono::Utc::now().timestamp_millis() + remaining.as_millis() as i64}),
+        )
+    }
+
     fn readiness_command(&self, script: &str, deadline: Instant) -> Result<String> {
         if self.cancel.load(Ordering::Relaxed) {
             return Err(Error::new("CANCELLED", "Проверка остановлена"));
@@ -84,6 +94,7 @@ impl Engine {
     }
 
     fn readiness_sample(&self, deadline: Instant, start_sent: &mut bool) -> Result<String> {
+        self.readiness_progress("Проверяем USB-соединение с автомобилем", deadline)?;
         if self.readiness_command("id -u", deadline)? != "0" {
             let remaining = deadline.saturating_duration_since(Instant::now());
             self.adb
@@ -94,11 +105,17 @@ impl Engine {
                 "Ожидание ADB с системным доступом",
             ));
         }
+        self.readiness_progress("Ожидаем завершения загрузки Android", deadline)?;
         self.readiness_command(
             "[ \"$(getprop sys.boot_completed)\" = 1 ] && service check package | grep -q ': found'",
             deadline,
         )?;
+        self.readiness_progress("Проверяем отсутствие активной Cunba", deadline)?;
         crate::cunba::check(
+            &self.adb,
+            deadline.saturating_duration_since(Instant::now()),
+        )?;
+        crate::voyahtweaks::check(
             &self.adb,
             deadline.saturating_duration_since(Instant::now()),
         )?;
@@ -106,6 +123,7 @@ impl Engine {
             .map_err(|error| {
                 Error::new("HEALTH_PENDING", "Идёт другая операция установки или OTA").detail(error)
             })?;
+        self.readiness_progress("Проверяем запуск Native", deadline)?;
         let native = self
             .readiness_command(NATIVE_HEALTH, deadline)
             .map_err(|error| {
@@ -122,6 +140,7 @@ impl Engine {
                 self.warning(&error);
             }
         }
+        self.readiness_progress("Проверяем запуск RestoreMode", deadline)?;
         let restore = self
             .readiness_command(RESTORE_HEALTH, deadline)
             .map_err(|error| {
@@ -144,6 +163,7 @@ impl Engine {
             &self.payload.manifest.release_version,
             "Native",
         )?;
+        self.readiness_progress("Проверяем работу службы обновлений", deadline)?;
         let before = self.readiness_identity(deadline)?;
         self.readiness_command(
             "[ \"$(getprop init.svc.voyahtune_updater)\" = running ]",
@@ -210,6 +230,7 @@ impl Engine {
             }
             let sample = self.readiness_sample(deadline, &mut start_sent).and_then(|identity| {
                 if verified_identity != identity {
+                    self.readiness_progress("Проверяем установленные файлы приложений", deadline)?;
                     for (package, artifact) in [(NATIVE, "native.apk"), (RESTORE, "restore_mode.apk")] {
                         self.readiness_command(
                             &active_apk_script(package, &self.payload.artifact(artifact)?.sha256, None),
@@ -228,16 +249,31 @@ impl Engine {
                 {
                     return Ok(())
                 }
-                Ok(_) => {}
+                Ok(_) => {
+                    self.readiness_progress(
+                        "Проверки пройдены. Наблюдаем стабильность служб",
+                        deadline,
+                    )?;
+                }
                 Err(error) if error.code == "CANCELLED" => return Err(error),
-                Err(error) if crate::cunba::is_blocking_error(&error) => return Err(error),
+                Err(error)
+                    if crate::cunba::is_blocking_error(&error)
+                        || crate::voyahtweaks::is_blocking_error(&error) =>
+                {
+                    return Err(error)
+                }
                 Err(error) => {
                     stability.reset();
                     self.adb.events.emit(
                         "readiness-pending",
                         Some("verify"),
                         &error.message,
-                        json!({"detail":error.detail}),
+                        json!({
+                            "detail": error.detail,
+                            "code": error.code,
+                            "deadlineUnixMs": chrono::Utc::now().timestamp_millis()
+                                + deadline.saturating_duration_since(Instant::now()).as_millis() as i64
+                        }),
                     )?;
                     last = error;
                 }
@@ -246,6 +282,10 @@ impl Engine {
                 Duration::from_secs(2).min(deadline.saturating_duration_since(Instant::now())),
             );
         }
+        self.readiness_progress(
+            "Время проверки истекло. Собираем диагностический отчёт",
+            deadline,
+        )?;
         self.readiness_diagnostics();
         Err(Error::new(
             "READINESS_UNCONFIRMED",
@@ -330,6 +370,12 @@ root=$(dirname "$0")
 script=$(cat)
 printf '%s\n' "$script" >> "$root/commands"
 case "$script" in
+    *'VOYAHTWEAKS_FOUND'*)
+        if [ -e "$root/voyahtweaks" ]; then
+            printf 'VOYAHTWEAKS_FOUND\tloader\n'
+        else
+            echo VOYAHTWEAKS_CLEAR
+        fi ;;
     *'CUNBA_FOUND'*)
         if [ -e "$root/cunba" ]; then
             printf 'CUNBA_FOUND\tfile: /data/local/bin/frida-inject2\n'
@@ -367,12 +413,14 @@ esac
             root: directory.path().into(),
             manifest: serde_json::from_value(manifest).unwrap(),
         };
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured_events = captured.clone();
         let mut engine = Engine::new(
             &adb_path,
             payload,
             "CAR-001",
             &directory.path().join("logs"),
-            Arc::new(|_| {}),
+            Arc::new(move |event| captured_events.lock().unwrap().push(event.clone())),
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
@@ -380,6 +428,7 @@ esac
         let deadline = Instant::now() + Duration::from_secs(60);
         for (marker, code) in [
             ("cunba", "CUNBA_DETECTED"),
+            ("voyahtweaks", "VOYAHTWEAKS_DETECTED"),
             ("cunba-check-failed", "CUNBA_CHECK_FAILED"),
         ] {
             fs::write(directory.path().join(marker), "").unwrap();
@@ -398,6 +447,25 @@ esac
         assert!(engine.readiness_sample(deadline, &mut sent).is_err());
         assert!(sent);
         assert!(engine.readiness_sample(deadline, &mut sent).is_ok());
+        let progress: Vec<_> = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.kind == "readiness-progress")
+            .cloned()
+            .collect();
+        for stage in [
+            "Проверяем запуск Native",
+            "Проверяем запуск RestoreMode",
+            "Проверяем работу службы обновлений",
+        ] {
+            assert!(progress
+                .iter()
+                .any(|event| event.message == stage && event.step_id.as_deref() == Some("verify")));
+        }
+        assert!(progress
+            .iter()
+            .all(|event| event.data["deadlineUnixMs"].as_i64().is_some()));
         assert_eq!(
             fs::read_to_string(directory.path().join("broadcasts")).unwrap(),
             "sent\n"

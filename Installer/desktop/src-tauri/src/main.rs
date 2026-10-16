@@ -364,7 +364,11 @@ async fn open_release_link(app: tauri::AppHandle, url: String) -> Result<()> {
     .map_err(|e| Error::new("WORKER", "Не удалось открыть браузер").detail(e))?
 }
 #[tauri::command]
-async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Value> {
+async fn download_payload(
+    app: tauri::AppHandle,
+    version: String,
+    refresh: Option<bool>,
+) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -379,9 +383,14 @@ async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Valu
                 .ok_or_else(|| Error::new("RELEASE_MISSING", "Обновите список и выберите релиз"))?;
             (entry, state.cancel.clone().unwrap())
         };
-        let payload = Cache::user()?.download(&release, &cancel, &|event| {
-            let _ = handle.emit("payload-progress", event);
-        })?;
+        let payload = Cache::user()?.download_with_refresh(
+            &release,
+            refresh.unwrap_or(false),
+            &cancel,
+            &|event| {
+                let _ = handle.emit("payload-progress", event);
+            },
+        )?;
         select_payload(&handle, payload)
     })
     .await
@@ -391,13 +400,34 @@ async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Valu
     result
 }
 #[tauri::command]
-async fn delete_payload(app: tauri::AppHandle, path: String) -> Result<Value> {
+async fn delete_payload(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    version: Option<String>,
+) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
-        let canonical = path.canonicalize()?;
-        Cache::user()?.remove(&path)?;
+        let cache = Cache::user()?;
+        let path = if let Some(version) = version {
+            let runtime = handle.state::<Runtime>();
+            let state = runtime.0.lock().unwrap();
+            let release = state
+                .catalog
+                .as_ref()
+                .and_then(|catalog| {
+                    catalog
+                        .releases
+                        .iter()
+                        .find(|release| release.version == version)
+                })
+                .ok_or_else(|| Error::new("RELEASE_MISSING", "Обновите список релизов"))?;
+            cache.root.join("payloads").join(&release.payload.sha256)
+        } else {
+            PathBuf::from(path.ok_or_else(|| Error::new("CACHE_PATH", "Не указан релиз"))?)
+        };
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        cache.remove(&path)?;
         let runtime = handle.state::<Runtime>();
         let mut state = runtime.0.lock().unwrap();
         let deselected = state.payload.as_ref() == Some(&canonical);
@@ -522,6 +552,57 @@ async fn disable_cunba(app: tauri::AppHandle, serial: String, confirmed: bool) -
     })
     .await
     .map_err(|error| Error::new("WORKER", "Ошибка отключения Cunba").detail(error))
+    .and_then(|result| result);
+    release(&app.state::<Runtime>());
+    result
+}
+
+#[tauri::command]
+async fn disable_voyahtweaks(
+    app: tauri::AppHandle,
+    serial: String,
+    confirmed: bool,
+) -> Result<Value> {
+    if !confirmed {
+        return Err(Error::new(
+            "CONFIRMATION_REQUIRED",
+            "Подтвердите отключение VoyahTweaks",
+        ));
+    }
+    reserve(&app.state::<Runtime>())?;
+    {
+        let runtime = app.state::<Runtime>();
+        let mut state = runtime.0.lock().unwrap();
+        state.prepared = None;
+        state.verification_pending = false;
+    }
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let payload = operation_payload(&handle, &serial, Action::Install)?;
+        let emitter = handle.clone();
+        let session_log = installation_log(&handle);
+        if let Some(session) = &session_log {
+            session.bind_device(&serial)?;
+        }
+        let result = installer_core::voyahtweaks_recovery::disable(
+            &default_adb(&bundle(&handle)?),
+            &payload,
+            &serial,
+            confirmed,
+            &recovery::data_dir()?,
+            Arc::new(move |event| {
+                record_engine_event(&session_log, event);
+                if let Some(report) = event.data.get("reportPath").and_then(Value::as_str) {
+                    emitter.state::<Runtime>().0.lock().unwrap().operation_dir =
+                        PathBuf::from(report).parent().map(PathBuf::from);
+                }
+                let _ = emitter.emit("installer-event", event);
+            }),
+        )?;
+        Ok(serde_json::to_value(result)?)
+    })
+    .await
+    .map_err(|error| Error::new("WORKER", "Ошибка отключения VoyahTweaks").detail(error))
     .and_then(|result| result);
     release(&app.state::<Runtime>());
     result
@@ -849,7 +930,12 @@ fn main() {
     tauri::Builder::default()
         .manage(Runtime::default())
         .setup(|_| {
-            InstallationLog::recover_interrupted(&session_logs_root()?)?;
+            let root = session_logs_root()?;
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(error) = InstallationLog::recover_interrupted(&root) {
+                    eprintln!("Installation log recovery failed: {error}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -869,6 +955,7 @@ fn main() {
             apply,
             retry_verification,
             disable_cunba,
+            disable_voyahtweaks,
             cancel,
             resolve_canbus_conflict,
             operation_events,
