@@ -10,17 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::{BufReader, Read, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
-    time::Duration,
 };
-
-const INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -95,11 +92,11 @@ struct Shared {
     packing: Mutex<spool::Cursor>,
     stopping: AtomicBool,
     wake: Condvar,
-    timer: Mutex<()>,
+    pending_records: Mutex<u64>,
     finish_lock: Mutex<()>,
     sender: mpsc::Sender<PathBuf>,
     collector: Mutex<Option<JoinHandle<()>>>,
-    ticker: Mutex<Option<JoinHandle<()>>>,
+    packer: Mutex<Option<JoinHandle<()>>>,
     _lock: File,
 }
 
@@ -108,7 +105,6 @@ pub struct InstallationLog(Arc<Shared>);
 
 impl InstallationLog {
     pub fn begin(root: &Path, adb_path: &Path, release: Option<Value>) -> Result<Self> {
-        Self::recover_interrupted(root)?;
         fs::create_dir_all(root)?;
         let directory = tempfile::Builder::new()
             .prefix("installation-")
@@ -163,33 +159,35 @@ impl InstallationLog {
             packing: Mutex::new(spool::Cursor::default()),
             stopping: AtomicBool::new(false),
             wake: Condvar::new(),
-            timer: Mutex::new(()),
+            pending_records: Mutex::new(0),
             finish_lock: Mutex::new(()),
             sender,
             collector: Mutex::new(None),
-            ticker: Mutex::new(None),
+            packer: Mutex::new(None),
             _lock: lock,
         }));
         session.record("step", "session-started", None, None, json!({}))?;
         let weak = Arc::downgrade(&session.0);
-        *session.0.ticker.lock().unwrap() = Some(thread::spawn(move || loop {
+        *session.0.packer.lock().unwrap() = Some(thread::spawn(move || loop {
             let Some(shared) = weak.upgrade() else {
                 break;
             };
-            let guard = shared.timer.lock().unwrap();
-            let _wait = shared
+            let guard = shared.pending_records.lock().unwrap();
+            let mut pending = shared
                 .wake
-                .wait_timeout_while(guard, INTERVAL, |_| {
-                    !shared.stopping.load(Ordering::Acquire)
+                .wait_while(guard, |count| {
+                    *count < spool::MAX_CHUNK_RECORDS as u64
+                        && !shared.stopping.load(Ordering::Acquire)
                 })
                 .unwrap();
             if shared.stopping.load(Ordering::Acquire) {
                 break;
             }
+            *pending %= spool::MAX_CHUNK_RECORDS as u64;
+            drop(pending);
             if let Err(error) = InstallationLog(shared.clone()).cut() {
                 eprintln!("Session chunk failed: {error}");
             }
-            drop(_wait);
             drop(shared);
         }));
         *session.0.collector.lock().unwrap() = Some(logcat::start(
@@ -253,6 +251,12 @@ impl InstallationLog {
                 .push(json!({"timestamp":record.timestamp,"step":name,"error":record.data}));
             recovery::write_json(&self.0.directory.join("session.json"), &state.info)?;
         }
+        drop(state);
+        let mut pending = self.0.pending_records.lock().unwrap();
+        *pending += 1;
+        if *pending >= spool::MAX_CHUNK_RECORDS as u64 {
+            self.0.wake.notify_one();
+        }
         Ok(())
     }
 
@@ -315,12 +319,12 @@ impl InstallationLog {
     }
 
     fn cut(&self) -> Result<PathBuf> {
-        self.cut_with(|path| {
+        self.cut_with(false, |path| {
             let _ = self.0.sender.send(path.to_owned());
         })
     }
 
-    fn cut_with(&self, notify: impl FnMut(&Path)) -> Result<PathBuf> {
+    fn cut_with(&self, flush: bool, notify: impl FnMut(&Path)) -> Result<PathBuf> {
         let mut cursor = self.0.packing.lock().unwrap();
         let (info, end) = {
             let mut state = self.0.state.lock().unwrap();
@@ -329,7 +333,7 @@ impl InstallationLog {
         };
         // The snapshot ends at a complete record; appends continue while it is packed.
         File::open(self.0.directory.join("logs.jsonl"))?.sync_data()?;
-        spool::write_chunks(&self.0.directory, &info, &mut cursor, end, notify)
+        spool::write_chunks(&self.0.directory, &info, &mut cursor, end, flush, notify)
     }
 
     pub fn finish(&self, status: Status, reason: Option<Value>) -> Result<()> {
@@ -347,9 +351,12 @@ impl InstallationLog {
         } else {
             None
         };
-        self.0.stopping.store(true, Ordering::Release);
-        self.0.wake.notify_all();
-        for worker in [&self.0.collector, &self.0.ticker] {
+        {
+            let _pending = self.0.pending_records.lock().unwrap();
+            self.0.stopping.store(true, Ordering::Release);
+            self.0.wake.notify_all();
+        }
+        for worker in [&self.0.collector, &self.0.packer] {
             if let Some(handle) = worker.lock().unwrap().take() {
                 let _ = handle.join();
             }
@@ -427,14 +434,16 @@ impl InstallationLog {
             if lock.try_lock_exclusive().is_err() {
                 continue;
             }
-            let mut info: SessionInfo = serde_json::from_reader(File::open(&metadata)?)?;
+            let mut info: SessionInfo =
+                serde_json::from_reader(BufReader::new(File::open(&metadata)?))?;
             let was_active = info.status == Status::InProgress;
             let mut final_saved = false;
             let mut cursor = spool::Cursor::default();
             for item in fs::read_dir(directory.join("outbox"))? {
                 let path = item?.path();
                 if path.extension().is_some_and(|ext| ext == "json") {
-                    let spool: SpoolItem = serde_json::from_reader(File::open(path)?)?;
+                    let spool: SpoolItem =
+                        serde_json::from_reader(BufReader::new(File::open(path)?))?;
                     if spool.request.final_chunk {
                         final_saved = true;
                     }
@@ -461,6 +470,7 @@ impl InstallationLog {
                 &info,
                 &mut cursor,
                 fs::metadata(directory.join("logs.jsonl"))?.len(),
+                true,
                 |_| {},
             )?;
             recovery::write_json(&metadata, &info)?;
@@ -473,7 +483,7 @@ impl InstallationLog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
+    use std::{sync::atomic::AtomicUsize, time::Duration};
 
     fn begin(root: &Path) -> InstallationLog {
         InstallationLog::begin(
@@ -491,6 +501,22 @@ mod tests {
     }
 
     #[test]
+    fn starting_session_does_not_scan_previous_session_files() {
+        let root = tempfile::tempdir().unwrap();
+        let previous = root.path().join("previous-session");
+        fs::create_dir(&previous).unwrap();
+        fs::write(previous.join("session.json"), b"incomplete metadata").unwrap();
+
+        let session = begin(root.path());
+        assert!(session.active());
+        session.finish(Status::Success, None).unwrap();
+        assert_eq!(
+            fs::read(previous.join("session.json")).unwrap(),
+            b"incomplete metadata"
+        );
+    }
+
+    #[test]
     fn chunks_are_disjoint_and_final_chunk_contains_exact_reason() {
         let root = tempfile::tempdir().unwrap();
         let session = begin(root.path());
@@ -504,7 +530,7 @@ mod tests {
             )
             .unwrap();
         session.metadata(None, Some("on")).unwrap();
-        let first = read_chunk(session.cut().unwrap());
+        let first = read_chunk(session.cut_with(true, |_| {}).unwrap());
         session
             .record(
                 "step",
@@ -514,7 +540,7 @@ mod tests {
                 json!({"error":{"code":"CUNBA_DETECTED"}}),
             )
             .unwrap();
-        let second = read_chunk(session.cut().unwrap());
+        let second = read_chunk(session.cut_with(true, |_| {}).unwrap());
         assert!(first.last_sequence.unwrap() < second.first_sequence.unwrap());
         assert_eq!(second.session.vehicle_check_errors.len(), 1);
         assert_eq!(second.session.status, Status::InProgress);
@@ -557,7 +583,7 @@ mod tests {
         }
         let root = tempfile::tempdir().unwrap();
         let session = begin(root.path());
-        let chunk = read_chunk(session.cut().unwrap());
+        let chunk = read_chunk(session.cut_with(true, |_| {}).unwrap());
         let mut sender = Failing { ids: vec![] };
         let sleeps = AtomicUsize::new(0);
         let mut attempts = vec![];
@@ -588,7 +614,7 @@ mod tests {
         // Stop workers without writing a final status, emulating process termination.
         session.0.stopping.store(true, Ordering::Release);
         session.0.wake.notify_all();
-        for worker in [&session.0.collector, &session.0.ticker] {
+        for worker in [&session.0.collector, &session.0.packer] {
             if let Some(handle) = worker.lock().unwrap().take() {
                 handle.join().unwrap();
             }
@@ -633,18 +659,40 @@ mod tests {
     }
 
     #[test]
-    fn periodic_cuts_continue_after_failed_delivery() {
+    fn hundred_records_trigger_delivery_and_terminal_remainder_is_flushed() {
         let root = tempfile::tempdir().unwrap();
         let session = begin(root.path());
-        thread::sleep(Duration::from_millis(5300));
-        let first = read_chunk(session.directory().join("outbox/000000000001.json"));
+        for _ in 0..98 {
+            session
+                .record("logcat", "output", None, None, json!({"text":"line"}))
+                .unwrap();
+        }
+        session.cut().unwrap();
+        assert_eq!(
+            fs::read_dir(session.directory().join("outbox"))
+                .unwrap()
+                .count(),
+            0
+        );
+        session
+            .record("logcat", "output", None, None, json!({"text":"line 100"}))
+            .unwrap();
+        let path = session.directory().join("outbox/000000000001.json");
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !path.exists() {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+        let first = read_chunk(path);
+        assert_eq!(first.logs.len(), 100);
         assert!(!first.final_chunk);
         session
             .record("user_choice", "continue", None, None, json!({}))
             .unwrap();
         session.finish(Status::Success, None).unwrap();
         let last = read_chunk(session.directory().join("outbox/000000000002.json"));
-        assert!(last.first_sequence > first.last_sequence);
+        assert_eq!(last.logs.len(), 2);
         assert!(last.final_chunk);
+        assert_eq!(last.first_sequence, Some(101));
     }
 }

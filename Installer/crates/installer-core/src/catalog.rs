@@ -18,7 +18,10 @@ use std::{
     time::Duration,
 };
 
-pub use release_core::catalog::CATALOG_URL;
+pub const CATALOG_URL: &str = match option_env!("VOYAH_DESKTOP_CATALOG_URL") {
+    Some(url) => url,
+    None => "https://voyahtune.ru/api/v1/releases",
+};
 const MAX_CATALOG: u64 = 4 * 1024 * 1024;
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED: u64 = 4 * 1024 * 1024 * 1024;
@@ -373,9 +376,7 @@ fn fetch_catalog(client: &ureq::Agent, url: &str) -> Result<Catalog> {
     catalog.resolve()
 }
 fn verify_release(payload: &Payload, release: &Release) -> Result<()> {
-    if payload.manifest.release_version != release.version
-        || payload.manifest.schema != release.payload.manifest_schema
-    {
+    if payload.manifest.schema != release.payload.manifest_schema {
         return Err(Error::new(
             "CATALOG_MISMATCH",
             "Манифест архива не соответствует выбранному релизу",
@@ -731,7 +732,7 @@ mod tests {
         );
         payload.manifest.requirements = Some(release.requirements.clone());
         payload.manifest.release_version = "3.13.1".into();
-        assert!(verify_release(&payload, &release).is_err());
+        assert!(verify_release(&payload, &release).is_ok());
     }
     #[test]
     fn rejects_nonportable_archive_paths() {

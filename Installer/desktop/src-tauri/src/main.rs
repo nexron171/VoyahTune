@@ -849,7 +849,12 @@ fn main() {
     tauri::Builder::default()
         .manage(Runtime::default())
         .setup(|_| {
-            InstallationLog::recover_interrupted(&session_logs_root()?)?;
+            let root = session_logs_root()?;
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(error) = InstallationLog::recover_interrupted(&root) {
+                    eprintln!("Installation log recovery failed: {error}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -7,8 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const MAX_CHUNK_BYTES: usize = 512 * 1024;
-const MAX_CHUNK_RECORDS: usize = 500;
+pub(super) const MAX_CHUNK_RECORDS: usize = 100;
 
 #[derive(Default)]
 pub(super) struct Cursor {
@@ -21,6 +20,7 @@ pub(super) fn write_chunks(
     info: &SessionInfo,
     cursor: &mut Cursor,
     snapshot_end: u64,
+    flush: bool,
     mut notify: impl FnMut(&Path),
 ) -> Result<PathBuf> {
     loop {
@@ -37,8 +37,6 @@ pub(super) fn write_chunks(
             session: info.clone(),
             logs: Vec::new(),
         };
-        // Reserve space for sequence numbers and commas in the compact HTTP body.
-        let mut bytes = serde_json::to_vec(&request)?.len() + 64;
         let mut journal = File::open(directory.join("logs.jsonl"))?;
         journal.seek(SeekFrom::Start(cursor.offset))?;
         let mut reader = BufReader::new(journal.take(snapshot_end - cursor.offset));
@@ -56,14 +54,13 @@ pub(super) fn write_chunks(
                 break;
             }
             let record: Record = serde_json::from_str(&line)?;
-            let record_bytes = serde_json::to_vec(&record)?.len() + 1;
-            if !request.logs.is_empty() && bytes + record_bytes > MAX_CHUNK_BYTES {
-                break;
-            }
-            // An indivisible oversized record travels alone; never truncate evidence.
-            bytes += record_bytes;
             end += length as u64;
             request.logs.push(record);
+        }
+        if !flush && info.status == Status::InProgress && request.logs.len() < MAX_CHUNK_RECORDS {
+            return Ok(directory
+                .join("outbox")
+                .join(format!("{:012}.json", cursor.index)));
         }
         request.first_sequence = request.logs.first().map(|record| record.sequence);
         request.last_sequence = request.logs.last().map(|record| record.sequence);
@@ -98,18 +95,18 @@ mod tests {
 
         let root = tempfile::tempdir().unwrap();
         let session = InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
-        let text = "x".repeat(MAX_CHUNK_BYTES + 1);
+        let text = "x".repeat(512 * 1024 + 1);
         session
             .record("step", "large-report", None, None, json!({"text":text}))
             .unwrap();
         session.finish(Status::Success, None).unwrap();
         let directory = session.directory();
         let large: SpoolItem = serde_json::from_reader(
-            File::open(directory.join("outbox/000000000002.json")).unwrap(),
+            File::open(directory.join("outbox/000000000001.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(large.request.logs.len(), 1);
-        assert_eq!(large.request.logs[0].data["text"], text);
+        assert_eq!(large.request.logs.len(), 3);
+        assert_eq!(large.request.logs[1].data["text"], text);
 
         let mut journal = fs::OpenOptions::new()
             .append(true)
@@ -123,6 +120,7 @@ mod tests {
             &session.info(),
             &mut cursor,
             journal.metadata().unwrap().len(),
+            true,
             |_| {},
         )
         .unwrap();
@@ -157,7 +155,6 @@ mod tests {
         let mut final_count = 0;
         for (index, path) in paths.iter().enumerate() {
             let item: SpoolItem = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-            assert!(serde_json::to_vec(&item.request).unwrap().len() <= MAX_CHUNK_BYTES);
             assert!(item.request.logs.len() <= MAX_CHUNK_RECORDS);
             if item.request.final_chunk {
                 final_count += 1;
@@ -174,7 +171,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let session = InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
         let first = session
-            .cut_with(|_| {
+            .cut_with(true, |_| {
                 // This would deadlock if packing held the event writer's mutex.
                 session
                     .record("step", "during-packing", None, None, json!({}))

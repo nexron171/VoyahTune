@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import CatalogSettings from "./CatalogSettings.svelte";
   import ReadinessStatus from "./ReadinessStatus.svelte";
+  import { compareReleaseVersionsNewestFirst } from "./release-version";
   import {
     command,
     beginInstallationSession,
@@ -95,7 +96,6 @@
       release,
       cached: cached.find(
         (entry) =>
-          entry.version === release.version &&
           entry.path
             .replaceAll("\\", "/")
             .endsWith("/" + release.payload.sha256),
@@ -104,7 +104,9 @@
     for (const entry of cached)
       if (!rows.some((row) => row.cached?.path === entry.path))
         rows.push({ version: entry.version, cached: entry });
-    return rows;
+    return rows.sort((left, right) =>
+      compareReleaseVersionsNewestFirst(left.version, right.version),
+    );
   });
   const nextBlocked = $derived(
     sessionStarting
@@ -369,6 +371,7 @@
       selectInfo(await command("release_info", { path }));
     } catch (e) {
       error = failure(e);
+      await finishBlockedPreparation(error);
     } finally {
       downloadBusy = false;
       await updateCatalog(false);
@@ -390,6 +393,7 @@
           "Скачайте и запустите требуемую версию установщика или новее.",
         retryable: false,
       };
+      await finishBlockedPreparation(error);
       return;
     }
     selectedVersion = row.version;
@@ -405,6 +409,7 @@
       selectInfo(await command("download_payload", { version: row.version }));
     } catch (e) {
       error = failure(e);
+      await finishBlockedPreparation(error);
     } finally {
       downloadBusy = false;
       await updateCatalog(false);
@@ -462,6 +467,10 @@
   async function ensureInstallationSession() {
     if (action !== "install") return;
     installationSessionId = await beginInstallationSession();
+  }
+  async function finishBlockedPreparation(reason: Failure) {
+    if (reason.retryable || ["CUNBA_DETECTED", "CUNBA_ROLLBACK_REQUIRED"].includes(reason.code)) return;
+    await finishSession("error", { ...reason, displayTitle: reason.message, source: "gui" });
   }
   async function finishSession(
     status: "success" | "error",
@@ -606,6 +615,7 @@
       cunbaRestored = false;
     } catch (e) {
       error = failure(e);
+      await finishBlockedPreparation(error);
     } finally {
       busy = false;
     }

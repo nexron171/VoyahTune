@@ -32,13 +32,19 @@ fn validate_url(value: &str) -> Result<()> {
 
 impl Cache {
     pub fn catalog_settings(&self) -> Result<CatalogSettings> {
-        let settings = match fs::read(self.root.join("catalog-settings.json")) {
+        let mut settings = match fs::read(self.root.join("catalog-settings.json")) {
             Ok(bytes) => serde_json::from_slice::<CatalogSettings>(&bytes)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => CatalogSettings {
                 catalog_url: CATALOG_URL.into(),
             },
             Err(error) => return Err(error.into()),
         };
+        if CATALOG_URL == "https://voyahtune.ru/api/v1/releases"
+            && settings.catalog_url
+                == "https://gitlab.com/openvoyah/voyahtune/-/raw/master/Releases/ota/index-v4.json"
+        {
+            settings.catalog_url = CATALOG_URL.into();
+        }
         validate_url(&settings.catalog_url)?;
         Ok(settings)
     }

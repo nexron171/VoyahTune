@@ -6,7 +6,7 @@ use serde_json::json;
 use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
-    io::Write,
+    io::{BufReader, Write},
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
@@ -119,7 +119,9 @@ pub(super) fn deliver(
 }
 
 pub(super) fn resume(directory: &Path) -> crate::Result<()> {
-    let initial = serde_json::from_reader(File::open(directory.join("session-request.json"))?)?;
+    let initial = serde_json::from_reader(BufReader::new(File::open(
+        directory.join("session-request.json"),
+    )?))?;
     let (_sender, receiver) = mpsc::channel();
     start(receiver, directory.to_owned(), initial);
     Ok(())
@@ -139,7 +141,7 @@ fn pending_chunks(directory: &Path) -> crate::Result<Vec<PathBuf>> {
     }
     paths.sort();
     if let Some(last) = paths.last() {
-        let item: SpoolItem = serde_json::from_reader(File::open(last)?)?;
+        let item: SpoolItem = serde_json::from_reader(BufReader::new(File::open(last)?))?;
         if item.request.final_chunk {
             // Final status must not wait behind a large logcat backlog.
             paths.rotate_right(1);
@@ -154,7 +156,7 @@ fn deliver_file(
     path: &Path,
     delay: impl Fn(Duration),
 ) -> crate::Result<bool> {
-    let item: SpoolItem = serde_json::from_reader(File::open(path)?)?;
+    let item: SpoolItem = serde_json::from_reader(BufReader::new(File::open(path)?))?;
     let mut attempts = OpenOptions::new()
         .create(true)
         .append(true)
@@ -308,7 +310,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let session = InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
         let directory = session.directory();
-        let first = session.cut().unwrap();
+        let first = session.cut_with(true, |_| {}).unwrap();
         let original = fs::read(&first).unwrap();
         let mut sender = Sender {
             failing: true,
