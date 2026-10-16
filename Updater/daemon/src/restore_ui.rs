@@ -22,6 +22,7 @@ pub fn capabilities() -> Vec<&'static str> {
     if enabled() {
         result.push("restoremode-ota-ui-v1");
         result.push("catalog-releases");
+        result.push("select-release");
     }
     result
 }

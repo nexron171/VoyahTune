@@ -9,6 +9,7 @@ mod od_command;
 mod protocol;
 mod restore_ui;
 mod state;
+mod telemetry;
 mod ui_update;
 mod workflow;
 
@@ -36,6 +37,10 @@ const UI_APK: &str = "/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk";
 const LOG_LIMIT: u64 = 512 * 1024;
 
 fn log(root: &Path, event: &str) -> io::Result<()> {
+    if restore_ui::enabled() {
+        telemetry::record("step", "daemon.event", json!({"message":event}));
+        return Ok(());
+    }
     let path = root.join("updater.log");
     if fs::symlink_metadata(&path).is_ok_and(|m| m.len() >= LOG_LIMIT) {
         fs::rename(&path, root.join("updater.log.1"))?;
@@ -212,6 +217,7 @@ fn run() -> io::Result<()> {
                     let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
                     let changed = config::change_settings(root, current, &url, dns_enabled)?;
                     if changed {
+                        telemetry::finish(Some("Пользователь изменил источник релизов"));
                         rt.state.clear_od_catalog();
                         rt.state.selected = None;
                         rt.state.notice = None;
@@ -230,6 +236,7 @@ fn run() -> io::Result<()> {
                     }
                     let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
                     if config::change_url(root, current, &url)? {
+                        telemetry::finish(Some("Пользователь изменил источник релизов"));
                         rt.state.clear_od_catalog();
                         rt.state.selected = None;
                         rt.state.notice = None;
@@ -248,6 +255,10 @@ fn run() -> io::Result<()> {
                     workflow::queue(&shared, &jobs, workflow::Job::Check(same_version))?;
                     Ok(json!({"schema":1,"ok":true}))
                 }
+                protocol::Request::SelectRelease { version } => {
+                    workflow::select_release(&shared, &version)?;
+                    Ok(json!({"schema":1,"ok":true}))
+                }
                 protocol::Request::Download {} => {
                     workflow::queue(&shared, &jobs, workflow::Job::Download)?;
                     Ok(json!({"schema":1,"ok":true}))
@@ -259,6 +270,11 @@ fn run() -> io::Result<()> {
                 protocol::Request::Finish { reset_errors } => {
                     workflow::update(&shared, |s| {
                         s.finish_result(reset_errors);
+                        if s.phase == "idle" && reset_errors {
+                            telemetry::finish(Some(
+                                "Пользователь завершил подготовку без установки",
+                            ));
+                        }
                     })?;
                     Ok(json!({"schema":1,"ok":true}))
                 }
