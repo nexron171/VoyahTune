@@ -51,7 +51,7 @@ impl Stability {
 }
 
 impl Engine {
-    fn readiness_progress(&self, message: &str, deadline: Instant) -> Result<()> {
+    pub(super) fn readiness_progress(&self, message: &str, deadline: Instant) -> Result<()> {
         let remaining = deadline.saturating_duration_since(Instant::now());
         self.adb.events.emit(
             "readiness-progress",
@@ -61,7 +61,7 @@ impl Engine {
         )
     }
 
-    fn readiness_command(&self, script: &str, deadline: Instant) -> Result<String> {
+    pub(super) fn readiness_command(&self, script: &str, deadline: Instant) -> Result<String> {
         if self.cancel.load(Ordering::Relaxed) {
             return Err(Error::new("CANCELLED", "Проверка остановлена"));
         }
@@ -204,15 +204,69 @@ impl Engine {
         Ok(format!("{after}\n{}", status["pid"]))
     }
 
-    fn readiness_diagnostics(&self) {
+    pub(super) fn readiness_diagnostics(&self) {
         for (name, command) in [
             ("logcat.txt", "logcat -b main -b system -b crash -d -t 400"),
+            ("native-data.txt", "ls -ldZ /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative; dumpsys package ru.big.town.anative; dumpsys activity exit-info ru.big.town.anative"),
             ("services.txt", "getprop init.svc.voyahtune_updater; pidof system_server; dumpsys activity services ru.big.town.anative"),
         ] {
             let output = self.readiness_command(command, Instant::now() + Duration::from_secs(6));
             let text = match output { Ok(text) => text, Err(error) => error.to_string() };
             let _ = fs::write(self.operation.dir.join(name), text);
         }
+    }
+
+    pub(super) fn verify_od_installation(&self) -> Result<()> {
+        let deadline = Instant::now() + DEADLINE;
+        self.prepare_od_native_data(deadline)?;
+        self.verify_od_readiness_until(deadline)
+    }
+
+    fn confirmed_readiness_failure(&self) -> Option<Error> {
+        let probe = format!("{}\nprobe_native_data", super::native_data::PROBE);
+        let state = self
+            .readiness_command(&probe, Instant::now() + Duration::from_secs(6))
+            .ok()?;
+        if state.starts_with("BROKEN|") || state.starts_with("UNREGISTERED|") {
+            return Some(
+                Error::new(
+                    "NATIVE_DATA_INVALID",
+                    "Повреждена регистрация или каталоги данных Native",
+                )
+                .detail(state)
+                .retry("Повторите установку для восстановления Native с сохранением данных."),
+            );
+        }
+        if !state.starts_with("READY|") {
+            return None;
+        }
+        for (command, key, component) in [
+            (NATIVE_HEALTH, "otaReady", "Native"),
+            (RESTORE_HEALTH, "ready", "RestoreMode"),
+        ] {
+            let output = self
+                .readiness_command(command, Instant::now() + Duration::from_secs(6))
+                .ok()?;
+            if bundle_value(&output, key).is_some()
+                && require_health(
+                    &output,
+                    key,
+                    &self.payload.manifest.release_version,
+                    component,
+                )
+                .is_err()
+            {
+                return Some(
+                    Error::new(
+                        "READINESS_FAILED",
+                        format!("{component} не подтвердил готовность после установки"),
+                    )
+                    .detail(output)
+                    .retry("Посмотрите диагностический отчёт и повторите установку."),
+                );
+            }
+        }
+        None
     }
 
     pub(super) fn verify_od_readiness(&self) -> Result<()> {
@@ -286,7 +340,11 @@ impl Engine {
             "Время проверки истекло. Собираем диагностический отчёт",
             deadline,
         )?;
+        let confirmed_failure = self.confirmed_readiness_failure();
         self.readiness_diagnostics();
+        if let Some(error) = confirmed_failure {
+            return Err(error);
+        }
         Err(Error::new(
             "READINESS_UNCONFIRMED",
             format!(
@@ -384,6 +442,10 @@ case "$script" in
         else
             echo CUNBA_CLEAR
         fi ;;
+    *'probe_native_data'*)
+        if [ -e "$root/data-broken" ]; then echo 'BROKEN|boot:1:2|10068';
+        elif [ -e "$root/data-ready" ]; then echo 'READY|boot:1:2|10068';
+        else echo UNAVAILABLE; fi ;;
     *'id -u'*) echo 0 ;;
     *'am broadcast'*) touch "$root/started"; echo sent >> "$root/broadcasts"; exit 124 ;;
     *'--method health'*)
@@ -478,15 +540,23 @@ esac
             .unwrap_err();
         assert_eq!(error.code, "READINESS_UNCONFIRMED");
         assert!(error.retryable);
-        engine.finish_report(Err(error)).unwrap();
+        assert_eq!(
+            engine.finish_report(Err(error)).unwrap_err().code,
+            "READINESS_UNCONFIRMED"
+        );
         let report_path = engine.operation.dir.join("report.json");
         let warning_report: serde_json::Value =
             serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
-        assert_eq!(warning_report["success"], true);
+        assert_eq!(warning_report["success"], false);
         assert_eq!(warning_report["readinessConfirmed"], false);
-        assert_eq!(warning_report["warning"]["code"], "READINESS_UNCONFIRMED");
-        assert!(warning_report.get("error").is_none());
-        for code in ["ADB_COMMAND_FAILED", "CANCELLED"] {
+        assert_eq!(warning_report["error"]["code"], "READINESS_UNCONFIRMED");
+        assert!(warning_report.get("warning").is_none());
+        for code in [
+            "ADB_COMMAND_FAILED",
+            "CANCELLED",
+            "NATIVE_DATA_REPAIR_FAILED",
+            "READINESS_FAILED",
+        ] {
             let error = engine
                 .finish_report(Err(Error::new(code, "test")))
                 .unwrap_err();
@@ -496,6 +566,20 @@ esac
             assert_eq!(report["success"], false);
             assert!(report.get("warning").is_none());
         }
+        fs::write(directory.path().join("data-broken"), "").unwrap();
+        assert_eq!(
+            engine.confirmed_readiness_failure().unwrap().code,
+            "NATIVE_DATA_INVALID"
+        );
+        fs::remove_file(directory.path().join("data-broken")).unwrap();
+        fs::write(directory.path().join("data-ready"), "").unwrap();
+        fs::remove_file(directory.path().join("started")).unwrap();
+        assert_eq!(
+            engine.confirmed_readiness_failure().unwrap().code,
+            "READINESS_FAILED"
+        );
+        fs::write(directory.path().join("started"), "").unwrap();
+        assert!(engine.confirmed_readiness_failure().is_none());
         engine
             .verify_installed(Request {
                 action: Action::Install,

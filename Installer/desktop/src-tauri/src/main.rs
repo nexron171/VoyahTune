@@ -667,14 +667,25 @@ async fn retry_verification(app: tauri::AppHandle) -> Result<()> {
     .map_err(|error| Error::new("WORKER", "Ошибка проверки").detail(error))
     .and_then(|value| value);
     // Keep the saved installation available after a transient USB failure.
-    if result.is_ok() {
+    if result.is_ok()
+        || result.as_ref().is_err_and(|error| {
+            matches!(
+                error.code.as_str(),
+                "READINESS_FAILED" | "NATIVE_DATA_INVALID"
+            )
+        })
+    {
         finish_verification_state(&app, &result);
     }
     release(&app.state::<Runtime>());
     result.map_err(|error| {
         if matches!(
             error.code.as_str(),
-            "READINESS_UNCONFIRMED" | "CANCELLED" | "VERIFICATION_NOT_ALLOWED"
+            "READINESS_UNCONFIRMED"
+                | "READINESS_FAILED"
+                | "NATIVE_DATA_INVALID"
+                | "CANCELLED"
+                | "VERIFICATION_NOT_ALLOWED"
         ) {
             error
         } else {

@@ -274,7 +274,9 @@
     if (event.type === "operation-failed") {
       canbusNotice = "";
       error = event.data.report?.error || failure(event.message);
-      verificationPending ||= error?.code === "READINESS_UNCONFIRMED";
+      if (["READINESS_FAILED", "NATIVE_DATA_INVALID"].includes(error?.code || ""))
+        verificationPending = false;
+      else verificationPending ||= error?.code === "READINESS_UNCONFIRMED";
       outcome = "failed";
       screen = 4;
       busy = false;
@@ -754,7 +756,9 @@
       }
     } catch (e) {
       error = failure(e);
-      verificationPending ||= error.code === "READINESS_UNCONFIRMED";
+      if (["READINESS_FAILED", "NATIVE_DATA_INVALID"].includes(error.code))
+        verificationPending = false;
+      else verificationPending ||= error.code === "READINESS_UNCONFIRMED";
       outcome = "failed";
       screen = 4;
       busy = false;
