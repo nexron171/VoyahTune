@@ -364,7 +364,11 @@ async fn open_release_link(app: tauri::AppHandle, url: String) -> Result<()> {
     .map_err(|e| Error::new("WORKER", "Не удалось открыть браузер").detail(e))?
 }
 #[tauri::command]
-async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Value> {
+async fn download_payload(
+    app: tauri::AppHandle,
+    version: String,
+    refresh: Option<bool>,
+) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -379,9 +383,14 @@ async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Valu
                 .ok_or_else(|| Error::new("RELEASE_MISSING", "Обновите список и выберите релиз"))?;
             (entry, state.cancel.clone().unwrap())
         };
-        let payload = Cache::user()?.download(&release, &cancel, &|event| {
-            let _ = handle.emit("payload-progress", event);
-        })?;
+        let payload = Cache::user()?.download_with_refresh(
+            &release,
+            refresh.unwrap_or(false),
+            &cancel,
+            &|event| {
+                let _ = handle.emit("payload-progress", event);
+            },
+        )?;
         select_payload(&handle, payload)
     })
     .await
@@ -391,13 +400,34 @@ async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Valu
     result
 }
 #[tauri::command]
-async fn delete_payload(app: tauri::AppHandle, path: String) -> Result<Value> {
+async fn delete_payload(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    version: Option<String>,
+) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
-        let canonical = path.canonicalize()?;
-        Cache::user()?.remove(&path)?;
+        let cache = Cache::user()?;
+        let path = if let Some(version) = version {
+            let runtime = handle.state::<Runtime>();
+            let state = runtime.0.lock().unwrap();
+            let release = state
+                .catalog
+                .as_ref()
+                .and_then(|catalog| {
+                    catalog
+                        .releases
+                        .iter()
+                        .find(|release| release.version == version)
+                })
+                .ok_or_else(|| Error::new("RELEASE_MISSING", "Обновите список релизов"))?;
+            cache.root.join("payloads").join(&release.payload.sha256)
+        } else {
+            PathBuf::from(path.ok_or_else(|| Error::new("CACHE_PATH", "Не указан релиз"))?)
+        };
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        cache.remove(&path)?;
         let runtime = handle.state::<Runtime>();
         let mut state = runtime.0.lock().unwrap();
         let deselected = state.payload.as_ref() == Some(&canonical);

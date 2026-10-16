@@ -389,7 +389,7 @@
       await updateCatalog(false);
     }
   }
-  async function selectRelease(row: ReleaseRow) {
+  async function selectRelease(row: ReleaseRow, refresh = false) {
     if (busy) return;
     await recordChoice(
       "release-selected",
@@ -409,7 +409,13 @@
       return;
     }
     selectedVersion = row.version;
-    if (row.cached) {
+    if (row.cached?.path === releasePath) {
+      releasePath = "";
+      releaseVersion = "";
+      plan = null;
+      confirmed = false;
+    }
+    if (!row.release && row.cached) {
       await loadRelease(row.cached.path);
       return;
     }
@@ -418,7 +424,10 @@
     downloadProgress = null;
     error = null;
     try {
-      selectInfo(await command("download_payload", { version: row.version }));
+      selectInfo(await command("download_payload", {
+        version: row.version,
+        refresh,
+      }));
     } catch (e) {
       error = failure(e);
       await finishBlockedPreparation(error);
@@ -427,16 +436,17 @@
       await updateCatalog(false);
     }
   }
-  async function deleteRelease(cached: CachedPayload) {
-    if (busy || !cached.deletable) return;
-    await recordChoice("cached-release-delete", { version: cached.version });
+  async function deleteRelease(row: ReleaseRow) {
+    if (busy || (!row.release && !row.cached?.deletable)) return;
+    await recordChoice("cached-release-delete", { version: row.version });
     busy = true;
     error = null;
     try {
       const result = await command<{ deselected: boolean }>("delete_payload", {
-        path: cached.path,
+        path: row.cached?.path,
+        version: row.release?.version,
       });
-      if (result.deselected || releasePath === cached.path) {
+      if (result.deselected || releasePath === row.cached?.path) {
         releasePath = "";
         releaseVersion = "";
         await recordChoice("release-cleared", {}, null);
@@ -985,15 +995,19 @@
                               >{downloadBusy && selectedVersion === row.version
                                 ? "Загрузка…"
                                 : "Выбрать"}</button
-                            ><button
+                            >{#if row.release}<button
+                              class="button secondary"
+                              disabled={busy}
+                              onclick={() => selectRelease(row, true)}
+                              >Скачать заново</button
+                            >{/if}<button
                               class="button delete-cache"
                               aria-label={`Удалить скачанный релиз ${row.version}`}
-                              title={row.cached?.deletable
+                              title={row.release || row.cached?.deletable
                                 ? "Удалить релиз с компьютера"
                                 : "Нет скачанного релиза для удаления"}
-                              disabled={busy || !row.cached?.deletable}
-                              onclick={() =>
-                                row.cached && deleteRelease(row.cached)}
+                              disabled={busy || (!row.release && !row.cached?.deletable)}
+                              onclick={() => deleteRelease(row)}
                               >Удалить</button
                             >
                           </div></td
