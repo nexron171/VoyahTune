@@ -42,6 +42,7 @@ pub(super) fn write_chunks(
         let mut reader = BufReader::new(journal.take(snapshot_end - cursor.offset));
         let mut end = cursor.offset;
         let mut line = String::new();
+        let mut kind_boundary = false;
         while request.logs.len() < MAX_CHUNK_RECORDS {
             line.clear();
             let length = reader.read_line(&mut line)?;
@@ -54,10 +55,22 @@ pub(super) fn write_chunks(
                 break;
             }
             let record: Record = serde_json::from_str(&line)?;
+            if request
+                .logs
+                .first()
+                .is_some_and(|first| (first.kind == "logcat") != (record.kind == "logcat"))
+            {
+                kind_boundary = true;
+                break;
+            }
             end += length as u64;
             request.logs.push(record);
         }
-        if !flush && info.status == Status::InProgress && request.logs.len() < MAX_CHUNK_RECORDS {
+        if !flush
+            && !kind_boundary
+            && info.status == Status::InProgress
+            && request.logs.len() < MAX_CHUNK_RECORDS
+        {
             return Ok(directory
                 .join("outbox")
                 .join(format!("{:012}.json", cursor.index)));

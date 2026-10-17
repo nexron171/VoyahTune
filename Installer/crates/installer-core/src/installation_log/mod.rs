@@ -80,6 +80,29 @@ struct SpoolItem {
     request: Chunk,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadProgress {
+    pub uploaded_chunks: usize,
+    pub total_chunks: usize,
+    pub total_events: u64,
+}
+
+pub struct UploadSnapshot {
+    directory: PathBuf,
+    initial_session: SessionInfo,
+    chunks: Vec<PathBuf>,
+    progress: UploadProgress,
+    request_lock: Arc<Mutex<()>>,
+    _lock: File,
+}
+
+impl UploadSnapshot {
+    pub fn upload(self, progress: impl FnMut(UploadProgress)) -> Result<UploadProgress> {
+        transport::upload(self, progress)
+    }
+}
+
 struct State {
     info: SessionInfo,
     journal: File,
@@ -90,12 +113,13 @@ struct Shared {
     directory: PathBuf,
     state: Mutex<State>,
     packing: Mutex<spool::Cursor>,
-    stopping: Arc<AtomicBool>,
+    stopping: AtomicBool,
     wake: Condvar,
     pending_records: Mutex<u64>,
     finish_lock: Mutex<()>,
     sender: mpsc::Sender<transport::Message>,
     delivery: Mutex<Option<JoinHandle<()>>>,
+    request_lock: Arc<Mutex<()>>,
     collector: Mutex<Option<JoinHandle<()>>>,
     packer: Mutex<Option<JoinHandle<()>>>,
     _lock: File,
@@ -106,20 +130,6 @@ pub struct InstallationLog(Arc<Shared>);
 
 impl InstallationLog {
     pub fn begin(root: &Path, adb_path: &Path, release: Option<Value>) -> Result<Self> {
-        Self::begin_with_sender(root, adb_path, release, transport::start)
-    }
-
-    fn begin_with_sender(
-        root: &Path,
-        adb_path: &Path,
-        release: Option<Value>,
-        start_sender: impl FnOnce(
-            mpsc::Receiver<transport::Message>,
-            PathBuf,
-            SessionInfo,
-            Arc<AtomicBool>,
-        ) -> Option<JoinHandle<()>>,
-    ) -> Result<Self> {
         fs::create_dir_all(root)?;
         let directory = tempfile::Builder::new()
             .prefix("installation-")
@@ -161,10 +171,15 @@ impl InstallationLog {
             .append(true)
             .read(true)
             .open(directory.join("logs.jsonl"))?;
-        let (sender, receiver) = mpsc::channel();
         recovery::write_json(&directory.join("session-request.json"), &info)?;
-        let stopping = Arc::new(AtomicBool::new(false));
-        let delivery = start_sender(receiver, directory.clone(), info.clone(), stopping.clone());
+        let (sender, receiver) = mpsc::channel();
+        let request_lock = Arc::new(Mutex::new(()));
+        let delivery = transport::start(
+            receiver,
+            directory.clone(),
+            info.clone(),
+            request_lock.clone(),
+        );
         let session = Self(Arc::new(Shared {
             directory,
             state: Mutex::new(State {
@@ -173,12 +188,13 @@ impl InstallationLog {
                 sequence: 0,
             }),
             packing: Mutex::new(spool::Cursor::default()),
-            stopping,
+            stopping: AtomicBool::new(false),
             wake: Condvar::new(),
             pending_records: Mutex::new(0),
             finish_lock: Mutex::new(()),
             sender,
             delivery: Mutex::new(delivery),
+            request_lock,
             collector: Mutex::new(None),
             packer: Mutex::new(None),
             _lock: lock,
@@ -336,11 +352,64 @@ impl InstallationLog {
     }
 
     fn cut(&self) -> Result<PathBuf> {
-        self.cut_with(false, |path| {
-            let _ = self
-                .0
-                .sender
-                .send(transport::Message::Chunk(path.to_owned()));
+        self.cut_with(false, |path| self.queue_automatic(path))
+    }
+
+    fn queue_automatic(&self, path: &Path) {
+        let _ = self
+            .0
+            .sender
+            .send(transport::Message::Chunk(path.to_owned()));
+    }
+
+    pub fn upload_snapshot(&self) -> Result<UploadSnapshot> {
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.0.directory.join("delivery.lock"))?;
+        lock.try_lock_exclusive().map_err(|error| {
+            Error::new("LOG_UPLOAD_BUSY", "Выгрузка логов уже выполняется").detail(error)
+        })?;
+        let mut cursor = self.0.packing.lock().unwrap();
+        let (info, end, sequence) = {
+            let state = self.0.state.lock().unwrap();
+            (
+                state.info.clone(),
+                state.journal.metadata()?.len(),
+                state.sequence,
+            )
+        };
+        // Freeze the packet list before networking; collection can continue independently.
+        if cursor.offset < end {
+            File::open(self.0.directory.join("logs.jsonl"))?.sync_data()?;
+            spool::write_chunks(&self.0.directory, &info, &mut cursor, end, true, |path| {
+                self.queue_automatic(path)
+            })?;
+        }
+        let chunks: Vec<_> = (1..=cursor.index)
+            .map(|index| {
+                self.0
+                    .directory
+                    .join("outbox")
+                    .join(format!("{index:012}.json"))
+            })
+            .collect();
+        let initial_session = serde_json::from_reader(BufReader::new(File::open(
+            self.0.directory.join("session-request.json"),
+        )?))?;
+        Ok(UploadSnapshot {
+            directory: self.0.directory.clone(),
+            initial_session,
+            progress: UploadProgress {
+                uploaded_chunks: 0,
+                total_chunks: chunks.len(),
+                total_events: sequence,
+            },
+            chunks,
+            request_lock: self.0.request_lock.clone(),
+            _lock: lock,
         })
     }
 
@@ -382,11 +451,7 @@ impl InstallationLog {
             }
         }
         let result = self.finish_journal(status, reason);
-        // Stop delivery even if the final journal or chunk could not be saved.
-        let _ = self
-            .0
-            .sender
-            .send(transport::Message::Finish(result.as_ref().ok().cloned()));
+        let _ = self.0.sender.send(transport::Message::Finish);
         if let Some(handle) = self.0.delivery.lock().unwrap().take() {
             let _ = handle.join();
         }
@@ -410,7 +475,7 @@ impl InstallationLog {
             state.info.updated_at = now;
             recovery::write_json(&self.0.directory.join("session.json"), &state.info)?;
         }
-        self.cut_with(false, |_| {})
+        self.cut()
     }
 
     pub fn export(&self, destination: &Path) -> Result<()> {
@@ -644,7 +709,7 @@ mod tests {
         let directory = session.directory();
         drop(session);
         InstallationLog::recover_interrupted(root.path()).unwrap();
-        let final_chunk = read_chunk(directory.join("outbox/000000000001.json"));
+        let final_chunk = read_chunk(directory.join("outbox/000000000002.json"));
         assert_eq!(final_chunk.session.status, Status::Error);
         assert_eq!(
             final_chunk.session.final_reason.unwrap()["code"],
@@ -652,7 +717,7 @@ mod tests {
         );
         assert!(final_chunk.logs.iter().any(|log| log.kind == "logcat"));
         InstallationLog::recover_interrupted(root.path()).unwrap();
-        assert!(!directory.join("outbox/000000000002.json").exists());
+        assert!(!directory.join("outbox/000000000003.json").exists());
     }
 
     #[test]
@@ -681,12 +746,12 @@ mod tests {
     }
 
     #[test]
-    fn hundred_records_trigger_delivery_and_terminal_remainder_is_flushed() {
+    fn hundred_events_trigger_packing_and_terminal_remainder_is_flushed() {
         let root = tempfile::tempdir().unwrap();
         let session = begin(root.path());
         for _ in 0..98 {
             session
-                .record("logcat", "output", None, None, json!({"text":"line"}))
+                .record("step", "progress", None, None, json!({"text":"line"}))
                 .unwrap();
         }
         session.cut().unwrap();
@@ -697,7 +762,7 @@ mod tests {
             0
         );
         session
-            .record("logcat", "output", None, None, json!({"text":"line 100"}))
+            .record("step", "progress", None, None, json!({"text":"line 100"}))
             .unwrap();
         let path = session.directory().join("outbox/000000000001.json");
         let deadline = std::time::Instant::now() + Duration::from_secs(3);

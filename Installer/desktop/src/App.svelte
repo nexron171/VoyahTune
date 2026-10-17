@@ -7,6 +7,7 @@
     command,
     beginInstallationSession,
     finishInstallationSession,
+    uploadInstallationLogs,
     recordChoice,
     recordStep,
     subscribe,
@@ -17,6 +18,7 @@
     type Release,
     type CachedPayload,
     type PayloadProgress,
+    type LogUploadProgress,
     type Action,
     type Dns,
     type Device,
@@ -29,6 +31,10 @@
   let loggingWarning = $state("");
   let logsFolderOpening = $state(false);
   let logsFolderError = $state("");
+  let logsUploading = $state(false);
+  let logUploadProgress = $state<LogUploadProgress | null>(null);
+  let logUploadError = $state("");
+  let logUploadComplete = $state(false);
   let sessionStarting = $state(false);
   let screen = $state(0),
     action = $state<Action | null>(null),
@@ -803,6 +809,24 @@
       logsFolderOpening = false;
     }
   }
+  async function uploadLogs() {
+    if (logsUploading || !installationSessionId) return;
+    logsUploading = true;
+    logUploadProgress = null;
+    logUploadError = "";
+    logUploadComplete = false;
+    try {
+      logUploadProgress = await uploadInstallationLogs(
+        installationSessionId,
+        progress => (logUploadProgress = progress),
+      );
+      logUploadComplete = true;
+    } catch (caught) {
+      logUploadError = failure(caught).message;
+    } finally {
+      logsUploading = false;
+    }
+  }
   async function saveReport() {
     try {
       const path = await command<string>("save_report", { events });
@@ -846,6 +870,44 @@
       : "Не удалось завершить операцию";
   }
 </script>
+
+{#snippet logActions()}
+  <div class="log-actions">
+    <div class="footer-actions">
+      <button
+        class="button secondary"
+        disabled={logsFolderOpening}
+        onclick={openLogsFolder}
+      >Открыть папку с логами</button>
+      <button
+        class="button secondary"
+        disabled={logsUploading || !installationSessionId}
+        onclick={uploadLogs}
+        title="Выгрузить журнал текущей установки"
+      >{logsUploading ? "Выгружаем логи…" : "Выгрузить логи"}</button>
+    </div>
+    {#if logsUploading || logUploadProgress}
+      <div class="log-upload-progress" role="status" aria-live="polite">
+        <progress
+          aria-label="Выгрузка логов"
+          max={logUploadProgress?.totalChunks || 1}
+          value={logUploadProgress?.uploadedChunks}
+        ></progress>
+        <p class="info-note">
+          {#if logUploadComplete}
+            Выгружено событий: {logUploadProgress?.totalEvents}.
+          {:else if logUploadProgress}
+            Отправлено пакетов: {logUploadProgress.uploadedChunks} из {logUploadProgress.totalChunks}.
+          {:else}
+            Подготовка журнала…
+          {/if}
+        </p>
+      </div>
+    {/if}
+    {#if logUploadError}<p class="info-note" role="alert">{logUploadError}</p>{/if}
+    {#if logsFolderError}<p class="info-note" role="alert">{logsFolderError}</p>{/if}
+  </div>
+{/snippet}
 
 <div class="installer-window">
   <div class="window-body">
@@ -1575,16 +1637,7 @@
             </details>
           </section>{/if}
         {#if reportPath}<p class="report-path">Отчёт: {reportPath}</p>{/if}
-        <button
-          class="button secondary"
-          disabled={logsFolderOpening}
-          onclick={openLogsFolder}
-        >
-          Открыть папку с логами
-        </button>
-        {#if logsFolderError}<p class="info-note" role="alert">
-            {logsFolderError}
-          </p>{/if}
+        {@render logActions()}
       </div>
       <footer class="footer">
         {#if cunbaRunning || cunbaReady || cunbaChoice}<span class="footer-note"
@@ -1701,20 +1754,25 @@
       <button class="button primary" onclick={saveReport}
         >Сохранить отчёт</button
       >
-      <button
-        class="button secondary"
-        disabled={logsFolderOpening}
-        onclick={openLogsFolder}
-      >
-        Открыть папку с логами
-      </button>
+      {@render logActions()}
     </div>
-    {#if logsFolderError}<p class="info-note" role="alert">
-        {logsFolderError}
-      </p>{/if}
   </dialog>{/if}
 
 <style>
+  .log-actions {
+    min-width: 0;
+  }
+  .log-upload-progress {
+    width: 360px;
+    max-width: 100%;
+    margin-top: 12px;
+  }
+  .log-upload-progress progress {
+    display: block;
+    width: 100%;
+    height: 8px;
+    accent-color: var(--teal);
+  }
   .catalog-actions {
     display: flex;
     align-items: center;

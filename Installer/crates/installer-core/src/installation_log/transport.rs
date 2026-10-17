@@ -1,7 +1,5 @@
-use super::{Chunk, SessionInfo, SpoolItem};
+use super::{Chunk, SessionInfo, SpoolItem, UploadProgress, UploadSnapshot};
 use chrono::Utc;
-#[cfg(not(test))]
-use fs2::FileExt;
 use serde_json::json;
 #[cfg(test)]
 use std::fs;
@@ -9,11 +7,8 @@ use std::{
     fs::{File, OpenOptions},
     io::{BufReader, Write},
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
-    },
-    thread,
+    sync::{mpsc, Arc, Mutex},
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
@@ -21,7 +16,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) enum Message {
     Chunk(PathBuf),
-    Finish(Option<PathBuf>),
+    Finish,
 }
 
 pub(super) trait Transport {
@@ -114,37 +109,22 @@ pub(super) fn deliver(
     result.is_ok()
 }
 
-#[cfg(test)]
-
-fn pending_chunks(directory: &Path) -> crate::Result<Vec<PathBuf>> {
-    let mut paths = Vec::new();
-    for entry in fs::read_dir(directory.join("outbox"))? {
-        let path = entry?.path();
-        if path
-            .extension()
-            .is_some_and(|extension| extension == "json")
-            && !path.with_extension("ack").exists()
-        {
-            paths.push(path);
-        }
-    }
-    paths.sort();
-    if let Some(last) = paths.last() {
-        let item: SpoolItem = serde_json::from_reader(BufReader::new(File::open(last)?))?;
-        if item.request.final_chunk {
-            // Final status must not wait behind a large logcat backlog.
-            paths.rotate_right(1);
-        }
-    }
-    Ok(paths)
-}
-
 fn deliver_file(
     transport: &mut dyn Transport,
     directory: &Path,
     path: &Path,
+    automatic: bool,
 ) -> crate::Result<bool> {
     let item: SpoolItem = serde_json::from_reader(BufReader::new(File::open(path)?))?;
+    if automatic
+        && item
+            .request
+            .logs
+            .iter()
+            .any(|record| record.kind == "logcat")
+    {
+        return Ok(true);
+    }
     let mut attempts = OpenOptions::new()
         .create(true)
         .append(true)
@@ -171,76 +151,23 @@ fn deliver_file(
     Ok(delivered)
 }
 
-#[cfg(not(test))]
-fn run_sender(
-    receiver: mpsc::Receiver<Message>,
-    directory: PathBuf,
-    initial_session: SessionInfo,
-    stopping: Arc<AtomicBool>,
-) -> crate::Result<()> {
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(directory.join("delivery.lock"))?;
-    if lock.try_lock_exclusive().is_err() {
-        return Ok(());
-    }
-    let mut transport = HttpTransport::new(directory.clone(), initial_session);
-    let registered = transport.register();
-    let mut attempts = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(directory.join("delivery-attempts.jsonl"))?;
-    writeln!(
-        attempts,
-        "{}",
-        json!({
-            "sessionId": transport.initial_session.session_id,
-            "endpoint": "installation_sessions",
-            "timestamp": Utc::now().to_rfc3339(),
-            "success": registered.is_ok(),
-            "error": registered.err()
-        })
-    )?;
-    run_delivery_loop(&mut transport, receiver, &directory, &stopping)
-}
-
 fn run_delivery_loop(
-    transport: &mut dyn Transport,
     receiver: mpsc::Receiver<Message>,
     directory: &Path,
-    stopping: &AtomicBool,
-) -> crate::Result<()> {
-    // Only newly announced packets are eligible; disk outboxes are local diagnostics.
+    transport: &mut dyn Transport,
+    request_lock: &Mutex<()>,
+) {
     while let Ok(message) = receiver.recv() {
-        let (path, finished) = match message {
-            Message::Chunk(path) if !stopping.load(Ordering::Acquire) => (Some(path), false),
-            Message::Chunk(_) => continue,
-            Message::Finish(path) => (path, true),
-        };
-        if let Some(path) = path {
-            if let Err(error) = deliver_file(transport, directory, &path) {
-                eprintln!("Session delivery failed: {error}");
+        match message {
+            Message::Chunk(path) => {
+                let _request = request_lock.lock().unwrap();
+                if let Err(error) = deliver_file(transport, directory, &path, true) {
+                    eprintln!("Session delivery failed: {error}");
+                }
             }
-        }
-        if finished {
-            break;
+            Message::Finish => break,
         }
     }
-    Ok(())
-}
-
-// Tests drive the sender explicitly against loopback or an in-memory transport.
-#[cfg(test)]
-pub(super) fn start(
-    _: mpsc::Receiver<Message>,
-    _: PathBuf,
-    _: SessionInfo,
-    _: Arc<AtomicBool>,
-) -> Option<thread::JoinHandle<()>> {
-    None
 }
 
 #[cfg(not(test))]
@@ -248,13 +175,64 @@ pub(super) fn start(
     receiver: mpsc::Receiver<Message>,
     directory: PathBuf,
     initial: SessionInfo,
-    stopping: Arc<AtomicBool>,
-) -> Option<thread::JoinHandle<()>> {
+    request_lock: Arc<Mutex<()>>,
+) -> Option<JoinHandle<()>> {
     Some(thread::spawn(move || {
-        if let Err(error) = run_sender(receiver, directory, initial, stopping) {
-            eprintln!("Session sender stopped: {error}");
+        let mut transport = HttpTransport::new(directory.clone(), initial);
+        {
+            let _request = request_lock.lock().unwrap();
+            if let Err(error) = transport.register() {
+                eprintln!("Session registration failed: {error}");
+            }
         }
+        run_delivery_loop(receiver, &directory, &mut transport, &request_lock);
     }))
+}
+
+// Tests drive delivery explicitly against loopback or an in-memory transport.
+#[cfg(test)]
+pub(super) fn start(
+    _: mpsc::Receiver<Message>,
+    _: PathBuf,
+    _: SessionInfo,
+    _: Arc<Mutex<()>>,
+) -> Option<JoinHandle<()>> {
+    None
+}
+
+pub(super) fn upload(
+    snapshot: UploadSnapshot,
+    progress: impl FnMut(UploadProgress),
+) -> crate::Result<UploadProgress> {
+    let mut transport =
+        HttpTransport::new(snapshot.directory.clone(), snapshot.initial_session.clone());
+    upload_with(snapshot, &mut transport, progress)
+}
+
+fn upload_with(
+    mut snapshot: UploadSnapshot,
+    transport: &mut dyn Transport,
+    mut progress: impl FnMut(UploadProgress),
+) -> crate::Result<UploadProgress> {
+    progress(snapshot.progress.clone());
+    for path in &snapshot.chunks {
+        let delivered = {
+            let _request = snapshot.request_lock.lock().unwrap();
+            deliver_file(transport, &snapshot.directory, path, false)?
+        };
+        if !delivered {
+            return Err(crate::Error::new(
+                "LOG_UPLOAD_FAILED",
+                format!(
+                    "Не удалось выгрузить логи. Отправлено пакетов: {} из {}. Повторите выгрузку.",
+                    snapshot.progress.uploaded_chunks, snapshot.progress.total_chunks
+                ),
+            ));
+        }
+        snapshot.progress.uploaded_chunks += 1;
+        progress(snapshot.progress.clone());
+    }
+    Ok(snapshot.progress)
 }
 
 #[cfg(test)]
@@ -264,29 +242,19 @@ mod tests {
     use std::{
         io::{BufRead, BufReader, Read},
         net::TcpListener,
-        sync::Mutex,
-        time::Instant,
     };
 
-    struct BlockingTransport {
-        requests: Arc<Mutex<Vec<Chunk>>>,
-        started: mpsc::Sender<()>,
-        resume: mpsc::Receiver<()>,
-        fail_final: bool,
+    #[derive(Default)]
+    struct RecordingTransport {
+        requests: Vec<Chunk>,
+        fail_at: Option<usize>,
     }
 
-    impl Transport for BlockingTransport {
-        fn send(&mut self, chunk: &Chunk, _: Duration) -> Result<(), String> {
-            let first = {
-                let mut requests = self.requests.lock().unwrap();
-                requests.push(chunk.clone());
-                requests.len() == 1
-            };
-            if first {
-                self.started.send(()).unwrap();
-                self.resume.recv_timeout(Duration::from_secs(5)).unwrap();
-            }
-            if chunk.final_chunk && self.fail_final {
+    impl Transport for RecordingTransport {
+        fn send(&mut self, chunk: &Chunk, timeout: Duration) -> Result<(), String> {
+            assert_eq!(timeout, REQUEST_TIMEOUT);
+            self.requests.push(chunk.clone());
+            if self.fail_at == Some(self.requests.len()) {
                 Err("offline".into())
             } else {
                 Ok(())
@@ -295,230 +263,220 @@ mod tests {
     }
 
     #[test]
-    fn finishing_skips_backlog_attempts_final_once_and_joins_all_workers() {
-        for (status, fail_final) in [
-            (Status::Success, false),
-            (Status::Error, false),
-            (Status::Success, true),
-        ] {
+    fn automatic_delivery_excludes_logcat_and_stops_after_session_finish() {
+        for status in [Status::Success, Status::Error] {
             let root = tempfile::tempdir().unwrap();
-            let requests = Arc::new(Mutex::new(Vec::new()));
-            let captured = requests.clone();
-            let (started, receiving) = mpsc::channel();
-            let (resume, waiting) = mpsc::channel();
-            let session = InstallationLog::begin_with_sender(
-                root.path(),
-                Path::new("/missing-adb"),
-                None,
-                move |receiver, directory, _, stopping| {
-                    Some(thread::spawn(move || {
-                        let mut transport = BlockingTransport {
-                            requests: captured,
-                            started,
-                            resume: waiting,
-                            fail_final,
-                        };
-                        run_delivery_loop(&mut transport, receiver, &directory, &stopping).unwrap();
-                    }))
-                },
-            )
-            .unwrap();
-            let mut backlog = Vec::new();
-            for index in 0..20 {
+            let session =
+                InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
+            for index in 0..240 {
                 session
-                    .record("step", "progress", None, None, json!({"index":index}))
+                    .record("logcat", "output", None, None, json!({"index":index}))
                     .unwrap();
-                let path = session
-                    .cut_with(true, |path| {
-                        session
-                            .0
-                            .sender
-                            .send(Message::Chunk(path.to_owned()))
-                            .unwrap();
-                    })
-                    .unwrap();
-                backlog.push(path);
-                if index == 0 {
-                    receiving.recv_timeout(Duration::from_secs(5)).unwrap();
+                if index % 60 == 0 {
+                    session
+                        .record("step", "progress", None, None, json!({"index":index}))
+                        .unwrap();
+                    session
+                        .record("user_choice", "continue", None, None, json!({}))
+                        .unwrap();
                 }
             }
-            let finishing = session.clone();
-            let expected_status = status.clone();
+            session.finish(status.clone(), None).unwrap();
+            assert!(session.0.collector.lock().unwrap().is_none());
+            assert!(session.0.packer.lock().unwrap().is_none());
+            assert!(session.0.delivery.lock().unwrap().is_none());
+            let snapshot = session.upload_snapshot().unwrap();
+            let directory = session.directory();
+            let (sender, receiver) = mpsc::channel();
+            for path in &snapshot.chunks {
+                sender.send(Message::Chunk(path.clone())).unwrap();
+            }
+            sender.send(Message::Finish).unwrap();
             let (finished, completion) = mpsc::channel();
             let worker = thread::spawn(move || {
-                let result = finishing.finish(status, None);
-                finished.send(result).unwrap();
+                let mut transport = RecordingTransport {
+                    fail_at: Some(2),
+                    ..Default::default()
+                };
+                run_delivery_loop(receiver, &directory, &mut transport, &Mutex::new(()));
+                finished.send(transport.requests).unwrap();
             });
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !session.0.stopping.load(Ordering::Acquire) {
-                assert!(Instant::now() < deadline);
-                thread::yield_now();
-            }
-            resume.send(()).unwrap();
-            completion
-                .recv_timeout(Duration::from_secs(5))
-                .unwrap()
-                .unwrap();
+            let requests = completion.recv_timeout(Duration::from_secs(5)).unwrap();
             worker.join().unwrap();
-
-            // The GUI can keep the session alive after finish without a sender thread.
-            for worker in [&session.0.collector, &session.0.packer, &session.0.delivery] {
-                assert!(worker.lock().unwrap().is_none());
-            }
-            let requests = requests.lock().unwrap();
-            assert_eq!(requests.len(), 2);
-            assert!(!requests[0].final_chunk);
-            assert!(requests[1].final_chunk);
-            assert_eq!(requests[1].session.status, expected_status);
-            assert_eq!(requests[1].logs.last().unwrap().name, "session-finished");
-            for path in &backlog[1..] {
-                assert!(path.exists());
-                assert!(!path.with_extension("ack").exists());
-            }
-            let final_path = session.directory().join("outbox/000000000021.json");
-            assert_eq!(final_path.with_extension("ack").exists(), !fail_final);
-            assert!(session
-                .0
-                .sender
-                .send(Message::Chunk(backlog[1].clone()))
-                .is_err());
-            let before = fs::read(session.directory().join("logs.jsonl")).unwrap();
-            session
-                .record("logcat", "late", None, None, json!({}))
-                .unwrap();
-            session.finish(Status::Success, None).unwrap();
+            assert!(sender.send(Message::Finish).is_err());
+            let automatic_events: Vec<_> = requests.iter().flat_map(|chunk| &chunk.logs).collect();
+            assert_eq!(automatic_events.len(), 10);
+            assert!(automatic_events
+                .iter()
+                .all(|record| record.kind != "logcat"));
+            assert_eq!(automatic_events.first().unwrap().name, "session-started");
+            assert_eq!(automatic_events.last().unwrap().name, "session-finished");
+            assert_eq!(requests.last().unwrap().session.status, status);
+            assert!(requests.last().unwrap().final_chunk);
+            let mut manual = RecordingTransport::default();
+            upload_with(snapshot, &mut manual, |_| {}).unwrap();
+            let events: Vec<_> = manual
+                .requests
+                .iter()
+                .flat_map(|chunk| &chunk.logs)
+                .collect();
+            assert_eq!(events.len(), 250);
             assert_eq!(
-                fs::read(session.directory().join("logs.jsonl")).unwrap(),
-                before
+                events
+                    .iter()
+                    .filter(|record| record.kind == "logcat")
+                    .count(),
+                240
             );
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|record| record.sequence)
+                    .collect::<Vec<_>>(),
+                (1..=250).collect::<Vec<_>>()
+            );
+            for request in requests {
+                let repeated = manual
+                    .requests
+                    .iter()
+                    .find(|chunk| chunk.chunk_id == request.chunk_id)
+                    .unwrap();
+                assert_eq!(
+                    serde_json::to_value(repeated).unwrap(),
+                    serde_json::to_value(request).unwrap()
+                );
+            }
         }
     }
 
     #[test]
-    fn finishing_stops_delivery_even_when_final_chunk_cannot_be_saved() {
+    fn manual_upload_freezes_all_events_and_reports_acknowledged_progress() {
         let root = tempfile::tempdir().unwrap();
-        let session = InstallationLog::begin_with_sender(
-            root.path(),
-            Path::new("/missing-adb"),
-            None,
-            |receiver, directory, _, stopping| {
-                Some(thread::spawn(move || {
-                    struct NoRequests;
-                    impl Transport for NoRequests {
-                        fn send(&mut self, _: &Chunk, _: Duration) -> Result<(), String> {
-                            panic!("No chunk should be sent after a failed finish");
-                        }
-                    }
-                    run_delivery_loop(&mut NoRequests, receiver, &directory, &stopping).unwrap();
-                }))
-            },
-        )
+        let session = InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
+        for _ in 0..250 {
+            session
+                .record("step", "before-click", None, None, json!({}))
+                .unwrap();
+        }
+        let snapshot = session.upload_snapshot().unwrap();
+        assert_eq!(snapshot.progress.total_events, 251);
+        assert_eq!(snapshot.progress.total_chunks, 3);
+        assert_eq!(
+            session.upload_snapshot().err().unwrap().code,
+            "LOG_UPLOAD_BUSY"
+        );
+        let mut transport = RecordingTransport::default();
+        let mut updates = Vec::new();
+        let result = upload_with(snapshot, &mut transport, |progress| {
+            session
+                .record("logcat", "after-click", None, None, json!({}))
+                .unwrap();
+            updates.push(progress);
+        })
         .unwrap();
-        fs::remove_dir(session.directory().join("outbox")).unwrap();
-        assert!(session.finish(Status::Success, None).is_err());
-        assert!(session.0.delivery.lock().unwrap().is_none());
-        assert!(session.0.sender.send(Message::Finish(None)).is_err());
+        assert_eq!(result.uploaded_chunks, 3);
+        assert_eq!(
+            updates
+                .iter()
+                .map(|p| p.uploaded_chunks)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+        assert!(updates
+            .iter()
+            .all(|p| p.total_chunks == 3 && p.total_events == 251));
+        assert!(session.active());
+        assert_eq!(
+            transport
+                .requests
+                .iter()
+                .flat_map(|chunk| chunk.logs.iter().map(|record| record.sequence))
+                .collect::<Vec<_>>(),
+            (1..=251).collect::<Vec<_>>()
+        );
+        assert!(transport
+            .requests
+            .iter()
+            .all(|chunk| chunk.logs.len() <= 100 && !chunk.final_chunk));
+        let first_requests = transport.requests.clone();
+        session.finish(Status::Success, None).unwrap();
+        assert!(session.0.collector.lock().unwrap().is_none());
+        assert!(session.0.packer.lock().unwrap().is_none());
+        transport.requests.clear();
+        let result =
+            upload_with(session.upload_snapshot().unwrap(), &mut transport, |_| {}).unwrap();
+        assert_eq!(result.total_events, 256);
+        assert_eq!(
+            serde_json::to_value(&transport.requests[..3]).unwrap(),
+            serde_json::to_value(first_requests).unwrap()
+        );
+        assert_eq!(
+            transport
+                .requests
+                .iter()
+                .map(|chunk| chunk.logs.len())
+                .sum::<usize>(),
+            256
+        );
+        assert!(transport.requests.last().unwrap().final_chunk);
+        assert_eq!(
+            transport.requests.last().unwrap().session.status,
+            Status::Success
+        );
     }
 
     #[test]
-    fn failed_outbox_survives_restart_and_final_status_is_delivered_first() {
-        struct Sender {
-            failing: bool,
-            requests: Vec<String>,
-        }
-        impl Transport for Sender {
-            fn send(&mut self, chunk: &Chunk, _: Duration) -> Result<(), String> {
-                self.requests.push(serde_json::to_string(chunk).unwrap());
-                if self.failing {
-                    Err("offline".into())
-                } else {
-                    Ok(())
-                }
-            }
-        }
+    fn manual_upload_failure_stops_without_retries_and_next_click_can_resend() {
         let root = tempfile::tempdir().unwrap();
         let session = InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
-        let directory = session.directory();
-        let first = session.cut_with(true, |_| {}).unwrap();
-        let original = fs::read(&first).unwrap();
-        let mut sender = Sender {
-            failing: true,
-            requests: vec![],
-        };
-        assert!(!deliver_file(&mut sender, &directory, &first).unwrap());
-        assert!(!first.with_extension("ack").exists());
-        session.finish(Status::Success, None).unwrap();
-        drop(session);
-        InstallationLog::recover_interrupted(root.path()).unwrap();
-        let pending = pending_chunks(&directory).unwrap();
-        assert_eq!(pending.len(), 2);
-        assert_eq!(pending[0].file_name().unwrap(), "000000000002.json");
-        let final_item: SpoolItem =
-            serde_json::from_reader(File::open(&pending[0]).unwrap()).unwrap();
-        assert!(final_item.request.final_chunk);
-        assert_eq!(final_item.request.session.status, Status::Success);
-        sender.failing = false;
-        for path in pending {
-            assert!(deliver_file(&mut sender, &directory, &path).unwrap());
+        for _ in 0..210 {
+            session
+                .record("step", "event", None, None, json!({}))
+                .unwrap();
         }
-        assert!(pending_chunks(&directory).unwrap().is_empty());
-        assert_eq!(fs::read(first).unwrap(), original);
-        assert_eq!(sender.requests[0], *sender.requests.last().unwrap());
-    }
-
-    #[test]
-    fn sender_does_not_replay_saved_or_failed_packets() {
-        struct Recovering {
-            calls: usize,
-            first_request: Option<String>,
-        }
-        impl Transport for Recovering {
-            fn send(&mut self, chunk: &Chunk, _: Duration) -> Result<(), String> {
-                let request = serde_json::to_string(chunk).unwrap();
-                assert_eq!(self.first_request.get_or_insert(request.clone()), &request);
-                self.calls += 1;
-                if self.calls <= 4 {
-                    Err("temporary failure".into())
-                } else {
-                    Ok(())
-                }
-            }
-        }
-        let root = tempfile::tempdir().unwrap();
-        let session = InstallationLog::begin(root.path(), Path::new("/missing-adb"), None).unwrap();
-        session.finish(Status::Success, None).unwrap();
-        let directory = session.directory();
-        drop(session);
-        let (sender, receiver) = mpsc::channel();
-        sender
-            .send(Message::Chunk(
-                pending_chunks(&directory).unwrap()[0].clone(),
-            ))
+        session
+            .finish(Status::Error, Some(json!({"code":"TEST_FAILURE"})))
             .unwrap();
-        drop(sender);
-        let mut transport = Recovering {
-            calls: 0,
-            first_request: None,
+        let snapshot = session.upload_snapshot().unwrap();
+        let originals: Vec<_> = snapshot
+            .chunks
+            .iter()
+            .map(|path| fs::read(path).unwrap())
+            .collect();
+        assert!(!session.directory().join("delivery-attempts.jsonl").exists());
+        assert!(!session.directory().join("session.ack").exists());
+        let mut transport = RecordingTransport {
+            fail_at: Some(2),
+            ..Default::default()
         };
-        run_delivery_loop(
-            &mut transport,
-            receiver,
-            &directory,
-            &AtomicBool::new(false),
-        )
-        .unwrap();
-        assert_eq!(transport.calls, 1);
-        assert!(!pending_chunks(&directory).unwrap().is_empty());
-        let (sender, receiver) = mpsc::channel();
-        drop(sender);
-        run_delivery_loop(
-            &mut transport,
-            receiver,
-            &directory,
-            &AtomicBool::new(false),
-        )
-        .unwrap();
-        assert_eq!(transport.calls, 1);
+        let mut updates = Vec::new();
+        assert_eq!(
+            upload_with(snapshot, &mut transport, |p| updates
+                .push(p.uploaded_chunks))
+            .unwrap_err()
+            .code,
+            "LOG_UPLOAD_FAILED"
+        );
+        assert_eq!(transport.requests.len(), 2);
+        assert_eq!(updates, vec![0, 1]);
+        transport.fail_at = None;
+        transport.requests.clear();
+        let snapshot = session.upload_snapshot().unwrap();
+        assert_eq!(
+            snapshot
+                .chunks
+                .iter()
+                .map(|path| fs::read(path).unwrap())
+                .collect::<Vec<_>>(),
+            originals
+        );
+        let result = upload_with(snapshot, &mut transport, |_| {}).unwrap();
+        assert_eq!(result.uploaded_chunks, 3);
+        assert_eq!(result.total_events, 212);
+        assert_eq!(
+            transport.requests.last().unwrap().session.final_reason,
+            Some(json!({"code":"TEST_FAILURE"}))
+        );
     }
 
     fn server(

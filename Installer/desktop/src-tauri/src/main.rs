@@ -6,7 +6,7 @@ use installer_core::{
     engine::{default_adb, Engine},
     engineering_menu,
     events::{Event, Events},
-    installation_log::{InstallationLog, Status as SessionStatus},
+    installation_log::{InstallationLog, Status as SessionStatus, UploadProgress},
     payload::{self, Payload},
     plans::{Action, Dns, Plan, Request},
     recovery, session, Error, Result,
@@ -114,6 +114,25 @@ async fn log_session_finish(
     })
     .await
     .map_err(|e| Error::new("SESSION_FINISH", "Не удалось завершить журнал сессии").detail(e))?
+}
+
+#[tauri::command]
+async fn log_session_upload(
+    app: tauri::AppHandle,
+    session_id: String,
+    on_progress: tauri::ipc::Channel<UploadProgress>,
+) -> Result<UploadProgress> {
+    let session = installation_log(&app)
+        .filter(|session| session.info().session_id == session_id)
+        .ok_or_else(|| Error::new("SESSION_CHANGED", "Журнал текущей установки недоступен"))?;
+    let snapshot = session.upload_snapshot()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        snapshot.upload(|progress| {
+            let _ = on_progress.send(progress);
+        })
+    })
+    .await
+    .map_err(|error| Error::new("LOG_UPLOAD_FAILED", "Не удалось выгрузить логи").detail(error))?
 }
 
 fn record_engine_event(session: &Option<InstallationLog>, event: &Event) {
@@ -979,6 +998,7 @@ fn main() {
             log_session_begin,
             log_session_record,
             log_session_finish,
+            log_session_upload,
             engineering_code,
             release_catalog,
             catalog_settings,
