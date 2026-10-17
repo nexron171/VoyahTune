@@ -18,7 +18,7 @@ import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 public final class SettingsPreviewView extends View
         implements SharedPreferences.OnSharedPreferenceChangeListener {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final SharedPreferences prefs;
+    private SharedPreferences prefs;
     private final String tileKey;
     private final int kind;
     private int tileWidth, tileHeight;
@@ -40,6 +40,23 @@ public final class SettingsPreviewView extends View
     public void setCells(int width, int height) {
         tileWidth = AppWidgetStore.clampWidth(width);
         tileHeight = AppWidgetStore.clampHeight(height);
+        updateDescription();
+        invalidate();
+    }
+
+    /** Settings pages for another dashboard profile pass their own preferences. */
+    public void usePreferences(SharedPreferences next) {
+        if (next == null || next == prefs) {
+            return;
+        }
+        boolean attached = isAttachedToWindow();
+        if (attached) {
+            prefs.unregisterOnSharedPreferenceChangeListener(this);
+        }
+        prefs = next;
+        if (attached) {
+            prefs.registerOnSharedPreferenceChangeListener(this);
+        }
         updateDescription();
         invalidate();
     }

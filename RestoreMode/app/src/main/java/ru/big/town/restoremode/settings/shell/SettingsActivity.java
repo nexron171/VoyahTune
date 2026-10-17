@@ -125,7 +125,9 @@ public class SettingsActivity extends AppCompatActivity implements SettingsHost 
                             this,
                             currentSection == SettingsSection.SCENARIOS
                                     ? "Сценарии сохранены"
-                                    : "Настройки голосового управления сохранены",
+                                    : currentSection == SettingsSection.PASSENGER
+                                            ? "Настройки пассажирского экрана сохранены"
+                                            : "Настройки голосового управления сохранены",
                             Toast.LENGTH_SHORT)
                     .show();
             return;

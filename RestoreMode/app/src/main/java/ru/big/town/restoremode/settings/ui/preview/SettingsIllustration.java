@@ -20,13 +20,28 @@ public final class SettingsIllustration extends View
     };
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final SharedPreferences preferences;
+    private SharedPreferences preferences;
     private Drawable rearCarIllustration;
 
     public SettingsIllustration(Context context, AttributeSet attrs) {
         super(context, attrs);
         preferences = context.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+    }
+
+    /** Settings pages for another dashboard profile pass their own preferences. */
+    public void usePreferences(SharedPreferences next) {
+        if (next == null || next == preferences) {
+            return;
+        }
+        if (isAttachedToWindow()) {
+            preferences.unregisterOnSharedPreferenceChangeListener(this);
+        }
+        preferences = next;
+        if (isAttachedToWindow()) {
+            preferences.registerOnSharedPreferenceChangeListener(this);
+        }
+        invalidate();
     }
 
     @Override

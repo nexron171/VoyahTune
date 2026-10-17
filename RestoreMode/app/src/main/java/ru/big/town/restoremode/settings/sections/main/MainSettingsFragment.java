@@ -1,10 +1,13 @@
 package ru.big.town.restoremode.settings.sections.main;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Bundle;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -18,6 +21,7 @@ import android.widget.TextView;
 
 import ru.big.town.common.CarPlayTarget;
 import ru.big.town.restoremode.R;
+import ru.big.town.restoremode.dashboard.DashboardProfile;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.dashboard.tiles.TileScrollSnap;
 import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
@@ -28,7 +32,10 @@ import ru.big.town.restoremode.settings.core.SettingsSectionLayouts;
 import ru.big.town.restoremode.settings.ui.dialogs.SettingsAppPicker;
 import ru.big.town.restoremode.settings.ui.layout.SettingsGrid;
 import ru.big.town.restoremode.settings.ui.layout.SettingsPanels;
+import ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard;
 import ru.big.town.restoremode.settings.ui.list.SettingsList;
+import ru.big.town.restoremode.settings.ui.preview.SettingsIllustration;
+import ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
@@ -41,10 +48,31 @@ import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class MainSettingsFragment extends SettingsSectionFragment {
+public class MainSettingsFragment extends SettingsSectionFragment {
+    private SharedPreferences globalPreferences;
+
+    @Override
+    public void onCreate(Bundle state) {
+        super.onCreate(state);
+        globalPreferences = preferences;
+        preferences = profile().layoutPreferences(requireContext());
+    }
+
+    protected DashboardProfile profile() {
+        return DashboardProfile.driver();
+    }
+
     @Override
     public SettingsSection section() {
         return SettingsSection.MAIN;
+    }
+
+    private void syncTiles() {
+        TileOrderStore.sync(
+                preferences,
+                globalPreferences,
+                requireContext().getPackageManager(),
+                profile().isPassenger());
     }
 
     private void bindMainWidgetSwitches() {
@@ -146,10 +174,10 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             return;
         }
         Switch switchSaveHistory = settingView(R.id.switchSaveTripHistory);
-        switchSaveHistory.setChecked(preferences.getBoolean("saveTripHistory", true));
+        switchSaveHistory.setChecked(globalPreferences.getBoolean("saveTripHistory", true));
         switchSaveHistory.setOnCheckedChangeListener(
                 (button, checked) -> {
-                    preferences.edit().putBoolean("saveTripHistory", checked).apply();
+                    globalPreferences.edit().putBoolean("saveTripHistory", checked).apply();
                     Intent intent =
                             new Intent("ru.big.town.anative.TRIP_HISTORY")
                                     .setPackage("ru.big.town.anative");
@@ -231,12 +259,16 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         }
         entries.add(new DialWidgetStore.Entry());
         DialWidgetStore.save(preferences, entries);
-        TileOrderStore.sync(preferences, requireContext().getPackageManager());
+        syncTiles();
         refreshSettingsRows();
     }
 
     private void bindShowSwitch(int switchId, String key, boolean defaultValue) {
         bindShowSwitch(switchId, key, defaultValue, 0);
+    }
+
+    private boolean defaultVisibility(boolean driverDefault) {
+        return profile().defaultVisible(driverDefault);
     }
 
     private void bindShowSwitch(int switchId, String key, boolean defaultValue, int dependentId) {
@@ -245,7 +277,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             return;
         }
         View dependent = dependentId == 0 ? null : settingView(dependentId);
-        boolean checked = preferences.getBoolean(key, defaultValue);
+        boolean checked = preferences.getBoolean(key, defaultVisibility(defaultValue));
         visibilitySwitch.setChecked(checked);
         if (dependent != null) {
             dependent.setVisibility(checked ? View.VISIBLE : View.GONE);
@@ -443,7 +475,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             return;
         }
         field.setKeyListener(android.text.method.DigitsKeyListener.getInstance("0123456789.,"));
-        float saved = EnergyWidgetPreferences.capacity(preferences, key, fallback);
+        float saved = EnergyWidgetPreferences.capacity(globalPreferences, key, fallback);
         settingsList.bindDraft(
                 field, "capacity:" + key, new java.text.DecimalFormat("0.#").format(saved));
         field.addTextChangedListener(
@@ -465,11 +497,11 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                             return;
                         }
                         field.setError(null);
-                        preferences.edit().putFloat(key, parsed).apply();
+                        globalPreferences.edit().putFloat(key, parsed).apply();
                         if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
                             try {
                                 EnergyWidgetPreferences.sync(
-                                        GlobalVars.serviceMessenger, preferences);
+                                        GlobalVars.serviceMessenger, globalPreferences);
                             } catch (RemoteException e) {
                                 Log.w(
                                         "EnergyWidgets",
@@ -491,7 +523,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                         list.add(packageName);
                         AppShortcutStore.save(preferences, list);
 
-                        TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                        syncTiles();
                         renderAppShortcuts();
                     }
                 });
@@ -521,8 +553,8 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                 requireContext(),
                 "Приложение для виджета",
                 (packageName, label) -> {
-                    AppWidgetStore.add(preferences, packageName);
-                    TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                    AppWidgetStore.add(preferences, packageName, profile().widgetIdPrefix());
+                    syncTiles();
                     renderAppWidgets();
                 });
     }
@@ -602,7 +634,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                         if (profile.dpi != value) {
                             profile.dpi = value;
                             AppWidgetStore.update(preferences, entry);
-                            TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            syncTiles();
                         }
                     }
 
@@ -614,7 +646,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                 v -> {
                     AppWidgetStore.removeProfile(entry, profileIndex);
                     AppWidgetStore.update(preferences, entry);
-                    TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                    syncTiles();
                     renderAppWidgets();
                 });
         SettingsDesign.styleTree(profileView);
@@ -651,7 +683,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                                 }
                             }
                             DialWidgetStore.save(preferences, entries);
-                            TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            syncTiles();
                             android.widget.Toast.makeText(
                                             requireContext(),
                                             "Карточка сохранена",
@@ -664,7 +696,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                             List<DialWidgetStore.Entry> entries = DialWidgetStore.load(preferences);
                             entries.removeIf(current -> current.id.equals(entry.id));
                             DialWidgetStore.save(preferences, entries);
-                            TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            syncTiles();
                             refreshSettingsRows();
                         });
         SettingsDesign.styleTree(row);
@@ -694,7 +726,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                     updatedPackages.remove(packageName);
                     AppShortcutStore.save(preferences, updatedPackages);
 
-                    TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                    syncTiles();
                     renderAppShortcuts();
                 });
         SettingsDesign.styleTree(row);
@@ -766,7 +798,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                         if (entry.width != value) {
                             entry.width = value;
                             AppWidgetStore.update(preferences, entry);
-                            TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            syncTiles();
                             if (CarPlayTarget.isCarPlay(entry.packageName)) {
                                 renderAppWidgets();
                             }
@@ -796,7 +828,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                         if (entry.height != value) {
                             entry.height = value;
                             AppWidgetStore.update(preferences, entry);
-                            TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                            syncTiles();
                             if (CarPlayTarget.isCarPlay(entry.packageName)) {
                                 renderAppWidgets();
                             }
@@ -843,13 +875,13 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                     entry.autoStart = checked;
                     delayContainer.setVisibility(checked ? View.VISIBLE : View.GONE);
                     AppWidgetStore.update(preferences, entry);
-                    TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                    syncTiles();
                 });
         delete.setContentDescription("Убрать виджет приложения");
         delete.setOnClickListener(
                 v -> {
                     AppWidgetStore.remove(preferences, entry.id);
-                    TileOrderStore.sync(preferences, requireContext().getPackageManager());
+                    syncTiles();
                     renderAppWidgets();
                 });
         SettingsDesign.styleTree(row);
@@ -871,8 +903,7 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                                     AppWidgetStore.addProfile(
                                             entry, packageName, AppWidgetStore.DEFAULT_DPI);
                                     AppWidgetStore.update(preferences, entry);
-                                    TileOrderStore.sync(
-                                            preferences, requireContext().getPackageManager());
+                                    syncTiles();
                                     renderAppWidgets();
                                 }));
         SettingsDesign.styleTree(row);
@@ -964,11 +995,30 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected View decorateSettingsRow(int layout, View row) {
+        if (profile().isPassenger()) {
+            useLayoutPreferences(row);
+        }
         if (layout == R.layout.settings_main_add_shortcut) {
             return SettingsPanels.appSelectionPanel(
                     row, AppShortcutStore.load(preferences).isEmpty(), true);
         }
         return row;
+    }
+
+    private void useLayoutPreferences(View view) {
+        if (view instanceof SettingsWidgetCard) {
+            ((SettingsWidgetCard) view).usePreferences(preferences);
+        } else if (view instanceof SettingsPreviewView) {
+            ((SettingsPreviewView) view).usePreferences(preferences);
+        } else if (view instanceof SettingsIllustration) {
+            ((SettingsIllustration) view).usePreferences(preferences);
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                useLayoutPreferences(group.getChildAt(index));
+            }
+        }
     }
 
     @Override
