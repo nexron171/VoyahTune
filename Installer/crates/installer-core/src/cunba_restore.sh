@@ -5,9 +5,21 @@ source_directory=/data/media/0/Download/cunba
 injector=/data/local/bin/frida-inject2
 startup=/system/etc/init.logcat.sh
 package=com.cunba.lantu.otan.motorstore
-fail() { echo "$*" >&2; exit 1; }
-exists() { [ -e "$1" ] || [ -L "$1" ]; }
-digest() { sha256sum "$1" | cut -d ' ' -f 1; }
+fail() {
+    echo "$*" >&2
+    exit 1
+}
+
+exists() {
+    [ -e "$1" ] || [ -L "$1" ]
+}
+
+digest() {
+    sha256sum "$1" | cut -d ' ' -f 1
+}
+
+__CUNBA_SYSTEM_ACCESS__
+
 replace_startup() (
     replacement=$startup.voyahtune-cunba-new
     [ ! -L "$startup" ] && [ -f "$startup" ] || fail 'Unsafe startup target'
@@ -27,8 +39,15 @@ replace_startup() (
     mv -f "$replacement" "$startup"
     sync
 )
-state() { printf '%s\n' "$1" > "$journal/state.new"; mv "$journal/state.new" "$journal/state"; sync; }
+
+state() {
+    printf '%s\n' "$1" > "$journal/state.new"
+    mv "$journal/state.new" "$journal/state"
+    sync
+}
+
 package_state() { dumpsys package "$package" | sed -n 's/.*User 0:.* enabled=\([0-4]\).*/\1/p'; }
+
 require_backup() {
     [ ! -L "$journal" ] && [ -d "$journal" ] || fail 'Cunba backup unavailable'
     case "$(cat "$journal/state")" in verified|reactivating|restore-reboot-pending) ;; *) fail 'Cunba backup is not available for restoration' ;; esac
@@ -46,6 +65,7 @@ require_backup() {
         [ "$(digest "$journal/startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup backup changed'
     fi
 }
+
 require_removed() {
     packages=$(pm list packages --user 0) || fail 'Package Manager unavailable'
     printf '%s\n' "$packages" | grep -qx 'package:android' || fail 'Incomplete package inventory'
@@ -61,6 +81,7 @@ require_removed() {
         fail 'VoyahTune processes are still running'
     fi
 }
+
 verify_files() {
     if [ -f "$journal/directory-present" ]; then
         [ -d "$source_directory" ] && [ ! -L "$source_directory" ] || fail 'Cunba directory not restored'
@@ -75,6 +96,7 @@ verify_files() {
         [ "$(package_state)" = "$(cat "$journal/package-state")" ] || fail 'Package state not restored'
     fi
 }
+
 [ "$(id -u)" = 0 ] || fail 'Root access required'
 case "$action" in
     available)
@@ -110,7 +132,7 @@ case "$action" in
             current_hash=$(digest "$startup")
             if [ "$current_hash" != "$(cat "$journal/restore-startup-after")" ]; then
                 [ "$current_hash" = "$(digest "$journal/restore-startup-before")" ] || fail 'Startup changed during restoration'
-                replace_startup "$journal/restore-startup-new"
+                with_writable_system replace_startup "$journal/restore-startup-new"
             fi
         fi
         if [ -f "$journal/directory-present" ] && [ -d "$journal/directory" ]; then
