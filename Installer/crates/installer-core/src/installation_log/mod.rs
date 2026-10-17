@@ -90,11 +90,12 @@ struct Shared {
     directory: PathBuf,
     state: Mutex<State>,
     packing: Mutex<spool::Cursor>,
-    stopping: AtomicBool,
+    stopping: Arc<AtomicBool>,
     wake: Condvar,
     pending_records: Mutex<u64>,
     finish_lock: Mutex<()>,
-    sender: mpsc::Sender<PathBuf>,
+    sender: mpsc::Sender<transport::Message>,
+    delivery: Mutex<Option<JoinHandle<()>>>,
     collector: Mutex<Option<JoinHandle<()>>>,
     packer: Mutex<Option<JoinHandle<()>>>,
     _lock: File,
@@ -105,6 +106,20 @@ pub struct InstallationLog(Arc<Shared>);
 
 impl InstallationLog {
     pub fn begin(root: &Path, adb_path: &Path, release: Option<Value>) -> Result<Self> {
+        Self::begin_with_sender(root, adb_path, release, transport::start)
+    }
+
+    fn begin_with_sender(
+        root: &Path,
+        adb_path: &Path,
+        release: Option<Value>,
+        start_sender: impl FnOnce(
+            mpsc::Receiver<transport::Message>,
+            PathBuf,
+            SessionInfo,
+            Arc<AtomicBool>,
+        ) -> Option<JoinHandle<()>>,
+    ) -> Result<Self> {
         fs::create_dir_all(root)?;
         let directory = tempfile::Builder::new()
             .prefix("installation-")
@@ -148,7 +163,8 @@ impl InstallationLog {
             .open(directory.join("logs.jsonl"))?;
         let (sender, receiver) = mpsc::channel();
         recovery::write_json(&directory.join("session-request.json"), &info)?;
-        transport::start(receiver, directory.clone(), info.clone());
+        let stopping = Arc::new(AtomicBool::new(false));
+        let delivery = start_sender(receiver, directory.clone(), info.clone(), stopping.clone());
         let session = Self(Arc::new(Shared {
             directory,
             state: Mutex::new(State {
@@ -157,11 +173,12 @@ impl InstallationLog {
                 sequence: 0,
             }),
             packing: Mutex::new(spool::Cursor::default()),
-            stopping: AtomicBool::new(false),
+            stopping,
             wake: Condvar::new(),
             pending_records: Mutex::new(0),
             finish_lock: Mutex::new(()),
             sender,
+            delivery: Mutex::new(delivery),
             collector: Mutex::new(None),
             packer: Mutex::new(None),
             _lock: lock,
@@ -320,7 +337,10 @@ impl InstallationLog {
 
     fn cut(&self) -> Result<PathBuf> {
         self.cut_with(false, |path| {
-            let _ = self.0.sender.send(path.to_owned());
+            let _ = self
+                .0
+                .sender
+                .send(transport::Message::Chunk(path.to_owned()));
         })
     }
 
@@ -361,6 +381,19 @@ impl InstallationLog {
                 let _ = handle.join();
             }
         }
+        let result = self.finish_journal(status, reason);
+        // Stop delivery even if the final journal or chunk could not be saved.
+        let _ = self
+            .0
+            .sender
+            .send(transport::Message::Finish(result.as_ref().ok().cloned()));
+        if let Some(handle) = self.0.delivery.lock().unwrap().take() {
+            let _ = handle.join();
+        }
+        result.map(|_| ())
+    }
+
+    fn finish_journal(&self, status: Status, reason: Option<Value>) -> Result<PathBuf> {
         self.record(
             "step",
             "session-finished",
@@ -377,8 +410,7 @@ impl InstallationLog {
             state.info.updated_at = now;
             recovery::write_json(&self.0.directory.join("session.json"), &state.info)?;
         }
-        self.cut()?;
-        Ok(())
+        self.cut_with(false, |_| {})
     }
 
     pub fn export(&self, destination: &Path) -> Result<()> {
