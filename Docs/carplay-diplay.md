@@ -495,12 +495,15 @@ VoyahTune; скрытие не изменяет сохранённые preferenc
 `settings_back`/`settings_icon_back`, как в Advanced (72dp, в компактном режиме 56dp).
 Она вызывает Actions.back → DiPlayActivity.onBackPressedDispatcher.onBackPressed()
 без disconnect/stop сессии. Внизу справа всегда видна отдельная кнопка «Выйти»:
-она напрямую вызывает `Activity.finish()` для host Activity, возвращая предыдущий
-экран либо домашний экран, когда под ней нет другой Activity. Она не зависит от
-обработчика Back и не вызывает disconnect/stop сессии.
+она вызывает `CarPlayHomeUi.finishActivities()`: удаляет выделенные UI tasks
+`DiPlayActivity` и `CarPlayHostActivity` по точному компоненту baseIntent, затем
+завершает текущую Activity через `finishAndRemoveTask()`. Поэтому оставшийся экран
+подключения не появляется под настройками. Другие tasks RestoreMode сохраняются.
+Действие не зависит от обработчика Back и не вызывает disconnect/stop сессии.
 Рядом с «Вернуться в настройки» на экране подключения есть «Отмена»: она блокирует
-повторные попытки и вызывает штатный shutdown без завершения процесса. После
-закрытия транспорта и медиаресурсов открывается home, Activity подключения закрывается.
+повторные попытки, вызывает штатный shutdown без завершения процесса и сразу
+закрывает UI через тот же `finishActivities()`. Транспорт и медиаресурсы закрываются
+асинхронно; UI не ждёт teardown, home после него не открывается.
 Таймера автоматической отмены нет.
 
 `CarPlayWindowUi` оборачивает home/settings и весь корневой View проекции общей
@@ -1096,7 +1099,7 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 
 | Файл | Назначение |
 | --- | --- |
-| [common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt) | Контракт фабрики app-owned home и callbacks/state. |
+| [common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt) | Контракт фабрики app-owned home и callbacks/state; finishActivities закрывает только выделенные UI tasks CarPlay, сохраняя сессию и другие экраны RestoreMode (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt) | App-policy безопасных границ, обёртка UI/видео, потребление insets, текст ошибки auth, connectionIcon и darkHostAppearance с безопасным fallback без приложения (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt) | Java-friendly доступ настроек VoyahTune к preferences/состоянию/stop DiPlay. |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayThemePolicy.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayThemePolicy.kt) | SWReason влияет только на projection в выбранном VEHICLE (§6). |
@@ -1290,11 +1293,12 @@ Authentication assets и бинарную иконку сохранить отд
 - Перенос между VD и отдельной Activity: штатный owner transfer с завершением старого
   controller и согласованием нового размера (§4), без killProcess всего RestoreMode.
 - «Отмена» на экране подключения: явный shutdown(false), блокировка retry, сброс
-  retry budget и generation, закрытие транспорта/медиаресурсов; затем `page=home`
-  и finish host. Это не обычный Back и не пассивное скрытие.
+  retry budget и generation, немедленное закрытие UI tasks CarPlay, асинхронное
+  закрытие транспорта/медиаресурсов без открытия `page=home`. Это не обычный Back
+  и не пассивное скрытие.
 
 При разрешении merge не возвращать удалённые элементы home: hotspot-подсказку и
-предупреждение, idle-слоган, «Выйти», автоподключение, выбор iPhone и кнопку точки
+предупреждение, idle-слоган, автоподключение, выбор iPhone и кнопку точки
 доступа. Ошибки `setupError` остаются. Три компактные карточки центрируются в безопасной
 области; фон home берётся из BG DiPlay. Экран подключения имеет тёмную палитру,
 тёмный значок, заголовок CarPlay, «Вернуться в настройки» и «Отмена» рядом; русская
@@ -1316,7 +1320,7 @@ UI-тесты и испытания на ГУ выполнять только в
 
 | Контракт | Существующие целевые тесты |
 | --- | --- |
-| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, видимая кнопка «Выйти» под плитками и завершение Activity без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `VoyahSettingsUiTest`: скрытые категории/пункты и поисковый индекс, восстановление AUDIO/ADVANCED, SWReason, Wi-Fi Direct и включённая передача местоположения в UI-контролах; сохранение явного выбора, включая отключение GPS после recreate. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, закрытие controller/sink и блокировка повторной отмены, сохранение сессии при возврате. |
+| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, видимая кнопка «Выйти» под плитками и закрытие Activity вместе с task проекции без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `CarPlayHomeUiTest`: закрытие обоих UI tasks CarPlay с сохранением других tasks RestoreMode и фоновой сессии. `VoyahSettingsUiTest`: скрытые категории/пункты и поисковый индекс, восстановление AUDIO/ADVANCED, SWReason, Wi-Fi Direct и включённая передача местоположения в UI-контролах; сохранение явного выбора, включая отключение GPS после recreate. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, немедленное закрытие Activity до завершения teardown и до создания controller, закрытие controller/sink без открытия home и блокировка повторной отмены, сохранение сессии при возврате. |
 | Два значка OD и безопасная область | `Packaging/tests/test_carplay_allapps.js`; app `CarPlaySafeAreaTest`; common `CarPlayWindowUiTest`, `CarPlayHostVideoSurfaceTest` |
 | Защита сессии в памяти OD | `Packaging/tests/test_carplay_memory_protection.js`: приоритет только при session FGS, снятие защиты, изоляция Activity/процессов, несовместимый ABI; `test_vd_stability.js`: установка и откат hooks. |
 | Нажатия OD-дока | `Packaging/tests/test_dock_navigation_actions.js`; перенос обоих config extras и OD guards проверить с двух сторон |
