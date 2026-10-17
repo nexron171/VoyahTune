@@ -2703,6 +2703,19 @@ public class DashboardActivity extends AppCompatActivity {
         }
     }
 
+    /** Badge is only shown together with the controls that operate the embedded tile. */
+    private void setAppWidgetBadgeVisible(View widgetView, boolean visible) {
+        if (widgetView == null) {
+            return;
+        }
+        TextView badge = widgetView.findViewById(R.id.appWidgetBadge);
+        if (badge == null) {
+            return;
+        }
+        boolean hasDesignation = badge.getText() != null && badge.getText().length() > 0;
+        badge.setVisibility(visible && hasDesignation ? View.VISIBLE : View.GONE);
+    }
+
     /** Переключить карточку в режим embedded VirtualDisplay (пакет из настроек виджета). */
     private void showEmbeddedAppWidget(View widgetView, AppWidgetStore.Entry entry) {
         AppWidgetStore.Profile profile = entry.selected();
@@ -2871,11 +2884,12 @@ public class DashboardActivity extends AppCompatActivity {
                 new ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         embeddedWidgetSurfaces.put(widgetId, textureView);
-        // Обозначение виджета видно и поверх запущенного приложения.
+        // The designation belongs to the controls, not to the running application.
         View badge = widgetView.findViewById(R.id.appWidgetBadge);
         if (badge != null) {
             badge.bringToFront();
         }
+        setAppWidgetBadgeVisible(widgetView, false);
 
         final GestureDetector longClickDetector =
                 new GestureDetector(
@@ -2886,6 +2900,7 @@ public class DashboardActivity extends AppCompatActivity {
                                         if (controls != null) {
                                             controls.setVisibility(View.GONE);
                                         }
+                                        setAppWidgetBadgeVisible(widgetView, false);
                                     };
 
                             @Override
@@ -2893,6 +2908,10 @@ public class DashboardActivity extends AppCompatActivity {
                                 if (controls != null) {
                                     controls.setVisibility(View.VISIBLE);
                                     controls.bringToFront();
+                                    setAppWidgetBadgeVisible(widgetView, true);
+                                    if (badge != null) {
+                                        badge.bringToFront();
+                                    }
                                     uiHandler.removeCallbacks(hideControls);
                                     uiHandler.postDelayed(hideControls, 3000);
                                 }
