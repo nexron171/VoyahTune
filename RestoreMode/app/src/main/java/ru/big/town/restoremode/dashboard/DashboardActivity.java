@@ -80,6 +80,7 @@ import ru.big.town.restoremode.scenarios.ScenarioQuickList;
 import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
+import ru.big.town.restoremode.widgets.apps.AppWidgetSessionStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.CarAppearance;
@@ -304,6 +305,10 @@ public class DashboardActivity extends AppCompatActivity {
     private SuspensionWidgetView suspensionWidgetView;
     private Bundle suspensionState = new Bundle();
     private boolean suspensionScreenResumed;
+    // True only around the render triggered by onResume: launches belong to opening the screen,
+    // not to every later relayout or drag reorder.
+    private boolean dashboardOpening;
+    private final Set<String> pendingAutoStartWidgets = new HashSet<>();
     private final Messenger suspensionClient =
             new Messenger(
                     new Handler(
@@ -1396,7 +1401,8 @@ public class DashboardActivity extends AppCompatActivity {
         if (embeddedWidgetSurfaces.containsKey(entry.id)) {
             releaseEmbeddedWidget(entry.id, widgetView);
         }
-        showEmbeddedAppWidget(widgetView, entry, pkg, AppDpiStore.get(sharedPreferences, pkg));
+        launchEmbeddedAppWidget(
+                widgetView, entry, pkg, AppDpiStore.get(sharedPreferences, pkg));
     }
 
     /** Открыть системный экран настроек Android. */
@@ -1516,7 +1522,12 @@ public class DashboardActivity extends AppCompatActivity {
         applyContentTopInset();
         // Синхронизировать список плиток перед рендером
         TileOrderStore.sync(sharedPreferences, getPackageManager());
-        renderSplitTiles();
+        dashboardOpening = true;
+        try {
+            renderSplitTiles();
+        } finally {
+            dashboardOpening = false;
+        }
     }
 
     /**
@@ -1765,6 +1776,14 @@ public class DashboardActivity extends AppCompatActivity {
         watchSuspension();
         watchEnergyWidgets();
         appWidgetTileViews.clear();
+        String widgetSessionId = AppWidgetSessionStore.sessionId(this, sharedPreferences);
+        boolean firstOpening =
+                dashboardOpening
+                        && AppWidgetSessionStore.isFirstOpening(
+                                sharedPreferences, widgetSessionId);
+        if (firstOpening) {
+            pendingAutoStartWidgets.clear();
+        }
         PackageManager pm = getPackageManager();
         LayoutInflater inf = LayoutInflater.from(this);
 
@@ -2155,17 +2174,17 @@ public class DashboardActivity extends AppCompatActivity {
                 appWidgetView.setLayoutParams(lp);
                 splitTilesGrid.addView(appWidgetView);
                 tileDragController.add(appWidgetView, tilePos, widgetWidth, widgetHeight);
-                if (entry.autoStart && !CarPlayTarget.isCarPlay(entry.packageName)) {
-                    appWidgetView.postDelayed(
-                            () -> {
-                                if (suspensionScreenResumed
-                                        && !destroyed
-                                        && appWidgetTileViews.get(entry.id) == appWidgetView
-                                        && !embeddedWidgetSurfaces.containsKey(entry.id)) {
-                                    showEmbeddedAppWidget(appWidgetView, entry);
-                                }
-                            },
-                            entry.autoStartDelay * 1000L);
+                if (!CarPlayTarget.isCarPlay(entry.packageName)) {
+                    AppWidgetSessionStore.Launch sessionLaunch =
+                            AppWidgetSessionStore.findLaunch(
+                                    sharedPreferences, widgetSessionId, entry.id);
+                    if (firstOpening && entry.autoStart) {
+                        scheduleEmbeddedLaunch(
+                                appWidgetView, entry, null, entry.autoStartDelay);
+                    } else if (!pendingAutoStartWidgets.contains(entry.id)
+                            && sessionLaunch != null) {
+                        scheduleEmbeddedLaunch(appWidgetView, entry, sessionLaunch, 0);
+                    }
                 }
                 continue;
             }
@@ -2265,8 +2284,70 @@ public class DashboardActivity extends AppCompatActivity {
                 tileDragController.add(tileView, tilePos, 1, 1);
             }
         }
+        if (firstOpening) {
+            AppWidgetSessionStore.markOpeningHandled(sharedPreferences, widgetSessionId);
+        }
         systemWidgets.setResumed(suspensionScreenResumed);
         requestCarPlayWidgets();
+    }
+
+    private String currentWidgetSessionId() {
+        return AppWidgetSessionStore.sessionId(this, sharedPreferences);
+    }
+
+    /** Open an embedded app in the tile on user action and remember it for this session. */
+    private void launchEmbeddedAppWidget(
+            View widgetView,
+            AppWidgetStore.Entry entry,
+            String packageName,
+            int dpi) {
+        if (!CarPlayTarget.isCarPlay(packageName)) {
+            AppWidgetSessionStore.saveLaunch(
+                    sharedPreferences, currentWidgetSessionId(), entry.id, packageName, dpi);
+        }
+        showEmbeddedAppWidget(widgetView, entry, packageName, dpi);
+    }
+
+    /**
+     * Launch after the screen opens. Auto-start runs only on the first opening of the session;
+     * the session launch restores an application that was started earlier.
+     */
+    private void scheduleEmbeddedLaunch(
+            View widgetView,
+            AppWidgetStore.Entry entry,
+            AppWidgetSessionStore.Launch sessionLaunch,
+            int delaySeconds) {
+        AppWidgetStore.Profile profile = entry.selected();
+        String packageName =
+                sessionLaunch == null ? profile.packageName : sessionLaunch.packageName;
+        int dpi = sessionLaunch == null ? profile.dpi : sessionLaunch.dpi;
+        if (CarPlayTarget.isCarPlay(packageName)) {
+            return;
+        }
+        try {
+            getPackageManager().getApplicationInfo(packageName, 0);
+        } catch (PackageManager.NameNotFoundException e) {
+            AppWidgetSessionStore.forgetLaunch(
+                    sharedPreferences, currentWidgetSessionId(), entry.id);
+            return;
+        }
+        AppWidgetSessionStore.saveLaunch(
+                sharedPreferences, currentWidgetSessionId(), entry.id, packageName, dpi);
+        if (sessionLaunch == null) {
+            pendingAutoStartWidgets.add(entry.id);
+        }
+        widgetView.postDelayed(
+                () -> {
+                    pendingAutoStartWidgets.remove(entry.id);
+                    if (!suspensionScreenResumed
+                            || destroyed
+                            || appWidgetTileViews.get(entry.id) != widgetView
+                            || embeddedWidgetSurfaces.containsKey(entry.id)) {
+                        return;
+                    }
+                    showEmbeddedAppWidget(widgetView, entry, packageName, dpi);
+                },
+                Math.max(0, delaySeconds) * 1000L);
     }
 
     /**
@@ -2561,7 +2642,8 @@ public class DashboardActivity extends AppCompatActivity {
                     v -> {
                         entry.selectedProfile = index;
                         AppWidgetStore.update(sharedPreferences, entry);
-                        showEmbeddedAppWidget(widgetView, entry);
+                        launchEmbeddedAppWidget(
+                                widgetView, entry, profile.packageName, profile.dpi);
                     });
             item.setOnLongClickListener(dragLauncher);
             list.addView(item);
@@ -2688,7 +2770,12 @@ public class DashboardActivity extends AppCompatActivity {
             View closeBtn = widgetView.findViewById(R.id.appWidgetClose);
             if (closeBtn != null) {
                 closeBtn.setVisibility(View.VISIBLE);
-                closeBtn.setOnClickListener(v -> releaseEmbeddedWidget(widgetId, widgetView));
+                closeBtn.setOnClickListener(
+                        v -> {
+                            AppWidgetSessionStore.forgetLaunch(
+                                    sharedPreferences, currentWidgetSessionId(), widgetId);
+                            releaseEmbeddedWidget(widgetId, widgetView);
+                        });
             }
             View dragBtn = widgetView.findViewById(R.id.appWidgetDragHandle);
             if (dragBtn != null) {
@@ -3123,6 +3210,18 @@ public class DashboardActivity extends AppCompatActivity {
         int dpiA = runningDpi(idA);
         embeddedWidgetDpi.put(idA, runningDpi(idB));
         embeddedWidgetDpi.put(idB, dpiA);
+        AppWidgetSessionStore.saveLaunch(
+                sharedPreferences,
+                currentWidgetSessionId(),
+                idA,
+                embeddedWidgetPackages.get(idA),
+                runningDpi(idA));
+        AppWidgetSessionStore.saveLaunch(
+                sharedPreferences,
+                currentWidgetSessionId(),
+                idB,
+                embeddedWidgetPackages.get(idB),
+                runningDpi(idB));
         showSnack("Виджеты обменялись запущенными приложениями");
     }
 
@@ -3143,6 +3242,10 @@ public class DashboardActivity extends AppCompatActivity {
         if (!embeddedWidgetSurfaces.containsKey(toWidgetId)) {
             return;
         }
+        AppWidgetSessionStore.saveLaunch(
+                sharedPreferences, currentWidgetSessionId(), toWidgetId, packageName, dpi);
+        AppWidgetSessionStore.forgetLaunch(
+                sharedPreferences, currentWidgetSessionId(), fromWidgetId);
         detachEmbeddedWidget(fromWidgetId, fromView);
         String designation = AppWidgetStore.designation(sharedPreferences, toWidgetId);
         showSnack(
@@ -3516,6 +3619,7 @@ public class DashboardActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         cancelGridSnap();
+        dashboardOpening = false;
         suspensionScreenResumed = false;
         carPlayWidgetGeneration++;
         systemWidgets.setResumed(false);
