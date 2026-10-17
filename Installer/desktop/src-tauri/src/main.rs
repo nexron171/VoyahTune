@@ -20,6 +20,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 use tauri::{Emitter, Manager, State};
 
@@ -937,6 +938,31 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
     )?;
     Ok(path.display().to_string())
 }
+
+fn shutdown(app: &tauri::AppHandle) {
+    // Stop log collection first so it cannot restart the ADB server.
+    if let Some(session) = installation_log(app) {
+        let reason = json!({
+            "code": "USER_CLOSED",
+            "message": "Пользователь закрыл установщик до завершения установки",
+            "source": "lifecycle"
+        });
+        if let Err(error) = session.finish(SessionStatus::Error, Some(reason)) {
+            eprintln!("Installation log shutdown failed: {error}");
+        }
+    }
+
+    let result = (|| {
+        let adb = Adb::new(default_adb(&bundle(app)?), Events::quiet())?;
+        adb.run(&["kill-server"], None, Duration::from_secs(5))?
+            .checked("Не удалось остановить ADB при закрытии установщика")?;
+        Ok::<_, Error>(())
+    })();
+    if let Err(error) = result {
+        eprintln!("ADB shutdown failed: {error}");
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(Runtime::default())
@@ -983,15 +1009,15 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("Не удалось запустить VoyahTune Installer")
-        .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
                 if operation_busy(&app.state::<Runtime>()) {
                     api.prevent_exit();
                     let _ = app.emit("installer-close-blocked", ());
-                } else if let Some(session) = installation_log(app).filter(InstallationLog::active) {
-                    let _ = session.finish(SessionStatus::Error, Some(json!({"code":"USER_CLOSED","message":"Пользователь закрыл установщик до завершения установки","source":"lifecycle"})));
                 }
             }
+            tauri::RunEvent::Exit => shutdown(app),
+            _ => {}
         });
 }
 
