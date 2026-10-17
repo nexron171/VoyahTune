@@ -2,12 +2,13 @@ package com.shilapi.xcertplay
 
 import android.content.Context
 import com.shilapi.xcertplay.host.R
+import com.shilapi.xcertplay.media.AmbientIdleBehavior
 import com.shilapi.xcertplay.media.AmbientMusicSettings
 
 /**
  * Plain-language lines for what the lamps do under the given settings, mirroring AmbientMusicActivityPolicy:
- * brightness 0 holds the lowest level; paused, stopped or disconnected drops every zone to the lowest level;
- * only the chosen area follows the music; the lamps never switch fully off.
+ * brightness 0 holds the lowest level; while paused, stopped or disconnected the lamps follow the idle choice
+ * (steady glow, the car's own lighting after a pause, or the lowest level); only the chosen area follows the music.
  */
 internal object AmbientBehaviorText {
     fun lines(context: Context, values: AmbientMusicSettings.Values): List<String> {
@@ -22,6 +23,7 @@ internal object AmbientBehaviorText {
         return buildList {
             if (values.brightness <= 0) {
                 add(context.getString(R.string.settings_ambient_behavior_lowest))
+                if (values.idle == AmbientIdleBehavior.CAR) add(context.getString(R.string.settings_ambient_behavior_idle_car))
             } else {
                 add(
                     context.getString(
@@ -30,7 +32,13 @@ internal object AmbientBehaviorText {
                         values.brightness,
                     ),
                 )
-                add(context.getString(R.string.settings_ambient_behavior_idle))
+                add(
+                    when (values.idle) {
+                        AmbientIdleBehavior.STEADY -> context.getString(R.string.settings_ambient_behavior_idle_steady, area, values.brightness)
+                        AmbientIdleBehavior.CAR -> context.getString(R.string.settings_ambient_behavior_idle_car)
+                        AmbientIdleBehavior.OFF -> context.getString(R.string.settings_ambient_behavior_idle)
+                    },
+                )
                 if (values.area != ALL_ZONES) add(context.getString(R.string.settings_ambient_behavior_other_zone))
             }
             add(context.getString(R.string.settings_ambient_behavior_restore))

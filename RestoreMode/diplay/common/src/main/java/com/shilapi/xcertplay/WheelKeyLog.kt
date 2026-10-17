@@ -8,6 +8,8 @@ import java.util.Locale
 /**
  * What the wheel key service saw and did with it, for the diagnostic report. The service wrote only to
  * logcat, so a head unit without adb could not show whether a wheel key reaches Android at all (#662).
+ * The media keys that reach DiPlay's media session, and its audio focus changes, are noted here too:
+ * without them a report could not tell a key the head unit kept from one the iPhone ignored (#610).
  *
  * Kept in memory since the app process started: storage on a key press would delay the head unit's own
  * key handling. A press is one entry; a held key's repeats and its release add nothing.

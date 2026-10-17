@@ -79,8 +79,11 @@ internal class MicrophoneUplink(
 
         val source = when {
             voyahCallCapture -> MediaRecorder.AudioSource.VOICE_RECOGNITION
-            config.audioType == "telephony" && speakerphoneCall -> MediaRecorder.AudioSource.MIC
-            config.audioType == "telephony" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            config.audioType == "telephony" -> telephonyMicrophoneSource(
+                speakerphoneCall = speakerphoneCall,
+                carPhoneState = PhoneAudioRoute.carPlayCallsUseCarAudio(),
+                geelyHeadUnit = com.shilapi.xcertplay.network.GeelyHeadUnit.detected,
+            )
             // The Geely/Lynk head unit only opens the microphone for the voice-communication
             // source; its voice-recognition source records silence, so Siri never hears.
             config.audioType == "speechrecognition" ->
@@ -519,6 +522,19 @@ internal class MicrophoneUplink(
         const val MAX_NO_AUDIO_RESTARTS = 3
         const val EMPTY_READ_PAUSE_MILLIS = 5L
     }
+}
+
+/**
+ * The recorder source for a CarPlay call. While DiPlay holds the car's phone audio state the car's call
+ * processing is on for every source, but VOICE_COMMUNICATION then clips (about a fifth of the samples on a
+ * Han) and the plain microphone source is muted. VOICE_RECOGNITION, which is also what the stock CarPlay
+ * service ends up with, gives a normal level with no clipping, and the car still suppresses the far end's
+ * echo on it. Geely/Lynk head units record silence on VOICE_RECOGNITION, so they keep the old choice.
+ */
+internal fun telephonyMicrophoneSource(speakerphoneCall: Boolean, carPhoneState: Boolean, geelyHeadUnit: Boolean): Int = when {
+    carPhoneState && !geelyHeadUnit -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+    speakerphoneCall -> MediaRecorder.AudioSource.MIC
+    else -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
 }
 
 /**

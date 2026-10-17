@@ -10,7 +10,7 @@ android {
     }
 
     defaultConfig {
-        minSdk = 25
+        minSdk = 24
     }
 
     compileOptions {
@@ -24,8 +24,8 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        // The UI suite covers several SDKs and locale-specific resource sandboxes.
-        unitTests.all { it.maxHeapSize = "1g" }
+        // Robolectric keeps separate resource sandboxes for SDKs and locales.
+        unitTests.all { it.maxHeapSize = "2g" }
     }
 }
 

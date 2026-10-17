@@ -95,6 +95,10 @@ class VoyahSettingsUiTest {
         val forbidden = listOf(
             R.string.settings_advanced,
             R.string.settings_wheel_keys,
+            R.string.settings_launcher_bubble,
+            R.string.settings_ambient_car_rhythm,
+            R.string.settings_ambient_car_rhythm_feed,
+            R.string.settings_car_hotspot_config_title,
             R.string.settings_ambient_title,
             R.string.connect_when_iphone_bluetooth_connects,
             R.string.settings_navigation_wheel_volume,
