@@ -64,6 +64,25 @@ public class AppWidgetSessionStoreTest {
     }
 
     @Test
+    public void explicitPackageCloseForgetsEveryTileHostingIt() {
+        AppWidgetSessionStore.saveLaunch(
+                preferences, FIRST_SESSION, "tile-a", "app.music", 160);
+        AppWidgetSessionStore.saveLaunch(
+                preferences, FIRST_SESSION, "tile-b", "app.music", 200);
+        AppWidgetSessionStore.saveLaunch(
+                preferences, FIRST_SESSION, "tile-c", "app.maps", 160);
+
+        AppWidgetSessionStore.forgetPackage(preferences, FIRST_SESSION, "app.music");
+
+        assertNull(AppWidgetSessionStore.findLaunch(preferences, FIRST_SESSION, "tile-a"));
+        assertNull(AppWidgetSessionStore.findLaunch(preferences, FIRST_SESSION, "tile-b"));
+        assertEquals(
+                "app.maps",
+                AppWidgetSessionStore.findLaunch(preferences, FIRST_SESSION, "tile-c")
+                        .packageName);
+    }
+
+    @Test
     public void unsupportedDpiIsNormalizedBeforeRestoring() {
         AppWidgetSessionStore.saveLaunch(
                 preferences, FIRST_SESSION, "tile-a", "app.music", 9999);
