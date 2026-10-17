@@ -6,23 +6,28 @@ import java.util.Locale;
 /**
  * Android-free policy for choosing a media target and exactly one command backend.
  *
- * <p>The Android adapter ({@link MediaControlRouter}) deliberately lives elsewhere so this class can
- * be covered by ordinary JVM tests.  In particular, {@code PAUSE_ONLY} never produces both an
+ * <p>The Android adapter ({@link MediaControlRouter}) deliberately lives elsewhere so this class
+ * can be covered by ordinary JVM tests. In particular, {@code PAUSE_ONLY} never produces both an
  * idempotent pause and a toggle fallback: a delayed second toggle could resume a player which has
- * already paused.</p>
+ * already paused.
  */
 final class MediaControlPolicy {
 
-    static final int STATE_UNKNOWN  = -1;
+    static final int STATE_UNKNOWN = -1;
     static final int STATE_INACTIVE = 0;
-    static final int STATE_ACTIVE   = 1;
+    static final int STATE_ACTIVE = 1;
 
     static final int KEY_PLAY_PAUSE = 85;
-    static final int KEY_NEXT       = 87;
-    static final int KEY_PREVIOUS   = 88;
-    static final int KEY_PAUSE      = 127;
+    static final int KEY_NEXT = 87;
+    static final int KEY_PREVIOUS = 88;
+    static final int KEY_PAUSE = 127;
 
-    enum Command { PLAY_PAUSE, PAUSE_ONLY, NEXT, PREVIOUS }
+    enum Command {
+        PLAY_PAUSE,
+        PAUSE_ONLY,
+        NEXT,
+        PREVIOUS
+    }
 
     enum Operation {
         /** The selected session already satisfies PAUSE_ONLY. */
@@ -31,6 +36,9 @@ final class MediaControlPolicy {
         TARGET_KEY,
         /** Send MediaController.TransportControls.pause() once. */
         TRANSPORT_PAUSE,
+        TRANSPORT_PLAY,
+        TRANSPORT_NEXT,
+        TRANSPORT_PREVIOUS,
         /** The keymanager hook must send the returned standard Android media key. */
         KEYMANAGER_KEY,
         /** Preserve the original Qinggan KeyManager path. */
@@ -45,8 +53,13 @@ final class MediaControlPolicy {
         final boolean bridge;
         final boolean nativeQinggan;
 
-        Candidate(String tokenId, String packageName, int playbackClass,
-                  boolean supportsPause, boolean bridge, boolean nativeQinggan) {
+        Candidate(
+                String tokenId,
+                String packageName,
+                int playbackClass,
+                boolean supportsPause,
+                boolean bridge,
+                boolean nativeQinggan) {
             this.tokenId = tokenId == null ? "" : tokenId;
             this.packageName = packageName == null ? "" : packageName;
             this.playbackClass = playbackClass;
@@ -69,11 +82,13 @@ final class MediaControlPolicy {
     private MediaControlPolicy() {}
 
     /**
-     * Select in framework priority order. A pinned token is retained after our own pause so the next
-     * PLAY_PAUSE resumes the same app instead of jumping to a stale Bluetooth session. A genuine new
-     * active transition replaces the pinned token in the Android adapter before this method is called.
+     * Select in framework priority order. A pinned token is retained after our own pause so the
+     * next PLAY_PAUSE resumes the same app instead of jumping to a stale Bluetooth session. A
+     * genuine new active transition replaces the pinned token in the Android adapter before this
+     * method is called.
      */
-    static int chooseTarget(List<Candidate> candidates, String stickyTokenId, boolean stickyShouldWin) {
+    static int chooseTarget(
+            List<Candidate> candidates, String stickyTokenId, boolean stickyShouldWin) {
         if (candidates == null || candidates.isEmpty()) return -1;
 
         int sticky = indexOfToken(candidates, stickyTokenId);
@@ -94,8 +109,8 @@ final class MediaControlPolicy {
         if (command == Command.PAUSE_ONLY) {
             if (target.playbackClass == STATE_INACTIVE) return new Plan(Operation.NONE, 0);
             if (target.playbackClass == STATE_UNKNOWN) {
-                return new Plan(target.bridge ? Operation.KEYMANAGER_KEY : Operation.TARGET_KEY,
-                        KEY_PAUSE);
+                return new Plan(
+                        target.bridge ? Operation.KEYMANAGER_KEY : Operation.TARGET_KEY, KEY_PAUSE);
             }
         }
 
@@ -108,21 +123,52 @@ final class MediaControlPolicy {
         return new Plan(Operation.TARGET_KEY, keyFor(command));
     }
 
+    static Plan radioPlan(Candidate target, Command command) {
+        if (target == null || !"com.pateo.rdsapp".equals(target.packageName)) {
+            return plan(target, command);
+        }
+        if (command == Command.PAUSE_ONLY) {
+            return new Plan(
+                    target.playbackClass == STATE_ACTIVE
+                            ? Operation.TRANSPORT_PAUSE
+                            : Operation.NONE,
+                    0);
+        }
+        if (command == Command.PLAY_PAUSE && target.playbackClass != STATE_UNKNOWN) {
+            return new Plan(
+                    target.playbackClass == STATE_ACTIVE
+                            ? Operation.TRANSPORT_PAUSE
+                            : Operation.TRANSPORT_PLAY,
+                    0);
+        }
+        if (target.playbackClass == STATE_ACTIVE) {
+            if (command == Command.NEXT) return new Plan(Operation.TRANSPORT_NEXT, 0);
+            if (command == Command.PREVIOUS) return new Plan(Operation.TRANSPORT_PREVIOUS, 0);
+        }
+        return plan(target, command);
+    }
+
     static int keyFor(Command command) {
         if (command == null) return 0;
         switch (command) {
-            case PLAY_PAUSE: return KEY_PLAY_PAUSE;
-            case PAUSE_ONLY: return KEY_PLAY_PAUSE; // reached only for a confirmed active target
-            case NEXT:       return KEY_NEXT;
-            case PREVIOUS:   return KEY_PREVIOUS;
-            default:         return 0;
+            case PLAY_PAUSE:
+                return KEY_PLAY_PAUSE;
+            case PAUSE_ONLY:
+                return KEY_PLAY_PAUSE; // reached only for a confirmed active target
+            case NEXT:
+                return KEY_NEXT;
+            case PREVIOUS:
+                return KEY_PREVIOUS;
+            default:
+                return 0;
         }
     }
 
     /**
-     * A missing/unknown MediaSession normally permits only idempotent PAUSE. If AudioManager confirms
-     * that the music stream is currently active, PLAY_PAUSE is no longer blind and is the appropriate
-     * compatibility command for bridges which ignore KEYCODE_MEDIA_PAUSE (notably AutoKit).
+     * A missing/unknown MediaSession normally permits only idempotent PAUSE. If AudioManager
+     * confirms that the music stream is currently active, PLAY_PAUSE is no longer blind and is the
+     * appropriate compatibility command for bridges which ignore KEYCODE_MEDIA_PAUSE (notably
+     * AutoKit).
      */
     static int pauseKeyWithAudioEvidence(int plannedKey, boolean musicActive) {
         return plannedKey == KEY_PAUSE && musicActive ? KEY_PLAY_PAUSE : plannedKey;

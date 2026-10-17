@@ -705,6 +705,66 @@ function createRdsRestoreController(io, initial) {
     };
 }
 
+function createRdsWidgetController(io) {
+    function valid(station) {
+        return station && typeof station.fm === "boolean" && Number.isInteger(station.freq)
+            && (station.fm ? station.freq >= 6500 && station.freq <= 10800
+                : station.freq >= 150 && station.freq <= 30000) && !station.ta;
+    }
+    function same(first, second) {
+        return valid(first) && valid(second) && first.fm === second.fm && first.freq === second.freq;
+    }
+    function stations(station) {
+        return (io.list() || []).filter(function (item) { return valid(item) && item.fm === station.fm; });
+    }
+    function snapshot() {
+        var saved = io.saved();
+        var current = io.current();
+        var available = io.ready();
+        var name = valid(saved) ? String(saved.name || "") : "";
+        if (same(saved, current) && current.name) name = String(current.name);
+        return {schema: 1, fm: valid(saved) ? saved.fm : true, freq: valid(saved) ? saved.freq : -1,
+            name: name.trim().slice(0, 160), ready: available, playing: !!io.playing(),
+            canSkip: available && valid(saved) && stations(saved).length > 1,
+            message: available ? "" : "Радио не готово"};
+    }
+    return function (action, requested) {
+        var response = snapshot();
+        if (action === "snapshot") return response;
+        response.accepted = false;
+        if (action === "pause") {
+            io.pause();
+            response.accepted = true;
+            return response;
+        }
+        if (!response.ready || !valid(requested)) return response;
+        var target = {fm: requested.fm, freq: requested.freq, rds: false, pi: 0, ta: false};
+        if (action === "next" || action === "previous") {
+            var list = stations(target);
+            if (list.length < 2) { response.message = "Нет списка станций"; return response; }
+            var index = list.findIndex(function (station) { return same(station, target); });
+            if (index >= 0) {
+                target = list[(index + (action === "next" ? 1 : list.length - 1)) % list.length];
+            } else {
+                list = list.slice().sort(function (first, second) { return first.freq - second.freq; });
+                if (action === "next") {
+                    target = list.find(function (station) { return station.freq > requested.freq; }) || list[0];
+                } else {
+                    target = list.slice().reverse().find(function (station) { return station.freq < requested.freq; }) || list[list.length - 1];
+                }
+            }
+        } else if (action !== "play") {
+            return response;
+        }
+        // The displayed frequency is explicit intent, never an index or the tuner's wake default.
+        io.tune(target);
+        response.accepted = true;
+        response.requestedFreq = target.freq;
+        response.requestedFm = target.fm;
+        return response;
+    };
+}
+
 function installRdsStationRestore(application) {
     var TAG = "VoyahRdsRestore";
     var hooks = [];
@@ -753,9 +813,13 @@ function installRdsStationRestore(application) {
         var manager = Rds.getInstance();
         function snapshot(station) {
             if (station === null) return null;
-            return {fm: !!station.isFMStation(), freq: Number(station.getFreq()),
-                rds: !!station.isRDS(), pi: Number(station.getPICode()),
-                ta: !!station.isTAAssert()};
+            var value = {fm: !!station.isFMStation(), freq: Number(station.getFreq()),
+                rds: !!station.isRDS(), pi: Number(station.getPICode()), ta: !!station.isTAAssert()};
+            try {
+                var name = station.getPSName();
+                if (name !== null && String(name).trim()) value.name = String(name).trim();
+            } catch (_) { /* Station names are optional OEM metadata. */ }
+            return value;
         }
         function current() { return snapshot(manager.getCurStation()); }
         function ready() {
@@ -788,6 +852,20 @@ function installRdsStationRestore(application) {
                 manager.handler.value.removeMessages(1002);
             }
             releaseOwned();
+        }
+        function tuneOwned(station) {
+            cancelOwned();
+            owned = Java.retain(Station.$new(station.freq));
+            owned.setIsFMStation(station.fm);
+            // Tune by frequency; the OEM PI can be stale after wake.
+            owned.setIsRDS(false);
+            owned.setPICode(0);
+            dispatching = station;
+            try { playbackCalls++; playStation.call(manager, owned); }
+            finally {
+                dispatching = null;
+                if (cancelAfterDispatch) { cancelAfterDispatch = false; cancelOwned(); }
+            }
         }
         // Touch the cancellation fields up front, before installing any hooks.
         manager.delayPlayStation.value;
@@ -847,24 +925,12 @@ function installRdsStationRestore(application) {
             save: function (station) {
                 // One atomic record, independent of SP_PLAY_DATA. commit acknowledges the disk write;
                 // writes occur only after a settled choice and never on every frequency callback.
-                return prefs.edit().putString("station", JSON.stringify({schema: 1, station: station})).commit();
+                var committed = prefs.edit().putString("station", JSON.stringify({schema: 1, station: station})).commit();
+                if (committed) record = station;
+                return committed;
             },
             playCurrent: function () { playbackCalls++; play.call(manager); },
-            tune: function (station) {
-                cancelOwned();
-                owned = Java.retain(Station.$new(station.freq));
-                owned.setIsFMStation(station.fm);
-                // Tune the confirmed frequency, not an OEM PI that may be stale after wake.
-                // RDS metadata is filled by subsequent tuner callbacks at this frequency.
-                owned.setIsRDS(false);
-                owned.setPICode(0);
-                dispatching = station;
-                try { playbackCalls++; playStation.call(manager, owned); }
-                finally {
-                    dispatching = null;
-                    if (cancelAfterDispatch) { cancelAfterDispatch = false; cancelOwned(); }
-                }
-            }
+            tune: tuneOwned
         }, record);
         function hook(method, replacement) {
             method.implementation = replacement;
@@ -999,6 +1065,116 @@ function installRdsStationRestore(application) {
                 safely(function () { controller.observe(current()); });
             }
         });
+        // Use the existing MediaSession transport; failures here do not disable station restoration.
+        try {
+            var Player = Java.use("com.pateo.midrds.media.RdsPlayer");
+            var command = Player.onCommand.overload("java.lang.String", "android.os.Bundle", "android.os.ResultReceiver");
+            var Bundle = Java.use("android.os.Bundle");
+            var widget = createRdsWidgetController({
+                saved: function () { return record; }, current: current,
+                ready: function () { return ready() && !audio.isCall(); },
+                playing: function () { return hasFocus() && manager.isRdsSource() && manager.isPlay(); },
+                list: function () {
+                    var result = [];
+                    var list = manager.getPlayList();
+                    if (list !== null) {
+                        for (var index = 0; index < list.size(); index++) result.push(snapshot(Java.cast(list.get(index), Station)));
+                    }
+                    return result;
+                },
+                pause: function () { manager.pause(); },
+                tune: function (target) {
+                    controller.select(target);
+                    tuneOwned(target);
+                    var submitted = owned;
+                    setTimeout(function () {
+                        if (!stopped) Java.perform(function () {
+                            Java.scheduleOnMainThread(function () {
+                                if (!stopped && owned === submitted) safely(cancelOwned);
+                            });
+                        });
+                    }, 6000);
+                    controller.observe(current());
+                }
+            });
+            hook(command, function (name, extras, receiver) {
+                if (String(name) !== "ru.big.town.voyahtune.RADIO_WIDGET") return command.call(this, name, extras, receiver);
+                if (receiver === null) return;
+                var response = Bundle.$new();
+                try {
+                    var caller = String(this.getCallingPackage());
+                    if (caller !== "ru.big.town.restoremode" && caller !== "ru.big.town.anative") throw new Error("untrusted radio controller");
+                    if (extras === null || extras.getInt("schema", -1) !== 1) throw new Error("unsupported widget protocol");
+                    var result = widget(String(extras.getString("action", "")), {
+                        fm: !!extras.getBoolean("fm", true), freq: Number(extras.getInt("freq", -1))
+                    });
+                    Object.keys(result).forEach(function (key) {
+                        if (typeof result[key] === "boolean") response.putBoolean(key, result[key]);
+                        else if (typeof result[key] === "number") response.putInt(key, result[key]);
+                        else response.putString(key, result[key]);
+                    });
+                    receiver.send(1, response);
+                } catch (error) {
+                    log("widget command failed: " + error);
+                    receiver.send(0, response);
+                }
+            });
+        } catch (error) { log("widget bridge unavailable: " + error); }
+        // RdsApp never activates its session, so Android cannot select it for wheel commands.
+        try {
+            var RadioService = Java.use("com.pateo.midrds.media.RdsMediaBrowserService");
+            var PlayerListener = Java.use("com.pateo.midrds.media.RdsPlayer$1");
+            var serviceCreate = RadioService.onCreate.overload();
+            var serviceDestroy = Java.use("com.pateo.overSideRadio.base.media.BaseBrowserService").onDestroy.overload();
+            var notification = Java.use("com.pateo.overSideRadio.base.media.MediaNotificationManager").getNotification.overload(
+                "android.support.v4.media.MediaMetadataCompat", "android.support.v4.media.session.PlaybackStateCompat",
+                "android.support.v4.media.session.MediaSessionCompat$Token");
+            var StateBuilder = Java.use("android.support.v4.media.session.PlaybackStateCompat$Builder");
+            hook(notification, function (metadata, state, token) {
+                // The OEM compact layout unconditionally references three actions, even at startup.
+                var complete = StateBuilder.$new(state).setActions(Number(state.getActions()) | 16 | 32).build();
+                return notification.call(this, metadata, complete, token);
+            });
+            function publishRadioSession(player) {
+                var playing = hasFocus() && manager.isRdsSource() && manager.isPlay();
+                player.setPlaybackState(player.createPlaybackStateCompat(playing));
+                // Keep the paused session discoverable so the next toggle can resume it.
+                player.mMediaSession.value.setActive(true);
+            }
+            hook(serviceCreate, function () {
+                serviceCreate.call(this);
+                var service = this;
+                safely(function () { publishRadioSession(service.rdsPlayer.value); });
+            });
+            hook(serviceDestroy, function () {
+                if (String(this.getClass().getName()) === "com.pateo.midrds.media.RdsMediaBrowserService") {
+                    var service = Java.cast(this, RadioService);
+                    safely(function () { service.rdsPlayer.value.mMediaSession.value.setActive(false); });
+                }
+                return serviceDestroy.call(this);
+            });
+            Java.scheduleOnMainThread(function () {
+                if (stopped) return;
+                safely(function () {
+                    // Resolve existing players through the OEM listener registry, never ART heap scans.
+                    var listeners = manager.infoListeners.value.iterator();
+                    var found = false;
+                    while (listeners.hasNext()) {
+                        var listener = listeners.next();
+                        if (String(listener.getClass().getName()) === "com.pateo.midrds.media.RdsPlayer$1") {
+                            publishRadioSession(Java.cast(listener, PlayerListener).this$0.value);
+                            found = true;
+                        }
+                    }
+                    if (!found) {
+                        // This stock service only publishes metadata; creation does not request audio.
+                        var intent = Java.use("android.content.Intent").$new();
+                        intent.setClassName("com.pateo.rdsapp", "com.pateo.midrds.media.RdsMediaBrowserService");
+                        application.startForegroundService(intent);
+                    }
+                });
+            });
+        } catch (error) { log("radio media session unavailable: " + error); }
         log("ready; silent ACC selection, tuning on requested or confirmed active radio playback");
         console.log("[rds-restore] hook ready v1");
     } catch (e) {

@@ -6,6 +6,7 @@ import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
+import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 /**
@@ -42,6 +43,9 @@ public class TileSizeStore {
             return defaultValue;
         }
         int value = prefs.getInt(WIDTH_KEY_PREFIX + widgetId, defaultValue);
+        if (RadioWidgetLayout.ID.equals(widgetId)) {
+            return RadioWidgetLayout.width(value);
+        }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {
             return HeadlightWidgetLayout.width(value);
         }
@@ -59,6 +63,10 @@ public class TileSizeStore {
     public static int height(SharedPreferences prefs, String widgetId, int defaultValue) {
         if (prefs == null || widgetId == null) {
             return defaultValue;
+        }
+        if (RadioWidgetLayout.ID.equals(widgetId)) {
+            return RadioWidgetLayout.height(
+                    prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue));
         }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {
             return HeadlightWidgetLayout.height(
@@ -78,6 +86,12 @@ public class TileSizeStore {
 
     public static void setWidth(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) {
+            return;
+        }
+        if (RadioWidgetLayout.ID.equals(widgetId)) {
+            prefs.edit()
+                    .putInt(WIDTH_KEY_PREFIX + widgetId, RadioWidgetLayout.width(value))
+                    .apply();
             return;
         }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {
@@ -119,6 +133,12 @@ public class TileSizeStore {
 
     public static void setHeight(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) {
+            return;
+        }
+        if (RadioWidgetLayout.ID.equals(widgetId)) {
+            prefs.edit()
+                    .putInt(HEIGHT_KEY_PREFIX + widgetId, RadioWidgetLayout.height(value))
+                    .apply();
             return;
         }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {

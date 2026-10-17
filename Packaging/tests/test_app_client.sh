@@ -26,6 +26,7 @@ require_before() {
 if command -v node > /dev/null 2>&1; then
     node --check "$AGENT"
     node "$ROOT/Packaging/tests/test_rds_restore.js"
+    node "$ROOT/Packaging/tests/test_rds_widget.js"
 fi
 sh -n "$LOADER"
 sh -n "$FULL_INSTALL"

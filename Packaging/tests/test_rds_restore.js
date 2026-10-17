@@ -167,14 +167,38 @@ function adapterFixture(options = {}) {
         if (!s) return null;
         const value = {...s}; const id = f.nextId++;
         return {getFreq: () => value.freq, getPICode: () => value.pi, isRDS: () => value.rds,
-            isFMStation: () => value.fm, isTAAssert: () => value.ta,
+            isFMStation: () => value.fm, isTAAssert: () => value.ta, getPSName: () => value.name || null,
             setIsFMStation: v => { value.fm = v; }, setIsRDS: v => { value.rds = v; },
             setPICode: v => { value.pi = v; }, $dispose() {}, equals: other => other && other.id === id,
             id, value};
     }
+    function bundle(values = {}) {
+        return {values: {...values},
+            getInt(key, fallback) { return this.values[key] ?? fallback; },
+            getBoolean(key, fallback) { return this.values[key] ?? fallback; },
+            getString(key, fallback) { return this.values[key] ?? fallback; },
+            putInt(key, value) { this.values[key] = value; },
+            putBoolean(key, value) { this.values[key] = value; },
+            putString(key, value) { this.values[key] = value; }};
+    }
+    const player = {
+        createPlaybackStateCompat: playing => playing ? 3 : 2,
+        setPlaybackState: state => { f.mediaState = state; },
+        mMediaSession: {value: {setActive: active => { f.mediaActive = active; }}}
+    };
+    const playerListener = {getClass: () => ({getName: () => "com.pateo.midrds.media.RdsPlayer$1"}),
+        this$0: {value: player}};
+    const service = {rdsPlayer: {value: player},
+        getClass: () => ({getName: () => "com.pateo.midrds.media.RdsMediaBrowserService"})};
     const mgr = {
         getCurStation: () => station(f.current), isInit: () => f.ready,
         isRdsSource: () => f.radioSource !== false, isPlay: () => f.playing !== false,
+        getPlayList: () => ({size: () => 2, get: index => station(index ? fm(10620) : original)}),
+        infoListeners: {value: {iterator: () => {
+            const listeners = options.existingPlayer ? [playerListener] : [];
+            return {hasNext: () => listeners.length > 0, next: () => listeners.shift()};
+        }}},
+        pause: () => Rds.pause.invoke(mgr),
         getScanState: () => ({name: () => "FINISH"}),
         delayPlayStation: {value: null}, delayPlay: {value: true}, tempPlayStation: {value: null}, actionCode: {value: 0},
         handler: {value: {removeMessages: code => f.calls.push(["remove", code])}}
@@ -208,6 +232,21 @@ function adapterFixture(options = {}) {
         onFreqSeekStateChanged: method("scanState", () => {})
     };
     const classes = {
+        "android.os.Bundle": {$new: bundle},
+        "android.content.Intent": {$new: () => ({setClassName: (pkg, name) => { f.serviceTarget = [pkg, name]; }})},
+        "com.pateo.midrds.media.RdsPlayer": {onCommand: method("widgetCommand", () => { f.originalCommand = true; })},
+        "com.pateo.midrds.media.RdsPlayer$1": {},
+        "com.pateo.midrds.media.RdsMediaBrowserService": {onCreate: method("serviceCreate", () => {
+            f.serviceCreated = true;
+            f.fields.notification.invoke({}, null, {getActions: () => 0}, null);
+        })},
+        "com.pateo.overSideRadio.base.media.BaseBrowserService": {onDestroy: method("serviceDestroy", () => {})},
+        "com.pateo.overSideRadio.base.media.MediaNotificationManager": {
+            getNotification: method("notification", (metadata, state) => { f.notificationActions = state.getActions(); })},
+        "android.support.v4.media.session.PlaybackStateCompat$Builder": {$new: state => ({
+            setActions(actions) { this.actions = actions; return this; },
+            build() { return {getActions: () => this.actions}; }
+        })},
         "android.net.Uri": {parse: s => s},
         "android.content.ContentResolver": {call: method("provider", () => ({
             getInt: k => k === "protocol" ? 2 : f.acc, getLong: () => f.cycle}))},
@@ -229,6 +268,7 @@ function adapterFixture(options = {}) {
         "com.qinggan.media.helper.MediaEnum": {RDS: {value: "RDS"}}
     };
     const app = {
+        startForegroundService: () => f.fields.serviceCreate.invoke(service),
         getContentResolver: () => ({}),
         registerReceiver: {overload: () => ({call: (app, receiver, filter, permission) => {
             f.receiver = receiver; f.receiverPermission = permission; f.receiverAction = filter.action;
@@ -271,6 +311,13 @@ function adapterFixture(options = {}) {
     f.update = s => f.invoke("update", station(s));
     f.choose = s => f.invoke("playStation", station(s));
     f.manager = mgr;
+    f.destroyService = () => f.fields.serviceDestroy.invoke(service);
+    f.widget = (action, values = {}, caller = "ru.big.town.restoremode", name = "ru.big.town.voyahtune.RADIO_WIDGET") => {
+        let response;
+        f.fields.widgetCommand.invoke({getCallingPackage: () => caller}, name, bundle({schema: 1, action, ...values}),
+            {send: (code, result) => { response = {code, ...result.values}; }});
+        return response;
+    };
     f.restoreAcc = () => f.receiver.receive();
     return f;
 }
@@ -455,5 +502,69 @@ test("adapter sleep does not stage and later ACC preserves a fresh manual choice
     f.choose(fm(9900)); f.update(fm(9900)); f.tick(750); f.restoreAcc();
     assert.equal(f.invoke("modelCurrent").value.freq, 9900);
     assert.equal(f.calls.filter(c => c[0] === "tune").length, 1);
+});
+test("widget adapter reads the durable station without starting playback", () => {
+    const f = adapterFixture({playing: false});
+    const state = f.widget("snapshot");
+    assert.equal(state.code, 1); assert.equal(state.freq, original.freq);
+    assert.equal(state.playing, false); assert.equal(state.canSkip, true);
+    assert.equal(f.current.freq, reset.freq); assert.equal(f.calls.length, 0);
+    assert.equal(f.focusRequests, 0);
+});
+test("widget adapter validates caller and schema and preserves OEM commands", () => {
+    const f = adapterFixture({playing: false});
+    assert.equal(f.widget("play", fm(9990), "untrusted.app").code, 0);
+    assert.equal(f.widget("play", {...fm(9990), schema: 2}).code, 0);
+    assert.equal(f.calls.length, 0);
+    f.widget("play", {}, "untrusted.app", "OEM_COMMAND");
+    assert.equal(f.originalCommand, true);
+});
+test("widget adapter tunes the exact displayed station and saves only confirmed playback", () => {
+    const f = adapterFixture({playing: false});
+    const state = f.widget("play", fm(9990));
+    assert.equal(state.accepted, true); assert.equal(state.requestedFreq, 9990);
+    assert.equal(f.calls.filter(c => c[0] === "tune")[0][1].freq, 9990);
+    assert.equal(f.widget("snapshot").freq, original.freq); assert.equal(f.writes.length, 0);
+    f.playing = true; f.update({...fm(9990), name: "Station"}); f.tick(750);
+    assert.equal(f.widget("snapshot").freq, 9990);
+    assert.equal(f.widget("snapshot").name, "Station");
+    assert.equal(f.writes.length, 1);
+});
+test("widget adapter corrects AM source and uses idempotent pause", () => {
+    const f = adapterFixture();
+    const response = f.widget("play", {fm: false, freq: 999});
+    assert.equal(response.accepted, true); assert.equal(response.requestedFm, false);
+    assert.deepEqual(f.calls.find(c => c[0] === "band"), ["band", "MW"]);
+    f.widget("pause"); assert.equal(f.calls.filter(c => c[0] === "pause").length, 1);
+    assert.equal(f.manager.delayPlayStation.value, null);
+    assert.equal(f.manager.tempPlayStation.value, null);
+});
+test("widget tune deadline cannot cancel a newer choice", () => {
+    const f = adapterFixture();
+    f.widget("play", fm(9990)); f.tick(1000);
+    f.choose(fm(10210)); f.tick(5000);
+    assert.equal(f.manager.delayPlayStation.value.value.freq, 10210);
+    const expired = adapterFixture();
+    expired.widget("play", fm(9990)); expired.tick(6000);
+    assert.equal(expired.manager.delayPlayStation.value, null);
+    assert.equal(expired.writes.length, 0);
+});
+test("radio session becomes discoverable without requesting audio or requiring a widget", () => {
+    for (const existingPlayer of [false, true]) {
+        const f = adapterFixture({playing: false, existingPlayer});
+        assert.equal(f.mediaActive, true); assert.equal(f.mediaState, 2);
+        assert.equal(!!f.serviceCreated, !existingPlayer);
+        if (!existingPlayer) assert.equal(f.notificationActions, 16 | 32);
+        assert.equal(f.focusRequests, 0); assert.equal(f.calls.length, 0);
+        f.destroyService(); assert.equal(f.mediaActive, false);
+    }
+    const active = adapterFixture({playing: true, existingPlayer: true});
+    assert.equal(active.mediaState, 3);
+});
+test("unsupported media session integration leaves restoration working", () => {
+    const f = adapterFixture({missing: "com.pateo.midrds.media.RdsMediaBrowserService"});
+    f.invoke("modelPlay");
+    assert.equal(f.calls.filter(c => c[0] === "tune").length, 1);
+    assert.equal(f.widget("snapshot").code, 1);
 });
 console.log("PASS: " + count + " RDS restore scenarios");

@@ -44,6 +44,7 @@ import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
+import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -120,6 +121,9 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 false,
                 R.id.headlightSizeRow);
         bindHeadlightSize();
+        bindShowSwitch(R.id.switchShowRadio, RadioWidgetLayout.VISIBLE, false, R.id.radioSizeRow);
+        bindTileSizeSpinners(
+                R.id.radioSettingWidth, R.id.radioSettingHeight, RadioWidgetLayout.ID, 2, 2);
         bindShowSwitch(R.id.switchShowCpu, "show_cpuWidget", false, R.id.CpuSizeRow);
         bindTileSizeSpinners(
                 R.id.CpuSettingWidth, R.id.CpuSettingHeight, SystemWidgetLayout.CPU, 1, 1);
@@ -342,6 +346,11 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         android.widget.Spinner widthSpinner = settingView(widthSpinnerId);
         android.widget.Spinner heightSpinner = settingView(heightSpinnerId);
         if (widthSpinner == null || heightSpinner == null) {
+            return;
+        }
+        if (RadioWidgetLayout.ID.equals(widgetId)) {
+            bindEnergySize(widthSpinner, widgetId, true, 2, 2, 3, null);
+            bindEnergySize(heightSpinner, widgetId, false, 2, 2, 5, null);
             return;
         }
         if (SystemWidgetLayout.isWidget(widgetId)) {
@@ -1067,6 +1076,12 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     protected View decorateSettingsRow(int layout, View row) {
         if (profile().isPassenger()) {
             useLayoutPreferences(row);
+        }
+        if (layout == R.layout.settings_main_radio
+                && ru.big.town.common.InfrastructureProfile.read(requireContext())
+                        != ru.big.town.common.InfrastructureProfile.OD) {
+            row.setVisibility(View.GONE);
+            return row;
         }
         if (layout == R.layout.settings_main_add_shortcut) {
             return SettingsPanels.appSelectionPanel(

@@ -14,6 +14,7 @@ import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
+import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -228,7 +229,8 @@ public class TileOrderStore {
             return true;
         }
         // Список всех известных виджетов на главном экране
-        return widgetId.equals(HeadlightWidgetLayout.ID)
+        return widgetId.equals(RadioWidgetLayout.ID)
+                || widgetId.equals(HeadlightWidgetLayout.ID)
                 || widgetId.equals("suspensionWidget")
                 || widgetId.equals("tripCard")
                 || widgetId.equals("cardPowerHold")
@@ -335,6 +337,7 @@ public class TileOrderStore {
                         ? PASSENGER_WIDGETS
                         : new String[] {
                             HeadlightWidgetLayout.ID,
+                            RadioWidgetLayout.ID,
                             SystemWidgetLayout.CPU,
                             SystemWidgetLayout.RAM,
                             SystemWidgetLayout.CLEAR,
