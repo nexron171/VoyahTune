@@ -8,7 +8,7 @@ fn selected_runtime(installed: &str, target: &str, minimum: &str) -> Shared {
             "url": "https://example.org/payload.zip",
             "size": 1,
             "sha256": "a".repeat(64),
-            "minimumInstallerVersion": "1.7.12",
+            "minimumInstallerVersion": "1.7.11",
             "minimumOtaVersion": minimum
         }]
     }))
