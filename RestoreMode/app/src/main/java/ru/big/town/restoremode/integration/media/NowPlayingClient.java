@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.session.PlaybackState;
 import android.net.Uri;
+import android.os.Bundle;
 
 import java.io.InputStream;
 
@@ -32,6 +33,12 @@ public final class NowPlayingClient {
     public static final String ACTION_REQUEST_NOW_PLAYING =
             "ru.big.town.anative.REQUEST_NOW_PLAYING";
 
+    public static final String COMMAND_PLAY_PAUSE = "play_pause";
+    public static final String COMMAND_NEXT = "next";
+    public static final String COMMAND_PREVIOUS = "previous";
+
+    private static final String METHOD_MEDIA_CONTROL = "media_control";
+    private static final String EXTRA_HANDLED = "handled";
     private static final String AUTHORITY = "ru.big.town.anative.nowplaying";
     public static final Uri CONTENT_URI = Uri.parse("content://" + AUTHORITY);
     public static final Uri ART_URI = Uri.parse("content://" + AUTHORITY + "/art");
@@ -133,6 +140,21 @@ public final class NowPlayingClient {
             i.setPackage("ru.big.town.anative");
             ctx.sendBroadcast(i);
         } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Отправляет команду текущему плееру через Native. {@code false} означает, что активной
+     * сессии нет либо установленный Native ещё не поддерживает {@code media_control}.
+     */
+    public static boolean sendCommand(Context ctx, String command) {
+        try {
+            Bundle result =
+                    ctx.getContentResolver()
+                            .call(CONTENT_URI, METHOD_MEDIA_CONTROL, command, null);
+            return result != null && result.getBoolean(EXTRA_HANDLED, false);
+        } catch (Exception e) {
+            return false;
         }
     }
 

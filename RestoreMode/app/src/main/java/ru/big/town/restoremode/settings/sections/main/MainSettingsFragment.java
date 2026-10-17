@@ -35,6 +35,7 @@ import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
+import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -86,6 +87,13 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         bindTileSizeSpinners(
                 R.id.RamSettingWidth, R.id.RamSettingHeight, SystemWidgetLayout.RAM, 1, 1);
         bindShowSwitch(R.id.switchShowClearMemory, "show_clearMemoryWidget", false, 0);
+        bindShowSwitch(R.id.switchShowMedia, "show_mediaWidget", false, R.id.MediaSizeRow);
+        bindTileSizeSpinners(
+                R.id.MediaSettingWidth,
+                R.id.MediaSettingHeight,
+                MediaWidgetLayout.MEDIA,
+                MediaWidgetLayout.DEFAULT_WIDTH,
+                MediaWidgetLayout.DEFAULT_HEIGHT);
         bindShowSwitch(R.id.switchShowEnergy, "show_energyWidget", false, R.id.EnergySizeRow);
         bindTileSizeSpinners(
                 R.id.EnergySettingWidth, R.id.EnergySettingHeight, "energyWidget", 8, 4);
@@ -266,6 +274,30 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
             bindEnergySize(widthSpinner, widgetId, true, 1, 1, 2, null);
             bindEnergySize(heightSpinner, widgetId, false, 1, 1, 1, null);
             heightSpinner.setEnabled(false);
+            return;
+        }
+        if (MediaWidgetLayout.isWidget(widgetId)) {
+            Runnable bindHeight =
+                    () -> {
+                        int columns = TileSizeStore.width(preferences, widgetId, defaultWidth);
+                        bindEnergySize(
+                                heightSpinner,
+                                widgetId,
+                                false,
+                                defaultHeight,
+                                MediaWidgetLayout.minHeight(columns),
+                                MediaWidgetLayout.maxHeight(columns),
+                                null);
+                    };
+            bindHeight.run();
+            bindEnergySize(
+                    widthSpinner,
+                    widgetId,
+                    true,
+                    defaultWidth,
+                    MediaWidgetLayout.minWidth(),
+                    MediaWidgetLayout.maxWidth(),
+                    bindHeight);
             return;
         }
         if (EnergyWidgetLayout.isWidget(widgetId)) {

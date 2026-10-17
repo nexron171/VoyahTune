@@ -2,6 +2,7 @@ package ru.big.town.anative;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
@@ -32,9 +33,16 @@ public class NowPlayingProvider extends ContentProvider {
 
     private static final String TAG = "$$$ NowPlayingProvider $$$";
     private static final String KEYMANAGER_PACKAGE = "com.qinggan.keymanager.service";
+    private static final String RESTORE_MODE_PACKAGE = "ru.big.town.restoremode";
+    private static final String BIND_SET_MODES_PERMISSION =
+            "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
 
     /** Synchronous command API used by the steering-wheel hook on the initial key DOWN only. */
     public static final String METHOD_MEDIA_COMMAND = "media_command";
+
+    /** Direct transport control used by the dashboard media widget. */
+    public static final String METHOD_MEDIA_CONTROL = "media_control";
+    private static final String EXTRA_HANDLED = "handled";
 
     public static final String AUTHORITY = "ru.big.town.anative.nowplaying";
     public static final Uri CONTENT_URI  = Uri.parse("content://" + AUTHORITY);
@@ -99,6 +107,9 @@ public class NowPlayingProvider extends ContentProvider {
      */
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
+        if (METHOD_MEDIA_CONTROL.equals(method)) {
+            return controlMedia(arg);
+        }
         if (!METHOD_MEDIA_COMMAND.equals(method)) return super.call(method, arg, extras);
         enforceMediaCommandCaller();
 
@@ -118,6 +129,41 @@ public class NowPlayingProvider extends ContentProvider {
         } finally {
             Binder.restoreCallingIdentity(identity);
         }
+    }
+
+    private Bundle controlMedia(String arg) {
+        enforceMediaControlCaller();
+        Bundle result = new Bundle();
+        MediaControlPolicy.Command command = parseCommand(arg);
+        if (command == null) {
+            result.putBoolean(EXTRA_HANDLED, false);
+            return result;
+        }
+        long identity = Binder.clearCallingIdentity();
+        try {
+            result.putBoolean(EXTRA_HANDLED, MediaControlRouter.control(getContext(), command));
+            return result;
+        } finally {
+            Binder.restoreCallingIdentity(identity);
+        }
+    }
+
+    private void enforceMediaControlCaller() {
+        if (Binder.getCallingUid() == Process.myUid()) return;
+        String caller = null;
+        try {
+            caller = getCallingPackage();
+        } catch (SecurityException e) {
+            Log.w(TAG, "media_control: invalid calling package: " + e.getMessage());
+        }
+        boolean signedCaller =
+                getContext() != null
+                        && getContext().checkCallingPermission(BIND_SET_MODES_PERMISSION)
+                                == PackageManager.PERMISSION_GRANTED;
+        if (signedCaller && (caller == null || RESTORE_MODE_PACKAGE.equals(caller))) {
+            return;
+        }
+        throw new SecurityException("media_control is not allowed for " + caller);
     }
 
     private void enforceMediaCommandCaller() {
