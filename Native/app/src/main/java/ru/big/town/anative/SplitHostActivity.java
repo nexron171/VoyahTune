@@ -210,8 +210,6 @@ public class SplitHostActivity extends Activity {
         getWindow().setDecorFitsSystemWindows(false);
         setContentView(R.layout.activity_split_host);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-        applyScreenLiftSize(readScreenLiftType());
-        registerScreenLiftReceiver();
         applyWindowInsets();
 
         displayManager = (DisplayManager) getSystemService(DISPLAY_SERVICE);
@@ -236,6 +234,8 @@ public class SplitHostActivity extends Activity {
         // Одиночный режим (ярлык): правый пакет пуст → одно окно на всю ширину, без разделителя.
         boolean single = (right.pkg == null || right.pkg.isEmpty());
         fullscreenCarPlay = single && CarPlayTarget.isCarPlay(left.pkg);
+        applyScreenLiftSize(readScreenLiftType());
+        registerScreenLiftReceiver();
 
         if (single) {
             findViewById(R.id.splitDivider).setVisibility(View.GONE);
@@ -284,9 +284,8 @@ public class SplitHostActivity extends Activity {
     }
 
     /**
-     * The OEM display always reports 1920x720. In the lowered state only the upper 560 pixels are
-     * physically visible, so size the host content explicitly. SurfaceView then emits
-     * surfaceChanged and the existing VD resize path updates an already running split as well.
+     * Fullscreen CarPlay keeps the raised viewport. Other hosts follow the lift state because only
+     * the upper 560 pixels remain visible when lowered; surface callbacks resize their VDs.
      */
     private void applyScreenLiftSize(int type) {
         screenLiftType = type == SCREEN_LIFT_DOWN ? SCREEN_LIFT_DOWN : SCREEN_LIFT_UP;
@@ -309,6 +308,7 @@ public class SplitHostActivity extends Activity {
     }
 
     private int currentHostHeight() {
+        if (fullscreenCarPlay) return SCREEN_UP_HEIGHT_PX;
         return screenLiftType == SCREEN_LIFT_DOWN ? SCREEN_DOWN_HEIGHT_PX : SCREEN_UP_HEIGHT_PX;
     }
 
