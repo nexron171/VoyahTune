@@ -112,6 +112,9 @@ public class DashboardActivity extends AppCompatActivity {
     private int customCommandCount = 1;
 
     private SharedPreferences sharedPreferences;
+    private SharedPreferences settingsPreferences;
+    private DashboardProfile dashboardProfile = DashboardProfile.driver();
+    private int dashboardDisplayId;
     static final int MSG_RESULT = 4;
     static final int MSG_AUTO_LIGHT_ENABLE = 10;
     static final int MSG_AUTO_LIGHT_DISABLE = 11;
@@ -254,6 +257,9 @@ public class DashboardActivity extends AppCompatActivity {
     private final Map<String, View> appWidgetTileViews = new HashMap<>();
     private long carPlayWidgetGeneration;
     private final Messenger carPlayWidgetClient = new Messenger(new IncomingHandler());
+    // Replies from Native must return to this screen only; GlobalVars holds the last dashboard,
+    // which is wrong when both physical screens are open.
+    private final Messenger clientMessenger = new Messenger(new IncomingHandler());
 
     // -------- Drag-and-drop для переупорядочивания плиток --------
     private TileDragController tileDragController;
@@ -293,7 +299,7 @@ public class DashboardActivity extends AppCompatActivity {
             show |= sharedPreferences.getBoolean("show_" + id, false);
         }
         try {
-            EnergyWidgetPreferences.sync(GlobalVars.serviceMessenger, sharedPreferences);
+            EnergyWidgetPreferences.sync(GlobalVars.serviceMessenger, settingsPreferences);
             Message msg =
                     Message.obtain(
                             null,
@@ -975,7 +981,7 @@ public class DashboardActivity extends AppCompatActivity {
 
         try {
             Message msg = Message.obtain(null, message, arg1, 0);
-            msg.replyTo = GlobalVars.clientMessenger;
+            msg.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(msg);
             return true;
         } catch (RemoteException e) {
@@ -1010,7 +1016,7 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Клик по карточке «Forced EV» (вкл = удерживаем электротягу). */
     public void onCardSuspensionMaintenance(View v) {
-        suspensionMaintenanceOn = !sharedPreferences.getBoolean("suspensionMaintenance", false);
+        suspensionMaintenanceOn = !settingsPreferences.getBoolean("suspensionMaintenance", false);
         editor.putBoolean("suspensionMaintenance", suspensionMaintenanceOn).apply();
         sendMessageToService(MSG_APPLY_SUSPENSION_MAINTENANCE, suspensionMaintenanceOn ? 1 : 0);
         updateToggleVisuals();
@@ -1026,10 +1032,10 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Перечитать состояние из prefs (напр. после «Дополнительно») и обновить вид. */
     private void refreshToggles() {
-        autoLightOn = sharedPreferences.getBoolean("autoLight", false);
-        pedestrianOn = !sharedPreferences.getBoolean("disablePedestrianSound", false);
-        forcedEvOn = sharedPreferences.getBoolean("forcedEv", false);
-        suspensionMaintenanceOn = sharedPreferences.getBoolean("suspensionMaintenance", false);
+        autoLightOn = settingsPreferences.getBoolean("autoLight", false);
+        pedestrianOn = !settingsPreferences.getBoolean("disablePedestrianSound", false);
+        forcedEvOn = settingsPreferences.getBoolean("forcedEv", false);
+        suspensionMaintenanceOn = settingsPreferences.getBoolean("suspensionMaintenance", false);
         updateToggleVisuals();
     }
 
@@ -1052,6 +1058,11 @@ public class DashboardActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        dashboardDisplayId = DashboardProfile.displayId(this);
+        dashboardProfile = DashboardProfile.forDisplay(dashboardDisplayId);
+        settingsPreferences = dashboardProfile.settingsPreferences(this);
+        sharedPreferences = dashboardProfile.layoutPreferences(this);
 
         bindToMessengerService();
 
@@ -1098,8 +1109,7 @@ public class DashboardActivity extends AppCompatActivity {
                     return insets;
                 });
 
-        sharedPreferences = getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
-        GlobalVars.sharedPreferences = sharedPreferences;
+        GlobalVars.sharedPreferences = settingsPreferences;
 
         splitTilesGrid = findViewById(R.id.splitTilesGrid);
         gridPaddingTop = splitTilesGrid.getPaddingTop();
@@ -1125,12 +1135,12 @@ public class DashboardActivity extends AppCompatActivity {
                     });
         }
 
-        editor = sharedPreferences.edit();
+        editor = settingsPreferences.edit();
         GlobalVars.editor = editor;
 
         initToggleCards();
         initIntent();
-        GlobalVars.clientMessenger = new Messenger(new IncomingHandler());
+        GlobalVars.clientMessenger = clientMessenger;
     }
 
     public void initIntent() {
@@ -1326,13 +1336,15 @@ public class DashboardActivity extends AppCompatActivity {
     /** Контекстное меню иконки «Быстрого запуска»: куда открыть приложение. */
     private void showLaunchAppMenu(View anchor, String pkg) {
         final int idMainDisplay = 1;
+        final int idPassengerDisplay = 3;
         final int idNoWidgets = 2;
         final int idWidgetBase = 100;
         java.util.List<AppWidgetStore.Entry> widgets = AppWidgetStore.load(sharedPreferences);
         android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
         menu.getMenu().add(0, idMainDisplay, 0, "Запустить на основном дисплее");
+        menu.getMenu().add(0, idPassengerDisplay, 1, "Запустить на пассажирском экране");
         if (widgets.isEmpty()) {
-            menu.getMenu().add(0, idNoWidgets, 1, "Нет виджетов приложения").setEnabled(false);
+            menu.getMenu().add(0, idNoWidgets, 2, "Нет виджетов приложения").setEnabled(false);
         } else {
             // По пункту на каждый созданный пользователем виджет приложения.
             for (int i = 0; i < widgets.size(); i++) {
@@ -1340,7 +1352,7 @@ public class DashboardActivity extends AppCompatActivity {
                         .add(
                                 0,
                                 idWidgetBase + i,
-                                i + 1,
+                                i + 2,
                                 "Запустить в виджете: " + appWidgetTitle(widgets.get(i)));
             }
         }
@@ -1349,6 +1361,10 @@ public class DashboardActivity extends AppCompatActivity {
                     int id = item.getItemId();
                     if (id == idMainDisplay) {
                         launchAppOnDisplay(pkg, 0);
+                        return true;
+                    }
+                    if (id == idPassengerDisplay) {
+                        launchAppOnDisplay(pkg, 1);
                         return true;
                     }
                     int index = id - idWidgetBase;
@@ -1412,7 +1428,7 @@ public class DashboardActivity extends AppCompatActivity {
             releaseEmbeddedWidget(entry.id, widgetView);
         }
         launchEmbeddedAppWidget(
-                widgetView, entry, pkg, AppDpiStore.get(sharedPreferences, pkg));
+                widgetView, entry, pkg, AppDpiStore.get(settingsPreferences, pkg));
     }
 
     /** Открыть системный экран настроек Android. */
@@ -1531,7 +1547,9 @@ public class DashboardActivity extends AppCompatActivity {
         fullscreenGrid = isFullscreenGridEnabled();
         applyContentTopInset();
         // Синхронизировать список плиток перед рендером
-        TileOrderStore.sync(sharedPreferences, getPackageManager());
+        TileOrderStore.sync(
+                sharedPreferences, settingsPreferences, getPackageManager(),
+                dashboardProfile.isPassenger());
         dashboardOpening = true;
         try {
             renderSplitTiles();
@@ -1546,7 +1564,7 @@ public class DashboardActivity extends AppCompatActivity {
      * остальные карточки включены.
      */
     public void onVoiceCommand(View view) {
-        if (sharedPreferences.getBoolean(VoiceCommands.ENABLED, false)) {
+        if (settingsPreferences.getBoolean(VoiceCommands.ENABLED, false)) {
             startActivity(new Intent(this, VoiceActivity.class));
         } else {
             startActivityForResult(
@@ -1560,7 +1578,7 @@ public class DashboardActivity extends AppCompatActivity {
     public void onScenariosCard(View view) {
         ScenarioQuickList.show(
                 this,
-                sharedPreferences,
+                settingsPreferences,
                 this::runScenario,
                 this::onScenarioToggled,
                 this::openScenarioSettings);
@@ -1571,9 +1589,10 @@ public class DashboardActivity extends AppCompatActivity {
      * плитки.
      */
     private void onScenarioToggled() {
-        SplitConfigSync.pushScenarios(this, sharedPreferences);
+        SplitConfigSync.pushScenarios(this, settingsPreferences);
         VoiceCommands.invalidate();
-        TileOrderStore.sync(sharedPreferences, getPackageManager());
+        TileOrderStore.sync(sharedPreferences, settingsPreferences, getPackageManager(),
+                dashboardProfile.isPassenger());
         renderSplitTiles();
     }
 
@@ -1625,16 +1644,21 @@ public class DashboardActivity extends AppCompatActivity {
             case "suspensionWidget":
                 return sharedPreferences.getBoolean("showSuspensionWidget", false);
             case "tripCard":
-                return sharedPreferences.getBoolean("showTripTimer", true);
+                return sharedPreferences.getBoolean(
+                        "showTripTimer", dashboardProfile.defaultVisible(true));
             case "cardPowerHold":
             case "cardLeaveCar":
-                return sharedPreferences.getBoolean("showPowerHold", true);
+                return sharedPreferences.getBoolean(
+                        "showPowerHold", dashboardProfile.defaultVisible(true));
             case "cardWashMode":
-                return sharedPreferences.getBoolean("showWashMode", true);
+                return sharedPreferences.getBoolean(
+                        "showWashMode", dashboardProfile.defaultVisible(true));
             case "cardAutoLight":
-                return sharedPreferences.getBoolean("showAutoLight", true);
+                return sharedPreferences.getBoolean(
+                        "showAutoLight", dashboardProfile.defaultVisible(true));
             case "cardPedestrian":
-                return sharedPreferences.getBoolean("showPedestrian", true);
+                return sharedPreferences.getBoolean(
+                        "showPedestrian", dashboardProfile.defaultVisible(true));
             case "cardSuspensionMaintenance":
                 return sharedPreferences.getBoolean("showSuspensionMaintenance", false);
             case "cardForcedEv":
@@ -1642,13 +1666,16 @@ public class DashboardActivity extends AppCompatActivity {
             case "cardVoiceCommand":
                 return sharedPreferences.getBoolean("showVoiceCommand", false);
             case "cardScenarios":
-                return sharedPreferences.getBoolean("showScenariosCard", true);
+                return sharedPreferences.getBoolean(
+                        "showScenariosCard", dashboardProfile.defaultVisible(true));
             case "cardBatteryHeat":
-                return sharedPreferences.getBoolean("showBatteryHeat", true);
+                return sharedPreferences.getBoolean(
+                        "showBatteryHeat", dashboardProfile.defaultVisible(true));
             case "launchAppsWidget":
                 return sharedPreferences.getBoolean("showLaunchAppsWidget", false);
             case "taskManagerTile":
-                return sharedPreferences.getBoolean("showTaskManagerTile", true);
+                return sharedPreferences.getBoolean(
+                        "showTaskManagerTile", dashboardProfile.defaultVisible(true));
             // Виджеты без тумблера («Настройки», настройки Android) видно всегда.
             default:
                 return true;
@@ -1686,7 +1713,7 @@ public class DashboardActivity extends AppCompatActivity {
         for (VehicleWidgetView view : energyWidgetViews) {
             if (view instanceof TripWidgetView) {
                 ((TripWidgetView) view)
-                        .showTripHistory(sharedPreferences.getBoolean("saveTripHistory", true));
+                        .showTripHistory(settingsPreferences.getBoolean("saveTripHistory", true));
             }
         }
     }
@@ -1695,7 +1722,7 @@ public class DashboardActivity extends AppCompatActivity {
         if (root == null) {
             return;
         }
-        boolean enabled = sharedPreferences.getBoolean("saveTripHistory", true);
+        boolean enabled = settingsPreferences.getBoolean("saveTripHistory", true);
         for (int id : new int[] {R.id.buttonTripHistory, R.id.buttonCurrentTripHistory}) {
             View button = root.findViewById(id);
             if (button != null) {
@@ -1708,7 +1735,10 @@ public class DashboardActivity extends AppCompatActivity {
         if (card == null) {
             return;
         }
-        card.setVisibility(sharedPreferences.getBoolean(key, true) ? View.VISIBLE : View.GONE);
+        card.setVisibility(
+                sharedPreferences.getBoolean(key, dashboardProfile.defaultVisible(true))
+                        ? View.VISIBLE
+                        : View.GONE);
     }
 
     /**
@@ -1796,7 +1826,7 @@ public class DashboardActivity extends AppCompatActivity {
         watchSuspension();
         watchEnergyWidgets();
         appWidgetTileViews.clear();
-        String widgetSessionId = AppWidgetSessionStore.sessionId(this, sharedPreferences);
+        String widgetSessionId = AppWidgetSessionStore.sessionId(this, settingsPreferences);
         boolean firstOpening =
                 dashboardOpening
                         && AppWidgetSessionStore.isFirstOpening(
@@ -1858,7 +1888,7 @@ public class DashboardActivity extends AppCompatActivity {
 
         // Создаём карту сплитов по id для быстрого доступа
         Map<String, SplitStore.Preset> splitMap = new HashMap<>();
-        List<SplitStore.Preset> splits = SplitStore.load(sharedPreferences);
+        List<SplitStore.Preset> splits = SplitStore.load(settingsPreferences);
         for (SplitStore.Preset ps : splits) {
             if (ps.ready()) {
                 splitMap.put(ps.id, ps);
@@ -1920,7 +1950,10 @@ public class DashboardActivity extends AppCompatActivity {
             }
 
             if (TileOrderStore.Tile.TYPE_SCENARIO.equals(tile.type)) {
-                ScenarioStore.Scenario scenario = ScenarioStore.find(sharedPreferences, tile.id);
+                if (dashboardProfile.isPassenger()) {
+                    continue;
+                }
+                ScenarioStore.Scenario scenario = ScenarioStore.find(settingsPreferences, tile.id);
                 if (scenario == null || !scenario.enabled) {
                     continue;
                 }
@@ -1979,7 +2012,7 @@ public class DashboardActivity extends AppCompatActivity {
                                 VehicleWidgets.create(
                                         this,
                                         tile.id,
-                                        CarAppearance.savedColor(sharedPreferences),
+                                        CarAppearance.savedColor(settingsPreferences),
                                         getWidgetDimensions(tile.id)[0],
                                         getWidgetDimensions(tile.id)[1]);
                         energyView.update(energyWidgetState);
@@ -2000,7 +2033,7 @@ public class DashboardActivity extends AppCompatActivity {
                                             ViewGroup.LayoutParams.MATCH_PARENT));
                             ((TripWidgetView) energyView)
                                     .showTripHistory(
-                                            sharedPreferences.getBoolean("saveTripHistory", true));
+                                            settingsPreferences.getBoolean("saveTripHistory", true));
                             energyView.setOnLongClickListener(v -> tripWidget.performLongClick());
                             widgetView = tripWidget;
                         } else {
@@ -2213,6 +2246,9 @@ public class DashboardActivity extends AppCompatActivity {
             }
 
             if (TileOrderStore.Tile.TYPE_SPLIT.equals(tile.type)) {
+                if (dashboardProfile.isPassenger()) {
+                    continue;
+                }
                 // Это плитка сплита
                 SplitStore.Preset preset = splitMap.get(tile.id);
                 if (preset == null || !preset.ready()) {
@@ -2316,7 +2352,7 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private String currentWidgetSessionId() {
-        return AppWidgetSessionStore.sessionId(this, sharedPreferences);
+        return AppWidgetSessionStore.sessionId(this, settingsPreferences);
     }
 
     /** Open an embedded app in the tile on user action and remember it for this session. */
@@ -2617,7 +2653,19 @@ public class DashboardActivity extends AppCompatActivity {
             showSnack("Сервис не готов");
             return;
         }
-        sendAppWindow(pkg);
+        openAppOnDashboardDisplay(pkg);
+    }
+
+    /** Native already supports both physical displays through OPEN_ON_DISPLAY. */
+    private void openAppOnDashboardDisplay(String pkg) {
+        if (pkg == null || pkg.isEmpty()) {
+            return;
+        }
+        if (dashboardDisplayId == 0) {
+            sendAppWindow(pkg);
+        } else {
+            launchAppOnDisplay(pkg, dashboardDisplayId);
+        }
     }
 
     private void populateAppWidgetLauncher(View widgetView, AppWidgetStore.Entry entry) {
@@ -2768,7 +2816,7 @@ public class DashboardActivity extends AppCompatActivity {
             boolean retainedCarPlay) {
         if (CarPlayTarget.opensActivity(packageName, entry.width, entry.height)) {
             if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
-                sendAppWindow(packageName);
+                openAppOnDashboardDisplay(packageName);
             } else {
                 launchAppNormally(packageName);
             }
@@ -2838,7 +2886,7 @@ public class DashboardActivity extends AppCompatActivity {
                             // Native retires CarPlay tasks before releasing their VD.
                             if (!CarPlayTarget.isCarPlay(running))
                                 releaseEmbeddedWidget(widgetId, widgetView);
-                            sendAppWindow(running);
+                            openAppOnDashboardDisplay(running);
                         });
             }
 
@@ -3083,7 +3131,7 @@ public class DashboardActivity extends AppCompatActivity {
         if (entry.setPackageDpi(runningPackage, value)) {
             AppWidgetStore.update(sharedPreferences, entry);
         } else {
-            AppDpiStore.set(sharedPreferences, runningPackage, value);
+            AppDpiStore.set(settingsPreferences, runningPackage, value);
         }
 
         // Переподключаем поверхность: Native пересчитывает плотность дисплея по новому DPI.
@@ -3316,7 +3364,7 @@ public class DashboardActivity extends AppCompatActivity {
             data.putInt("height", height);
             data.putInt("leftDpi", AppWidgetStore.normalizeDpi(dpi));
             message.setData(data);
-            message.replyTo = GlobalVars.clientMessenger;
+            message.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(message);
             Log.i(
                     TAG,
@@ -3363,7 +3411,7 @@ public class DashboardActivity extends AppCompatActivity {
             data.putInt("height", height);
             data.putInt("dpi", AppWidgetStore.normalizeDpi(runningDpi(toWidgetId)));
             message.setData(data);
-            message.replyTo = GlobalVars.clientMessenger;
+            message.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(message);
             Log.i(TAG, "sendEmbeddedMove " + fromWidgetId + " -> " + toWidgetId + " pkg=" + pkg);
         } catch (RemoteException e) {
@@ -3396,7 +3444,7 @@ public class DashboardActivity extends AppCompatActivity {
             data.putInt("height2", embeddedPixelHeight(idB));
             data.putInt("dpi2", runningDpi(idB));
             message.setData(data);
-            message.replyTo = GlobalVars.clientMessenger;
+            message.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(message);
             Log.i(TAG, "sendEmbeddedSwap " + idA + " <-> " + idB);
         } catch (RemoteException e) {
@@ -3425,7 +3473,7 @@ public class DashboardActivity extends AppCompatActivity {
             data.putBoolean("embeddedTouch", true);
             data.putParcelable("event", MotionEvent.obtain(event));
             message.setData(data);
-            message.replyTo = GlobalVars.clientMessenger;
+            message.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(message);
         } catch (RemoteException e) {
             Log.w(TAG, "sendEmbeddedTouch failed: " + e.getMessage());
@@ -3442,7 +3490,7 @@ public class DashboardActivity extends AppCompatActivity {
             data.putString("widgetId", widgetId);
             data.putBoolean("embeddedRelease", true);
             message.setData(data);
-            message.replyTo = GlobalVars.clientMessenger;
+            message.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(message);
         } catch (RemoteException e) {
             Log.w(TAG, "sendEmbeddedRelease failed: " + e.getMessage());
@@ -3503,6 +3551,10 @@ public class DashboardActivity extends AppCompatActivity {
         Bundle dpi = data.getBundle(CarPlayWidgetProtocol.DPI);
         if (widgets == null) return;
         for (String id : widgets) {
+            if (!dashboardProfile.ownsWidgetId(id)) {
+                // Both physical screens query the same Native registry.
+                continue;
+            }
             AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, id);
             View view = appWidgetTileViews.get(id);
             if (entry == null
@@ -3552,11 +3604,9 @@ public class DashboardActivity extends AppCompatActivity {
                 carPlayWidgetGeneration++;
             }
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            if (CarPlayTarget.isCarPlay(pkg)) {
-                android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
-                options.setLaunchDisplayId(getWindowManager().getDefaultDisplay().getDisplayId());
-                startActivity(i, options.toBundle());
-            } else startActivity(i);
+            android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(dashboardDisplayId);
+            startActivity(i, options.toBundle());
             Log.i(TAG, "launchAppNormally " + pkg);
         } catch (Exception e) {
             showSnack("Не удалось открыть приложение");
@@ -3569,7 +3619,7 @@ public class DashboardActivity extends AppCompatActivity {
         if (pkg == null || pkg.isEmpty()) {
             return;
         }
-        int dpi = AppDpiStore.get(sharedPreferences, pkg);
+        int dpi = AppDpiStore.get(settingsPreferences, pkg);
         try {
             if (CarPlayTarget.isCarPlay(pkg)) {
                 carPlayWidgetGeneration++;
@@ -3584,7 +3634,7 @@ public class DashboardActivity extends AppCompatActivity {
             if (CarPlayTarget.isCarPlay(pkg))
                 b.putInt("displayId", getWindowManager().getDefaultDisplay().getDisplayId());
             m.setData(b);
-            m.replyTo = GlobalVars.clientMessenger;
+            m.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(m);
             Log.i(TAG, "sendAppWindow " + pkg);
         } catch (RemoteException e) {
@@ -3606,7 +3656,7 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Индекс пресета в сохранённом списке — по нему Native вернёт выставленную рукой пропорцию. */
     private int presetIndex(SplitStore.Preset preset) {
-        List<SplitStore.Preset> all = SplitStore.load(sharedPreferences);
+        List<SplitStore.Preset> all = SplitStore.load(settingsPreferences);
         for (int i = 0; i < all.size(); i++) {
             SplitStore.Preset p = all.get(i);
             if (p.l.equals(preset.l) && p.r.equals(preset.r) && p.ratio == preset.ratio) {
@@ -3623,8 +3673,8 @@ public class DashboardActivity extends AppCompatActivity {
         if (preset.l == null || preset.l.isEmpty() || preset.r == null || preset.r.isEmpty()) {
             return;
         }
-        int lDpi = AppDpiStore.get(sharedPreferences, preset.l);
-        int rDpi = AppDpiStore.get(sharedPreferences, preset.r);
+        int lDpi = AppDpiStore.get(settingsPreferences, preset.l);
+        int rDpi = AppDpiStore.get(settingsPreferences, preset.r);
         try {
             Message m = Message.obtain(null, MSG_SPLIT_LAUNCH_VD, preset.ratio, 0);
             Bundle b = new Bundle();
@@ -3639,7 +3689,7 @@ public class DashboardActivity extends AppCompatActivity {
             b.putInt("presetIdx", presetIndex(preset));
             b.putString("presetId", preset.id);
             m.setData(b);
-            m.replyTo = GlobalVars.clientMessenger;
+            m.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(m);
             Log.i(
                     TAG,
