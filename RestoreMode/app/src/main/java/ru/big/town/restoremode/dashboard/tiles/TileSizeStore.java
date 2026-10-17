@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
+import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 /**
@@ -43,6 +44,9 @@ public class TileSizeStore {
         if (SystemWidgetLayout.isWidget(widgetId)) {
             return SystemWidgetLayout.width(widgetId, value);
         }
+        if (MediaWidgetLayout.isWidget(widgetId)) {
+            return MediaWidgetLayout.width(value);
+        }
         return EnergyWidgetLayout.isWidget(widgetId)
                 ? EnergyWidgetLayout.width(widgetId, value)
                 : AppWidgetStore.clampWidth(value);
@@ -56,6 +60,9 @@ public class TileSizeStore {
             return 1;
         }
         int value = prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue);
+        if (MediaWidgetLayout.isWidget(widgetId)) {
+            return MediaWidgetLayout.height(width(prefs, widgetId, defaultValue), value);
+        }
         return EnergyWidgetLayout.isWidget(widgetId)
                 ? EnergyWidgetLayout.height(widgetId, width(prefs, widgetId, 8), value)
                 : AppWidgetStore.clampHeight(value);
@@ -75,8 +82,14 @@ public class TileSizeStore {
         int columns =
                 EnergyWidgetLayout.isWidget(widgetId)
                         ? EnergyWidgetLayout.width(widgetId, value)
-                        : AppWidgetStore.clampWidth(value);
+                        : MediaWidgetLayout.isWidget(widgetId)
+                                ? MediaWidgetLayout.width(value)
+                                : AppWidgetStore.clampWidth(value);
         SharedPreferences.Editor editor = prefs.edit().putInt(WIDTH_KEY_PREFIX + widgetId, columns);
+        if (MediaWidgetLayout.isWidget(widgetId)) {
+            int rows = prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, 1);
+            editor.putInt(HEIGHT_KEY_PREFIX + widgetId, MediaWidgetLayout.height(columns, rows));
+        }
         if (EnergyWidgetLayout.isWidget(widgetId)) {
             int rows =
                     prefs.getInt(
@@ -97,10 +110,14 @@ public class TileSizeStore {
                         HEIGHT_KEY_PREFIX + widgetId,
                         SystemWidgetLayout.isWidget(widgetId)
                                 ? 1
-                                : EnergyWidgetLayout.isWidget(widgetId)
-                                        ? EnergyWidgetLayout.height(
-                                                widgetId, width(prefs, widgetId, 8), value)
-                                        : AppWidgetStore.clampHeight(value))
+                                : MediaWidgetLayout.isWidget(widgetId)
+                                        ? MediaWidgetLayout.height(
+                                                width(prefs, widgetId, MediaWidgetLayout.DEFAULT_WIDTH),
+                                                value)
+                                        : EnergyWidgetLayout.isWidget(widgetId)
+                                                ? EnergyWidgetLayout.height(
+                                                        widgetId, width(prefs, widgetId, 8), value)
+                                                : AppWidgetStore.clampHeight(value))
                 .apply();
     }
 }

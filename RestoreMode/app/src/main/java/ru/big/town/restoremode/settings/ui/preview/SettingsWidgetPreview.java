@@ -122,8 +122,14 @@ public final class SettingsWidgetPreview extends View
                                                                     ? "3,2 ГБ"
                                                                     : "Виджет подвески".equals(kind)
                                                                             ? "— Нормальный"
-                                                                            : "➤    ♪    ◈";
+                                                                            : "Музыка".equals(kind)
+                                                                                    ? "Трек · 2:14"
+                                                                                    : "➤    ♪    ◈";
             text(c, value, 14, 59, 23, 0xffbbd6ff);
+            if ("Музыка".equals(kind)) {
+                text(c, "Исполнитель", 14, 76, 12, 0xff8fa2ba);
+                text(c, "◀   ▶   ▶", 14, 94, 13, 0xff8bbcff);
+            }
             boolean chart =
                     "Заряд и топливо".equals(kind)
                             || "Расход за 2,5 км".equals(kind)

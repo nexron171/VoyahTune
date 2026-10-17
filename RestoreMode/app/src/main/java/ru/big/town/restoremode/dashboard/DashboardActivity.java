@@ -88,6 +88,8 @@ import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.energy.TripWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
+import ru.big.town.restoremode.widgets.media.MediaWidgetDashboard;
+import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.suspension.SuspensionWidgetView;
 import ru.big.town.restoremode.widgets.system.SystemWidgetDashboard;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
@@ -259,6 +261,8 @@ public class DashboardActivity extends AppCompatActivity {
     private Bundle energyWidgetState = new Bundle();
     private final SystemWidgetDashboard systemWidgets =
             new SystemWidgetDashboard(this, this::showSnack);
+    private final MediaWidgetDashboard mediaWidgets =
+            new MediaWidgetDashboard(this, this::showSnack);
     private boolean tripTimerReceived;
     private final Messenger energyWidgetClient =
             new Messenger(
@@ -1612,7 +1616,9 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private boolean isWidgetVisible(String widgetId) {
-        if (VehicleWidgets.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) {
+        if (VehicleWidgets.isWidget(widgetId)
+                || SystemWidgetLayout.isWidget(widgetId)
+                || MediaWidgetLayout.isWidget(widgetId)) {
             return sharedPreferences.getBoolean("show_" + widgetId, false);
         }
         switch (widgetId) {
@@ -1715,6 +1721,13 @@ public class DashboardActivity extends AppCompatActivity {
         if (SystemWidgetLayout.isWidget(widgetId)) {
             return TileSizeStore.dimensions(sharedPreferences, widgetId, 1, 1);
         }
+        if (MediaWidgetLayout.isWidget(widgetId)) {
+            return TileSizeStore.dimensions(
+                    sharedPreferences,
+                    widgetId,
+                    MediaWidgetLayout.DEFAULT_WIDTH,
+                    MediaWidgetLayout.DEFAULT_HEIGHT);
+        }
         if (VehicleWidgets.isWidget(widgetId)) {
             int[] size = VehicleWidgets.size(widgetId);
             return TileSizeStore.dimensions(sharedPreferences, widgetId, size[0], size[1]);
@@ -1779,6 +1792,7 @@ public class DashboardActivity extends AppCompatActivity {
         suspensionWidgetView = null;
         energyWidgetViews.clear();
         systemWidgets.resetViews();
+        mediaWidgets.resetViews();
         watchSuspension();
         watchEnergyWidgets();
         appWidgetTileViews.clear();
@@ -1952,6 +1966,9 @@ public class DashboardActivity extends AppCompatActivity {
                     case SystemWidgetLayout.RAM:
                     case SystemWidgetLayout.CLEAR:
                         widgetView = systemWidgets.create(tile.id, splitTilesGrid);
+                        break;
+                    case MediaWidgetLayout.MEDIA:
+                        widgetView = mediaWidgets.create();
                         break;
                     case VehicleWidgets.ENERGY:
                     case VehicleWidgets.CONSUMPTION:
@@ -2294,6 +2311,7 @@ public class DashboardActivity extends AppCompatActivity {
             AppWidgetSessionStore.markOpeningHandled(sharedPreferences, widgetSessionId);
         }
         systemWidgets.setResumed(suspensionScreenResumed);
+        mediaWidgets.setActive(suspensionScreenResumed);
         requestCarPlayWidgets();
     }
 
@@ -3648,6 +3666,7 @@ public class DashboardActivity extends AppCompatActivity {
         suspensionScreenResumed = false;
         carPlayWidgetGeneration++;
         systemWidgets.setResumed(false);
+        mediaWidgets.setActive(false);
         watchSuspension();
         watchEnergyWidgets();
         energyWidgetState = new Bundle();
@@ -3681,6 +3700,7 @@ public class DashboardActivity extends AppCompatActivity {
     protected void onDestroy() {
         destroyed = true;
         systemWidgets.close();
+        mediaWidgets.close();
         if (tileDragController != null) {
             tileDragController.cancel();
         }
