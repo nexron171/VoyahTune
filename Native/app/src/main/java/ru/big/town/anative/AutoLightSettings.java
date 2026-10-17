@@ -102,7 +102,11 @@ final class AutoLightSettings {
                                         .getBoolean(ScreenBrightnessSettings.ENABLED, false);
                 boolean needsSensor = scenarioNeedsLight || brightnessEnabled;
                 // Keep headlight commands disabled until an unused sensor service has stopped.
-                LightSensorService.setObserveOnly(context, !enabled);
+                LightSensorService.setObserveOnly(
+                        context,
+                        !enabled
+                                || HeadlightSelectionController.suspendsAutomatic(
+                                        HeadlightSelectionController.selected(context)));
                 Intent service = new Intent(context, LightSensorService.class);
                 if (enabled || needsSensor) {
                     if (context.startForegroundService(service) == null) {

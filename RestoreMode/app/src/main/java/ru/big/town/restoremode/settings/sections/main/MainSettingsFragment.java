@@ -35,6 +35,7 @@ import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
+import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -79,6 +80,12 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
                 TileSizeStore.SUSPENSION_WIDGET_ID,
                 TileSizeStore.SUSPENSION_DEFAULT_WIDTH,
                 TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
+        bindShowSwitch(
+                R.id.switchShowHeadlights,
+                HeadlightWidgetLayout.VISIBLE,
+                false,
+                R.id.headlightSizeRow);
+        bindHeadlightSize();
         bindShowSwitch(R.id.switchShowCpu, "show_cpuWidget", false, R.id.CpuSizeRow);
         bindTileSizeSpinners(
                 R.id.CpuSettingWidth, R.id.CpuSettingHeight, SystemWidgetLayout.CPU, 1, 1);
@@ -122,6 +129,36 @@ public final class MainSettingsFragment extends SettingsSectionFragment {
         bindShowSwitch(R.id.switchShowOdometer, "show_odometerWidget", false, R.id.OdometerSizeRow);
         bindTileSizeSpinners(
                 R.id.OdometerSettingWidth, R.id.OdometerSettingHeight, "odometerWidget", 4, 1);
+    }
+
+    private void bindHeadlightSize() {
+        Spinner size = settingView(R.id.headlightSettingSize);
+        if (size == null) {
+            return;
+        }
+        ArrayAdapter<String> adapter =
+                new ArrayAdapter<>(
+                        requireContext(),
+                        R.layout.settings_spinner_item,
+                        new String[] {"2 × 2", "3 × 1", "4 × 1"});
+        adapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
+        size.setAdapter(adapter);
+        size.setSelection(TileSizeStore.width(preferences, HeadlightWidgetLayout.ID, 4) - 2);
+        size.setOnItemSelectedListener(
+                new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(
+                            AdapterView<?> parent, View view, int position, long id) {
+                        int columns = position + 2;
+                        if (TileSizeStore.width(preferences, HeadlightWidgetLayout.ID, 4)
+                                != columns) {
+                            TileSizeStore.setWidth(preferences, HeadlightWidgetLayout.ID, columns);
+                        }
+                    }
+
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {}
+                });
     }
 
     private void bindEnergyCapacities() {
