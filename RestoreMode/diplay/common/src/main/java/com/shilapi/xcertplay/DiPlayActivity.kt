@@ -125,7 +125,7 @@ internal enum class SettingsSection {
 
 internal object SettingsInformationArchitecture {
     val visibleCategories = SettingsCategory.entries.filter {
-        it != SettingsCategory.AUDIO && it != SettingsCategory.ADVANCED
+        it != SettingsCategory.ADVANCED
     }
 
     val sectionsByCategory: Map<SettingsCategory, Set<SettingsSection>> = mapOf(
@@ -2043,16 +2043,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 AirPlayPersistence.saveLowLatencyDecoder(this, it)
                 markReconnectNeeded()
             }
-            toggle(card, getString(R.string.call_echo_cancellation), getString(R.string.call_echo_cancellation_description),
-                AirPlayPersistence.loadCallEchoCancellation(this)) {
-                AirPlayPersistence.saveCallEchoCancellation(this, it)
-                markReconnectNeeded()
-            }
-            toggle(card, getString(R.string.call_voice_filter), getString(R.string.call_voice_filter_description),
-                AirPlayPersistence.loadCallVoiceFilter(this)) {
-                AirPlayPersistence.saveCallVoiceFilter(this, it)
-                markReconnectNeeded()
-            }
             toggle(card, getString(R.string.phone_audio_route), getString(R.string.phone_audio_route_description),
                 BydOutputSettings.phoneAudioRoute(this)) {
                 BydOutputSettings.setPhoneAudioRoute(this, it)
@@ -2068,7 +2058,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     Thread({ WheelKeyService.enableOverAdb(this) }, "diplay-phone-audio-enable").start()
                 }
             }
-            audioFocusControls(card)
             if (resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)) {
                 toggle(card, getString(R.string.advanced_audio_channel_mapping),
                     getString(R.string.use_usage_content_type_routing_instead_of_stream_type),
@@ -2077,6 +2066,26 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     markReconnectNeeded()
                 }
             }
+        }
+        filteredSection(content, SettingsSection.CAR_BUTTON,
+            getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
+        filteredSection(content, SettingsSection.AUDIO_ROUTING,
+            getString(R.string.audio), R.drawable.ic_dp_audio) { card ->
+            musicBufferChoice(card, wireless = true)
+            musicBufferChoice(card, wireless = false)
+            toggle(card, getString(R.string.settings_call_speakerphone), getString(R.string.settings_call_speakerphone_description),
+                AirPlayPersistence.loadCallSpeakerphone(this)) { AirPlayPersistence.saveCallSpeakerphone(this, it) }
+            toggle(card, getString(R.string.call_echo_cancellation), getString(R.string.call_echo_cancellation_description),
+                AirPlayPersistence.loadCallEchoCancellation(this)) {
+                AirPlayPersistence.saveCallEchoCancellation(this, it)
+                markReconnectNeeded()
+            }
+            toggle(card, getString(R.string.call_voice_filter), getString(R.string.call_voice_filter_description),
+                AirPlayPersistence.loadCallVoiceFilter(this)) {
+                AirPlayPersistence.saveCallVoiceFilter(this, it)
+                markReconnectNeeded()
+            }
+            audioFocusControls(card)
             toggle(card, getString(R.string.main_buffered_audio), getString(R.string.main_buffered_audio_description),
                 AirPlayPersistence.loadMainBufferedAudio(this)) {
                 AirPlayPersistence.saveMainBufferedAudio(this, it)
@@ -2092,17 +2101,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 AirPlayPersistence.saveCarBluetoothAudio(this, it)
                 reconnectIfRunning()
             }
-        }
-        filteredSection(content, SettingsSection.CAR_BUTTON,
-            getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
-        filteredSection(content, SettingsSection.AUDIO_ROUTING,
-            getString(R.string.audio_routing), R.drawable.ic_dp_audio) { card ->
-            mediaChannelControl(card)
-            navigationChannelControl(card)
-            musicBufferChoice(card, wireless = true)
-            musicBufferChoice(card, wireless = false)
-            toggle(card, getString(R.string.settings_call_speakerphone), getString(R.string.settings_call_speakerphone_description),
-                AirPlayPersistence.loadCallSpeakerphone(this)) { AirPlayPersistence.saveCallSpeakerphone(this, it) }
         }
         filteredSection(content, SettingsSection.NAVIGATION_WHEEL,
             getString(R.string.settings_navigation_wheel_volume), R.drawable.ic_dp_audio) { card ->
@@ -5992,8 +5990,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val presets = if (wireless) buffer.wirelessPresets else buffer.wiredPresets
         val labels = presets.map { millis ->
             when (millis) {
-                buffer.DEFAULT_MILLIS -> getString(R.string.s_300_ms_default)
-                buffer.MOST_STABLE_MILLIS -> getString(R.string.s_1000_ms_most_stable)
+                AirPlayPersistence.DEFAULT_MEDIA_BUFFER_MILLIS ->
+                    getString(R.string.voyah_carplay_music_buffer_default, millis)
                 else -> getString(R.string.settings_music_buffer_ms, millis)
             }
         }
