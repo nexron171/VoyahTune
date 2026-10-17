@@ -7,6 +7,8 @@ import android.provider.Settings;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.Iterator;
+
 import ru.big.town.restoremode.vehicle.DriveSelectionPreferences;
 
 /**
@@ -116,6 +118,36 @@ public final class AppWidgetSessionStore {
         try {
             preferences.edit().putString(KEY_LAUNCHES, root.toString()).apply();
         } catch (RuntimeException ignored) {
+        }
+    }
+
+    /** Forget every tile that hosted the explicitly closed package in the current session. */
+    public static void forgetPackage(
+            Context context, SharedPreferences preferences, String packageName) {
+        forgetPackage(preferences, sessionId(context, preferences), packageName);
+    }
+
+    public static void forgetPackage(
+            SharedPreferences preferences, String sessionId, String packageName) {
+        if (packageName == null || packageName.isEmpty()) {
+            return;
+        }
+        JSONObject root = readSession(preferences, sessionId);
+        JSONObject launches = root.optJSONObject(KEY_LAUNCH_ITEMS);
+        if (launches == null) {
+            return;
+        }
+        boolean changed = false;
+        Iterator<String> widgetIds = launches.keys();
+        while (widgetIds.hasNext()) {
+            JSONObject launch = launches.optJSONObject(widgetIds.next());
+            if (launch != null && packageName.equals(launch.optString(KEY_PACKAGE, ""))) {
+                widgetIds.remove();
+                changed = true;
+            }
+        }
+        if (changed) {
+            preferences.edit().putString(KEY_LAUNCHES, root.toString()).apply();
         }
     }
 

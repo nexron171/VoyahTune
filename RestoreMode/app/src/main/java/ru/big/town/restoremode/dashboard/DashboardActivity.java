@@ -128,6 +128,7 @@ public class DashboardActivity extends AppCompatActivity {
     // Native уводит задачу приложения с виртуального дисплея виджета при полноэкранном запуске.
     static final String ACTION_EMBEDDED_TASK_LEFT = "ru.big.town.anative.EMBEDDED_TASK_LEFT";
     static final String EXTRA_EMBEDDED_TASK_PKG = "pkg";
+    static final String EXTRA_EMBEDDED_TASK_CLOSED = "closed";
     private static final String BIND_SET_MODES_PERMISSION =
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
     private static final int POWER_HOLD_UNKNOWN = 0;
@@ -405,7 +406,12 @@ public class DashboardActivity extends AppCompatActivity {
             new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
-                    releaseEmbeddedWidgetsOf(intent.getStringExtra(EXTRA_EMBEDDED_TASK_PKG));
+                    String packageName = intent.getStringExtra(EXTRA_EMBEDDED_TASK_PKG);
+                    if (intent.getBooleanExtra(EXTRA_EMBEDDED_TASK_CLOSED, false)) {
+                        AppWidgetSessionStore.forgetPackage(
+                                sharedPreferences, currentWidgetSessionId(), packageName);
+                    }
+                    releaseEmbeddedWidgetsOf(packageName);
                 }
             };
 
