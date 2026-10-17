@@ -2,15 +2,19 @@ package ru.big.town.restoremode.carplay;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
+import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.Application;
+import android.content.Intent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
 import android.widget.TextView;
 
 import com.shilapi.xcertplay.CarPlayHomeUi;
+import com.shilapi.xcertplay.CarPlayHostActivity;
 import com.shilapi.xcertplay.DiPlayActivity;
 import com.shilapi.xcertplay.VoyahCarPlayIntegration;
 
@@ -74,8 +78,16 @@ public class CarPlayHomeScreenUiTest {
             ((View) text(root, "Настройки").getParent()).performClick();
             assertEquals("settings", ReflectionHelpers.getField(activity, "page"));
             activity.getOnBackPressedDispatcher().onBackPressed();
+            ActivityManager.AppTask projectionTask = mock(ActivityManager.AppTask.class);
+            ActivityManager.RecentTaskInfo projectionInfo = new ActivityManager.RecentTaskInfo();
+            projectionInfo.taskId = activity.getTaskId() + 1;
+            projectionInfo.baseIntent = new Intent(activity, CarPlayHostActivity.class);
+            when(projectionTask.getTaskInfo()).thenReturn(projectionInfo);
+            shadowOf(activity.getSystemService(ActivityManager.class))
+                    .setAppTasks(List.of(projectionTask));
             text(activity.getWindow().getDecorView(), "Выйти").performClick();
             assertTrue(activity.isFinishing());
+            verify(projectionTask).finishAndRemoveTask();
         } finally {
             controller.pause().stop().destroy();
             VoyahCarPlayIntegration.install(null);

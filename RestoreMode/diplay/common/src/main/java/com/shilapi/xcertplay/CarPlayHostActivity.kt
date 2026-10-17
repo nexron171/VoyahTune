@@ -1815,12 +1815,8 @@ class CarPlayHostActivity : ComponentActivity() {
                 back.isEnabled = false
                 startupRetryStopped = true
                 startupRetryButton?.isEnabled = false
-                shutdown(false, "connection cancelled") {
-                    if (!isFinishing && !isDestroyed) {
-                        showDiPlayHome()
-                        finish()
-                    }
-                }
+                shutdown(false, "connection cancelled")
+                CarPlayHomeUi.finishActivities(this@CarPlayHostActivity)
             }
         }
         val actions = LinearLayout(this).apply {

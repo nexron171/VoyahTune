@@ -64,27 +64,37 @@ class VoyahConnectionUiTest {
         val panel = field("connectionPanel") as View
         val color = (panel.background as ColorDrawable).color
         assertTrue(Color.red(color) < 40 && Color.green(color) < 40 && Color.blue(color) < 40)
-        val labels = views(field("connectionPanel") as View).filterIsInstance<TextView>().filter { it.visibility == View.VISIBLE }.map { it.text.toString() }.toList()
+        val labels = views(panel)
+            .filterIsInstance<TextView>()
+            .filter { it.visibility == View.VISIBLE }
+            .map { it.text.toString() }
+            .toList()
         assertTrue(labels.contains("CarPlay"))
         assertTrue(labels.contains("Вернуться в настройки"))
         assertTrue(labels.contains(activity.getString(android.R.string.cancel)))
         assertFalse(labels.any { it.contains("DiPlay", ignoreCase = true) })
-        assertSame(button("Вернуться в настройки").parent, button(activity.getString(android.R.string.cancel)).parent)
+        assertSame(
+            button("Вернуться в настройки").parent,
+            button(activity.getString(android.R.string.cancel)).parent,
+        )
     }
 
     @Test
-    fun cancelClosesLiveControllerAndClearsSessionBeforeReturningHome() {
+    fun cancelFinishesImmediatelyAndClosesTheSessionWithoutOpeningHome() {
         val controller = mock(CarPlayController::class.java)
         `when`(controller.awaitClosed(anyLong())).thenReturn(true)
         val sink = mock(AndroidMediaSink::class.java)
         ReflectionHelpers.setField(activity, "controller", controller)
         ReflectionHelpers.setField(activity, "sink", sink)
-        CarPlayBackgroundSession.store(controller, sink, 1280, 720,
-            activity, CarPlaySessionDisplay(1280, 720, 0, false, false, 1280, 720)) { it() }
+        CarPlayBackgroundSession.store(
+            controller, sink, 1280, 720, activity,
+            CarPlaySessionDisplay(1280, 720, 0, false, false, 1280, 720),
+        ) { it() }
         CarPlayBackgroundSession.active = true
         assertTrue(CarPlayBackgroundSession.hasSession())
         val cancel = button(activity.getString(android.R.string.cancel))
         cancel.performClick()
+        assertTrue(activity.isFinishing)
         assertFalse(cancel.isEnabled)
         assertTrue(field("startupRetryStopped") as Boolean)
         assertFalse(CarPlayBackgroundSession.hasSession())
@@ -92,6 +102,7 @@ class VoyahConnectionUiTest {
         assertNull(CarPlayBackgroundSession.snapshot())
         assertNull(field("controller"))
         assertNull(shadowOf(activity).nextStartedActivity)
+        verify(controller, never()).close()
         cancel.performClick()
         teardown.runAll()
         verify(sink, times(1)).close()
@@ -99,30 +110,52 @@ class VoyahConnectionUiTest {
         verify(controller).awaitClosed(anyLong())
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(activity.isFinishing)
-        val home = shadowOf(activity).nextStartedActivity
-        assertEquals(DiPlayActivity::class.java.name, home.component!!.className)
-        assertEquals("home", home.getStringExtra("page"))
+        assertNull(shadowOf(activity).nextStartedActivity)
         verifyNoMoreInteractions(controller)
+    }
+
+    @Test
+    fun cancelFinishesBeforeAControllerExists() {
+        button(activity.getString(android.R.string.cancel)).performClick()
+
+        assertTrue(activity.isFinishing)
+        assertTrue(field("startupRetryStopped") as Boolean)
+        teardown.runAll()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNull(shadowOf(activity).nextStartedActivity)
     }
 
     @Test
     fun returningToSettingsKeepsTheSessionAlive() {
         val controller = mock(CarPlayController::class.java)
         ReflectionHelpers.setField(activity, "controller", controller)
-        CarPlayBackgroundSession.store(controller, mock(AndroidMediaSink::class.java), 1280, 720,
-            activity, CarPlaySessionDisplay(1280, 720, 0, false, false, 1280, 720)) { it() }
+        CarPlayBackgroundSession.store(
+            controller, mock(AndroidMediaSink::class.java), 1280, 720, activity,
+            CarPlaySessionDisplay(1280, 720, 0, false, false, 1280, 720),
+        ) { it() }
         button("Вернуться в настройки").performClick()
         assertTrue(CarPlayBackgroundSession.hasSession())
         assertSame(controller, CarPlayBackgroundSession.snapshot()!!.controller)
         verify(controller, never()).close()
         assertFalse(activity.isFinishing)
-        assertEquals(DiPlayActivity::class.java.name, shadowOf(activity).nextStartedActivity.component!!.className)
+        assertEquals(
+            DiPlayActivity::class.java.name,
+            shadowOf(activity).nextStartedActivity.component!!.className,
+        )
     }
 
     private fun field(name: String): Any? = ReflectionHelpers.getField(activity, name)
-    private fun button(label: String): Button = views(field("connectionPanel") as View).filterIsInstance<Button>().single { it.text == label }
+
+    private fun button(label: String): Button = views(field("connectionPanel") as View)
+        .filterIsInstance<Button>()
+        .single { it.text == label }
+
     private fun views(view: View): Sequence<View> = sequence {
         yield(view)
-        if (view is ViewGroup) for (index in 0 until view.childCount) yieldAll(views(view.getChildAt(index)))
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                yieldAll(views(view.getChildAt(index)))
+            }
+        }
     }
 }
