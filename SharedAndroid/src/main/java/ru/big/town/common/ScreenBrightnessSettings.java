@@ -8,7 +8,6 @@ import java.util.Set;
 
 /** Ordered rules shared by the editor and the Native controller. */
 public final class ScreenBrightnessSettings {
-    public static final int NIGHT_TARGET = 0;
     public static final String ENABLED = "screenBrightnessEnabled";
     public static final String RULES = "screenBrightnessRules";
     public static final String ACTION_CONFIG = "ru.big.town.anative.SCREEN_BRIGHTNESS_CONFIG";
@@ -67,20 +66,20 @@ public final class ScreenBrightnessSettings {
         public String label() {
             for (int index = 0; index < OPERATORS.length; index++) {
                 if (operator.equals(OPERATORS[index])) {
-                    return "Датчик " + SYMBOLS[index] + " " + threshold + " → "
-                            + (night ? "☾ Ночь" : percent + "%");
+                    return "Датчик " + SYMBOLS[index] + " " + threshold + " → " + percent + "%"
+                            + (night ? " · ☾ Ночь" : "");
                 }
             }
             throw new IllegalStateException(operator);
         }
     }
 
-    public static int target(List<Rule> rules, int level) {
-        if (level < 0 || level > 7) return -1;
+    public static Rule matchingRule(List<Rule> rules, int level) {
+        if (level < 0 || level > 7) return null;
         for (Rule rule : rules) {
-            if (rule.matches(level)) return rule.night ? NIGHT_TARGET : rule.percent;
+            if (rule.matches(level)) return rule;
         }
-        return -1;
+        return null;
     }
 
     public static List<Rule> decode(String encoded) {

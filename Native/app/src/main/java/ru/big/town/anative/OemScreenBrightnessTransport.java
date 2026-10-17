@@ -1,8 +1,12 @@
 package ru.big.town.anative;
 
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.IBinder;
 
 import java.lang.reflect.Method;
@@ -10,6 +14,10 @@ import java.lang.reflect.Method;
 /** Uses the installed SDK's Binder proxy so transaction numbers follow the vehicle firmware. */
 final class OemScreenBrightnessTransport
         implements ScreenBrightnessController.Screens, ScreenBrightnessModeController.Modes {
+    private static final Uri SYSTEM_SETTINGS = Uri.parse("content://qinggan.settings/system");
+    private static final String BRIGHTNESS_SYNC_KEY = "sync_bright_switcher_value";
+
+    private ContentResolver contentResolver;
     private IBinder binder;
     private Object service;
     private Method getter;
@@ -18,6 +26,7 @@ final class OemScreenBrightnessTransport
     private Method modeSetter;
 
     void connect(Context context) throws Exception {
+        contentResolver = context.getContentResolver();
         if (binder != null && binder.isBinderAlive()) return;
         Class<?> api = loadApi(context);
         ClassLoader loader = api.getClassLoader();
@@ -61,6 +70,30 @@ final class OemScreenBrightnessTransport
     @Override
     public boolean writeMode(int screen, int mode) throws Exception {
         return Boolean.TRUE.equals(modeSetter.invoke(service, mode, 0, screen, false));
+    }
+
+    @Override
+    public boolean isSynchronizationEnabled() {
+        try (Cursor cursor =
+                contentResolver.query(
+                        SYSTEM_SETTINGS,
+                        new String[] {"value"},
+                        "name=?",
+                        new String[] {BRIGHTNESS_SYNC_KEY},
+                        null)) {
+            if (cursor == null) {
+                throw new IllegalStateException("OEM brightness synchronization unavailable");
+            }
+            return cursor.moveToFirst() && "1".equals(cursor.getString(0));
+        }
+    }
+
+    @Override
+    public void enableSynchronization() {
+        ContentValues values = new ContentValues();
+        values.put("name", BRIGHTNESS_SYNC_KEY);
+        values.put("value", "1");
+        contentResolver.insert(SYSTEM_SETTINGS, values);
     }
 
     private static Class<?> loadApi(Context context) throws Exception {

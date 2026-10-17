@@ -84,10 +84,12 @@ public final class ScreenBrightnessService extends Service {
                                             () ->
                                                     active
                                                             && !preferences.getBoolean(
-                                                                    ScreenBrightnessSettings.ENABLED,
+                                                                    ScreenBrightnessSettings
+                                                                            .ENABLED,
                                                                     false));
                             if (!confirmed) {
-                                throw new IllegalStateException("OEM brightness mode not confirmed");
+                                throw new IllegalStateException(
+                                        "OEM brightness mode not confirmed");
                             }
                             if (preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false))
                                 return;
@@ -129,12 +131,12 @@ public final class ScreenBrightnessService extends Service {
                         status =
                                 result.target < 0
                                         ? "Основной экран: яркость недоступна"
-                                        : (result.target == ScreenBrightnessSettings.NIGHT_TARGET
-                                                ? "Ночь"
-                                                : "Цель: " + result.target + "%")
-                                                + " · подтверждено экранов: "
-                                                + result.confirmed
-                                                + "/3";
+                                        : "Цель: " + result.target + "%"
+                                                + (result.night ? " · Ночь" : "")
+                                                + " · подтверждено экранов: " + result.confirmed + "/3";
+                        if (!result.synchronizationConfirmed) {
+                            status += " · синхронизация не подтверждена";
+                        }
                     } catch (Exception | LinkageError error) {
                         status = "Управление яркостью недоступно · повтор подключения";
                         Log.w(TAG, "OEM brightness unavailable", error);

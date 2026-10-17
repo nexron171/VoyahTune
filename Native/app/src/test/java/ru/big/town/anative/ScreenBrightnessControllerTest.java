@@ -20,17 +20,18 @@ public class ScreenBrightnessControllerTest {
     public void exampleCoversEverySensorLevelAndHonorsBoundaries() {
         int[] targets = {20, 20, 50, 80, 80, 100, 100, 100};
         for (int level = 0; level <= 7; level++) {
-            assertEquals(targets[level], ScreenBrightnessSettings.target(defaults, level));
+            assertEquals(
+                    targets[level], ScreenBrightnessSettings.matchingRule(defaults, level).percent);
         }
-        assertEquals(-1, ScreenBrightnessSettings.target(defaults, -1));
-        assertEquals(-1, ScreenBrightnessSettings.target(defaults, 8));
+        assertNull(ScreenBrightnessSettings.matchingRule(defaults, -1));
+        assertNull(ScreenBrightnessSettings.matchingRule(defaults, 8));
     }
 
     @Test
     public void firstMatchingRuleWinsAndOrderSurvivesRoundTrip() {
         List<ScreenBrightnessSettings.Rule> rules =
                 ScreenBrightnessSettings.decode("first,ge,2,40\nsecond,ge,5,90\nlast,lt,2,10");
-        assertEquals(40, ScreenBrightnessSettings.target(rules, 6));
+        assertEquals(40, ScreenBrightnessSettings.matchingRule(rules, 6).percent);
         assertEquals(
                 "first,ge,2,40\nsecond,ge,5,90\nlast,lt,2,10",
                 ScreenBrightnessSettings.encode(rules));
@@ -163,34 +164,163 @@ public class ScreenBrightnessControllerTest {
         assertEquals(75, rules.get(0).percent);
         assertFalse(rules.get(1).night);
         assertEquals("night,lt,2,75,night\nday,ge,2,45", ScreenBrightnessSettings.encode(rules));
-        assertEquals(ScreenBrightnessSettings.NIGHT_TARGET, ScreenBrightnessSettings.target(rules, 1));
+        assertSame(rules.get(0), ScreenBrightnessSettings.matchingRule(rules, 1));
+        assertEquals("Датчик < 2 → 75% · ☾ Ночь", rules.get(0).label());
+        assertEquals("Датчик ≥ 2 → 45%", rules.get(1).label());
         assertThrows(
                 IllegalArgumentException.class,
                 () -> ScreenBrightnessSettings.decode("bad,ge,2,75,unknown"));
     }
 
     @Test
-    public void nightSkipsPercentWritesRetainsModeDuringOutageAndReturnsToDay() throws Exception {
+    public void nightAppliesPercentRetainsTargetDuringOutageAndReturnsToDay() throws Exception {
         FakeScreens screens = new FakeScreens();
         List<ScreenBrightnessSettings.Rule> rules =
                 ScreenBrightnessSettings.decode("night,lt,2,75,night\nday,ge,2,45");
         ScreenBrightnessController controller = new ScreenBrightnessController();
         ScreenBrightnessController.Result night =
                 controller.reconcile(screens, rules, 1, () -> true);
-        assertEquals(ScreenBrightnessSettings.NIGHT_TARGET, night.target);
+        assertEquals(75, night.target);
+        assertTrue(night.night);
         assertEquals(3, night.confirmed);
-        assertTrue(screens.writes.isEmpty());
+        assertEquals(Arrays.asList("1=75", "2=75", "16=75"), screens.writes);
         assertEquals(Arrays.asList("1=0", "2=0", "16=0"), screens.modeWrites);
+        screens.writes.clear();
         screens.modeWrites.clear();
-        assertEquals(0, controller.reconcile(screens, rules, -1, () -> true).target);
-        assertEquals(0, controller.reconcile(screens, new ArrayList<>(), 5, () -> true).target);
+        ScreenBrightnessController.Result unavailable =
+                controller.reconcile(screens, rules, -1, () -> true);
+        assertEquals(75, unavailable.target);
+        assertTrue(unavailable.night);
+        ScreenBrightnessController.Result uncovered =
+                controller.reconcile(screens, new ArrayList<>(), 5, () -> true);
+        assertEquals(75, uncovered.target);
+        assertTrue(uncovered.night);
         assertTrue(screens.writes.isEmpty());
         assertTrue(screens.modeWrites.isEmpty());
         ScreenBrightnessController.Result day = controller.reconcile(screens, rules, 3, () -> true);
         assertEquals(45, day.target);
+        assertFalse(day.night);
         assertEquals(3, day.confirmed);
         assertEquals(Arrays.asList("1=1", "2=1", "16=1"), screens.modeWrites);
         assertEquals(Arrays.asList("1=45", "2=45", "16=45"), screens.writes);
+    }
+
+    @Test
+    public void editedNightPercentIsAppliedWithoutChangingMode() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        ScreenBrightnessController controller = new ScreenBrightnessController();
+        controller.reconcile(
+                screens, ScreenBrightnessSettings.decode("night,ge,0,75,night"), 1, () -> true);
+        screens.writes.clear();
+        screens.modeWrites.clear();
+
+        ScreenBrightnessController.Result result =
+                controller.reconcile(
+                        screens,
+                        ScreenBrightnessSettings.decode("night,ge,0,30,night"),
+                        1,
+                        () -> true);
+
+        assertEquals(30, result.target);
+        assertTrue(result.night);
+        assertEquals(3, result.confirmed);
+        assertTrue(screens.modeWrites.isEmpty());
+        assertEquals(Arrays.asList("1=30", "2=30", "16=30"), screens.writes);
+    }
+
+    @Test
+    public void equalPercentDoesNotHideDayNightTransition() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        List<ScreenBrightnessSettings.Rule> rules =
+                ScreenBrightnessSettings.decode("night,lt,2,60,night\nday,ge,2,60");
+        ScreenBrightnessController controller = new ScreenBrightnessController();
+        controller.reconcile(screens, rules, 3, () -> true);
+        screens.writes.clear();
+
+        assertTrue(controller.reconcile(screens, rules, 1, () -> true).night);
+        assertFalse(controller.reconcile(screens, rules, 3, () -> true).night);
+        assertEquals(Arrays.asList("1=0", "2=0", "16=0", "1=1", "2=1", "16=1"), screens.modeWrites);
+        assertTrue(screens.writes.isEmpty());
+    }
+
+    @Test
+    public void nightRequiresPercentReadbackBeforeConfirmingScreen() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        screens.rejectCluster = true;
+        ScreenBrightnessController.Result result =
+                new ScreenBrightnessController()
+                        .reconcile(
+                                screens,
+                                ScreenBrightnessSettings.decode("night,ge,0,75,night"),
+                                1,
+                                () -> true);
+
+        assertTrue(result.night);
+        assertEquals(2, result.confirmed);
+        assertEquals(Integer.valueOf(0), screens.modes.get(16));
+        assertEquals(Integer.valueOf(30), screens.values.get(16));
+    }
+
+    @Test
+    public void enablingAlsoEnablesOemSynchronizationWithoutRepeatedWrites() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        ScreenBrightnessController controller = new ScreenBrightnessController();
+
+        assertTrue(controller.reconcile(screens, defaults, 7, () -> true).synchronizationConfirmed);
+        assertTrue(screens.synchronizationEnabled);
+        assertEquals(1, screens.synchronizationWrites);
+        assertTrue(controller.reconcile(screens, defaults, 7, () -> true).synchronizationConfirmed);
+        assertEquals(1, screens.synchronizationWrites);
+    }
+
+    @Test
+    public void synchronizationFailureDoesNotBlockScreensAndIsRetried() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        screens.rejectSynchronization = true;
+        ScreenBrightnessController controller = new ScreenBrightnessController();
+
+        ScreenBrightnessController.Result rejected =
+                controller.reconcile(screens, defaults, 7, () -> true);
+        assertFalse(rejected.synchronizationConfirmed);
+        assertEquals(3, rejected.confirmed);
+
+        screens.rejectSynchronization = false;
+        assertTrue(controller.reconcile(screens, defaults, 7, () -> true).synchronizationConfirmed);
+        assertEquals(2, screens.synchronizationWrites);
+    }
+
+    @Test
+    public void unavailableSynchronizationDoesNotBlockScreens() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        screens.synchronizationUnavailable = true;
+
+        ScreenBrightnessController.Result result =
+                new ScreenBrightnessController().reconcile(screens, defaults, 7, () -> true);
+
+        assertFalse(result.synchronizationConfirmed);
+        assertEquals(3, result.confirmed);
+        assertEquals(0, screens.synchronizationWrites);
+    }
+
+    @Test
+    public void disabledControllerDoesNotEnableSynchronizationOrWriteScreens() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        new ScreenBrightnessController().reconcile(screens, defaults, 7, () -> false);
+
+        assertEquals(0, screens.synchronizationWrites);
+        assertTrue(screens.writes.isEmpty());
+        assertTrue(screens.modeWrites.isEmpty());
+    }
+
+    @Test
+    public void disablingDuringSynchronizationStopsScreenWrites() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        new ScreenBrightnessController()
+                .reconcile(screens, defaults, 7, () -> screens.synchronizationWrites == 0);
+
+        assertEquals(1, screens.synchronizationWrites);
+        assertTrue(screens.writes.isEmpty());
+        assertTrue(screens.modeWrites.isEmpty());
     }
 
     @Test
@@ -221,12 +351,30 @@ public class ScreenBrightnessControllerTest {
         final List<String> modeWrites = new ArrayList<>();
         boolean rejectModes;
         boolean rejectCluster;
+        boolean synchronizationEnabled;
+        boolean rejectSynchronization;
+        boolean synchronizationUnavailable;
+        int synchronizationWrites;
 
         FakeScreens() {
             for (int screen : new int[] {1, 2, 16}) modes.put(screen, 1);
             values.put(1, 60);
             values.put(2, 40);
             values.put(16, 30);
+        }
+
+        @Override
+        public boolean isSynchronizationEnabled() {
+            if (synchronizationUnavailable) {
+                throw new IllegalStateException("OEM settings unavailable");
+            }
+            return synchronizationEnabled;
+        }
+
+        @Override
+        public void enableSynchronization() {
+            synchronizationWrites++;
+            if (!rejectSynchronization) synchronizationEnabled = true;
         }
 
         @Override

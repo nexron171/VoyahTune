@@ -6,19 +6,30 @@ import java.util.List;
 
 /** Retains the last target through sensor outages and uncovered rule intervals. */
 final class ScreenBrightnessPolicy {
-    private int target = -1;
+    static final class Target {
+        final int percent;
+        final boolean night;
 
-    int next(List<ScreenBrightnessSettings.Rule> rules, int sensor, int primary) {
-        int matched = ScreenBrightnessSettings.target(rules, sensor);
-        if (matched == ScreenBrightnessSettings.NIGHT_TARGET) {
-            target = matched;
+        Target(int percent, boolean night) {
+            this.percent = percent;
+            this.night = night;
+        }
+    }
+
+    private Target target = new Target(-1, false);
+
+    Target next(List<ScreenBrightnessSettings.Rule> rules, int sensor, int primary) {
+        ScreenBrightnessSettings.Rule matched =
+                ScreenBrightnessSettings.matchingRule(rules, sensor);
+        if (target.percent < 0 && (matched == null || !matched.night)) {
+            if (primary >= 1 && primary <= 100) {
+                target = new Target(primary, false);
+            }
             return target;
         }
-        if (target < 0) {
-            if (primary >= 1 && primary <= 100) target = primary;
-            return target;
+        if (matched != null) {
+            target = new Target(matched.percent, matched.night);
         }
-        if (matched >= 1) target = matched;
         return target;
     }
 }

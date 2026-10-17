@@ -11,6 +11,10 @@ final class ScreenBrightnessController {
         int read(int screen) throws Exception;
 
         boolean write(int screen, int percent) throws Exception;
+
+        boolean isSynchronizationEnabled() throws Exception;
+
+        void enableSynchronization() throws Exception;
     }
 
     private static final int[] SCREENS = {1, 2, 16};
@@ -18,11 +22,18 @@ final class ScreenBrightnessController {
 
     static final class Result {
         final int target;
+        final boolean night;
         final int confirmed;
+        final boolean synchronizationConfirmed;
 
-        Result(int target, int confirmed) {
-            this.target = target;
+        Result(
+                ScreenBrightnessPolicy.Target target,
+                int confirmed,
+                boolean synchronizationConfirmed) {
+            this.target = target.percent;
+            this.night = target.night;
             this.confirmed = confirmed;
+            this.synchronizationConfirmed = synchronizationConfirmed;
         }
     }
 
@@ -32,12 +43,17 @@ final class ScreenBrightnessController {
             int sensor,
             BooleanSupplier active)
             throws Exception {
-        if (!active.getAsBoolean()) return new Result(-1, 0);
-        int target = policy.next(rules, sensor, screens.read(1));
+        ScreenBrightnessPolicy.Target target = new ScreenBrightnessPolicy.Target(-1, false);
+        if (!active.getAsBoolean()) return new Result(target, 0, false);
+        boolean synchronizationConfirmed = enableSynchronization(screens, active);
+        if (!active.getAsBoolean()) return new Result(target, 0, synchronizationConfirmed);
+        target = policy.next(rules, sensor, screens.read(1));
         int confirmed = 0;
-        if (target < 0) return new Result(target, confirmed);
-        boolean night = target == ScreenBrightnessSettings.NIGHT_TARGET;
-        int mode = night ? ScreenBrightnessModeController.NIGHT : ScreenBrightnessModeController.DAY;
+        if (target.percent < 0) return new Result(target, confirmed, synchronizationConfirmed);
+        int mode =
+                target.night
+                        ? ScreenBrightnessModeController.NIGHT
+                        : ScreenBrightnessModeController.DAY;
         for (int screen : SCREENS) {
             if (!active.getAsBoolean()) break;
             try {
@@ -46,18 +62,30 @@ final class ScreenBrightnessController {
                 }
                 if (!active.getAsBoolean()) break;
                 if (screens.readMode(screen) != mode) continue;
-                if (night) {
-                    confirmed++;
-                    continue;
-                }
                 int actual = screens.read(screen);
-                if (actual != target && active.getAsBoolean()) screens.write(screen, target);
+                if (actual != target.percent && active.getAsBoolean()) {
+                    screens.write(screen, target.percent);
+                }
                 if (!active.getAsBoolean()) break;
-                if (screens.read(screen) == target) confirmed++;
+                if (screens.read(screen) == target.percent) confirmed++;
             } catch (Exception unavailable) {
                 // One unavailable display must not prevent the other displays from updating.
             }
         }
-        return new Result(target, confirmed);
+        return new Result(target, confirmed, synchronizationConfirmed);
+    }
+
+    private boolean enableSynchronization(Screens screens, BooleanSupplier active) {
+        try {
+            if (!active.getAsBoolean()) return false;
+            if (!screens.isSynchronizationEnabled()) {
+                if (!active.getAsBoolean()) return false;
+                screens.enableSynchronization();
+            }
+            return active.getAsBoolean() && screens.isSynchronizationEnabled();
+        } catch (Exception unavailable) {
+            // Direct display control remains available when the OEM setting cannot be accessed.
+            return false;
+        }
     }
 }
