@@ -9,6 +9,29 @@ pub(super) fn same_release_version(left: &str, right: &str) -> bool {
     matches!((parse(left), parse(right)), (Ok(left), Ok(right)) if left == right)
 }
 
+fn require_ota_version(
+    release: &Release,
+    installed: &str,
+    infrastructure: Infrastructure,
+) -> Result<()> {
+    if infrastructure == Infrastructure::Od {
+        release.require_ota_version(installed)?;
+    }
+    Ok(())
+}
+
+pub(super) fn verify_selection(
+    release: &Release,
+    installed: &str,
+    same_version: bool,
+    infrastructure: Infrastructure,
+) -> Result<ota::Claims> {
+    let claims = ota::verify(release)?;
+    ota::compatible(&claims, installed, same_version)?;
+    require_ota_version(release, installed, infrastructure)?;
+    Ok(claims)
+}
+
 pub(super) fn choose(
     catalog: &Catalog,
     installed: &str,
@@ -28,6 +51,7 @@ pub(super) fn choose(
             continue;
         }
 
+        require_ota_version(release, installed, infrastructure)?;
         return Ok(Some(release.clone()));
     }
     Ok(None)
@@ -48,11 +72,53 @@ mod tests {
     }
 
     #[test]
-    fn od_offers_newest_release_without_minimum_version_filter() {
-        let selected = choose(&catalog(), "4.0.0-od", false, Infrastructure::Od, |_| {})
-            .unwrap()
-            .unwrap();
-        assert_eq!(selected.version, "4.1.0-od");
+    fn newest_usb_release_does_not_fall_back_to_an_older_release() {
+        let error = choose(&catalog(), "4.0.0-od", false, Infrastructure::Od, |_| {}).unwrap_err();
+        assert_eq!(error.code, "OTA_USB_REQUIRED");
+    }
+
+    #[test]
+    fn explicit_selection_rejects_downgrades_and_checks_the_ota_minimum() {
+        let catalog = catalog();
+        let release = &catalog.releases[0];
+        assert_eq!(release.version, "4.1.0-od");
+        assert_eq!(
+            verify_selection(release, "4.0.0-od", false, Infrastructure::Od)
+                .unwrap_err()
+                .code,
+            "OTA_USB_REQUIRED"
+        );
+        assert!(verify_selection(release, "4.2.0-od", true, Infrastructure::Od).is_err());
+        assert!(verify_selection(release, "4.1.0-od", true, Infrastructure::Od).is_ok());
+        assert!(verify_selection(release, "4.1.0-od", false, Infrastructure::Od).is_err());
+
+        let mut rebuilt = release.clone();
+        rebuilt.payload.sha256 = "c".repeat(64);
+        assert!(verify_selection(&rebuilt, "4.1.0-od", true, Infrastructure::Od).is_ok());
+        assert!(verify_selection(&rebuilt, "4.1.0", true, Infrastructure::Od).is_ok());
+        rebuilt.minimum_ota_version = Some("4.0.0".into());
+        assert!(verify_selection(&rebuilt, "4.0.0-od", false, Infrastructure::Od).is_ok());
+        rebuilt.minimum_ota_version = Some("4.2.0".into());
+        assert_eq!(
+            verify_selection(&rebuilt, "4.1.0-od", true, Infrastructure::Od)
+                .unwrap_err()
+                .code,
+            "OTA_USB_REQUIRED"
+        );
+    }
+
+    #[test]
+    fn current_release_can_be_reinstalled_without_selecting_an_older_release() {
+        assert!(
+            choose(&catalog(), "4.1.0-od", true, Infrastructure::Od, |_| {})
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            choose(&catalog(), "4.2.0-od", true, Infrastructure::Od, |_| {})
+                .unwrap()
+                .is_none()
+        );
         assert!(same_release_version("4.1.0", "4.1.0-od"));
         assert!(!same_release_version("4.1.0-beta-od", "4.1.0-od"));
     }

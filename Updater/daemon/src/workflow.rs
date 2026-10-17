@@ -5,6 +5,8 @@ use crate::{
 };
 use release_core::{catalog::Release, ota, payload::Payload};
 mod catalog_selection;
+#[cfg(test)]
+mod tests;
 use std::{
     fs, io,
     path::Path,
@@ -271,7 +273,15 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
             "Повторная установка разрешена только для того же архива",
         ));
     }
-    if !crate::restore_ui::enabled() {
+    if crate::restore_ui::enabled() {
+        catalog_selection::verify_selection(
+            &r,
+            &s.installed_version,
+            s.same_version,
+            release_core::infrastructure::Infrastructure::Od,
+        )
+        .map_err(|error| invalid(&error.to_string()))?;
+    } else {
         ota::compatible(&c, &s.installed_version, s.same_version)
             .map_err(|e| invalid(&e.to_string()))?;
     }
@@ -317,16 +327,13 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
         |error| rejected = Some(error.to_string()),
     );
     if crate::restore_ui::enabled() && !automatic && !same && matches!(&selection, Ok(None)) {
-        selection = Ok(catalog
-            .releases
-            .iter()
-            .find(|release| {
-                release_core::infrastructure::Infrastructure::from_version(&release.version)
-                    .is_ok_and(|profile| {
-                        profile == release_core::infrastructure::Infrastructure::Od
-                    })
-            })
-            .cloned());
+        selection = catalog_selection::choose(
+            &catalog,
+            &current.installed_version,
+            true,
+            release_core::infrastructure::Infrastructure::Od,
+            |error| rejected = Some(error.to_string()),
+        );
     }
     let selection_error = selection.as_ref().err().map(ToString::to_string);
     let mut rt = shared.lock().unwrap();
@@ -349,6 +356,11 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
                         .is_ok_and(|profile| {
                             profile == release_core::infrastructure::Infrastructure::Od
                         })
+                        && ota::verify(release)
+                            .and_then(|claims| {
+                                ota::compatible(&claims, &current.installed_version, true)
+                            })
+                            .is_ok()
                 })
                 .map(|release| release.version.clone())
                 .collect(),
@@ -449,11 +461,10 @@ fn download(shared: &Shared) -> io::Result<()> {
     phase(shared, "verified", "Релиз проверен. Можно начать установку")
 }
 fn verify_payload(payload: &Payload, claims: &ota::Claims) -> io::Result<()> {
-    let mut expected = claims.clone();
-    if crate::restore_ui::enabled() {
-        expected.version = payload.manifest.release_version.clone();
+    if crate::restore_ui::enabled() && payload.manifest.release_version != claims.version {
+        return Err(invalid("Manifest не соответствует выбранному релизу"));
     }
-    ota::verify_payload(payload, &expected).map_err(|error| invalid(&error.to_string()))
+    ota::verify_payload(payload, claims).map_err(|error| invalid(&error.to_string()))
 }
 
 pub fn select_release(shared: &Shared, version: &str) -> io::Result<()> {
@@ -483,6 +494,13 @@ pub fn select_release(shared: &Shared, version: &str) -> io::Result<()> {
     release_core::infrastructure::Infrastructure::from_version(&release.version)
         .and_then(|profile| profile.require(release_core::infrastructure::Infrastructure::Od))
         .map_err(|error| invalid(&error.to_string()))?;
+    catalog_selection::verify_selection(
+        &release,
+        &runtime.state.installed_version,
+        true,
+        release_core::infrastructure::Infrastructure::Od,
+    )
+    .map_err(|error| invalid(&error.to_string()))?;
     crate::telemetry::finish(Some("Пользователь изменил выбранный релиз"));
     runtime.state.same_version =
         catalog_selection::same_release_version(version, &runtime.state.installed_version);

@@ -399,9 +399,6 @@ impl Drop for OperationLock {
 }
 fn install_apk(p: &Payload, package: &str, artifact: &str, apk: &Path) -> io::Result<()> {
     let mut arguments = vec!["install", "-r"];
-    if crate::restore_ui::enabled() {
-        arguments.push("-d");
-    }
     arguments.extend([
         "--user",
         "0",
