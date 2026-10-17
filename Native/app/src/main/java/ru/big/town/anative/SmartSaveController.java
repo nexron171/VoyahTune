@@ -18,12 +18,14 @@ import ru.big.town.common.SmartSaveSettings;
 
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-/** Event-driven speed control; only charge and the OEM charge target use a minute timer. */
+/** OD energy control with bounded startup readiness and event-driven speed updates. */
 final class SmartSaveController implements AutoCloseable {
     private static final String TAG = "SmartSave";
     private static final long CHARGE_INTERVAL_MS = 60_000;
-    private static final long MAX_CHARGE_AGE_MS = 90_000;
     private static final Uri SETTINGS_URI =
             Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
     private static final OemVehicleStateTransport.StateKey MODE =
@@ -40,8 +42,10 @@ final class SmartSaveController implements AutoCloseable {
     private final CanBusEventHub hub;
     private final SharedPreferences preferences;
     private final SmartSavePolicy policy;
+    private final ExecutorService stateQueries = Executors.newSingleThreadExecutor();
     private final Runnable poll = this::refreshCharge;
     private final Runnable retryConfiguration = this::refreshConfiguration;
+    private final Runnable measurementDeadline = this::evaluate;
     private final BroadcastReceiver settingsChanged =
             new BroadcastReceiver() {
                 @Override
@@ -52,12 +56,15 @@ final class SmartSaveController implements AutoCloseable {
 
     private CanBusEventHub.Subscription subscription;
     private Bundle configuration;
+    private SmartSaveSession session;
     private boolean connected;
     private boolean temporaryElectric;
-    private float charge = Float.NaN;
-    private long chargeTime = -1;
-    private int target = -1;
-    private int speed = -1;
+    private boolean stateQueryPending;
+    private boolean requestSubmitted;
+    private long measurementGeneration;
+    private long targetRevision;
+    private long modeRevision;
+    private String lastDecision;
     private int observedMode = -1;
     private int requestedMode = -1;
     private volatile long commandGeneration;
@@ -83,6 +90,7 @@ final class SmartSaveController implements AutoCloseable {
                     handler,
                     ContextCompat.RECEIVER_EXPORTED);
         } catch (RuntimeException error) {
+            stateQueries.shutdownNow();
             thread.quitSafely();
             throw error;
         }
@@ -105,13 +113,28 @@ final class SmartSaveController implements AutoCloseable {
     }
 
     private void refreshConfiguration() {
+        refreshConfiguration(true);
+    }
+
+    private boolean refreshConfiguration(boolean evaluateNow) {
         handler.removeCallbacks(retryConfiguration);
         if (closed) {
-            return;
+            return false;
         }
-        commandGeneration++;
-        requestedMode = -1;
-        configuration = readConfiguration();
+        Bundle next = readConfiguration();
+        boolean newCycle =
+                configuration != null
+                        && next != null
+                        && configuration.getLong("cycle", -1) != next.getLong("cycle", -1);
+        if (!sameConfiguration(configuration, next)) {
+            commandGeneration++;
+            requestedMode = -1;
+            requestSubmitted = false;
+        }
+        configuration = next;
+        if (newCycle) {
+            stopWatching();
+        }
         if (configuration != null) {
             long selection = configuration.getLong("energySelectionRevision", 0);
             long previousSelection = preferences.getLong("energySelectionRevision", 0);
@@ -134,19 +157,21 @@ final class SmartSaveController implements AutoCloseable {
             } else {
                 handler.postDelayed(retryConfiguration, CHARGE_INTERVAL_MS);
             }
-            return;
+            return false;
         }
         if (!configuration.getBoolean(SmartSaveSettings.ENABLED, false)) {
             stopWatching();
             persistState();
-            if (temporaryElectric && configuration.getInt("acc", -1) == 2) {
-                requestMode(VehicleRestorePolicy.SOC_SREV);
+            if (temporaryElectric
+                    && configuration.getInt("acc", -1) == 2
+                    && requestedMode != VehicleRestorePolicy.SOC_SREV) {
+                requestMode(VehicleRestorePolicy.SOC_SREV, "option disabled");
             }
-            return;
+            return false;
         }
         if (configuration.getInt("acc", -1) != 2) {
             stopWatching();
-            return;
+            return false;
         }
         if (subscription == null) {
             subscription =
@@ -158,9 +183,23 @@ final class SmartSaveController implements AutoCloseable {
                             new int[] {MODE.stableId, TARGET.stableId},
                             handler,
                             this::onEvent);
-        } else if (connected) {
+        } else if (connected && evaluateNow) {
             evaluate();
         }
+        return connected;
+    }
+
+    private static boolean sameConfiguration(Bundle previous, Bundle next) {
+        if (previous == null || next == null) {
+            return previous == next;
+        }
+        return previous.getLong("revision", -1) == next.getLong("revision", -1)
+                && previous.getLong("cycle", -1) == next.getLong("cycle", -1)
+                && previous.getInt("acc", -1) == next.getInt("acc", -1)
+                && previous.getBoolean(SmartSaveSettings.ENABLED, false)
+                        == next.getBoolean(SmartSaveSettings.ENABLED, false)
+                && previous.getBoolean("forcedEv", false) == next.getBoolean("forcedEv", false)
+                && Objects.equals(previous.getString("energy"), next.getString("energy"));
     }
 
     private void onEvent(CanBusEvent event) {
@@ -171,38 +210,33 @@ final class SmartSaveController implements AutoCloseable {
             case CONNECTION:
                 clearMeasurements();
                 connected = true;
+                session = new SmartSaveSession(policy, SystemClock.elapsedRealtime());
                 hub.requestSpeedSnapshot();
                 refreshCharge();
                 return;
             case CONNECTION_LOST:
-                commandGeneration++;
                 connected = false;
                 handler.removeCallbacks(poll);
                 clearMeasurements();
                 return;
             case VEHICLE_SPEED:
-                speed = event.first;
-                policy.onSpeedChanged(speed);
+                if (session == null) return;
+                session.recordSpeed(event.first);
                 break;
             case ENERGY_TELEMETRY:
-                if (event.telemetry.kind != EnergyTelemetrySample.SOC) {
+                if (session == null || event.telemetry.kind != EnergyTelemetrySample.SOC) {
                     return;
                 }
-                charge = event.telemetry.values[0];
-                chargeTime = event.elapsedRealtime;
+                session.recordCharge(event.telemetry.values[0], event.elapsedRealtime);
                 break;
             case VEHICLE_STATE:
+                if (session == null) return;
                 if (event.first == TARGET.stableId) {
-                    target = targetPercent(event.second);
+                    targetRevision++;
+                    session.recordTarget(targetPercent(event.second));
                 } else if (event.first == MODE.stableId) {
-                    observedMode = event.second;
-                    if (observedMode == requestedMode) {
-                        requestedMode = -1;
-                    }
-                    if (observedMode == VehicleRestorePolicy.SOC_SREV
-                            && requestedMode != VehicleRestorePolicy.SOC_EV) {
-                        temporaryElectric = false;
-                    }
+                    modeRevision++;
+                    observeMode(event.second);
                 }
                 break;
             default:
@@ -216,17 +250,76 @@ final class SmartSaveController implements AutoCloseable {
         if (closed || !connected || subscription == null) {
             return;
         }
-        refreshConfiguration();
-        if (subscription == null || !connected) {
+        if (!refreshConfiguration(false)) {
             return;
         }
         hub.requestEnergySnapshot();
-        Map<OemVehicleStateTransport.StateKey, Integer> states =
-                OemVehicleStateTransport.readVehicleStates(context, Arrays.asList(MODE, TARGET));
-        target = states == null ? -1 : targetPercent(states.get(TARGET));
-        observedMode = states == null ? -1 : states.get(MODE);
+        requestVehicleStates();
         evaluate();
         handler.postDelayed(poll, CHARGE_INTERVAL_MS);
+    }
+
+    private void requestVehicleStates() {
+        if (stateQueryPending || session == null || !connected || closed) return;
+        stateQueryPending = true;
+        long generation = measurementGeneration;
+        long targetBeforeQuery = targetRevision;
+        long modeBeforeQuery = modeRevision;
+        long commandBeforeQuery = commandGeneration;
+        stateQueries.execute(
+                () -> {
+                    Map<OemVehicleStateTransport.StateKey, Integer> states = readVehicleStates();
+                    handler.post(
+                            () -> {
+                                stateQueryPending = false;
+                                if (closed || !connected || session == null) return;
+                                if (generation != measurementGeneration) {
+                                    requestVehicleStates();
+                                    return;
+                                }
+                                // Live callbacks supersede a getter that was already in progress.
+                                if (targetRevision == targetBeforeQuery) {
+                                    session.recordTarget(
+                                            states == null
+                                                    ? -1
+                                                    : targetPercent(states.get(TARGET)));
+                                }
+                                if (modeRevision == modeBeforeQuery) {
+                                    if (states != null
+                                            && requestSubmitted
+                                            && commandBeforeQuery == commandGeneration) {
+                                        requestedMode = -1;
+                                        requestSubmitted = false;
+                                    }
+                                    observeMode(states == null ? -1 : states.get(MODE));
+                                }
+                                evaluate();
+                            });
+                });
+    }
+
+    private Map<OemVehicleStateTransport.StateKey, Integer> readVehicleStates() {
+        try {
+            return OemVehicleStateTransport.readVehicleStates(context, Arrays.asList(MODE, TARGET));
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Energy state snapshot unavailable", error);
+            return null;
+        }
+    }
+
+    private void observeMode(int mode) {
+        if (observedMode != mode) {
+            Log.i(TAG, "Observed energy mode=" + mode);
+        }
+        observedMode = mode;
+        if (observedMode == requestedMode) {
+            requestedMode = -1;
+            requestSubmitted = false;
+        }
+        if (observedMode == VehicleRestorePolicy.SOC_SREV
+                && requestedMode != VehicleRestorePolicy.SOC_EV) {
+            temporaryElectric = false;
+        }
     }
 
     private int targetPercent(int level) {
@@ -234,25 +327,52 @@ final class SmartSaveController implements AutoCloseable {
     }
 
     private void evaluate() {
-        if (!connected || subscription == null || closed) {
+        handler.removeCallbacks(measurementDeadline);
+        if (!connected || subscription == null || session == null || closed) {
             return;
         }
-        long age = SystemClock.elapsedRealtime() - chargeTime;
-        float freshCharge =
-                chargeTime >= 0 && age >= 0 && age <= MAX_CHARGE_AGE_MS ? charge : Float.NaN;
+        long now = SystemClock.elapsedRealtime();
         int currentMode = requestedMode >= 0 ? requestedMode : observedMode;
-        int desiredMode = policy.desiredMode(freshCharge, target, speed, currentMode);
+        int desiredMode = session.desiredMode(now, currentMode);
         persistState();
+        String decision = desiredMode + ":" + session.reason();
+        if (!decision.equals(lastDecision)) {
+            lastDecision = decision;
+            logDecision("decision", desiredMode, session.reason());
+        }
+        long deadline = session.nextEvaluationAt(now);
+        if (deadline >= 0) {
+            handler.postDelayed(measurementDeadline, Math.max(1, deadline - now));
+        }
+        if (desiredMode == SmartSaveSession.WAIT_FOR_DATA) return;
         if (desiredMode == requestedMode || (requestedMode < 0 && desiredMode == observedMode)) {
             return;
         }
-        requestMode(desiredMode);
+        requestMode(desiredMode, session.reason());
     }
 
-    private void requestMode(int mode) {
+    private void logDecision(String action, int mode, String reason) {
+        String measurements =
+                session == null
+                        ? "no active measurements"
+                        : session.measurements(SystemClock.elapsedRealtime());
+        Log.i(
+                TAG,
+                action + " mode=" + mode + " reason=" + reason
+                        + " cycle=" + configuration.getLong("cycle", -1)
+                        + " revision=" + configuration.getLong("revision", -1)
+                        + " selection=" + configuration.getLong("energySelectionRevision", 0)
+                        + " " + measurements + " chargeLock=" + policy.isChargingLocked()
+                        + " manualHold=" + policy.isManualSaveHeld() + " observed=" + observedMode);
+    }
+
+    private void requestMode(int mode, String reason) {
         final long generation = ++commandGeneration;
         requestedMode = mode;
+        requestSubmitted = false;
         final long selectionRevision = configuration.getLong("revision", -1);
+        final long cycle = configuration.getLong("cycle", -1);
+        logDecision("request", mode, reason);
         if (mode == VehicleRestorePolicy.SOC_EV) {
             // Record ownership before enqueueing so disabling can cancel a pending EV as well.
             temporaryElectric = true;
@@ -267,6 +387,7 @@ final class SmartSaveController implements AutoCloseable {
                     Bundle current = readConfiguration();
                     if (!saveSelected(current)
                             || current.getLong("revision", -1) != selectionRevision
+                            || current.getLong("cycle", -1) != cycle
                             || current.getInt("acc", -1) != 2
                             || (mode == VehicleRestorePolicy.SOC_EV
                                     && !current.getBoolean(SmartSaveSettings.ENABLED, false))) {
@@ -291,6 +412,8 @@ final class SmartSaveController implements AutoCloseable {
                                     if (result != ApplyEngine.WakeActionResult.SUCCESS) {
                                         requestedMode = -1;
                                         Log.w(TAG, "Temporary mode was not submitted: " + result);
+                                    } else if (requestedMode == mode) {
+                                        requestSubmitted = true;
                                     }
                                 }));
     }
@@ -310,16 +433,19 @@ final class SmartSaveController implements AutoCloseable {
     }
 
     private void clearMeasurements() {
-        charge = Float.NaN;
-        chargeTime = -1;
-        target = -1;
-        speed = -1;
+        commandGeneration++;
+        measurementGeneration++;
+        handler.removeCallbacks(measurementDeadline);
+        session = null;
+        lastDecision = null;
         observedMode = -1;
         requestedMode = -1;
+        requestSubmitted = false;
     }
 
     private void stopWatching() {
         handler.removeCallbacks(poll);
+        if (subscription == null && !connected && session == null) return;
         if (subscription != null) {
             subscription.close();
             subscription = null;
@@ -337,6 +463,7 @@ final class SmartSaveController implements AutoCloseable {
                 () -> {
                     handler.removeCallbacks(retryConfiguration);
                     stopWatching();
+                    stateQueries.shutdownNow();
                     thread.quitSafely();
                 });
     }
