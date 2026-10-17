@@ -221,6 +221,47 @@ public class MediaControlPolicyTest {
     }
 
     @Test
+    public void playOnlyNeverTogglesOrPausesAnyPlayer() {
+        for (boolean bridge : new boolean[] {false, true}) {
+            for (boolean nativeQinggan : new boolean[] {false, true}) {
+                for (int state :
+                        new int[] {
+                            MediaControlPolicy.STATE_UNKNOWN,
+                            MediaControlPolicy.STATE_INACTIVE,
+                            MediaControlPolicy.STATE_ACTIVE
+                        }) {
+                    MediaControlPolicy.Plan plan =
+                            MediaControlPolicy.plan(
+                                    candidate("player", state, false, bridge, nativeQinggan),
+                                    MediaControlPolicy.Command.PLAY_ONLY);
+                    if (state == MediaControlPolicy.STATE_ACTIVE) {
+                        assertEquals(MediaControlPolicy.Operation.NONE, plan.operation);
+                    } else {
+                        assertEquals(MediaControlPolicy.KEY_PLAY, plan.keyCode);
+                        assertEquals(
+                                bridge || nativeQinggan
+                                        ? MediaControlPolicy.Operation.KEYMANAGER_KEY
+                                        : MediaControlPolicy.Operation.TARGET_KEY,
+                                plan.operation);
+                    }
+                }
+            }
+        }
+        MediaControlPolicy.Candidate radio =
+                new MediaControlPolicy.Candidate(
+                        "radio",
+                        "com.pateo.rdsapp",
+                        MediaControlPolicy.STATE_INACTIVE,
+                        false,
+                        false,
+                        false);
+        assertEquals(
+                MediaControlPolicy.Operation.TRANSPORT_PLAY,
+                MediaControlPolicy.radioPlan(radio, MediaControlPolicy.Command.PLAY_ONLY)
+                        .operation);
+    }
+
+    @Test
     public void radioExtensionPreservesOtherPlayersAndBridgeRouting() {
         for (boolean bridge : new boolean[] {false, true}) {
             MediaControlPolicy.Candidate player =

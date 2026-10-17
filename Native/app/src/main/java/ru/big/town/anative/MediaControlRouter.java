@@ -17,7 +17,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Single routing point for steering-wheel commands and door PAUSE_ONLY.
+ * Single routing point for steering-wheel commands and door playback actions.
  *
  * <p>For ordinary Android players a key is dispatched to one concrete {@link MediaController}; for
  * bridge players (AutoKit/CarPlay/Android Auto) the command is returned to the injected keymanager
@@ -100,12 +100,28 @@ final class MediaControlRouter {
             List<MediaController> controllers = msm.getActiveSessions(null);
             if (controllers == null) controllers = Collections.emptyList();
             MediaController target = selectController(controllers);
+            if (command == MediaControlPolicy.Command.PLAY_ONLY) {
+                List<MediaControlPolicy.Candidate> sessions = new ArrayList<>();
+                for (MediaController controller : controllers)
+                    sessions.add(candidate(controller, false));
+                int index =
+                        LastMediaSessionStore.choose(
+                                sessions,
+                                controllers.indexOf(target),
+                                LastMediaSessionStore.read(context));
+                target = index >= 0 ? controllers.get(index) : null;
+            }
             logDecisionInput(command, controllers, target);
 
-            // With no Android session the wheel must remain OEM-native. Door PAUSE_ONLY instead
-            // asks
-            // keymanager for idempotent PAUSE=127; it must not blindly toggle an unknown player.
+            // With no session, door actions use explicit PLAY/PAUSE rather than a blind toggle.
             if (target == null) {
+                if (command == MediaControlPolicy.Command.PLAY_ONLY) {
+                    return new Result(
+                            ROUTE_KEYMANAGER,
+                            MediaControlPolicy.KEY_PLAY,
+                            "",
+                            MediaControlPolicy.STATE_UNKNOWN);
+                }
                 return command == MediaControlPolicy.Command.PAUSE_ONLY
                         ? new Result(
                                 ROUTE_KEYMANAGER,
@@ -534,6 +550,7 @@ final class MediaControlRouter {
             stickyToken = target.getSessionToken();
             stickyPinned =
                     command == MediaControlPolicy.Command.PAUSE_ONLY
+                            || command == MediaControlPolicy.Command.PLAY_ONLY
                             || command == MediaControlPolicy.Command.PLAY_PAUSE;
             targetRevision++;
         }
@@ -575,6 +592,13 @@ final class MediaControlRouter {
     }
 
     private static Result safeFailure(MediaControlPolicy.Command command) {
+        if (command == MediaControlPolicy.Command.PLAY_ONLY) {
+            return new Result(
+                    ROUTE_KEYMANAGER,
+                    MediaControlPolicy.KEY_PLAY,
+                    "",
+                    MediaControlPolicy.STATE_UNKNOWN);
+        }
         return command == MediaControlPolicy.Command.PAUSE_ONLY
                 ? new Result(
                         ROUTE_KEYMANAGER,

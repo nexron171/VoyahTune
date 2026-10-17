@@ -1887,16 +1887,16 @@ public class SetModesService extends Service {
         startForegroundService(intent);
     }
 
-    /**
-     * Восстанавливает WiperColdService (реактор двери) на старте, если включён хотя бы один его
-     * потребитель: сервисный режим дворников ({@code wiperCold}) или пауза музыки при открытии
-     * двери ({@code pauseMediaOnDoor}).
-     */
+    /** Restore the door reactor when any saved door action is enabled. */
     private void restoreWiperColdState() {
         boolean wiper = prefs().getBoolean("wiperCold", false);
         boolean pauseMedia = prefs().getBoolean("pauseMediaOnDoor", false);
         Log.i(TAG, "restoreWiperColdState: wiperCold=" + wiper + " pauseMediaOnDoor=" + pauseMedia);
-        if (wiper || pauseMedia) {
+        boolean playMedia =
+                InfrastructureProfile.read(this).usesAccHooks()
+                        && prefs().getBoolean(
+                                        ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, false);
+        if (wiper || pauseMedia || playMedia) {
             Intent intent = new Intent(this, WiperColdService.class);
             startForegroundService(intent);
         }

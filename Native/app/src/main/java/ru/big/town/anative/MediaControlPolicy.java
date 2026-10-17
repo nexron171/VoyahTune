@@ -21,10 +21,12 @@ final class MediaControlPolicy {
     static final int KEY_NEXT = 87;
     static final int KEY_PREVIOUS = 88;
     static final int KEY_PAUSE = 127;
+    static final int KEY_PLAY = 126;
 
     enum Command {
         PLAY_PAUSE,
         PAUSE_ONLY,
+        PLAY_ONLY,
         NEXT,
         PREVIOUS
     }
@@ -104,6 +106,15 @@ final class MediaControlPolicy {
     static Plan plan(Candidate target, Command command) {
         if (target == null || command == null) return new Plan(Operation.NATIVE_QG, 0);
 
+        if (command == Command.PLAY_ONLY) {
+            if (target.playbackClass == STATE_ACTIVE) return new Plan(Operation.NONE, 0);
+            return new Plan(
+                    target.bridge || target.nativeQinggan
+                            ? Operation.KEYMANAGER_KEY
+                            : Operation.TARGET_KEY,
+                    KEY_PLAY);
+        }
+
         // PAUSE_ONLY must be deterministic. A known paused/stopped session is already done; an
         // unknown session gets idempotent PAUSE=127, never a blind toggle.
         if (command == Command.PAUSE_ONLY) {
@@ -126,6 +137,13 @@ final class MediaControlPolicy {
     static Plan radioPlan(Candidate target, Command command) {
         if (target == null || !"com.pateo.rdsapp".equals(target.packageName)) {
             return plan(target, command);
+        }
+        if (command == Command.PLAY_ONLY) {
+            return new Plan(
+                    target.playbackClass == STATE_ACTIVE
+                            ? Operation.NONE
+                            : Operation.TRANSPORT_PLAY,
+                    0);
         }
         if (command == Command.PAUSE_ONLY) {
             return new Plan(
@@ -151,6 +169,8 @@ final class MediaControlPolicy {
     static int keyFor(Command command) {
         if (command == null) return 0;
         switch (command) {
+            case PLAY_ONLY:
+                return KEY_PLAY;
             case PLAY_PAUSE:
                 return KEY_PLAY_PAUSE;
             case PAUSE_ONLY:
