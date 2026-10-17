@@ -1847,6 +1847,7 @@ public class SetModesService extends Service {
             service.releaseEmbeddedDisplaysOf(pkg);
         Intent update = new Intent(ACTION_EMBEDDED_TASK_LEFT);
         update.setPackage(RESTOREMODE_PKG);
+        update.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
         update.putExtra(EXTRA_EMBEDDED_TASK_PKG, pkg);
         update.putExtra(EXTRA_EMBEDDED_TASK_CLOSED, closed);
         try {
