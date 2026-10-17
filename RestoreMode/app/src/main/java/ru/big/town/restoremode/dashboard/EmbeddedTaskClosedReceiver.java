@@ -26,8 +26,14 @@ public class EmbeddedTaskClosedReceiver extends BroadcastReceiver {
         if (packageName == null || packageName.isEmpty()) {
             return;
         }
-        SharedPreferences preferences =
-                context.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
-        AppWidgetSessionStore.forgetPackage(context, preferences, packageName);
+        for (String name :
+                new String[] {
+                    DashboardProfile.SETTINGS_PREFERENCES,
+                    DashboardProfile.PASSENGER_PREFERENCES
+                }) {
+            SharedPreferences preferences =
+                    context.getSharedPreferences(name, Context.MODE_PRIVATE);
+            AppWidgetSessionStore.forgetPackage(context, preferences, packageName);
+        }
     }
 }
