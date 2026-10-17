@@ -41,7 +41,16 @@ fi
 # Keep legacy target recovery semantics.
 require_fixed "$SERVICE" 'timerHandler.postDelayed(driveFallbackRunnable, DRIVE_FALLBACK_MS);'
 require_fixed "$SERVICE" 'timerHandler.postDelayed(canbusReassertRunnable, CANBUS_REASSERT_DELAY_MS);'
-require_fixed "$SERVICE" 'if (autoLamp == lastAutoLamp && dippedBeam == lastDippedBeam && headLight == lastHeadLight)'
+python3 - "$SERVICE" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source = re.sub(r'\s+', ' ', Path(sys.argv[1]).read_text())
+condition = 'if (autoLamp == lastAutoLamp && dippedBeam == lastDippedBeam && headLight == lastHeadLight)'
+if condition not in source:
+    raise SystemExit('FAIL: repeated headlight feedback must be ignored')
+PY
 require_fixed "$SERVICE" 'if (since < HEADLIGHT_GUARD_MS)'
 require_fixed "$SERVICE" 'if (!everSent || desired != headlightsOn) commit(desired, "ext-sensor reason=" + reason);'
 require_fixed "$SERVICE" 'if (MANUAL_AUTO_GATE.blocksAntiAuto())'
