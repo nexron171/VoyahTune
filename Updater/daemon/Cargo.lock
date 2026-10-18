@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "release-core"
-version = "1.7.13"
+version = "1.8.0"
 dependencies = [
  "apksig",
  "hex",
