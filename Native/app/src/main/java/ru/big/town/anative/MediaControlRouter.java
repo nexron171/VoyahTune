@@ -113,6 +113,108 @@ final class MediaControlRouter {
         }
     }
 
+    /**
+     * Direct transport control for UI clients (the media widget). Unlike {@link #dispatch}, every
+     * command is executed against the selected session here; routes meant for the keymanager hook
+     * are not returned to a caller which cannot deliver them.
+     */
+    static boolean control(Context context, MediaControlPolicy.Command command) {
+        if (context == null || command == null) return false;
+        try {
+            MediaSessionManager msm =
+                    (MediaSessionManager) context.getSystemService(Context.MEDIA_SESSION_SERVICE);
+            if (msm == null) return false;
+            MediaController target = selectController(msm.getActiveSessions(null));
+            if (target == null) return false;
+            PlaybackState state = safePlaybackState(target);
+            MediaController.TransportControls controls = target.getTransportControls();
+            boolean handled;
+            switch (command) {
+                case PLAY_PAUSE:
+                    handled = isPlaying(state)
+                                    ? pauseTarget(target, controls, state)
+                                    : playTarget(target, controls, state);
+                    break;
+                case PAUSE_ONLY:
+                    handled = !isPlaying(state) || pauseTarget(target, controls, state);
+                    break;
+                case NEXT:
+                    handled =
+                            skipTarget(
+                                    target,
+                                    controls,
+                                    state,
+                                    PlaybackState.ACTION_SKIP_TO_NEXT,
+                                    MediaControlPolicy.KEY_NEXT,
+                                    true);
+                    break;
+                case PREVIOUS:
+                    handled =
+                            skipTarget(
+                                    target,
+                                    controls,
+                                    state,
+                                    PlaybackState.ACTION_SKIP_TO_PREVIOUS,
+                                    MediaControlPolicy.KEY_PREVIOUS,
+                                    false);
+                    break;
+                default:
+                    return false;
+            }
+            if (handled) rememberCommandTarget(target, command);
+            Log.i(TAG, "control " + command + " -> " + (handled ? "ok" : "not accepted")
+                    + " pkg=" + safePackage(target));
+            return handled;
+        } catch (Exception e) {
+            Log.w(TAG, "control " + command + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean isPlaying(PlaybackState state) {
+        return state != null && state.getState() == PlaybackState.STATE_PLAYING;
+    }
+
+    private static boolean pauseTarget(
+            MediaController target,
+            MediaController.TransportControls controls,
+            PlaybackState state) {
+        if (state != null && (state.getActions() & PlaybackState.ACTION_PAUSE) != 0) {
+            controls.pause();
+            return true;
+        }
+        return dispatchTargetedKey(target, MediaControlPolicy.KEY_PLAY_PAUSE);
+    }
+
+    private static boolean playTarget(
+            MediaController target,
+            MediaController.TransportControls controls,
+            PlaybackState state) {
+        if (state != null && (state.getActions() & PlaybackState.ACTION_PLAY) != 0) {
+            controls.play();
+            return true;
+        }
+        return dispatchTargetedKey(target, MediaControlPolicy.KEY_PLAY_PAUSE);
+    }
+
+    private static boolean skipTarget(
+            MediaController target,
+            MediaController.TransportControls controls,
+            PlaybackState state,
+            long action,
+            int keyCode,
+            boolean next) {
+        if (state != null && (state.getActions() & action) != 0) {
+            if (next) {
+                controls.skipToNext();
+            } else {
+                controls.skipToPrevious();
+            }
+            return true;
+        }
+        return dispatchTargetedKey(target, keyCode);
+    }
+
     /** Called by NowPlayingService when a controller genuinely enters an active playback state. */
     static void notePlaying(MediaController controller) {
         if (controller == null) return;

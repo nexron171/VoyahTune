@@ -13,6 +13,7 @@ import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
+import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -24,6 +25,14 @@ import java.util.List;
  */
 public class TileOrderStore {
     private static final String KEY = "tileOrder";
+    private static final String[] PASSENGER_WIDGETS = {
+        SystemWidgetLayout.CPU,
+        SystemWidgetLayout.RAM,
+        SystemWidgetLayout.CLEAR,
+        MediaWidgetLayout.MEDIA,
+        "tripCard",
+        "taskManagerTile"
+    };
 
     public static class Tile {
         public static final String TYPE_SPLIT = "split";
@@ -44,8 +53,18 @@ public class TileOrderStore {
 
     /** Загрузить список плиток, иначе создать дефолтный по существующим Store-ам. */
     public static List<Tile> load(SharedPreferences p) {
+        return load(p, p, false);
+    }
+
+    /**
+     * Loads a screen-scoped order. Splits and scenarios are definitions shared by both screens,
+     * so they are read from {@code content}; app widgets, shortcuts and dials come from
+     * {@code layout}.
+     */
+    public static List<Tile> load(
+            SharedPreferences layout, SharedPreferences content, boolean passenger) {
         List<Tile> out = new ArrayList<>();
-        String stored = p.getString(KEY, "");
+        String stored = layout.getString(KEY, "");
 
         if (!stored.isEmpty()) {
             // Есть сохранённый порядок — загружаем его
@@ -61,15 +80,31 @@ public class TileOrderStore {
                 }
             } catch (Exception ignored) {
             }
+        } else if (passenger) {
+            for (String app : AppShortcutStore.load(layout)) {
+                out.add(new Tile(Tile.TYPE_APP, app));
+            }
+            for (String widgetId : PASSENGER_WIDGETS) {
+                out.add(new Tile(Tile.TYPE_WIDGET, widgetId));
+            }
+            for (DialWidgetStore.Entry entry : DialWidgetStore.load(layout)) {
+                out.add(new Tile(Tile.TYPE_DIAL, entry.id));
+            }
+            for (AppWidgetStore.Entry entry : AppWidgetStore.load(layout)) {
+                out.add(new Tile(Tile.TYPE_APP_WIDGET, entry.id));
+            }
+            if (!out.isEmpty()) {
+                save(layout, out);
+            }
         } else {
             // Первый запуск — мигрируем существующие сплиты и приложения + добавляем виджеты
-            List<SplitStore.Preset> splits = SplitStore.load(p);
+            List<SplitStore.Preset> splits = SplitStore.load(content);
             for (SplitStore.Preset ps : splits) {
                 if (ps.ready()) {
                     out.add(new Tile(Tile.TYPE_SPLIT, ps.id));
                 }
             }
-            List<String> apps = AppShortcutStore.load(p);
+            List<String> apps = AppShortcutStore.load(layout);
             for (String app : apps) {
                 out.add(new Tile(Tile.TYPE_APP, app));
             }
@@ -90,7 +125,7 @@ public class TileOrderStore {
             out.add(new Tile(Tile.TYPE_WIDGET, "taskManagerTile"));
             // Сохранить миграцию
             if (!out.isEmpty()) {
-                save(p, out);
+                save(layout, out);
             }
         }
         return out;
@@ -116,9 +151,21 @@ public class TileOrderStore {
      * виджет включен).
      */
     static boolean exists(SharedPreferences p, Tile t, android.content.pm.PackageManager pm) {
+        return exists(p, p, t, pm, false);
+    }
+
+    static boolean exists(
+            SharedPreferences layout,
+            SharedPreferences content,
+            Tile t,
+            android.content.pm.PackageManager pm,
+            boolean passenger) {
         if (Tile.TYPE_SPLIT.equals(t.type)) {
+            if (passenger) {
+                return false;
+            }
             // Проверяем, что сплит с таким id существует и готов
-            List<SplitStore.Preset> splits = SplitStore.load(p);
+            List<SplitStore.Preset> splits = SplitStore.load(content);
             for (SplitStore.Preset ps : splits) {
                 if (ps.id.equals(t.id) && ps.ready()) {
                     return true;
@@ -128,7 +175,7 @@ public class TileOrderStore {
         } else if (Tile.TYPE_APP.equals(t.type)) {
             // Ярлык существует, только если приложение установлено и остаётся в списке ярлыков
             // главного экрана
-            if (!AppShortcutStore.load(p).contains(t.id)) {
+            if (!AppShortcutStore.load(layout).contains(t.id)) {
                 return false;
             }
             try {
@@ -139,9 +186,9 @@ public class TileOrderStore {
             }
         } else if (Tile.TYPE_WIDGET.equals(t.type)) {
             // Все известные виджеты считаем существующими (видимость управляется отдельно)
-            return isKnownWidget(t.id);
+            return isKnownWidget(t.id) && (!passenger || isPassengerWidget(t.id));
         } else if (Tile.TYPE_APP_WIDGET.equals(t.type)) {
-            AppWidgetStore.Entry entry = AppWidgetStore.find(p, t.id);
+            AppWidgetStore.Entry entry = AppWidgetStore.find(layout, t.id);
             if (entry == null) {
                 return false;
             }
@@ -156,15 +203,18 @@ public class TileOrderStore {
                 return false;
             }
         } else if (Tile.TYPE_DIAL.equals(t.type)) {
-            for (DialWidgetStore.Entry entry : DialWidgetStore.load(p)) {
+            for (DialWidgetStore.Entry entry : DialWidgetStore.load(layout)) {
                 if (entry.id.equals(t.id)) {
                     return true;
                 }
             }
             return false;
         } else if (Tile.TYPE_SCENARIO.equals(t.type)) {
+            if (passenger) {
+                return false;
+            }
             // Плитка существует, пока сценарий включён и она запрошена в его настройках.
-            ScenarioStore.Scenario scenario = ScenarioStore.find(p, t.id);
+            ScenarioStore.Scenario scenario = ScenarioStore.find(content, t.id);
             return scenario != null && scenario.enabled && scenario.showTile;
         }
         return false;
@@ -172,7 +222,9 @@ public class TileOrderStore {
 
     /** Проверить, это известный виджет. */
     static boolean isKnownWidget(String widgetId) {
-        if (VehicleWidgets.isWidget(widgetId) || SystemWidgetLayout.isWidget(widgetId)) {
+        if (VehicleWidgets.isWidget(widgetId)
+                || SystemWidgetLayout.isWidget(widgetId)
+                || MediaWidgetLayout.isWidget(widgetId)) {
             return true;
         }
         // Список всех известных виджетов на главном экране
@@ -196,53 +248,72 @@ public class TileOrderStore {
                 || widgetId.equals("taskManagerTile");
     }
 
+    private static boolean isPassengerWidget(String widgetId) {
+        for (String allowed : PASSENGER_WIDGETS) {
+            if (allowed.equals(widgetId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Синхронизировать список плиток: удалить несуществующие, добавить новые из SplitStore и
      * AppShortcutStore.
      */
     public static void sync(SharedPreferences p, android.content.pm.PackageManager pm) {
-        List<Tile> tiles = load(p);
+        sync(p, p, pm, false);
+    }
+
+    public static void sync(
+            SharedPreferences layout,
+            SharedPreferences content,
+            android.content.pm.PackageManager pm,
+            boolean passenger) {
+        List<Tile> tiles = load(layout, content, passenger);
 
         // Миграция прежней одиночной карточки набора в новый список.
-        List<DialWidgetStore.Entry> dials = DialWidgetStore.load(p);
+        List<DialWidgetStore.Entry> dials = DialWidgetStore.load(layout);
         if (dials.isEmpty()) {
-            String oldNumber = p.getString("dialWidgetNumber", "");
+            String oldNumber = layout.getString("dialWidgetNumber", "");
             if (!oldNumber.isEmpty()) {
                 DialWidgetStore.Entry entry = new DialWidgetStore.Entry();
-                entry.name = p.getString("dialWidgetContactName", "Набрать номер");
+                entry.name = layout.getString("dialWidgetContactName", "Набрать номер");
                 entry.number = oldNumber;
                 dials.add(entry);
-                DialWidgetStore.save(p, dials);
+                DialWidgetStore.save(layout, dials);
             }
         }
 
         // Удалить несуществующие элементы
         for (int i = tiles.size() - 1; i >= 0; i--) {
-            if (!exists(p, tiles.get(i), pm)) {
+            if (!exists(layout, content, tiles.get(i), pm, passenger)) {
                 tiles.remove(i);
             }
         }
 
         // Добавить новые сплиты
-        List<SplitStore.Preset> splits = SplitStore.load(p);
-        for (SplitStore.Preset ps : splits) {
-            if (ps.ready()) {
-                // Проверяем, есть ли он уже в списке плиток
-                boolean found = false;
-                for (Tile t : tiles) {
-                    if (Tile.TYPE_SPLIT.equals(t.type) && t.id.equals(ps.id)) {
-                        found = true;
-                        break;
+        if (!passenger) {
+            List<SplitStore.Preset> splits = SplitStore.load(content);
+            for (SplitStore.Preset ps : splits) {
+                if (ps.ready()) {
+                    // Проверяем, есть ли он уже в списке плиток
+                    boolean found = false;
+                    for (Tile t : tiles) {
+                        if (Tile.TYPE_SPLIT.equals(t.type) && t.id.equals(ps.id)) {
+                            found = true;
+                            break;
+                        }
                     }
-                }
-                if (!found) {
-                    tiles.add(new Tile(Tile.TYPE_SPLIT, ps.id));
+                    if (!found) {
+                        tiles.add(new Tile(Tile.TYPE_SPLIT, ps.id));
+                    }
                 }
             }
         }
 
         // Добавить новые приложения
-        List<String> apps = AppShortcutStore.load(p);
+        List<String> apps = AppShortcutStore.load(layout);
         for (String app : apps) {
             // Проверяем, есть ли оно уже в списке плиток
             boolean found = false;
@@ -258,32 +329,36 @@ public class TileOrderStore {
         }
 
         // Добавить известные виджеты, которые ещё не в списке
-        String[] knownWidgets = {
-            HeadlightWidgetLayout.ID,
-            SystemWidgetLayout.CPU,
-            SystemWidgetLayout.RAM,
-            SystemWidgetLayout.CLEAR,
-            "energyWidget",
-            "energyConsumptionWidget",
-            "energyTripWidget",
-            "tirePressureWidget",
-            "odometerWidget",
-            "tripCard",
-            "cardPowerHold",
-            "cardWashMode",
-            "cardAutoLight",
-            "cardPedestrian",
-            "cardForcedEv",
-            "cardSuspensionMaintenance",
-            "cardBatteryHeat",
-            "suspensionWidget",
-            "cardSettings",
-            "cardAndroidSettings",
-            "cardVoiceCommand",
-            "cardScenarios",
-            "launchAppsWidget",
-            "taskManagerTile"
-        };
+        String[] knownWidgets =
+                passenger
+                        ? PASSENGER_WIDGETS
+                        : new String[] {
+                            HeadlightWidgetLayout.ID,
+                            SystemWidgetLayout.CPU,
+                            SystemWidgetLayout.RAM,
+                            SystemWidgetLayout.CLEAR,
+                            MediaWidgetLayout.MEDIA,
+                            "energyWidget",
+                            "energyConsumptionWidget",
+                            "energyTripWidget",
+                            "tirePressureWidget",
+                            "odometerWidget",
+                            "tripCard",
+                            "cardPowerHold",
+                            "cardWashMode",
+                            "cardAutoLight",
+                            "cardPedestrian",
+                            "cardForcedEv",
+                            "cardSuspensionMaintenance",
+                            "cardBatteryHeat",
+                            "suspensionWidget",
+                            "cardSettings",
+                            "cardAndroidSettings",
+                            "cardVoiceCommand",
+                            "cardScenarios",
+                            "launchAppsWidget",
+                            "taskManagerTile"
+                        };
         for (String widgetId : knownWidgets) {
             boolean found = false;
             for (Tile t : tiles) {
@@ -312,7 +387,7 @@ public class TileOrderStore {
         }
 
         // Добавить новые виджеты приложений в конец, сохранив порядок уже существующих.
-        for (AppWidgetStore.Entry entry : AppWidgetStore.load(p)) {
+        for (AppWidgetStore.Entry entry : AppWidgetStore.load(layout)) {
             boolean found = false;
             for (Tile tile : tiles) {
                 if (Tile.TYPE_APP_WIDGET.equals(tile.type) && tile.id.equals(entry.id)) {
@@ -327,22 +402,24 @@ public class TileOrderStore {
 
         // Плитки сценариев: добавляются только для включённых сценариев с запрошенной плиткой
         // (несуществующие/выключенные уже удалены выше через exists()).
-        for (ScenarioStore.Scenario scenario : ScenarioStore.load(p)) {
-            if (!scenario.enabled || !scenario.showTile) {
-                continue;
-            }
-            boolean found = false;
-            for (Tile tile : tiles) {
-                if (Tile.TYPE_SCENARIO.equals(tile.type) && tile.id.equals(scenario.id)) {
-                    found = true;
-                    break;
+        if (!passenger) {
+            for (ScenarioStore.Scenario scenario : ScenarioStore.load(content)) {
+                if (!scenario.enabled || !scenario.showTile) {
+                    continue;
                 }
-            }
-            if (!found) {
-                tiles.add(new Tile(Tile.TYPE_SCENARIO, scenario.id));
+                boolean found = false;
+                for (Tile tile : tiles) {
+                    if (Tile.TYPE_SCENARIO.equals(tile.type) && tile.id.equals(scenario.id)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    tiles.add(new Tile(Tile.TYPE_SCENARIO, scenario.id));
+                }
             }
         }
 
-        save(p, tiles);
+        save(layout, tiles);
     }
 }

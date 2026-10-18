@@ -142,7 +142,7 @@ public class SplitHostActivity extends Activity {
         View container; // FrameLayout с весом и скруглением
         View view;
         Surface textureSurface;
-        CarPlayWidgetSurface parkedOutput;
+        EmbeddedWidgetSurface parkedOutput;
         VirtualDisplay vd;
         String pkg;
         int dpi; // 0 = дефолт дисплея (приходит из per-app настройки RestoreMode)
@@ -532,9 +532,9 @@ public class SplitHostActivity extends Activity {
 
     private void parkCarPlayOutput(Pane pane) {
         if (pane.vd == null || pane.parkedOutput != null) return;
-        CarPlayWidgetSurface parking = null;
+        EmbeddedWidgetSurface parking = null;
         try {
-            parking = new CarPlayWidgetSurface(pane.w, pane.h);
+            parking = new EmbeddedWidgetSurface(pane.w, pane.h);
             pane.vd.setSurface(parking.surface());
             pane.parkedOutput = parking;
         } catch (RuntimeException error) {

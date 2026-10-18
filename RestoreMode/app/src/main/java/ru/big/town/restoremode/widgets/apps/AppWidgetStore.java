@@ -199,6 +199,16 @@ public class AppWidgetStore {
     }
 
     public static Entry add(SharedPreferences preferences, String packageName) {
+        return add(preferences, packageName, "");
+    }
+
+    /**
+     * Adds a tile with a profile-specific ID prefix. Passenger widget IDs are distinguishable in
+     * the shared Native VirtualDisplay registry, so car screens cannot release each other's
+     * embedded tasks.
+     */
+    public static Entry add(
+            SharedPreferences preferences, String packageName, String widgetIdPrefix) {
         List<Entry> entries = load(preferences);
         if (CarPlayTarget.isCarPlay(packageName)) {
             for (Entry entry : entries) {
@@ -210,7 +220,8 @@ public class AppWidgetStore {
         if (entries.size() >= MAX_WIDGETS) {
             return null;
         }
-        Entry entry = new Entry(UUID.randomUUID().toString(), packageName);
+        String prefix = widgetIdPrefix == null ? "" : widgetIdPrefix;
+        Entry entry = new Entry(prefix + UUID.randomUUID(), packageName);
         entries.add(entry);
         save(preferences, entries);
         return entry;
