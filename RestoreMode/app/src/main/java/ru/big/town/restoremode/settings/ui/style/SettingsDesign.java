@@ -368,6 +368,7 @@ public final class SettingsDesign {
             "showSuspensionMaintenance",
             "showLaunchAppsWidget",
             "showSuspensionWidget",
+            "showHeadlightWidget",
             "show_cpuWidget",
             "show_ramWidget",
             "show_clearMemoryWidget",

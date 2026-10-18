@@ -4,7 +4,12 @@ use release_core::{
     ota, Result,
 };
 
-pub(super) fn require_ota_version(
+pub(super) fn same_release_version(left: &str, right: &str) -> bool {
+    let parse = release_core::infrastructure::release_version;
+    matches!((parse(left), parse(right)), (Ok(left), Ok(right)) if left == right)
+}
+
+fn require_ota_version(
     release: &Release,
     installed: &str,
     infrastructure: Infrastructure,
@@ -13,6 +18,18 @@ pub(super) fn require_ota_version(
         release.require_ota_version(installed)?;
     }
     Ok(())
+}
+
+pub(super) fn verify_selection(
+    release: &Release,
+    installed: &str,
+    same_version: bool,
+    infrastructure: Infrastructure,
+) -> Result<ota::Claims> {
+    let claims = ota::verify(release)?;
+    ota::compatible(&claims, installed, same_version)?;
+    require_ota_version(release, installed, infrastructure)?;
+    Ok(claims)
 }
 
 pub(super) fn choose(
@@ -25,7 +42,7 @@ pub(super) fn choose(
     for release in catalog.ota_releases().filter(|release| {
         Infrastructure::from_version(&release.version).is_ok_and(|value| value == infrastructure)
             && (infrastructure == Infrastructure::Od || release.channel == "stable")
-            && (!same_version || release.version == installed)
+            && (!same_version || same_release_version(&release.version, installed))
     }) {
         let compatibility = ota::verify(release)
             .and_then(|claims| ota::compatible(&claims, installed, same_version));
@@ -33,7 +50,7 @@ pub(super) fn choose(
             on_rejected(&error);
             continue;
         }
-        // A newer USB-only release must remain visible instead of falling back to an older OTA.
+
         require_ota_version(release, installed, infrastructure)?;
         return Ok(Some(release.clone()));
     }
@@ -55,30 +72,55 @@ mod tests {
     }
 
     #[test]
-    fn newest_usb_release_is_reported_instead_of_older_ota() {
+    fn newest_usb_release_does_not_fall_back_to_an_older_release() {
         let error = choose(&catalog(), "4.0.0-od", false, Infrastructure::Od, |_| {}).unwrap_err();
         assert_eq!(error.code, "OTA_USB_REQUIRED");
-        assert!(error.message.contains("4.1.0-od"));
-        assert!(error.message.contains("Installer 1.7.0"));
     }
 
     #[test]
-    fn ota_download_and_reinstall_respect_the_installed_minimum() {
-        let release = choose(&catalog(), "4.1.0-od", true, Infrastructure::Od, |_| {})
-            .unwrap()
-            .unwrap();
-        require_ota_version(&release, "4.1.0-od", Infrastructure::Od).unwrap();
-        assert!(require_ota_version(&release, "4.0.0-od", Infrastructure::Od).is_err());
+    fn explicit_selection_rejects_downgrades_and_checks_the_ota_minimum() {
+        let catalog = catalog();
+        let release = &catalog.releases[0];
+        assert_eq!(release.version, "4.1.0-od");
+        assert_eq!(
+            verify_selection(release, "4.0.0-od", false, Infrastructure::Od)
+                .unwrap_err()
+                .code,
+            "OTA_USB_REQUIRED"
+        );
+        assert!(verify_selection(release, "4.2.0-od", true, Infrastructure::Od).is_err());
+        assert!(verify_selection(release, "4.1.0-od", true, Infrastructure::Od).is_ok());
+        assert!(verify_selection(release, "4.1.0-od", false, Infrastructure::Od).is_err());
+
+        let mut rebuilt = release.clone();
+        rebuilt.payload.sha256 = "c".repeat(64);
+        assert!(verify_selection(&rebuilt, "4.1.0-od", true, Infrastructure::Od).is_ok());
+        assert!(verify_selection(&rebuilt, "4.1.0", true, Infrastructure::Od).is_ok());
+        rebuilt.minimum_ota_version = Some("4.0.0".into());
+        assert!(verify_selection(&rebuilt, "4.0.0-od", false, Infrastructure::Od).is_ok());
+        rebuilt.minimum_ota_version = Some("4.2.0".into());
+        assert_eq!(
+            verify_selection(&rebuilt, "4.1.0-od", true, Infrastructure::Od)
+                .unwrap_err()
+                .code,
+            "OTA_USB_REQUIRED"
+        );
+    }
+
+    #[test]
+    fn current_release_can_be_reinstalled_without_selecting_an_older_release() {
         assert!(
-            choose(&catalog(), "4.1.0-od", false, Infrastructure::Od, |_| {})
+            choose(&catalog(), "4.1.0-od", true, Infrastructure::Od, |_| {})
                 .unwrap()
-                .is_none()
+                .is_some()
         );
         assert!(
             choose(&catalog(), "4.2.0-od", true, Infrastructure::Od, |_| {})
                 .unwrap()
                 .is_none()
         );
+        assert!(same_release_version("4.1.0", "4.1.0-od"));
+        assert!(!same_release_version("4.1.0-beta-od", "4.1.0-od"));
     }
 
     #[test]

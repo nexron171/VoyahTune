@@ -32,13 +32,23 @@ fn validate_url(value: &str) -> Result<()> {
 
 impl Cache {
     pub fn catalog_settings(&self) -> Result<CatalogSettings> {
-        let settings = match fs::read(self.root.join("catalog-settings.json")) {
+        let mut settings = match fs::read(self.root.join("catalog-settings.json")) {
             Ok(bytes) => serde_json::from_slice::<CatalogSettings>(&bytes)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => CatalogSettings {
                 catalog_url: CATALOG_URL.into(),
             },
             Err(error) => return Err(error.into()),
         };
+        if CATALOG_URL == "https://voyahtune.ru/api/v1/releases"
+            && matches!(
+                settings.catalog_url.as_str(),
+                "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json"
+                    | "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index-v4.json"
+                    | "https://gitlab.com/openvoyah/voyahtune/-/raw/master/Releases/ota/index-v4.json"
+            )
+        {
+            settings.catalog_url = CATALOG_URL.into();
+        }
         validate_url(&settings.catalog_url)?;
         Ok(settings)
     }
@@ -71,20 +81,33 @@ mod tests {
     use crate::catalog::Catalog;
 
     #[test]
-    fn gitlab_default_does_not_reuse_the_old_github_cache() {
-        let directory = tempfile::tempdir().unwrap();
-        let cache = Cache {
-            root: directory.path().into(),
-        };
-        let mut previous = Catalog::empty();
-        previous.generated_at = "old-github-catalog".into();
-        recovery::write_json(&cache.root.join("ota-catalog.json"), &previous).unwrap();
-        cache
-            .save_catalog_url(
-                "https://gitlab.com/openvoyah/voyahtune/-/raw/master/Releases/ota/index-v4.json",
-            )
-            .unwrap();
-        assert!(cache.state(false).unwrap().catalog.generated_at.is_empty());
+    fn legacy_defaults_do_not_reuse_old_offline_catalogs() {
+        if CATALOG_URL != "https://voyahtune.ru/api/v1/releases" {
+            return;
+        }
+        for legacy in [
+            "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json",
+            "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index-v4.json",
+            "https://gitlab.com/openvoyah/voyahtune/-/raw/master/Releases/ota/index-v4.json",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let cache = Cache {
+                root: directory.path().into(),
+            };
+            let mut previous = Catalog::empty();
+            previous.generated_at = "old-catalog".into();
+            recovery::write_json(&cache.root.join("ota-catalog.json"), &previous).unwrap();
+            let keyed = format!("ota-catalog-{:x}.json", Sha256::digest(legacy.as_bytes()));
+            recovery::write_json(&cache.root.join(keyed), &previous).unwrap();
+            cache.save_catalog_url(legacy).unwrap();
+            assert_eq!(cache.catalog_settings().unwrap().catalog_url, CATALOG_URL);
+            let offline = cache
+                .state_with(|| Err(Error::new("NETWORK", "offline")), true)
+                .unwrap();
+            assert!(offline.catalog.releases.is_empty());
+            assert!(offline.catalog.generated_at.is_empty());
+            assert!(offline.warning.is_some());
+        }
     }
 
     #[test]

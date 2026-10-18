@@ -1,4 +1,4 @@
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 export type Action = 'install' | 'remove';
@@ -52,6 +52,11 @@ export interface Event {
   data: Record<string, any>;
 }
 export interface PayloadProgress { stage: string; bytes: number; total: number }
+export interface LogUploadProgress {
+  uploadedChunks: number;
+  totalChunks: number;
+  totalEvents: number;
+}
 export interface Release {
   installerUpdates?: { version: string; platform: string; url: string }[];
   version: string;
@@ -122,6 +127,27 @@ export async function finishInstallationSession(status: 'success' | 'error', rea
   await auditQueue;
   await raw('log_session_finish', { sessionId, status, reason });
   sessionId = null;
+}
+
+export async function uploadInstallationLogs(
+  recordedSessionId: string,
+  onProgress: (progress: LogUploadProgress) => void,
+): Promise<LogUploadProgress> {
+  await auditQueue;
+  if (fixture()) {
+    const progress = { uploadedChunks: 0, totalChunks: 4, totalEvents: 342 };
+    onProgress({ ...progress });
+    for (let index = 1; index <= progress.totalChunks; index += 1) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      progress.uploadedChunks = index;
+      onProgress({ ...progress });
+    }
+    return progress;
+  }
+  return raw<LogUploadProgress>('log_session_upload', {
+    sessionId: recordedSessionId,
+    onProgress: new Channel<LogUploadProgress>(onProgress),
+  });
 }
 
 export async function command<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {

@@ -6,7 +6,7 @@ use installer_core::{
     engine::{default_adb, Engine},
     engineering_menu,
     events::{Event, Events},
-    installation_log::{InstallationLog, Status as SessionStatus},
+    installation_log::{InstallationLog, Status as SessionStatus, UploadProgress},
     payload::{self, Payload},
     plans::{Action, Dns, Plan, Request},
     recovery, session, Error, Result,
@@ -20,6 +20,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 use tauri::{Emitter, Manager, State};
 
@@ -113,6 +114,25 @@ async fn log_session_finish(
     })
     .await
     .map_err(|e| Error::new("SESSION_FINISH", "Не удалось завершить журнал сессии").detail(e))?
+}
+
+#[tauri::command]
+async fn log_session_upload(
+    app: tauri::AppHandle,
+    session_id: String,
+    on_progress: tauri::ipc::Channel<UploadProgress>,
+) -> Result<UploadProgress> {
+    let session = installation_log(&app)
+        .filter(|session| session.info().session_id == session_id)
+        .ok_or_else(|| Error::new("SESSION_CHANGED", "Журнал текущей установки недоступен"))?;
+    let snapshot = session.upload_snapshot()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        snapshot.upload(|progress| {
+            let _ = on_progress.send(progress);
+        })
+    })
+    .await
+    .map_err(|error| Error::new("LOG_UPLOAD_FAILED", "Не удалось выгрузить логи").detail(error))?
 }
 
 fn record_engine_event(session: &Option<InstallationLog>, event: &Event) {
@@ -364,7 +384,11 @@ async fn open_release_link(app: tauri::AppHandle, url: String) -> Result<()> {
     .map_err(|e| Error::new("WORKER", "Не удалось открыть браузер").detail(e))?
 }
 #[tauri::command]
-async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Value> {
+async fn download_payload(
+    app: tauri::AppHandle,
+    version: String,
+    refresh: Option<bool>,
+) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -379,9 +403,14 @@ async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Valu
                 .ok_or_else(|| Error::new("RELEASE_MISSING", "Обновите список и выберите релиз"))?;
             (entry, state.cancel.clone().unwrap())
         };
-        let payload = Cache::user()?.download(&release, &cancel, &|event| {
-            let _ = handle.emit("payload-progress", event);
-        })?;
+        let payload = Cache::user()?.download_with_refresh(
+            &release,
+            refresh.unwrap_or(false),
+            &cancel,
+            &|event| {
+                let _ = handle.emit("payload-progress", event);
+            },
+        )?;
         select_payload(&handle, payload)
     })
     .await
@@ -391,13 +420,34 @@ async fn download_payload(app: tauri::AppHandle, version: String) -> Result<Valu
     result
 }
 #[tauri::command]
-async fn delete_payload(app: tauri::AppHandle, path: String) -> Result<Value> {
+async fn delete_payload(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    version: Option<String>,
+) -> Result<Value> {
     reserve(&app.state::<Runtime>())?;
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
-        let canonical = path.canonicalize()?;
-        Cache::user()?.remove(&path)?;
+        let cache = Cache::user()?;
+        let path = if let Some(version) = version {
+            let runtime = handle.state::<Runtime>();
+            let state = runtime.0.lock().unwrap();
+            let release = state
+                .catalog
+                .as_ref()
+                .and_then(|catalog| {
+                    catalog
+                        .releases
+                        .iter()
+                        .find(|release| release.version == version)
+                })
+                .ok_or_else(|| Error::new("RELEASE_MISSING", "Обновите список релизов"))?;
+            cache.root.join("payloads").join(&release.payload.sha256)
+        } else {
+            PathBuf::from(path.ok_or_else(|| Error::new("CACHE_PATH", "Не указан релиз"))?)
+        };
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        cache.remove(&path)?;
         let runtime = handle.state::<Runtime>();
         let mut state = runtime.0.lock().unwrap();
         let deselected = state.payload.as_ref() == Some(&canonical);
@@ -528,6 +578,57 @@ async fn disable_cunba(app: tauri::AppHandle, serial: String, confirmed: bool) -
 }
 
 #[tauri::command]
+async fn disable_voyahtweaks(
+    app: tauri::AppHandle,
+    serial: String,
+    confirmed: bool,
+) -> Result<Value> {
+    if !confirmed {
+        return Err(Error::new(
+            "CONFIRMATION_REQUIRED",
+            "Подтвердите отключение VoyahTweaks",
+        ));
+    }
+    reserve(&app.state::<Runtime>())?;
+    {
+        let runtime = app.state::<Runtime>();
+        let mut state = runtime.0.lock().unwrap();
+        state.prepared = None;
+        state.verification_pending = false;
+    }
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let payload = operation_payload(&handle, &serial, Action::Install)?;
+        let emitter = handle.clone();
+        let session_log = installation_log(&handle);
+        if let Some(session) = &session_log {
+            session.bind_device(&serial)?;
+        }
+        let result = installer_core::voyahtweaks_recovery::disable(
+            &default_adb(&bundle(&handle)?),
+            &payload,
+            &serial,
+            confirmed,
+            &recovery::data_dir()?,
+            Arc::new(move |event| {
+                record_engine_event(&session_log, event);
+                if let Some(report) = event.data.get("reportPath").and_then(Value::as_str) {
+                    emitter.state::<Runtime>().0.lock().unwrap().operation_dir =
+                        PathBuf::from(report).parent().map(PathBuf::from);
+                }
+                let _ = emitter.emit("installer-event", event);
+            }),
+        )?;
+        Ok(serde_json::to_value(result)?)
+    })
+    .await
+    .map_err(|error| Error::new("WORKER", "Ошибка отключения VoyahTweaks").detail(error))
+    .and_then(|result| result);
+    release(&app.state::<Runtime>());
+    result
+}
+
+#[tauri::command]
 async fn apply(app: tauri::AppHandle, request: Request, restore_cunba: Option<bool>) -> Result<()> {
     if !request.confirmed {
         return Err(Error::new("CONFIRMATION_REQUIRED", "Подтвердите план"));
@@ -586,14 +687,25 @@ async fn retry_verification(app: tauri::AppHandle) -> Result<()> {
     .map_err(|error| Error::new("WORKER", "Ошибка проверки").detail(error))
     .and_then(|value| value);
     // Keep the saved installation available after a transient USB failure.
-    if result.is_ok() {
+    if result.is_ok()
+        || result.as_ref().is_err_and(|error| {
+            matches!(
+                error.code.as_str(),
+                "READINESS_FAILED" | "NATIVE_DATA_INVALID"
+            )
+        })
+    {
         finish_verification_state(&app, &result);
     }
     release(&app.state::<Runtime>());
     result.map_err(|error| {
         if matches!(
             error.code.as_str(),
-            "READINESS_UNCONFIRMED" | "CANCELLED" | "VERIFICATION_NOT_ALLOWED"
+            "READINESS_UNCONFIRMED"
+                | "READINESS_FAILED"
+                | "NATIVE_DATA_INVALID"
+                | "CANCELLED"
+                | "VERIFICATION_NOT_ALLOWED"
         ) {
             error
         } else {
@@ -845,17 +957,48 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
     )?;
     Ok(path.display().to_string())
 }
+
+fn shutdown(app: &tauri::AppHandle) {
+    // Stop log collection first so it cannot restart the ADB server.
+    if let Some(session) = installation_log(app) {
+        let reason = json!({
+            "code": "USER_CLOSED",
+            "message": "Пользователь закрыл установщик до завершения установки",
+            "source": "lifecycle"
+        });
+        if let Err(error) = session.finish(SessionStatus::Error, Some(reason)) {
+            eprintln!("Installation log shutdown failed: {error}");
+        }
+    }
+
+    let result = (|| {
+        let adb = Adb::new(default_adb(&bundle(app)?), Events::quiet())?;
+        adb.run(&["kill-server"], None, Duration::from_secs(5))?
+            .checked("Не удалось остановить ADB при закрытии установщика")?;
+        Ok::<_, Error>(())
+    })();
+    if let Err(error) = result {
+        eprintln!("ADB shutdown failed: {error}");
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(Runtime::default())
         .setup(|_| {
-            InstallationLog::recover_interrupted(&session_logs_root()?)?;
+            let root = session_logs_root()?;
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(error) = InstallationLog::recover_interrupted(&root) {
+                    eprintln!("Installation log recovery failed: {error}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             log_session_begin,
             log_session_record,
             log_session_finish,
+            log_session_upload,
             engineering_code,
             release_catalog,
             catalog_settings,
@@ -869,6 +1012,7 @@ fn main() {
             apply,
             retry_verification,
             disable_cunba,
+            disable_voyahtweaks,
             cancel,
             resolve_canbus_conflict,
             operation_events,
@@ -885,15 +1029,15 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("Не удалось запустить VoyahTune Installer")
-        .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
                 if operation_busy(&app.state::<Runtime>()) {
                     api.prevent_exit();
                     let _ = app.emit("installer-close-blocked", ());
-                } else if let Some(session) = installation_log(app).filter(InstallationLog::active) {
-                    let _ = session.finish(SessionStatus::Error, Some(json!({"code":"USER_CLOSED","message":"Пользователь закрыл установщик до завершения установки","source":"lifecycle"})));
                 }
             }
+            tauri::RunEvent::Exit => shutdown(app),
+            _ => {}
         });
 }
 

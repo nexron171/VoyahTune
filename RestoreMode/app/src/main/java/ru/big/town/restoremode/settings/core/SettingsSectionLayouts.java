@@ -16,6 +16,7 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_forced_ev_suspension_maintenance),
         layout(R.layout.settings_main_launch_apps_suspension),
         layout(R.layout.settings_main_suspension_description),
+        layout(R.layout.settings_main_headlights),
         layout(R.layout.settings_main_carplay_heading),
         dynamic(DynamicContent.CARPLAY_WIDGETS),
         layout(R.layout.settings_main_energy_heading),
@@ -59,7 +60,8 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_vehicle_automation_heading),
         layout(R.layout.settings_vehicle_automation),
         layout(R.layout.settings_vehicle_special_modes_heading),
-        layout(R.layout.settings_vehicle_special_modes)
+        layout(R.layout.settings_vehicle_special_modes),
+        dynamic(DynamicContent.SCREEN_BRIGHTNESS)
     };
     private static final Item[] APPS = {
         layout(R.layout.settings_apps_intro),
@@ -131,7 +133,8 @@ public final class SettingsSectionLayouts {
         SHORTCUTS,
         FULLSCREEN_APPS,
         SPLITS,
-        APP_SCALE
+        APP_SCALE,
+        SCREEN_BRIGHTNESS
     }
 
     static final class Item {

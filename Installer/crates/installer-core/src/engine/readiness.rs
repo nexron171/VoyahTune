@@ -51,7 +51,17 @@ impl Stability {
 }
 
 impl Engine {
-    fn readiness_command(&self, script: &str, deadline: Instant) -> Result<String> {
+    pub(super) fn readiness_progress(&self, message: &str, deadline: Instant) -> Result<()> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        self.adb.events.emit(
+            "readiness-progress",
+            Some("verify"),
+            message,
+            json!({"deadlineUnixMs": chrono::Utc::now().timestamp_millis() + remaining.as_millis() as i64}),
+        )
+    }
+
+    pub(super) fn readiness_command(&self, script: &str, deadline: Instant) -> Result<String> {
         if self.cancel.load(Ordering::Relaxed) {
             return Err(Error::new("CANCELLED", "Проверка остановлена"));
         }
@@ -84,6 +94,7 @@ impl Engine {
     }
 
     fn readiness_sample(&self, deadline: Instant, start_sent: &mut bool) -> Result<String> {
+        self.readiness_progress("Проверяем USB-соединение с автомобилем", deadline)?;
         if self.readiness_command("id -u", deadline)? != "0" {
             let remaining = deadline.saturating_duration_since(Instant::now());
             self.adb
@@ -94,11 +105,17 @@ impl Engine {
                 "Ожидание ADB с системным доступом",
             ));
         }
+        self.readiness_progress("Ожидаем завершения загрузки Android", deadline)?;
         self.readiness_command(
             "[ \"$(getprop sys.boot_completed)\" = 1 ] && service check package | grep -q ': found'",
             deadline,
         )?;
+        self.readiness_progress("Проверяем отсутствие активной Cunba", deadline)?;
         crate::cunba::check(
+            &self.adb,
+            deadline.saturating_duration_since(Instant::now()),
+        )?;
+        crate::voyahtweaks::check(
             &self.adb,
             deadline.saturating_duration_since(Instant::now()),
         )?;
@@ -106,6 +123,7 @@ impl Engine {
             .map_err(|error| {
                 Error::new("HEALTH_PENDING", "Идёт другая операция установки или OTA").detail(error)
             })?;
+        self.readiness_progress("Проверяем запуск Native", deadline)?;
         let native = self
             .readiness_command(NATIVE_HEALTH, deadline)
             .map_err(|error| {
@@ -122,6 +140,7 @@ impl Engine {
                 self.warning(&error);
             }
         }
+        self.readiness_progress("Проверяем запуск RestoreMode", deadline)?;
         let restore = self
             .readiness_command(RESTORE_HEALTH, deadline)
             .map_err(|error| {
@@ -144,6 +163,7 @@ impl Engine {
             &self.payload.manifest.release_version,
             "Native",
         )?;
+        self.readiness_progress("Проверяем работу службы обновлений", deadline)?;
         let before = self.readiness_identity(deadline)?;
         self.readiness_command(
             "[ \"$(getprop init.svc.voyahtune_updater)\" = running ]",
@@ -184,15 +204,69 @@ impl Engine {
         Ok(format!("{after}\n{}", status["pid"]))
     }
 
-    fn readiness_diagnostics(&self) {
+    pub(super) fn readiness_diagnostics(&self) {
         for (name, command) in [
             ("logcat.txt", "logcat -b main -b system -b crash -d -t 400"),
+            ("native-data.txt", "ls -ldZ /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative; dumpsys package ru.big.town.anative; dumpsys activity exit-info ru.big.town.anative"),
             ("services.txt", "getprop init.svc.voyahtune_updater; pidof system_server; dumpsys activity services ru.big.town.anative"),
         ] {
             let output = self.readiness_command(command, Instant::now() + Duration::from_secs(6));
             let text = match output { Ok(text) => text, Err(error) => error.to_string() };
             let _ = fs::write(self.operation.dir.join(name), text);
         }
+    }
+
+    pub(super) fn verify_od_installation(&self) -> Result<()> {
+        let deadline = Instant::now() + DEADLINE;
+        self.prepare_od_native_data(deadline)?;
+        self.verify_od_readiness_until(deadline)
+    }
+
+    fn confirmed_readiness_failure(&self) -> Option<Error> {
+        let probe = format!("{}\nprobe_native_data", super::native_data::PROBE);
+        let state = self
+            .readiness_command(&probe, Instant::now() + Duration::from_secs(6))
+            .ok()?;
+        if state.starts_with("BROKEN|") || state.starts_with("UNREGISTERED|") {
+            return Some(
+                Error::new(
+                    "NATIVE_DATA_INVALID",
+                    "Повреждена регистрация или каталоги данных Native",
+                )
+                .detail(state)
+                .retry("Повторите установку для восстановления Native с сохранением данных."),
+            );
+        }
+        if !state.starts_with("READY|") {
+            return None;
+        }
+        for (command, key, component) in [
+            (NATIVE_HEALTH, "otaReady", "Native"),
+            (RESTORE_HEALTH, "ready", "RestoreMode"),
+        ] {
+            let output = self
+                .readiness_command(command, Instant::now() + Duration::from_secs(6))
+                .ok()?;
+            if bundle_value(&output, key).is_some()
+                && require_health(
+                    &output,
+                    key,
+                    &self.payload.manifest.release_version,
+                    component,
+                )
+                .is_err()
+            {
+                return Some(
+                    Error::new(
+                        "READINESS_FAILED",
+                        format!("{component} не подтвердил готовность после установки"),
+                    )
+                    .detail(output)
+                    .retry("Посмотрите диагностический отчёт и повторите установку."),
+                );
+            }
+        }
+        None
     }
 
     pub(super) fn verify_od_readiness(&self) -> Result<()> {
@@ -210,6 +284,7 @@ impl Engine {
             }
             let sample = self.readiness_sample(deadline, &mut start_sent).and_then(|identity| {
                 if verified_identity != identity {
+                    self.readiness_progress("Проверяем установленные файлы приложений", deadline)?;
                     for (package, artifact) in [(NATIVE, "native.apk"), (RESTORE, "restore_mode.apk")] {
                         self.readiness_command(
                             &active_apk_script(package, &self.payload.artifact(artifact)?.sha256, None),
@@ -228,16 +303,31 @@ impl Engine {
                 {
                     return Ok(())
                 }
-                Ok(_) => {}
+                Ok(_) => {
+                    self.readiness_progress(
+                        "Проверки пройдены. Наблюдаем стабильность служб",
+                        deadline,
+                    )?;
+                }
                 Err(error) if error.code == "CANCELLED" => return Err(error),
-                Err(error) if crate::cunba::is_blocking_error(&error) => return Err(error),
+                Err(error)
+                    if crate::cunba::is_blocking_error(&error)
+                        || crate::voyahtweaks::is_blocking_error(&error) =>
+                {
+                    return Err(error)
+                }
                 Err(error) => {
                     stability.reset();
                     self.adb.events.emit(
                         "readiness-pending",
                         Some("verify"),
                         &error.message,
-                        json!({"detail":error.detail}),
+                        json!({
+                            "detail": error.detail,
+                            "code": error.code,
+                            "deadlineUnixMs": chrono::Utc::now().timestamp_millis()
+                                + deadline.saturating_duration_since(Instant::now()).as_millis() as i64
+                        }),
                     )?;
                     last = error;
                 }
@@ -246,7 +336,15 @@ impl Engine {
                 Duration::from_secs(2).min(deadline.saturating_duration_since(Instant::now())),
             );
         }
+        self.readiness_progress(
+            "Время проверки истекло. Собираем диагностический отчёт",
+            deadline,
+        )?;
+        let confirmed_failure = self.confirmed_readiness_failure();
         self.readiness_diagnostics();
+        if let Some(error) = confirmed_failure {
+            return Err(error);
+        }
         Err(Error::new(
             "READINESS_UNCONFIRMED",
             format!(
@@ -330,6 +428,12 @@ root=$(dirname "$0")
 script=$(cat)
 printf '%s\n' "$script" >> "$root/commands"
 case "$script" in
+    *'VOYAHTWEAKS_FOUND'*)
+        if [ -e "$root/voyahtweaks" ]; then
+            printf 'VOYAHTWEAKS_FOUND\tloader\n'
+        else
+            echo VOYAHTWEAKS_CLEAR
+        fi ;;
     *'CUNBA_FOUND'*)
         if [ -e "$root/cunba" ]; then
             printf 'CUNBA_FOUND\tfile: /data/local/bin/frida-inject2\n'
@@ -338,6 +442,10 @@ case "$script" in
         else
             echo CUNBA_CLEAR
         fi ;;
+    *'probe_native_data'*)
+        if [ -e "$root/data-broken" ]; then echo 'BROKEN|boot:1:2|10068';
+        elif [ -e "$root/data-ready" ]; then echo 'READY|boot:1:2|10068';
+        else echo UNAVAILABLE; fi ;;
     *'id -u'*) echo 0 ;;
     *'am broadcast'*) touch "$root/started"; echo sent >> "$root/broadcasts"; exit 124 ;;
     *'--method health'*)
@@ -367,12 +475,14 @@ esac
             root: directory.path().into(),
             manifest: serde_json::from_value(manifest).unwrap(),
         };
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured_events = captured.clone();
         let mut engine = Engine::new(
             &adb_path,
             payload,
             "CAR-001",
             &directory.path().join("logs"),
-            Arc::new(|_| {}),
+            Arc::new(move |event| captured_events.lock().unwrap().push(event.clone())),
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
@@ -380,6 +490,7 @@ esac
         let deadline = Instant::now() + Duration::from_secs(60);
         for (marker, code) in [
             ("cunba", "CUNBA_DETECTED"),
+            ("voyahtweaks", "VOYAHTWEAKS_DETECTED"),
             ("cunba-check-failed", "CUNBA_CHECK_FAILED"),
         ] {
             fs::write(directory.path().join(marker), "").unwrap();
@@ -398,6 +509,25 @@ esac
         assert!(engine.readiness_sample(deadline, &mut sent).is_err());
         assert!(sent);
         assert!(engine.readiness_sample(deadline, &mut sent).is_ok());
+        let progress: Vec<_> = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.kind == "readiness-progress")
+            .cloned()
+            .collect();
+        for stage in [
+            "Проверяем запуск Native",
+            "Проверяем запуск RestoreMode",
+            "Проверяем работу службы обновлений",
+        ] {
+            assert!(progress
+                .iter()
+                .any(|event| event.message == stage && event.step_id.as_deref() == Some("verify")));
+        }
+        assert!(progress
+            .iter()
+            .all(|event| event.data["deadlineUnixMs"].as_i64().is_some()));
         assert_eq!(
             fs::read_to_string(directory.path().join("broadcasts")).unwrap(),
             "sent\n"
@@ -410,15 +540,23 @@ esac
             .unwrap_err();
         assert_eq!(error.code, "READINESS_UNCONFIRMED");
         assert!(error.retryable);
-        engine.finish_report(Err(error)).unwrap();
+        assert_eq!(
+            engine.finish_report(Err(error)).unwrap_err().code,
+            "READINESS_UNCONFIRMED"
+        );
         let report_path = engine.operation.dir.join("report.json");
         let warning_report: serde_json::Value =
             serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
-        assert_eq!(warning_report["success"], true);
+        assert_eq!(warning_report["success"], false);
         assert_eq!(warning_report["readinessConfirmed"], false);
-        assert_eq!(warning_report["warning"]["code"], "READINESS_UNCONFIRMED");
-        assert!(warning_report.get("error").is_none());
-        for code in ["ADB_COMMAND_FAILED", "CANCELLED"] {
+        assert_eq!(warning_report["error"]["code"], "READINESS_UNCONFIRMED");
+        assert!(warning_report.get("warning").is_none());
+        for code in [
+            "ADB_COMMAND_FAILED",
+            "CANCELLED",
+            "NATIVE_DATA_REPAIR_FAILED",
+            "READINESS_FAILED",
+        ] {
             let error = engine
                 .finish_report(Err(Error::new(code, "test")))
                 .unwrap_err();
@@ -428,6 +566,20 @@ esac
             assert_eq!(report["success"], false);
             assert!(report.get("warning").is_none());
         }
+        fs::write(directory.path().join("data-broken"), "").unwrap();
+        assert_eq!(
+            engine.confirmed_readiness_failure().unwrap().code,
+            "NATIVE_DATA_INVALID"
+        );
+        fs::remove_file(directory.path().join("data-broken")).unwrap();
+        fs::write(directory.path().join("data-ready"), "").unwrap();
+        fs::remove_file(directory.path().join("started")).unwrap();
+        assert_eq!(
+            engine.confirmed_readiness_failure().unwrap().code,
+            "READINESS_FAILED"
+        );
+        fs::write(directory.path().join("started"), "").unwrap();
+        assert!(engine.confirmed_readiness_failure().is_none());
         engine
             .verify_installed(Request {
                 action: Action::Install,

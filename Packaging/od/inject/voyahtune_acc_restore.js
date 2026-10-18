@@ -92,6 +92,7 @@ Java.perform(function () {
         var Binder = Java.use("android.os.Binder");
         var ActivityThread = Java.use("android.app.ActivityThread");
         var State = Java.use("com.qinggan.canbus.VehicleState");
+        var HashMap = Java.use("java.util.HashMap");
         var Task = Java.use(
             "com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl$ModeSettingTask"
         );
@@ -187,7 +188,17 @@ Java.perform(function () {
             var requestMetadata = Bundle.$new();
             requestMetadata.putBoolean("automatic", automatic);
             requestMetadata.putLong("revision", snapshot.getLong("revision"));
+            requestMetadata.putLong("cycle", snapshot.getLong("cycle"));
+            requestMetadata.putBoolean("smartSave", smartSaveActive(snapshot));
             return requestMetadata;
+        }
+        function smartSaveActive(snapshot) {
+            return (
+                snapshot.getInt("acc", -1) === 2 &&
+                snapshot.getBoolean("smartSaveEnabled", false) &&
+                String(snapshot.getString("energy")) === "SREV" &&
+                !snapshot.getBoolean("forcedEv", false)
+            );
         }
         function applyTargets(outgoing, targets) {
             if (targets.drive !== null) {
@@ -233,12 +244,40 @@ Java.perform(function () {
                     var requestMetadata = Java.cast(raw, Bundle);
                     if (requestMetadata.getBoolean("__vt_temporary_energy", false)) {
                         try {
-                            if (!temporaryEnergyAllowed(requestMetadata)) return false;
+                            if (!temporaryEnergyAllowed(requestMetadata)) {
+                                log("temporary energy cancelled: stale selection or ACC");
+                                return false;
+                            }
                         } catch (error) {
                             log("temporary energy cancelled: " + error);
                             return false;
                         }
                         sending.set(requestMetadata);
+                    } else if (requestMetadata.getBoolean("automatic", false)) {
+                        var omitEnergy = requestMetadata.getBoolean("smartSave", false);
+                        try {
+                            var snapshot = hook(
+                                ActivityThread.currentApplication().getContentResolver(),
+                                "snapshot"
+                            );
+                            omitEnergy =
+                                omitEnergy ||
+                                smartSaveActive(snapshot) ||
+                                snapshot.getInt("acc", -1) !== 2 ||
+                                String(snapshot.getLong("revision")) !==
+                                    String(requestMetadata.getLong("revision", -1)) ||
+                                String(snapshot.getLong("cycle")) !==
+                                    String(requestMetadata.getLong("cycle", -1));
+                        } catch (error) {
+                            omitEnergy = true;
+                            log("automatic energy unavailable: " + error);
+                        }
+                        if (omitEnergy) {
+                            values = HashMap.$new(values);
+                            if (values.remove(State.valueOf("IVI_SOC_MODESET")) !== null)
+                                log("automatic energy omitted before task execution");
+                            if (values.isEmpty()) return false;
+                        }
                     }
                     log(
                         "mode task origin=" +
@@ -392,13 +431,16 @@ Java.perform(function () {
                             var temporaryMetadata = Bundle.$new(vehicle);
                             temporaryMetadata.putBoolean("automatic", true);
                             sending.set(temporaryMetadata);
+                            log("temporary energy accepted mode=" + vehicle.getInt("IVI_SOC_MODESET"));
                         } catch (error) {
                             log("temporary energy rejected: " + error);
                             return -1;
                         }
                     } else if (automatic) {
+                        var requestMetadata = null;
                         try {
-                            var requestMetadata = metadata(this, true);
+                            requestMetadata = metadata(this, true);
+                            sending.set(requestMetadata);
                             var targets = selectedTargets(this.contentResolver.value);
                             if (targets !== null) {
                                 applyTargets(outgoing, targets);
@@ -406,11 +448,14 @@ Java.perform(function () {
                                     outgoing.putInt("ASC_MAINTAIN_SWITCH", targets.maintenance);
                                 targetDrive = targets.drive === null ? 0 : targets.drive[0];
                             }
-                            sending.set(requestMetadata);
                         } catch (error) {
-                            // Never claim success or remember an automatic event if settings are unavailable.
-                            sending.remove();
+                            if (requestMetadata === null) sending.remove();
                             log("automatic target unavailable: " + error);
+                        }
+                        if (requestMetadata !== null && requestMetadata.getBoolean("smartSave", false)) {
+                            if (outgoing.containsKey("IVI_SOC_MODESET"))
+                                log("automatic energy delegated to smart Save");
+                            outgoing.remove("IVI_SOC_MODESET");
                         }
                     } else if (
                         (taggedUser || nativeCaller) &&

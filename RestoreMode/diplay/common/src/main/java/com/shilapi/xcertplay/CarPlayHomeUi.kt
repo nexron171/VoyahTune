@@ -1,5 +1,8 @@
 package com.shilapi.xcertplay
 
+import android.app.Activity
+import android.app.ActivityManager
+import android.content.ComponentName
 import android.content.Context
 import android.view.View
 
@@ -31,6 +34,22 @@ object CarPlayHomeUi {
     @JvmStatic
     fun install(factory: Factory) {
         this.factory = factory
+    }
+
+    @JvmStatic
+    fun finishActivities(activity: Activity) {
+        val components = setOf(
+            ComponentName(activity, DiPlayActivity::class.java),
+            ComponentName(activity, CarPlayHostActivity::class.java),
+        )
+        // Settings and projection have separate tasks; either can be underneath the other.
+        for (task in activity.getSystemService(ActivityManager::class.java).appTasks) {
+            val info = task.taskInfo ?: continue
+            if (info.taskId != activity.taskId && info.baseIntent.component in components) {
+                task.finishAndRemoveTask()
+            }
+        }
+        activity.finishAndRemoveTask()
     }
 
     internal fun create(context: Context, actions: Actions): Screen? = factory?.create(context, actions)

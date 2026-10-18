@@ -1,5 +1,6 @@
 //! Durable installation sessions; device operations keep their independent operation IDs.
 mod logcat;
+mod spool;
 mod transport;
 
 use crate::{events::Event, recovery, Error, Result};
@@ -9,17 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Seek, SeekFrom, Write},
+    io::{BufReader, Read, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
-    time::Duration,
 };
-
-const INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -82,24 +80,48 @@ struct SpoolItem {
     request: Chunk,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadProgress {
+    pub uploaded_chunks: usize,
+    pub total_chunks: usize,
+    pub total_events: u64,
+}
+
+pub struct UploadSnapshot {
+    directory: PathBuf,
+    initial_session: SessionInfo,
+    chunks: Vec<PathBuf>,
+    progress: UploadProgress,
+    request_lock: Arc<Mutex<()>>,
+    _lock: File,
+}
+
+impl UploadSnapshot {
+    pub fn upload(self, progress: impl FnMut(UploadProgress)) -> Result<UploadProgress> {
+        transport::upload(self, progress)
+    }
+}
+
 struct State {
     info: SessionInfo,
     journal: File,
     sequence: u64,
-    offset: u64,
-    chunk_index: u64,
 }
 
 struct Shared {
     directory: PathBuf,
     state: Mutex<State>,
+    packing: Mutex<spool::Cursor>,
     stopping: AtomicBool,
     wake: Condvar,
-    timer: Mutex<()>,
+    pending_records: Mutex<u64>,
     finish_lock: Mutex<()>,
-    sender: mpsc::Sender<PathBuf>,
+    sender: mpsc::Sender<transport::Message>,
+    delivery: Mutex<Option<JoinHandle<()>>>,
+    request_lock: Arc<Mutex<()>>,
     collector: Mutex<Option<JoinHandle<()>>>,
-    ticker: Mutex<Option<JoinHandle<()>>>,
+    packer: Mutex<Option<JoinHandle<()>>>,
     _lock: File,
 }
 
@@ -108,7 +130,6 @@ pub struct InstallationLog(Arc<Shared>);
 
 impl InstallationLog {
     pub fn begin(root: &Path, adb_path: &Path, release: Option<Value>) -> Result<Self> {
-        Self::recover_interrupted(root)?;
         fs::create_dir_all(root)?;
         let directory = tempfile::Builder::new()
             .prefix("installation-")
@@ -150,47 +171,56 @@ impl InstallationLog {
             .append(true)
             .read(true)
             .open(directory.join("logs.jsonl"))?;
-        let (sender, receiver) = mpsc::channel();
         recovery::write_json(&directory.join("session-request.json"), &info)?;
-        transport::start(receiver, directory.clone(), info.clone());
+        let (sender, receiver) = mpsc::channel();
+        let request_lock = Arc::new(Mutex::new(()));
+        let delivery = transport::start(
+            receiver,
+            directory.clone(),
+            info.clone(),
+            request_lock.clone(),
+        );
         let session = Self(Arc::new(Shared {
             directory,
             state: Mutex::new(State {
                 info,
                 journal,
                 sequence: 0,
-                offset: 0,
-                chunk_index: 0,
             }),
+            packing: Mutex::new(spool::Cursor::default()),
             stopping: AtomicBool::new(false),
             wake: Condvar::new(),
-            timer: Mutex::new(()),
+            pending_records: Mutex::new(0),
             finish_lock: Mutex::new(()),
             sender,
+            delivery: Mutex::new(delivery),
+            request_lock,
             collector: Mutex::new(None),
-            ticker: Mutex::new(None),
+            packer: Mutex::new(None),
             _lock: lock,
         }));
         session.record("step", "session-started", None, None, json!({}))?;
         let weak = Arc::downgrade(&session.0);
-        *session.0.ticker.lock().unwrap() = Some(thread::spawn(move || loop {
+        *session.0.packer.lock().unwrap() = Some(thread::spawn(move || loop {
             let Some(shared) = weak.upgrade() else {
                 break;
             };
-            let guard = shared.timer.lock().unwrap();
-            let _wait = shared
+            let guard = shared.pending_records.lock().unwrap();
+            let mut pending = shared
                 .wake
-                .wait_timeout_while(guard, INTERVAL, |_| {
-                    !shared.stopping.load(Ordering::Acquire)
+                .wait_while(guard, |count| {
+                    *count < spool::MAX_CHUNK_RECORDS as u64
+                        && !shared.stopping.load(Ordering::Acquire)
                 })
                 .unwrap();
             if shared.stopping.load(Ordering::Acquire) {
                 break;
             }
+            *pending %= spool::MAX_CHUNK_RECORDS as u64;
+            drop(pending);
             if let Err(error) = InstallationLog(shared.clone()).cut() {
                 eprintln!("Session chunk failed: {error}");
             }
-            drop(_wait);
             drop(shared);
         }));
         *session.0.collector.lock().unwrap() = Some(logcat::start(
@@ -254,6 +284,12 @@ impl InstallationLog {
                 .push(json!({"timestamp":record.timestamp,"step":name,"error":record.data}));
             recovery::write_json(&self.0.directory.join("session.json"), &state.info)?;
         }
+        drop(state);
+        let mut pending = self.0.pending_records.lock().unwrap();
+        *pending += 1;
+        if *pending >= spool::MAX_CHUNK_RECORDS as u64 {
+            self.0.wake.notify_one();
+        }
         Ok(())
     }
 
@@ -316,48 +352,77 @@ impl InstallationLog {
     }
 
     fn cut(&self) -> Result<PathBuf> {
-        let mut state = self.0.state.lock().unwrap();
-        state.journal.sync_data()?;
-        let mut reader = BufReader::new(File::open(self.0.directory.join("logs.jsonl"))?);
-        reader.seek(SeekFrom::Start(state.offset))?;
-        let mut logs = Vec::new();
-        let mut end = state.offset;
-        for line in reader.lines() {
-            let line = line?;
-            end += line.len() as u64 + 1;
-            logs.push(serde_json::from_str::<Record>(&line)?);
-        }
-        state.info.updated_at = Utc::now().to_rfc3339();
-        let index = state.chunk_index + 1;
-        let request = Chunk {
-            schema_version: 1,
-            session_id: state.info.session_id.clone(),
-            chunk_id: format!("{}:{index}", state.info.session_id),
-            chunk_index: index,
-            created_at: Utc::now().to_rfc3339(),
-            final_chunk: state.info.status != Status::InProgress,
-            first_sequence: logs.first().map(|r| r.sequence),
-            last_sequence: logs.last().map(|r| r.sequence),
-            session: state.info.clone(),
-            logs,
-        };
-        let path = self
+        self.cut_with(false, |path| self.queue_automatic(path))
+    }
+
+    fn queue_automatic(&self, path: &Path) {
+        let _ = self
             .0
-            .directory
-            .join("outbox")
-            .join(format!("{index:012}.json"));
-        recovery::write_json(
-            &path,
-            &SpoolItem {
-                journal_end_offset: end,
-                request,
+            .sender
+            .send(transport::Message::Chunk(path.to_owned()));
+    }
+
+    pub fn upload_snapshot(&self) -> Result<UploadSnapshot> {
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.0.directory.join("delivery.lock"))?;
+        lock.try_lock_exclusive().map_err(|error| {
+            Error::new("LOG_UPLOAD_BUSY", "Выгрузка логов уже выполняется").detail(error)
+        })?;
+        let mut cursor = self.0.packing.lock().unwrap();
+        let (info, end, sequence) = {
+            let state = self.0.state.lock().unwrap();
+            (
+                state.info.clone(),
+                state.journal.metadata()?.len(),
+                state.sequence,
+            )
+        };
+        // Freeze the packet list before networking; collection can continue independently.
+        if cursor.offset < end {
+            File::open(self.0.directory.join("logs.jsonl"))?.sync_data()?;
+            spool::write_chunks(&self.0.directory, &info, &mut cursor, end, true, |path| {
+                self.queue_automatic(path)
+            })?;
+        }
+        let chunks: Vec<_> = (1..=cursor.index)
+            .map(|index| {
+                self.0
+                    .directory
+                    .join("outbox")
+                    .join(format!("{index:012}.json"))
+            })
+            .collect();
+        let initial_session = serde_json::from_reader(BufReader::new(File::open(
+            self.0.directory.join("session-request.json"),
+        )?))?;
+        Ok(UploadSnapshot {
+            directory: self.0.directory.clone(),
+            initial_session,
+            progress: UploadProgress {
+                uploaded_chunks: 0,
+                total_chunks: chunks.len(),
+                total_events: sequence,
             },
-        )?;
-        state.offset = end;
-        state.chunk_index = index;
-        recovery::write_json(&self.0.directory.join("session.json"), &state.info)?;
-        let _ = self.0.sender.send(path.clone());
-        Ok(path)
+            chunks,
+            request_lock: self.0.request_lock.clone(),
+            _lock: lock,
+        })
+    }
+
+    fn cut_with(&self, flush: bool, notify: impl FnMut(&Path)) -> Result<PathBuf> {
+        let mut cursor = self.0.packing.lock().unwrap();
+        let (info, end) = {
+            let mut state = self.0.state.lock().unwrap();
+            state.info.updated_at = Utc::now().to_rfc3339();
+            (state.info.clone(), state.journal.metadata()?.len())
+        };
+        // The snapshot ends at a complete record; appends continue while it is packed.
+        File::open(self.0.directory.join("logs.jsonl"))?.sync_data()?;
+        spool::write_chunks(&self.0.directory, &info, &mut cursor, end, flush, notify)
     }
 
     pub fn finish(&self, status: Status, reason: Option<Value>) -> Result<()> {
@@ -375,13 +440,25 @@ impl InstallationLog {
         } else {
             None
         };
-        self.0.stopping.store(true, Ordering::Release);
-        self.0.wake.notify_all();
-        for worker in [&self.0.collector, &self.0.ticker] {
+        {
+            let _pending = self.0.pending_records.lock().unwrap();
+            self.0.stopping.store(true, Ordering::Release);
+            self.0.wake.notify_all();
+        }
+        for worker in [&self.0.collector, &self.0.packer] {
             if let Some(handle) = worker.lock().unwrap().take() {
                 let _ = handle.join();
             }
         }
+        let result = self.finish_journal(status, reason);
+        let _ = self.0.sender.send(transport::Message::Finish);
+        if let Some(handle) = self.0.delivery.lock().unwrap().take() {
+            let _ = handle.join();
+        }
+        result.map(|_| ())
+    }
+
+    fn finish_journal(&self, status: Status, reason: Option<Value>) -> Result<PathBuf> {
         self.record(
             "step",
             "session-finished",
@@ -398,19 +475,25 @@ impl InstallationLog {
             state.info.updated_at = now;
             recovery::write_json(&self.0.directory.join("session.json"), &state.info)?;
         }
-        self.cut()?;
-        Ok(())
+        self.cut()
     }
 
     pub fn export(&self, destination: &Path) -> Result<()> {
-        let mut state = self.0.state.lock().unwrap();
-        state.journal.flush()?;
+        let _packing = self.0.packing.lock().unwrap();
+        let (info, end) = {
+            let state = self.0.state.lock().unwrap();
+            (state.info.clone(), state.journal.metadata()?.len())
+        };
         fs::create_dir_all(destination)?;
+        recovery::write_json(&destination.join("session.json"), &info)?;
+        let mut journal = File::open(self.0.directory.join("logs.jsonl"))?.take(end);
+        std::io::copy(
+            &mut journal,
+            &mut File::create(destination.join("logs.jsonl"))?,
+        )?;
         for name in [
-            "session.json",
             "session-request.json",
             "session.ack",
-            "logs.jsonl",
             "delivery-attempts.jsonl",
         ] {
             let source = self.0.directory.join(name);
@@ -448,21 +531,22 @@ impl InstallationLog {
             if lock.try_lock_exclusive().is_err() {
                 continue;
             }
-            let mut info: SessionInfo = serde_json::from_reader(File::open(&metadata)?)?;
+            let mut info: SessionInfo =
+                serde_json::from_reader(BufReader::new(File::open(&metadata)?))?;
             let was_active = info.status == Status::InProgress;
             let mut final_saved = false;
-            let mut index = 0;
-            let mut offset = 0;
+            let mut cursor = spool::Cursor::default();
             for item in fs::read_dir(directory.join("outbox"))? {
                 let path = item?.path();
                 if path.extension().is_some_and(|ext| ext == "json") {
-                    let spool: SpoolItem = serde_json::from_reader(File::open(path)?)?;
+                    let spool: SpoolItem =
+                        serde_json::from_reader(BufReader::new(File::open(path)?))?;
                     if spool.request.final_chunk {
                         final_saved = true;
                     }
-                    if spool.request.chunk_index > index {
-                        index = spool.request.chunk_index;
-                        offset = spool.journal_end_offset;
+                    if spool.request.chunk_index > cursor.index {
+                        cursor.index = spool.request.chunk_index;
+                        cursor.offset = spool.journal_end_offset;
                     }
                 }
             }
@@ -477,35 +561,13 @@ impl InstallationLog {
                 info.ended_at = Some(now.clone());
                 info.updated_at = now;
             }
-            let mut reader = BufReader::new(File::open(directory.join("logs.jsonl"))?);
-            reader.seek(SeekFrom::Start(offset))?;
-            let mut logs = Vec::new();
-            // A power loss may leave an incomplete last record; earlier records remain usable.
-            for line in reader.lines() {
-                if let Ok(record) = serde_json::from_str::<Record>(&line?) {
-                    logs.push(record);
-                }
-            }
-            let request = Chunk {
-                schema_version: 1,
-                session_id: info.session_id.clone(),
-                chunk_id: format!("{}:{}", info.session_id, index + 1),
-                chunk_index: index + 1,
-                created_at: Utc::now().to_rfc3339(),
-                final_chunk: true,
-                first_sequence: logs.first().map(|r| r.sequence),
-                last_sequence: logs.last().map(|r| r.sequence),
-                session: info.clone(),
-                logs,
-            };
-            recovery::write_json(
-                &directory
-                    .join("outbox")
-                    .join(format!("{:012}.json", index + 1)),
-                &SpoolItem {
-                    journal_end_offset: fs::metadata(directory.join("logs.jsonl"))?.len(),
-                    request,
-                },
+            spool::write_chunks(
+                &directory,
+                &info,
+                &mut cursor,
+                fs::metadata(directory.join("logs.jsonl"))?.len(),
+                true,
+                |_| {},
             )?;
             recovery::write_json(&metadata, &info)?;
         }
@@ -516,7 +578,7 @@ impl InstallationLog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
+    use std::time::Duration;
 
     fn begin(root: &Path) -> InstallationLog {
         InstallationLog::begin(
@@ -534,6 +596,22 @@ mod tests {
     }
 
     #[test]
+    fn starting_session_does_not_scan_previous_session_files() {
+        let root = tempfile::tempdir().unwrap();
+        let previous = root.path().join("previous-session");
+        fs::create_dir(&previous).unwrap();
+        fs::write(previous.join("session.json"), b"incomplete metadata").unwrap();
+
+        let session = begin(root.path());
+        assert!(session.active());
+        session.finish(Status::Success, None).unwrap();
+        assert_eq!(
+            fs::read(previous.join("session.json")).unwrap(),
+            b"incomplete metadata"
+        );
+    }
+
+    #[test]
     fn chunks_are_disjoint_and_final_chunk_contains_exact_reason() {
         let root = tempfile::tempdir().unwrap();
         let session = begin(root.path());
@@ -547,7 +625,7 @@ mod tests {
             )
             .unwrap();
         session.metadata(None, Some("on")).unwrap();
-        let first = read_chunk(session.cut().unwrap());
+        let first = read_chunk(session.cut_with(true, |_| {}).unwrap());
         session
             .record(
                 "step",
@@ -557,7 +635,7 @@ mod tests {
                 json!({"error":{"code":"CUNBA_DETECTED"}}),
             )
             .unwrap();
-        let second = read_chunk(session.cut().unwrap());
+        let second = read_chunk(session.cut_with(true, |_| {}).unwrap());
         assert!(first.last_sequence.unwrap() < second.first_sequence.unwrap());
         assert_eq!(second.session.vehicle_check_errors.len(), 1);
         assert_eq!(second.session.status, Status::InProgress);
@@ -583,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn retries_reuse_the_exact_chunk_and_wait_three_times() {
+    fn failed_chunk_is_attempted_once_and_kept_locally() {
         struct Failing {
             ids: Vec<String>,
         }
@@ -593,28 +671,20 @@ mod tests {
                 chunk: &Chunk,
                 timeout: Duration,
             ) -> std::result::Result<(), String> {
-                assert_eq!(timeout, Duration::from_secs(2));
+                assert_eq!(timeout, Duration::from_secs(10));
                 self.ids.push(serde_json::to_string(chunk).unwrap());
                 Err("network unavailable".into())
             }
         }
         let root = tempfile::tempdir().unwrap();
         let session = begin(root.path());
-        let chunk = read_chunk(session.cut().unwrap());
+        let chunk = read_chunk(session.cut_with(true, |_| {}).unwrap());
         let mut sender = Failing { ids: vec![] };
-        let sleeps = AtomicUsize::new(0);
         let mut attempts = vec![];
-        assert!(!transport::deliver(
-            &mut sender,
-            &chunk,
-            |duration| {
-                assert_eq!(duration, Duration::from_millis(300));
-                sleeps.fetch_add(1, Ordering::Relaxed);
-            },
-            |attempt, _| attempts.push(attempt)
-        ));
-        assert_eq!(attempts, vec![1, 2, 3, 4]);
-        assert_eq!(sleeps.load(Ordering::Relaxed), 3);
+        assert!(!transport::deliver(&mut sender, &chunk, |attempt, _| {
+            attempts.push(attempt)
+        }));
+        assert_eq!(attempts, vec![1]);
         assert!(sender.ids.iter().all(|id| id == &sender.ids[0]));
         session.finish(Status::Success, None).unwrap();
     }
@@ -631,7 +701,7 @@ mod tests {
         // Stop workers without writing a final status, emulating process termination.
         session.0.stopping.store(true, Ordering::Release);
         session.0.wake.notify_all();
-        for worker in [&session.0.collector, &session.0.ticker] {
+        for worker in [&session.0.collector, &session.0.packer] {
             if let Some(handle) = worker.lock().unwrap().take() {
                 handle.join().unwrap();
             }
@@ -639,7 +709,7 @@ mod tests {
         let directory = session.directory();
         drop(session);
         InstallationLog::recover_interrupted(root.path()).unwrap();
-        let final_chunk = read_chunk(directory.join("outbox/000000000001.json"));
+        let final_chunk = read_chunk(directory.join("outbox/000000000002.json"));
         assert_eq!(final_chunk.session.status, Status::Error);
         assert_eq!(
             final_chunk.session.final_reason.unwrap()["code"],
@@ -647,7 +717,7 @@ mod tests {
         );
         assert!(final_chunk.logs.iter().any(|log| log.kind == "logcat"));
         InstallationLog::recover_interrupted(root.path()).unwrap();
-        assert!(!directory.join("outbox/000000000002.json").exists());
+        assert!(!directory.join("outbox/000000000003.json").exists());
     }
 
     #[test]
@@ -676,18 +746,40 @@ mod tests {
     }
 
     #[test]
-    fn periodic_cuts_continue_after_failed_delivery() {
+    fn hundred_events_trigger_packing_and_terminal_remainder_is_flushed() {
         let root = tempfile::tempdir().unwrap();
         let session = begin(root.path());
-        thread::sleep(Duration::from_millis(5300));
-        let first = read_chunk(session.directory().join("outbox/000000000001.json"));
+        for _ in 0..98 {
+            session
+                .record("step", "progress", None, None, json!({"text":"line"}))
+                .unwrap();
+        }
+        session.cut().unwrap();
+        assert_eq!(
+            fs::read_dir(session.directory().join("outbox"))
+                .unwrap()
+                .count(),
+            0
+        );
+        session
+            .record("step", "progress", None, None, json!({"text":"line 100"}))
+            .unwrap();
+        let path = session.directory().join("outbox/000000000001.json");
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !path.exists() {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+        let first = read_chunk(path);
+        assert_eq!(first.logs.len(), 100);
         assert!(!first.final_chunk);
         session
             .record("user_choice", "continue", None, None, json!({}))
             .unwrap();
         session.finish(Status::Success, None).unwrap();
         let last = read_chunk(session.directory().join("outbox/000000000002.json"));
-        assert!(last.first_sequence > first.last_sequence);
+        assert_eq!(last.logs.len(), 2);
         assert!(last.final_chunk);
+        assert_eq!(last.first_sequence, Some(101));
     }
 }

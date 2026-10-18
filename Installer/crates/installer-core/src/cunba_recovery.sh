@@ -7,21 +7,105 @@ injector=/data/local/bin/frida-inject2
 startup=/system/etc/init.logcat.sh
 package=com.cunba.lantu.otan.motorstore
 
-fail() { echo "$*" >&2; exit 1; }
-exists() { [ -e "$1" ] || [ -L "$1" ]; }
-digest() { sha256sum "$1" | cut -d ' ' -f 1; }
-state() { printf '%s\n' "$1" > "$journal/state.new"; mv "$journal/state.new" "$journal/state"; sync; }
-require_root() { [ "$(id -u)" = 0 ] || fail 'Root access required'; }
+fail() {
+    echo "$*" >&2
+    exit 1
+}
+
+exists() {
+    [ -e "$1" ] || [ -L "$1" ]
+}
+
+digest() {
+    sha256sum "$1" | cut -d ' ' -f 1
+}
+
+__CUNBA_SYSTEM_ACCESS__
+
+replace_startup() (
+    replacement=$startup.voyahtune-cunba-new
+    [ ! -L "$startup" ] && [ -f "$startup" ] || fail 'Unsafe startup target'
+    [ ! -L "$replacement" ] || fail 'Unsafe startup replacement'
+    if exists "$replacement"; then
+        [ -f "$replacement" ] || fail 'Unsafe startup replacement'
+        rm "$replacement"
+    fi
+    trap 'rm -f "$replacement"' EXIT
+    cp -p "$journal/startup" "$replacement"
+    cat "$1" > "$replacement"
+    context=$(cat "$journal/startup-context" 2>/dev/null || ls -Zd "$startup" | awk '{print $1}')
+    case "$context" in u:object_r:*:*) ;; *) fail 'Startup SELinux context unavailable' ;; esac
+    chcon "$context" "$replacement"
+    [ "$(digest "$replacement")" = "$(digest "$1")" ] || fail 'Startup replacement verification failed'
+    sync
+    mv -f "$replacement" "$startup"
+    sync
+)
+
+state() {
+    printf '%s\n' "$1" > "$journal/state.new"
+    mv "$journal/state.new" "$journal/state"
+    sync
+}
+
+require_root() {
+    [ "$(id -u)" = 0 ] || fail 'Root access required'
+}
+
 require_lock() {
     [ ! -L "$lock" ] && [ -d "$lock" ] || fail 'Installation lock missing'
     [ "$(cat "$lock/owner")" = 'desktop:cunba-recovery' ] || fail 'Installation lock belongs to another operation'
 }
+
+acquire_lock() {
+    mkdir "$lock" 2>/dev/null || fail 'Another installation or OTA owns the device'
+    printf '%s' 'desktop:cunba-recovery' > "$lock/owner"
+    cat /proc/sys/kernel/random/boot_id > "$lock/boot"
+    chmod 700 "$lock"
+}
+
 release_lock() {
     require_lock
     rm "$lock/owner" "$lock/boot"
     rmdir "$lock"
     sync
 }
+
+verify_rollback() {
+    [ "$(cat "$journal/state")" = rolled-back ] || fail 'Recovery has not rolled back'
+    for path in "$journal/startup" "$journal/startup-before" "$journal/package-state" "$startup"; do
+        [ ! -L "$path" ] && [ -f "$path" ] || fail 'Rollback evidence missing or unsafe'
+    done
+    [ "$(digest "$journal/startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup backup changed'
+    [ "$(digest "$startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup not restored'
+    ! exists "$saved_directory" || fail 'Cunba directory still quarantined'
+    ! exists "$journal/injector" || fail 'Injector still quarantined'
+    if [ -f "$journal/directory-present" ]; then
+        [ ! -L "$source_directory" ] && [ -d "$source_directory" ] || fail 'Cunba directory not restored'
+    fi
+    if [ -f "$journal/injector-before" ]; then
+        [ ! -L "$injector" ] && [ -f "$injector" ] || fail 'Injector not restored'
+        [ "$(digest "$injector")" = "$(cat "$journal/injector-before")" ] || fail 'Injector changed after rollback'
+    fi
+    packages=$(pm list packages --user 0) || fail 'Package Manager unavailable'
+    printf '%s\n' "$packages" | grep -qx 'package:android' || fail 'Incomplete package inventory'
+    original_state=$(cat "$journal/package-state")
+    case "$original_state" in
+        absent)
+            if printf '%s\n' "$packages" | grep -qx "package:$package"; then
+                fail 'Package appeared after rollback'
+            fi
+            ;;
+        0|1|2|3|4)
+            printf '%s\n' "$packages" | grep -qx "package:$package" || fail 'Package not restored'
+            package_dump=$(dumpsys package "$package") || fail 'Package state unavailable'
+            restored_state=$(printf '%s\n' "$package_dump" | sed -n 's/.*User 0:.* enabled=\([0-4]\).*/\1/p')
+            [ "$restored_state" = "$original_state" ] || fail 'Package state not restored'
+            ;;
+        *) fail 'Original package state unavailable' ;;
+    esac
+}
+
 stop_processes() {
     # Only this loader and this exact executable belong to the supported recipe.
     for process in /proc/[0-9]*; do
@@ -47,9 +131,47 @@ stop_processes() {
         esac
     done
 }
+
+apply_changes() {
+    state applying
+    if [ "$(cat "$journal/package-state")" != absent ]; then
+        pm disable-user --user 0 "$package"
+        pm list packages -d --user 0 | grep -qx "package:$package" || fail 'Package was not disabled'
+    fi
+    stop_processes
+    if [ -f "$journal/startup" ]; then
+        [ "$(digest "$startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup changed after inspection'
+        : > "$journal/startup-write-started"
+        sync
+        replace_startup "$journal/startup-disabled"
+        [ "$(digest "$startup")" = "$(cat "$journal/startup-after")" ] || fail 'Startup verification failed'
+    fi
+    if [ -f "$journal/directory-present" ]; then
+        ! exists "$saved_directory" || fail 'Quarantine appeared during operation'
+        mv "$source_directory" "$saved_directory"
+    fi
+    if [ -f "$journal/injector-before" ]; then
+        [ "$(digest "$injector")" = "$(cat "$journal/injector-before")" ] || fail 'Injector changed after inspection'
+        mv "$injector" "$journal/injector"
+    fi
+    state reboot-pending
+}
+
 require_root
 [ ! -L "$journal" ] || fail 'Recovery journal is a symbolic link'
 case "$action" in
+    archive-rollback)
+        acquire_lock
+        trap 'release_lock' EXIT
+        verify_rollback
+        history=/data/local/voyahtune-cunba-history
+        [ ! -L "$history" ] || fail 'Recovery history is a symbolic link'
+        if ! exists "$history"; then mkdir -m 700 "$history"; fi
+        [ -d "$history" ] || fail 'Recovery history is not a directory'
+        archive=$(mktemp -d "$history/attempt.XXXXXX")
+        mv "$journal" "$archive/journal"
+        sync
+        ;;
     prepare)
         if [ -d "$journal" ]; then
             fail 'Previous recovery exists; restore or verify it first'
@@ -64,14 +186,7 @@ case "$action" in
         if exists "$injector"; then
             [ -f "$injector" ] || fail 'Injector is not a regular file'
         fi
-        # A shared OEM startup script is editable only when every matching line is understood.
-        if [ -f "$startup" ] && grep -Eiq 'cunba|frida-inject2|launcher2[.]bin|systemserver[.]bin' "$startup"; then
-            awk '
-                tolower($0) ~ /cunba|frida-inject2|launcher2[.]bin|systemserver[.]bin/ {
-                    if ($0 !~ /^[ \t]*(\/system\/bin\/sh|sh) \/sdcard\/Download\/cunba\/patch\/load[.]bin[ \t]*&?[ \t]*$/) exit 1
-                }
-            ' "$startup" || fail 'Unknown Cunba startup commands; automatic changes are not supported'
-        fi
+        [ -f "$startup" ] || fail 'Startup script missing'
         packages=$(pm list packages --user 0) || fail 'Package Manager unavailable'
         printf '%s\n' "$packages" | grep -qx 'package:android' || fail 'Incomplete package inventory'
         package_state=absent
@@ -80,10 +195,7 @@ case "$action" in
             package_state=$(printf '%s\n' "$package_dump" | sed -n 's/.*User 0:.* enabled=\([0-4]\).*/\1/p')
             case "$package_state" in 0|1|2|3|4) ;; *) fail 'Unknown package enabled state' ;; esac
         fi
-        mkdir "$lock" 2>/dev/null || fail 'Another installation or OTA owns the device'
-        printf '%s' 'desktop:cunba-recovery' > "$lock/owner"
-        cat /proc/sys/kernel/random/boot_id > "$lock/boot"
-        chmod 700 "$lock"
+        acquire_lock
         # If preparation fails before a journal exists, do not strand our lock.
         trap '[ -d "$journal" ] || release_lock' EXIT
         mkdir "$journal"
@@ -91,13 +203,15 @@ case "$action" in
         printf '%s\n' "$package_state" > "$journal/package-state"
         cat /proc/sys/kernel/random/boot_id > "$journal/boot-before"
         state preparing
-        if [ -f "$startup" ] && grep -Fq '/cunba/patch/load.bin' "$startup"; then
-            cp -p "$startup" "$journal/startup"
-            digest "$startup" > "$journal/startup-before"
-            awk '!/\/cunba\/patch\/load[.]bin/' "$startup" > "$journal/startup-disabled"
-            /system/bin/sh -n "$journal/startup-disabled"
-            digest "$journal/startup-disabled" > "$journal/startup-after"
-        fi
+        cp -p "$startup" "$journal/startup"
+        digest "$startup" > "$journal/startup-before"
+        [ "$(digest "$journal/startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup backup verification failed'
+        ls -Zd "$startup" | awk '{print $1}' > "$journal/startup-context"
+        cat > "$journal/startup-disabled" <<'VOYAHTUNE_CLEAN_STARTUP'
+__CUNBA_CLEAN_STARTUP__
+VOYAHTUNE_CLEAN_STARTUP
+        /system/bin/sh -n "$journal/startup-disabled"
+        digest "$journal/startup-disabled" > "$journal/startup-after"
         if [ -d "$source_directory" ]; then : > "$journal/directory-present"; fi
         if [ -f "$injector" ]; then digest "$injector" > "$journal/injector-before"; fi
         state prepared
@@ -106,29 +220,7 @@ case "$action" in
     apply)
         require_lock
         [ "$(cat "$journal/state")" = prepared ] || fail 'Recovery not prepared'
-        state applying
-        if [ "$(cat "$journal/package-state")" != absent ]; then
-            pm disable-user --user 0 "$package"
-            pm list packages -d --user 0 | grep -qx "package:$package" || fail 'Package was not disabled'
-        fi
-        stop_processes
-        if [ -f "$journal/startup" ]; then
-            [ "$(digest "$startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup changed after inspection'
-            # Write through the existing inode to preserve ownership, mode and SELinux label.
-            : > "$journal/startup-write-started"
-            sync
-            cat "$journal/startup-disabled" > "$startup"
-            [ "$(digest "$startup")" = "$(cat "$journal/startup-after")" ] || fail 'Startup verification failed'
-        fi
-        if [ -f "$journal/directory-present" ]; then
-            ! exists "$saved_directory" || fail 'Quarantine appeared during operation'
-            mv "$source_directory" "$saved_directory"
-        fi
-        if [ -f "$journal/injector-before" ]; then
-            [ "$(digest "$injector")" = "$(cat "$journal/injector-before")" ] || fail 'Injector changed after inspection'
-            mv "$injector" "$journal/injector"
-        fi
-        state reboot-pending
+        with_writable_system apply_changes
         ;;
     commit)
         require_lock
@@ -157,7 +249,8 @@ case "$action" in
         fi
         if [ -f "$journal/startup-write-started" ]; then
             if [ "$(digest "$startup")" != "$(cat "$journal/startup-before")" ]; then
-                cat "$journal/startup" > "$startup"
+                [ "$(digest "$journal/startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup backup changed'
+                with_writable_system replace_startup "$journal/startup"
             fi
             [ "$(digest "$startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup rollback verification failed'
         fi

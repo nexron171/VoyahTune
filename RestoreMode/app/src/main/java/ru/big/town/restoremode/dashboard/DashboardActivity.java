@@ -88,6 +88,8 @@ import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.energy.TripWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
+import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetDashboard;
+import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetDashboard;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.suspension.SuspensionWidgetView;
@@ -313,6 +315,14 @@ public class DashboardActivity extends AppCompatActivity {
         }
     }
 
+    private final HeadlightWidgetDashboard headlightWidget = new HeadlightWidgetDashboard(this);
+
+    private void watchHeadlightWidget() {
+        headlightWidget.watch(
+                suspensionScreenResumed
+                        && sharedPreferences.getBoolean(HeadlightWidgetLayout.VISIBLE, false));
+    }
+
     private SuspensionWidgetView suspensionWidgetView;
     private Bundle suspensionState = new Bundle();
     private boolean suspensionScreenResumed;
@@ -362,6 +372,7 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void watchSuspension() {
+        watchHeadlightWidget();
         uiHandler.removeCallbacks(suspensionUnavailable);
         boolean show =
                 suspensionScreenResumed
@@ -941,6 +952,7 @@ public class DashboardActivity extends AppCompatActivity {
         connectionReported = false;
         GlobalVars.clientDisconnected();
         systemWidgets.disconnected();
+        headlightWidget.disconnected();
     }
 
     private void restartMessengerBinding(String reason) {
@@ -1641,6 +1653,8 @@ public class DashboardActivity extends AppCompatActivity {
             return sharedPreferences.getBoolean("show_" + widgetId, false);
         }
         switch (widgetId) {
+            case HeadlightWidgetLayout.ID:
+                return sharedPreferences.getBoolean(HeadlightWidgetLayout.VISIBLE, false);
             case "suspensionWidget":
                 return sharedPreferences.getBoolean("showSuspensionWidget", false);
             case "tripCard":
@@ -1748,6 +1762,10 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (HeadlightWidgetLayout.ID.equals(widgetId)) {
+            return TileSizeStore.dimensions(
+                    sharedPreferences, widgetId, HeadlightWidgetLayout.DEFAULT_WIDTH, 1);
+        }
         if (SystemWidgetLayout.isWidget(widgetId)) {
             return TileSizeStore.dimensions(sharedPreferences, widgetId, 1, 1);
         }
@@ -1823,6 +1841,7 @@ public class DashboardActivity extends AppCompatActivity {
         energyWidgetViews.clear();
         systemWidgets.resetViews();
         mediaWidgets.resetViews();
+        headlightWidget.resetView();
         watchSuspension();
         watchEnergyWidgets();
         appWidgetTileViews.clear();
@@ -2039,6 +2058,9 @@ public class DashboardActivity extends AppCompatActivity {
                         } else {
                             widgetView = energyView;
                         }
+                        break;
+                    case HeadlightWidgetLayout.ID:
+                        widgetView = headlightWidget.create(getWidgetDimensions(tile.id)[0]);
                         break;
                     case "suspensionWidget":
                         suspensionWidgetView =
@@ -3751,6 +3773,7 @@ public class DashboardActivity extends AppCompatActivity {
         destroyed = true;
         systemWidgets.close();
         mediaWidgets.close();
+        headlightWidget.close();
         if (tileDragController != null) {
             tileDragController.cancel();
         }

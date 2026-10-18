@@ -368,7 +368,12 @@ function fixture(options = {}) {
         "java.util.HashMap": {
             $new(v) {
                 const m = new Map(v);
-                m.remove = (k) => m.delete(k);
+                m.remove = (key) => {
+                    const value = m.get(key) ?? null;
+                    m.delete(key);
+                    return value;
+                };
+                m.isEmpty = () => m.size === 0;
                 return m;
             }
         },
@@ -883,3 +888,74 @@ console.log(
     assert.equal(scenario.sends.at(-1).vehicle.values.__vt_auto, undefined);
 }
 console.log("PASS: Native Drive restoration preserves explicit mode selection");
+
+for (const energyEnabled of [0, 1]) {
+    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true, energyEnabled });
+    scenario.request(temporaryEnergy(scenario, 2), 10);
+    scenario.execute(0);
+    scenario.frame([0]);
+    scenario.frame();
+    assert.equal(scenario.sends.at(-1).vehicle.values.IVI_SOC_MODESET, undefined);
+    assert.equal(scenario.sends.at(-1).vehicle.values.DRIVING_MODE_SET, 3);
+    scenario.execute(scenario.tasks.length - 1);
+    assert.equal(scenario.executed.has("IVI_SOC_MODESET"), false);
+    assert.equal(scenario.energy, "SREV");
+    scenario.bootstrap();
+    assert.equal(scenario.sends.at(-1).vehicle.values.IVI_SOC_MODESET, undefined);
+}
+console.log("PASS: Smart Save owns energy across ACC and startup restoration");
+
+for (const caller of [10, 20]) {
+    const scenario = fixture({ acc: 2, energy: "SREV", energyEnabled: 1, smartSaveEnabled: true });
+    scenario.request({ IVI_SOC_MODESET: 4, DRIVING_MODE_SET: 2, __vt_auto: true }, caller);
+    assert.equal(scenario.sends[0].vehicle.values.IVI_SOC_MODESET, undefined);
+    scenario.execute(0);
+    assert.equal(scenario.executed.has("IVI_SOC_MODESET"), false);
+    assert.equal(scenario.executed.get("DRIVING_MODE_SET"), 3);
+    assert.equal(scenario.revision, 0);
+}
+
+for (const changeBeforeExecution of [
+    scenario => { scenario.smartSaveEnabled = true; },
+    scenario => { scenario.revision++; },
+    scenario => { scenario.cycle++; },
+    scenario => { scenario.providerAcc = 0; },
+    scenario => { scenario.queryError = true; }
+]) {
+    const scenario = fixture({ acc: 2, energy: "SREV", energyEnabled: 1 });
+    scenario.bootstrap();
+    assert.equal(scenario.sends[0].vehicle.values.IVI_SOC_MODESET, 4);
+    changeBeforeExecution(scenario);
+    scenario.execute(0);
+    assert.equal(scenario.executed.has("IVI_SOC_MODESET"), false);
+    assert.equal(scenario.executed.get("DRIVING_MODE_SET"), 3);
+    assert.equal(scenario.tasks[0].values.get("IVI_SOC_MODESET"), 4, "filter a task-local copy");
+}
+
+{
+    const scenario = fixture({ acc: 2, enabled: 0, energy: "SREV", energyEnabled: 1 });
+    scenario.bootstrap();
+    scenario.smartSaveEnabled = true;
+    assert.equal(scenario.execute(0), false, "an energy-only automatic task becomes empty");
+    assert.equal(scenario.executed, undefined);
+}
+
+for (const caller of [10, 20]) {
+    const scenario = fixture({ acc: 2, energy: "SREV", energyEnabled: 1, smartSaveEnabled: true });
+    scenario.request({ IVI_SOC_MODESET: 4, __vt_user: true }, caller);
+    scenario.execute(0);
+    assert.equal(scenario.executed.get("IVI_SOC_MODESET"), 4, "explicit Save must be preserved");
+    assert.equal(scenario.revision, 1);
+}
+
+for (const options of [
+    { smartSaveEnabled: false, energy: "SREV", expected: 4 },
+    { smartSaveEnabled: true, energy: "EV", expected: 2 },
+    { smartSaveEnabled: true, energy: "SREV", forcedEv: 1, expected: 5 }
+]) {
+    const scenario = fixture({ acc: 2, energyEnabled: 1, ...options });
+    scenario.bootstrap();
+    scenario.execute(0);
+    assert.equal(scenario.executed.get("IVI_SOC_MODESET"), options.expected);
+}
+console.log("PASS: automatic energy ownership, queued task filtering and explicit mode priority");

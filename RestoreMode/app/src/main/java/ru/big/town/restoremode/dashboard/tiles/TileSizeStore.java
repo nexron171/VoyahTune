@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
+import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
@@ -41,6 +42,9 @@ public class TileSizeStore {
             return defaultValue;
         }
         int value = prefs.getInt(WIDTH_KEY_PREFIX + widgetId, defaultValue);
+        if (HeadlightWidgetLayout.ID.equals(widgetId)) {
+            return HeadlightWidgetLayout.width(value);
+        }
         if (SystemWidgetLayout.isWidget(widgetId)) {
             return SystemWidgetLayout.width(widgetId, value);
         }
@@ -56,6 +60,10 @@ public class TileSizeStore {
         if (prefs == null || widgetId == null) {
             return defaultValue;
         }
+        if (HeadlightWidgetLayout.ID.equals(widgetId)) {
+            return HeadlightWidgetLayout.height(
+                    width(prefs, widgetId, HeadlightWidgetLayout.DEFAULT_WIDTH));
+        }
         if (SystemWidgetLayout.isWidget(widgetId)) {
             return 1;
         }
@@ -70,6 +78,14 @@ public class TileSizeStore {
 
     public static void setWidth(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) {
+            return;
+        }
+        if (HeadlightWidgetLayout.ID.equals(widgetId)) {
+            int columns = HeadlightWidgetLayout.width(value);
+            prefs.edit()
+                    .putInt(WIDTH_KEY_PREFIX + widgetId, columns)
+                    .putInt(HEIGHT_KEY_PREFIX + widgetId, HeadlightWidgetLayout.height(columns))
+                    .apply();
             return;
         }
         if (SystemWidgetLayout.isWidget(widgetId)) {
@@ -103,6 +119,9 @@ public class TileSizeStore {
 
     public static void setHeight(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) {
+            return;
+        }
+        if (HeadlightWidgetLayout.ID.equals(widgetId)) {
             return;
         }
         prefs.edit()

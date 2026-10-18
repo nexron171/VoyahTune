@@ -23,6 +23,8 @@ import java.io.File
 
 /** SharedPreferences persistence for the accessory identity and paired controllers. */
 object AirPlayPersistence {
+    const val DEFAULT_MEDIA_BUFFER_MILLIS = 1000
+
     /** 0 uses usage-based routing; 1–20 select stream types supported by the head unit. */
     val AUDIO_CHANNELS = 0..20
     private const val PREFS = "xcertplay_airplay"
@@ -640,7 +642,7 @@ object AirPlayPersistence {
     /** Music buffer for the session's transport. Wireless and wired USB have separate settings. */
     fun loadMediaBufferMillis(context: Context, wireless: Boolean): Int {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val shared = prefs.getInt(KEY_MEDIA_BUFFER_MS, com.shilapi.xcertplay.media.MediaAudioBuffer.DEFAULT_MILLIS)
+        val shared = prefs.getInt(KEY_MEDIA_BUFFER_MS, DEFAULT_MEDIA_BUFFER_MILLIS)
         return if (wireless) {
             com.shilapi.xcertplay.media.MediaAudioBuffer.sanitizeWireless(shared)
         } else {

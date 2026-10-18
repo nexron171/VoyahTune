@@ -17,7 +17,9 @@ use std::{
 };
 
 const SCRIPT: &str = include_str!("cunba_recovery.sh");
+const CLEAN_STARTUP: &str = include_str!("../../../../Packaging/od/system/init.logcat.original.sh");
 const RESTORE_SCRIPT: &str = include_str!("cunba_restore.sh");
+const SYSTEM_ACCESS: &str = include_str!("cunba_system_access.sh");
 const JOURNAL: &str = "/data/local/voyahtune-cunba-recovery";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -34,13 +36,61 @@ fn progress(adb: &Adb, message: &str) -> Result<()> {
         .emit("cunba-progress", Some("cunba"), message, json!({}))
 }
 
-fn execute(adb: &Adb, action: &str) -> Result<()> {
+fn command_script(action: &str, template: &str) -> String {
     // action is selected by the orchestrator, never supplied by the caller.
-    adb.shell(
-        &format!("action={action}\n{SCRIPT}"),
-        Duration::from_secs(90),
-    )?;
+    format!(
+        "action={action}\n{}",
+        template
+            .replace("__CUNBA_CLEAN_STARTUP__", CLEAN_STARTUP.trim_end())
+            .replace("__CUNBA_SYSTEM_ACCESS__", SYSTEM_ACCESS.trim_end())
+    )
+}
+
+fn execute(adb: &Adb, action: &str) -> Result<()> {
+    adb.shell(&command_script(action, SCRIPT), Duration::from_secs(90))?;
     Ok(())
+}
+
+fn prepare_retry(adb: &Adb) -> Result<()> {
+    let state = adb.shell(
+        &format!("if [ -d {JOURNAL} ]; then cat {JOURNAL}/state; else echo absent; fi"),
+        COMMAND_TIMEOUT,
+    )?;
+    match state.as_str() {
+        "absent" => return Ok(()),
+        "preparing" | "prepared" | "applying" | "reboot-pending" | "restoring" => {
+            progress(
+                adb,
+                "Восстанавливаем изменения прерванного отключения Cunba",
+            )?;
+            execute(adb, "rollback").map_err(|error| {
+                Error::new(
+                    "CUNBA_ROLLBACK_REQUIRED",
+                    "Не удалось восстановить Cunba. Установка заблокирована; восстановите USB-соединение и повторите восстановление.",
+                )
+                .detail(error)
+            })?;
+        }
+        "rolled-back" => {}
+        _ => {
+            return Err(Error::new(
+                "CUNBA_RECOVERY_EXISTS",
+                "Сохранена предыдущая операция Cunba. Установка заблокирована до повторной диагностики.",
+            )
+            .detail(state));
+        }
+    }
+    progress(
+        adb,
+        "Проверяем восстановление Cunba и сохраняем предыдущий журнал",
+    )?;
+    execute(adb, "archive-rollback").map_err(|error| {
+        Error::new(
+            "CUNBA_ROLLBACK_REQUIRED",
+            "Не удалось подтвердить восстановление Cunba. Предыдущий журнал сохранён, повторное отключение заблокировано.",
+        )
+        .detail(error)
+    })
 }
 
 fn root(adb: &Adb) -> Result<()> {
@@ -79,7 +129,7 @@ fn observe_boot(adb: &Adb, previous_boot: &str, restoring: bool) -> Result<()> {
                 ));
             }
             if restoring {
-                adb.shell(&format!("action=verify\n{RESTORE_SCRIPT}"), COMMAND_TIMEOUT)?;
+                adb.shell(&command_script("verify", RESTORE_SCRIPT), COMMAND_TIMEOUT)?;
             } else {
                 let output = adb.shell(
                     &format!("CUNBA_RECOVERY_VERIFY=1\n{}", cunba::PROBE),
@@ -170,25 +220,7 @@ pub fn disable(
     let result: Result<()> = (|| {
         adb.require_single()?;
         root(&adb)?;
-        let state = adb.shell(
-            &format!("if [ -d {JOURNAL} ]; then cat {JOURNAL}/state; else echo absent; fi"),
-            COMMAND_TIMEOUT,
-        )?;
-        if state != "absent" {
-            // An interrupted operation must restore first; never overwrite its backups.
-            if matches!(
-                state.as_str(),
-                "preparing" | "prepared" | "applying" | "reboot-pending" | "restoring"
-            ) {
-                progress(
-                    &adb,
-                    "Восстанавливаем изменения прерванного отключения Cunba",
-                )?;
-                execute(&adb, "rollback").map_err(|error| Error::new("CUNBA_ROLLBACK_REQUIRED", "Не удалось восстановить Cunba. Установка заблокирована; восстановите USB-соединение и повторите восстановление.").detail(error))?;
-            }
-            return Err(Error::new("CUNBA_RECOVERY_EXISTS", "Сохранена предыдущая операция Cunba. Установка заблокирована до повторной диагностики.")
-            .detail(state));
-        }
+        prepare_retry(&adb)?;
         match cunba::check(&adb, COMMAND_TIMEOUT) {
             Err(error) if error.code == "CUNBA_DETECTED" => {}
             Err(error) => return Err(error),
@@ -206,7 +238,10 @@ pub fn disable(
         let result: Result<()> = (|| {
             execute(&adb, "prepare")?;
             let boot = adb.shell("cat /proc/sys/kernel/random/boot_id", COMMAND_TIMEOUT)?;
-            progress(&adb, "Отключаем загрузчик и инжекторы Cunba")?;
+            progress(
+                &adb,
+                "Проверяем запись в системный раздел и отключаем Cunba",
+            )?;
             execute(&adb, "apply")?;
             progress(&adb, "Перезагружаем ГУ для выгрузки внедрённых агентов")?;
             adb.run(&["reboot"], None, Duration::from_secs(15))?
@@ -234,10 +269,18 @@ pub fn disable(
                     Ok::<_, Error>(())
                 })();
                 Err(match rollback {
-                Ok(()) => Error::new("CUNBA_DISABLE_FAILED", "Не удалось отключить Cunba. Изменения восстановлены, дальнейшая установка невозможна.").detail(error),
-                Err(rollback_error) => Error::new("CUNBA_ROLLBACK_REQUIRED", "Не удалось завершить откат Cunba. Установка заблокирована; восстановите USB-соединение и повторите восстановление.")
+                    Ok(()) => Error::new(
+                        "CUNBA_DISABLE_FAILED",
+                        "Не удалось отключить Cunba. Изменения восстановлены, установка не продолжена.",
+                    )
+                    .detail(error)
+                    .retry("Устраните указанную причину и повторите отключение Cunba."),
+                    Err(rollback_error) => Error::new(
+                        "CUNBA_ROLLBACK_REQUIRED",
+                        "Не удалось завершить откат Cunba. Установка заблокирована; восстановите USB-соединение и повторите восстановление.",
+                    )
                     .detail(format!("Отключение: {error}\nОткат: {rollback_error}")),
-            })
+                })
             }
         };
         result
@@ -264,7 +307,7 @@ pub fn restoration_available(adb: &Adb, infrastructure: Infrastructure) -> Resul
         return Ok(false);
     }
     Ok(adb.shell(
-        &format!("action=available\n{RESTORE_SCRIPT}"),
+        &command_script("available", RESTORE_SCRIPT),
         COMMAND_TIMEOUT,
     )? == "RESTORE_AVAILABLE")
 }
@@ -296,10 +339,7 @@ pub fn restore_after_removal(
                 }
 
                 adb.shell("[ \"$(getprop sys.boot_completed)\" = 1 ] && service check package | grep -q ': found'", COMMAND_TIMEOUT)?;
-                adb.shell(
-                    &format!("action=removed\n{RESTORE_SCRIPT}"),
-                    COMMAND_TIMEOUT,
-                )?;
+                adb.shell(&command_script("removed", RESTORE_SCRIPT), COMMAND_TIMEOUT)?;
                 Ok::<_, Error>(())
             })();
             if ready.is_ok() {
@@ -320,10 +360,8 @@ pub fn restore_after_removal(
             adb,
             "Восстанавливаем файлы, автозапуск и состояние пакета Cunba",
         )?;
-        // The remover has already requested writable system access; retry after its reboot.
-        let _ = adb.run(&["remount"], None, COMMAND_TIMEOUT);
         adb.shell(
-            &format!("action=restore\n{RESTORE_SCRIPT}"),
+            &command_script("restore", RESTORE_SCRIPT),
             Duration::from_secs(90),
         )?;
         let boot = adb.shell("cat /proc/sys/kernel/random/boot_id", COMMAND_TIMEOUT)?;
@@ -331,8 +369,113 @@ pub fn restore_after_removal(
         adb.run(&["reboot"], None, Duration::from_secs(15))?
             .checked("Не удалось перезагрузить ГУ")?;
         observe_boot(adb, &boot, true)?;
-        adb.shell(&format!("action=finish\n{RESTORE_SCRIPT}"), COMMAND_TIMEOUT)?;
+        adb.shell(&command_script("finish", RESTORE_SCRIPT), COMMAND_TIMEOUT)?;
         Ok(())
     })();
-    result.map_err(|error: Error| Error::new("CUNBA_RESTORE_FAILED", "VoyahTune удалён, но восстановление Cunba не подтверждено. Сохранённые данные оставлены на ГУ; повторите удаление с восстановлением после устранения причины.").detail(error))
+    result.map_err(|error: Error| {
+        Error::new(
+            "CUNBA_RESTORE_FAILED",
+            "VoyahTune удалён, но восстановление Cunba не подтверждено. Сохранённые данные оставлены на ГУ; повторите удаление с восстановлением после устранения причины.",
+        )
+        .detail(error)
+    })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    fn retry_fixture(state: &str, failed_action: &str) -> (tempfile::TempDir, Adb) {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("state"), state).unwrap();
+        fs::write(directory.path().join("failed-action"), failed_action).unwrap();
+        fs::write(directory.path().join("calls"), "").unwrap();
+        let executable = directory.path().join("adb");
+        fs::write(
+            &executable,
+            r#"#!/bin/sh
+set -eu
+directory=$(dirname "$0")
+script=$(cat)
+action=$(printf '%s\n' "$script" | sed -n 's/^action=//p')
+if [ -z "$action" ]; then cat "$directory/state"; exit 0; fi
+printf '%s\n' "$action" >> "$directory/calls"
+[ "$action" != "$(cat "$directory/failed-action")" ] || exit 1
+case "$action" in
+    rollback) echo rolled-back > "$directory/state" ;;
+    archive-rollback) echo absent > "$directory/state" ;;
+    *) exit 1 ;;
+esac
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let adb = Adb::new(executable, Events::quiet()).unwrap();
+        (directory, adb)
+    }
+
+    #[test]
+    fn retry_archives_completed_rollback_without_repeating_it() {
+        let (directory, adb) = retry_fixture("rolled-back", "");
+        prepare_retry(&adb).unwrap();
+        assert_eq!(
+            fs::read_to_string(directory.path().join("calls")).unwrap(),
+            "archive-rollback\n"
+        );
+    }
+
+    #[test]
+    fn retry_recovers_interrupted_operations_before_archiving() {
+        for state in [
+            "preparing",
+            "prepared",
+            "applying",
+            "reboot-pending",
+            "restoring",
+        ] {
+            let (directory, adb) = retry_fixture(state, "");
+            prepare_retry(&adb).unwrap();
+            assert_eq!(
+                fs::read_to_string(directory.path().join("calls")).unwrap(),
+                "rollback\narchive-rollback\n",
+                "{state}"
+            );
+        }
+    }
+
+    #[test]
+    fn retry_stops_when_rollback_or_archive_verification_fails() {
+        for (state, failed_action, calls) in [
+            ("applying", "rollback", "rollback\n"),
+            ("rolled-back", "archive-rollback", "archive-rollback\n"),
+        ] {
+            let (directory, adb) = retry_fixture(state, failed_action);
+            assert_eq!(
+                prepare_retry(&adb).unwrap_err().code,
+                "CUNBA_ROLLBACK_REQUIRED"
+            );
+            assert_eq!(
+                fs::read_to_string(directory.path().join("calls")).unwrap(),
+                calls
+            );
+        }
+    }
+
+    #[test]
+    fn retry_leaves_absent_verified_and_unknown_operations_untouched() {
+        for state in ["absent", "verified", "restored", "unknown"] {
+            let (directory, adb) = retry_fixture(state, "");
+            let result = prepare_retry(&adb);
+            if state == "absent" {
+                result.unwrap();
+            } else {
+                assert_eq!(result.unwrap_err().code, "CUNBA_RECOVERY_EXISTS");
+            }
+            assert_eq!(
+                fs::read_to_string(directory.path().join("calls")).unwrap(),
+                ""
+            );
+        }
+    }
 }

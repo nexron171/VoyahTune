@@ -39,38 +39,32 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Сервис автоматического управления фарами по датчику освещённости.
  *
- * Архитектура (event-driven + safety-poll), проверена декомпиляцией CarSignalService:
- *  - Подписка: регистрируем колбэк через TX=46 (writeStrongBinder). Сервис ONEWAY-ом
- *    вызывает onLightSensorChanged(level) — код 13, дескриптор
- *    "com.qinggan.carsignal.ICarSignalServiceCallBack". Это мгновенный push при
- *    изменении освещённости (уровень 0–7).
- *  - Начальный снимок: колбэки дельта-only (не отдают текущее значение), поэтому
- *    при коннекте читаем уровень через TX=36 (getLightSensorLevel) на отдельной
- *    single-flight очереди, не блокируя main и bind/reconnect.
- *  - Safety-poll каждые SAFETY_POLL_MS: фоновая страховка от пропущенного события.
- *    CAN шлёт только при реальной смене цели — холостого трафика не создаёт.
- *  - Общая process-wide подписка CanBusEventHub фильтрует LightStatus и только VehicleState 1072,
- *    а КПП приходит через GearStateController. Когда BCM сам уходит в «авто» (перевод КПП
- *    в Drive сбрасывает фары в auto) при нашем таргете «ближний» — возвращаем ближний.
- *    Ручное «выкл» (autoLamp=0, headLight=0) под правило не попадает — уважается.
- *    Guard HEADLIGHT_GUARD_MS отсекает «эхо» собственных команд. Так заменяется
- *    старый 10-сек поллинг без спама в CAN.
- *    (CarSignalService.onHeadLightStateChanged код 7 НЕ реагирует на смену режима —
- *    проверено на живой машине, поэтому используем именно CanBus.)
- *  - Дебаунс SENSOR_DEBOUNCE_MS на значения датчика — гасит дребезг.
- *  - force-init через FORCE_INIT_MS после коннекта — гарантия установки режима
- *    на холодном старте (колбэки дельта-only).
+ * <p>Архитектура (event-driven + safety-poll), проверена декомпиляцией CarSignalService: -
+ * Подписка: регистрируем колбэк через TX=46 (writeStrongBinder). Сервис ONEWAY-ом вызывает
+ * onLightSensorChanged(level) — код 13, дескриптор
+ * "com.qinggan.carsignal.ICarSignalServiceCallBack". Это мгновенный push при изменении освещённости
+ * (уровень 0–7). - Начальный снимок: колбэки дельта-only (не отдают текущее значение), поэтому при
+ * коннекте читаем уровень через TX=36 (getLightSensorLevel) на отдельной single-flight очереди, не
+ * блокируя main и bind/reconnect. - Safety-poll каждые SAFETY_POLL_MS: фоновая страховка от
+ * пропущенного события. CAN шлёт только при реальной смене цели — холостого трафика не создаёт. -
+ * Общая process-wide подписка CanBusEventHub фильтрует LightStatus и только VehicleState 1072, а
+ * КПП приходит через GearStateController. Когда BCM сам уходит в «авто» (перевод КПП в Drive
+ * сбрасывает фары в auto) при нашем таргете «ближний» — возвращаем ближний. Ручное «выкл»
+ * (autoLamp=0, headLight=0) под правило не попадает — уважается. Guard HEADLIGHT_GUARD_MS отсекает
+ * «эхо» собственных команд. Так заменяется старый 10-сек поллинг без спама в CAN.
+ * (CarSignalService.onHeadLightStateChanged код 7 НЕ реагирует на смену режима — проверено на живой
+ * машине, поэтому используем именно CanBus.) - Дебаунс SENSOR_DEBOUNCE_MS на значения датчика —
+ * гасит дребезг. - force-init через FORCE_INIT_MS после коннекта — гарантия установки режима на
+ * холодном старте (колбэки дельта-only).
  *
- * Решение по уровню → режим (с гистерезисом):
- *  - level ≤ threshOn  → ближний свет (setHeadlights(true))
- *  - level > threshOff → наружный свет выключен (setHeadlights(false))
- *  - между порогами    → не менять
+ * <p>Решение по уровню → режим (с гистерезисом): - level ≤ threshOn → ближний свет
+ * (setHeadlights(true)) - level > threshOff → наружный свет выключен (setHeadlights(false)) - между
+ * порогами → не менять
  *
- * CAN отправляется ТОЛЬКО при изменении целевого режима по датчику (heartbeat убран).
- * Следствие: если пользователь ночью вручную переключил фары в иной режим, он
- * сохранится до фактического изменения освещённости — это намеренно.
- * Ограничение железа: при подрулевом в AUTO VehicleCanBusTool может отменять
- * команду ближнего света.
+ * <p>CAN отправляется ТОЛЬКО при изменении целевого режима по датчику (heartbeat убран). Следствие:
+ * если пользователь ночью вручную переключил фары в иной режим, он сохранится до фактического
+ * изменения освещённости — это намеренно. Ограничение железа: при подрулевом в AUTO
+ * VehicleCanBusTool может отменять команду ближнего света.
  */
 public class LightSensorService extends Service {
 
@@ -78,7 +72,7 @@ public class LightSensorService extends Service {
     private static final String CHANNEL_ID = "light_sensor_channel";
 
     // Broadcast для передачи уровня датчика в RestoreMode UI
-    public static final String ACTION_LUX_UPDATE  = "ru.big.town.anative.LUX_UPDATE";
+    public static final String ACTION_LUX_UPDATE = "ru.big.town.anative.LUX_UPDATE";
     public static final String EXTRA_SENSOR_LEVEL = "sensorLevel"; // int, -1 если датчик недоступен
 
     /** Наблюдатель уровня датчика для сценариев; вызывается на главном потоке сервиса. */
@@ -87,13 +81,22 @@ public class LightSensorService extends Service {
     }
 
     private static final String PREF_OBSERVE_ONLY = "lightObserveOnly";
+    private static final String ACTION_RESUME_AUTOMATIC = "ru.big.town.anative.RESUME_AUTO_LIGHT";
+
+    static void resumeAutomaticControl(Context context) {
+        context.startForegroundService(
+                new Intent(context, LightSensorService.class).setAction(ACTION_RESUME_AUTOMATIC));
+    }
+
     private static final CopyOnWriteArrayList<LevelListener> LEVEL_LISTENERS =
             new CopyOnWriteArrayList<>();
+
     /**
-     * Наблюдение без управления фарами: сервис держит подписку на датчик и публикует уровень,
-     * но не отправляет команды света. Включается, когда уровень нужен только сценариям.
+     * Наблюдение без управления фарами: сервис держит подписку на датчик и публикует уровень, но не
+     * отправляет команды света. Включается, когда уровень нужен только сценариям.
      */
     private static volatile boolean observeOnly;
+
     private static volatile int lastKnownLevel = -1;
 
     /** Последний известный уровень 0–7 или -1, если датчик недоступен. */
@@ -110,14 +113,16 @@ public class LightSensorService extends Service {
     }
 
     /**
-     * Режим «только наблюдение». Флаг живёт в процессе и дублируется в NativePrefs, чтобы
-     * пережить перезапуск сервиса системой.
+     * Режим «только наблюдение». Флаг живёт в процессе и дублируется в NativePrefs, чтобы пережить
+     * перезапуск сервиса системой.
      */
     static void setObserveOnly(Context context, boolean value) {
         observeOnly = value;
         if (context != null) {
             context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
-                    .edit().putBoolean(PREF_OBSERVE_ONLY, value).apply();
+                    .edit()
+                    .putBoolean(PREF_OBSERVE_ONLY, value)
+                    .apply();
         }
     }
 
@@ -125,7 +130,7 @@ public class LightSensorService extends Service {
     // реальной смене цели — холостого трафика не создаёт.
     private static final long SAFETY_POLL_MS = 30_000L;
     // Минимальный интервал между попытками bind, если сервис ещё не подключён
-    private static final long BIND_RETRY_MS  = 5_000L;
+    private static final long BIND_RETRY_MS = 5_000L;
     // После инициализации подписок один раз принудительно отправляем таргет —
     // гарантия, что на холодном старте режим выставится, не дожидаясь первого
     // изменения освещённости (колбэки дельта-only).
@@ -135,15 +140,16 @@ public class LightSensorService extends Service {
     private static final long SENSOR_DEBOUNCE_MS = 3_000L;
 
     // ICarSignalService — датчик света (transact через IBinder напрямую)
-    private static final String CAR_SIGNAL_DESCRIPTOR  = "com.qinggan.carsignal.ICarSignalService";
-    private static final int    TX_getLightSensorLevel = 36;
-    private static final int    TX_registerCallback    = 46;
-    private static final int    TX_unregisterCallback  = 47;
+    private static final String CAR_SIGNAL_DESCRIPTOR = "com.qinggan.carsignal.ICarSignalService";
+    private static final int TX_getLightSensorLevel = 36;
+    private static final int TX_registerCallback = 46;
+    private static final int TX_unregisterCallback = 47;
 
     // ICarSignalServiceCallBack — наш stub датчика
-    private static final String CALLBACK_DESCRIPTOR     = "com.qinggan.carsignal.ICarSignalServiceCallBack";
-    private static final int    CB_onLightSensorChanged = 13;
-    private static final int    MAX_OUTSTANDING_CALLBACKS = 2;
+    private static final String CALLBACK_DESCRIPTOR =
+            "com.qinggan.carsignal.ICarSignalServiceCallBack";
+    private static final int CB_onLightSensorChanged = 13;
+    private static final int MAX_OUTSTANDING_CALLBACKS = 2;
     private static final AtomicInteger OUTSTANDING_CALLBACKS = new AtomicInteger();
 
     // Best-effort unregister is process-scoped and bounded: a stuck vendor TX47 can retain one
@@ -158,25 +164,32 @@ public class LightSensorService extends Service {
             newBoundedBinderExecutor("LightSettings");
 
     private static ThreadPoolExecutor newBoundedBinderExecutor(String name) {
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(1), runnable -> {
-                    Thread thread = new Thread(runnable, name);
-                    thread.setDaemon(true);
-                    return thread;
-                }, new ThreadPoolExecutor.AbortPolicy());
+        ThreadPoolExecutor executor =
+                new ThreadPoolExecutor(
+                        1,
+                        1,
+                        30L,
+                        TimeUnit.SECONDS,
+                        new ArrayBlockingQueue<>(1),
+                        runnable -> {
+                            Thread thread = new Thread(runnable, name);
+                            thread.setDaemon(true);
+                            return thread;
+                        },
+                        new ThreadPoolExecutor.AbortPolicy());
         executor.allowCoreThreadTimeOut(true);
         return executor;
     }
 
-    private static final String CAR_SIGNAL_ACTION  = "com.qinggan.carsignal.CarSignalService";
+    private static final String CAR_SIGNAL_ACTION = "com.qinggan.carsignal.CarSignalService";
     private static final String CAR_SIGNAL_PACKAGE = "com.qinggan.carsignal.service";
 
     // CanBus signals routed through the single process-wide callback.
-    private static final int    GEAR_DRIVE               = 3;
+    private static final int GEAR_DRIVE = 3;
     // BCM_RSM_lightSWReason (value 1072): 0 Day, 1 Others, 2 Dark, 3 Tunnel, 4 Darkstart
-    private static final int    RSM_LIGHT_SW_REASON      = 1072;
+    private static final int RSM_LIGHT_SW_REASON = 1072;
     // Задержка после перевода в Drive: даём BCM сбросить фары в Auto, затем выставляем наш таргет.
-    private static final long   DRIVE_FALLBACK_MS        = 5_000L;
+    private static final long DRIVE_FALLBACK_MS = 5_000L;
     // Окно после нашей CAN-команды, в течение которого статус фар считаем «эхом»
     // своей же команды и игнорируем (защита от самозацикливания).
     private static final long HEADLIGHT_GUARD_MS = 2_500L;
@@ -210,7 +223,7 @@ public class LightSensorService extends Service {
     private boolean callbackRegistrationInFlight = false;
     private RegisterRequest pendingRegistration;
     private RegisterRequest runningRegistration;
-    private long    lastBindAttempt = -BIND_RETRY_MS;
+    private long lastBindAttempt = -BIND_RETRY_MS;
     private final Runnable carSignalRebindRunnable = this::ensureBound;
     private long carSignalEpoch = 0L;
     private volatile long activeCarSignalEpoch = 0L;
@@ -223,13 +236,13 @@ public class LightSensorService extends Service {
     private boolean headlightsOn = false;
     private volatile boolean everSent = false;
     private boolean forceInitCompleted = false;
-    private long    readyCarSignalEpoch = 0L;
-    private long    forceInitCarSignalEpoch = 0L;
-    private long    commitSequence = 0L;
-    private long    pendingSensorEpoch = 0L;
-    private long    pendingSensorRevision = 0L;
-    private int     pendingSensorLevel = -1;
-    private long    lastCommitElapsed  = 0L;
+    private long readyCarSignalEpoch = 0L;
+    private long forceInitCarSignalEpoch = 0L;
+    private long commitSequence = 0L;
+    private long pendingSensorEpoch = 0L;
+    private long pendingSensorRevision = 0L;
+    private int pendingSensorLevel = -1;
+    private long lastCommitElapsed = 0L;
 
     // Последний уровень датчика для broadcast в UI
     private long lastSensorEpoch = 0L;
@@ -241,17 +254,18 @@ public class LightSensorService extends Service {
     private SettingsSnapshot pendingSettingsSnapshot;
     private long nextSettingsSnapshotGeneration;
 
-    // Тестовый режим уличного сенсора: последняя КПП и последнее решение RSM (для анти-Auto по Drive)
-    private int lastGear   = -1;
+    // Тестовый режим уличного сенсора: последняя КПП и последнее решение RSM (для анти-Auto по
+    // Drive)
+    private int lastGear = -1;
     private volatile int lastReason = -1;
 
     private CanBusEventHub.Subscription canBusSubscription;
     private GearStateController.Subscription gearStateSubscription;
     private volatile boolean destroyed = false;
     // Последние значимые поля LightStatus — фильтр шума от поворотников/стопа
-    private int lastAutoLamp   = -1;
+    private int lastAutoLamp = -1;
     private int lastDippedBeam = -1;
-    private int lastHeadLight  = -1;
+    private int lastHeadLight = -1;
 
     // -------------------------------------------------------------------------
     // ICarSignalServiceCallBack — Binder stub (сервис вызывает onTransact ONEWAY)
@@ -272,15 +286,15 @@ public class LightSensorService extends Service {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
-            if (destroyed && code >= IBinder.FIRST_CALL_TRANSACTION
+            if (destroyed
+                    && code >= IBinder.FIRST_CALL_TRANSACTION
                     && code <= IBinder.LAST_CALL_TRANSACTION) {
                 return true;
             }
             if (code == CB_onLightSensorChanged) {
                 data.enforceInterface(CALLBACK_DESCRIPTOR);
                 final int level = data.readInt();
-                if (destroyed || activeCarSignalEpoch != epoch
-                        || activeCarSignalCallback != this) {
+                if (destroyed || activeCarSignalEpoch != epoch || activeCarSignalCallback != this) {
                     return true;
                 }
                 final long revision = ingressRevision.incrementAndGet();
@@ -313,8 +327,11 @@ public class LightSensorService extends Service {
 
     private void acceptSensorCallbackLevel(long epoch, long revision, int level) {
         CarSignalCallbackBinder callback = activeCarSignalCallback;
-        if (destroyed || readyCarSignalEpoch != epoch || activeCarSignalEpoch != epoch
-                || callback == null || callback.epoch != epoch
+        if (destroyed
+                || readyCarSignalEpoch != epoch
+                || activeCarSignalEpoch != epoch
+                || callback == null
+                || callback.epoch != epoch
                 || callback.ingressRevision.get() != revision) {
             return;
         }
@@ -366,28 +383,31 @@ public class LightSensorService extends Service {
     private void requestSensorLevel(long epoch) {
         Handler io = carSignalIoHandler;
         if (destroyed || io == null || readyCarSignalEpoch != epoch) return;
-        io.post(() -> {
-            if (!destroyed && carSignalConnected && carSignalEpoch == epoch) {
-                requestSensorLevelOnIo(null);
-            }
-        });
+        io.post(
+                () -> {
+                    if (!destroyed && carSignalConnected && carSignalEpoch == epoch) {
+                        requestSensorLevelOnIo(null);
+                    }
+                });
     }
 
     private void requestSensorLevelForApply(long epoch, SensorApplyMode mode, String reason) {
         requestSensorLevelForApply(epoch, mode, reason, false);
     }
 
-    private void requestSensorLevelForApply(long epoch, SensorApplyMode mode, String reason,
-                                            boolean cancelOnManualAuto) {
+    private void requestSensorLevelForApply(
+            long epoch, SensorApplyMode mode, String reason, boolean cancelOnManualAuto) {
         if (destroyed || readyCarSignalEpoch != epoch || activeCarSignalEpoch != epoch) return;
         SensorApplyRequest existing = pendingMainSensorApply;
         final SensorApplyRequest request;
-        if (existing != null && existing.epoch == epoch
+        if (existing != null
+                && existing.epoch == epoch
                 && existing.mode.priority >= mode.priority) {
             request = existing;
         } else {
-            request = new SensorApplyRequest(epoch, ++nextSensorApplyGeneration, mode, reason,
-                    cancelOnManualAuto);
+            request =
+                    new SensorApplyRequest(
+                            epoch, ++nextSensorApplyGeneration, mode, reason, cancelOnManualAuto);
             pendingMainSensorApply = request;
         }
         Handler io = carSignalIoHandler;
@@ -397,7 +417,8 @@ public class LightSensorService extends Service {
     }
 
     private enum SensorApplyMode {
-        IF_UNSENT(1), FORCE(2);
+        IF_UNSENT(1),
+        FORCE(2);
 
         final int priority;
 
@@ -413,8 +434,12 @@ public class LightSensorService extends Service {
         final String reason;
         final boolean cancelOnManualAuto;
 
-        SensorApplyRequest(long epoch, long generation, SensorApplyMode mode, String reason,
-                           boolean cancelOnManualAuto) {
+        SensorApplyRequest(
+                long epoch,
+                long generation,
+                SensorApplyMode mode,
+                String reason,
+                boolean cancelOnManualAuto) {
             this.epoch = epoch;
             this.generation = generation;
             this.mode = mode;
@@ -428,8 +453,11 @@ public class LightSensorService extends Service {
         final LightThresholds thresholds;
         final SensorSampleFence sensorFence;
 
-        SettingsSnapshot(SensorApplyRequest request, LightThresholds thresholds,
-                         long generation, long liveRevisionFence) {
+        SettingsSnapshot(
+                SensorApplyRequest request,
+                LightThresholds thresholds,
+                long generation,
+                long liveRevisionFence) {
             this.request = request;
             this.thresholds = thresholds;
             this.sensorFence = new SensorSampleFence(generation, liveRevisionFence);
@@ -444,9 +472,13 @@ public class LightSensorService extends Service {
         final SensorApplyRequest apply;
         final long settingsGeneration;
 
-        SensorQueryRun(IBinder binder, CarSignalCallbackBinder callback, long epoch,
-                       long ingressRevision, SensorApplyRequest apply,
-                       long settingsGeneration) {
+        SensorQueryRun(
+                IBinder binder,
+                CarSignalCallbackBinder callback,
+                long epoch,
+                long ingressRevision,
+                SensorApplyRequest apply,
+                long settingsGeneration) {
             this.binder = binder;
             this.callback = callback;
             this.epoch = epoch;
@@ -468,8 +500,7 @@ public class LightSensorService extends Service {
         }
 
         private boolean isCurrent() {
-            return carSignalConnection == this
-                    && activeCarSignalBindingGeneration == generation;
+            return carSignalConnection == this && activeCarSignalBindingGeneration == generation;
         }
 
         @Override
@@ -516,8 +547,8 @@ public class LightSensorService extends Service {
         final boolean registered;
         final long epoch;
 
-        OldCarSignalSession(IBinder remote, CarSignalCallbackBinder callback,
-                            boolean registered, long epoch) {
+        OldCarSignalSession(
+                IBinder remote, CarSignalCallbackBinder callback, boolean registered, long epoch) {
             this.remote = remote;
             this.callback = callback;
             this.registered = registered;
@@ -540,15 +571,17 @@ public class LightSensorService extends Service {
     private void requestCarSignalMaintenance() {
         if (destroyed || !carSignalMaintenancePosted.compareAndSet(false, true)) return;
         Handler io = carSignalIoHandler;
-        if (io == null || !io.post(() -> {
-            try {
-                if (destroyed) return;
-                ensureBound();
-                startRegisterCallbackOnIo();
-            } finally {
-                carSignalMaintenancePosted.set(false);
-            }
-        })) {
+        if (io == null
+                || !io.post(
+                        () -> {
+                            try {
+                                if (destroyed) return;
+                                ensureBound();
+                                startRegisterCallbackOnIo();
+                            } finally {
+                                carSignalMaintenancePosted.set(false);
+                            }
+                        })) {
             carSignalMaintenancePosted.set(false);
         }
     }
@@ -565,8 +598,8 @@ public class LightSensorService extends Service {
         try {
             Intent intent = new Intent(CAR_SIGNAL_ACTION);
             intent.setPackage(CAR_SIGNAL_PACKAGE);
-            boolean ok = bindService(intent, Context.BIND_AUTO_CREATE,
-                    carSignalIoExecutor, connection);
+            boolean ok =
+                    bindService(intent, Context.BIND_AUTO_CREATE, carSignalIoExecutor, connection);
             carSignalBindingRequested = ok;
             Log.i(TAG, "ensureBound: bindService returned " + ok);
             if (!ok) {
@@ -585,9 +618,10 @@ public class LightSensorService extends Service {
 
     private OldCarSignalSession invalidateCarSignalRemoteOnIo() {
         long closingEpoch = carSignalEpoch;
-        OldCarSignalSession old = new OldCarSignalSession(
-                carSignalBinder, carSignalCallbackBinder,
-                callbackRegistered, closingEpoch);
+        OldCarSignalSession old =
+                new OldCarSignalSession(
+                        carSignalBinder, carSignalCallbackBinder,
+                        callbackRegistered, closingEpoch);
         activeCarSignalEpoch = 0L;
         activeCarSignalCallback = null;
         carSignalBinder = null;
@@ -595,16 +629,14 @@ public class LightSensorService extends Service {
         carSignalConnected = false;
         callbackRegistered = false;
         callbackRegistrationInFlight = false;
-        if (pendingRegistration != null
-                && pendingRegistration.callback == old.callback) {
+        if (pendingRegistration != null && pendingRegistration.callback == old.callback) {
             releaseRegistrationSlot(pendingRegistration.callback);
             pendingRegistration = null;
         }
         if (pendingIoSensorApply != null && pendingIoSensorApply.epoch == closingEpoch) {
             pendingIoSensorApply = null;
         }
-        if (pendingIoSettingsRequest != null
-                && pendingIoSettingsRequest.epoch == closingEpoch) {
+        if (pendingIoSettingsRequest != null && pendingIoSettingsRequest.epoch == closingEpoch) {
             pendingIoSettingsRequest = null;
             pendingIoSettingsGeneration = 0L;
         }
@@ -647,9 +679,12 @@ public class LightSensorService extends Service {
     }
 
     private void startRegisterCallbackOnIo() {
-        if (destroyed || !carSignalConnected || carSignalBinder == null
+        if (destroyed
+                || !carSignalConnected
+                || carSignalBinder == null
                 || carSignalCallbackBinder == null
-                || callbackRegistered || callbackRegistrationInFlight
+                || callbackRegistered
+                || callbackRegistrationInFlight
                 || carSignalCallbackBinder.cleanupScheduled.get()) {
             return;
         }
@@ -671,25 +706,31 @@ public class LightSensorService extends Service {
         pendingRegistration = null;
         runningRegistration = request;
         try {
-            CAR_SIGNAL_REGISTRATION_EXECUTOR.execute(() -> {
-                RegistrationResult result = registerCallbackTransaction(
-                        request.remote, request.callback);
-                boolean success = result == RegistrationResult.SUCCESS;
-                if (result == RegistrationResult.NOT_SENT) {
-                    releaseRegistrationSlot(request.callback);
-                } else if (result == RegistrationResult.AMBIGUOUS) {
-                    // transact reached the vendor but the reply failed: cleanup before retrying,
-                    // otherwise an uncounted observer could bypass the process-wide slot limit.
-                    scheduleUnregister(request.remote, request.callback);
-                }
-                Handler io = carSignalIoHandler;
-                boolean delivered = io != null
-                        && io.post(() -> finishRegisterCallbackOnIo(request, success));
-                if (!delivered && success) {
-                    // The lifecycle lane is already gone: compensate on this isolated worker.
-                    scheduleUnregister(request.remote, request.callback);
-                }
-            });
+            CAR_SIGNAL_REGISTRATION_EXECUTOR.execute(
+                    () -> {
+                        RegistrationResult result =
+                                registerCallbackTransaction(request.remote, request.callback);
+                        boolean success = result == RegistrationResult.SUCCESS;
+                        if (result == RegistrationResult.NOT_SENT) {
+                            releaseRegistrationSlot(request.callback);
+                        } else if (result == RegistrationResult.AMBIGUOUS) {
+                            // transact reached the vendor but the reply failed: cleanup before
+                            // retrying,
+                            // otherwise an uncounted observer could bypass the process-wide slot
+                            // limit.
+                            scheduleUnregister(request.remote, request.callback);
+                        }
+                        Handler io = carSignalIoHandler;
+                        boolean delivered =
+                                io != null
+                                        && io.post(
+                                                () -> finishRegisterCallbackOnIo(request, success));
+                        if (!delivered && success) {
+                            // The lifecycle lane is already gone: compensate on this isolated
+                            // worker.
+                            scheduleUnregister(request.remote, request.callback);
+                        }
+                    });
         } catch (RejectedExecutionException e) {
             runningRegistration = null;
             releaseRegistrationSlot(request.callback);
@@ -699,10 +740,14 @@ public class LightSensorService extends Service {
         }
     }
 
-    private enum RegistrationResult { SUCCESS, NOT_SENT, AMBIGUOUS }
+    private enum RegistrationResult {
+        SUCCESS,
+        NOT_SENT,
+        AMBIGUOUS
+    }
 
     private RegistrationResult registerCallbackTransaction(IBinder remote, IBinder callback) {
-        Parcel data  = Parcel.obtain();
+        Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         boolean attempted = false;
         try {
@@ -718,7 +763,8 @@ public class LightSensorService extends Service {
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "registerCallback: error: " + e.getMessage());
             return attempted && remote.isBinderAlive()
-                    ? RegistrationResult.AMBIGUOUS : RegistrationResult.NOT_SENT;
+                    ? RegistrationResult.AMBIGUOUS
+                    : RegistrationResult.NOT_SENT;
         } finally {
             data.recycle();
             reply.recycle();
@@ -728,9 +774,11 @@ public class LightSensorService extends Service {
     private void finishRegisterCallbackOnIo(RegisterRequest request, boolean success) {
         if (runningRegistration != request) return;
         runningRegistration = null;
-        boolean current = !destroyed && request.remote == carSignalBinder
-                && request.callback == carSignalCallbackBinder
-                && request.epoch == carSignalEpoch;
+        boolean current =
+                !destroyed
+                        && request.remote == carSignalBinder
+                        && request.callback == carSignalCallbackBinder
+                        && request.epoch == carSignalEpoch;
         if (!current) {
             if (success) scheduleUnregister(request.remote, request.callback);
         } else {
@@ -759,21 +807,25 @@ public class LightSensorService extends Service {
         if (remote == null || callback == null) return;
         if (!callback.cleanupScheduled.compareAndSet(false, true)) return;
         try {
-            CAR_SIGNAL_CLEANUP_EXECUTOR.execute(() -> {
-                if (unregisterCallbackTransaction(remote, callback)) {
-                    callback.cleanupScheduled.set(false);
-                    releaseRegistrationSlot(callback);
-                } else {
-                    Log.w(TAG, "unregisterCallback not confirmed; registration gate remains closed");
-                }
-            });
+            CAR_SIGNAL_CLEANUP_EXECUTOR.execute(
+                    () -> {
+                        if (unregisterCallbackTransaction(remote, callback)) {
+                            callback.cleanupScheduled.set(false);
+                            releaseRegistrationSlot(callback);
+                        } else {
+                            Log.w(
+                                    TAG,
+                                    "unregisterCallback not confirmed; registration gate remains"
+                                        + " closed");
+                        }
+                    });
         } catch (RejectedExecutionException e) {
             Log.w(TAG, "unregisterCallback deferred: cleanup queue saturated");
         }
     }
 
     private boolean unregisterCallbackTransaction(IBinder remote, IBinder callback) {
-        Parcel data  = Parcel.obtain();
+        Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(CAR_SIGNAL_DESCRIPTOR);
@@ -794,17 +846,20 @@ public class LightSensorService extends Service {
     }
 
     private void requestSensorLevelOnIo(SensorApplyRequest applyRequest) {
-        if (destroyed || !carSignalConnected || carSignalBinder == null
+        if (destroyed
+                || !carSignalConnected
+                || carSignalBinder == null
                 || carSignalCallbackBinder == null) {
             return;
         }
         if (applyRequest != null) {
             if (applyRequest.epoch != carSignalEpoch) return;
             SensorApplyRequest existing = pendingIoSensorApply;
-            if (existing == null || existing.epoch != applyRequest.epoch
+            if (existing == null
+                    || existing.epoch != applyRequest.epoch
                     || existing.mode.priority < applyRequest.mode.priority
                     || (existing.mode == applyRequest.mode
-                    && existing.generation < applyRequest.generation)) {
+                            && existing.generation < applyRequest.generation)) {
                 pendingIoSensorApply = applyRequest;
             }
         }
@@ -823,21 +878,23 @@ public class LightSensorService extends Service {
         sensorQueryRequested = false;
         SensorApplyRequest apply = pendingIoSensorApply;
         if (apply != null && apply.epoch != epoch) apply = null;
-        long settingsGeneration = pendingIoSettingsRequest == apply
-                ? pendingIoSettingsGeneration : 0L;
+        long settingsGeneration =
+                pendingIoSettingsRequest == apply ? pendingIoSettingsGeneration : 0L;
         long ingressRevision = callback.ingressRevision.get();
-        SensorQueryRun run = new SensorQueryRun(
-                binder, callback, epoch, ingressRevision, apply, settingsGeneration);
+        SensorQueryRun run =
+                new SensorQueryRun(
+                        binder, callback, epoch, ingressRevision, apply, settingsGeneration);
         sensorQueryRunning = true;
         runningSensorQuery = run;
         try {
-            CAR_SIGNAL_QUERY_EXECUTOR.execute(() -> {
-                int level = readSensorLevelOnQueryThread(binder);
-                Handler io = carSignalIoHandler;
-                if (io != null) {
-                    io.post(() -> finishSensorLevelQueryOnIo(run, level));
-                }
-            });
+            CAR_SIGNAL_QUERY_EXECUTOR.execute(
+                    () -> {
+                        int level = readSensorLevelOnQueryThread(binder);
+                        Handler io = carSignalIoHandler;
+                        if (io != null) {
+                            io.post(() -> finishSensorLevelQueryOnIo(run, level));
+                        }
+                    });
         } catch (RejectedExecutionException e) {
             sensorQueryRunning = false;
             runningSensorQuery = null;
@@ -847,11 +904,15 @@ public class LightSensorService extends Service {
 
     private void finishSensorLevelQueryOnIo(SensorQueryRun run, int level) {
         if (!sensorQueryRunning || runningSensorQuery != run) return;
-        boolean current = !destroyed && carSignalConnected
-                && run.binder == carSignalBinder && run.callback == carSignalCallbackBinder
-                && run.epoch == carSignalEpoch
-                && run.callback.ingressRevision.get() == run.ingressRevision;
-        if (current && level >= 0
+        boolean current =
+                !destroyed
+                        && carSignalConnected
+                        && run.binder == carSignalBinder
+                        && run.callback == carSignalCallbackBinder
+                        && run.epoch == carSignalEpoch
+                        && run.callback.ingressRevision.get() == run.ingressRevision;
+        if (current
+                && level >= 0
                 && timerHandler.post(() -> acceptSensorQueryResultOnMain(run, level))) {
             // Keep the logical flight open until main validates the epoch/revision and acks it.
             return;
@@ -865,17 +926,20 @@ public class LightSensorService extends Service {
 
     private void acceptSensorQueryResultOnMain(SensorQueryRun run, int level) {
         CarSignalCallbackBinder activeCallback = activeCarSignalCallback;
-        boolean accepted = !destroyed && readyCarSignalEpoch == run.epoch
-                && activeCarSignalEpoch == run.epoch
-                && activeCallback == run.callback
-                && run.callback.ingressRevision.get() == run.ingressRevision;
+        boolean accepted =
+                !destroyed
+                        && readyCarSignalEpoch == run.epoch
+                        && activeCarSignalEpoch == run.epoch
+                        && activeCallback == run.callback
+                        && run.callback.ingressRevision.get() == run.ingressRevision;
         boolean applyAccepted = false;
         if (accepted) {
             onSensorLevel(run.epoch, run.ingressRevision, level, "poll");
             SensorApplyRequest apply = run.apply;
             if (apply != null && pendingMainSensorApply == apply) {
-                applyAccepted = applySensorRequest(
-                        apply, level, run.ingressRevision, run.settingsGeneration);
+                applyAccepted =
+                        applySensorRequest(
+                                apply, level, run.ingressRevision, run.settingsGeneration);
                 if (applyAccepted) pendingMainSensorApply = null;
             }
         }
@@ -905,17 +969,19 @@ public class LightSensorService extends Service {
     private void acknowledgeSensorApplyFromCallback(long epoch, long generation) {
         Handler io = carSignalIoHandler;
         if (io == null) return;
-        io.post(() -> {
-            SensorApplyRequest pending = pendingIoSensorApply;
-            if (pending != null && pending.epoch == epoch
-                    && pending.generation == generation) {
-                pendingIoSensorApply = null;
-                if (pendingIoSettingsRequest == pending) {
-                    pendingIoSettingsRequest = null;
-                    pendingIoSettingsGeneration = 0L;
-                }
-            }
-        });
+        io.post(
+                () -> {
+                    SensorApplyRequest pending = pendingIoSensorApply;
+                    if (pending != null
+                            && pending.epoch == epoch
+                            && pending.generation == generation) {
+                        pendingIoSensorApply = null;
+                        if (pendingIoSettingsRequest == pending) {
+                            pendingIoSettingsRequest = null;
+                            pendingIoSettingsGeneration = 0L;
+                        }
+                    }
+                });
     }
 
     // -------------------------------------------------------------------------
@@ -949,37 +1015,41 @@ public class LightSensorService extends Service {
         ContentResolver resolver = getApplicationContext().getContentResolver();
         WeakReference<LightSensorService> serviceRef = new WeakReference<>(this);
         try {
-            LIGHT_SETTINGS_EXECUTOR.execute(() -> {
-                LightSensorService beforeQuery = serviceRef.get();
-                if (beforeQuery == null || beforeQuery.destroyed
-                        || beforeQuery.pendingMainSensorApply != request
-                        || beforeQuery.activeCarSignalEpoch != request.epoch) {
-                    if (beforeQuery != null) {
-                        Handler main = beforeQuery.timerHandler;
-                        if (main != null) {
-                            main.post(() -> beforeQuery.dropSettingsQueryOnMain(request));
+            LIGHT_SETTINGS_EXECUTOR.execute(
+                    () -> {
+                        LightSensorService beforeQuery = serviceRef.get();
+                        if (beforeQuery == null
+                                || beforeQuery.destroyed
+                                || beforeQuery.pendingMainSensorApply != request
+                                || beforeQuery.activeCarSignalEpoch != request.epoch) {
+                            if (beforeQuery != null) {
+                                Handler main = beforeQuery.timerHandler;
+                                if (main != null) {
+                                    main.post(() -> beforeQuery.dropSettingsQueryOnMain(request));
+                                }
+                            }
+                            return;
                         }
-                    }
-                    return;
-                }
-                LightSettingsPolicy.Decision beforeQueryDecision =
-                        beforeQuery.settingsDecision(request);
-                if (beforeQueryDecision != LightSettingsPolicy.Decision.NEED_THRESHOLDS) {
-                    Handler main = beforeQuery.timerHandler;
-                    if (main != null) {
-                        main.post(() -> beforeQuery.finishSettingsWithoutQueryOnMain(
-                                request));
-                    }
-                    return;
-                }
-                LightThresholds thresholds = queryThresholds(resolver);
-                LightSensorService service = serviceRef.get();
-                if (service == null) return;
-                Handler main = service.timerHandler;
-                if (main != null) {
-                    main.post(() -> service.finishSettingsQueryOnMain(request, thresholds));
-                }
-            });
+                        LightSettingsPolicy.Decision beforeQueryDecision =
+                                beforeQuery.settingsDecision(request);
+                        if (beforeQueryDecision != LightSettingsPolicy.Decision.NEED_THRESHOLDS) {
+                            Handler main = beforeQuery.timerHandler;
+                            if (main != null) {
+                                main.post(
+                                        () ->
+                                                beforeQuery.finishSettingsWithoutQueryOnMain(
+                                                        request));
+                            }
+                            return;
+                        }
+                        LightThresholds thresholds = queryThresholds(resolver);
+                        LightSensorService service = serviceRef.get();
+                        if (service == null) return;
+                        Handler main = service.timerHandler;
+                        if (main != null) {
+                            main.post(() -> service.finishSettingsQueryOnMain(request, thresholds));
+                        }
+                    });
         } catch (RejectedExecutionException e) {
             settingsRequestGate.reject(request);
             scheduleSettingsRetry();
@@ -987,15 +1057,18 @@ public class LightSensorService extends Service {
     }
 
     private boolean isSettingsRequestCurrentOnMain(SensorApplyRequest request) {
-        return !destroyed && pendingMainSensorApply == request
+        return !destroyed
+                && pendingMainSensorApply == request
                 && request.epoch == readyCarSignalEpoch
                 && request.epoch == activeCarSignalEpoch;
     }
 
     private LightSettingsPolicy.Decision settingsDecision(SensorApplyRequest request) {
         return LightSettingsPolicy.decide(
-                request.cancelOnManualAuto, MANUAL_AUTO_GATE.blocksAntiAuto(),
-                request.mode == SensorApplyMode.IF_UNSENT, everSent,
+                request.cancelOnManualAuto,
+                MANUAL_AUTO_GATE.blocksAntiAuto(),
+                request.mode == SensorApplyMode.IF_UNSENT,
+                everSent,
                 reasonToDesired(lastReason) != null);
     }
 
@@ -1018,8 +1091,7 @@ public class LightSensorService extends Service {
         boolean fulfilled = applySensorRequest(request, -1, 0L, 0L);
         if (fulfilled && pendingMainSensorApply == request) {
             pendingMainSensorApply = null;
-            if (pendingSettingsSnapshot != null
-                    && pendingSettingsSnapshot.request == request) {
+            if (pendingSettingsSnapshot != null && pendingSettingsSnapshot.request == request) {
                 pendingSettingsSnapshot = null;
             }
             acknowledgeSensorApplyFromCallback(request.epoch, request.generation);
@@ -1032,8 +1104,7 @@ public class LightSensorService extends Service {
         if (completion.next != null) submitSettingsQuery(completion.next);
     }
 
-    private void finishSettingsQueryOnMain(SensorApplyRequest request,
-                                           LightThresholds thresholds) {
+    private void finishSettingsQueryOnMain(SensorApplyRequest request, LightThresholds thresholds) {
         LatestRequestGate.Completion<SensorApplyRequest> completion =
                 settingsRequestGate.finish(request);
         if (completion.publish && isSettingsRequestCurrentOnMain(request)) {
@@ -1042,23 +1113,29 @@ public class LightSensorService extends Service {
                 resolveSettingsRequestOnMain(request, decision);
             } else {
                 CarSignalCallbackBinder callback = activeCarSignalCallback;
-                long liveRevisionFence = callback != null && callback.epoch == request.epoch
-                        ? callback.ingressRevision.get() : Long.MAX_VALUE;
+                long liveRevisionFence =
+                        callback != null && callback.epoch == request.epoch
+                                ? callback.ingressRevision.get()
+                                : Long.MAX_VALUE;
                 long settingsGeneration = ++nextSettingsSnapshotGeneration;
-                pendingSettingsSnapshot = new SettingsSnapshot(
-                        request, thresholds, settingsGeneration, liveRevisionFence);
+                pendingSettingsSnapshot =
+                        new SettingsSnapshot(
+                                request, thresholds, settingsGeneration, liveRevisionFence);
                 // Never apply a threshold result to the sensor value captured before the blocking
                 // provider call. Request a fresh, epoch/revision-protected TX36 instead.
                 Handler io = carSignalIoHandler;
-                if (io != null) io.post(() -> {
-                    if (destroyed || request.epoch != carSignalEpoch
-                            || pendingIoSensorApply != request) {
-                        return;
-                    }
-                    pendingIoSettingsRequest = request;
-                    pendingIoSettingsGeneration = settingsGeneration;
-                    requestSensorLevelOnIo(request);
-                });
+                if (io != null)
+                    io.post(
+                            () -> {
+                                if (destroyed
+                                        || request.epoch != carSignalEpoch
+                                        || pendingIoSensorApply != request) {
+                                    return;
+                                }
+                                pendingIoSettingsRequest = request;
+                                pendingIoSettingsGeneration = settingsGeneration;
+                                requestSensorLevelOnIo(request);
+                            });
             }
         }
         if (completion.next != null) submitSettingsQuery(completion.next);
@@ -1070,15 +1147,16 @@ public class LightSensorService extends Service {
         timerHandler.postDelayed(settingsRetryRunnable, BIND_RETRY_MS);
     }
 
-    private final Runnable settingsRetryRunnable = () -> {
-        if (destroyed) return;
-        SensorApplyRequest retry = settingsRequestGate.retry();
-        if (retry != null) submitSettingsQuery(retry);
-    };
+    private final Runnable settingsRetryRunnable =
+            () -> {
+                if (destroyed) return;
+                SensorApplyRequest retry = settingsRequestGate.retry();
+                if (retry != null) submitSettingsQuery(retry);
+            };
 
     /** Synchronous TX36 isolated from both main and the bind/register IO queue. */
     private int readSensorLevelOnQueryThread(IBinder binder) {
-        Parcel data  = Parcel.obtain();
+        Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(CAR_SIGNAL_DESCRIPTOR);
@@ -1101,6 +1179,9 @@ public class LightSensorService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        observeOnly =
+                getSharedPreferences("NativePrefs", MODE_PRIVATE)
+                        .getBoolean(PREF_OBSERVE_ONLY, false);
         Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         Log.i(TAG, "onCreate() — LightSensorService (event-driven + safety-poll)");
         Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -1108,37 +1189,46 @@ public class LightSensorService extends Service {
         carSignalIoThread = new HandlerThread("CarSignalIo");
         carSignalIoThread.start();
         carSignalIoHandler = new Handler(carSignalIoThread.getLooper());
-        carSignalIoExecutor = command -> {
-            Handler io = carSignalIoHandler;
-            if (io == null || !io.post(command)) {
-                if (!destroyed) Log.w(TAG, "CarSignal ServiceConnection callback dropped");
-            }
-        };
-        sensorCallbackDelivery = new LatestIntDelivery(command -> {
-            if (!timerHandler.post(command)) {
-                throw new RejectedExecutionException("main Handler stopped");
-            }
-        }, this::acceptSensorCallbackLevel);
+        carSignalIoExecutor =
+                command -> {
+                    Handler io = carSignalIoHandler;
+                    if (io == null || !io.post(command)) {
+                        if (!destroyed) Log.w(TAG, "CarSignal ServiceConnection callback dropped");
+                    }
+                };
+        sensorCallbackDelivery =
+                new LatestIntDelivery(
+                        command -> {
+                            if (!timerHandler.post(command)) {
+                                throw new RejectedExecutionException("main Handler stopped");
+                            }
+                        },
+                        this::acceptSensorCallbackLevel);
         HeadlightCanTransport.initialize(this);
 
         createNotificationChannel();
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Автосвет")
-                .setContentText("Управление фарами активно")
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .build();
+        Notification notification =
+                new NotificationCompat.Builder(this, CHANNEL_ID)
+                        .setContentTitle("Автосвет")
+                        .setContentText("Управление фарами активно")
+                        .setSmallIcon(R.drawable.ic_launcher_foreground)
+                        .build();
         startForeground(2, notification);
 
         IntentFilter reqFilter = new IntentFilter("ru.big.town.anative.REQUEST_LUX_UPDATE");
         registerReceiver(requestReceiver, reqFilter, RECEIVER_EXPORTED);
 
         requestCarSignalMaintenance();
-        canBusSubscription = CanBusEventHub.get(this).subscribe(
-                CanBusEventRouter.INTEREST_LIGHT_STATUS
-                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                new int[]{RSM_LIGHT_SW_REASON}, timerHandler, this::onCanBusEvent);
-        gearStateSubscription = VehicleStateControllers.get(this).gear().subscribe(
-                timerHandler, this::onGear);
+        canBusSubscription =
+                CanBusEventHub.get(this)
+                        .subscribe(
+                                CanBusEventRouter.INTEREST_LIGHT_STATUS
+                                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                                new int[] {RSM_LIGHT_SW_REASON},
+                                timerHandler,
+                                this::onCanBusEvent);
+        gearStateSubscription =
+                VehicleStateControllers.get(this).gear().subscribe(timerHandler, this::onGear);
         timerHandler.postDelayed(safetyRunnable, 2_000L);
     }
 
@@ -1147,8 +1237,18 @@ public class LightSensorService extends Service {
         Log.i(TAG, "onStartCommand()");
         // Режим наблюдения переживает перезапуск сервиса системой: SetModesService кладёт флаг
         // в NativePrefs, чтобы сервис не начал управлять фарами при выключенном автосвете.
-        observeOnly = getSharedPreferences("NativePrefs", MODE_PRIVATE)
-                .getBoolean(PREF_OBSERVE_ONLY, false);
+        observeOnly =
+                getSharedPreferences("NativePrefs", MODE_PRIVATE)
+                        .getBoolean(PREF_OBSERVE_ONLY, false);
+        if (!observeOnly && intent != null && ACTION_RESUME_AUTOMATIC.equals(intent.getAction())) {
+            everSent = false;
+            if (reasonToDesired(lastReason) != null) {
+                applyTargetWithSensorLevel("widget auto", -1);
+            } else if (readyCarSignalEpoch != 0L) {
+                requestSensorLevelForApply(
+                        readyCarSignalEpoch, SensorApplyMode.IF_UNSENT, "widget auto");
+            }
+        }
         return START_STICKY;
     }
 
@@ -1178,7 +1278,10 @@ public class LightSensorService extends Service {
         GearStateController.Subscription gearSubscription = gearStateSubscription;
         gearStateSubscription = null;
         if (gearSubscription != null) gearSubscription.close();
-        try { unregisterReceiver(requestReceiver); } catch (Exception ignored) {}
+        try {
+            unregisterReceiver(requestReceiver);
+        } catch (Exception ignored) {
+        }
         timerHandler.removeCallbacks(safetyRunnable);
         timerHandler.removeCallbacks(forceInitRunnable);
         timerHandler.removeCallbacks(sensorDebounceRunnable);
@@ -1188,10 +1291,11 @@ public class LightSensorService extends Service {
         Handler io = carSignalIoHandler;
         HandlerThread ioThread = carSignalIoThread;
         if (io != null && ioThread != null) {
-            if (!io.post(() -> {
-                releaseCarSignalBindingOnIo("onDestroy");
-                ioThread.quitSafely();
-            })) {
+            if (!io.post(
+                    () -> {
+                        releaseCarSignalBindingOnIo("onDestroy");
+                        ioThread.quitSafely();
+                    })) {
                 ioThread.quitSafely();
             }
         }
@@ -1201,86 +1305,90 @@ public class LightSensorService extends Service {
 
     // Срабатывает, когда значение датчика «устоялось» (дебаунс) — обрабатываем
     // последний полученный уровень.
-    private final Runnable sensorDebounceRunnable = new Runnable() {
-        @Override
-        public void run() {
-            CarSignalCallbackBinder callback = activeCarSignalCallback;
-            if (pendingSensorLevel < 0 || pendingSensorEpoch != readyCarSignalEpoch
-                    || pendingSensorEpoch != activeCarSignalEpoch || callback == null
-                    || callback.epoch != pendingSensorEpoch
-                    || callback.ingressRevision.get() != pendingSensorRevision) {
-                return;
-            }
-            long epoch = pendingSensorEpoch;
-            long revision = pendingSensorRevision;
-            int level = pendingSensorLevel;
-            onSensorLevel(epoch, revision, level, "callback");
-            SensorApplyRequest apply = pendingMainSensorApply;
-            if (apply != null && apply.epoch == epoch) {
-                if (applySensorRequest(apply, level, revision, 0L)) {
-                    pendingMainSensorApply = null;
-                    acknowledgeSensorApplyFromCallback(epoch, apply.generation);
+    private final Runnable sensorDebounceRunnable =
+            new Runnable() {
+                @Override
+                public void run() {
+                    CarSignalCallbackBinder callback = activeCarSignalCallback;
+                    if (pendingSensorLevel < 0
+                            || pendingSensorEpoch != readyCarSignalEpoch
+                            || pendingSensorEpoch != activeCarSignalEpoch
+                            || callback == null
+                            || callback.epoch != pendingSensorEpoch
+                            || callback.ingressRevision.get() != pendingSensorRevision) {
+                        return;
+                    }
+                    long epoch = pendingSensorEpoch;
+                    long revision = pendingSensorRevision;
+                    int level = pendingSensorLevel;
+                    onSensorLevel(epoch, revision, level, "callback");
+                    SensorApplyRequest apply = pendingMainSensorApply;
+                    if (apply != null && apply.epoch == epoch) {
+                        if (applySensorRequest(apply, level, revision, 0L)) {
+                            pendingMainSensorApply = null;
+                            acknowledgeSensorApplyFromCallback(epoch, apply.generation);
+                        }
+                    }
                 }
-            }
-        }
-    };
+            };
 
     // Один раз через FORCE_INIT_MS после готовности подписок принудительно выставляем таргет
     // (уличный если известен, иначе фолбэк на салонный) — гарантия установки на холодном старте.
-    private final Runnable forceInitRunnable = new Runnable() {
-        @Override
-        public void run() {
-            long epoch = forceInitCarSignalEpoch;
-            if (epoch == 0L || epoch != readyCarSignalEpoch
-                    || epoch != activeCarSignalEpoch) {
-                return;
-            }
-            forceInitCarSignalEpoch = 0L;
-            if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
-                Log.i(TAG, "force-init: OEM Auto выбран с руля — инициализация отменена");
-                forceInitCompleted = true;
-                return;
-            }
-            if (reasonToDesired(lastReason) != null) {
-                forceInitCompleted = applyTargetWithSensorLevel(
-                        "force-init", -1, true);
-            } else {
-                requestSensorLevelForApply(
-                        epoch, SensorApplyMode.FORCE, "force-init", true);
-            }
-        }
-    };
+    private final Runnable forceInitRunnable =
+            new Runnable() {
+                @Override
+                public void run() {
+                    long epoch = forceInitCarSignalEpoch;
+                    if (epoch == 0L
+                            || epoch != readyCarSignalEpoch
+                            || epoch != activeCarSignalEpoch) {
+                        return;
+                    }
+                    forceInitCarSignalEpoch = 0L;
+                    if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
+                        Log.i(TAG, "force-init: OEM Auto выбран с руля — инициализация отменена");
+                        forceInitCompleted = true;
+                        return;
+                    }
+                    if (reasonToDesired(lastReason) != null) {
+                        forceInitCompleted = applyTargetWithSensorLevel("force-init", -1, true);
+                    } else {
+                        requestSensorLevelForApply(
+                                epoch, SensorApplyMode.FORCE, "force-init", true);
+                    }
+                }
+            };
 
     // -------------------------------------------------------------------------
     // Safety-poll: страховка (колбэк остаётся основным триггером)
     // -------------------------------------------------------------------------
 
-    private final Runnable safetyRunnable = new Runnable() {
-        @Override
-        public void run() {
-            requestCarSignalMaintenance();
-            long epoch = readyCarSignalEpoch;
-            Boolean outdoor = reasonToDesired(lastReason);
-            if (!everSent && outdoor != null) {
-                applyTargetWithSensorLevel("poll-retry", -1);
-            }
-            if (epoch != 0L && epoch == activeCarSignalEpoch) {
-                if (!everSent && outdoor == null) {
-                    requestSensorLevelForApply(
-                            epoch, SensorApplyMode.IF_UNSENT, "poll-retry");
-                } else {
-                    requestSensorLevel(epoch);
+    private final Runnable safetyRunnable =
+            new Runnable() {
+                @Override
+                public void run() {
+                    requestCarSignalMaintenance();
+                    long epoch = readyCarSignalEpoch;
+                    Boolean outdoor = reasonToDesired(lastReason);
+                    if (!everSent && outdoor != null) {
+                        applyTargetWithSensorLevel("poll-retry", -1);
+                    }
+                    if (epoch != 0L && epoch == activeCarSignalEpoch) {
+                        if (!everSent && outdoor == null) {
+                            requestSensorLevelForApply(
+                                    epoch, SensorApplyMode.IF_UNSENT, "poll-retry");
+                        } else {
+                            requestSensorLevel(epoch);
+                        }
+                    }
+                    timerHandler.postDelayed(this, SAFETY_POLL_MS);
                 }
-            }
-            timerHandler.postDelayed(this, SAFETY_POLL_MS);
-        }
-    };
+            };
 
     /**
-     * Показание салонного датчика (из колбэка/поллинга) — только для индикации в UI.
-     * Решения по фарам принимает уличный датчик (lightSWReason) + анти-Auto по Drive/старту;
-     * салонный используется лишь как ФОЛБЭК внутри {@link #applyTargetWithSensorLevel},
-     * а не непрерывно.
+     * Показание салонного датчика (из колбэка/поллинга) — только для индикации в UI. Решения по
+     * фарам принимает уличный датчик (lightSWReason) + анти-Auto по Drive/старту; салонный
+     * используется лишь как ФОЛБЭК внутри {@link #applyTargetWithSensorLevel}, а не непрерывно.
      */
     private void onSensorLevel(long epoch, long revision, int level, String source) {
         if (epoch != readyCarSignalEpoch || epoch != activeCarSignalEpoch) return;
@@ -1298,8 +1406,8 @@ public class LightSensorService extends Service {
         }
     }
 
-    private boolean applySensorRequest(SensorApplyRequest request, int level,
-                                       long sensorRevision, long settingsGeneration) {
+    private boolean applySensorRequest(
+            SensorApplyRequest request, int level, long sensorRevision, long settingsGeneration) {
         if (request.cancelOnManualAuto && MANUAL_AUTO_GATE.blocksAntiAuto()) {
             Log.i(TAG, request.reason + ": OEM Auto выбран с руля — pending action отменён");
             if (request.mode == SensorApplyMode.FORCE) forceInitCompleted = true;
@@ -1320,8 +1428,9 @@ public class LightSensorService extends Service {
             thresholds = snapshot.thresholds;
             pendingSettingsSnapshot = null;
         }
-        boolean fulfilled = applyTargetWithSensorLevel(
-                request.reason, level, request.mode == SensorApplyMode.FORCE, thresholds);
+        boolean fulfilled =
+                applyTargetWithSensorLevel(
+                        request.reason, level, request.mode == SensorApplyMode.FORCE, thresholds);
         if (fulfilled && request.mode == SensorApplyMode.FORCE) {
             forceInitCompleted = true;
         }
@@ -1329,21 +1438,20 @@ public class LightSensorService extends Service {
     }
 
     /**
-     * Выставить целевой режим фар: приоритет — уличный датчик (последний lightSWReason);
-     * если данных улицы нет — фолбэк на салонный уровень по порогам.
+     * Выставить целевой режим фар: приоритет — уличный датчик (последний lightSWReason); если
+     * данных улицы нет — фолбэк на салонный уровень по порогам.
      */
     private boolean applyTargetWithSensorLevel(String src, int sensorLevel) {
         return applyTargetWithSensorLevel(src, sensorLevel, false, null);
     }
 
-    private boolean applyTargetWithSensorLevel(String src, int sensorLevel,
-                                               boolean retainCurrentTarget) {
+    private boolean applyTargetWithSensorLevel(
+            String src, int sensorLevel, boolean retainCurrentTarget) {
         return applyTargetWithSensorLevel(src, sensorLevel, retainCurrentTarget, null);
     }
 
-    private boolean applyTargetWithSensorLevel(String src, int sensorLevel,
-                                               boolean retainCurrentTarget,
-                                               LightThresholds thresholds) {
+    private boolean applyTargetWithSensorLevel(
+            String src, int sensorLevel, boolean retainCurrentTarget, LightThresholds thresholds) {
         Boolean desired = reasonToDesired(lastReason);
         String s2 = src + " ext reason=" + lastReason;
         if (desired == null) {
@@ -1370,7 +1478,12 @@ public class LightSensorService extends Service {
         // Единственная точка записи света. В режиме наблюдения ничего не отправляем: сценариям
         // нужен только уровень датчика, а автосвет выключен.
         if (observeOnly) {
-            Log.i(TAG, "commit(" + (targetOn ? "ближний" : "выкл") + ") пропущен: наблюдение — " + reason);
+            Log.i(
+                    TAG,
+                    "commit("
+                            + (targetOn ? "ближний" : "выкл")
+                            + ") пропущен: наблюдение — "
+                            + reason);
             return true;
         }
         Log.i(TAG, "★ commit(" + (targetOn ? "ближний" : "выкл") + ") — " + reason);
@@ -1380,10 +1493,11 @@ public class LightSensorService extends Service {
             return false;
         }
         final long sequence = ++commitSequence;
-        headlightsOn      = targetOn;
-        everSent          = true;
+        headlightsOn = targetOn;
+        everSent = true;
         lastCommitElapsed = SystemClock.elapsedRealtime();
-        ApplyEngine.postWakeAction("auto light " + (targetOn ? "low" : "off"),
+        ApplyEngine.postWakeAction(
+                "auto light " + (targetOn ? "low" : "off"),
                 () -> {
                     if (!MANUAL_AUTO_GATE.isAutomaticActionCurrent(automaticToken)) {
                         Log.i(TAG, "auto-light action superseded by newer manual intent");
@@ -1403,23 +1517,31 @@ public class LightSensorService extends Service {
 
     private void invalidateCommit(long sequence) {
         if (destroyed) return;
-        timerHandler.post(() -> {
-            if (!destroyed && commitSequence == sequence) {
-                everSent = false;
-                Log.w(TAG, "auto-light commit was cancelled/failed; safety poll will retry");
-            }
-        });
+        timerHandler.post(
+                () -> {
+                    if (!destroyed && commitSequence == sequence) {
+                        everSent = false;
+                        Log.w(
+                                TAG,
+                                "auto-light commit was cancelled/failed; safety poll will retry");
+                    }
+                });
     }
 
     /**
-     * Уличный датчик (BCM_RSM_lightSWReason, лобовой RSM) — основной источник автосвета.
-     * 0 Day → выкл; 2 Dark / 3 Tunnel / 4 Darkstart → ближний; 1 Others — не меняем.
+     * Уличный датчик (BCM_RSM_lightSWReason, лобовой RSM) — основной источник автосвета. 0 Day →
+     * выкл; 2 Dark / 3 Tunnel / 4 Darkstart → ближний; 1 Others — не меняем.
      */
     private void onLightSwReason(int reason) {
-        lastReason = reason; // запоминаем последнее известное состояние улицы (для анти-Auto по Drive)
+        lastReason =
+                reason; // запоминаем последнее известное состояние улицы (для анти-Auto по Drive)
         Boolean desired = reasonToDesired(reason);
-        Log.i(TAG, "RSM lightSWReason=" + reason + " → "
-                + (desired == null ? "без изменений" : (desired ? "ближний" : "выкл")));
+        Log.i(
+                TAG,
+                "RSM lightSWReason="
+                        + reason
+                        + " → "
+                        + (desired == null ? "без изменений" : (desired ? "ближний" : "выкл")));
         if (desired == null) return;
         if (!everSent || desired != headlightsOn) commit(desired, "ext-sensor reason=" + reason);
     }
@@ -1427,9 +1549,14 @@ public class LightSensorService extends Service {
     /** RSM lightSWReason → цель: 0 Day→выкл, 2/3/4 Dark/Tunnel/Darkstart→ближний, иначе null. */
     private Boolean reasonToDesired(int reason) {
         switch (reason) {
-            case 0: return Boolean.FALSE;                     // день → выкл
-            case 2: case 3: case 4: return Boolean.TRUE;      // темно/тоннель → ближний
-            default: return null;                             // 1 Others / неизвестно
+            case 0:
+                return Boolean.FALSE; // день → выкл
+            case 2:
+            case 3:
+            case 4:
+                return Boolean.TRUE; // темно/тоннель → ближний
+            default:
+                return null; // 1 Others / неизвестно
         }
     }
 
@@ -1443,51 +1570,68 @@ public class LightSensorService extends Service {
         boolean toDrive = (gearVal == GEAR_DRIVE);
         lastGear = gearVal;
         if (toDrive) {
-            Log.i(TAG, "gear=Drive → через " + DRIVE_FALLBACK_MS + "мс выставим таргет (анти-Auto)");
+            Log.i(
+                    TAG,
+                    "gear=Drive → через " + DRIVE_FALLBACK_MS + "мс выставим таргет (анти-Auto)");
             timerHandler.removeCallbacks(driveFallbackRunnable);
             timerHandler.postDelayed(driveFallbackRunnable, DRIVE_FALLBACK_MS);
         }
     }
 
-    // Анти-Auto после Drive: выставляем таргет по уличному датчику (если знаем), иначе по салонному.
-    private final Runnable driveFallbackRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
-                Log.i(TAG, "drive+5s: OEM Auto выбран с руля — anti-Auto пропущен");
-                return;
-            }
-            if (reasonToDesired(lastReason) != null) {
-                applyTargetWithSensorLevel("drive+5s (анти-Auto)", -1);
-                return;
-            }
-            long epoch = readyCarSignalEpoch;
-            if (epoch != 0L && epoch == activeCarSignalEpoch) {
-                requestSensorLevelForApply(
-                        epoch, SensorApplyMode.FORCE, "drive+5s (анти-Auto)", true);
-            }
-        }
-    };
+    // Анти-Auto после Drive: выставляем таргет по уличному датчику (если знаем), иначе по
+    // салонному.
+    private final Runnable driveFallbackRunnable =
+            new Runnable() {
+                @Override
+                public void run() {
+                    if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
+                        Log.i(TAG, "drive+5s: OEM Auto выбран с руля — anti-Auto пропущен");
+                        return;
+                    }
+                    if (reasonToDesired(lastReason) != null) {
+                        applyTargetWithSensorLevel("drive+5s (анти-Auto)", -1);
+                        return;
+                    }
+                    long epoch = readyCarSignalEpoch;
+                    if (epoch != 0L && epoch == activeCarSignalEpoch) {
+                        requestSensorLevelForApply(
+                                epoch, SensorApplyMode.FORCE, "drive+5s (анти-Auto)", true);
+                    }
+                }
+            };
 
     /**
-     * Статус фар из CanBusService (LightStatus). Ловим внешний сброс режима: при
-     * переводе КПП в Drive BCM уходит в «авто» (autoLamp=1). Если наш таргет —
-     * «ближний» (темно), возвращаем ближний. Ручное «выкл» (autoLamp=0, headLight=0)
-     * под правило не попадает — уважается. Guard отсекает эхо своих команд.
+     * Статус фар из CanBusService (LightStatus). Ловим внешний сброс режима: при переводе КПП в
+     * Drive BCM уходит в «авто» (autoLamp=1). Если наш таргет — «ближний» (темно), возвращаем
+     * ближний. Ручное «выкл» (autoLamp=0, headLight=0) под правило не попадает — уважается. Guard
+     * отсекает эхо своих команд.
      */
     private void onLightStatusChanged(int autoLamp, int dippedBeam, int headLight) {
         // Фильтр шума: реагируем только на изменение значимых полей
         // (поворотники/стоп меняют другие поля и сыпят событиями постоянно).
-        if (autoLamp == lastAutoLamp && dippedBeam == lastDippedBeam && headLight == lastHeadLight) {
+        if (autoLamp == lastAutoLamp
+                && dippedBeam == lastDippedBeam
+                && headLight == lastHeadLight) {
             return;
         }
-        lastAutoLamp = autoLamp; lastDippedBeam = dippedBeam; lastHeadLight = headLight;
+        lastAutoLamp = autoLamp;
+        lastDippedBeam = dippedBeam;
+        lastHeadLight = headLight;
 
         long since = SystemClock.elapsedRealtime() - lastCommitElapsed;
-        Log.i(TAG, "lightstatus: autoLamp=" + autoLamp + " dippedBeam=" + dippedBeam
-                + " headLight=" + headLight
-                + " ourTarget=" + (headlightsOn ? "ближний" : "выкл")
-                + " sinceCommit=" + since + "ms");
+        Log.i(
+                TAG,
+                "lightstatus: autoLamp="
+                        + autoLamp
+                        + " dippedBeam="
+                        + dippedBeam
+                        + " headLight="
+                        + headLight
+                        + " ourTarget="
+                        + (headlightsOn ? "ближний" : "выкл")
+                        + " sinceCommit="
+                        + since
+                        + "ms");
 
         // Любое значимое изменение статуса отменяет отложенную переустановку —
         // решение принимаем заново по свежему состоянию.
@@ -1497,9 +1641,9 @@ public class LightSensorService extends Service {
             Log.i(TAG, "lightstatus: OEM Auto выбран с руля — anti-Auto подавлен");
             return;
         }
-        if (!everSent) return;                 // режим ещё не выставляли — ждём force-init
-        if (!headlightsOn) return;             // таргет «выкл» (светло) — не вмешиваемся
-        if (since < HEADLIGHT_GUARD_MS) {      // эхо нашей же команды
+        if (!everSent) return; // режим ещё не выставляли — ждём force-init
+        if (!headlightsOn) return; // таргет «выкл» (светло) — не вмешиваемся
+        if (since < HEADLIGHT_GUARD_MS) { // эхо нашей же команды
             Log.i(TAG, "lightstatus: игнор — эхо нашей команды (" + since + "ms назад)");
             return;
         }
@@ -1507,30 +1651,37 @@ public class LightSensorService extends Service {
             // BCM ушёл в «авто» при таргете «ближний» → Drive-сброс/переключение.
             // Ждём CANBUS_REASSERT_DELAY_MS: если состояние не устаканится обратно —
             // вернём ближний. Отменяемо любым новым значимым событием (см. выше).
-            Log.i(TAG, "lightstatus: поймал АВТО при таргете ближний → выдержка "
-                    + CANBUS_REASSERT_DELAY_MS + "ms");
+            Log.i(
+                    TAG,
+                    "lightstatus: поймал АВТО при таргете ближний → выдержка "
+                            + CANBUS_REASSERT_DELAY_MS
+                            + "ms");
             timerHandler.postDelayed(canbusReassertRunnable, CANBUS_REASSERT_DELAY_MS);
         }
     }
 
     // Отложенная переустановка ближнего после того как поймали «авто». Перед запуском
     // ещё раз проверяем актуальность (таргет ближний и BCM всё ещё в авто).
-    private final Runnable canbusReassertRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
-                Log.i(TAG, "canbus-reset: OEM Auto выбран с руля — отмена");
-                return;
-            }
-            if (!everSent || !headlightsOn) return;
-            if (lastAutoLamp != 1) {           // за время выдержки ушли из «авто» — отменяем
-                Log.i(TAG, "canbus-reset: за выдержку состояние ушло из авто — отмена");
-                return;
-            }
-            Log.i(TAG, "canbus-reset: выдержка прошла, BCM всё ещё в авто → возвращаем ближний");
-            commit(true, "canbus-reset");
-        }
-    };
+    private final Runnable canbusReassertRunnable =
+            new Runnable() {
+                @Override
+                public void run() {
+                    if (MANUAL_AUTO_GATE.blocksAntiAuto()) {
+                        Log.i(TAG, "canbus-reset: OEM Auto выбран с руля — отмена");
+                        return;
+                    }
+                    if (!everSent || !headlightsOn) return;
+                    if (lastAutoLamp != 1) { // за время выдержки ушли из «авто» — отменяем
+                        Log.i(TAG, "canbus-reset: за выдержку состояние ушло из авто — отмена");
+                        return;
+                    }
+                    Log.i(
+                            TAG,
+                            "canbus-reset: выдержка прошла, BCM всё ещё в авто → возвращаем"
+                                + " ближний");
+                    commit(true, "canbus-reset");
+                }
+            };
 
     static ManualAutoGate.Ticket reserveManualHeadlightCommand() {
         return MANUAL_AUTO_GATE.reserveManualCommand();
@@ -1555,8 +1706,7 @@ public class LightSensorService extends Service {
         int thresholdOn = LightThresholds.DEFAULT_ON;
         int thresholdOff = LightThresholds.DEFAULT_OFF;
         try {
-            Cursor cursor = resolver.query(
-                    CONTENT_PROVIDER_URI, null, null, null, null);
+            Cursor cursor = resolver.query(CONTENT_PROVIDER_URI, null, null, null, null);
             if (cursor != null) {
                 try {
                     if (cursor.moveToFirst() && cursor.getColumnCount() > COL_THRESHOLD_OFF) {
@@ -1586,20 +1736,21 @@ public class LightSensorService extends Service {
         sendBroadcast(intent);
     }
 
-    private final BroadcastReceiver requestReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            broadcastUpdate(lastSensorLevel);
-        }
-    };
+    private final BroadcastReceiver requestReceiver =
+            new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    broadcastUpdate(lastSensorLevel);
+                }
+            };
 
     // -------------------------------------------------------------------------
     // Notification channel
     // -------------------------------------------------------------------------
 
     private void createNotificationChannel() {
-        NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "Автосвет", NotificationManager.IMPORTANCE_LOW);
+        NotificationChannel channel =
+                new NotificationChannel(CHANNEL_ID, "Автосвет", NotificationManager.IMPORTANCE_LOW);
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null) manager.createNotificationChannel(channel);
     }

@@ -2,6 +2,7 @@
 //! Each checked result below corresponds to a checked branch in those scripts.
 //! OD installation also rejects evidence of conflicting CUNBA hooks.
 //! The approved VoyahHlCTRL remediation is an opt-in extension to the permission step.
+mod native_data;
 mod readiness;
 
 use crate::{
@@ -163,8 +164,9 @@ impl Engine {
             ));
         }
         let mut result = self.execute(request);
-        if result.as_ref().is_err_and(crate::cunba::is_blocking_error)
-            && !self.ota_locked
+        if result.as_ref().is_err_and(|error| {
+            crate::cunba::is_blocking_error(error) || crate::voyahtweaks::is_blocking_error(error)
+        }) && !self.ota_locked
             && !self.restart_loader
         {
             return self.finish_report(result);
@@ -187,22 +189,18 @@ impl Engine {
     }
 
     fn finish_report(&self, result: Result<()>) -> Result<()> {
-        let readiness_unconfirmed = result
-            .as_ref()
-            .is_err_and(|error| error.code == "READINESS_UNCONFIRMED");
         let mut report = match &result {
             Ok(()) => {
                 json!({"success":true,"operationId":self.operation.id,"releaseVersion":self.payload.manifest.release_version,"installerVersion":env!("CARGO_PKG_VERSION"),"payloadManifest":self.payload.manifest})
             }
-            Err(warning) if readiness_unconfirmed => json!({
-                "success":true,
-                "operationId":self.operation.id,
-                "readinessConfirmed":false,
-                "warning":warning
-            }),
             Err(e) => json!({"success":false,"operationId":self.operation.id,"error":e,
                 "recovery":"Завершённые изменения могли сохраниться. Повторите установку или удаление после устранения указанной причины."}),
         };
+        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+            && (self.adb.step.as_deref() == Some("verify") || result.is_err())
+        {
+            report["readinessConfirmed"] = json!(result.is_ok());
+        }
         report["cunbaRestorationRequested"] = json!(self.restore_cunba);
         report["releaseVersion"] = json!(self.payload.manifest.release_version);
         report["installerVersion"] = json!(crate::compatibility::INSTALLER_VERSION);
@@ -214,9 +212,7 @@ impl Engine {
         }
         recovery::write_json(&self.operation.dir.join("report.json"), &report)?;
         self.adb.events.emit(
-            if readiness_unconfirmed {
-                "operation-completed-with-warning"
-            } else if result.is_ok() {
+            if result.is_ok() {
                 "operation-completed"
             } else if result.as_ref().is_err_and(|e| e.code == "CANCELLED") {
                 "operation-cancelled"
@@ -226,18 +222,14 @@ impl Engine {
                 "operation-failed"
             },
             self.adb.step.as_deref(),
-            if result.is_ok() || readiness_unconfirmed {
+            if result.is_ok() {
                 "Операция завершена"
             } else {
                 "Операция остановлена"
             },
             json!({"report":report,"reportPath":self.operation.dir.join("report.json")}),
         )?;
-        if readiness_unconfirmed {
-            Ok(())
-        } else {
-            result
-        }
+        result
     }
     fn step(
         &mut self,
@@ -411,6 +403,11 @@ impl Engine {
                     e.payload.manifest.infrastructure,
                     r.action,
                 )?;
+                crate::voyahtweaks::check_installation(
+                    &e.adb,
+                    e.payload.manifest.infrastructure,
+                    r.action,
+                )?;
                 Ok(())
             },
         )?;
@@ -510,7 +507,7 @@ impl Engine {
                     if e.payload.manifest.infrastructure
                         == crate::infrastructure::Infrastructure::Od
                     {
-                        return e.verify_od_readiness();
+                        return e.verify_od_installation();
                     }
                     e.wait_boot(true)?;
                     e.native_ready()?;

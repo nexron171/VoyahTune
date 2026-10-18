@@ -40,6 +40,7 @@ pub fn plan_with_events(
         let _ = adb.run(args, None, Duration::from_secs(20));
     }
     crate::cunba::check_installation(&adb, payload.manifest.infrastructure, action)?;
+    crate::voyahtweaks::check_installation(&adb, payload.manifest.infrastructure, action)?;
     let plan = plans::plan(
         inventory::diagnose(&adb, payload, action),
         payload,

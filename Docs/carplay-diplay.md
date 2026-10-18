@@ -1,7 +1,7 @@
 # DiPlay в VoyahTune: спецификация интеграции и восстановления
 
 Этот документ — контракт адаптации, по которому восстанавливают интеграцию после
-полной замены исходников DiPlay. Он описывает исходники на **14 октября 2026**;
+полной замены исходников DiPlay. Он описывает исходники на **17 октября 2026**;
 состав конкретного опубликованного релиза определяется его manifest и revision.
 Имена upstream-классов могут измениться: при обновлении сохранять поведение
 и границы ответственности, а не только переносить строки патча.
@@ -248,8 +248,12 @@ fallback только для controller без app-owned callback.
   Полноэкранная панель использует `TextureView`, как виджет: контейнер и поверхность
   обрезаются по радиусу **44dp** (`carplay_fullscreen_corner_radius`), касания
   пересылаются на VD штатным путём Native. Геометрия учитывает док, системные
-  insets и положение подъёмного экрана. Обычные приложения и двухпанельные сплиты
-  сохраняют `SurfaceView` и свои скругления.
+  insets. Для отдельного полноэкранного CarPlay высота корня хоста всегда **720 px**,
+  независимо от положения подъёмного экрана: начальное чтение свойства/настройки
+  и события `action.qg.layout.changed` не уменьшают его до 560 px. Режим CarPlay
+  определяется до первого применения высоты и создания поверхности/VD.
+  Обычные приложения и двухпанельные сплиты сохраняют `SurfaceView`, свои скругления
+  и переключение высоты 720/560 px. Геометрия встроенного виджета не меняется.
   При пассивном скрытии полноэкранной TextureView VD паркуется на
   `EmbeddedWidgetSurface` и продолжает читать кадры; возврат присоединяет поверхность
   к прежнему VD без нового запуска проекции. Завершение хоста освобождает VD и
@@ -495,12 +499,15 @@ VoyahTune; скрытие не изменяет сохранённые preferenc
 `settings_back`/`settings_icon_back`, как в Advanced (72dp, в компактном режиме 56dp).
 Она вызывает Actions.back → DiPlayActivity.onBackPressedDispatcher.onBackPressed()
 без disconnect/stop сессии. Внизу справа всегда видна отдельная кнопка «Выйти»:
-она напрямую вызывает `Activity.finish()` для host Activity, возвращая предыдущий
-экран либо домашний экран, когда под ней нет другой Activity. Она не зависит от
-обработчика Back и не вызывает disconnect/stop сессии.
+она вызывает `CarPlayHomeUi.finishActivities()`: удаляет выделенные UI tasks
+`DiPlayActivity` и `CarPlayHostActivity` по точному компоненту baseIntent, затем
+завершает текущую Activity через `finishAndRemoveTask()`. Поэтому оставшийся экран
+подключения не появляется под настройками. Другие tasks RestoreMode сохраняются.
+Действие не зависит от обработчика Back и не вызывает disconnect/stop сессии.
 Рядом с «Вернуться в настройки» на экране подключения есть «Отмена»: она блокирует
-повторные попытки и вызывает штатный shutdown без завершения процесса. После
-закрытия транспорта и медиаресурсов открывается home, Activity подключения закрывается.
+повторные попытки, вызывает штатный shutdown без завершения процесса и сразу
+закрывает UI через тот же `finishActivities()`. Транспорт и медиаресурсы закрываются
+асинхронно; UI не ждёт teardown, home после него не открывается.
 Таймера автоматической отмены нет.
 
 `CarPlayWindowUi` оборачивает home/settings и весь корневой View проекции общей
@@ -572,9 +579,24 @@ Host наблюдает изменение preference, поэтому перек
 Раздел «Дополнительные настройки» (ADVANCED) с экспериментальными опциями скрыт
 из меню, обзора, поиска и страницы автомобиля; сохранённая категория ADVANCED
 не восстанавливается при открытии настроек. Значения опций сохраняются.
-Раздел DiPlay «Аудио» с настройкой аудиопотоков скрыт из меню, обзора и поиска;
-восстановление прежнего экрана переводит в обзор. Настройки маршрутизации и
-аудиодвижок сохраняются, громкость каналов регулируется в настройках VoyahTune.
+Раздел DiPlay «Аудио» доступен в меню, обзоре и поиске; категория AUDIO
+восстанавливается после пересоздания Activity. Он содержит отдельные буферы музыки
+для Wi-Fi/USB, громкую связь, подавление эха и фильтр голоса звонков, аудиофокус
+и его зависимые опции, buffered music, ограничение низких частот речевого PCM
+и вывод звука через Bluetooth автомобиля. Звуковые опции перенесены из скрытого
+ADVANCED_MEDIA в AUDIO_ROUTING; их значения и правила применения сохраняются.
+Выбор аудиопотоков музыки/навигации и advanced channel mapping остаются скрытыми,
+включая поиск; прежние значения не сбрасываются. OEM/BYD phone-audio controls
+и экспериментальные видеонастройки остаются в скрытом ADVANCED.
+Громкость каналов регулируется в настройках VoyahTune.
+
+Без сохранённого `media_buffer_ms` используется **1000 мс** для Wi-Fi и USB
+(`AirPlayPersistence.DEFAULT_MEDIA_BUFFER_MILLIS`). Отдельный
+`wired_media_buffer_ms` имеет приоритет для USB; при его отсутствии USB продолжает
+наследовать старое общее значение. Явные значения, включая прежние 300 мс,
+не перезаписываются; чтение default не записывает preference. UI помечает
+1000 мс как default, остальные пресеты показывает без такой пометки. Допустимые
+пресеты и обработка некорректных сохранённых значений в MediaAudioBuffer сохранены.
 
 ### Русский интерфейс
 
@@ -1018,7 +1040,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | --- | --- |
 | [common/build.gradle.kts](../RestoreMode/diplay/common/build.gradle.kts) | Переименовать catalog → diplayLibs, dependency → :diplay-shared; сохранить Compose/тестовое окружение; исключить WorkManager. Из gradle/libs.versions.toml удалить work и androidx-work-runtime; не возвращать при обновлении upstream. |
 | [shared/build.gradle](../RestoreMode/diplay/shared/build.gradle) | Использовать diplayLibs; сохранить JNI/NDK и library namespace. |
-| [common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt) | initializeAutomaticNavigationAudioChannel: 0 только при отсутствии нового ключа; DEFAULT_OEM_LABEL=Voyah Free; location_reporting_enabled по умолчанию true; carplay_night_mode по умолчанию VEHICLE/voyah_light без перезаписи явного выбора; observer изменения carplay_night_mode; wireless_hotspot_mode по умолчанию WIFI_P2P без перезаписи сохранённого выбора (§5). |
+| [common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt) | initializeAutomaticNavigationAudioChannel: 0 только при отсутствии нового ключа; DEFAULT_OEM_LABEL=Voyah Free; location_reporting_enabled по умолчанию true; carplay_night_mode по умолчанию VEHICLE/voyah_light без перезаписи явного выбора; observer изменения carplay_night_mode; wireless_hotspot_mode по умолчанию WIFI_P2P; буфер музыки 1000 мс только без сохранённого значения, сохранение наследования общего буфера для USB (§5). |
 | [common/src/test/java/com/shilapi/xcertplay/HotspotModeMigrationTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/HotspotModeMigrationTest.kt) | Ожидание Wi-Fi Direct для новой установки; сохранить проверки legacy-миграции и ранее выбранного режима. |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayNightMode.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayNightMode.kt)<br>[common/src/main/java/com/shilapi/xcertplay/AppAppearance.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AppAppearance.kt) | VEHICLE/voyah_light: локальный системный fallback и независимое оформление приложения (§6). |
 | [common/src/main/res/values/strings_night_mode.xml](../RestoreMode/diplay/common/src/main/res/values/strings_night_mode.xml)<br>[common/src/main/res/values-ru/strings_night_mode.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings_night_mode.xml) | Подпись автомобильного режима темы в штатном списке DiPlay. |
@@ -1029,7 +1051,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [common/src/main/java/com/shilapi/xcertplay/AdbClusterActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AdbClusterActivity.kt) | AppLocale.wrap/enforce для отдельного экрана карты. |
 | [common/src/main/java/com/shilapi/xcertplay/AudioChannelPreview.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AudioChannelPreview.kt) | Automatic использует OEM 3/1; проверять фактический AudioTrack stream и fallback. |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt) | available → источники скорости/темы/аудиомаршруты Voyah; Siri keys переданы Native. Сохранить ownerDisplayId, последовательный transfer и guards уничтоженного host; передать app-owned requestUI callback, парковать main decoder при любом surface detach Voyah UI, запрашивать кадр при attach/adopt и откладывать скрытый resize (§4); подключить CarPlayWindowUi, тёмный экран ожидания с app-иконкой, заголовком CarPlay и явной отменой через shutdown(false) без killProcess (§5). |
-| [common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt) | Defaults; projection launchDisplayId и делегирование VD-запуска Native с обработкой отказа (§4); фабрика home + обновление состояния; CarPlayWindowUi для границ окна и ошибки auth; одноразовый запрос автоподключения при открытии; home без ScrollView и idle/hotspot-подсказок, BG из палитры; скрытие AUDIO/ADVANCED во всех входах и поиске, фильтрация сохранённой категории; скрытие WHEEL_KEYS при доступной VoyahCarPlayIntegration (§5); guards OEM/ADB-разделов и vehicle-data probe в диагностике (§9). |
+| [common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt) | Defaults; projection launchDisplayId и делегирование VD-запуска Native с обработкой отказа (§4); фабрика home + обновление состояния; CarPlayWindowUi для границ окна и ошибки auth; одноразовый запрос автоподключения при открытии; home без ScrollView и idle/hotspot-подсказок, BG из палитры; AUDIO с буферами/обработкой звука/аудиофокусом без выбора каналов, пометка default у 1000 мс; скрытие ADVANCED во всех входах и поиске, фильтрация сохранённой категории; скрытие WHEEL_KEYS при доступной VoyahCarPlayIntegration (§5); guards OEM/ADB-разделов и vehicle-data probe в диагностике (§9). |
 | [common/src/main/java/com/shilapi/xcertplay/DiPlayBootstrap.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlayBootstrap.kt) | Вызов VoyahCarPlayDefaults.initialize до штатной загрузки identity. |
 | [common/src/main/java/com/shilapi/xcertplay/DiPlaySessionService.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlaySessionService.kt) | start/stop интеграции по жизни сервиса, сохранение сессии при onTaskRemoved на Voyah; локализованный context и уведомление. |
 | [common/src/main/java/com/shilapi/xcertplay/PhoneBluetoothReceiver.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/PhoneBluetoothReceiver.kt) | Ранний return по standaloneAppEnabled: запуск только через VoyahTune/Native. |
@@ -1096,7 +1118,7 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 
 | Файл | Назначение |
 | --- | --- |
-| [common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt) | Контракт фабрики app-owned home и callbacks/state. |
+| [common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt) | Контракт фабрики app-owned home и callbacks/state; finishActivities закрывает только выделенные UI tasks CarPlay, сохраняя сессию и другие экраны RestoreMode (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt) | App-policy безопасных границ, обёртка UI/видео, потребление insets, текст ошибки auth, connectionIcon и darkHostAppearance с безопасным fallback без приложения (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt) | Java-friendly доступ настроек VoyahTune к preferences/состоянию/stop DiPlay. |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayThemePolicy.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayThemePolicy.kt) | SWReason влияет только на projection в выбранном VEHICLE (§6). |
@@ -1153,7 +1175,7 @@ app/Native/OD-файлы дополнительно перечислены в §
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayLauncherActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayLauncherActivity.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayTarget.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayTarget.java) | Экспортированный MAIN/LAUNCHER-вход и bind fallback ярлыка, игнорирование позднего callback; стабильный component ID и выбор home/projection по целевому displayId (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/MainSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/MainSettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileOrderStore.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileOrderStore.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java)<br>[RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Отдельные настройки виджета CarPlay; общий picker для остальных приложений, размеры, блокировка autoStart ярлыка, физический displayId и поколения запусков/query (§4). |
 | [Native/app/src/main/java/ru/big/town/anative/AppDisplayLauncher.java](../Native/app/src/main/java/ru/big/town/anative/AppDisplayLauncher.java)<br>[Native/app/src/main/java/ru/big/town/anative/AppDisplayTaskPlan.java](../Native/app/src/main/java/ru/big/town/anative/AppDisplayTaskPlan.java)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesService.java](../Native/app/src/main/java/ru/big/town/anative/SetModesService.java) | Выбор projection для виджета и полноэкранного VD-хоста на физических 0/1; фильтрация tasks, очистка старого CarPlay VD после task removal независимо от Dashboard и закрытие прежнего полноэкранного хоста при переходе в виджет; сообщения 34/120/121/123, destroy контроллера (§4/6); включение Wi-Fi и Bluetooth при создании службы в обоих профилях (§5). |
-| [Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java)<br>[Native/app/src/main/java/ru/big/town/anative/SplitHostTaskLane.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostTaskLane.java)<br>[Native/app/src/main/java/ru/big/town/anative/SplitHostTaskSnapshot.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostTaskSnapshot.java)<br>[Native/app/src/main/res/values/carplay_dimensions.xml](../Native/app/src/main/res/values/carplay_dimensions.xml) | Однопанельный полноэкранный CarPlay: VD, TextureView и outline 44dp, парковка вывода в фоне; проверка поколения перед запуском хоста, распознавание CarPlay component вместо общего пакета RestoreMode в надзирателе (§4). |
+| [Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java)<br>[Native/app/src/main/java/ru/big/town/anative/SplitHostTaskLane.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostTaskLane.java)<br>[Native/app/src/main/java/ru/big/town/anative/SplitHostTaskSnapshot.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostTaskSnapshot.java)<br>[Native/app/src/main/res/values/carplay_dimensions.xml](../Native/app/src/main/res/values/carplay_dimensions.xml) | Однопанельный полноэкранный CarPlay: постоянная высота хоста 720 px при старте и событиях подъёмного экрана, VD, TextureView и outline 44dp, парковка вывода в фоне; проверка поколения перед запуском хоста, распознавание CarPlay component вместо общего пакета RestoreMode в надзирателе (§4). |
 | [Native/app/src/main/java/ru/big/town/anative/EmbeddedWidgetSurface.java](../Native/app/src/main/java/ru/big/town/anative/EmbeddedWidgetSurface.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayWidgetProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayWidgetProtocol.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java) | Passive detach, фоновая поверхность того же VD, восстановление по Native и отсечение устаревших UI callbacks. Общий механизм для CarPlay и обычных приложений в плитках (§4/6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWidgetPlaceholder.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWidgetPlaceholder.java)<br>[RestoreMode/app/src/main/res/layout/tile_embedded_app.xml](../RestoreMode/app/src/main/res/layout/tile_embedded_app.xml)<br>[RestoreMode/app/src/main/res/layout/tile_app_shortcut.xml](../RestoreMode/app/src/main/res/layout/tile_app_shortcut.xml) | Общий шаблон плитки, тёмный значок и подпись CarPlay для 1×1; чёрная заглушка большого виджета; тап/долгое нажатие и скрытие при старте проекции (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayHomeScreen.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayHomeScreen.java)<br>[RestoreMode/app/src/main/res/drawable/carplay_home_wireless.xml](../RestoreMode/app/src/main/res/drawable/carplay_home_wireless.xml)<br>[RestoreMode/app/src/main/res/drawable/carplay_home_usb.xml](../RestoreMode/app/src/main/res/drawable/carplay_home_usb.xml)<br>[RestoreMode/app/src/main/res/values/carplay_home.xml](../RestoreMode/app/src/main/res/values/carplay_home.xml)<br>[RestoreMode/app/src/main/res/drawable-nodpi/carplay_home_logo.png](../RestoreMode/app/src/main/res/drawable-nodpi/carplay_home_logo.png) | Home в дизайн-системе; собственные иконки, строки home/настроек и ярлыка 1×1 (§4/5). |
@@ -1278,7 +1300,7 @@ Authentication assets и бинарную иконку сохранить отд
 | `AppWidgetStore.Entry` | ID, profiles/packageName, DPI, width/height, autoStart и autoStartDelay. Новый виджет — 1×1; 1×1 всегда ярлык. Смешанные профили не удалять. При дедупликации чистого CarPlay сохраняется первая запись. |
 | `carPlayWindow:<entry.id>` в TileSizeStore | Последний размер окна; переключение в ярлык не стирает его. Первый размер окна 8×5, сетка 12×5, окно не может быть 1×1. |
 | `Entry.autoStart` | Default false; переключатель виден только в режиме окна. После Native QUERY сначала восстановить retained VD, затем запускать отсутствующее видимое окно без autoStartDelay; не забирать полноэкранную проекцию. Старые ответы отсекать carPlayWidgetGeneration. |
-| Категории DiPlay | AUDIO/ADVANCED недоступны в меню, обзоре, поиске, ссылках и восстановлении сохранённой категории. Сами audio/experimental preferences не очищать и не отключать автоматически. |
+| Категории DiPlay | AUDIO доступен с буферами, обработкой звука и аудиофокусом; выбор каналов скрыт. ADVANCED недоступен в меню, обзоре, поиске, ссылках и восстановлении сохранённой категории. Сохранённые audio/experimental preferences не очищать и не отключать автоматически. Без выбранного буфера использовать 1000 мс, сохраняя отдельное значение USB и наследование прежнего общего. |
 | Настройки громкости | Четыре фактических OEM-канала через Native; не заменять локальными preference-ползунками и не возвращать скрытый редактор аудиопотоков (§9). |
 | Dock preferences | `dockHomeShortVoyahTune`, `dockAllAppsShortVoyahTune`: default false; OD-only зеркалирование. Слоты сохраняют `dockOverride1/2=CarPlayTarget.ID` для CarPlay; это отдельный target внутри того же APK. |
 | Компоненты и ресурсы | MainActivity, DiPlayActivity, CarPlayHostActivity, CarPlayLauncherActivity и affinity по §3. Launcher CarPlay экспортирован; иконка `carplay_home_logo` общая с ярлыком 1×1, зелёные launcher assets не возвращать. |
@@ -1290,11 +1312,12 @@ Authentication assets и бинарную иконку сохранить отд
 - Перенос между VD и отдельной Activity: штатный owner transfer с завершением старого
   controller и согласованием нового размера (§4), без killProcess всего RestoreMode.
 - «Отмена» на экране подключения: явный shutdown(false), блокировка retry, сброс
-  retry budget и generation, закрытие транспорта/медиаресурсов; затем `page=home`
-  и finish host. Это не обычный Back и не пассивное скрытие.
+  retry budget и generation, немедленное закрытие UI tasks CarPlay, асинхронное
+  закрытие транспорта/медиаресурсов без открытия `page=home`. Это не обычный Back
+  и не пассивное скрытие.
 
 При разрешении merge не возвращать удалённые элементы home: hotspot-подсказку и
-предупреждение, idle-слоган, «Выйти», автоподключение, выбор iPhone и кнопку точки
+предупреждение, idle-слоган, автоподключение, выбор iPhone и кнопку точки
 доступа. Ошибки `setupError` остаются. Три компактные карточки центрируются в безопасной
 области; фон home берётся из BG DiPlay. Экран подключения имеет тёмную палитру,
 тёмный значок, заголовок CarPlay, «Вернуться в настройки» и «Отмена» рядом; русская
@@ -1316,7 +1339,7 @@ UI-тесты и испытания на ГУ выполнять только в
 
 | Контракт | Существующие целевые тесты |
 | --- | --- |
-| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, видимая кнопка «Выйти» под плитками и завершение Activity без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `VoyahSettingsUiTest`: скрытые категории/пункты и поисковый индекс, восстановление AUDIO/ADVANCED, SWReason, Wi-Fi Direct и включённая передача местоположения в UI-контролах; сохранение явного выбора, включая отключение GPS после recreate. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, закрытие controller/sink и блокировка повторной отмены, сохранение сессии при возврате. |
+| Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, видимая кнопка «Выйти» под плитками и закрытие Activity вместе с task проекции без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `CarPlayHomeUiTest`: закрытие обоих UI tasks CarPlay с сохранением других tasks RestoreMode и фоновой сессии. `VoyahSettingsUiTest`: доступность AUDIO в UI/поиске и после recreate, сохранение USB/Wi-Fi буферов, скрытые каналы/ADVANCED, звуковые переключатели, SWReason, Wi-Fi Direct и сохранение явного отключения GPS. `MediaBufferPersistenceTest`: default 1000 мс без записи preference, сохранение прежних 300/500 мс и отдельного USB-буфера; `AudioFocusSettingsTest`: зависимые опции аудиофокуса. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, немедленное закрытие Activity до завершения teardown и до создания controller, закрытие controller/sink без открытия home и блокировка повторной отмены, сохранение сессии при возврате. |
 | Два значка OD и безопасная область | `Packaging/tests/test_carplay_allapps.js`; app `CarPlaySafeAreaTest`; common `CarPlayWindowUiTest`, `CarPlayHostVideoSurfaceTest` |
 | Защита сессии в памяти OD | `Packaging/tests/test_carplay_memory_protection.js`: приоритет только при session FGS, снятие защиты, изоляция Activity/процессов, несовместимый ABI; `test_vd_stability.js`: установка и откат hooks. |
 | Нажатия OD-дока | `Packaging/tests/test_dock_navigation_actions.js`; перенос обоих config extras и OD guards проверить с двух сторон |

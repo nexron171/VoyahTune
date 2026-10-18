@@ -398,17 +398,13 @@ impl Drop for OperationLock {
     }
 }
 fn install_apk(p: &Payload, package: &str, artifact: &str, apk: &Path) -> io::Result<()> {
-    let output = command(
-        "/system/bin/pm",
-        &[
-            "install",
-            "-r",
-            "--user",
-            "0",
-            apk.to_str().ok_or_else(|| invalid("Invalid APK path"))?,
-        ],
-        180,
-    )?;
+    let mut arguments = vec!["install", "-r"];
+    arguments.extend([
+        "--user",
+        "0",
+        apk.to_str().ok_or_else(|| invalid("Invalid APK path"))?,
+    ]);
+    let output = command("/system/bin/pm", &arguments, 180)?;
     if !output.lines().any(|s| s.trim() == "Success") {
         return Err(invalid(&format!("PackageManager: {output}")));
     }
@@ -629,6 +625,7 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
                     fs::remove_file(BLOCK)?;
                     fs::File::open("/data/local/bin")?.sync_all()?;
                     command("/system/bin/sync", &[], 30)?;
+                    crate::telemetry::before_reboot()?;
                     command("/system/bin/reboot", &[], 15)?;
                 }
             }
@@ -900,13 +897,14 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
                     workflow::update(shared, |s| {
                         s.phase = "committed".into();
                         s.step = "Обновление установлено, службы работают".into();
-                        s.installed_version = claims.version.clone();
+                        s.installed_version = p.manifest.release_version.clone();
                         s.installed_archive_sha256 = claims.archive_sha256.clone();
                         s.selected = None;
                         s.error = None;
                         s.notice = Some("success".into());
                         s.notice_opened = false;
                     })?;
+                    crate::telemetry::finish(None);
                     for path in [root().join("release.zip"), root().join("release.part")] {
                         if path.exists() {
                             if let Err(e) = fs::remove_file(path) {

@@ -7,7 +7,13 @@ use std::{
     path::Path,
 };
 
-pub const DEFAULT_CATALOG_URL: &str = release_core::catalog::CATALOG_URL;
+pub fn default_catalog_url() -> &'static str {
+    if crate::restore_ui::enabled() {
+        "https://voyahtune.ru/api/v1/releases"
+    } else {
+        release_core::catalog::CATALOG_URL
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -25,7 +31,7 @@ impl Default for Config {
         Self {
             infrastructure: release_core::infrastructure::Infrastructure::compiled(),
             schema: 1,
-            catalog_url: DEFAULT_CATALOG_URL.into(),
+            catalog_url: default_catalog_url().into(),
             source_generation: 0,
             dns_enabled: None,
         }
@@ -36,7 +42,7 @@ impl Config {
     pub fn response(&self) -> serde_json::Value {
         let mut settings = serde_json::json!(self);
         if crate::restore_ui::enabled() {
-            settings["defaultCatalogUrl"] = DEFAULT_CATALOG_URL.into();
+            settings["defaultCatalogUrl"] = default_catalog_url().into();
         }
         settings
     }
@@ -94,6 +100,16 @@ pub fn load(root: &Path) -> io::Result<Config> {
         return Err(invalid("Неизвестный формат настроек"));
     }
     config.catalog_url = normalize_url(&config.catalog_url)?;
+    if crate::restore_ui::enabled()
+        && matches!(
+            config.catalog_url.as_str(),
+            "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json"
+                | "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index-v4.json"
+                | "https://gitlab.com/openvoyah/voyahtune/-/raw/master/Releases/ota/index-v4.json"
+        )
+    {
+        change_url(root, &mut config, default_catalog_url())?;
+    }
     Ok(config)
 }
 
@@ -138,6 +154,45 @@ pub fn change_url(root: &Path, current: &mut Config, input: &str) -> io::Result<
 mod tests {
     use super::*;
     #[test]
+    fn legacy_default_migrates_only_for_od_and_keeps_custom_catalogs() {
+        let root = tempfile::tempdir().unwrap();
+        for legacy in [
+            "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json",
+            "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index-v4.json",
+            "https://gitlab.com/openvoyah/voyahtune/-/raw/master/Releases/ota/index-v4.json",
+        ] {
+            let config = Config {
+                catalog_url: legacy.into(),
+                source_generation: 7,
+                dns_enabled: Some(true),
+                ..Config::default()
+            };
+            save(root.path(), &config).unwrap();
+            let migrated = load(root.path()).unwrap();
+            if crate::restore_ui::enabled() {
+                assert_eq!(migrated.catalog_url, "https://voyahtune.ru/api/v1/releases");
+                assert_eq!(migrated.source_generation, 8);
+                assert_eq!(migrated.dns_enabled, Some(true));
+            } else {
+                assert_eq!(migrated, config);
+            }
+            assert_eq!(load(root.path()).unwrap(), migrated);
+        }
+        let custom = Config {
+            catalog_url: "https://example.org/beta.json".into(),
+            ..Config::default()
+        };
+        save(root.path(), &custom).unwrap();
+        assert_eq!(load(root.path()).unwrap(), custom);
+        let beta = Config {
+            catalog_url: "https://gitlab.com/openvoyah/voyahtune/-/raw/master/Releases/ota/index-v4-beta.json".into(),
+            ..Config::default()
+        };
+        save(root.path(), &beta).unwrap();
+        assert_eq!(load(root.path()).unwrap(), beta);
+    }
+
+    #[test]
     fn response_exposes_compiled_default_without_persisting_it() {
         let config = Config {
             catalog_url: "https://example.org/custom.json".into(),
@@ -146,7 +201,7 @@ mod tests {
         let response = config.response();
         assert_eq!(response["catalogUrl"], config.catalog_url);
         if crate::restore_ui::enabled() {
-            assert_eq!(response["defaultCatalogUrl"], DEFAULT_CATALOG_URL);
+            assert_eq!(response["defaultCatalogUrl"], default_catalog_url());
         } else {
             assert!(response.get("defaultCatalogUrl").is_none());
         }
@@ -159,7 +214,7 @@ mod tests {
     fn address_is_host_independent_and_persists_across_restart() {
         let root = tempfile::tempdir().unwrap();
         let mut config = load(root.path()).unwrap();
-        assert_eq!(config.catalog_url, DEFAULT_CATALOG_URL);
+        assert_eq!(config.catalog_url, default_catalog_url());
         assert!(change_url(
             root.path(),
             &mut config,
@@ -191,8 +246,11 @@ mod tests {
         let beta = "https://updates.example.org/custom-path?channel=beta";
         assert!(change_settings(root.path(), &mut config, beta, None).unwrap());
         assert_eq!(load(root.path()).unwrap().catalog_url, beta);
-        assert!(change_settings(root.path(), &mut config, DEFAULT_CATALOG_URL, None).unwrap());
-        assert_eq!(load(root.path()).unwrap().catalog_url, DEFAULT_CATALOG_URL);
+        assert!(change_settings(root.path(), &mut config, default_catalog_url(), None).unwrap());
+        assert_eq!(
+            load(root.path()).unwrap().catalog_url,
+            default_catalog_url()
+        );
         assert_eq!(config.source_generation, 2);
     }
 
@@ -258,14 +316,14 @@ mod dns_tests {
     #[test]
     fn old_settings_default_to_preserving_dns_and_changes_are_atomic() {
         let original: Config = serde_json::from_value(
-            serde_json::json!({"schema":1,"infrastructure":release_core::infrastructure::Infrastructure::compiled(),"catalogUrl":DEFAULT_CATALOG_URL,"sourceGeneration":0}),
+            serde_json::json!({"schema":1,"infrastructure":release_core::infrastructure::Infrastructure::compiled(),"catalogUrl":default_catalog_url(),"sourceGeneration":0}),
         )
         .unwrap();
         assert_eq!(original.dns_enabled, None);
         let root = tempfile::tempdir().unwrap();
         let mut config = original;
         assert!(
-            !change_settings(root.path(), &mut config, DEFAULT_CATALOG_URL, Some(true)).unwrap()
+            !change_settings(root.path(), &mut config, default_catalog_url(), Some(true)).unwrap()
         );
         assert_eq!(load(root.path()).unwrap().dns_enabled, Some(true));
         let before = config.clone();
