@@ -98,7 +98,16 @@ for key in driveRememberLast energyRememberLast recycleRememberLast; do
     require_fixed "$PROVIDER" "\"$key\","
     require_fixed "$ADVANCE" "\"$key\""
 done
-require_fixed "$NATIVE_MAIN" 'cursor.getColumnCount() <= column || cursor.isNull(column)'
+python3 - "$NATIVE_MAIN" <<'PY_CHECK'
+from pathlib import Path
+import re
+import sys
+
+source = re.sub(r'\s+', ' ', Path(sys.argv[1]).read_text())
+assert 'cursor.getColumnCount() <= column || cursor.isNull(column)' in source, (
+    'Missing or NULL provider fields must retain the enabled default'
+)
+PY_CHECK
 require_fixed "$NATIVE_MAIN" 'p.getBoolean("cacheDriveRememberLast", true)'
 require_fixed "$NATIVE_MAIN" 'p.getBoolean("cacheEnergyRememberLast", true)'
 require_fixed "$NATIVE_MAIN" 'p.getBoolean("cacheRecycleRememberLast", true)'

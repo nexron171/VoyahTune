@@ -22,7 +22,7 @@ fail() {
     exit 1
 }
 require_fixed() {
-    if [ "$1" = "$ADVANCE" ] || [ "$1" = "$PROVIDER" ]; then
+    if [ "$1" = "$ADVANCE" ] || [ "$1" = "$PROVIDER" ] || [ "$1" = "$MAIN" ]; then
         python3 "$REPO_ROOT/Packaging/tests/assert_java_source.py" "$1" "$2"
     else
         grep -RFq -- "$2" "$1" || fail "missing '$2' in $1"

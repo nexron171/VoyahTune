@@ -210,7 +210,8 @@ def main():
             path.write_text(contents)
             sources.append(str(path))
         sources += [str(ROOT / "RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/DriveSelectionPreferences.java"),
-                    str(ROOT / "SharedAndroid/src/main/java/ru/big/town/common/DriveSelectionPolicy.java")]
+                    str(ROOT / "SharedAndroid/src/main/java/ru/big/town/common/DriveSelectionPolicy.java"),
+                    str(ROOT / "SharedAndroid/src/main/java/ru/big/town/common/DoorMediaSettings.java")]
         subprocess.run([javac, "--release", "11", "-d", str(temp), *sources], check=True)
         subprocess.run([java, "-cp", str(temp), "ru.big.town.restoremode.vehicle.AccPreferencesHarness"], check=True)
 
