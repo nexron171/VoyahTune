@@ -24,45 +24,52 @@ pub struct Runtime {
     pub config: Result<Config, String>,
     pub state: State,
 }
+
 pub type Shared = Arc<Mutex<Runtime>>;
+
 fn root() -> &'static Path {
     Path::new(crate::ROOT)
 }
+
 pub fn update(shared: &Shared, change: impl FnOnce(&mut State)) -> io::Result<()> {
-    let mut rt = shared.lock().unwrap();
-    change(&mut rt.state);
-    state::save(root(), "state.json", &rt.state)
+    let mut runtime = shared.lock().unwrap();
+    change(&mut runtime.state);
+    state::save(root(), "state.json", &runtime.state)
 }
+
 fn snapshot(shared: &Shared) -> State {
     shared.lock().unwrap().state.clone()
 }
+
 pub fn phase(shared: &Shared, name: &str, step: &str) -> io::Result<()> {
     crate::log(root(), &format!("phase={name} {step}"))?;
-    update(shared, |s| {
-        s.phase = name.into();
-        s.step = step.into();
-        s.error = None;
-        s.bytes = 0;
-        s.total = 0;
+    update(shared, |state| {
+        state.phase = name.into();
+        state.step = step.into();
+        state.error = None;
+        state.bytes = 0;
+        state.total = 0;
     })
 }
+
 fn fail(shared: &Shared, error: &io::Error, repair: bool) {
     let message = error.to_string();
     let _ = crate::log(root(), &format!("FAILED {message}"));
-    let _ = update(shared, |s| s.fail(message.clone(), repair));
+    let _ = update(shared, |state| state.fail(message.clone(), repair));
     crate::telemetry::finish(Some(&message));
 }
+
 pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
-    let config = config::load(root()).map_err(|e| e.to_string());
+    let config = config::load(root()).map_err(|error| error.to_string());
     let stored = root().join("state.json");
     let mut state = if stored.exists() {
         match state::read::<State>(&stored) {
             Ok(state) => state,
-            Err(e) => {
+            Err(error) => {
                 fs::copy(&stored, root().join("state.corrupt.json"))?;
                 let mut broken = State::fresh("0.0.0".into(), "unknown".into());
                 broken.phase = "repair-required".into();
-                broken.error = Some(e.to_string());
+                broken.error = Some(error.to_string());
                 broken.notice = Some("error".into());
                 broken
             }
@@ -75,10 +82,10 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
                 .cloned()
                 .unwrap_or(serde_json::json!("od")),
         )
-        .map_err(|e| invalid(&e.to_string()))?;
+        .map_err(|error| invalid(&error.to_string()))?;
         infrastructure
             .require(release_core::infrastructure::Infrastructure::compiled())
-            .map_err(|e| invalid(&e.to_string()))?;
+            .map_err(|error| invalid(&error.to_string()))?;
         State::fresh(
             boot["version"]
                 .as_str()
@@ -101,39 +108,42 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     } else if state.error.is_some() {
         crate::telemetry::finish(state.error.as_deref());
     }
-    if let Ok(c) = &config {
-        if state.source_generation != c.source_generation && !state.repair() {
+    if let Ok(config) = &config {
+        if state.source_generation != config.source_generation && !state.repair() {
             state.clear_od_catalog();
             state.selected = None;
             state.phase = "idle".into();
-            state.source_generation = c.source_generation;
+            state.source_generation = config.source_generation;
         }
     }
     state::save(root(), "state.json", &state)?;
     let shared = Arc::new(Mutex::new(Runtime { config, state }));
-    let (tx, rx) = mpsc::channel();
+    let (sender, receiver) = mpsc::channel();
     let worker = shared.clone();
-    thread::spawn(move || run(worker, rx));
-    Ok((shared, tx))
+    thread::spawn(move || run(worker, receiver));
+    Ok((shared, sender))
 }
-pub fn queue(shared: &Shared, tx: &mpsc::Sender<Job>, job: Job) -> io::Result<()> {
-    let mut rt = shared.lock().unwrap();
-    if rt.state.busy() || rt.state.repair() {
+
+pub fn queue(shared: &Shared, sender: &mpsc::Sender<Job>, job: Job) -> io::Result<()> {
+    let mut runtime = shared.lock().unwrap();
+    if runtime.state.busy() || runtime.state.repair() {
         return Err(invalid(
             "Обновление занято или требуется USB-восстановление",
         ));
     }
     match job {
-        Job::Download if rt.state.selected.is_none() => {
+        Job::Download if runtime.state.selected.is_none() => {
             return Err(invalid("Сначала проверьте наличие релиза"))
         }
-        Job::Apply if rt.state.phase != "verified" => return Err(invalid("Релиз ещё не проверен")),
+        Job::Apply if runtime.state.phase != "verified" => {
+            return Err(invalid("Релиз ещё не проверен"))
+        }
         _ => {}
     }
-    rt.config.as_ref().map_err(|e| invalid(e))?;
+    runtime.config.as_ref().map_err(|error| invalid(error))?;
     if matches!(job, Job::Download | Job::Apply) {
-        let config = rt.config.as_ref().map_err(|error| invalid(error))?;
-        let release = rt
+        let config = runtime.config.as_ref().map_err(|error| invalid(error))?;
+        let release = runtime
             .state
             .selected
             .as_ref()
@@ -161,34 +171,37 @@ pub fn queue(shared: &Shared, tx: &mpsc::Sender<Job>, job: Job) -> io::Result<()
         crate::telemetry::finish(Some("Пользователь начал новую проверку каталога"));
     }
     // Set busy before acknowledging: double taps cannot enqueue parallel work.
-    rt.state.phase = match job {
+    runtime.state.phase = match job {
         Job::Check(_) => "checking",
         Job::Download => "downloading",
         Job::Apply => "preparing",
     }
     .into();
-    rt.state.error = None;
-    rt.state.completed_steps = 0;
-    rt.state.total_steps = 0;
-    rt.state.notice = None;
-    rt.state.step = match job {
+    runtime.state.error = None;
+    runtime.state.completed_steps = 0;
+    runtime.state.total_steps = 0;
+    runtime.state.notice = None;
+    runtime.state.step = match job {
         Job::Check(_) => "Проверка каталога релизов",
         Job::Download => "Скачивание архива",
         Job::Apply => "Проверка условий установки",
     }
     .into();
-    state::save(root(), "state.json", &rt.state)?;
-    tx.send(job).map_err(|_| invalid("Исполнитель остановлен"))
+    state::save(root(), "state.json", &runtime.state)?;
+    sender
+        .send(job)
+        .map_err(|_| invalid("Исполнитель остановлен"))
 }
-fn run(shared: Shared, rx: mpsc::Receiver<Job>) {
-    let s = snapshot(&shared);
-    if s.phase == "reboot-pending" || s.phase == "validating" {
-        if let Err(e) = crate::install::validate(&shared) {
-            fail(&shared, &e, true);
+
+fn run(shared: Shared, receiver: mpsc::Receiver<Job>) {
+    let state = snapshot(&shared);
+    if state.phase == "reboot-pending" || state.phase == "validating" {
+        if let Err(error) = crate::install::validate(&shared) {
+            fail(&shared, &error, true);
         }
     }
     loop {
-        match rx.recv_timeout(Duration::from_secs(15)) {
+        match receiver.recv_timeout(Duration::from_secs(15)) {
             Ok(job) => {
                 let apply = matches!(job, Job::Apply);
                 let result = match job {
@@ -197,77 +210,82 @@ fn run(shared: Shared, rx: mpsc::Receiver<Job>) {
                     Job::Apply => crate::install::apply(&shared),
                 };
                 let _ = device::wake(false);
-                if let Err(e) = result {
+                if let Err(error) = result {
                     let repair = apply && snapshot(&shared).installation_started();
-                    fail(&shared, &e, repair);
+                    fail(&shared, &error, repair);
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                let s = snapshot(&shared);
-                if !s.busy()
-                    && !s.repair()
+                let state = snapshot(&shared);
+                if !state.busy()
+                    && !state.repair()
                     && !crate::telemetry::active()
                     && shared.lock().unwrap().config.is_ok()
                     && matches!(device::prop("sys.boot_completed").as_deref(), Ok("1"))
-                    && state::due(&s, device::wall(), &device::boot(), device::uptime())
+                    && state::due(&state, device::wall(), &device::boot(), device::uptime())
                 {
                     let reserved = {
-                        let mut rt = shared.lock().unwrap();
-                        if rt.state.busy() || rt.state.repair() {
+                        let mut runtime = shared.lock().unwrap();
+                        if runtime.state.busy() || runtime.state.repair() {
                             false
                         } else {
-                            rt.state.phase = "checking".into();
+                            runtime.state.phase = "checking".into();
                             true
                         }
                     };
                     if !reserved {
                         continue;
                     }
-                    if let Err(e) = check(&shared, false, true) {
-                        let _ = crate::log(root(), &format!("automatic_check_failed {e}"));
-                        let _ = update(&shared, |s| {
-                            s.phase = "idle".into();
-                            s.error = Some(e.to_string());
+                    if let Err(error) = check(&shared, false, true) {
+                        let _ = crate::log(root(), &format!("automatic_check_failed {error}"));
+                        let _ = update(&shared, |state| {
+                            state.phase = "idle".into();
+                            state.error = Some(error.to_string());
                         });
                     }
                 }
             }
         }
-        let s = snapshot(&shared);
-        if s.notice.is_some()
-            && !s.notice_opened
+        let state = snapshot(&shared);
+        if state.notice.is_some()
+            && !state.notice_opened
             && matches!(device::prop("sys.boot_completed").as_deref(), Ok("1"))
         {
             if device::open_ui().is_ok() {
-                let _ = update(&shared, |s| s.notice_opened = true);
+                let _ = update(&shared, |state| state.notice_opened = true);
             }
         }
     }
 }
+
 fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
-    let s = snapshot(shared);
+    let state = snapshot(shared);
     let generation = shared
         .lock()
         .unwrap()
         .config
         .as_ref()
-        .map_err(|e| invalid(e))?
+        .map_err(|error| invalid(error))?
         .source_generation;
-    if s.source_generation != generation {
+    if state.source_generation != generation {
         return Err(invalid("Релиз выбран из прежнего источника"));
     }
-    let r = s.selected.ok_or_else(|| invalid("Нет выбранного релиза"))?;
-    for version in [&r.version, &s.installed_version] {
+    let release = state
+        .selected
+        .ok_or_else(|| invalid("Нет выбранного релиза"))?;
+    for version in [&release.version, &state.installed_version] {
         release_core::infrastructure::Infrastructure::from_version(version)
-            .and_then(|i| i.require(release_core::infrastructure::Infrastructure::compiled()))
-            .map_err(|e| invalid(&e.to_string()))?;
+            .and_then(|infrastructure| {
+                infrastructure.require(release_core::infrastructure::Infrastructure::compiled())
+            })
+            .map_err(|error| invalid(&error.to_string()))?;
     }
-    let c = ota::verify(&r).map_err(|e| invalid(&e.to_string()))?;
+    let claims = ota::verify(&release).map_err(|error| invalid(&error.to_string()))?;
     if !crate::restore_ui::enabled()
-        && c.version == s.installed_version
-        && !s.installed_archive_sha256.is_empty()
-        && c.archive_sha256 != s.installed_archive_sha256
+        && claims.version == state.installed_version
+        && !state.installed_archive_sha256.is_empty()
+        && claims.archive_sha256 != state.installed_archive_sha256
     {
         return Err(invalid(
             "Повторная установка разрешена только для того же архива",
@@ -275,34 +293,35 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
     }
     if crate::restore_ui::enabled() {
         catalog_selection::verify_selection(
-            &r,
-            &s.installed_version,
-            s.same_version,
+            &release,
+            &state.installed_version,
+            state.same_version,
             release_core::infrastructure::Infrastructure::Od,
         )
         .map_err(|error| invalid(&error.to_string()))?;
     } else {
-        ota::compatible(&c, &s.installed_version, s.same_version)
-            .map_err(|e| invalid(&e.to_string()))?;
+        ota::compatible(&claims, &state.installed_version, state.same_version)
+            .map_err(|error| invalid(&error.to_string()))?;
     }
-    if device::prop("ro.build.fingerprint")? != s.fingerprint {
+    if device::prop("ro.build.fingerprint")? != state.fingerprint {
         return Err(invalid(
             "Прошивка ГУ изменилась: установите VoyahTune через USB",
         ));
     }
-    Ok((r, c))
+    Ok((release, claims))
 }
+
 fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     let (url, generation) = {
-        let rt = shared.lock().unwrap();
-        let c = rt.config.as_ref().map_err(|e| invalid(e))?;
-        (c.catalog_url.clone(), c.source_generation)
+        let runtime = shared.lock().unwrap();
+        let config = runtime.config.as_ref().map_err(|error| invalid(error))?;
+        (config.catalog_url.clone(), config.source_generation)
     };
     if automatic {
-        update(shared, |s| {
-            s.last_auto_wall = device::wall();
-            s.last_auto_boot = device::boot();
-            s.last_auto_uptime = device::uptime();
+        update(shared, |state| {
+            state.last_auto_wall = device::wall();
+            state.last_auto_boot = device::boot();
+            state.last_auto_uptime = device::uptime();
         })?;
     }
     if url.is_empty() {
@@ -316,8 +335,10 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     let catalog = network::catalog(&url)?;
     let current = snapshot(shared);
     release_core::infrastructure::Infrastructure::from_version(&current.installed_version)
-        .and_then(|i| i.require(release_core::infrastructure::Infrastructure::compiled()))
-        .map_err(|e| invalid(&e.to_string()))?;
+        .and_then(|infrastructure| {
+            infrastructure.require(release_core::infrastructure::Infrastructure::compiled())
+        })
+        .map_err(|error| invalid(&error.to_string()))?;
     let mut rejected = None;
     let mut selection = catalog_selection::choose(
         &catalog,
@@ -336,18 +357,18 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
         );
     }
     let selection_error = selection.as_ref().err().map(ToString::to_string);
-    let mut rt = shared.lock().unwrap();
-    if rt
+    let mut runtime = shared.lock().unwrap();
+    if runtime
         .config
         .as_ref()
-        .map_err(|e| invalid(e))?
+        .map_err(|error| invalid(error))?
         .source_generation
         != generation
     {
         return Err(invalid("Источник каталога изменён"));
     }
     if crate::restore_ui::enabled() {
-        rt.state.catalog_versions = Some(
+        runtime.state.catalog_versions = Some(
             catalog
                 .releases
                 .iter()
@@ -369,33 +390,36 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     if crate::restore_ui::enabled() {
         state::save(root(), "catalog.json", &catalog)?;
     }
-    rt.state.source_generation = generation;
-    rt.state.same_version = selection
+    runtime.state.source_generation = generation;
+    runtime.state.same_version = selection
         .as_ref()
         .ok()
         .and_then(|release| release.as_ref())
         .is_some_and(|release| {
-            catalog_selection::same_release_version(&release.version, &rt.state.installed_version)
+            catalog_selection::same_release_version(
+                &release.version,
+                &runtime.state.installed_version,
+            )
         });
-    rt.state.selected = selection.ok().flatten();
-    rt.state.phase = "idle".into();
-    rt.state.error = None;
-    rt.state.step = if rt.state.selected.is_some() {
+    runtime.state.selected = selection.ok().flatten();
+    runtime.state.phase = "idle".into();
+    runtime.state.error = None;
+    runtime.state.step = if runtime.state.selected.is_some() {
         "Релиз доступен для скачивания"
     } else {
         "Новых совместимых релизов нет"
     }
     .into();
     if automatic {
-        if let Some(r) = &rt.state.selected {
-            if r.version != rt.state.installed_version {
-                rt.state.notice = Some(r.version.clone());
-                rt.state.notice_opened = false;
+        if let Some(release) = &runtime.state.selected {
+            if release.version != runtime.state.installed_version {
+                runtime.state.notice = Some(release.version.clone());
+                runtime.state.notice_opened = false;
             }
         }
     }
-    state::save(root(), "state.json", &rt.state)?;
-    drop(rt);
+    state::save(root(), "state.json", &runtime.state)?;
+    drop(runtime);
     if let Some(error) = rejected {
         crate::log(root(), &format!("catalog_release_skipped {error}"))?;
     }
@@ -404,6 +428,7 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     }
     Ok(())
 }
+
 fn download(shared: &Shared) -> io::Result<()> {
     let (release, claims) = selected(shared)?;
     device::wake(true)?;
@@ -415,9 +440,9 @@ fn download(shared: &Shared) -> io::Result<()> {
     )?;
     let archive = root().join("release.zip");
     let partial = root().join("release.part");
-    for p in [&archive, &partial] {
-        if p.exists() {
-            fs::remove_file(p)?;
+    for path in [&archive, &partial] {
+        if path.exists() {
+            fs::remove_file(path)?;
         }
     }
     if root().join("staging").exists() {
@@ -428,38 +453,60 @@ fn download(shared: &Shared) -> io::Result<()> {
         &partial,
         release.payload.size,
         &release.payload.sha256,
-        |n| {
-            let _ = update(shared, |s| {
-                s.bytes = n;
-                s.total = release.payload.size;
+        |processed_bytes| {
+            let _ = update(shared, |state| {
+                state.bytes = processed_bytes;
+                state.total = release.payload.size;
             });
         },
     )?;
     fs::rename(&partial, &archive)?;
     phase(shared, "verifying", "Распаковка и проверка релиза")?;
-    let mut zip =
-        zip::ZipArchive::new(fs::File::open(&archive)?).map_err(|e| invalid(&e.to_string()))?;
+    let mut zip = zip::ZipArchive::new(fs::File::open(&archive)?)
+        .map_err(|error| invalid(&error.to_string()))?;
     let mut expanded = 0u64;
-    for i in 0..zip.len() {
+    for index in 0..zip.len() {
         expanded = expanded
-            .checked_add(zip.by_index(i).map_err(|e| invalid(&e.to_string()))?.size())
+            .checked_add(
+                zip.by_index(index)
+                    .map_err(|error| invalid(&error.to_string()))?
+                    .size(),
+            )
             .ok_or_else(|| invalid("Размер ZIP переполнен"))?;
     }
     device::space(root(), expanded.saturating_add(256 * 1024 * 1024))?;
     drop(zip);
-    network::extract(&archive, &root().join("staging"), |n, total| {
-        let _ = update(shared, |s| {
-            s.bytes = n;
-            s.total = total;
-        });
-    })?;
-    let p = Payload::open(&root().join("staging")).map_err(|e| invalid(&e.to_string()))?;
-    p.require_infrastructure(release_core::infrastructure::Infrastructure::compiled())
-        .map_err(|e| invalid(&e.to_string()))?;
-    verify_payload(&p, &claims)?;
-    crate::install::compatible(&p)?;
+    network::extract(
+        &archive,
+        &root().join("staging"),
+        |processed_bytes, total| {
+            let _ = update(shared, |state| {
+                state.bytes = processed_bytes;
+                state.total = total;
+            });
+        },
+    )?;
+    let payload = open_ota_payload(&root().join("staging"))?;
+    verify_payload(&payload, &claims)?;
+    crate::install::compatible(&payload)?;
     phase(shared, "verified", "Релиз проверен. Можно начать установку")
 }
+
+fn open_ota_payload(directory: &Path) -> io::Result<Payload> {
+    use release_core::infrastructure::Infrastructure;
+
+    let infrastructure = Infrastructure::compiled();
+    let payload = match infrastructure {
+        Infrastructure::Od => Payload::open_for_od_ota(directory),
+        Infrastructure::Pi => Payload::open(directory),
+    }
+    .map_err(|error| invalid(&error.to_string()))?;
+    payload
+        .require_infrastructure(infrastructure)
+        .map_err(|error| invalid(&error.to_string()))?;
+    Ok(payload)
+}
+
 fn verify_payload(payload: &Payload, claims: &ota::Claims) -> io::Result<()> {
     if crate::restore_ui::enabled() && payload.manifest.release_version != claims.version {
         return Err(invalid("Manifest не соответствует выбранному релизу"));
@@ -515,9 +562,7 @@ pub fn select_release(shared: &Shared, version: &str) -> io::Result<()> {
 
 pub fn verified(shared: &Shared) -> io::Result<(Payload, ota::Claims)> {
     let (_, claims) = selected(shared)?;
-    let p = Payload::open(&root().join("staging")).map_err(|e| invalid(&e.to_string()))?;
-    p.require_infrastructure(release_core::infrastructure::Infrastructure::compiled())
-        .map_err(|e| invalid(&e.to_string()))?;
-    verify_payload(&p, &claims)?;
-    Ok((p, claims))
+    let payload = open_ota_payload(&root().join("staging"))?;
+    verify_payload(&payload, &claims)?;
+    Ok((payload, claims))
 }

@@ -8,6 +8,12 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+pub(crate) mod validation;
+use validation::ValidationTarget;
+
+#[cfg(test)]
+mod ota_tests;
+
 pub const MANIFEST_SCHEMA: u32 = 4;
 
 pub fn validate_schema(schema: u32) -> Result<()> {
@@ -69,6 +75,7 @@ pub struct BuildMetadata {
     #[serde(default)]
     pub runtime_hashes: std::collections::BTreeMap<String, String>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Artifact {
@@ -77,6 +84,7 @@ pub struct Artifact {
     pub sha256: String,
     pub size: u64,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Manifest {
@@ -94,17 +102,26 @@ pub struct Manifest {
     pub build_revision: String,
     pub artifacts: Vec<Artifact>,
 }
+
 #[derive(Clone)]
 pub struct Payload {
     pub root: PathBuf,
     pub manifest: Manifest,
 }
+
 impl Payload {
     pub fn restoremode_ota(&self) -> bool {
         self.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
-            && self.manifest.requirements.as_ref().is_some_and(|r| {
-                r.required_capabilities.iter().any(|c| c == "restoremode-ota-ui-v1")
-            })
+            && self
+                .manifest
+                .requirements
+                .as_ref()
+                .is_some_and(|requirements| {
+                    requirements
+                        .required_capabilities
+                        .iter()
+                        .any(|capability| capability == "restoremode-ota-ui-v1")
+                })
     }
 
     pub fn require_infrastructure(
@@ -113,32 +130,45 @@ impl Payload {
     ) -> Result<()> {
         self.manifest.infrastructure.require(expected)
     }
+
     pub fn open(root: &Path) -> Result<Self> {
         let payload = Self::load(root)?;
         payload.verify()?;
         Ok(payload)
     }
+
+    pub fn open_for_od_ota(root: &Path) -> Result<Self> {
+        let payload = Self::load_for_target(root, ValidationTarget::OdOta)?;
+        payload.require_infrastructure(crate::infrastructure::Infrastructure::Od)?;
+        payload.verify()?;
+        Ok(payload)
+    }
+
     /// Installation uses classic per-file checks; full integrity verification is explicit.
     pub fn load(root: &Path) -> Result<Self> {
+        Self::load_for_target(root, ValidationTarget::Installer)
+    }
+
+    fn load_for_target(root: &Path, target: ValidationTarget) -> Result<Self> {
         let root = root.canonicalize()?;
         let value: serde_json::Value =
             serde_json::from_reader(File::open(root.join("manifest.json"))?)?;
         let schema = value["schema"]
             .as_u64()
-            .and_then(|v| u32::try_from(v).ok())
+            .and_then(|schema| u32::try_from(schema).ok())
             .ok_or_else(|| Error::new("PAYLOAD_SCHEMA", "Нет допустимой версии формата релиза"))?;
-        validate_schema(schema)?;
+        target.validate_schema(schema)?;
         if let Some(requirements) = value.get("requirements") {
-            serde_json::from_value::<crate::compatibility::Requirements>(requirements.clone())?
-                .validate()?;
+            target.validate_requirements(&serde_json::from_value(requirements.clone())?)?;
         }
         let explicit_infrastructure = value.get("infrastructure").is_some();
         let manifest: Manifest = serde_json::from_value(value)?;
         if !manifest.removal_only
-            && manifest.requirements.as_ref().is_some_and(|r| {
-                r.required_capabilities
+            && manifest.requirements.as_ref().is_some_and(|requirements| {
+                requirements
+                    .required_capabilities
                     .iter()
-                    .any(|c| c == "infrastructure-v1")
+                    .any(|capability| capability == "infrastructure-v1")
             })
         {
             if !explicit_infrastructure {
@@ -161,16 +191,13 @@ impl Payload {
             ));
         }
         if manifest.schema == 4 {
-            manifest
-                .requirements
-                .as_ref()
-                .ok_or_else(|| {
-                    Error::new(
-                        "REQUIREMENTS_MISSING",
-                        "Нет требований к версии установщика",
-                    )
-                })?
-                .validate()?;
+            let requirements = manifest.requirements.as_ref().ok_or_else(|| {
+                Error::new(
+                    "REQUIREMENTS_MISSING",
+                    "Нет требований к версии установщика",
+                )
+            })?;
+            target.validate_requirements(requirements)?;
             if manifest.recipe.schema != 3 {
                 return Err(Error::new(
                     "RECIPE_INVALID",
@@ -182,6 +209,7 @@ impl Payload {
         let payload = Self { root, manifest };
         Ok(payload)
     }
+
     pub fn save_removal(&self, destination: &Path) -> Result<()> {
         let parent = destination
             .parent()
@@ -190,9 +218,9 @@ impl Payload {
         let stage = tempfile::tempdir_in(parent)?;
         let mut manifest = self.manifest.clone();
         manifest.removal_only = true;
-        manifest
-            .artifacts
-            .retain(|a| ["dns-helper.sh", "init.logcat.original.sh"].contains(&a.name.as_str()));
+        manifest.artifacts.retain(|artifact| {
+            ["dns-helper.sh", "init.logcat.original.sh"].contains(&artifact.name.as_str())
+        });
         for artifact in &manifest.artifacts {
             let target = stage.path().join(&artifact.path);
             std::fs::create_dir_all(target.parent().unwrap())?;
@@ -206,32 +234,38 @@ impl Payload {
         }
         Ok(())
     }
+
     pub fn artifact(&self, name: &str) -> Result<&Artifact> {
         self.manifest
             .artifacts
             .iter()
-            .find(|a| a.name == name)
+            .find(|artifact| artifact.name == name)
             .ok_or_else(|| {
                 Error::new("PAYLOAD_MISSING", "В релизе отсутствует обязательный файл").detail(name)
             })
     }
-    pub fn path(&self, a: &Artifact) -> Result<PathBuf> {
-        if !crate::paths::safe_path(&a.path)
-            || Path::new(&a.path)
+
+    pub fn path(&self, artifact: &Artifact) -> Result<PathBuf> {
+        if !crate::paths::safe_path(&artifact.path)
+            || Path::new(&artifact.path)
                 .components()
-                .any(|c| !matches!(c, Component::Normal(_)))
+                .any(|component| !matches!(component, Component::Normal(_)))
         {
-            return Err(Error::new("PAYLOAD_PATH", "Недопустимый путь в релизе").detail(&a.path));
+            return Err(
+                Error::new("PAYLOAD_PATH", "Недопустимый путь в релизе").detail(&artifact.path)
+            );
         }
-        let path = self.root.join(&a.path).canonicalize()?;
+        let path = self.root.join(&artifact.path).canonicalize()?;
         if !path.starts_with(&self.root) {
             return Err(Error::new("PAYLOAD_PATH", "Файл выходит за пределы релиза"));
         }
         Ok(path)
     }
+
     pub fn file(&self, name: &str) -> Result<PathBuf> {
         self.path(self.artifact(name)?)
     }
+
     pub fn verify(&self) -> Result<()> {
         self.manifest.recipe.validate()?;
         let loader = match self.manifest.infrastructure {
@@ -243,7 +277,7 @@ impl Payload {
             .recipe
             .files
             .iter()
-            .any(|f| f.artifact == loader)
+            .any(|file| file.artifact == loader)
         {
             return Err(Error::new(
                 "INFRASTRUCTURE_RECIPE",
@@ -254,20 +288,23 @@ impl Payload {
             &self.manifest.recipe,
         )?)?));
         let mut seen = BTreeSet::new();
-        for a in &self.manifest.artifacts {
-            if !seen.insert(a.name.clone()) {
+        for artifact in &self.manifest.artifacts {
+            if !seen.insert(artifact.name.clone()) {
                 return Err(Error::new(
                     "PAYLOAD_DUPLICATE",
                     "Дублирующийся файл в релизе",
                 ));
             }
-            let path = self.path(a)?;
-            if a.size == 0 || path.metadata()?.len() != a.size || sha256(&path)? != a.sha256 {
+            let path = self.path(artifact)?;
+            if artifact.size == 0
+                || path.metadata()?.len() != artifact.size
+                || sha256(&path)? != artifact.sha256
+            {
                 return Err(Error::new(
                     "PAYLOAD_HASH",
                     "Файл установщика повреждён. Загрузите полный релиз заново.",
                 )
-                .detail(&a.path));
+                .detail(&artifact.path));
             }
         }
         if self.manifest.removal_only {
@@ -304,7 +341,7 @@ impl Payload {
                 .recipe
                 .packages
                 .iter()
-                .filter(|p| p.artifact != "restore_mode.apk")
+                .filter(|package| package.artifact != "restore_mode.apk")
             {
                 if metadata.runtime_hashes.get(&package.artifact)
                     != Some(&self.artifact(&package.artifact)?.sha256)
@@ -356,6 +393,7 @@ impl Payload {
         Ok(())
     }
 }
+
 pub fn destination(name: &str) -> Option<(String, u32)> {
     match name {
         "native.apk" => Some((NATIVE_PATH.into(), 0o644)),
@@ -382,41 +420,43 @@ pub fn destination(name: &str) -> Option<(String, u32)> {
         _ => None,
     }
 }
+
 pub fn sha256(path: &Path) -> Result<String> {
     let mut file = File::open(path)?;
     let mut hash = Sha256::new();
-    let mut b = [0u8; 65536];
+    let mut buffer = [0u8; 65536];
     loop {
-        let n = file.read(&mut b)?;
-        if n == 0 {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
             break;
         }
-        hash.update(&b[..n]);
+        hash.update(&buffer[..bytes_read]);
     }
     Ok(hex::encode(hash.finalize()))
 }
+
 pub fn apk_metadata(path: &Path) -> Result<Option<BuildMetadata>> {
     let mut zip = zip::ZipArchive::new(File::open(path)?)
-        .map_err(|e| Error::new("APK_FORMAT", "Не удалось прочитать APK").detail(e))?;
-    let mut f = match zip.by_name("assets/voyahtune-build.json") {
-        Ok(f) => f,
+        .map_err(|error| Error::new("APK_FORMAT", "Не удалось прочитать APK").detail(error))?;
+    let mut metadata_file = match zip.by_name("assets/voyahtune-build.json") {
+        Ok(metadata_file) => metadata_file,
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
-        Err(e) => return Err(Error::new("APK_FORMAT", "Повреждён APK").detail(e)),
+        Err(error) => return Err(Error::new("APK_FORMAT", "Повреждён APK").detail(error)),
     };
-    if f.size() > 65536 {
+    if metadata_file.size() > 65536 {
         return Err(Error::new(
             "APK_METADATA",
             "Слишком большой файл метаданных APK",
         ));
     }
     let mut bytes = Vec::new();
-    f.by_ref().take(65537).read_to_end(&mut bytes)?;
+    metadata_file.by_ref().take(65537).read_to_end(&mut bytes)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-    let explicit = value.get("infrastructure").is_some();
+    let explicit_infrastructure = value.get("infrastructure").is_some();
     let metadata: BuildMetadata = serde_json::from_value(value)?;
     if crate::infrastructure::Infrastructure::explicit_version(&metadata.release_version)?.is_some()
     {
-        if !explicit {
+        if !explicit_infrastructure {
             return Err(Error::new(
                 "APK_METADATA",
                 "Нет инфраструктуры в подписанных метаданных APK",
@@ -433,12 +473,14 @@ pub fn apk_metadata(path: &Path) -> Result<Option<BuildMetadata>> {
 /// The current release keys use RSA. Unsupported schemes fail closed.
 pub fn verified_signers(path: &Path) -> Result<Vec<String>> {
     use apksig::{Apk, ValueSigningBlock};
-    let fail = |e: String| {
+    let fail = |error: String| {
         Error::new("APK_SIGNATURE", "Не удалось подтвердить подпись APK")
-            .detail(format!("{}: {e}", path.display()))
+            .detail(format!("{}: {error}", path.display()))
     };
     let apk = Apk::new(path.to_path_buf())?;
-    let block = apk.get_signing_block().map_err(|e| fail(e.to_string()))?;
+    let block = apk
+        .get_signing_block()
+        .map_err(|error| fail(error.to_string()))?;
     let mut result = Vec::new();
     for block in block.content {
         if let ValueSigningBlock::SignatureSchemeV2Block(v2) = block {
@@ -450,31 +492,36 @@ pub fn verified_signers(path: &Path) -> Result<Vec<String>> {
                 if signer.signatures.signatures_data.is_empty() {
                     return Err(fail("Empty signature list".into()));
                 }
-                for sig in &signer.signatures.signatures_data {
-                    let algo = &sig.signature_algorithm_id;
+                for signature in &signer.signatures.signatures_data {
+                    let algorithm = &signature.signature_algorithm_id;
                     let digest = signer
                         .signed_data
                         .digests
                         .digests_data
                         .iter()
-                        .find(|d| d.signature_algorithm_id == *algo)
+                        .find(|candidate| candidate.signature_algorithm_id == *algorithm)
                         .ok_or_else(|| fail("Missing content digest".into()))?;
-                    algo.verify(&signer.pub_key.data, data, &sig.signature)
+                    algorithm
+                        .verify(&signer.pub_key.data, data, &signature.signature)
                         .map_err(&fail)?;
-                    if apk.digest(algo).map_err(|e| fail(e.to_string()))? != digest.digest {
+                    if apk
+                        .digest(algorithm)
+                        .map_err(|error| fail(error.to_string()))?
+                        != digest.digest
+                    {
                         return Err(fail("APK content digest mismatch".into()));
                     }
                 }
                 // Bind both the verified key and signed certificates; PackageManager additionally
                 // checks its Android-specific certificate/rotation policy at installation time.
-                let certs = &signer.signed_data.certificates.certificates_data;
-                if certs.is_empty() {
+                let certificates = &signer.signed_data.certificates.certificates_data;
+                if certificates.is_empty() {
                     return Err(fail("Missing certificate".into()));
                 }
                 let mut hash = Sha256::new();
                 hash.update(&signer.pub_key.data);
-                for c in certs {
-                    hash.update(&c.certificate);
+                for certificate in certificates {
+                    hash.update(&certificate.certificate);
                 }
                 result.push(hex::encode(hash.finalize()));
             }
@@ -495,11 +542,13 @@ struct HostFiles {
     #[serde(default)]
     platform: Option<String>,
 }
+
 #[derive(Deserialize)]
 struct HostFile {
     path: String,
     sha256: String,
 }
+
 pub fn verify_host(bundle: &Path) -> Result<()> {
     let root = bundle.canonicalize()?;
     let host: HostFiles = serde_json::from_reader(File::open(root.join("host-tools.json"))?)?;
@@ -510,7 +559,7 @@ pub fn verify_host(bundle: &Path) -> Result<()> {
     for file in host.files {
         if Path::new(&file.path)
             .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
+            .any(|component| !matches!(component, Component::Normal(_)))
             || !crate::paths::safe_path(&file.path.replace('+', "_"))
             || !(file.path.starts_with("adb/") || file.path.starts_with("recovery/"))
         {
@@ -560,7 +609,7 @@ pub fn locate(bundle: &Path, executable: &Path, explicit: Option<&Path>) -> Resu
         candidates.push(bundle.join("payload"));
         if let Some(app) = executable
             .ancestors()
-            .find(|p| p.extension().is_some_and(|e| e == "app"))
+            .find(|path| path.extension().is_some_and(|extension| extension == "app"))
         {
             if let Some(parent) = app.parent() {
                 candidates.push(parent.join("payload"));
@@ -571,7 +620,10 @@ pub fn locate(bundle: &Path, executable: &Path, explicit: Option<&Path>) -> Resu
         }
     }
     for candidate in candidates {
-        let directory = if candidate.file_name().is_some_and(|f| f == "manifest.json") {
+        let directory = if candidate
+            .file_name()
+            .is_some_and(|filename| filename == "manifest.json")
+        {
             candidate.parent().unwrap().to_path_buf()
         } else {
             candidate
@@ -601,10 +653,10 @@ mod tests {
             artifacts: vec![],
         };
         let mut value = serde_json::to_value(manifest).unwrap();
-        let write = |v: &serde_json::Value| {
+        let write = |manifest_value: &serde_json::Value| {
             std::fs::write(
                 root.path().join("manifest.json"),
-                serde_json::to_vec(v).unwrap(),
+                serde_json::to_vec(manifest_value).unwrap(),
             )
             .unwrap()
         };
@@ -631,6 +683,7 @@ mod tests {
             crate::infrastructure::Infrastructure::Od
         );
     }
+
     #[test]
     fn rejects_retired_and_future_archives_before_reading_artifacts() {
         let root = tempfile::tempdir().unwrap();
@@ -646,6 +699,7 @@ mod tests {
             assert_eq!(Payload::load(root.path()).err().unwrap().code, expected);
         }
     }
+
     #[test]
     fn only_owned_destinations() {
         assert!(destination("/system/bin/sh").is_none());

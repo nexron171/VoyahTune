@@ -83,3 +83,42 @@ fn catalog_version_cannot_hide_an_older_payload() {
         .to_string()
         .contains("Manifest не соответствует выбранному релизу"));
 }
+
+#[test]
+fn payload_opening_ignores_installer_minimum_only_for_od() {
+    use release_core::{
+        compatibility::Requirements, infrastructure::Infrastructure, payload::Manifest,
+        recipe::Recipe,
+    };
+
+    let directory = tempfile::tempdir().unwrap();
+    let infrastructure = Infrastructure::compiled();
+    let mut requirements = Requirements::infrastructure();
+    requirements.min_installer_version = "99.0.0".into();
+    let manifest = Manifest {
+        infrastructure,
+        removal_only: false,
+        requirements: Some(requirements),
+        recipe: Recipe::default(),
+        schema: 4,
+        product: "VoyahTune".into(),
+        release_version: format!("4.3.0-{}", infrastructure.as_str()),
+        build_revision: "test".into(),
+        artifacts: Vec::new(),
+    };
+    fs::write(
+        directory.path().join("manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    let error = open_ota_payload(directory.path())
+        .err()
+        .unwrap()
+        .to_string();
+    let expected = match infrastructure {
+        Infrastructure::Od => "PAYLOAD_MISSING",
+        Infrastructure::Pi => "INSTALLER_UPDATE_REQUIRED",
+    };
+    assert!(error.contains(expected), "{error}");
+}
