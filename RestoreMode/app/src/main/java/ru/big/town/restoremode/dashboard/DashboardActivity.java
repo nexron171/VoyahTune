@@ -194,6 +194,8 @@ public class DashboardActivity extends AppCompatActivity {
     static final String ACTION_BATTERY_HEAT_ACTIVATE = "ru.big.town.anative.BATTERY_HEAT_ACTIVATE";
     // Запуск приложения из плитки «Быстрый запуск» на выбранном физическом дисплее (0/1).
     static final String ACTION_OPEN_ON_DISPLAY = "ru.big.town.anative.OPEN_ON_DISPLAY";
+    static final String ACTION_OPEN_PASSENGER_DASHBOARD =
+            "ru.big.town.anative.OPEN_PASSENGER_DASHBOARD";
     private static final int BH_UNKNOWN = Integer.MIN_VALUE;
     private static final int BH_TEMP_INVALID = -9999;
     private static final int BH_PLATFORM_H97X = 1;
@@ -1410,7 +1412,9 @@ public class DashboardActivity extends AppCompatActivity {
         try {
             Intent intent =
                     new Intent(ACTION_OPEN_ON_DISPLAY)
-                            .setPackage("ru.big.town.anative")
+                            .setClassName(
+                                    "ru.big.town.anative",
+                                    "ru.big.town.anative.SetModesReceiverDynamic")
                             .putExtra("pkg", pkg)
                             .putExtra("display", displayId);
             sendBroadcast(intent, BIND_SET_MODES_PERMISSION);
@@ -1639,6 +1643,21 @@ public class DashboardActivity extends AppCompatActivity {
         startActivity(new Intent(this, TaskManagerActivity.class));
     }
 
+    /** Плитка 1x1: открыть сетку VoyahTune на пассажирском дисплее через Native. */
+    public void onPassengerDashboardTile(View view) {
+        try {
+            Intent intent =
+                    new Intent(ACTION_OPEN_PASSENGER_DASHBOARD)
+                            .setClassName(
+                                    "ru.big.town.anative",
+                                    "ru.big.town.anative.SetModesReceiverDynamic");
+            sendBroadcast(intent, BIND_SET_MODES_PERMISSION);
+        } catch (RuntimeException error) {
+            showSnack("Не удалось открыть пассажирский экран");
+            Log.w(TAG, "onPassengerDashboardTile: " + error.getMessage());
+        }
+    }
+
     /**
      * Число запущенных сторонних приложений для плитки — Native отвечает TaskManagerProtocol.LIST.
      */
@@ -1690,6 +1709,8 @@ public class DashboardActivity extends AppCompatActivity {
             case "taskManagerTile":
                 return sharedPreferences.getBoolean(
                         "showTaskManagerTile", dashboardProfile.defaultVisible(true));
+            case "passengerDashboardTile":
+                return sharedPreferences.getBoolean("showPassengerDashboardTile", false);
             // Виджеты без тумблера («Настройки», настройки Android) видно всегда.
             default:
                 return true;
@@ -1802,6 +1823,9 @@ public class DashboardActivity extends AppCompatActivity {
         }
         // Плитка «Диспетчер задач»: 1x1, в центре число запущенных приложений.
         if ("taskManagerTile".equals(widgetId)) {
+            return new int[] {1, 1};
+        }
+        if ("passengerDashboardTile".equals(widgetId)) {
             return new int[] {1, 1};
         }
         // Плитка «Быстрый запуск»: по умолчанию 2x3, размер задаётся в «Дополнительно».
@@ -2129,6 +2153,11 @@ public class DashboardActivity extends AppCompatActivity {
                         break;
                     case "taskManagerTile":
                         widgetView = inf.inflate(R.layout.tile_task_manager, splitTilesGrid, false);
+                        break;
+                    case "passengerDashboardTile":
+                        widgetView =
+                                inf.inflate(
+                                        R.layout.tile_passenger_dashboard, splitTilesGrid, false);
                         break;
                 }
                 if (widgetView == null) {

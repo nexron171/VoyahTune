@@ -77,6 +77,10 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     }
 
     private void bindMainWidgetSwitches() {
+        bindShowSwitch(
+                R.id.switchShowPassengerDashboardTile,
+                "showPassengerDashboardTile",
+                false);
         bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer", true);
         bindShowSwitch(R.id.switchShowPowerHold, "showPowerHold", true);
         bindShowSwitch(R.id.switchShowWashMode, "showWashMode", true);
@@ -1013,8 +1017,21 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         }
     }
 
+    /** The switch is written to DrivePreferences because Native reads it from the provider. */
+    private void bindPassengerAutoStart() {
+        Switch autoStart = settingView(R.id.switchPassengerAutoStart);
+        if (autoStart == null) {
+            return;
+        }
+        autoStart.setChecked(globalPreferences.getBoolean("passengerAutoStart", false));
+        autoStart.setOnCheckedChangeListener(
+                (button, checked) ->
+                        globalPreferences.edit().putBoolean("passengerAutoStart", checked).apply());
+    }
+
     @Override
     protected void bindSettingsRow() {
+        bindPassengerAutoStart();
         bindMainWidgetSwitches();
         bindEnergyCapacities();
         bindTripHistory();

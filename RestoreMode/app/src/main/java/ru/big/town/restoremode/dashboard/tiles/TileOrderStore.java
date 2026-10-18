@@ -245,7 +245,8 @@ public class TileOrderStore {
                 ||
                 // Native-виджеты
                 widgetId.equals("launchAppsWidget")
-                || widgetId.equals("taskManagerTile");
+                || widgetId.equals("taskManagerTile")
+                || widgetId.equals("passengerDashboardTile");
     }
 
     private static boolean isPassengerWidget(String widgetId) {
@@ -357,7 +358,8 @@ public class TileOrderStore {
                             "cardVoiceCommand",
                             "cardScenarios",
                             "launchAppsWidget",
-                            "taskManagerTile"
+                            "taskManagerTile",
+                            "passengerDashboardTile"
                         };
         for (String widgetId : knownWidgets) {
             boolean found = false;

@@ -722,6 +722,7 @@ public class SetModesService extends Service {
     // ВАЖНО: инициализация «давно», иначе near-boot (elapsedRealtime мал) первый запуск блокируется
     // дебаунсом.
     private long lastAutoLaunch = Long.MIN_VALUE / 2;
+    private long lastPassengerAutoLaunch = Long.MIN_VALUE / 2;
     private static final long AUTO_LAUNCH_DEBOUNCE_MS = 60_000L;
 
     /** На пробуждении: если включён «Автозапуск VoyahTune», открываем RestoreMode поверх. */
@@ -750,6 +751,44 @@ public class SetModesService extends Service {
             Log.w(TAG, "readAutoLaunchFromProvider: " + e.getMessage());
         }
         return false;
+    }
+
+    private boolean readPassengerAutoStartFromProvider() {
+        try {
+            android.database.Cursor c =
+                    getContentResolver()
+                            .query(
+                                    android.net.Uri.parse(
+                                            "content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                                    null,
+                                    null,
+                                    null,
+                                    null);
+            if (c != null) {
+                try {
+                    if (c.moveToFirst() && c.getColumnCount() > 41) return c.getInt(41) == 1;
+                } finally {
+                    c.close();
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "readPassengerAutoStartFromProvider: " + e.getMessage());
+        }
+        return false;
+    }
+
+    private void maybeAutoLaunchPassengerDashboard() {
+        if (!readPassengerAutoStartFromProvider()) {
+            Log.i(TAG, "maybeAutoLaunchPassengerDashboard: disabled — пропуск");
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastPassengerAutoLaunch < AUTO_LAUNCH_DEBOUNCE_MS) {
+            Log.i(TAG, "maybeAutoLaunchPassengerDashboard: пропуск (дебаунс)");
+            return;
+        }
+        lastPassengerAutoLaunch = now;
+        SetModesReceiverDynamic.openPassengerDashboard(this);
     }
 
     private void maybeAutoLaunchRestoreMode() {
@@ -1855,6 +1894,7 @@ public class SetModesService extends Service {
             };
     private final Runnable reassertFloatingBackRunnable = this::reassertFloatingBack;
     private final Runnable autoLaunchRunnable = this::maybeAutoLaunchRestoreMode;
+    private final Runnable passengerAutoLaunchRunnable = this::maybeAutoLaunchPassengerDashboard;
     private final Runnable floatingBackEnableRunnable =
             () -> BackButtonService.setFloatingButtonEnabled(this, true);
     private final Runnable carPowerReconnectRunnable = this::reconnectCarPowerOnWorker;
@@ -1934,12 +1974,15 @@ public class SetModesService extends Service {
         mainHandler.postDelayed(reassertFloatingBackRunnable, 3000);
         mainHandler.removeCallbacks(autoLaunchRunnable);
         mainHandler.postDelayed(autoLaunchRunnable, 5000);
+        mainHandler.removeCallbacks(passengerAutoLaunchRunnable);
+        mainHandler.postDelayed(passengerAutoLaunchRunnable, 5500);
     }
 
     private void cancelAncillaryWakeTasks() {
         mainHandler.removeCallbacks(startNowPlayingRunnable);
         mainHandler.removeCallbacks(reassertFloatingBackRunnable);
         mainHandler.removeCallbacks(autoLaunchRunnable);
+        mainHandler.removeCallbacks(passengerAutoLaunchRunnable);
         mainHandler.removeCallbacks(floatingBackEnableRunnable);
     }
 

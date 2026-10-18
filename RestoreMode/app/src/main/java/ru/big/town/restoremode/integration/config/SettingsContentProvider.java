@@ -58,6 +58,7 @@ public class SettingsContentProvider extends ContentProvider {
     private String customCommandStarButton1 = "";
     private String customCommandStarButton2 = "";
     private boolean autoLaunchOnWake = false;
+    private boolean passengerAutoStart = false;
     private boolean batteryHeatAuto = false;
     private boolean pauseMediaOnDoor = false;
     private boolean fragranceEnabled = FragranceSettings.DEFAULT_ENABLED;
@@ -303,6 +304,7 @@ public class SettingsContentProvider extends ContentProvider {
         customCommandStarButton1 = sharedPreferences.getString("customCommandStarButton1", "");
         customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
         autoLaunchOnWake = sharedPreferences.getBoolean("autoLaunchOnWake", false);
+        passengerAutoStart = sharedPreferences.getBoolean("passengerAutoStart", false);
         batteryHeatAuto = sharedPreferences.getBoolean("batteryHeatAuto", false);
         pauseMediaOnDoor = sharedPreferences.getBoolean("pauseMediaOnDoor", false);
         fragranceEnabled =
@@ -388,6 +390,7 @@ public class SettingsContentProvider extends ContentProvider {
                                     .CRUISE_SPEED_ADJUSTMENT, // 38 — совместимость со старым Native
                             ApolloSettings.SPEED_MODE, // 39 — режим ISA/ISLC (OD)
                             ApolloSettings.SPEED_WARNING, // 40 — предупреждение о превышении (OD)
+                            "passengerAutoStart", // 41 — автозапуск сетки пассажира
                         });
 
         cursor.addRow(
@@ -435,6 +438,7 @@ public class SettingsContentProvider extends ContentProvider {
                             : 0,
                     apolloSpeedMode,
                     apolloSpeedWarningEnabled ? 1 : 0,
+                    passengerAutoStart ? 1 : 0,
                 });
         return cursor;
     }

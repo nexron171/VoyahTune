@@ -9,6 +9,7 @@ public final class SettingsSectionLayouts {
     private static final Item[] MAIN = {
         layout(R.layout.settings_main_overview),
         layout(R.layout.settings_main_quick_access_heading),
+        layout(R.layout.settings_main_passenger_tile),
         layout(R.layout.settings_main_trip_timer_power_hold),
         layout(R.layout.settings_main_wash_mode_auto_light),
         layout(R.layout.settings_main_pedestrian_sound_battery_heat),
@@ -108,6 +109,7 @@ public final class SettingsSectionLayouts {
     };
     private static final Item[] PASSENGER = {
         layout(R.layout.settings_passenger_intro),
+        layout(R.layout.settings_passenger_autostart),
         layout(R.layout.settings_passenger_widgets_heading),
         layout(R.layout.settings_passenger_trip_timer),
         layout(R.layout.settings_main_cpu_ram),
