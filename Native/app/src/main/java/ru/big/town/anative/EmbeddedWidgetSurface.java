@@ -7,19 +7,19 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.view.Surface;
 
-/** Keeps a CarPlay VD online and draining frames while its Dashboard TextureView is absent. */
-final class CarPlayWidgetSurface implements AutoCloseable {
+/** Keeps an embedded app VD online and draining frames while its Dashboard TextureView is absent. */
+final class EmbeddedWidgetSurface implements AutoCloseable {
     private static final Handler FRAMES;
 
     static {
-        HandlerThread thread = new HandlerThread("CarPlayWidgetFrames");
+        HandlerThread thread = new HandlerThread("EmbeddedWidgetFrames");
         thread.start();
         FRAMES = new Handler(thread.getLooper());
     }
 
     private final ImageReader reader;
 
-    CarPlayWidgetSurface(int width, int height) {
+    EmbeddedWidgetSurface(int width, int height) {
         reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
         reader.setOnImageAvailableListener(source -> {
             try (Image ignored = source.acquireLatestImage()) {

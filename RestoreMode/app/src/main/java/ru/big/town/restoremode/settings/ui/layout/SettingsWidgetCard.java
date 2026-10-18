@@ -16,7 +16,7 @@ import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 public final class SettingsWidgetCard extends LinearLayout
         implements SharedPreferences.OnSharedPreferenceChangeListener {
     private final int toggleId;
-    private final SharedPreferences prefs;
+    private SharedPreferences prefs;
     private final Runnable refresh = this::refresh;
 
     public SettingsWidgetCard(Context context, AttributeSet attrs) {
@@ -26,6 +26,21 @@ public final class SettingsWidgetCard extends LinearLayout
         a.recycle();
         prefs = context.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
         setClipToOutline(true);
+    }
+
+    /** Settings pages for another dashboard profile pass their own preferences. */
+    public void usePreferences(SharedPreferences next) {
+        if (next == null || next == prefs) {
+            return;
+        }
+        if (isAttachedToWindow()) {
+            prefs.unregisterOnSharedPreferenceChangeListener(this);
+        }
+        prefs = next;
+        if (isAttachedToWindow()) {
+            prefs.registerOnSharedPreferenceChangeListener(this);
+        }
+        post(refresh);
     }
 
     private void refresh() {

@@ -9,6 +9,7 @@ public final class SettingsSectionLayouts {
     private static final Item[] MAIN = {
         layout(R.layout.settings_main_overview),
         layout(R.layout.settings_main_quick_access_heading),
+        layout(R.layout.settings_main_passenger_tile),
         layout(R.layout.settings_main_trip_timer_power_hold),
         layout(R.layout.settings_main_wash_mode_auto_light),
         layout(R.layout.settings_main_pedestrian_sound_battery_heat),
@@ -28,6 +29,7 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_system_heading),
         layout(R.layout.settings_main_cpu_ram),
         layout(R.layout.settings_main_memory_task_manager),
+        layout(R.layout.settings_main_media),
         layout(R.layout.settings_main_app_widgets_heading),
         dynamic(DynamicContent.APP_WIDGETS),
         layout(R.layout.settings_main_add_app_widget),
@@ -105,6 +107,26 @@ public final class SettingsSectionLayouts {
     private static final Item[] STEERING = {
         layout(R.layout.settings_steering_intro), layout(R.layout.settings_steering_button_actions)
     };
+    private static final Item[] PASSENGER = {
+        layout(R.layout.settings_passenger_intro),
+        layout(R.layout.settings_passenger_autostart),
+        layout(R.layout.settings_passenger_widgets_heading),
+        layout(R.layout.settings_passenger_trip_timer),
+        layout(R.layout.settings_main_cpu_ram),
+        layout(R.layout.settings_main_media),
+        layout(R.layout.settings_main_memory_task_manager),
+        layout(R.layout.settings_main_app_widgets_heading),
+        dynamic(DynamicContent.APP_WIDGETS),
+        layout(R.layout.settings_main_add_app_widget),
+        layout(R.layout.settings_passenger_shortcuts_heading),
+        dynamic(DynamicContent.SHORTCUTS),
+        layout(R.layout.settings_main_add_shortcut),
+        layout(R.layout.settings_main_dial_cards_heading),
+        dynamic(DynamicContent.DIAL_CARDS),
+        layout(R.layout.settings_main_add_dial_card),
+        layout(R.layout.settings_passenger_grid_heading),
+        layout(R.layout.settings_main_grid)
+    };
 
     public enum DynamicContent {
         CARPLAY_WIDGETS,
@@ -153,6 +175,8 @@ public final class SettingsSectionLayouts {
                 return new Item[] {layout(R.layout.settings_carplay)};
             case OTHER:
                 return OTHER;
+            case PASSENGER:
+                return PASSENGER;
             default:
                 throw new IllegalArgumentException("Section has its own controller: " + section);
         }

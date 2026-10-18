@@ -19,6 +19,11 @@ public final class DriveSelectionPreferences {
                 prefs.getString(DriveSelectionPolicy.CURRENT, ""));
     }
 
+    /** Monotonic ACC cycle used by session-scoped UI state. */
+    public static long cycle(SharedPreferences prefs) {
+        return prefs.getLong(CYCLE, 0L);
+    }
+
     public static synchronized boolean select(SharedPreferences prefs, String mode, String source) {
         DriveSelectionPolicy before = read(prefs);
         DriveSelectionPolicy after =

@@ -5,8 +5,10 @@ import static ru.big.town.anative.SetModesService.MSG_APPLY_DRIVE_MODES_STAR_BUT
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Process;
 import android.util.Log;
 
 import ru.big.town.common.CarPlayTarget;
@@ -85,6 +87,23 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 Log.w(TAG, "OPEN_ON_DISPLAY отклонён: пустой пакет");
             } else {
                 openFreeformApp(context, pkg, displayId);
+            }
+        }
+
+        // Плитка 1x1 и автозапуск: открыть сетку VoyahTune на пассажирском дисплее.
+        if ("ru.big.town.anative.OPEN_PASSENGER_DASHBOARD".equals(receivedIntent)) {
+            int sender = android.os.Binder.getCallingUid();
+            boolean trusted =
+                    sender == Process.myUid()
+                            || sender == Process.SYSTEM_UID
+                            || sender == Process.ROOT_UID
+                            || context.getPackageManager()
+                                            .checkSignatures(sender, Process.myUid())
+                                    == PackageManager.SIGNATURE_MATCH;
+            if (trusted) {
+                openPassengerDashboard(context);
+            } else {
+                Log.w(TAG, "OPEN_PASSENGER_DASHBOARD отклонён: uid=" + sender);
             }
         }
 
@@ -800,6 +819,26 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                                         "Не удалось открыть приложение",
                                         android.widget.Toast.LENGTH_LONG)
                                 .show());
+    }
+
+    /** Открыть MainActivity на пассажирском дисплее, не трогая водительскую задачу. */
+    static void openPassengerDashboard(Context context) {
+        try {
+            Intent intent = new Intent();
+            intent.setClassName(SetModesService.RESTOREMODE_PKG, SetModesService.RESTOREMODE_MAIN);
+            intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(1);
+            android.os.Bundle bundle = options.toBundle();
+            bundle.putInt("android.activity.windowingMode", 1);
+            context.startActivity(intent, bundle);
+            Log.i(TAG, "OPEN_PASSENGER_DASHBOARD display=1");
+        } catch (RuntimeException error) {
+            Log.w(TAG, "OPEN_PASSENGER_DASHBOARD failed: " + error.getMessage());
+        }
     }
 
     /** Cycle the vehicle state; only remember-last opt-in updates the saved UI selection. */

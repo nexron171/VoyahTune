@@ -48,7 +48,8 @@ public class SetModesService extends Service {
 
     private Messenger clientMessenger;
     private final Map<String, VirtualDisplay> embeddedDisplays = new HashMap<>();
-    private final Map<VirtualDisplay, CarPlayWidgetSurface> carPlayParkedOutputs = new HashMap<>();
+    private final Map<VirtualDisplay, EmbeddedWidgetSurface> embeddedParkedOutputs =
+            new HashMap<>();
     private final Map<String, String> embeddedPackages = new HashMap<>();
     private final Map<String, Boolean> embeddedLaunched = new HashMap<>();
     // Время последнего запуска приложения в виджет: задача создаётся не мгновенно, и без этой паузы
@@ -98,6 +99,7 @@ public class SetModesService extends Service {
     // на физический экран, и виджет без окна показал бы чёрный квадрат.
     static final String ACTION_EMBEDDED_TASK_LEFT = "ru.big.town.anative.EMBEDDED_TASK_LEFT";
     static final String EXTRA_EMBEDDED_TASK_PKG = "pkg";
+    static final String EXTRA_EMBEDDED_TASK_CLOSED = "closed";
     static final String EXTRA_POWER_HOLD_STATUS = "status";
     static final String EXTRA_POWER_HOLD_EXIT_REASON = "exitReason";
     static final String EXTRA_POWER_HOLD_REQUEST_OUTCOME = "requestOutcome";
@@ -720,6 +722,7 @@ public class SetModesService extends Service {
     // ВАЖНО: инициализация «давно», иначе near-boot (elapsedRealtime мал) первый запуск блокируется
     // дебаунсом.
     private long lastAutoLaunch = Long.MIN_VALUE / 2;
+    private long lastPassengerAutoLaunch = Long.MIN_VALUE / 2;
     private static final long AUTO_LAUNCH_DEBOUNCE_MS = 60_000L;
 
     /** На пробуждении: если включён «Автозапуск VoyahTune», открываем RestoreMode поверх. */
@@ -748,6 +751,44 @@ public class SetModesService extends Service {
             Log.w(TAG, "readAutoLaunchFromProvider: " + e.getMessage());
         }
         return false;
+    }
+
+    private boolean readPassengerAutoStartFromProvider() {
+        try {
+            android.database.Cursor c =
+                    getContentResolver()
+                            .query(
+                                    android.net.Uri.parse(
+                                            "content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                                    null,
+                                    null,
+                                    null,
+                                    null);
+            if (c != null) {
+                try {
+                    if (c.moveToFirst() && c.getColumnCount() > 41) return c.getInt(41) == 1;
+                } finally {
+                    c.close();
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "readPassengerAutoStartFromProvider: " + e.getMessage());
+        }
+        return false;
+    }
+
+    private void maybeAutoLaunchPassengerDashboard() {
+        if (!readPassengerAutoStartFromProvider()) {
+            Log.i(TAG, "maybeAutoLaunchPassengerDashboard: disabled — пропуск");
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastPassengerAutoLaunch < AUTO_LAUNCH_DEBOUNCE_MS) {
+            Log.i(TAG, "maybeAutoLaunchPassengerDashboard: пропуск (дебаунс)");
+            return;
+        }
+        lastPassengerAutoLaunch = now;
+        SetModesReceiverDynamic.openPassengerDashboard(this);
     }
 
     private void maybeAutoLaunchRestoreMode() {
@@ -903,6 +944,7 @@ public class SetModesService extends Service {
                 }
                 try {
                     forceStop.invoke(am, pkg);
+                    releaseWidgetInstances(pkg);
                     count++;
                 } catch (Exception e) {
                     Throwable c =
@@ -1003,7 +1045,7 @@ public class SetModesService extends Service {
      */
     protected void releaseWidgetInstances(String pkg) {
         if (pkg == null || pkg.isEmpty()) return;
-        if (releaseEmbeddedDisplaysOf(pkg)) notifyEmbeddedTaskLeft(this, pkg);
+        if (releaseEmbeddedDisplaysOf(pkg)) notifyEmbeddedTaskLeft(this, pkg, true);
     }
 
     private boolean releaseEmbeddedDisplaysOf(String pkg) {
@@ -1263,14 +1305,14 @@ public class SetModesService extends Service {
                 display = null;
             }
             if (display != null) {
-                boolean parkedCarPlay = carPlayParkedOutputs.containsKey(display);
+                boolean parked = embeddedParkedOutputs.containsKey(display);
                 display.setSurface(surface);
-                closeCarPlayParking(display);
+                closeEmbeddedParking(display);
                 display.resize(width, height, dpi > 0 ? dpi : 213);
-                if (parkedCarPlay)
+                if (parked)
                     Log.i(
                             TAG,
-                            "CarPlay widget reattached widget="
+                            "embedded widget reattached widget="
                                     + widgetId
                                     + " display="
                                     + display.getDisplay().getDisplayId());
@@ -1349,42 +1391,54 @@ public class SetModesService extends Service {
                 display.release();
             } catch (Exception ignored) {
             }
-            closeCarPlayParking(display);
+            closeEmbeddedParking(display);
             Log.i(TAG, "embedded VD released widget=" + widgetId);
         }
     }
 
-    /** Navigation detaches the visible surface; only CarPlay keeps its display and UI task. */
+    /** Navigation detaches the visible surface and keeps the task alive on a draining surface. */
     private void detachEmbeddedDisplay(String widgetId) {
-        if (!CarPlayTarget.isCarPlay(embeddedPackages.get(widgetId))) {
-            releaseEmbeddedDisplay(widgetId);
-            return;
-        }
         VirtualDisplay display = embeddedDisplays.get(widgetId);
-        if (display == null || carPlayParkedOutputs.containsKey(display)) return;
-        CarPlayWidgetSurface parking = null;
+        if (display == null || embeddedParkedOutputs.containsKey(display)) return;
+        EmbeddedWidgetSurface parking = null;
         try {
             android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
             display.getDisplay().getRealMetrics(metrics);
-            parking = new CarPlayWidgetSurface(metrics.widthPixels, metrics.heightPixels);
+            parking = new EmbeddedWidgetSurface(metrics.widthPixels, metrics.heightPixels);
             display.setSurface(parking.surface());
-            carPlayParkedOutputs.put(display, parking);
+            embeddedParkedOutputs.put(display, parking);
             Log.i(
                     TAG,
-                    "CarPlay widget parked widget="
+                    "embedded widget parked widget="
                             + widgetId
                             + " display="
                             + display.getDisplay().getDisplayId());
         } catch (RuntimeException error) {
             if (parking != null) parking.close();
-            // Keep the VD/task even if parking fails; navigation never retires CarPlay.
-            Log.w(TAG, "CarPlay widget parking failed widget=" + widgetId, error);
+            // Keep the VD/task even if parking fails; reattach can recover a transient surface.
+            Log.w(TAG, "embedded widget parking failed widget=" + widgetId, error);
         }
     }
 
-    private void closeCarPlayParking(VirtualDisplay display) {
-        CarPlayWidgetSurface parking = carPlayParkedOutputs.remove(display);
+    private void closeEmbeddedParking(VirtualDisplay display) {
+        EmbeddedWidgetSurface parking = embeddedParkedOutputs.remove(display);
         if (parking != null) parking.close();
+    }
+
+    /** Sleep, shutdown and service teardown end the preserved widget tasks of this session. */
+    private void releaseAllEmbeddedDisplays() {
+        for (String widgetId : new java.util.ArrayList<>(embeddedDisplays.keySet())) {
+            releaseEmbeddedDisplay(widgetId);
+        }
+        for (EmbeddedWidgetSurface parking :
+                new java.util.ArrayList<>(embeddedParkedOutputs.values())) {
+            parking.close();
+        }
+        embeddedParkedOutputs.clear();
+        embeddedDisplays.clear();
+        embeddedPackages.clear();
+        embeddedLaunched.clear();
+        embeddedLaunchAt.clear();
     }
 
     private void replyCarPlayWidgets(Message request) {
@@ -1466,7 +1520,7 @@ public class SetModesService extends Service {
             embeddedLaunchAt.put(toWidgetId, SystemClock.elapsedRealtime());
             if (surface != null && surface.isValid()) {
                 display.setSurface(surface);
-                closeCarPlayParking(display);
+                closeEmbeddedParking(display);
                 if (width > 0 && height > 0) display.resize(width, height, dpi > 0 ? dpi : 213);
             }
             Log.i(
@@ -1529,13 +1583,13 @@ public class SetModesService extends Service {
             }
             if (surfaceA != null && surfaceA.isValid()) {
                 displayB.setSurface(surfaceA);
-                closeCarPlayParking(displayB);
+                closeEmbeddedParking(displayB);
                 if (widthA > 0 && heightA > 0)
                     displayB.resize(widthA, heightA, dpiA > 0 ? dpiA : 213);
             }
             if (surfaceB != null && surfaceB.isValid()) {
                 displayA.setSurface(surfaceB);
-                closeCarPlayParking(displayA);
+                closeEmbeddedParking(displayA);
                 if (widthB > 0 && heightB > 0)
                     displayA.resize(widthB, heightB, dpiB > 0 ? dpiB : 213);
             }
@@ -1840,6 +1894,7 @@ public class SetModesService extends Service {
             };
     private final Runnable reassertFloatingBackRunnable = this::reassertFloatingBack;
     private final Runnable autoLaunchRunnable = this::maybeAutoLaunchRestoreMode;
+    private final Runnable passengerAutoLaunchRunnable = this::maybeAutoLaunchPassengerDashboard;
     private final Runnable floatingBackEnableRunnable =
             () -> BackButtonService.setFloatingButtonEnabled(this, true);
     private final Runnable carPowerReconnectRunnable = this::reconnectCarPowerOnWorker;
@@ -1855,18 +1910,23 @@ public class SetModesService extends Service {
             };
 
     /**
-     * Задача пакета снимается с виртуального дисплея (embedded-виджет главного экрана) перед
-     * полноэкранным запуском. Велим хосту снять такой виджет: сам он не восстановится, потому что
-     * защёлка embeddedLaunched не даёт перезапустить приложение без запроса хоста.
+     * Сообщает хосту, что задача ушла с виртуального дисплея плитки: перед полноэкранным
+     * запуском или при явном закрытии. В последнем случае хост также удаляет запись сеанса.
      */
     static void notifyEmbeddedTaskLeft(Context context, String pkg) {
+        notifyEmbeddedTaskLeft(context, pkg, false);
+    }
+
+    static void notifyEmbeddedTaskLeft(Context context, String pkg, boolean closed) {
         // Task removal has completed. Dashboard may already be paused/unregistered;
         // clear Native's VD registry before starting the physical CarPlay task.
         SetModesService service = activeInstance;
         if (CarPlayTarget.isCarPlay(pkg) && service != null) service.releaseEmbeddedDisplaysOf(pkg);
         Intent update = new Intent(ACTION_EMBEDDED_TASK_LEFT);
         update.setPackage(RESTOREMODE_PKG);
+        update.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
         update.putExtra(EXTRA_EMBEDDED_TASK_PKG, pkg);
+        update.putExtra(EXTRA_EMBEDDED_TASK_CLOSED, closed);
         try {
             context.sendBroadcast(update, BIND_PERMISSION);
         } catch (RuntimeException e) {
@@ -1914,12 +1974,15 @@ public class SetModesService extends Service {
         mainHandler.postDelayed(reassertFloatingBackRunnable, 3000);
         mainHandler.removeCallbacks(autoLaunchRunnable);
         mainHandler.postDelayed(autoLaunchRunnable, 5000);
+        mainHandler.removeCallbacks(passengerAutoLaunchRunnable);
+        mainHandler.postDelayed(passengerAutoLaunchRunnable, 5500);
     }
 
     private void cancelAncillaryWakeTasks() {
         mainHandler.removeCallbacks(startNowPlayingRunnable);
         mainHandler.removeCallbacks(reassertFloatingBackRunnable);
         mainHandler.removeCallbacks(autoLaunchRunnable);
+        mainHandler.removeCallbacks(passengerAutoLaunchRunnable);
         mainHandler.removeCallbacks(floatingBackEnableRunnable);
     }
 
@@ -2118,6 +2181,7 @@ public class SetModesService extends Service {
             pendingPhysicalWake = false;
             endWakeSession();
             cancelAncillaryWakeTasks();
+            releaseAllEmbeddedDisplays();
             requestWashModeCleanup("power state " + powerStateName(state));
             ApplyEngine.resetRestoreGate("power state " + powerStateName(state));
         }
@@ -2516,18 +2580,7 @@ public class SetModesService extends Service {
         closeScenarios();
         serviceDestroyed = true;
         ApplyEngine.stopEarlyDriveRestore("service destroyed");
-        for (VirtualDisplay display : embeddedDisplays.values()) {
-            try {
-                display.release();
-            } catch (Exception ignored) {
-            }
-        }
-        embeddedDisplays.clear();
-        for (CarPlayWidgetSurface parking : carPlayParkedOutputs.values()) parking.close();
-        carPlayParkedOutputs.clear();
-        embeddedPackages.clear();
-        embeddedLaunched.clear();
-        embeddedLaunchAt.clear();
+        releaseAllEmbeddedDisplays();
         if (powerHoldStatusReceiverRegistered) {
             try {
                 unregisterReceiver(powerHoldStatusRequestReceiver);
