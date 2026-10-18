@@ -15,8 +15,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-const STARTUP_FILTER: &str = include_str!("voyahtweaks_startup.awk");
 const SCRIPT: &str = include_str!("voyahtweaks_recovery.sh");
+const CLEAN_STARTUP: &str = include_str!("../../../../Packaging/od/system/init.logcat.original.sh");
+const SYSTEM_ACCESS: &str = include_str!("cunba_system_access.sh");
+const STARTUP_BACKUP: &str = include_str!("od_startup_backup.sh");
 const JOURNAL: &str = "/data/local/voyahtune-voyahtweaks-recovery";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -41,8 +43,11 @@ fn execute(adb: &Adb, action: &str) -> Result<()> {
     // action is selected by the orchestrator, never supplied by the caller.
     adb.shell(
         &format!(
-            "action={action}\nstartup_filter={}\n{SCRIPT}",
-            crate::adb::quote(STARTUP_FILTER)
+            "action={action}\n{}",
+            SCRIPT
+                .replace("__VOYAHTWEAKS_CLEAN_STARTUP__", CLEAN_STARTUP.trim_end())
+                .replace("__VOYAHTWEAKS_SYSTEM_ACCESS__", SYSTEM_ACCESS.trim_end())
+                .replace("__OD_STARTUP_BACKUP__", STARTUP_BACKUP.trim_end())
         ),
         Duration::from_secs(90),
     )?;
@@ -182,9 +187,18 @@ pub fn disable(
                     &adb,
                     "Восстанавливаем изменения прерванного отключения VoyahTweaks",
                 )?;
-                execute(&adb, "rollback").map_err(|error| Error::new("VOYAHTWEAKS_ROLLBACK_REQUIRED", "Не удалось восстановить VoyahTweaks. Установка заблокирована; восстановите USB-соединение и повторите восстановление.").detail(error))?;
+                execute(&adb, "rollback").map_err(|error| {
+                    Error::new(
+                        "VOYAHTWEAKS_ROLLBACK_REQUIRED",
+                        "Не удалось восстановить VoyahTweaks. Установка заблокирована; восстановите USB-соединение и повторите восстановление.",
+                    )
+                    .detail(error)
+                })?;
             }
-            return Err(Error::new("VOYAHTWEAKS_RECOVERY_EXISTS", "Сохранена предыдущая операция VoyahTweaks. Установка заблокирована до повторной диагностики.")
+            return Err(Error::new(
+                "VOYAHTWEAKS_RECOVERY_EXISTS",
+                "Сохранена предыдущая операция VoyahTweaks. Установка заблокирована до повторной диагностики.",
+            )
             .detail(state));
         }
         match voyahtweaks::check(&adb, COMMAND_TIMEOUT) {
@@ -218,7 +232,7 @@ pub fn disable(
             Err(error) => {
                 progress(
                     &adb,
-                    "Отключение не подтверждено. Восстанавливаем исходные файлы и настройки VoyahTweaks",
+                    "Отключение не подтверждено. Проверяем необходимость восстановления VoyahTweaks",
                 )?;
                 let rollback = (|| {
                     root(&adb)?;
@@ -228,14 +242,26 @@ pub fn disable(
                     )?;
                     if present == "PRESENT" {
                         execute(&adb, "rollback")?;
+                        return Ok(true);
                     }
-                    Ok::<_, Error>(())
+                    Ok::<_, Error>(false)
                 })();
                 Err(match rollback {
-                Ok(()) => Error::new("VOYAHTWEAKS_DISABLE_FAILED", "Не удалось отключить VoyahTweaks. Изменения восстановлены, дальнейшая установка невозможна.").detail(error),
-                Err(rollback_error) => Error::new("VOYAHTWEAKS_ROLLBACK_REQUIRED", "Не удалось завершить откат VoyahTweaks. Установка заблокирована; восстановите USB-соединение и повторите восстановление.")
+                    Ok(restored) => Error::new(
+                        "VOYAHTWEAKS_DISABLE_FAILED",
+                        if restored {
+                            "Не удалось отключить VoyahTweaks. Исходные файлы и настройки восстановлены, установка не продолжена."
+                        } else {
+                            "Не удалось подготовить отключение VoyahTweaks. Файлы и настройки не изменялись, установка не продолжена."
+                        },
+                    )
+                    .detail(error),
+                    Err(rollback_error) => Error::new(
+                        "VOYAHTWEAKS_ROLLBACK_REQUIRED",
+                        "Не удалось завершить откат VoyahTweaks. Установка заблокирована; восстановите USB-соединение и повторите восстановление.",
+                    )
                     .detail(format!("Отключение: {error}\nОткат: {rollback_error}")),
-            })
+                })
             }
         };
         result

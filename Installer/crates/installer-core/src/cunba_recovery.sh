@@ -22,6 +22,8 @@ digest() {
 
 __CUNBA_SYSTEM_ACCESS__
 
+__OD_STARTUP_BACKUP__
+
 replace_startup() (
     replacement=$startup.voyahtune-cunba-new
     [ ! -L "$startup" ] && [ -f "$startup" ] || fail 'Unsafe startup target'
@@ -133,6 +135,8 @@ stop_processes() {
 }
 
 apply_changes() {
+    [ "$(digest "$startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup changed after inspection'
+    backup_startup
     state applying
     if [ "$(cat "$journal/package-state")" != absent ]; then
         pm disable-user --user 0 "$package"

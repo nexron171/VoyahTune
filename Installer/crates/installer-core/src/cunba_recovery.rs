@@ -20,6 +20,7 @@ const SCRIPT: &str = include_str!("cunba_recovery.sh");
 const CLEAN_STARTUP: &str = include_str!("../../../../Packaging/od/system/init.logcat.original.sh");
 const RESTORE_SCRIPT: &str = include_str!("cunba_restore.sh");
 const SYSTEM_ACCESS: &str = include_str!("cunba_system_access.sh");
+const STARTUP_BACKUP: &str = include_str!("od_startup_backup.sh");
 const JOURNAL: &str = "/data/local/voyahtune-cunba-recovery";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -43,6 +44,7 @@ fn command_script(action: &str, template: &str) -> String {
         template
             .replace("__CUNBA_CLEAN_STARTUP__", CLEAN_STARTUP.trim_end())
             .replace("__CUNBA_SYSTEM_ACCESS__", SYSTEM_ACCESS.trim_end())
+            .replace("__OD_STARTUP_BACKUP__", STARTUP_BACKUP.trim_end())
     )
 }
 

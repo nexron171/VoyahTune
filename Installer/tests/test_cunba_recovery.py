@@ -16,8 +16,12 @@ class CunbaRecoveryTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.environment = dict(os.environ, FAKE_DEVICE=str(self.root))
         self.environment["PATH"] = f"{self.root}/bin:/usr/bin:/bin"
-        self.clean_startup = (SOURCE.parents[3] / "Packaging/od/system/init.logcat.original.sh").read_text().rstrip() + "\n"
-        self.script = (SOURCE / "cunba_recovery.sh").read_text().replace("__CUNBA_CLEAN_STARTUP__", self.clean_startup.rstrip())
+        self.clean_startup = (
+            SOURCE.parents[3] / "Packaging/od/system/init.logcat.original.sh"
+        ).read_text().rstrip() + "\n"
+        self.script = (SOURCE / "cunba_recovery.sh").read_text().replace(
+            "__CUNBA_CLEAN_STARTUP__", self.clean_startup.rstrip()
+        )
         self.script = self.expand_system_access(self.script)
         self.script = self.script.replace("/system/bin/sh -n", "/bin/sh -n")
         for name in ["data", "system", "proc", "sdcard", "storage"]:
@@ -39,7 +43,7 @@ mv "$FAKE_DEVICE/proc/mounts.new" "$FAKE_DEVICE/proc/mounts"''')
             "ls",
             'if [ "$1" = -Zd ]; then echo "u:object_r:system_file:s0 $2"; else /bin/ls "$@"; fi',
         )
-        self.command("chcon", ':')
+        self.command("chcon", ":")
         self.command("sha256sum", 'shasum -a 256 "$1"')
         self.command("pm", '''case "$1" in
  list)
@@ -68,6 +72,9 @@ esac''')
         return script.replace(
             "__CUNBA_SYSTEM_ACCESS__",
             (SOURCE / "cunba_system_access.sh").read_text().rstrip(),
+        ).replace(
+            "__OD_STARTUP_BACKUP__",
+            (SOURCE / "od_startup_backup.sh").read_text().rstrip(),
         )
 
     def write(self, path, text):
@@ -81,8 +88,12 @@ esac''')
 
     def run_action(self, action, success=True):
         result = subprocess.run(
-            ["/bin/sh"], input=f"action={action}\n{self.script}",
-            env=self.environment, text=True, capture_output=True, timeout=10,
+            ["/bin/sh"],
+            input=f"action={action}\n{self.script}",
+            env=self.environment,
+            text=True,
+            capture_output=True,
+            timeout=10,
         )
         if success:
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -149,12 +160,25 @@ esac''')
         startup.chmod(0o750)
         self.run_action("prepare")
         self.run_action("apply")
+        backups = list(startup.parent.glob("init.logcat.sh_*_backup"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), original)
         self.assertNotIn("cunba", startup.read_text())
         self.assertIn("start_logcat", startup.read_text())
         self.assertEqual(startup.stat().st_mode & 0o777, 0o750)
         self.run_action("rollback")
         self.assertEqual(startup.read_text(), original)
         self.assert_original()
+
+    def test_startup_backup_failure_prevents_disabling(self):
+        self.run_action("prepare")
+        self.command("cp", 'case "$3" in *_backup) exit 1 ;; *) /bin/cp "$@" ;; esac')
+        self.run_action("apply", success=False)
+        self.assert_original()
+        self.assertEqual(
+            (self.root / "system/etc/init.logcat.sh").read_text(),
+            "#!/system/bin/sh\necho OEM\n",
+        )
 
     def test_failed_atomic_replacement_keeps_original(self):
         startup = self.root / "system/etc/init.logcat.sh"
@@ -355,7 +379,11 @@ exec /bin/cp "$@"''')
         self.assert_original()
 
     def test_supported_startup_is_restored_exactly(self):
-        original = f"#!/system/bin/sh\necho OEM\nsh {self.root}/sdcard/Download/cunba/patch/load.bin &\necho keep\n"
+        original = (
+            "#!/system/bin/sh\necho OEM\n"
+            f"sh {self.root}/sdcard/Download/cunba/patch/load.bin &\n"
+            "echo keep\n"
+        )
         startup = self.write("system/etc/init.logcat.sh", original)
         self.run_action("prepare")
         self.run_action("apply")
@@ -408,8 +436,14 @@ exec /bin/cp "$@"''')
         for name in ["data", "system", "proc", "sdcard", "storage"]:
             script = script.replace(f"/{name}/", f"{self.root}/{name}/")
         script = script.replace(r"\/sdcard\/", str(self.root).replace("/", r"\/") + r"\/sdcard\/")
-        result = subprocess.run(["/bin/sh"], input=f"action={action}\n{script}",
-                                env=self.environment, text=True, capture_output=True, timeout=10)
+        result = subprocess.run(
+            ["/bin/sh"],
+            input=f"action={action}\n{script}",
+            env=self.environment,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
         if success:
             self.assertEqual(result.returncode, 0, result.stderr)
         else:
