@@ -115,7 +115,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     if !resets.is_empty() {
         warnings.push(format!("Другой ключ подписи: {}. Эти приложения будут автоматически удалены вместе с настройками и данными, затем установлены заново.", resets.join(", ")));
     }
-    let steps = operation_steps(action);
+    let steps = operation_steps(action, payload.manifest.infrastructure);
     use sha2::{Digest, Sha256};
     Ok(Plan {
         installer_version: crate::compatibility::INSTALLER_VERSION.into(),
@@ -150,7 +150,10 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
 }
 
 /// Presentation boundaries must match every step emitted by Engine::execute.
-fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
+fn operation_steps(
+    action: Action,
+    infrastructure: crate::infrastructure::Infrastructure,
+) -> Vec<(&'static str, &'static str)> {
     let mut s = vec![
         ("preflight", "Подготовка файлов релиза"),
         ("root", "Получение системного доступа"),
@@ -159,10 +162,16 @@ fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
             "Блокировка установки и сохранение OTA-логов",
         ),
     ];
-    if action != Action::Remove {
+    if action != Action::Remove && infrastructure == crate::infrastructure::Infrastructure::Pi {
         s.push(("permission", "Проверка владельца CAN-разрешения"));
     }
     s.push(("system", "Подготовка системного раздела"));
+    if action == Action::Install && infrastructure == crate::infrastructure::Infrastructure::Od {
+        s.push((
+            "third-party-loaders",
+            "Проверка и отключение сторонних решений",
+        ));
+    }
     if action == Action::Remove {
         s.extend([
             ("deactivate", "Отключение Apollo"),
@@ -200,6 +209,28 @@ fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn od_prepares_third_party_solutions_immediately_after_remount() {
+        use crate::infrastructure::Infrastructure;
+        let steps = operation_steps(Action::Install, Infrastructure::Od);
+        let ids: Vec<_> = steps.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            &ids[..6],
+            &[
+                "preflight",
+                "root",
+                "updater-lock",
+                "system",
+                "third-party-loaders",
+                "backup"
+            ]
+        );
+        assert!(!ids.contains(&"permission"));
+        let pi = operation_steps(Action::Install, Infrastructure::Pi);
+        assert!(pi.iter().any(|(id, _)| *id == "permission"));
+        assert!(!pi.iter().any(|(id, _)| *id == "third-party-loaders"));
+    }
 
     #[test]
     fn removal_does_not_require_matching_release_or_apk_signatures() {

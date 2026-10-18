@@ -97,7 +97,7 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     if state.schema != 1 {
         return Err(invalid("Неизвестный формат OTA journal"));
     }
-    if state.fingerprint.is_empty() {
+    if !crate::restore_ui::enabled() && state.fingerprint.is_empty() {
         return Err(invalid("Не определена прошивка ГУ"));
     }
     crate::telemetry::initialize(root())?;
@@ -136,7 +136,7 @@ pub fn queue(shared: &Shared, sender: &mpsc::Sender<Job>, job: Job) -> io::Resul
             return Err(invalid("Сначала проверьте наличие релиза"))
         }
         Job::Apply if runtime.state.phase != "verified" => {
-            return Err(invalid("Релиз ещё не проверен"))
+            return Err(invalid("Сначала скачайте и распакуйте релиз"))
         }
         _ => {}
     }
@@ -274,6 +274,11 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
     let release = state
         .selected
         .ok_or_else(|| invalid("Нет выбранного релиза"))?;
+    if crate::restore_ui::enabled() {
+        let claims = crate::od_release::select(&release, &state.installed_version)
+            .map_err(|error| invalid(&error.to_string()))?;
+        return Ok((release, claims));
+    }
     for version in [&release.version, &state.installed_version] {
         release_core::infrastructure::Infrastructure::from_version(version)
             .and_then(|infrastructure| {
@@ -291,18 +296,8 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
             "Повторная установка разрешена только для того же архива",
         ));
     }
-    if crate::restore_ui::enabled() {
-        catalog_selection::verify_selection(
-            &release,
-            &state.installed_version,
-            state.same_version,
-            release_core::infrastructure::Infrastructure::Od,
-        )
+    ota::compatible(&claims, &state.installed_version, state.same_version)
         .map_err(|error| invalid(&error.to_string()))?;
-    } else {
-        ota::compatible(&claims, &state.installed_version, state.same_version)
-            .map_err(|error| invalid(&error.to_string()))?;
-    }
     if device::prop("ro.build.fingerprint")? != state.fingerprint {
         return Err(invalid(
             "Прошивка ГУ изменилась: установите VoyahTune через USB",
@@ -329,16 +324,20 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     }
     update(shared, State::clear_od_catalog)?;
     phase(shared, "checking", "Проверка каталога релизов")?;
-    if device::prop("ro.build.fingerprint")? != snapshot(shared).fingerprint {
+    if !crate::restore_ui::enabled()
+        && device::prop("ro.build.fingerprint")? != snapshot(shared).fingerprint
+    {
         return Err(invalid("Прошивка ГУ изменилась. Требуется USB-установка"));
     }
     let catalog = network::catalog(&url)?;
     let current = snapshot(shared);
-    release_core::infrastructure::Infrastructure::from_version(&current.installed_version)
-        .and_then(|infrastructure| {
-            infrastructure.require(release_core::infrastructure::Infrastructure::compiled())
-        })
-        .map_err(|error| invalid(&error.to_string()))?;
+    if !crate::restore_ui::enabled() {
+        release_core::infrastructure::Infrastructure::from_version(&current.installed_version)
+            .and_then(|infrastructure| {
+                infrastructure.require(release_core::infrastructure::Infrastructure::compiled())
+            })
+            .map_err(|error| invalid(&error.to_string()))?;
+    }
     let mut rejected = None;
     let mut selection = catalog_selection::choose(
         &catalog,
@@ -377,11 +376,6 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
                         .is_ok_and(|profile| {
                             profile == release_core::infrastructure::Infrastructure::Od
                         })
-                        && ota::verify(release)
-                            .and_then(|claims| {
-                                ota::compatible(&claims, &current.installed_version, true)
-                            })
-                            .is_ok()
                 })
                 .map(|release| release.version.clone())
                 .collect(),
@@ -433,11 +427,13 @@ fn download(shared: &Shared) -> io::Result<()> {
     let (release, claims) = selected(shared)?;
     device::wake(true)?;
     phase(shared, "downloading", "Скачивание архива")?;
-    // A full archive plus extraction and PackageManager reserve; actual expanded size is checked below.
-    device::space(
-        root(),
-        release.payload.size.saturating_mul(3) + 256 * 1024 * 1024,
-    )?;
+    if !crate::restore_ui::enabled() {
+        // A full archive plus extraction and PackageManager reserve; actual expanded size is checked below.
+        device::space(
+            root(),
+            release.payload.size.saturating_mul(3) + 256 * 1024 * 1024,
+        )?;
+    }
     let archive = root().join("release.zip");
     let partial = root().join("release.part");
     for path in [&archive, &partial] {
@@ -461,21 +457,23 @@ fn download(shared: &Shared) -> io::Result<()> {
         },
     )?;
     fs::rename(&partial, &archive)?;
-    phase(shared, "verifying", "Распаковка и проверка релиза")?;
-    let mut zip = zip::ZipArchive::new(fs::File::open(&archive)?)
-        .map_err(|error| invalid(&error.to_string()))?;
-    let mut expanded = 0u64;
-    for index in 0..zip.len() {
-        expanded = expanded
-            .checked_add(
-                zip.by_index(index)
-                    .map_err(|error| invalid(&error.to_string()))?
-                    .size(),
-            )
-            .ok_or_else(|| invalid("Размер ZIP переполнен"))?;
+    phase(shared, "verifying", "Распаковка релиза")?;
+    if !crate::restore_ui::enabled() {
+        let mut zip = zip::ZipArchive::new(fs::File::open(&archive)?)
+            .map_err(|error| invalid(&error.to_string()))?;
+        let mut expanded = 0u64;
+        for index in 0..zip.len() {
+            expanded = expanded
+                .checked_add(
+                    zip.by_index(index)
+                        .map_err(|error| invalid(&error.to_string()))?
+                        .size(),
+                )
+                .ok_or_else(|| invalid("Размер ZIP переполнен"))?;
+        }
+        device::space(root(), expanded.saturating_add(256 * 1024 * 1024))?;
+        drop(zip);
     }
-    device::space(root(), expanded.saturating_add(256 * 1024 * 1024))?;
-    drop(zip);
     network::extract(
         &archive,
         &root().join("staging"),
@@ -489,18 +487,21 @@ fn download(shared: &Shared) -> io::Result<()> {
     let payload = open_ota_payload(&root().join("staging"))?;
     verify_payload(&payload, &claims)?;
     crate::install::compatible(&payload)?;
-    phase(shared, "verified", "Релиз проверен. Можно начать установку")
+    phase(
+        shared,
+        "verified",
+        "Релиз распакован. Можно начать установку",
+    )
 }
 
 fn open_ota_payload(directory: &Path) -> io::Result<Payload> {
     use release_core::infrastructure::Infrastructure;
 
     let infrastructure = Infrastructure::compiled();
-    let payload = match infrastructure {
-        Infrastructure::Od => Payload::open_for_od_ota(directory),
-        Infrastructure::Pi => Payload::open(directory),
+    if infrastructure == Infrastructure::Od {
+        return crate::od_release::payload(directory);
     }
-    .map_err(|error| invalid(&error.to_string()))?;
+    let payload = Payload::open(directory).map_err(|error| invalid(&error.to_string()))?;
     payload
         .require_infrastructure(infrastructure)
         .map_err(|error| invalid(&error.to_string()))?;
@@ -508,8 +509,8 @@ fn open_ota_payload(directory: &Path) -> io::Result<Payload> {
 }
 
 fn verify_payload(payload: &Payload, claims: &ota::Claims) -> io::Result<()> {
-    if crate::restore_ui::enabled() && payload.manifest.release_version != claims.version {
-        return Err(invalid("Manifest не соответствует выбранному релизу"));
+    if crate::restore_ui::enabled() {
+        return Ok(());
     }
     ota::verify_payload(payload, claims).map_err(|error| invalid(&error.to_string()))
 }

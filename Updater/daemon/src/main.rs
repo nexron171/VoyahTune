@@ -6,6 +6,7 @@ mod install;
 mod install_tail;
 mod network;
 mod od_command;
+mod od_release;
 mod protocol;
 mod restore_ui;
 mod state;

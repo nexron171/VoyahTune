@@ -45,6 +45,9 @@ pub fn catalog(url: &str) -> io::Result<Catalog> {
     if bytes.len() > 4 * 1024 * 1024 {
         return Err(invalid("Слишком большой каталог"));
     }
+    if crate::restore_ui::enabled() {
+        return crate::od_release::catalog(&bytes);
+    }
     let c: release_core::catalog::UpdateCatalog =
         serde_json::from_slice(&bytes).map_err(|e| invalid(&e.to_string()))?;
     c.resolve().map_err(|e| invalid(&e.to_string()))
@@ -60,7 +63,25 @@ pub fn download(
         .get(url)
         .call()
         .map_err(|e| invalid(&format!("Скачивание: {e}")))?;
-    let mut reader = response.body_mut().as_reader();
+    receive_archive(
+        response.body_mut().as_reader(),
+        path,
+        size,
+        sha,
+        Infrastructure::compiled(),
+        progress,
+    )
+}
+
+fn receive_archive(
+    mut reader: impl Read,
+    path: &Path,
+    size: u64,
+    sha: &str,
+    infrastructure: Infrastructure,
+    progress: impl Fn(u64),
+) -> io::Result<()> {
+    let verify = infrastructure == Infrastructure::Pi;
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     let mut hash = Sha256::new();
     let mut bytes = 0u64;
@@ -72,17 +93,19 @@ pub fn download(
             break;
         }
         bytes += n as u64;
-        if bytes > size {
+        if verify && bytes > size {
             return Err(invalid("Архив превысил заявленный размер"));
         }
         file.write_all(&buffer[..n])?;
-        hash.update(&buffer[..n]);
+        if verify {
+            hash.update(&buffer[..n]);
+        }
         if bytes - reported >= 1024 * 1024 {
             progress(bytes);
             reported = bytes;
         }
     }
-    if bytes != size || hex::encode(hash.finalize()) != sha {
+    if verify && (bytes != size || hex::encode(hash.finalize()) != sha) {
         return Err(invalid("Размер или SHA-256 архива не совпадает"));
     }
     file.sync_all()?;
@@ -94,7 +117,7 @@ pub fn extract(source: &Path, target: &Path, progress: impl Fn(u64, u64)) -> io:
     fs::create_dir(target)?;
     let mut archive =
         zip::ZipArchive::new(File::open(source)?).map_err(|e| invalid(&e.to_string()))?;
-    if archive.len() > 4096 {
+    if !crate::restore_ui::enabled() && archive.len() > 4096 {
         return Err(invalid("Слишком много файлов ZIP"));
     }
     let mut names = BTreeSet::new();
@@ -131,7 +154,7 @@ pub fn extract(source: &Path, target: &Path, progress: impl Fn(u64, u64)) -> io:
         total = total
             .checked_add(entry.size())
             .ok_or_else(|| invalid("Переполнение ZIP"))?;
-        if total > 4 * 1024 * 1024 * 1024 {
+        if !crate::restore_ui::enabled() && total > 4 * 1024 * 1024 * 1024 {
             return Err(invalid("Распакованный архив слишком велик"));
         }
         let out = target.join(name);
@@ -156,6 +179,22 @@ pub fn extract(source: &Path, target: &Path, progress: impl Fn(u64, u64)) -> io:
 mod tests {
     use super::*;
     use std::{net::TcpListener, thread};
+
+    #[test]
+    fn od_download_ignores_declared_size_and_hash_but_pi_still_verifies() {
+        for infrastructure in [Infrastructure::Od, Infrastructure::Pi] {
+            for (size, hash) in [(0, "missing"), (7, "wrong"), (99, "wrong")] {
+                let directory = tempfile::tempdir().unwrap();
+                let path = directory.path().join("release.zip");
+                let result =
+                    receive_archive(&b"payload"[..], &path, size, hash, infrastructure, |_| {});
+                assert_eq!(result.is_ok(), infrastructure == Infrastructure::Od);
+                if infrastructure == Infrastructure::Od {
+                    assert_eq!(fs::read(path).unwrap(), b"payload");
+                }
+            }
+        }
+    }
 
     #[test]
     fn continuous_payload_transfer_outlasts_body_budget_only_for_od() {

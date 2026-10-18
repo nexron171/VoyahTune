@@ -79,7 +79,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_daemon_rejects_releases_that_remove_its_ui() {
+    fn od_ignores_ui_capabilities_in_the_manifest() {
         if !crate::restore_ui::enabled() {
             return;
         }
@@ -87,10 +87,7 @@ mod tests {
         let mut p = compatibility_fixture(dir.path());
         compatible(&p).unwrap();
         p.manifest.requirements = Some(release_core::compatibility::Requirements::infrastructure());
-        assert!(compatible(&p)
-            .unwrap_err()
-            .to_string()
-            .contains("не содержит встроенный экран OTA"));
+        compatible(&p).unwrap();
     }
 
     #[test]
@@ -158,14 +155,18 @@ mod tests {
     }
 
     #[test]
-    fn changed_loader_init_still_requires_usb() {
+    fn changed_loader_init_requires_usb_only_for_pi() {
         let dir = tempfile::tempdir().unwrap();
         let p = compatibility_fixture(dir.path());
         fs::write(p.root.join("voyahtune.load.rc"), b"different init contract").unwrap();
-        assert!(compatible(&p)
-            .unwrap_err()
-            .to_string()
-            .contains("voyahtune.load.rc требует установки через USB"));
+        if crate::restore_ui::enabled() {
+            compatible(&p).unwrap();
+        } else {
+            assert!(compatible(&p)
+                .unwrap_err()
+                .to_string()
+                .contains("voyahtune.load.rc требует установки через USB"));
+        }
     }
 
     #[test]
@@ -214,13 +215,11 @@ mod tests {
 }
 
 pub fn compatible(p: &Payload) -> io::Result<()> {
+    if crate::restore_ui::enabled() {
+        return Ok(());
+    }
     p.require_infrastructure(release_core::infrastructure::Infrastructure::compiled())
         .map_err(error)?;
-    if crate::restore_ui::enabled() && !p.restoremode_ota() {
-        return Err(invalid(
-            "Этот релиз не содержит встроенный экран OTA. Установите его через USB",
-        ));
-    }
     for f in &p.manifest.recipe.files {
         // STABLE files are never installed by OTA, so their archive bytes may differ.
         // The loader init contract is applied and still requires an exact match.
@@ -298,6 +297,11 @@ fn native_status(safety: bool) -> io::Result<String> {
     )
 }
 fn preflight(p: &Payload) -> io::Result<()> {
+    if crate::restore_ui::enabled() {
+        let _ = command("/system/bin/mount", &["-o", "rw,remount", "/system"], 20);
+        let _ = command("/system/bin/mount", &["-o", "rw,remount", "/"], 20);
+        return Ok(());
+    }
     compatible(p)?;
     let status = native_status(true)?;
     if status.contains("error=")
@@ -399,6 +403,9 @@ impl Drop for OperationLock {
 }
 fn install_apk(p: &Payload, package: &str, artifact: &str, apk: &Path) -> io::Result<()> {
     let mut arguments = vec!["install", "-r"];
+    if crate::restore_ui::enabled() {
+        arguments.push("-d");
+    }
     arguments.extend([
         "--user",
         "0",
@@ -408,7 +415,11 @@ fn install_apk(p: &Payload, package: &str, artifact: &str, apk: &Path) -> io::Re
     if !output.lines().any(|s| s.trim() == "Success") {
         return Err(invalid(&format!("PackageManager: {output}")));
     }
-    check_active_apk(p, artifact, Path::new(&package_path(package)?))
+    if crate::restore_ui::enabled() {
+        Ok(())
+    } else {
+        check_active_apk(p, artifact, Path::new(&package_path(package)?))
+    }
 }
 
 pub fn apply(shared: &Shared) -> io::Result<()> {
@@ -429,15 +440,17 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
         .dns_enabled;
     let dns_action = crate::dns::prepare(&p, dns_choice)?;
     device::wake(true)?;
-    let fresh = native_status(true)?;
-    if fresh.contains("error=")
-        || !fresh.contains("otaReady=true")
-        || !fresh.contains("parked=true")
-        || !fresh.contains("stationary=true")
-    {
-        return Err(invalid(&format!(
-            "Состояние автомобиля изменилось перед установкой: {fresh}"
-        )));
+    if !crate::restore_ui::enabled() {
+        let fresh = native_status(true)?;
+        if fresh.contains("error=")
+            || !fresh.contains("otaReady=true")
+            || !fresh.contains("parked=true")
+            || !fresh.contains("stationary=true")
+        {
+            return Err(invalid(&format!(
+                "Состояние автомобиля изменилось перед установкой: {fresh}"
+            )));
+        }
     }
     workflow::update(shared, |s| s.completed_steps = 1)?;
     // Persist the non-retryable boundary before blocking app launches or changing release files.
@@ -455,12 +468,14 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     workflow::phase(shared, "applying", "Остановка приложений и загрузчика")?;
     command("/system/bin/setprop", &["ctl.stop", "voyahtune_load"], 10)?;
     for _ in 0..20 {
-        if device::prop("init.svc.voyahtune_load")? == "stopped" {
+        let state = device::prop("init.svc.voyahtune_load")?;
+        if state == "stopped" || (crate::restore_ui::enabled() && state.is_empty()) {
             break;
         }
         thread::sleep(Duration::from_millis(250));
     }
-    if device::prop("init.svc.voyahtune_load")? != "stopped" {
+    let loader_state = device::prop("init.svc.voyahtune_load")?;
+    if loader_state != "stopped" && !(crate::restore_ui::enabled() && loader_state.is_empty()) {
         return Err(invalid("Загрузчик hooks не остановился"));
     }
     for package in [payload::NATIVE, payload::RESTORE] {
@@ -472,6 +487,23 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             "/system/bin/am",
             &["force-stop", "--user", "0", package],
             20,
+        )?;
+    }
+    if crate::restore_ui::enabled() {
+        device::atomic_copy(
+            &p.file("init.logcat.original.sh").map_err(error)?,
+            Path::new("/system/etc/init.logcat.sh"),
+            0o644,
+        )?;
+        command(
+            "/system/bin/sh",
+            &[
+                "-c",
+                include_str!(
+                    "../../../Packaging/od/installer/common/disable-third-party-loaders.sh"
+                ),
+            ],
+            60,
         )?;
     }
     workflow::phase(shared, "applying", "Отключение старой активации Apollo")?;
@@ -561,6 +593,9 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
                         "native.apk",
                         Path::new(payload::NATIVE_PATH),
                     )?;
+                    if crate::restore_ui::enabled() {
+                        repair_native_data()?;
+                    }
                     workflow::update(shared, |s| s.completed_steps = 5)?;
                 }
                 Step::Restore => {
@@ -601,7 +636,14 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
                 }
                 Step::Dns => {
                     workflow::phase(shared, "applying", crate::dns::title(dns_action))?;
-                    crate::dns::apply(&p, dns_action)?;
+                    let result = crate::dns::apply(&p, dns_action);
+                    if crate::restore_ui::enabled() {
+                        if let Err(error) = result {
+                            let _ = crate::log(root(), &format!("dns_update_warning {error}"));
+                        }
+                    } else {
+                        result?;
+                    }
                     workflow::update(shared, |s| {
                         s.completed_steps = if crate::restore_ui::enabled() { 6 } else { 7 }
                     })?;
@@ -771,6 +813,11 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
         }
         thread::sleep(Duration::from_secs(3));
     }
+    if crate::restore_ui::enabled() {
+        repair_native_data()?;
+        let (payload, claims) = workflow::verified(shared)?;
+        return finish_installation(shared, &payload, &claims);
+    }
     // apply() has already installed both APKs for user 0. Postboot only observes
     // registration/data; repeating install-existing --wait can hang on this OEM ROM.
     let packages = command("/system/bin/pm", &["list", "packages", "--user", "0"], 30)?;
@@ -894,30 +941,7 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
                     }) {
                         return Err(invalid("В журнале новой загрузки есть crash/ANR VoyahTune"));
                     }
-                    workflow::update(shared, |s| {
-                        s.phase = "committed".into();
-                        s.step = "Обновление установлено, службы работают".into();
-                        s.installed_version = p.manifest.release_version.clone();
-                        s.installed_archive_sha256 = claims.archive_sha256.clone();
-                        s.selected = None;
-                        s.error = None;
-                        s.notice = Some("success".into());
-                        s.notice_opened = false;
-                    })?;
-                    crate::telemetry::finish(None);
-                    for path in [root().join("release.zip"), root().join("release.part")] {
-                        if path.exists() {
-                            if let Err(e) = fs::remove_file(path) {
-                                let _ = crate::log(root(), &format!("cache_cleanup_warning {e}"));
-                            }
-                        }
-                    }
-                    if root().join("staging").exists() {
-                        if let Err(e) = fs::remove_dir_all(root().join("staging")) {
-                            let _ = crate::log(root(), &format!("cache_cleanup_warning {e}"));
-                        }
-                    }
-                    return Ok(());
+                    return finish_installation(shared, &p, &claims);
                 }
             }
             Err(e) => {
@@ -934,4 +958,56 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
     Err(invalid(&format!(
         "Компоненты не прошли проверку запуска: {last}"
     )))
+}
+
+fn repair_native_data() -> io::Result<()> {
+    command(
+        "/system/bin/sh",
+        &[
+            "-c",
+            include_str!("../../../Packaging/od/installer/common/repair-native-data.sh"),
+        ],
+        180,
+    )
+    .map(|_| ())
+}
+
+fn finish_installation(
+    shared: &Shared,
+    p: &Payload,
+    claims: &release_core::ota::Claims,
+) -> io::Result<()> {
+    workflow::update(shared, |s| {
+        s.phase = "committed".into();
+        s.step = if crate::restore_ui::enabled() {
+            "Обновление установлено"
+        } else {
+            "Обновление установлено, службы работают"
+        }
+        .into();
+        s.installed_version = if p.manifest.release_version.is_empty() {
+            claims.version.clone()
+        } else {
+            p.manifest.release_version.clone()
+        };
+        s.installed_archive_sha256 = claims.archive_sha256.clone();
+        s.selected = None;
+        s.error = None;
+        s.notice = Some("success".into());
+        s.notice_opened = false;
+    })?;
+    crate::telemetry::finish(None);
+    for path in [root().join("release.zip"), root().join("release.part")] {
+        if path.exists() {
+            if let Err(e) = fs::remove_file(path) {
+                let _ = crate::log(root(), &format!("cache_cleanup_warning {e}"));
+            }
+        }
+    }
+    if root().join("staging").exists() {
+        if let Err(e) = fs::remove_dir_all(root().join("staging")) {
+            let _ = crate::log(root(), &format!("cache_cleanup_warning {e}"));
+        }
+    }
+    Ok(())
 }

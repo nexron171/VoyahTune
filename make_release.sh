@@ -55,6 +55,9 @@ done
 [ -n "$INFRASTRUCTURE" ] || { echo "Укажите инфраструктуру: --pi или --od" >&2; exit 2; }
 COMMON="$ROOT/Packaging/$INFRASTRUCTURE"
 COMMON_INSTALLER="$COMMON/installer/common"
+if [ "$INFRASTRUCTURE" = od ]; then
+    COMMON_INSTALLER_FILES="$COMMON_INSTALLER_FILES disable-third-party-loaders.sh repair-native-data.sh"
+fi
 
 if [ -z "$VERSION" ]; then
     echo "Не указана версия. Пример: ./make_release.sh 3.2.2 --od" >&2
@@ -370,7 +373,7 @@ verify_release_payload() {
     if [ "$INFRASTRUCTURE" = pi ]; then
         required="$required loaderFrida injects.json clusternavi.js phone-num.js runyn.apk"
     else
-        required="$required load.bin app_client.js voyahtune_drive_reset.js voyahtune_acc_restore.js"
+        required="$required load.bin app_client.js voyahtune_drive_reset.js voyahtune_acc_restore.js disable-third-party-loaders.sh repair-native-data.sh"
     fi
     for payload in $required; do
         if [ ! -s "$out/$payload" ]; then

@@ -9,26 +9,17 @@ pub(super) fn same_release_version(left: &str, right: &str) -> bool {
     matches!((parse(left), parse(right)), (Ok(left), Ok(right)) if left == right)
 }
 
-fn require_ota_version(
-    release: &Release,
-    installed: &str,
-    infrastructure: Infrastructure,
-) -> Result<()> {
-    if infrastructure == Infrastructure::Od {
-        release.require_ota_version(installed)?;
-    }
-    Ok(())
-}
-
 pub(super) fn verify_selection(
     release: &Release,
     installed: &str,
     same_version: bool,
     infrastructure: Infrastructure,
 ) -> Result<ota::Claims> {
+    if infrastructure == Infrastructure::Od {
+        return crate::od_release::select(release, installed);
+    }
     let claims = ota::verify(release)?;
     ota::compatible(&claims, installed, same_version)?;
-    require_ota_version(release, installed, infrastructure)?;
     Ok(claims)
 }
 
@@ -44,6 +35,10 @@ pub(super) fn choose(
             && (infrastructure == Infrastructure::Od || release.channel == "stable")
             && (!same_version || same_release_version(&release.version, installed))
     }) {
+        if infrastructure == Infrastructure::Od {
+            crate::od_release::select(release, installed)?;
+            return Ok(Some(release.clone()));
+        }
         let compatibility = ota::verify(release)
             .and_then(|claims| ota::compatible(&claims, installed, same_version));
         if let Err(error) = compatibility {
@@ -51,7 +46,6 @@ pub(super) fn choose(
             continue;
         }
 
-        require_ota_version(release, installed, infrastructure)?;
         return Ok(Some(release.clone()));
     }
     Ok(None)
@@ -78,7 +72,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_selection_rejects_downgrades_and_checks_the_ota_minimum() {
+    fn explicit_selection_only_checks_the_ota_minimum_for_od() {
         let catalog = catalog();
         let release = &catalog.releases[0];
         assert_eq!(release.version, "4.1.0-od");
@@ -88,9 +82,9 @@ mod tests {
                 .code,
             "OTA_USB_REQUIRED"
         );
-        assert!(verify_selection(release, "4.2.0-od", true, Infrastructure::Od).is_err());
+        assert!(verify_selection(release, "4.2.0-od", true, Infrastructure::Od).is_ok());
         assert!(verify_selection(release, "4.1.0-od", true, Infrastructure::Od).is_ok());
-        assert!(verify_selection(release, "4.1.0-od", false, Infrastructure::Od).is_err());
+        assert!(verify_selection(release, "4.1.0-od", false, Infrastructure::Od).is_ok());
 
         let mut rebuilt = release.clone();
         rebuilt.payload.sha256 = "c".repeat(64);
@@ -141,7 +135,7 @@ mod tests {
         assert!(
             choose(&catalog, "4.1.0-od", false, Infrastructure::Od, |_| {})
                 .unwrap()
-                .is_none()
+                .is_some()
         );
     }
 

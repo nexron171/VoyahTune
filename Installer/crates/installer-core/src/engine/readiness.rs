@@ -110,15 +110,6 @@ impl Engine {
             "[ \"$(getprop sys.boot_completed)\" = 1 ] && service check package | grep -q ': found'",
             deadline,
         )?;
-        self.readiness_progress("Проверяем отсутствие активной Cunba", deadline)?;
-        crate::cunba::check(
-            &self.adb,
-            deadline.saturating_duration_since(Instant::now()),
-        )?;
-        crate::voyahtweaks::check(
-            &self.adb,
-            deadline.saturating_duration_since(Instant::now()),
-        )?;
         self.readiness_command("[ ! -e /data/local/voyahtune-install.lock ]", deadline)
             .map_err(|error| {
                 Error::new("HEALTH_PENDING", "Идёт другая операция установки или OTA").detail(error)
@@ -310,12 +301,6 @@ impl Engine {
                     )?;
                 }
                 Err(error) if error.code == "CANCELLED" => return Err(error),
-                Err(error)
-                    if crate::cunba::is_blocking_error(&error)
-                        || crate::voyahtweaks::is_blocking_error(&error) =>
-                {
-                    return Err(error)
-                }
                 Err(error) => {
                     stability.reset();
                     self.adb.events.emit(
@@ -488,23 +473,8 @@ esac
         .unwrap();
         let mut sent = false;
         let deadline = Instant::now() + Duration::from_secs(60);
-        for (marker, code) in [
-            ("cunba", "CUNBA_DETECTED"),
-            ("voyahtweaks", "VOYAHTWEAKS_DETECTED"),
-            ("cunba-check-failed", "CUNBA_CHECK_FAILED"),
-        ] {
+        for marker in ["cunba", "voyahtweaks", "cunba-check-failed"] {
             fs::write(directory.path().join(marker), "").unwrap();
-            let error = engine.verify_od_readiness_until(deadline).unwrap_err();
-            assert_eq!(error.code, code);
-            assert!(!directory.path().join("broadcasts").exists());
-            assert_eq!(engine.finish_report(Err(error)).unwrap_err().code, code);
-            let report: serde_json::Value = serde_json::from_slice(
-                &fs::read(engine.operation.dir.join("report.json")).unwrap(),
-            )
-            .unwrap();
-            assert_eq!(report["success"], false);
-            assert!(report.get("warning").is_none());
-            fs::remove_file(directory.path().join(marker)).unwrap();
         }
         assert!(engine.readiness_sample(deadline, &mut sent).is_err());
         assert!(sent);

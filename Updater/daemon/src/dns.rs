@@ -44,6 +44,13 @@ pub fn prepare(p: &Payload, desired: Option<bool>) -> io::Result<Action> {
     if desired.is_none() {
         return Ok(Action::Keep);
     }
+    if crate::restore_ui::enabled() {
+        return Ok(if desired == Some(true) {
+            Action::Install
+        } else {
+            Action::Disable
+        });
+    }
     let action = plan(&status()?, desired)?;
     if action == Action::Install {
         let apk = p.file("dns.apk").map_err(|e| invalid(&e.to_string()))?;
@@ -67,6 +74,9 @@ pub fn prepare(p: &Payload, desired: Option<bool>) -> io::Result<Action> {
 pub fn apply(p: &Payload, action: Action) -> io::Result<()> {
     if action == Action::Keep {
         return Ok(());
+    }
+    if crate::restore_ui::enabled() {
+        let _ = device::command("/system/bin/mount", &["-o", "rw,remount", "/vendor"], 20);
     }
     if action == Action::Install {
         device::atomic_copy(

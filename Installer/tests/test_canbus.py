@@ -17,6 +17,7 @@ class CanbusTests(unittest.TestCase):
         self.f = fixture.InstallerTests()
         self.f.setUp()
         self.addCleanup(self.f.tearDown)
+        self.od = json.loads((fixture.PAYLOAD / 'manifest.json').read_text()).get('infrastructure', 'od') == 'od'
         self.directory = self.f.device / 'system/priv-app/VoyahHlCTRL'
         self.directory.mkdir()
         (self.directory / 'service.apk').write_bytes(b'original system APK')
@@ -73,8 +74,13 @@ class CanbusTests(unittest.TestCase):
             process.stdin.close()
         return code, events
 
-    def test_yes_alone_requests_action_without_removal_or_error(self):
+    def test_known_conflict_uses_profile_consent_policy(self):
         result = self.run_cli()
+        if self.od:
+            self.assertEqual(result.returncode, 0, result.stdout[-4000:])
+            self.assertNotIn('"canbus-conflict"', result.stdout)
+            self.assertFalse(self.directory.exists())
+            return
         self.assertEqual(result.returncode, 3, result.stdout)
         events = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertIn('canbus-conflict', [e['type'] for e in events])
@@ -97,7 +103,8 @@ class CanbusTests(unittest.TestCase):
         self.assertLess(types.index('canbus-backup'), types.index('canbus-removal-reboot'))
         self.assertLess(types.index('canbus-conflict-resolved'), types.index('operation-completed'))
         calls = self.f.calls()
-        uninstall = next(i for i,c in enumerate(calls) if 'pm uninstall --user 0 '+PACKAGE in (c['script'] or ''))
+        uninstall_command = ('pm uninstall -k --user 0 ' if self.od else 'pm uninstall --user 0 ') + PACKAGE
+        uninstall = next(i for i,c in enumerate(calls) if uninstall_command in (c['script'] or ''))
         remove = next(i for i,c in enumerate(calls) if 'rm -rf /system/priv-app/VoyahHlCTRL' in (c['script'] or ''))
         reboot = next(i for i,c in enumerate(calls) if c['args'] == ['reboot'])
         self.assertLess(uninstall, remove)
@@ -105,6 +112,8 @@ class CanbusTests(unittest.TestCase):
         self.assertTrue(any('dumpsys package permissions' in (c['script'] or '') for c in calls[reboot+1:]))
 
     def test_decline_cancel_and_eof_leave_app_intact(self):
+        if self.od:
+            self.skipTest('OD installation does not request separate consent')
         for response in [{'confirmRemoveVoyahHlService': False}, {'cancel': True}, None]:
             with self.subTest(response=response):
                 code, events = self.interactive(response)
@@ -155,6 +164,8 @@ class CanbusTests(unittest.TestCase):
                 self.assertTrue(self.directory.exists())
 
     def test_installed_package_prompts_with_absent_native_or_other_owner(self):
+        if self.od:
+            self.skipTest('OD installation resolves the known conflict automatically')
         for owner in [None, 'ru.big.town.anative', 'com.example.other']:
             with self.subTest(owner=owner):
                 if owner is None:
