@@ -821,15 +821,14 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                                 .show());
     }
 
-    /** Открыть MainActivity на пассажирском дисплее, не трогая водительскую задачу. */
+    /** Открыть отдельную пассажирскую activity на дисплее 1, не трогая водительскую задачу. */
     static void openPassengerDashboard(Context context) {
         try {
             Intent intent = new Intent();
-            intent.setClassName(SetModesService.RESTOREMODE_PKG, SetModesService.RESTOREMODE_MAIN);
-            intent.addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK
-                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            intent.setClassName(
+                    SetModesService.RESTOREMODE_PKG,
+                    SetModesService.RESTOREMODE_PASSENGER_MAIN);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
             options.setLaunchDisplayId(1);
             android.os.Bundle bundle = options.toBundle();

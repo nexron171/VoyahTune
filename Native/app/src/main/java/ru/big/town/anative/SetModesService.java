@@ -107,6 +107,8 @@ public class SetModesService extends Service {
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
     static final String RESTOREMODE_PKG = "ru.big.town.restoremode";
     static final String RESTOREMODE_MAIN = "ru.big.town.restoremode.MainActivity";
+    static final String RESTOREMODE_PASSENGER_MAIN =
+            "ru.big.town.restoremode.passenger.PassengerDashboardActivity";
     private static final String RESTOREMODE_CONFIG_SYNC_ACTION =
             "ru.big.town.restoremode.SYNC_SAVED_CONFIG";
     private static final String RESTOREMODE_CONFIG_SYNC_RECEIVER =

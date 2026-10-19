@@ -180,6 +180,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Separate affinity keeps the passenger task alive while the driver dashboard stays on
+             display 0 instead of moving the existing task to display 1. -->
+        <activity
+            android:name=".passenger.PassengerDashboardActivity"
+            android:label="@string/voyahtune_passenger_app_name"
+            android:icon="@mipmap/ic_passenger_dashboard"
+            android:roundIcon="@mipmap/ic_passenger_dashboard"
+            android:taskAffinity="ru.big.town.restoremode.passenger"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

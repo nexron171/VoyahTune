@@ -13,6 +13,16 @@ public class CarPlayDashboardDisplayTest {
     }
 
     @Test
+    public void passengerDisplayReturnsToTheDedicatedActivity() {
+        assertEquals(
+                "ru.big.town.restoremode.passenger.PassengerDashboardActivity",
+                CarPlayDashboardLauncher.dashboardActivityClass(1).getName());
+        assertEquals(
+                "ru.big.town.restoremode.MainActivity",
+                CarPlayDashboardLauncher.dashboardActivityClass(0).getName());
+    }
+
+    @Test
     public void fullscreenReturnsToItsPhysicalDisplay() {
         CarPlayDashboardLauncher.rememberDisplay(1);
         assertEquals(0, CarPlayDashboardLauncher.targetDisplayId(0));

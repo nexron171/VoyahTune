@@ -814,6 +814,7 @@ Java.perform(function () {
             var JavaString = Java.use("java.lang.String");
             // List.get() возвращает обёртку java.lang.Object: без Java.cast поля не читаются.
             var ApplicationInfo = Java.use("android.content.pm.ApplicationInfo");
+            var ComponentName = Java.use("android.content.ComponentName");
             var pm = ctx().getPackageManager();
             var installedSnapshot = null;
             var iconCache = {};
@@ -821,7 +822,20 @@ Java.perform(function () {
             var packageRefreshTimer = null;
             var FLAG_SYSTEM = 0x00000001;
             var SYNTHETIC_PREFIX = "__voyahtune_allapps__:";
+            var PASSENGER_CLASS = "ru.big.town.restoremode.passenger.PassengerDashboardActivity";
+            var PASSENGER_ENTRY = RESTORE_PKG + "/" + PASSENGER_CLASS;
             var resourceTemplate = null;
+
+            function entryPackage(target) {
+                return target === PASSENGER_ENTRY ? RESTORE_PKG : target;
+            }
+
+            function entryComponent(target) {
+                if (target === PASSENGER_ENTRY) {
+                    return ComponentName.$new(RESTORE_PKG, PASSENGER_CLASS);
+                }
+                return null;
+            }
 
             function packageFromIntent(intent) {
                 if (intent === null) return "";
@@ -856,17 +870,24 @@ Java.perform(function () {
                 return startAppComponent.call(this, context, pkgArg, classArg, screenIdArg);
             };
 
-            function launchAllApp(pkg, screenId) {
+            function launchAllApp(target, screenId) {
                 try {
-                    if (isUserFullscreen(pkg)) return launchFullscreen(pkg, screenId);
-                    var intent = pm.getLaunchIntentForPackage(pkg);
+                    var component = entryComponent(target);
+                    if (component === null && isUserFullscreen(target)) {
+                        return launchFullscreen(target, screenId);
+                    }
+                    var intent = component !== null
+                            ? Intent.$new("android.intent.action.MAIN")
+                                    .addCategory("android.intent.category.LAUNCHER")
+                                    .setComponent(component)
+                            : pm.getLaunchIntentForPackage(target);
                     if (intent === null) return false;
                     intent.addFlags(0x10000000); // FLAG_ACTIVITY_NEW_TASK
                     AppLauncher.startApp(ctx(), intent, screenId);
-                    Log.i(TAG, "[allapps] launch " + pkg + " display=" + screenId);
+                    Log.i(TAG, "[allapps] launch " + target + " display=" + screenId);
                     return true;
                 } catch (e) {
-                    Log.e(TAG, "[allapps] launch " + pkg + ": " + e);
+                    Log.e(TAG, "[allapps] launch " + target + ": " + e);
                     return false;
                 }
             }
@@ -910,38 +931,63 @@ Java.perform(function () {
             // Флаг от повторного входа: fallback-шаблон зовёт оригинальный getAllApps через наш хук.
             var addingApps = false;
 
-            function addMissingApps(list) {
+            function addMissingApps(list, screenId) {
                 if (list === null || addingApps) return;
                 addingApps = true;
-                try { addMissingAppsImpl(list); }
+                try { addMissingAppsImpl(list, screenId); }
                 finally { addingApps = false; }
             }
 
-            function addMissingAppsImpl(list) {
+            function addMissingAppsImpl(list, screenId) {
+                // Driver keeps the normal VoyahTune entry; the passenger list gets the dedicated
+                // activity instead, otherwise its stock icon would move the driver task to display 1.
+                var screen = screenId === 1 ? 1 : 0;
                 var existing = {};
-                for (var i = 0; i < list.size(); i++) {
-                    try { existing["pkg:" + Java.cast(list.get(i), AppBean).getPackageName()] = true; }
-                    catch (ignored) {}
+                for (var i = list.size() - 1; i >= 0; i--) {
+                    try {
+                        var current = Java.cast(list.get(i), AppBean);
+                        var existingTarget = syntheticPackage(current) || "" + current.getPackageName();
+                        if ((existingTarget === PASSENGER_ENTRY && screen !== 1)
+                                || (screen === 1 && existingTarget === RESTORE_PKG)) {
+                            list.remove(i);
+                            continue;
+                        }
+                        existing["pkg:" + existingTarget] = true;
+                    } catch (ignored) {}
                 }
                 var apps = snapshotInstalled();
                 var template = null;
                 for (var j = 0; j < apps.length; j++) {
-                    var pkg = apps[j];
-                    if (existing["pkg:" + pkg]) continue;
+                    var target = apps[j];
+                    if (screen === 1 && target === RESTORE_PKG) continue;
+                    if (existing["pkg:" + target]) continue;
                     try {
                         if (template === null) template = findAppTemplate(list);
                         // Пассажирский OEM-list может быть пустым: ресурсы обоих списков из одного APK,
                         // поэтому берём шаблон из main list через оригинальный getAllApps.
                         if (template === null) template = findAppTemplate(getAll.call(Data, 0));
                         if (template === null) {
-                            Log.e(TAG, "[allapps] no valid OEM app template; cannot safely add " + pkg);
+                            Log.e(TAG, "[allapps] no valid OEM app template; cannot safely add " + target);
                             return;
                         }
-                        var bean = AppBean.$new(template.icon, template.name, pkg);
-                        bean.setSubType(SYNTHETIC_PREFIX + pkg);
+                        var bean = AppBean.$new(template.icon, template.name, target);
+                        bean.setSubType(SYNTHETIC_PREFIX + target);
                         list.add(bean);
-                        existing["pkg:" + pkg] = true;
-                    } catch (e) { Log.e(TAG, "[allapps] add " + pkg + ": " + e); }
+                        existing["pkg:" + target] = true;
+                    } catch (e) { Log.e(TAG, "[allapps] add " + target + ": " + e); }
+                }
+                if (screen === 1 && !existing["pkg:" + PASSENGER_ENTRY]) {
+                    try {
+                        if (template === null) template = findAppTemplate(list);
+                        if (template === null) template = findAppTemplate(getAll.call(Data, 0));
+                        if (template === null) {
+                            Log.e(TAG, "[allapps] no template for passenger dashboard entry");
+                            return;
+                        }
+                        var passengerBean = AppBean.$new(template.icon, template.name, RESTORE_PKG);
+                        passengerBean.setSubType(SYNTHETIC_PREFIX + PASSENGER_ENTRY);
+                        list.add(passengerBean);
+                    } catch (e) { Log.e(TAG, "[allapps] add passenger dashboard: " + e); }
                 }
             }
 
@@ -957,27 +1003,37 @@ Java.perform(function () {
                 }
             }
 
-            function loadIcon(pkg) {
-                var icon = iconCache[pkg];
+            function loadIcon(target) {
+                var icon = iconCache[target];
                 if (!icon) {
-                    icon = Java.retain(pm.getApplicationIcon(pkg));
-                    iconCache[pkg] = icon;
+                    var component = entryComponent(target);
+                    icon = Java.retain(component !== null
+                            ? pm.getActivityIcon(component)
+                            : pm.getApplicationIcon(target));
+                    iconCache[target] = icon;
                 }
                 return icon;
             }
 
             // getApplicationInfo — binder-IPC, getApplicationLabel поднимает Resources чужого APK: на каждый
             // bind это десятки миллисекунд UI-потока. Кэшируем готовый java.lang.String до смены локали/пакета.
-            function loadLabel(pkg) {
-                var cached = labelCache[pkg];
+            function loadLabel(target) {
+                var cached = labelCache[target];
                 if (cached) return cached;
-                var value = Java.retain(JavaString.$new("" + pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0))));
-                labelCache[pkg] = value;
+                var component = entryComponent(target);
+                var value = Java.retain(component !== null
+                        ? JavaString.$new("" + pm.getActivityInfo(component, 0).loadLabel(pm))
+                        : JavaString.$new("" + pm.getApplicationLabel(pm.getApplicationInfo(target, 0))));
+                labelCache[target] = value;
                 return value;
             }
 
             function dropCache(store, packageName) {
-                var keys = packageName ? [packageName] : Object.keys(store);
+                var keys = packageName
+                        ? Object.keys(store).filter(function (key) {
+                            return entryPackage(key) === packageName;
+                        })
+                        : Object.keys(store);
                 for (var i = 0; i < keys.length; i++) {
                     var cached = store[keys[i]];
                     if (cached) {
@@ -1164,7 +1220,7 @@ Java.perform(function () {
             getAll.implementation = function (screenId) {
                 var list = getAll.call(this, screenId);
                 if ((screenId === 0 || screenId === 1) && list !== null) {
-                    addMissingApps(list);
+                    addMissingApps(list, screenId);
                     clearBindCaches();
                 }
                 return list;
@@ -1178,16 +1234,19 @@ Java.perform(function () {
             function injectAllScreens() {
                 try {
                     if (dataSingleton === null) dataSingleton = Java.retain(Data.getInstance());
-                    var fields = ["mMainAllApps", "mSecondAllApps"];
+                    var fields = [
+                        {name: "mMainAllApps", screen: 0},
+                        {name: "mSecondAllApps", screen: 1}
+                    ];
                     var total = 0;
                     for (var i = 0; i < fields.length; i++) {
-                        var list = field(dataSingleton, fields[i]);
+                        var list = field(dataSingleton, fields[i].name);
                         if (list === null) continue;
                         var before = list.size();
-                        addMissingApps(list);
+                        addMissingApps(list, fields[i].screen);
                         var added = list.size() - before;
                         if (added > 0) {
-                            Log.i(TAG, "[allapps] injectAllScreens " + fields[i] + " += " + added);
+                            Log.i(TAG, "[allapps] injectAllScreens " + fields[i].name + " += " + added);
                             total += added;
                         }
                     }

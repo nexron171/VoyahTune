@@ -1069,12 +1069,20 @@ public class DashboardActivity extends AppCompatActivity {
         badge.setBackgroundResource(on ? R.drawable.pill_active : R.drawable.pill_inactive);
     }
 
+    /**
+     * Passenger entry point overrides this so its layout profile does not depend on display probing.
+     * The driver dashboard keeps the historical display-based selection.
+     */
+    protected DashboardProfile resolveDashboardProfile(int displayId) {
+        return DashboardProfile.forDisplay(displayId);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         dashboardDisplayId = DashboardProfile.displayId(this);
-        dashboardProfile = DashboardProfile.forDisplay(dashboardDisplayId);
+        dashboardProfile = resolveDashboardProfile(dashboardDisplayId);
         settingsPreferences = dashboardProfile.settingsPreferences(this);
         sharedPreferences = dashboardProfile.layoutPreferences(this);
 

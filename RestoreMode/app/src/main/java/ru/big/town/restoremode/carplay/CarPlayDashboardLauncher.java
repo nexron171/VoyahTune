@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.util.Log;
 
 import ru.big.town.restoremode.MainActivity;
+import ru.big.town.restoremode.passenger.PassengerDashboardActivity;
 
 /** Return to the dashboard task without retiring the independent CarPlay task/session. */
 public final class CarPlayDashboardLauncher {
@@ -47,10 +48,14 @@ public final class CarPlayDashboardLauncher {
                 : dashboardDisplayId;
     }
 
+    static Class<? extends android.app.Activity> dashboardActivityClass(int displayId) {
+        return displayId == 1 ? PassengerDashboardActivity.class : MainActivity.class;
+    }
+
     public static boolean open(Context context, int carPlayDisplayId) {
         int displayId = targetDisplayId(carPlayDisplayId);
         Intent intent =
-                new Intent(context, MainActivity.class)
+                new Intent(context, dashboardActivityClass(displayId))
                         .setAction(Intent.ACTION_MAIN)
                         .addCategory(Intent.CATEGORY_LAUNCHER)
                         .addFlags(
