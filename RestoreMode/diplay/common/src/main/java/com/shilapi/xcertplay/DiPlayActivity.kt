@@ -3617,9 +3617,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         } else {
             parent.addView(label(getString(R.string.turn_the_car_s_wi_fi_switch_on_allow_location_nearby_devic), 16, MUTED))
             wifiDirectChannelControl(parent)
-            // #755: the pause also stops the car joining a known network, such as the phone's hotspot, by itself.
-            toggle(parent, getString(R.string.settings_wifi_direct_scan_pause),
-                getString(R.string.settings_wifi_direct_scan_pause_description),
+            val nativeScanPause = com.shilapi.xcertplay.network.VoyahWifiScanPause.available
+            toggle(parent, getString(if (nativeScanPause) R.string.voyah_wifi_scan_pause
+                else R.string.settings_wifi_direct_scan_pause),
+                getString(if (nativeScanPause) R.string.voyah_wifi_scan_pause_description
+                    else R.string.settings_wifi_direct_scan_pause_description),
                 AirPlayPersistence.loadWifiDirectScanPause(this)) {
                 AirPlayPersistence.saveWifiDirectScanPause(this, it)
                 markReconnectNeeded()

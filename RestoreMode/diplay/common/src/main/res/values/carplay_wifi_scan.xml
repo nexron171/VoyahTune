@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voyah_wifi_scan_pause">Pause automatic Wi-Fi search during CarPlay</string>
+    <string name="voyah_wifi_scan_pause_description">Pauses background network search and automatic connections during Wi-Fi Direct CarPlay to reduce interruptions. You can still connect manually in the car’s Wi-Fi settings. The previous search policy is restored when the session ends. Applies at the next connection.</string>
+</resources>

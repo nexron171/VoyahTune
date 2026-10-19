@@ -29,8 +29,13 @@ public final class VoyahApplication extends Application {
         if (isOtaProcess()) {
             return;
         }
-        com.shilapi.xcertplay.VoyahCarPlayIntegration.install(
-                new ru.big.town.restoremode.carplay.CarPlayVehicleBridge(this));
+        ru.big.town.restoremode.carplay.CarPlayVehicleBridge carPlayBridge =
+                new ru.big.town.restoremode.carplay.CarPlayVehicleBridge(this);
+        com.shilapi.xcertplay.VoyahCarPlayIntegration.install(carPlayBridge);
+        if (ru.big.town.common.InfrastructureProfile.read(this)
+                == ru.big.town.common.InfrastructureProfile.OD) {
+            com.shilapi.xcertplay.network.VoyahWifiScanPause.install(carPlayBridge);
+        }
         com.shilapi.xcertplay.CarPlayHomeUi.install(
                 ru.big.town.restoremode.carplay.CarPlayHomeScreen::new);
         com.shilapi.xcertplay.CarPlayWindowUi.install(

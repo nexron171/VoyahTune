@@ -17,17 +17,27 @@ import android.os.RemoteException;
 import androidx.core.content.ContextCompat;
 
 import com.shilapi.xcertplay.VoyahCarPlayIntegration;
+import com.shilapi.xcertplay.network.VoyahWifiScanPause;
+
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 import ru.big.town.common.CarPlayVehicleProtocol;
 import ru.big.town.common.CarPlayAudioProtocol;
+import ru.big.town.common.CarPlayWifiScanProtocol;
 import ru.big.town.restoremode.voice.commands.VoiceSteeringPolicy;
 
 /** One subscription per foreground CarPlay session, including UI/display transfers. */
-public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host {
+public final class CarPlayVehicleBridge
+        implements VoyahCarPlayIntegration.Host, VoyahWifiScanPause.Host {
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Messenger replies;
     private int generation;
+    private final Set<Object> wifiScanOwners =
+            Collections.newSetFromMap(new IdentityHashMap<>());
 
     private Messenger createReplies() {
         int expectedGeneration = ++generation;
@@ -67,6 +77,7 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
         com.shilapi.xcertplay.hud.VoyahManeuver maneuver =
                 com.shilapi.xcertplay.hud.VoyahNavigation.snapshot();
         Bundle values = new Bundle();
+        values.putBoolean(CarPlayWifiScanProtocol.PAUSED, !wifiScanOwners.isEmpty());
         values.putBoolean(CarPlayVehicleProtocol.NAV_ACTIVE, maneuver != null);
         values.putLong(CarPlayVehicleProtocol.NAV_TIME, android.os.SystemClock.elapsedRealtime());
         if (maneuver != null) {
@@ -93,6 +104,7 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
                     service = new Messenger(binder);
                     send(CarPlayVehicleProtocol.WATCH);
                     sendAudioFocus();
+                    sendNavigation();
                 }
 
                 @Override
@@ -131,6 +143,24 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
     }
 
     @Override
+    public void acquireWifiScanPause(Object owner, BooleanSupplier current) {
+        handler.post(
+                () -> {
+                    if (current.getAsBoolean() && wifiScanOwners.add(owner) && started) {
+                        sendNavigation();
+                    }
+                });
+    }
+
+    @Override
+    public void releaseWifiScanPause(Object owner) {
+        handler.post(
+                () -> {
+                    if (wifiScanOwners.remove(owner) && started) sendNavigation();
+                });
+    }
+
+    @Override
     public void audioFocus(int stream) {
         if (stream != CarPlayAudioProtocol.NONE && !CarPlayAudioProtocol.validStream(stream)) return;
         audioStream = stream;
@@ -144,11 +174,17 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
         Bundle data = new Bundle();
         data.putInt(CarPlayAudioProtocol.STREAM, audioStream);
         message.setData(data);
-        try { service.send(message); } catch (RemoteException unavailable) { reconnect(); }
+        try {
+            service.send(message);
+        } catch (RemoteException unavailable) {
+            reconnect();
+        }
     }
 
     @Override
-    public boolean openProjection(android.app.Activity activity, int displayId,
+    public boolean openProjection(
+            android.app.Activity activity,
+            int displayId,
             VoyahCarPlayIntegration.ProjectionResult result) {
         if (displayId <= 1) return false;
         new CarPlayProjectionClient(activity, displayId, result).start();
@@ -213,6 +249,7 @@ public final class CarPlayVehicleBridge implements VoyahCarPlayIntegration.Host 
     public void stop() {
         if (!started) return;
         started = false;
+        wifiScanOwners.clear();
         audioStream = CarPlayAudioProtocol.NONE;
         send(CarPlayVehicleProtocol.UNWATCH);
         generation++;

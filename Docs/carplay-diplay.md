@@ -563,6 +563,35 @@ EXISTING_WIFI при обновлении не меняется. Проверк�
 `LOCAL_ONLY_HOTSPOT` по-прежнему мигрирует в `MANUAL`. Activity и виджет используют
 общие preferences.
 
+В OD переключатель **«Приостанавливать автоматический поиск Wi-Fi при CarPlay»**
+использует существующий `wifi_direct_scan_pause` (default true, применяется при
+следующем подключении). Только `WIFI_P2P` получает lease; USB, ручной hotspot и
+EXISTING_WIFI его не создают. `WifiScanPause` передаёт владение установленному
+`VoyahWifiScanPause.Host`, реализованному `CarPlayVehicleBridge`; LocalAdb остаётся
+выключенным. Перекрывающиеся контроллеры имеют разные owner tokens, закрытый
+контроллер не может выполнить отложенный acquire. Уход UI в фон lease не снимает.
+
+Bridge включает `wifiScanPaused` в heartbeat сообщения 123. Native принимает его
+только от текущего WATCH-владельца и только в OD; worker раз в 3 секунды публикует
+`voyahtune_carplay_wifi_scan_lease` в `Settings.Global` как `boot_count:elapsedRealtime`
+исходного heartbeat. Отложенная запись не продлевает его срок. UNWATCH, смена
+владельца и destroy очищают запрос. Без heartbeat lease истекает через 10 секунд.
+
+OD `vd_bypass.js` обрабатывает lease на штатном Wi-Fi Handler раз в секунду.
+Для Android 11 он разрешает модульный class loader через Binder Wi-Fi-службы,
+проверяет `WifiServiceImpl.mClientModeImpl`, `ClientModeImpl.mWifiConnectivityManager`,
+`WifiConnectivityManager.mEventHandler/mAutoJoinEnabledExternal` и вызывает
+`setAutoJoinEnabledExternal(false)`. Это приостановка autojoin и фонового поиска
+ConnectivityManager, не выключение радио и не запрет всех явных scan requests.
+Ручное подключение сохраняется. Исходное значение и последующие внешние изменения
+autojoin восстанавливаются при снятии/истечении lease, ошибке чтения запроса или
+rollback агента; восстановление выполняется на том же Wi-Fi Handler. Старый boot,
+будущий timestamp и неподдерживаемый ABI не разрешают приостановку. Подтверждение
+пишется в `vt_vdbypass` после проверки состояния; при старте агент ожидает
+ещё не готовую Wi-Fi-службу до 30 секунд. Наличие настройки не доказывает работу
+на конкретной OEM-прошивке. На ГУ необходимо проверить отсутствие фоновых сканов
+и восстановление после разрыва/force-stop. PI не устанавливает Host и не публикует lease.
+
 Русская инструкция ручной настройки точки доступа требует точно скопировать её
 название и пароль и предупреждает не менять название: автомобиль может вернуть
 старое название в любой момент.
@@ -698,7 +727,7 @@ Android Back из проекции открывает home с `page=home`, со�
 | 120 WATCH | RestoreMode → Native | `replyTo`: Messenger подписчика. Один текущий владелец. |
 | 121 UNWATCH | RestoreMode → Native | `replyTo`: снять только свою подписку. |
 | 122 STATE | Native → replyTo | `speedKmh: int`, `gear: int`, `swReason: int`, `speedTime: long`. Неизвестные значения −1. |
-| 123 NAVIGATION | RestoreMode → Native | `replyTo` владельца; `navigationActive: boolean`, `navigationTime: long`, при active также `navigationIcon: int`, `navigationDistance: int`, `navigationRoad: String`. |
+| 123 NAVIGATION | RestoreMode → Native | `replyTo` владельца; `navigationActive: boolean`, `navigationTime: long`, при active также `navigationIcon: int`, `navigationDistance: int`, `navigationRoad: String`; OD heartbeat `wifiScanPaused: boolean` (отсутствие = false). |
 | 124 OPEN_PROJECTION | RestoreMode → Native | `displayId: int`, отдельный `replyTo`; только живой Native-owned VD, назначенный CarPlay. |
 | 125 PROJECTION_RESULT | Native → replyTo | `displayId: int`, `launched: boolean`; принятие запуска, не подтверждение соединения iPhone. |
 | 126 FOCUS | RestoreMode → Native | `replyTo` WATCH-владельца, `audioStream: int` — 3/1/6/22 или −1 для освобождения. |
@@ -1115,7 +1144,8 @@ brightness −50…50, warmth −100…100. Настройки хранятся 
 - `DiPlaySessionService.onTaskRemoved` использует ту же policy для сохранения сессии;
 - новые Bluetooth suspend/recovery, BYD call popup и ambient lighting блокируются
   до создания lease/worker/OEM-запроса; сохранённые opt-ins не обходят guards;
-- WifiScanPause не приостанавливает autojoin и не запускает restore через ADB;
+- WifiScanPause не запускает pause/restore через ADB; в OD получает собственный
+  app-host и Native heartbeat для системного агента (§5), в PI остаётся неактивным;
 - NAVIGATION_WHEEL и AMBIENT_LIGHTING скрыты через filteredSection; новый
   NavigationWheelSettings.enabled=false при available Voyah, чтобы не конкурировать
   с Native за громкость. Предпочтения пользователя не стираются.
@@ -1325,6 +1355,7 @@ app/Native/OD-файлы дополнительно перечислены в §
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWidgetPlaceholder.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWidgetPlaceholder.java)<br>[RestoreMode/app/src/main/res/layout/tile_embedded_app.xml](../RestoreMode/app/src/main/res/layout/tile_embedded_app.xml)<br>[RestoreMode/app/src/main/res/layout/tile_app_shortcut.xml](../RestoreMode/app/src/main/res/layout/tile_app_shortcut.xml) | Общий шаблон плитки, тёмный значок и подпись CarPlay для 1×1; чёрная заглушка большого виджета; тап/долгое нажатие и скрытие при старте проекции (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayHomeScreen.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayHomeScreen.java)<br>[RestoreMode/app/src/main/res/drawable/carplay_home_wireless.xml](../RestoreMode/app/src/main/res/drawable/carplay_home_wireless.xml)<br>[RestoreMode/app/src/main/res/drawable/carplay_home_usb.xml](../RestoreMode/app/src/main/res/drawable/carplay_home_usb.xml)<br>[RestoreMode/app/src/main/res/values/carplay_home.xml](../RestoreMode/app/src/main/res/values/carplay_home.xml)<br>[RestoreMode/app/src/main/res/drawable-nodpi/carplay_home_logo.png](../RestoreMode/app/src/main/res/drawable-nodpi/carplay_home_logo.png) | Home в дизайн-системе; собственные иконки, строки home/настроек и ярлыка 1×1 (§4/5). |
 | [CarPlayWidgetSettings.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/CarPlayWidgetSettings.java)<br>[settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Включение, Ярлык/Окно, размеры и общий предпросмотр сетки; сохраняет ID и параметры существующей записи (§4). |
+| [VoyahWifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/VoyahWifiScanPause.kt)<br>[WifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/WifiScanPause.kt)<br>[CarPlayWifiScanProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayWifiScanProtocol.java)<br>[CarPlayWifiScanController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayWifiScanController.java)<br>[vd_bypass.js](../Packaging/od/inject/vd_bypass.js)<br>[carplay_wifi_scan.xml](../RestoreMode/diplay/common/src/main/res/values-ru/carplay_wifi_scan.xml) | OD lease автоматического поиска Wi-Fi: Host устанавливается Application, owner tokens передаются Bridge, Native публикует ограниченный heartbeat, system_server сохраняет/восстанавливает autojoin на Wi-Fi Handler. Default true, только Wi-Fi Direct; LocalAdb и PI не включать (§5/6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java)<br>[RestoreMode/app/src/main/res/layout/settings_carplay.xml](../RestoreMode/app/src/main/res/layout/settings_carplay.xml)<br>[RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml](../RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml) | Раздел 9, navigation, живой статус, отключение, SWReason и четыре OEM-ползунка; без общего автоподключения (§5). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java) | Двунаправленный IPC, owner/generation/подписки (§6/8). |
 | [Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java)<br>[Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java](../Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java) | Начальное TX57-чтение SWReason, последующие события; защита от устаревшего snapshot после события/reconnect/close (§6). |
@@ -1503,6 +1534,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Task/component/display | Native `CarPlayTargetTest` (выбор компонента home на 0/1 и projection на VD со старым ID; полноэкранные входы направляются в VD-хост до разрешения intent), `AppDisplayTaskPlanTest`, `SplitHostTaskSnapshotTest` (CarPlay на своём VD, исключение Dashboard/launcher, unknown display); app `CarPlayDashboardDisplayTest` (возврат с полноэкранного VD на физический экран хоста); common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
 | Автоподключение и настройки | common `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `DefaultConnectionModeTest`, `VoyahEmbeddedEntryPointsTest`, `PhoneBluetoothReceiverTest` |
 | Способ Wi-Fi подключения | common `HotspotModeMigrationTest`, `ExistingWifiSettingsTest`: default Wi-Fi Direct, сохранение выбранного режима и реквизитов сетей |
+| Приостановка поиска Wi-Fi OD | shared `WifiScanPauseTest`: отменённый acquire, release и отсутствие ADB; app `CarPlayWifiScanBridgeTest`: несколько владельцев, закрытие до доставки и reconnect; Native `CarPlayWifiScanProtocolTest`: исходное время heartbeat, просроченные/будущие запросы; `Packaging/tests/test_carplay_wifi_scan_pause.js`: исполнение OD-агента на Wi-Fi Handler, expiry/boot, исходная и внешняя политика, частичная ошибка, rollback. |
 | Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp), `CarPlayLightStateTest` (начальный SWReason, события и запоздавшие ответы); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest` |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/tests/test_navigation_sources.js`, `test_cluster_navigation.js` |

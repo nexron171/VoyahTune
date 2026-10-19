@@ -10,6 +10,8 @@ import android.util.Log;
 
 import ru.big.town.common.CarPlayAudioProtocol;
 import ru.big.town.common.CarPlayVehicleProtocol;
+import ru.big.town.common.CarPlayWifiScanProtocol;
+import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.MessengerSubscription;
 
 import java.util.Collections;
@@ -27,6 +29,7 @@ final class CarPlayVehicleController implements AutoCloseable {
     private final ClusterNavigationController navigation;
     private final CarPlayAudioController audio;
     private final CarPlayLightState lightState;
+    private final CarPlayWifiScanController wifiScan;
     private Messenger owner;
     private final MessengerSubscription client = new MessengerSubscription();
     private CanBusEventHub.Subscription subscription;
@@ -53,6 +56,8 @@ final class CarPlayVehicleController implements AutoCloseable {
         navigation = ClusterNavigationController.get(context);
         this.audio = audio;
         Context applicationContext = context.getApplicationContext();
+        wifiScan = InfrastructureProfile.read(applicationContext) == InfrastructureProfile.OD
+                ? new CarPlayWifiScanController(applicationContext) : null;
         lightState =
                 new CarPlayLightState(
                         lightQueryExecutor,
@@ -86,6 +91,11 @@ final class CarPlayVehicleController implements AutoCloseable {
         if (message.what == CarPlayVehicleProtocol.NAVIGATION) {
             if (owner != null && owner.equals(message.replyTo) && client.active()) {
                 navigation.update(ClusterNavigationSources.Source.CARPLAY, message.getData());
+                if (wifiScan != null) {
+                    wifiScan.update(
+                            message.getData().getBoolean(CarPlayWifiScanProtocol.PAUSED, false),
+                            message.getData().getLong(CarPlayVehicleProtocol.NAV_TIME, 0));
+                }
             }
             return;
         }
@@ -97,6 +107,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         if (!message.replyTo.equals(owner)) {
             navigation.clear(ClusterNavigationSources.Source.CARPLAY);
             audio.setFocus(CarPlayAudioProtocol.NONE);
+            if (wifiScan != null) wifiScan.update(false, 0);
         }
         owner = message.replyTo;
         client.set(message.replyTo);
@@ -160,6 +171,7 @@ final class CarPlayVehicleController implements AutoCloseable {
 
     void destroy() {
         close();
+        if (wifiScan != null) wifiScan.close();
         lightQueryExecutor.shutdownNow();
     }
 
@@ -171,6 +183,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         lightState.reset();
         navigation.clear(ClusterNavigationSources.Source.CARPLAY);
         audio.setFocus(CarPlayAudioProtocol.NONE);
+        if (wifiScan != null) wifiScan.update(false, 0);
         if (subscription != null) subscription.close();
         subscription = null;
         speed = gear = reason = -1;

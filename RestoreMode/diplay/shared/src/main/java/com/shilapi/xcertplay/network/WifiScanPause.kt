@@ -35,11 +35,19 @@ internal class WifiScanPause(
     private val app = context.applicationContext
     private val owner = Any()
     @Volatile private var closed = false
+    private var voyahHost: VoyahWifiScanPause.Host? = null
 
     /** Asynchronously stops the periodic scans; repeated calls are harmless. */
     @Synchronized
     fun pause() {
-        if (!com.shilapi.xcertplay.VoyahPlatformPolicy.localAdbEnabled || closed) return
+        if (closed) return
+        val host = voyahHost ?: VoyahWifiScanPause.host
+        if (host != null) {
+            voyahHost = host
+            host.acquireWifiScanPause(owner) { !closed }
+            return
+        }
+        if (!com.shilapi.xcertplay.VoyahPlatformPolicy.localAdbEnabled) return
         control.acquire(app, owner, { !closed }, log)
     }
 
@@ -48,7 +56,13 @@ internal class WifiScanPause(
     fun close() {
         if (closed) return
         closed = true
-        control.release(app, owner, log)
+        val host = voyahHost
+        if (host != null) {
+            host.releaseWifiScanPause(owner)
+            voyahHost = null
+        } else if (com.shilapi.xcertplay.VoyahPlatformPolicy.localAdbEnabled) {
+            control.release(app, owner, log)
+        }
     }
 
     internal companion object {
