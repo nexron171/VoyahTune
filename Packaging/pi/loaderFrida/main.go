@@ -24,40 +24,49 @@ const (
 )
 
 var (
-	MainLog *os.File
-	Debug   bool
-	Ctx     map[string]context.CancelFunc
+	MainLog       *os.File
+	Debug         bool
+	Ctx           map[string]context.CancelFunc
+	contextsMutex sync.Mutex
 )
 
+// An application may be launched long after boot; only failed attaches consume retries.
+type injectionBudget struct {
+	pid       int
+	remaining int
+}
+
+func (b *injectionBudget) observe(pid int) bool {
+	if pid == 0 {
+		b.pid = 0
+		return false
+	}
+	if b.pid != pid {
+		b.pid = pid
+		b.remaining = maxRepl
+	}
+	return b.remaining > 0
+}
+
 func checkOrSetPid(pidPath string, pid int) bool {
-	f, err := os.OpenFile(pidPath, os.O_RDONLY, 0644)
-	defer f.Close()
-	if err != nil {
-		return false
+	data, err := os.ReadFile(pidPath)
+	if err == nil {
+		recordedPID, parseError := strconv.Atoi(strings.TrimSpace(string(data)))
+		if parseError == nil && recordedPID == pid {
+			return true
+		}
 	}
-
-	buf := make([]byte, 10)
-	n, _ := f.Read(buf)
-
-	f_pid, _ := strconv.Atoi(string(buf[0:n]))
-	//fmt.Println("*** pid f_pid n", pid, f_pid, n, err)
-
-	if n == 0 || f_pid == 0 || int(f_pid) != pid {
-		f, err = os.OpenFile(pidPath, os.O_TRUNC|os.O_WRONLY, 0644)
-		f.WriteString(strconv.Itoa(pid))
-		return false
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
+		logf(MainLog, "Cannot record process %d: %v", pid, err)
 	}
-
-	return int(f_pid) == pid
+	return false
 }
 
 func logf(f *os.File, format string, args ...any) {
 	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, args...))
 }
 
-// GetPIDsByName ищет процессы с ТОЧНЫМ именем: argv[0] из /proc/<pid>/cmdline
-// (для приложений Android это имя процесса) или его basename (/data/local/bin/loaderFrida).
-// Подстрока не годится: "com.qinggan.app.qgime" совпадала и с "com.qinggan.app.qgime.second".
+// Exact argv[0] matching excludes secondary Android processes with a package-name prefix.
 func GetPIDsByName(name string) []int {
 	var pids []int
 
@@ -69,17 +78,14 @@ func GetPIDsByName(name string) []int {
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil {
-			// Пропускаем всё, что не PID (например, "self", "thread-self")
 			continue
 		}
 
 		data, err := os.ReadFile(filepath.Join("/proc", e.Name(), "cmdline"))
 		if err != nil || len(data) == 0 {
-			// Нет прав или kernel thread без cmdline — пропускаем
 			continue
 		}
 
-		// В cmdline аргументы разделены NUL (\x00)
 		argv0, _, _ := strings.Cut(string(data), "\x00")
 		if argv0 == name || filepath.Base(argv0) == name {
 			pids = append(pids, pid)
@@ -93,7 +99,7 @@ func GetPIDsByName(name string) []int {
 }
 
 func setPidsZero(injects *map[string][]string) {
-	for pkg, _ := range *injects {
+	for pkg := range *injects {
 		logf(MainLog, "setPidsZero %s\n", filepath.Join(tmpDir, pkg+".pid Zero"))
 		f, _ := os.Create(filepath.Join(tmpDir, pkg+".pid"))
 		f.WriteString("0")
@@ -120,9 +126,15 @@ func runInjectCancel(pkg, injector string, pid int, scripts []string) error {
 
 	logf(MainLog, "runInjectCancel %v\n", cmds)
 
-	//out, err := exec.Command(filepath.Join(scriptsDir, injector), cmds...).Output()
 	cmd := exec.CommandContext(ctx, filepath.Join(scriptsDir, injector), cmds...)
+	contextsMutex.Lock()
 	Ctx[pkg] = cancel
+	contextsMutex.Unlock()
+	defer func() {
+		contextsMutex.Lock()
+		delete(Ctx, pkg)
+		contextsMutex.Unlock()
+	}()
 
 	err := cmd.Run()
 	if err != nil && ctx.Err() == context.Canceled {
@@ -132,13 +144,18 @@ func runInjectCancel(pkg, injector string, pid int, scripts []string) error {
 	}
 
 	logf(MainLog, "Процесс успешно завершился %v %s\n", scripts, pkg)
-	//fmt.Println(cmds)
 	return err
 }
 
 func checkZombi() {
 	for {
+		contextsMutex.Lock()
+		contexts := make(map[string]context.CancelFunc, len(Ctx))
 		for pkg, cancel := range Ctx {
+			contexts[pkg] = cancel
+		}
+		contextsMutex.Unlock()
+		for pkg, cancel := range contexts {
 			pid, _ := os.ReadFile(filepath.Join(tmpDir, pkg) + ".pid")
 			p, err := strconv.Atoi(string(pid))
 
@@ -197,40 +214,30 @@ func main() {
 			log, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 			defer log.Close()
 
-			repl := maxRepl
+			budget := injectionBudget{}
 			defer wg.Done()
 
 			for {
 				time.Sleep(RetryPause)
 
 				pid := GetPIDsByName(pkg)[0]
-				if pid == 0 {
-					repl--
+				if !budget.observe(pid) {
 					continue
 				}
-				//pid = 14
-				if checkOrSetPid(filepath.Join(tmpDir, pkg+".pid"), pid) && repl > 0 {
+				if checkOrSetPid(filepath.Join(tmpDir, pkg+".pid"), pid) {
 					if Debug {
-						logf(MainLog, "Пропускаем пид есть в файле! %s\n", pkg)
+						logf(MainLog, "Hooks already attached: package=%s pid=%d", pkg, pid)
 					}
-				} else {
-					if repl > 0 {
-						logf(MainLog, "Стартуем! %s  %v pid=%d(%s) repl=%d\n", injector, scripts, pid, pkg, repl)
-
-						err := runInjectCancel(pkg, injector, pid, scripts)
-						// frida-inject без -e живёт, пока держит скрипт: любой его выход (ошибка,
-						// сигнал или чистый exit 0) выгружает хуки. Сбрасываем pid, чтобы следующий
-						// проход внедрил скрипт заново; попытку тратим только на ошибку.
-						setPidZero(pkg)
-						if err != nil {
-							log.Write([]byte(err.Error()))
-							repl--
-						}
-
-					} else {
-						logf(MainLog, "Лимит попыток достигнут %s  pid=%d  repl=%d!\n", pkg, pid, repl)
-					}
-
+					continue
+				}
+				logf(MainLog, "Attach %s %v: pid=%d package=%s remaining=%d",
+					injector, scripts, pid, pkg, budget.remaining)
+				err := runInjectCancel(pkg, injector, pid, scripts)
+				// Without -e, every injector exit unloads the script and requires a new attach.
+				setPidZero(pkg)
+				if err != nil {
+					log.WriteString(err.Error())
+					budget.remaining--
 				}
 			}
 		}(pkg, scripts)
