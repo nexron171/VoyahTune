@@ -49,14 +49,14 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             SetModesReceiverDynamic.mirrorDock(context, intent, 1);
             SetModesReceiverDynamic.mirrorDock(context, intent, 2);
             SetModesReceiverDynamic.clearLegacyPassengerDock(context);
+            for (int slot = 1; slot <= 2; slot++) {
+                String key = DockIconStyle.configKey(slot);
+                DockIconStyle style = DockIconStyle.fromValue(intent.getStringExtra(key));
+                Settings.Global.putString(
+                        context.getContentResolver(), "voyahtune_" + key, style.value);
+            }
             if (ru.big.town.common.InfrastructureProfile.read(context)
                     == ru.big.town.common.InfrastructureProfile.OD) {
-                for (int slot = 1; slot <= 2; slot++) {
-                    String key = DockIconStyle.configKey(slot);
-                    DockIconStyle style = DockIconStyle.fromValue(intent.getStringExtra(key));
-                    Settings.Global.putString(
-                            context.getContentResolver(), "voyahtune_" + key, style.value);
-                }
                 for (String key :
                         new String[] {"dockHomeShortVoyahTune", "dockAllAppsShortVoyahTune"}) {
                     Settings.Global.putString(

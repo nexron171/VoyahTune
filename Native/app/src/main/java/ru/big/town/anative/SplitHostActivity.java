@@ -35,7 +35,6 @@ import android.widget.LinearLayout;
 import androidx.core.content.ContextCompat;
 
 import ru.big.town.common.CarPlayTarget;
-import ru.big.town.common.InfrastructureProfile;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
@@ -1544,8 +1543,7 @@ public class SplitHostActivity extends Activity {
     }
 
     private boolean canResumeCarPlay(String packageName, int dpi, int displayId) {
-        if (InfrastructureProfile.read(this) != InfrastructureProfile.OD
-                || !CarPlayTarget.isCarPlay(packageName)
+        if (!CarPlayTarget.isCarPlay(packageName)
                 || !fullscreenCarPlay
                 || hostDestroyed
                 || isFinishing()

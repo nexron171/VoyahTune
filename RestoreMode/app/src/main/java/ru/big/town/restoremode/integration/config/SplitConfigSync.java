@@ -90,14 +90,14 @@ public final class SplitConfigSync {
         i.putExtra("dock2", p2.isEmpty() ? "none" : p2);
         i.putExtra("dock1Dpi", p1.isEmpty() ? 0 : AppDpiStore.get(prefs, p1));
         i.putExtra("dock2Dpi", p2.isEmpty() ? 0 : AppDpiStore.get(prefs, p2));
+        for (int slot = 1; slot <= 2; slot++) {
+            DockIconStyle style =
+                    DockIconStyle.fromValue(
+                            prefs.getString(DockIconStyle.preferenceKey(slot), "default"));
+            i.putExtra(DockIconStyle.configKey(slot), style.value);
+        }
         if (ru.big.town.common.InfrastructureProfile.read(context)
                 == ru.big.town.common.InfrastructureProfile.OD) {
-            for (int slot = 1; slot <= 2; slot++) {
-                DockIconStyle style =
-                        DockIconStyle.fromValue(
-                                prefs.getString(DockIconStyle.preferenceKey(slot), "default"));
-                i.putExtra(DockIconStyle.configKey(slot), style.value);
-            }
             i.putExtra("dockHomeShortVoyahTune", prefs.getBoolean("dockHomeShortVoyahTune", false));
             i.putExtra(
                     "dockAllAppsShortVoyahTune",

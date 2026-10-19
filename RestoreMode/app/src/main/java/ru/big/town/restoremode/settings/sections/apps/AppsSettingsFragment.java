@@ -13,7 +13,6 @@ import android.widget.TextView;
 import androidx.lifecycle.ViewModelProvider;
 
 import ru.big.town.common.DockIconStyle;
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.DockLongPressAction;
@@ -52,10 +51,8 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         dockSplit2Btn = settingView(R.id.buttonDockSplit2);
         dockIcon1Button = settingView(R.id.buttonDockIcon1);
         dockIcon2Button = settingView(R.id.buttonDockIcon2);
-        boolean supportsIcons =
-                InfrastructureProfile.read(requireContext()) == InfrastructureProfile.OD;
-        settingView(R.id.dockIconOptions1).setVisibility(supportsIcons ? View.VISIBLE : View.GONE);
-        settingView(R.id.dockIconOptions2).setVisibility(supportsIcons ? View.VISIBLE : View.GONE);
+        settingView(R.id.dockIconOptions1).setVisibility(View.VISIBLE);
+        settingView(R.id.dockIconOptions2).setVisibility(View.VISIBLE);
         dockIcon1Button.setOnClickListener(view -> pickDockIcon(1));
         dockIcon2Button.setOnClickListener(view -> pickDockIcon(2));
         refreshDockButtons();
