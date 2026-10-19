@@ -1,9 +1,17 @@
 package ru.big.town.anative;
 
-/** Charge hysteresis is independent of speed and survives Native restarts. */
+/** The persisted charge lock requires charge recovery and driving speed to release. */
 final class SmartSavePolicy {
+    private static final float CHARGE_LOCK_DEFICIT_PERCENT = 5f;
+    private static final float CHARGE_UNLOCK_DEFICIT_PERCENT = 2.5f;
+    private static final int CHARGE_UNLOCK_SPEED_KMH = 35;
+
     private boolean chargingLocked;
     private boolean manualSaveHeld;
+
+    SmartSavePolicy(boolean chargingLocked) {
+        this.chargingLocked = chargingLocked;
+    }
 
     void holdManualSave() {
         manualSaveHeld = true;
@@ -17,10 +25,6 @@ final class SmartSavePolicy {
 
     boolean isManualSaveHeld() {
         return manualSaveHeld;
-    }
-
-    SmartSavePolicy(boolean chargingLocked) {
-        this.chargingLocked = chargingLocked;
     }
 
     boolean isChargingLocked() {
@@ -37,9 +41,10 @@ final class SmartSavePolicy {
             return VehicleRestorePolicy.SOC_SREV;
         }
 
-        if (charge < target - 5) {
+        if (charge <= target - CHARGE_LOCK_DEFICIT_PERCENT) {
             chargingLocked = true;
-        } else if (charge >= target) {
+        } else if (charge >= target - CHARGE_UNLOCK_DEFICIT_PERCENT
+                && speed >= CHARGE_UNLOCK_SPEED_KMH) {
             chargingLocked = false;
         }
 
