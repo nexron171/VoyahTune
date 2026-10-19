@@ -1,9 +1,16 @@
 package ru.big.town.anative;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
+
+import androidx.core.content.ContextCompat;
+
+import ru.big.town.common.InfrastructureProfile;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -13,11 +20,10 @@ import java.util.Map;
  *
  * <p>All state transitions run through one serial scheduler. Snapshot reads use a separate IO
  * thread, but their completion is fenced by connection epoch and live-event revision before it is
- * applied on the serial scheduler.</p>
+ * applied on the serial scheduler.
  */
 final class PowerHoldStatusTracker implements AutoCloseable {
     private static final String TAG = "PowerHoldStatus";
-    static final long ACTIVATION_TIMEOUT_MS = 10_000L;
 
     private static final OemVehicleStateTransport.StateKey SWITCH_KEY =
             new OemVehicleStateTransport.StateKey(
@@ -30,14 +36,10 @@ final class PowerHoldStatusTracker implements AutoCloseable {
 
     interface Scheduler {
         boolean post(Runnable runnable);
-
-        boolean postDelayed(Runnable runnable, long delayMs);
-
-        void removeCallbacks(Runnable runnable);
     }
 
     interface SeedCallback {
-        void onResult(long epoch, Integer switchValue, Integer warningValue);
+        void onResult(long epoch, Integer switchValue, Integer warningValue, Integer oemStatus);
     }
 
     interface SeedLoader extends AutoCloseable {
@@ -48,8 +50,10 @@ final class PowerHoldStatusTracker implements AutoCloseable {
     }
 
     interface StatusListener {
-        void onStatus(PowerHoldStatusPolicy.Snapshot snapshot,
-                      PowerHoldPolicy.Outcome requestOutcome, boolean force);
+        void onStatus(
+                PowerHoldStatusPolicy.Snapshot snapshot,
+                PowerHoldPolicy.Outcome requestOutcome,
+                boolean force);
     }
 
     interface ActivationReady {
@@ -64,12 +68,10 @@ final class PowerHoldStatusTracker implements AutoCloseable {
     private final SeedLoader seedLoader;
     private final StatusListener listener;
     private final CloseAction closeAction;
-    private final PowerHoldStatusPolicy.Machine machine =
-            new PowerHoldStatusPolicy.Machine();
+    private final PowerHoldStatusPolicy.Machine machine = new PowerHoldStatusPolicy.Machine();
 
     private CanBusEventHub.Subscription subscription;
     private PowerHoldStatusPolicy.Snapshot lastPublished;
-    private Runnable activationTimeout;
     private long activeEpoch;
     private long liveRevision;
     private volatile boolean closed;
@@ -82,65 +84,96 @@ final class PowerHoldStatusTracker implements AutoCloseable {
         seedThread.start();
         Handler statusHandler = new Handler(statusThread.getLooper());
         Handler seedHandler = new Handler(seedThread.getLooper());
-        Scheduler scheduler = new Scheduler() {
-            @Override
-            public boolean post(Runnable runnable) {
-                return statusHandler.post(runnable);
-            }
+        boolean stockManager = InfrastructureProfile.read(app) == InfrastructureProfile.OD;
+        PowerHoldOemTransport oemTransport = stockManager ? new PowerHoldOemTransport(app) : null;
+        Scheduler scheduler = statusHandler::post;
+        SeedLoader seedLoader =
+                new SeedLoader() {
+                    private volatile boolean stopped;
 
-            @Override
-            public boolean postDelayed(Runnable runnable, long delayMs) {
-                return statusHandler.postDelayed(runnable, delayMs);
-            }
+                    @Override
+                    public void load(long epoch, SeedCallback callback) {
+                        if (stopped) return;
+                        if (!seedHandler.post(
+                                () -> {
+                                    Map<OemVehicleStateTransport.StateKey, Integer> values =
+                                            OemVehicleStateTransport.readVehicleStates(
+                                                    app, Arrays.asList(SWITCH_KEY, WARNING_KEY));
+                                    Integer switchValue =
+                                            values == null ? null : values.get(SWITCH_KEY);
+                                    Integer warningValue =
+                                            values == null ? null : values.get(WARNING_KEY);
+                                    Integer oemStatus =
+                                            oemTransport == null ? null : oemTransport.readStatus();
+                                    if (stockManager
+                                            && oemStatus == null
+                                            && Integer.valueOf(0).equals(switchValue)) {
+                                        switchValue = null;
+                                    }
+                                    callback.onResult(epoch, switchValue, warningValue, oemStatus);
+                                })) {
+                            Log.w(TAG, "Power Hold seed was not queued");
+                        }
+                    }
 
-            @Override
-            public void removeCallbacks(Runnable runnable) {
-                statusHandler.removeCallbacks(runnable);
-            }
-        };
-        SeedLoader seedLoader = new SeedLoader() {
-            private volatile boolean stopped;
-
-            @Override
-            public void load(long epoch, SeedCallback callback) {
-                if (stopped) return;
-                if (!seedHandler.post(() -> {
-                    Map<OemVehicleStateTransport.StateKey, Integer> values =
-                            OemVehicleStateTransport.readVehicleStates(
-                                    app, Arrays.asList(SWITCH_KEY, WARNING_KEY));
-                    Integer switchValue = values == null ? null : values.get(SWITCH_KEY);
-                    Integer warningValue = values == null ? null : values.get(WARNING_KEY);
-                    callback.onResult(epoch, switchValue, warningValue);
-                })) {
-                    Log.w(TAG, "Power Hold seed was not queued");
-                }
-            }
-
-            @Override
-            public void close() {
-                stopped = true;
-                seedHandler.removeCallbacksAndMessages(null);
-            }
-        };
-        PowerHoldStatusTracker tracker = new PowerHoldStatusTracker(
-                scheduler, seedLoader, listener, () -> {
-                    statusHandler.removeCallbacksAndMessages(null);
-                    statusThread.quitSafely();
-                    seedThread.quitSafely();
-                });
-        tracker.subscription = CanBusEventHub.get(app).subscribe(
-                CanBusEventRouter.INTEREST_CONNECTION
-                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                new int[]{PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID,
-                        PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID},
-                statusHandler, tracker::acceptEventOnSerial);
+                    @Override
+                    public void close() {
+                        stopped = true;
+                        seedHandler.removeCallbacksAndMessages(null);
+                    }
+                };
+        BroadcastReceiver[] oemReceiver = new BroadcastReceiver[1];
+        PowerHoldStatusTracker tracker =
+                new PowerHoldStatusTracker(
+                        scheduler,
+                        seedLoader,
+                        listener,
+                        () -> {
+                            if (oemReceiver[0] != null) app.unregisterReceiver(oemReceiver[0]);
+                            statusHandler.removeCallbacksAndMessages(null);
+                            statusThread.quitSafely();
+                            seedThread.quitSafely();
+                        });
+        if (stockManager) {
+            oemReceiver[0] =
+                    new BroadcastReceiver() {
+                        @Override
+                        public void onReceive(Context receiverContext, Intent intent) {
+                            if (intent == null
+                                    || !PowerHoldOemTransport.ACTION_STATUS.equals(
+                                            intent.getAction())) return;
+                            tracker.acceptOemStatusOnSerial(
+                                    intent.getIntExtra(PowerHoldOemTransport.EXTRA_STATUS, -1));
+                        }
+                    };
+            ContextCompat.registerReceiver(
+                    app,
+                    oemReceiver[0],
+                    new IntentFilter(PowerHoldOemTransport.ACTION_STATUS),
+                    PowerHoldOemTransport.OEM_PERMISSION,
+                    statusHandler,
+                    ContextCompat.RECEIVER_EXPORTED);
+        }
+        tracker.subscription =
+                CanBusEventHub.get(app)
+                        .subscribe(
+                                CanBusEventRouter.INTEREST_CONNECTION
+                                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                                new int[] {
+                                    PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID,
+                                    PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID
+                                },
+                                statusHandler,
+                                tracker::acceptEventOnSerial);
         return tracker;
     }
 
-    PowerHoldStatusTracker(Scheduler scheduler, SeedLoader seedLoader,
-                           StatusListener listener, CloseAction closeAction) {
-        if (scheduler == null || seedLoader == null || listener == null
-                || closeAction == null) {
+    PowerHoldStatusTracker(
+            Scheduler scheduler,
+            SeedLoader seedLoader,
+            StatusListener listener,
+            CloseAction closeAction) {
+        if (scheduler == null || seedLoader == null || listener == null || closeAction == null) {
             throw new IllegalArgumentException("Power Hold tracker dependency is null");
         }
         this.scheduler = scheduler;
@@ -168,7 +201,6 @@ final class PowerHoldStatusTracker implements AutoCloseable {
                 liveRevision++;
                 if (event.first == PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID) {
                     publishIfChanged(machine.onSwitch(activeEpoch, event.second), null, false);
-                    cancelTimeoutUnlessActivating();
                 } else if (event.first == PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID) {
                     publishIfChanged(machine.onWarning(activeEpoch, event.second), null, false);
                 }
@@ -182,94 +214,102 @@ final class PowerHoldStatusTracker implements AutoCloseable {
         if (epoch <= 0 || epoch == activeEpoch) return;
         activeEpoch = epoch;
         liveRevision = 0;
-        cancelActivationTimeout();
         publishIfChanged(machine.onConnection(epoch), null, false);
-        long seedRevision = liveRevision;
-        seedLoader.load(epoch, (seedEpoch, switchValue, warningValue) ->
-                scheduler.post(() -> finishSeed(
-                        seedEpoch, seedRevision, switchValue, warningValue)));
+        loadSeed(epoch);
     }
 
-    private void finishSeed(long epoch, long seedRevision,
-                            Integer switchValue, Integer warningValue) {
+    private void loadSeed(long epoch) {
+        long seedRevision = liveRevision;
+        seedLoader.load(
+                epoch,
+                (seedEpoch, switchValue, warningValue, oemStatus) ->
+                        scheduler.post(
+                                () ->
+                                        finishSeed(
+                                                seedEpoch,
+                                                seedRevision,
+                                                switchValue,
+                                                warningValue,
+                                                oemStatus)));
+    }
+
+    private void finishSeed(
+            long epoch,
+            long seedRevision,
+            Integer switchValue,
+            Integer warningValue,
+            Integer oemStatus) {
         if (closed || epoch != activeEpoch || seedRevision != liveRevision) return;
         if (warningValue != null) machine.onWarning(epoch, warningValue);
         if (switchValue != null) {
-            publishIfChanged(machine.onSwitch(epoch, switchValue), null, false);
+            machine.onSwitch(epoch, switchValue);
         }
+        if (oemStatus != null) machine.onOemStatus(oemStatus);
+        publishIfChanged(machine.snapshot(), null, false);
+    }
+
+    void acceptOemStatus(int status) {
+        scheduler.post(() -> acceptOemStatusOnSerial(status));
+    }
+
+    private void acceptOemStatusOnSerial(int status) {
+        if (closed || activeEpoch <= 0 || status < 0 || status > 2) return;
+        liveRevision++;
+        publishIfChanged(machine.onOemStatus(status), null, false);
     }
 
     private void onConnectionLost() {
         long closingEpoch = activeEpoch;
         activeEpoch = 0;
         liveRevision++;
-        cancelActivationTimeout();
         publishIfChanged(machine.onConnectionLost(closingEpoch), null, false);
     }
 
     void beginActivation(ActivationReady ready) {
         if (ready == null || closed) return;
-        scheduler.post(() -> {
-            if (closed) return;
-            cancelActivationTimeout();
-            long generation = machine.beginActivation();
-            publishIfChanged(machine.snapshot(), null, false);
-            ready.onReady(generation);
-        });
+        scheduler.post(
+                () -> {
+                    if (closed) return;
+                    liveRevision++;
+                    long generation = machine.beginActivation();
+                    publishIfChanged(machine.snapshot(), null, false);
+                    ready.onReady(generation);
+                });
     }
 
     void finishActivation(long generation, PowerHoldPolicy.Outcome outcome) {
         if (outcome == null) outcome = PowerHoldPolicy.Outcome.TRANSPORT_FAILURE;
         PowerHoldPolicy.Outcome terminal = outcome;
-        scheduler.post(() -> {
-            if (closed) return;
-            PowerHoldStatusPolicy.Snapshot snapshot =
-                    machine.finishActivation(generation, terminal);
-            publishIfChanged(snapshot, terminal, true);
-            if (terminal == PowerHoldPolicy.Outcome.ACCEPTED
-                    && snapshot.status == PowerHoldStatusPolicy.Status.ACTIVATING
-                    && snapshot.requestGeneration == generation) {
-                scheduleActivationTimeout(generation);
-            } else {
-                cancelActivationTimeout();
-            }
-        });
+        scheduler.post(
+                () -> {
+                    if (closed) return;
+                    if (generation != machine.snapshot().requestGeneration) return;
+                    liveRevision++;
+                    PowerHoldStatusPolicy.Snapshot snapshot =
+                            machine.finishActivation(generation, terminal);
+                    PowerHoldPolicy.Outcome visibleOutcome = terminal;
+                    if (terminal.isAccepted()
+                            && (snapshot.status == PowerHoldStatusPolicy.Status.INACTIVE
+                                    || snapshot.status == PowerHoldStatusPolicy.Status.UNKNOWN)) {
+                        visibleOutcome = null;
+                    }
+                    publishIfChanged(snapshot, visibleOutcome, true);
+                });
     }
 
     void requestCurrentStatus() {
-        scheduler.post(() -> {
-            if (!closed) publishIfChanged(machine.snapshot(), null, true);
-        });
+        scheduler.post(
+                () -> {
+                    if (closed) return;
+                    publishIfChanged(machine.snapshot(), null, true);
+                    if (activeEpoch > 0) loadSeed(activeEpoch);
+                });
     }
 
-    private void scheduleActivationTimeout(long generation) {
-        cancelActivationTimeout();
-        Runnable timeout = () -> {
-            if (closed || activationTimeout == null) return;
-            activationTimeout = null;
-            publishIfChanged(machine.onActivationTimeout(generation), null, false);
-        };
-        activationTimeout = timeout;
-        if (!scheduler.postDelayed(timeout, ACTIVATION_TIMEOUT_MS)) {
-            activationTimeout = null;
-            publishIfChanged(machine.onActivationTimeout(generation), null, false);
-        }
-    }
-
-    private void cancelTimeoutUnlessActivating() {
-        if (machine.snapshot().status != PowerHoldStatusPolicy.Status.ACTIVATING) {
-            cancelActivationTimeout();
-        }
-    }
-
-    private void cancelActivationTimeout() {
-        Runnable timeout = activationTimeout;
-        activationTimeout = null;
-        if (timeout != null) scheduler.removeCallbacks(timeout);
-    }
-
-    private void publishIfChanged(PowerHoldStatusPolicy.Snapshot snapshot,
-                                  PowerHoldPolicy.Outcome requestOutcome, boolean force) {
+    private void publishIfChanged(
+            PowerHoldStatusPolicy.Snapshot snapshot,
+            PowerHoldPolicy.Outcome requestOutcome,
+            boolean force) {
         if (closed) return;
         if (!force && requestOutcome == null && snapshot.equals(lastPublished)) return;
         lastPublished = snapshot;
@@ -283,7 +323,6 @@ final class PowerHoldStatusTracker implements AutoCloseable {
         CanBusEventHub.Subscription current = subscription;
         subscription = null;
         if (current != null) current.close();
-        cancelActivationTimeout();
         seedLoader.close();
         closeAction.close();
     }

@@ -7,6 +7,7 @@ TRACKER="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/PowerHoldStatus
 HUB="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java"
 POLICY="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/PowerHoldPolicy.java"
 CONTROLLER="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/PowerHoldController.java"
+OEM_TRANSPORT="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/PowerHoldOemTransport.java"
 SERVICE="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/SetModesService.java"
 NATIVE_MAIN="$REPO_ROOT/Native/app/src/main/java/ru/big/town/anative/MainActivity.java"
 RESTORE_MAIN="$REPO_ROOT/RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java"
@@ -60,18 +61,17 @@ forbid_fixed "$TRANSPORT" 'TX_REMOVE_CALLBACK'
 forbid_fixed "$TRANSPORT" 'postDelayed('
 forbid_fixed "$TRANSPORT" 'setInterval'
 
-# Status uses the existing process-wide callback, an exact two-ID filter, a single seed per
-# connection epoch, and one terminal confirmation timeout. It must not own another callback or
-# repeat either the snapshot or timeout.
-require_fixed "$TRACKER" 'CanBusEventHub.get(app).subscribe('
+# Status uses the shared CAN callback and stock arming events, without a lock deadline.
+require_compact_source "$TRACKER" 'CanBusEventHub.get(app).subscribe('
 require_fixed "$TRACKER" 'CanBusEventRouter.INTEREST_CONNECTION'
 require_fixed "$TRACKER" '| CanBusEventRouter.INTEREST_VEHICLE_STATE'
-require_fixed "$TRACKER" 'new int[]{PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID,'
-require_fixed "$TRACKER" 'PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID}'
-require_fixed "$TRACKER" 'static final long ACTIVATION_TIMEOUT_MS = 10_000L;'
-require_fixed "$TRACKER" 'seedLoader.load(epoch,'
+require_compact_source "$TRACKER" 'new int[]{PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID}'
+require_compact_source "$TRACKER" 'seedLoader.load(epoch,'
 require_fixed "$TRACKER" 'seedRevision != liveRevision'
-require_fixed "$TRACKER" 'scheduler.postDelayed(timeout, ACTIVATION_TIMEOUT_MS)'
+forbid_fixed "$TRACKER" 'ACTIVATION_TIMEOUT_MS'
+forbid_fixed "$TRACKER" 'postDelayed('
+require_fixed "$TRACKER" 'PowerHoldOemTransport.ACTION_STATUS'
+require_fixed "$TRACKER" 'PowerHoldOemTransport.OEM_PERMISSION'
 require_fixed "$TRACKER" 'case CONNECTION_LOST:'
 require_compact_source "$HUB" 'router.dispatch(CanBusEvent.connectionLost('
 forbid_fixed "$TRACKER" 'TX_QUERY_VEHICLE_STATE'
@@ -80,8 +80,7 @@ forbid_fixed "$TRACKER" 'TX_REMOVE_CALLBACK'
 forbid_fixed "$TRACKER" 'postDelayed(this'
 forbid_fixed "$TRACKER" 'setInterval'
 
-# The stock controller performs exact P -> SOC -> one three-key TX77 operation. No raw frame may
-# retain charge/regen/drive neighbours and no Power Hold OFF/lease belongs to VoyahTune.
+# OD delegates the lifecycle to VehicleSetting. The shared direct transport retains P/SOC checks.
 require_fixed "$POLICY" 'static final int BMS_SOC_DISPLAY_ID = 615;'
 require_fixed "$POLICY" 'static final int SCENE_MODE_EXTENDER_SET_ID = 1127;'
 require_fixed "$POLICY" 'static final int POWER_HOLD_MODE_SWITCH_ID = 1161;'
@@ -91,7 +90,12 @@ require_fixed "$POLICY" 'static final int MINIMUM_SOC_PERCENT = 15;'
 require_fixed "$POLICY" 'static final int PERMANENT_DURATION = 15;'
 require_fixed "$CONTROLLER" 'Gear gear = session.readGear();'
 require_fixed "$CONTROLLER" 'Integer soc = session.readSoc();'
-require_fixed "$CONTROLLER" 'return oemSession.sendBundle(keyed, label).accepted();'
+require_compact_source "$CONTROLLER" 'return oemSession.sendBundle(keyed, label).accepted();'
+require_fixed "$CONTROLLER" 'InfrastructureProfile.read(app) == InfrastructureProfile.OD'
+require_fixed "$CONTROLLER" 'new PowerHoldOemTransport(app)::activate'
+require_fixed "$OEM_TRANSPORT" 'sendOrderedBroadcast('
+require_fixed "$OEM_TRANSPORT" 'setPackage(OEM_PACKAGE)'
+require_fixed "$POLICY" 'enableEngineExtender ? ENGINE_EXTENDER_ON : 0'
 forbid_fixed "$NATIVE_MAIN" 'LEAVE_CAR_FRAMES'
 forbid_fixed "$NATIVE_MAIN" 'sendLeaveCarCommand'
 forbid_fixed "$NATIVE_MAIN" '6c 08 00 3e 64 21 c7 00 00 00'
@@ -110,6 +114,7 @@ require_fixed "$SERVICE" 'sendBroadcast(update, BIND_PERMISSION);'
 require_fixed "$RESTORE_MAIN" 'new IntentFilter(ACTION_POWER_HOLD_STATUS_UPDATE)'
 require_fixed "$RESTORE_MAIN" 'sendBroadcast(powerHoldRequest, BIND_SET_MODES_PERMISSION);'
 require_fixed "$RESTORE_MAIN" 'case POWER_HOLD_ACTIVE:'
+require_fixed "$RESTORE_MAIN" 'case POWER_HOLD_ARMED:'
 require_fixed "$RESTORE_LAYOUT" 'android:id="@+id/powerHoldBadge"'
 
 # All four locally decompiled VehicleSettings variants expose the same H97C contract. Keep this
@@ -139,6 +144,7 @@ for firmware in VehicleSettings_OD_2024_1.0 VehicleSettings_PI_Rest_2023_rc7.2 \
     require_fixed "$manager" 'this.mCanBusManager.getVehicleState(DFVehicleState.BMS_SOC_DISPLAY) < 15'
     require_fixed "$manager" 'bundle.putInt(VehicleState.POWER_HOLD_MODE_SWITCH.toString(), 1);'
     require_fixed "$manager" 'this.mCanBusManager.setVehicleAndAirConditionBundleState(null, bundle);'
+    require_fixed "$manager" 'int i2 = i != -1 ? i / 30 : 15;'
 done
 if [ "$FIRMWARE_COUNT" -eq 0 ]; then
     echo "SKIP: optional local Power Hold firmware fixtures are absent; source contract checked"
@@ -146,4 +152,5 @@ else
     [ "$FIRMWARE_COUNT" -eq 4 ] || fail "incomplete Power Hold fixture set: expected 4, found $FIRMWARE_COUNT"
 fi
 
-echo "PASS: Power Hold uses bounded OEM activation and shared event-driven status"
+node "$REPO_ROOT/Packaging/tests/test_power_hold_bridge.js"
+echo "PASS: Power Hold uses the OD stock manager, explicit extender opt-in and event-driven status"

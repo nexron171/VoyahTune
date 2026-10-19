@@ -1,14 +1,13 @@
 package ru.big.town.anative;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
 import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 
 public class PowerHoldStatusTrackerTest {
     @Test
@@ -32,8 +31,7 @@ public class PowerHoldStatusTrackerTest {
     public void liveSwitchDiscardsOlderSeedCompletion() {
         Fixture fixture = new Fixture();
         fixture.tracker.acceptEvent(connection(4));
-        fixture.tracker.acceptEvent(vehicle(4,
-                PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
+        fixture.tracker.acceptEvent(vehicle(4, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
         assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.ACTIVE);
 
         fixture.seedLoader.complete(0, 0, 0);
@@ -41,72 +39,58 @@ public class PowerHoldStatusTrackerTest {
     }
 
     @Test
-    public void acceptedRequestWaitsForFeedbackThenTimesOutExactlyOnce() {
+    public void acceptedRequestWaitsForLockAndStockCancellation() {
         Fixture fixture = connectedInactiveFixture();
         long generation = fixture.beginActivation();
         assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.ACTIVATING);
 
         fixture.tracker.finishActivation(generation, PowerHoldPolicy.Outcome.ACCEPTED);
-        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.ACTIVATING);
+        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.REQUESTED);
         assertEquals(PowerHoldPolicy.Outcome.ACCEPTED, fixture.last().outcome);
-        assertEquals(1, fixture.scheduler.delayedCount());
-
-        fixture.scheduler.fireDelayed();
-        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.FAILED);
-        assertEquals(0, fixture.scheduler.delayedCount());
-        fixture.scheduler.fireDelayed();
-        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.FAILED);
+        fixture.tracker.acceptOemStatus(2);
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 0));
+        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.ARMED);
+        fixture.tracker.acceptOemStatus(0);
+        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.INACTIVE);
     }
 
     @Test
-    public void lateFeedbackAfterTimeoutStillConfirmsActiveAndExitReason() {
+    public void delayedSwitchConfirmsActiveAndExitReason() {
         Fixture fixture = connectedInactiveFixture();
         long generation = fixture.beginActivation();
         fixture.tracker.finishActivation(generation, PowerHoldPolicy.Outcome.ACCEPTED);
-        fixture.scheduler.fireDelayed();
 
-        fixture.tracker.acceptEvent(vehicle(1,
-                PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
         assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.ACTIVE);
 
-        fixture.tracker.acceptEvent(vehicle(1,
-                PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID, 2));
-        fixture.tracker.acceptEvent(vehicle(1,
-                PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 0));
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID, 2));
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 0));
         assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.INACTIVE);
-        assertEquals(PowerHoldStatusPolicy.ExitReason.TIME_UP,
-                fixture.last().snapshot.exitReason);
+        assertEquals(PowerHoldStatusPolicy.ExitReason.TIME_UP, fixture.last().snapshot.exitReason);
     }
 
     @Test
     public void genericExitAndLateWarningAreReportedWithoutDuplicatePayloads() {
         Fixture fixture = connectedInactiveFixture();
-        fixture.tracker.acceptEvent(vehicle(1,
-                PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
-        fixture.tracker.acceptEvent(vehicle(1,
-                PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
         int afterActive = fixture.publications.size();
-        fixture.tracker.acceptEvent(vehicle(1,
-                PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 0));
-        assertEquals(PowerHoldStatusPolicy.ExitReason.COMMON,
-                fixture.last().snapshot.exitReason);
-        fixture.tracker.acceptEvent(vehicle(1,
-                PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID, 1));
-        assertEquals(PowerHoldStatusPolicy.ExitReason.LOW_BATTERY,
-                fixture.last().snapshot.exitReason);
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 0));
+        assertEquals(PowerHoldStatusPolicy.ExitReason.COMMON, fixture.last().snapshot.exitReason);
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID, 1));
+        assertEquals(
+                PowerHoldStatusPolicy.ExitReason.LOW_BATTERY, fixture.last().snapshot.exitReason);
         assertEquals(afterActive + 2, fixture.publications.size());
     }
 
     @Test
-    public void connectionLossCancelsTimeoutAndReconnectSeedsAgain() {
+    public void connectionLossClearsArmingAndReconnectSeedsAgain() {
         Fixture fixture = connectedInactiveFixture();
         long generation = fixture.beginActivation();
         fixture.tracker.finishActivation(generation, PowerHoldPolicy.Outcome.ACCEPTED);
-        assertEquals(1, fixture.scheduler.delayedCount());
 
         fixture.tracker.acceptEvent(CanBusEvent.connectionLost(2, 10, 10, 1));
         assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.UNKNOWN);
-        assertEquals(0, fixture.scheduler.delayedCount());
 
         fixture.tracker.acceptEvent(connection(3));
         assertEquals(2, fixture.seedLoader.loadCount);
@@ -122,11 +106,10 @@ public class PowerHoldStatusTrackerTest {
 
         assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.INACTIVE);
         assertEquals(PowerHoldPolicy.Outcome.NOT_IN_PARK, fixture.last().outcome);
-        assertEquals(0, fixture.scheduler.delayedCount());
     }
 
     @Test
-    public void closeStopsSeedsTimersAndFuturePublication() {
+    public void closeStopsSeedsAndFuturePublication() {
         Fixture fixture = connectedInactiveFixture();
         long generation = fixture.beginActivation();
         fixture.tracker.finishActivation(generation, PowerHoldPolicy.Outcome.ACCEPTED);
@@ -134,13 +117,51 @@ public class PowerHoldStatusTrackerTest {
 
         fixture.tracker.close();
         fixture.tracker.close();
-        fixture.tracker.acceptEvent(vehicle(1,
-                PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
-        fixture.scheduler.fireDelayed();
+        fixture.tracker.acceptEvent(vehicle(1, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID, 1));
 
         assertTrue(fixture.seedLoader.closed);
         assertTrue(fixture.closeAction.closed);
         assertEquals(beforeClose, fixture.publications.size());
+    }
+
+    @Test
+    public void seedRestoresStockArmingBeforeSwitchConfirmation() {
+        Fixture fixture = new Fixture();
+        fixture.tracker.acceptEvent(connection(1));
+        fixture.seedLoader.complete(0, 0, 0, 2);
+        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.ARMED);
+    }
+
+    @Test
+    public void seedStartedBeforeRequestCannotClearArming() {
+        Fixture fixture = new Fixture();
+        fixture.tracker.acceptEvent(connection(1));
+        long generation = fixture.beginActivation();
+        fixture.tracker.finishActivation(generation, PowerHoldPolicy.Outcome.ARMED);
+        fixture.seedLoader.complete(0, 0, 0, 0);
+        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.ARMED);
+    }
+
+    @Test
+    public void oldCompletionDoesNotPublishSuccessForNewRequest() {
+        Fixture fixture = connectedInactiveFixture();
+        long first = fixture.beginActivation();
+        fixture.beginActivation();
+        int publications = fixture.publications.size();
+        fixture.tracker.finishActivation(first, PowerHoldPolicy.Outcome.ARMED);
+        assertEquals(publications, fixture.publications.size());
+        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.ACTIVATING);
+    }
+
+    @Test
+    public void cancellationSuppressesLateArmedNotification() {
+        Fixture fixture = connectedInactiveFixture();
+        long generation = fixture.beginActivation();
+        fixture.tracker.acceptOemStatus(2);
+        fixture.tracker.acceptOemStatus(0);
+        fixture.tracker.finishActivation(generation, PowerHoldPolicy.Outcome.ARMED);
+        assertStatus(fixture.last(), PowerHoldStatusPolicy.Status.INACTIVE);
+        org.junit.Assert.assertNull(fixture.last().outcome);
     }
 
     private static Fixture connectedInactiveFixture() {
@@ -155,12 +176,10 @@ public class PowerHoldStatusTrackerTest {
     }
 
     private static CanBusEvent vehicle(long epoch, int id, int value) {
-        return CanBusEvent.vehicleState(
-                CanBusEvent.Origin.LIVE, epoch, id, id, id, value);
+        return CanBusEvent.vehicleState(CanBusEvent.Origin.LIVE, epoch, id, id, id, value);
     }
 
-    private static void assertStatus(Publication publication,
-                                     PowerHoldStatusPolicy.Status status) {
+    private static void assertStatus(Publication publication, PowerHoldStatusPolicy.Status status) {
         assertEquals(status, publication.snapshot.status);
     }
 
@@ -169,11 +188,13 @@ public class PowerHoldStatusTrackerTest {
         final FakeSeedLoader seedLoader = new FakeSeedLoader();
         final FakeCloseAction closeAction = new FakeCloseAction();
         final List<Publication> publications = new ArrayList<>();
-        final PowerHoldStatusTracker tracker = new PowerHoldStatusTracker(
-                scheduler, seedLoader,
-                (snapshot, outcome, force) ->
-                        publications.add(new Publication(snapshot, outcome, force)),
-                closeAction);
+        final PowerHoldStatusTracker tracker =
+                new PowerHoldStatusTracker(
+                        scheduler,
+                        seedLoader,
+                        (snapshot, outcome, force) ->
+                                publications.add(new Publication(snapshot, outcome, force)),
+                        closeAction);
 
         long beginActivation() {
             final long[] generation = {0};
@@ -193,8 +214,10 @@ public class PowerHoldStatusTrackerTest {
         final PowerHoldPolicy.Outcome outcome;
         final boolean force;
 
-        Publication(PowerHoldStatusPolicy.Snapshot snapshot,
-                    PowerHoldPolicy.Outcome outcome, boolean force) {
+        Publication(
+                PowerHoldStatusPolicy.Snapshot snapshot,
+                PowerHoldPolicy.Outcome outcome,
+                boolean force) {
             this.snapshot = snapshot;
             this.outcome = outcome;
             this.force = force;
@@ -202,35 +225,10 @@ public class PowerHoldStatusTrackerTest {
     }
 
     private static final class FakeScheduler implements PowerHoldStatusTracker.Scheduler {
-        private Runnable delayed;
-
         @Override
         public boolean post(Runnable runnable) {
             runnable.run();
             return true;
-        }
-
-        @Override
-        public boolean postDelayed(Runnable runnable, long delayMs) {
-            assertEquals(PowerHoldStatusTracker.ACTIVATION_TIMEOUT_MS, delayMs);
-            assertNull(delayed);
-            delayed = runnable;
-            return true;
-        }
-
-        @Override
-        public void removeCallbacks(Runnable runnable) {
-            if (delayed == runnable) delayed = null;
-        }
-
-        int delayedCount() {
-            return delayed == null ? 0 : 1;
-        }
-
-        void fireDelayed() {
-            Runnable current = delayed;
-            delayed = null;
-            if (current != null) current.run();
         }
     }
 
@@ -248,7 +246,11 @@ public class PowerHoldStatusTrackerTest {
         }
 
         void complete(int index, Integer switchValue, Integer warningValue) {
-            callbacks.get(index).onResult(epochs.get(index), switchValue, warningValue);
+            complete(index, switchValue, warningValue, null);
+        }
+
+        void complete(int index, Integer switchValue, Integer warningValue, Integer oemStatus) {
+            callbacks.get(index).onResult(epochs.get(index), switchValue, warningValue, oemStatus);
         }
 
         @Override

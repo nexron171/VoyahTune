@@ -59,9 +59,7 @@ final class ScenarioActionExecutor {
             service.activateVoicePowerHold(
                     () -> true,
                     result ->
-                            completion.onFinished(
-                                    result == PowerHoldPolicy.Outcome.ACCEPTED,
-                                    describePowerHold(result)));
+                            completion.onFinished(result.isAccepted(), describePowerHold(result)));
             return;
         }
         if (service.isVoiceServiceAction(action)) {
@@ -224,11 +222,15 @@ final class ScenarioActionExecutor {
     }
 
     private static String describePowerHold(PowerHoldPolicy.Outcome result) {
-        if (result == PowerHoldPolicy.Outcome.ACCEPTED) return null;
+        if (result.isAccepted()) return null;
         if (result == PowerHoldPolicy.Outcome.NOT_IN_PARK)
             return "Для Power Hold переведите селектор в P";
         if (result == PowerHoldPolicy.Outcome.LOW_BATTERY)
             return "Для Power Hold нужен заряд не ниже 15%";
+        if (result == PowerHoldPolicy.Outcome.RESULT_UNKNOWN)
+            return "Результат команды Power Hold неизвестен";
+        if (result == PowerHoldPolicy.Outcome.STATE_UNAVAILABLE)
+            return "Не удалось проверить состояние автомобиля для Power Hold";
         return "Автомобиль не принял команду Power Hold";
     }
 

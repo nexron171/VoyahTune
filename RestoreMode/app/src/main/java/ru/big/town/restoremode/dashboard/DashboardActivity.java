@@ -148,6 +148,8 @@ public class DashboardActivity extends AppCompatActivity {
     private static final int POWER_HOLD_ACTIVATING = 2;
     private static final int POWER_HOLD_ACTIVE = 3;
     private static final int POWER_HOLD_FAILED = 4;
+    private static final int POWER_HOLD_REQUESTED = 5;
+    private static final int POWER_HOLD_ARMED = 6;
     private static final int POWER_HOLD_EXIT_LOW_BATTERY = 1;
     private static final int POWER_HOLD_EXIT_TIME_UP = 2;
     private static final int POWER_HOLD_REQUEST_ACCEPTED = 1;
@@ -155,6 +157,9 @@ public class DashboardActivity extends AppCompatActivity {
     private static final int POWER_HOLD_REQUEST_LOW_BATTERY = 3;
     private static final int POWER_HOLD_REQUEST_STATE_UNAVAILABLE = 4;
     private static final int POWER_HOLD_REQUEST_TRANSPORT_FAILURE = 5;
+    private static final int POWER_HOLD_REQUEST_ARMED = 6;
+    private static final int POWER_HOLD_REQUEST_ACTIVE = 7;
+    private static final int POWER_HOLD_REQUEST_RESULT_UNKNOWN = 8;
     private Intent resultIntent = null;
     private Intent resultIntentStarButton = null;
     private SharedPreferences.Editor editor = null;
@@ -504,6 +509,14 @@ public class DashboardActivity extends AppCompatActivity {
                 powerHoldBadge.setText(R.string.power_hold_status_active);
                 powerHoldBadge.setBackgroundResource(R.drawable.pill_active);
                 break;
+            case POWER_HOLD_REQUESTED:
+                powerHoldBadge.setText(R.string.power_hold_status_requested);
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_pending);
+                break;
+            case POWER_HOLD_ARMED:
+                powerHoldBadge.setText(R.string.power_hold_status_armed);
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_pending);
+                break;
             case POWER_HOLD_FAILED:
                 powerHoldBadge.setText(R.string.power_hold_status_failed);
                 powerHoldBadge.setBackgroundResource(R.drawable.pill_error);
@@ -521,6 +534,15 @@ public class DashboardActivity extends AppCompatActivity {
         switch (outcome) {
             case POWER_HOLD_REQUEST_ACCEPTED:
                 showSnack(getString(R.string.power_hold_request_accepted));
+                break;
+            case POWER_HOLD_REQUEST_ARMED:
+                showSnack(getString(R.string.power_hold_request_armed));
+                break;
+            case POWER_HOLD_REQUEST_ACTIVE:
+                showSnack(getString(R.string.power_hold_request_active));
+                break;
+            case POWER_HOLD_REQUEST_RESULT_UNKNOWN:
+                showSnack(getString(R.string.power_hold_request_result_unknown));
                 break;
             case POWER_HOLD_REQUEST_NOT_IN_PARK:
                 showSnack(getString(R.string.power_hold_request_not_in_park));
@@ -1229,15 +1251,23 @@ public class DashboardActivity extends AppCompatActivity {
         finish();
     }
 
-    /** Power Hold (leave car): подтверждение → шлём в SetModesService, тот дёргает CAN. */
     public void onButtonLeaveCar(View v) {
-        new MaterialAlertDialogBuilder(this, R.style.DarkDialog)
-                .setTitle(R.string.power_hold_title)
+        MaterialAlertDialogBuilder dialog =
+                new MaterialAlertDialogBuilder(this, R.style.DarkDialog);
+        View options =
+                android.view.LayoutInflater.from(dialog.getContext())
+                        .inflate(R.layout.dialog_power_hold, null);
+        android.widget.CompoundButton engineExtender =
+                options.findViewById(R.id.powerHoldEngineExtender);
+        dialog.setTitle(R.string.power_hold_title)
                 .setMessage(R.string.power_hold_confirmation)
+                .setView(options)
                 .setPositiveButton(
                         R.string.power_hold_activate,
                         (d, w) -> {
-                            boolean ok = sendMessageToService(MSG_LEAVE_CAR);
+                            boolean ok =
+                                    sendMessageToService(
+                                            MSG_LEAVE_CAR, engineExtender.isChecked() ? 1 : 0);
                             if (!ok) {
                                 showSnack(getString(R.string.service_not_ready));
                             }

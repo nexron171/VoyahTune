@@ -9,7 +9,9 @@ final class PowerHoldStatusPolicy {
         INACTIVE(1),
         ACTIVATING(2),
         ACTIVE(3),
-        FAILED(4);
+        FAILED(4),
+        REQUESTED(5),
+        ARMED(6);
 
         final int ipcCode;
 
@@ -51,8 +53,11 @@ final class PowerHoldStatusPolicy {
         final long connectionEpoch;
         final long requestGeneration;
 
-        Snapshot(Status status, ExitReason exitReason, long connectionEpoch,
-                 long requestGeneration) {
+        Snapshot(
+                Status status,
+                ExitReason exitReason,
+                long connectionEpoch,
+                long requestGeneration) {
             this.status = Objects.requireNonNull(status, "status");
             this.exitReason = Objects.requireNonNull(exitReason, "exitReason");
             this.connectionEpoch = connectionEpoch;
@@ -66,7 +71,8 @@ final class PowerHoldStatusPolicy {
             Snapshot that = (Snapshot) other;
             return connectionEpoch == that.connectionEpoch
                     && requestGeneration == that.requestGeneration
-                    && status == that.status && exitReason == that.exitReason;
+                    && status == that.status
+                    && exitReason == that.exitReason;
         }
 
         @Override
@@ -82,7 +88,6 @@ final class PowerHoldStatusPolicy {
         private ExitReason pendingExitReason = ExitReason.NONE;
         private long connectionEpoch;
         private long requestGeneration;
-        private boolean activationAccepted;
         private boolean exitedFromActive;
 
         Snapshot snapshot() {
@@ -92,7 +97,7 @@ final class PowerHoldStatusPolicy {
         Snapshot onConnection(long epoch) {
             if (epoch <= 0 || epoch == connectionEpoch) return snapshot();
             connectionEpoch = epoch;
-            activationAccepted = false;
+            requestGeneration++;
             pendingExitReason = ExitReason.NONE;
             exitedFromActive = false;
             status = Status.UNKNOWN;
@@ -102,7 +107,7 @@ final class PowerHoldStatusPolicy {
 
         Snapshot onConnectionLost(long epoch) {
             if (epoch != connectionEpoch) return snapshot();
-            activationAccepted = false;
+            requestGeneration++;
             pendingExitReason = ExitReason.NONE;
             exitedFromActive = false;
             status = Status.UNKNOWN;
@@ -113,7 +118,6 @@ final class PowerHoldStatusPolicy {
         long beginActivation() {
             requestGeneration++;
             statusBeforeActivation = status;
-            activationAccepted = false;
             pendingExitReason = ExitReason.NONE;
             exitedFromActive = false;
             status = Status.ACTIVATING;
@@ -126,10 +130,22 @@ final class PowerHoldStatusPolicy {
                 return snapshot();
             }
             if (outcome == PowerHoldPolicy.Outcome.ACCEPTED) {
-                activationAccepted = true;
+                status = Status.REQUESTED;
                 return snapshot();
             }
-            activationAccepted = false;
+            if (outcome == PowerHoldPolicy.Outcome.ARMED) {
+                status = Status.ARMED;
+                return snapshot();
+            }
+            if (outcome == PowerHoldPolicy.Outcome.ACTIVE) {
+                status = Status.ACTIVE;
+                return snapshot();
+            }
+            if (outcome == PowerHoldPolicy.Outcome.RESULT_UNKNOWN
+                    || outcome == PowerHoldPolicy.Outcome.STATE_UNAVAILABLE) {
+                status = Status.UNKNOWN;
+                return snapshot();
+            }
             if (outcome == PowerHoldPolicy.Outcome.NOT_IN_PARK
                     || outcome == PowerHoldPolicy.Outcome.LOW_BATTERY) {
                 status = statusBeforeActivation;
@@ -139,19 +155,9 @@ final class PowerHoldStatusPolicy {
             return snapshot();
         }
 
-        Snapshot onActivationTimeout(long generation) {
-            if (generation == requestGeneration && status == Status.ACTIVATING
-                    && activationAccepted) {
-                activationAccepted = false;
-                status = Status.FAILED;
-            }
-            return snapshot();
-        }
-
         Snapshot onSwitch(long epoch, int value) {
             if (epoch != connectionEpoch) return snapshot();
             if (value == PowerHoldPolicy.POWER_HOLD_ON) {
-                activationAccepted = false;
                 pendingExitReason = ExitReason.NONE;
                 exitedFromActive = false;
                 status = Status.ACTIVE;
@@ -159,17 +165,41 @@ final class PowerHoldStatusPolicy {
                 return snapshot();
             }
             if (value != 0) return snapshot();
-            if (status == Status.ACTIVATING && activationAccepted) {
+            // Zero is expected until the driver locks the car; only OEM cancellation ends arming.
+            if (isAwaitingLock()) {
                 return snapshot();
             }
-            boolean wasActive = status == Status.ACTIVE;
-            activationAccepted = false;
+            return becomeInactive();
+        }
+
+        Snapshot onOemStatus(int value) {
+            if (value == 0) return becomeInactive();
+            if (value != 1 && value != 2) return snapshot();
+            if (value == 2 && status == Status.ACTIVE) return snapshot();
+            status = value == 1 ? Status.ACTIVE : Status.ARMED;
+            exitReason = ExitReason.NONE;
+            pendingExitReason = ExitReason.NONE;
+            exitedFromActive = false;
+            return snapshot();
+        }
+
+        private boolean isAwaitingLock() {
+            return status == Status.ACTIVATING
+                    || status == Status.REQUESTED
+                    || status == Status.ARMED;
+        }
+
+        private Snapshot becomeInactive() {
+            if (status == Status.INACTIVE) return snapshot();
+            boolean wasActive = status == Status.ACTIVE || isAwaitingLock();
             status = Status.INACTIVE;
             exitedFromActive = wasActive;
-            exitReason = wasActive
-                    ? (pendingExitReason == ExitReason.NONE
-                            ? ExitReason.COMMON : pendingExitReason)
-                    : ExitReason.NONE;
+            exitReason =
+                    wasActive
+                            ? (pendingExitReason == ExitReason.NONE
+                                    ? ExitReason.COMMON
+                                    : pendingExitReason)
+                            : ExitReason.NONE;
             pendingExitReason = ExitReason.NONE;
             return snapshot();
         }
@@ -178,7 +208,10 @@ final class PowerHoldStatusPolicy {
             if (epoch != connectionEpoch) return snapshot();
             ExitReason reason = warningReason(value);
             if (reason == ExitReason.NONE) return snapshot();
-            if (status == Status.INACTIVE && exitedFromActive) {
+            if (isAwaitingLock()) {
+                pendingExitReason = reason;
+                becomeInactive();
+            } else if (status == Status.INACTIVE && exitedFromActive) {
                 exitReason = reason;
             } else {
                 pendingExitReason = reason;
@@ -187,8 +220,7 @@ final class PowerHoldStatusPolicy {
         }
     }
 
-    private PowerHoldStatusPolicy() {
-    }
+    private PowerHoldStatusPolicy() {}
 
     static ExitReason warningReason(int value) {
         if (value == 1) return ExitReason.LOW_BATTERY;

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.checkbox.MaterialCheckBox
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/powerHoldEngineExtender"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:checked="false"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:text="@string/power_hold_engine_extender" />

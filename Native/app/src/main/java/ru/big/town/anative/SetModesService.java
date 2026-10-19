@@ -208,7 +208,7 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_LEAVE_CAR:
-                    requestPowerHold();
+                    requestPowerHold(msg.arg1 == 1);
                     break;
 
                 case MSG_WASH_MODE:
@@ -506,7 +506,7 @@ public class SetModesService extends Service {
         SplitHostActivity.launchSingle(this, packageName, dpi, 0);
     }
 
-    protected void requestPowerHold() {
+    protected void requestPowerHold(boolean enableEngineExtender) {
         Log.i(TAG, "handleMessage() MSG_LEAVE_CAR");
         PowerHoldStatusTracker tracker = powerHoldStatusTracker;
         if (tracker == null) {
@@ -521,7 +521,8 @@ public class SetModesService extends Service {
                             "power hold",
                             () -> {
                                 PowerHoldController controller = powerHoldController;
-                                if (controller != null) outcome.set(controller.activate());
+                                if (controller != null)
+                                    outcome.set(controller.activate(enableEngineExtender));
                                 Log.i(TAG, "power hold activation outcome=" + outcome.get());
                             },
                             () -> tracker.finishActivation(requestGeneration, outcome.get()));
@@ -1952,8 +1953,8 @@ public class SetModesService extends Service {
             };
 
     /**
-     * Сообщает хосту, что задача ушла с виртуального дисплея плитки: перед полноэкранным
-     * запуском или при явном закрытии. В последнем случае хост также удаляет запись сеанса.
+     * Сообщает хосту, что задача ушла с виртуального дисплея плитки: перед полноэкранным запуском
+     * или при явном закрытии. В последнем случае хост также удаляет запись сеанса.
      */
     static void notifyEmbeddedTaskLeft(Context context, String pkg) {
         notifyEmbeddedTaskLeft(context, pkg, false);

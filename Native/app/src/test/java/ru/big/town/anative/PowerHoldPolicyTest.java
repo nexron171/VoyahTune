@@ -23,18 +23,12 @@ public class PowerHoldPolicyTest {
 
     @Test
     public void validatesExactParkingAndMinimumSoc() {
-        assertEquals(PowerHoldPolicy.Outcome.ACCEPTED,
-                PowerHoldPolicy.validate(0, 0, 15));
-        assertEquals(PowerHoldPolicy.Outcome.ACCEPTED,
-                PowerHoldPolicy.validate(0, 0, 100));
-        assertEquals(PowerHoldPolicy.Outcome.LOW_BATTERY,
-                PowerHoldPolicy.validate(0, 0, 14));
-        assertEquals(PowerHoldPolicy.Outcome.STATE_UNAVAILABLE,
-                PowerHoldPolicy.validate(0, 0, -1));
-        assertEquals(PowerHoldPolicy.Outcome.NOT_IN_PARK,
-                PowerHoldPolicy.validate(1, 1, 100));
-        assertEquals(PowerHoldPolicy.Outcome.NOT_IN_PARK,
-                PowerHoldPolicy.validate(0, -1, 100));
+        assertEquals(PowerHoldPolicy.Outcome.ACCEPTED, PowerHoldPolicy.validate(0, 0, 15));
+        assertEquals(PowerHoldPolicy.Outcome.ACCEPTED, PowerHoldPolicy.validate(0, 0, 100));
+        assertEquals(PowerHoldPolicy.Outcome.LOW_BATTERY, PowerHoldPolicy.validate(0, 0, 14));
+        assertEquals(PowerHoldPolicy.Outcome.STATE_UNAVAILABLE, PowerHoldPolicy.validate(0, 0, -1));
+        assertEquals(PowerHoldPolicy.Outcome.NOT_IN_PARK, PowerHoldPolicy.validate(1, 1, 100));
+        assertEquals(PowerHoldPolicy.Outcome.NOT_IN_PARK, PowerHoldPolicy.validate(0, -1, 100));
         assertTrue(PowerHoldPolicy.isParking(0, 0));
         assertFalse(PowerHoldPolicy.isParking(3, 3));
     }
@@ -44,7 +38,7 @@ public class PowerHoldPolicyTest {
         Map<String, Integer> values = PowerHoldPolicy.activationValues();
         assertEquals(3, values.size());
         assertEquals(Integer.valueOf(15), values.get("POWER_HOLD_MODE_TIME"));
-        assertEquals(Integer.valueOf(1), values.get("SCENE_MODE_EXTENDER_SET"));
+        assertEquals(Integer.valueOf(0), values.get("SCENE_MODE_EXTENDER_SET"));
         assertEquals(Integer.valueOf(1), values.get("POWER_HOLD_MODE_SWITCH"));
         assertFalse(values.containsKey("MAX_CHARGE_SOC_SET"));
         assertFalse(values.containsKey("HUM_ENERGY_PTREGEN_LEVL"));
@@ -54,11 +48,24 @@ public class PowerHoldPolicyTest {
     }
 
     @Test
+    public void engineExtenderRequiresExplicitOptIn() {
+        Map<String, Integer> values = PowerHoldPolicy.activationValues(true);
+        assertEquals(Integer.valueOf(1), values.get("SCENE_MODE_EXTENDER_SET"));
+        assertEquals(Integer.valueOf(15), values.get("POWER_HOLD_MODE_TIME"));
+        assertEquals(
+                Integer.valueOf(0),
+                PowerHoldPolicy.activationValues().get("SCENE_MODE_EXTENDER_SET"));
+        assertTrue(PowerHoldPolicy.Outcome.ARMED.isAccepted());
+        assertTrue(PowerHoldPolicy.Outcome.ACTIVE.isAccepted());
+        assertFalse(PowerHoldPolicy.Outcome.RESULT_UNKNOWN.isAccepted());
+    }
+
+    @Test
     public void outcomeIpcCodesAreStable() {
         for (PowerHoldPolicy.Outcome outcome : PowerHoldPolicy.Outcome.values()) {
             assertEquals(outcome, PowerHoldPolicy.Outcome.fromIpcCode(outcome.ipcCode));
         }
-        assertEquals(PowerHoldPolicy.Outcome.TRANSPORT_FAILURE,
-                PowerHoldPolicy.Outcome.fromIpcCode(-1));
+        assertEquals(
+                PowerHoldPolicy.Outcome.TRANSPORT_FAILURE, PowerHoldPolicy.Outcome.fromIpcCode(-1));
     }
 }

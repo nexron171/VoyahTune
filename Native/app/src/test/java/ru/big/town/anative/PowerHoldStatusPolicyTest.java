@@ -14,28 +14,64 @@ public class PowerHoldStatusPolicyTest {
         assertEquals(PowerHoldStatusPolicy.Status.ACTIVATING, machine.snapshot().status);
 
         machine.finishActivation(generation, PowerHoldPolicy.Outcome.ACCEPTED);
-        assertEquals(PowerHoldStatusPolicy.Status.ACTIVATING, machine.snapshot().status);
+        assertEquals(PowerHoldStatusPolicy.Status.REQUESTED, machine.snapshot().status);
         machine.onSwitch(7, 0);
-        assertEquals(PowerHoldStatusPolicy.Status.ACTIVATING, machine.snapshot().status);
+        assertEquals(PowerHoldStatusPolicy.Status.REQUESTED, machine.snapshot().status);
 
         machine.onSwitch(7, 1);
         assertEquals(PowerHoldStatusPolicy.Status.ACTIVE, machine.snapshot().status);
         machine.onSwitch(7, 0);
         assertEquals(PowerHoldStatusPolicy.Status.INACTIVE, machine.snapshot().status);
-        assertEquals(PowerHoldStatusPolicy.ExitReason.COMMON,
-                machine.snapshot().exitReason);
+        assertEquals(PowerHoldStatusPolicy.ExitReason.COMMON, machine.snapshot().exitReason);
     }
 
     @Test
-    public void timeoutFailsButLateFeedbackStillWins() {
+    public void stockArmingWaitsForLockAndThenExactSwitchFeedback() {
         PowerHoldStatusPolicy.Machine machine = new PowerHoldStatusPolicy.Machine();
         machine.onConnection(3);
         long generation = machine.beginActivation();
-        machine.finishActivation(generation, PowerHoldPolicy.Outcome.ACCEPTED);
-        machine.onActivationTimeout(generation);
-        assertEquals(PowerHoldStatusPolicy.Status.FAILED, machine.snapshot().status);
+        machine.onSwitch(3, 0);
+        machine.finishActivation(generation, PowerHoldPolicy.Outcome.ARMED);
+        for (int repeat = 0; repeat < 20; repeat++) machine.onSwitch(3, 0);
+        assertEquals(PowerHoldStatusPolicy.Status.ARMED, machine.snapshot().status);
         machine.onSwitch(3, 1);
+        machine.onOemStatus(2);
         assertEquals(PowerHoldStatusPolicy.Status.ACTIVE, machine.snapshot().status);
+    }
+
+    @Test
+    public void stockCancellationBeforeCanActivationCannotBeRevivedByLateAck() {
+        PowerHoldStatusPolicy.Machine machine = new PowerHoldStatusPolicy.Machine();
+        machine.onConnection(3);
+        long generation = machine.beginActivation();
+        machine.onOemStatus(2);
+        machine.onOemStatus(0);
+        machine.finishActivation(generation, PowerHoldPolicy.Outcome.ARMED);
+        assertEquals(PowerHoldStatusPolicy.Status.INACTIVE, machine.snapshot().status);
+    }
+
+    @Test
+    public void missingReplyAndMissingVehicleStateStayUnknown() {
+        PowerHoldStatusPolicy.Machine machine = new PowerHoldStatusPolicy.Machine();
+        machine.onConnection(3);
+        long generation = machine.beginActivation();
+        machine.finishActivation(generation, PowerHoldPolicy.Outcome.RESULT_UNKNOWN);
+        assertEquals(PowerHoldStatusPolicy.Status.UNKNOWN, machine.snapshot().status);
+        generation = machine.beginActivation();
+        machine.finishActivation(generation, PowerHoldPolicy.Outcome.STATE_UNAVAILABLE);
+        assertEquals(PowerHoldStatusPolicy.Status.UNKNOWN, machine.snapshot().status);
+    }
+
+    @Test
+    public void lowBatteryWarningEndsArmingWithoutWaitingForSwitchOne() {
+        PowerHoldStatusPolicy.Machine machine = new PowerHoldStatusPolicy.Machine();
+        machine.onConnection(3);
+        machine.onOemStatus(2);
+        machine.onWarning(3, 1);
+        machine.onOemStatus(0);
+        machine.onSwitch(3, 0);
+        assertEquals(PowerHoldStatusPolicy.Status.INACTIVE, machine.snapshot().status);
+        assertEquals(PowerHoldStatusPolicy.ExitReason.LOW_BATTERY, machine.snapshot().exitReason);
     }
 
     @Test
@@ -59,14 +95,12 @@ public class PowerHoldStatusPolicyTest {
         machine.onSwitch(5, 1);
         machine.onWarning(5, 1);
         machine.onSwitch(5, 0);
-        assertEquals(PowerHoldStatusPolicy.ExitReason.LOW_BATTERY,
-                machine.snapshot().exitReason);
+        assertEquals(PowerHoldStatusPolicy.ExitReason.LOW_BATTERY, machine.snapshot().exitReason);
 
         machine.onSwitch(5, 1);
         machine.onSwitch(5, 0);
         machine.onWarning(5, 2);
-        assertEquals(PowerHoldStatusPolicy.ExitReason.TIME_UP,
-                machine.snapshot().exitReason);
+        assertEquals(PowerHoldStatusPolicy.ExitReason.TIME_UP, machine.snapshot().exitReason);
     }
 
     @Test
@@ -93,14 +127,13 @@ public class PowerHoldStatusPolicyTest {
         for (PowerHoldStatusPolicy.Status status : PowerHoldStatusPolicy.Status.values()) {
             assertEquals(status, PowerHoldStatusPolicy.Status.fromIpcCode(status.ipcCode));
         }
-        for (PowerHoldStatusPolicy.ExitReason reason
-                : PowerHoldStatusPolicy.ExitReason.values()) {
-            assertEquals(reason,
-                    PowerHoldStatusPolicy.ExitReason.fromIpcCode(reason.ipcCode));
+        for (PowerHoldStatusPolicy.ExitReason reason : PowerHoldStatusPolicy.ExitReason.values()) {
+            assertEquals(reason, PowerHoldStatusPolicy.ExitReason.fromIpcCode(reason.ipcCode));
         }
-        assertEquals(PowerHoldStatusPolicy.Status.UNKNOWN,
-                PowerHoldStatusPolicy.Status.fromIpcCode(99));
-        assertEquals(PowerHoldStatusPolicy.ExitReason.NONE,
+        assertEquals(
+                PowerHoldStatusPolicy.Status.UNKNOWN, PowerHoldStatusPolicy.Status.fromIpcCode(99));
+        assertEquals(
+                PowerHoldStatusPolicy.ExitReason.NONE,
                 PowerHoldStatusPolicy.ExitReason.fromIpcCode(99));
     }
 }
