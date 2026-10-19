@@ -183,8 +183,9 @@ ID       = ru.big.town.restoremode/com.shilapi.xcertplay.DiPlayActivity
 фактический displayId виджета; существующие ID в профилях не требуют миграции.
 `matches` для CarPlay принимает только `com.shilapi.xcertplay.*` внутри
 RestoreMode: пакетная фильтрация без имени Activity закроет также Dashboard/настройки.
-Для обычного `PACKAGE` тот же helper явно открывает `MainActivity`, а не случайный
-первый launcher-компонент пакета.
+Для обычного `PACKAGE` на физических экранах helper использует `DashboardTarget`:
+`MainActivity` на 0 и `PassengerDashboardActivity` на 1. У сеток отдельные задачи
+с `singleTask` и разными affinity; запуск одной не завершает другую или CarPlay.
 
 OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет только VoyahTune с
 явным `MainActivity`. CarPlay скрыт из списков обоих физических экранов: отдельная
@@ -199,8 +200,9 @@ OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет толь
 хранятся в WeakHashMap и восстанавливаются перед обычным и payload bind: при
 перелистывании переиспользованный holder не переносит фон VoyahTune на штатные
 приложения. Обновление/удаление пакета сбрасывает кэш иконок и пересобирает списки.
-Клик сохраняет физический экран владельца All Apps (0/1) и явный компонент,
-включая пассажирскую ленту. PI-хуки этим изменением не затрагиваются.
+Клик сохраняет физический экран владельца All Apps (0/1); OD-хук выбирает
+соответствующий компонент сетки, в том числе в перегрузках OEM `AppLauncher.startApp`.
+Явные компоненты CarPlay проходят исходным маршрутом. PI-хуки этим изменением не затрагиваются.
 Для применения скрытия CarPlay на OD требуется обновить
 `Packaging/od/inject/launcherdock.js` в
 `/data/local/bin/launcherdock.js`. Файл публикуется атомарно с правами `0644`.
@@ -212,8 +214,8 @@ OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет толь
 Стартовая и проекционная Activity CarPlay включены в `ourInsetActivity`: док остаётся
 видимым над зарезервированной ими полосой, как над Dashboard.
 
-Долгое нажатие «Все приложения» в водительском OD-доке открывает явный
-`ru.big.town.restoremode.MainActivity` с action `ru.big.town.restoremode.OPEN_DASHBOARD`
+Долгое нажатие «Все приложения» в водительском OD-доке открывает явный компонент
+сетки для дисплея кнопки с action `ru.big.town.restoremode.OPEN_DASHBOARD`
 без категории LAUNCHER и с флагами NEW_TASK | CLEAR_TOP | SINGLE_TOP:
 настройки и другие экраны над Dashboard снимаются,
 а существующая главная используется повторно. Запуск сохраняет физический displayId
@@ -223,13 +225,22 @@ OD All Apps в `Packaging/od/inject/launcherdock.js` добавляет толь
 и пользовательские слоты дока; сохранённый экран настроек не является целью запуска.
 CarPlay task с отдельной affinity при этом не завершается.
 
+`OdDashboardTransferPolicy` через callbacks `VoyahApplication` запрещает OEM-перенос
+собственных Activity VoyahTune только в OD. Используется
+`MultiDisplayManager.setEnableActivityAnimation(activity, false, true)` при создании
+и после resume/подключения окна. `com.shilapi.xcertplay.*` и `CarPlayLauncherActivity`
+исключены: запрета на весь пакет RestoreMode нет. API проверен по декомпиляции
+VehicleSettings Sport+ 13.1; при его недоступности пишется предупреждение, приложение
+продолжает работать. Фактический запрет жеста и перенос CarPlay требуют проверки на ГУ.
+
 Нажатие кнопки автомобиля **VoyahTune** или прежнего имени **VoyahFree** на iPhone
 приходит как AirPlay `requestUI`. Controller передаёт его в app-owned callback
 `VoyahCarPlayIntegration.Host.openDashboard(displayId)` на главном потоке; библиотека
 не импортирует классы приложения. Проверка activeSession/closed выполняется перед
 постановкой в очередь и перед запуском: старый телефон/закрытая сессия не открывают UI.
-App запускает тот же `MainActivity` с CLEAR_TOP/SINGLE_TOP и fullscreen: для отдельного
-CarPlay сохраняет его физический экран. Полноэкранный VD получает от Native
+App запускает сетку своего физического дисплея через `DashboardTarget` с
+CLEAR_TOP/SINGLE_TOP и fullscreen: для отдельного CarPlay сохраняет его физический
+экран. Полноэкранный VD получает от Native
 `CarPlayTarget.EXTRA_HOST_DISPLAY_ID` (только 0/1); `CarPlayWindowPolicy` сохраняет
 пару VD/физический экран без удержания Activity, чтобы возврат шёл к исходному хосту.
 Для VD виджета берётся последний физический экран Dashboard, запомненный в onResume
@@ -1195,7 +1206,8 @@ app/Native/OD-файлы дополнительно перечислены в §
 
 | Файл/группа | Контракт |
 | --- | --- |
-| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayDashboardLauncher.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayDashboardLauncher.java) | requestUI → явная главная MainActivity, CLEAR_TOP/SINGLE_TOP, fullscreen и физический displayId без закрытия CarPlay; пара VD/физический экран полноэкранного хоста и последний экран Dashboard хранятся без ссылки на Activity (§4). |
+| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayDashboardLauncher.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayDashboardLauncher.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/DashboardTarget.java](../SharedAndroid/src/main/java/ru/big/town/common/DashboardTarget.java) | requestUI → отдельная задача сетки физического экрана 0/1, CLEAR_TOP/SINGLE_TOP и fullscreen без закрытия CarPlay; пара VD/физический экран полноэкранного хоста и последний экран Dashboard хранятся без ссылки на Activity (§4). |
+| [RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/OdDashboardTransferPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/OdDashboardTransferPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/passenger/PassengerDashboardActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/passenger/PassengerDashboardActivity.java) | Независимый пассажирский корень задачи; OEM-запрет переноса собственных Activity только в OD с исключением всех Activity CarPlay, подключённый через VoyahApplication (§4). |
 | [Native/app/src/main/java/ru/big/town/anative/CarPlayAudioController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayAudioController.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayAudioPolicy.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayAudioPolicy.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayAudioProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayAudioProtocol.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayAudioClient.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayAudioClient.java) | OEM focus/громкость, четыре ограниченных stream, settings-only binding, revisions и независимость от CAN-подписки (§5/6/9). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayProjectionClient.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayProjectionClient.java)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesService.java](../Native/app/src/main/java/ru/big/town/anative/SetModesService.java)<br>[Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java) | Ограниченный запрос projection 124/125, 5-секундный bind, проверка действующего CarPlay VD и запуск его владельцем (§4). |
 | [RestoreMode/settings.gradle.kts](../RestoreMode/settings.gradle.kts)<br>[RestoreMode/app/build.gradle.kts](../RestoreMode/app/build.gradle.kts)<br>[RestoreMode/gradle/libs.versions.toml](../RestoreMode/gradle/libs.versions.toml)<br>[RestoreMode/gradle/wrapper/gradle-wrapper.properties](../RestoreMode/gradle/wrapper/gradle-wrapper.properties) | Модули, зависимости, AGP/Gradle, assets и ABI (§3). |
@@ -1203,7 +1215,7 @@ app/Native/OD-файлы дополнительно перечислены в §
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java) | Установка bridge, home factory и window policy вне :ota (§2). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWindowPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayWindowPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlaySafeArea.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlaySafeArea.java) | Физические OEM-отступы, вычитание смещения окна, отсутствие резерва дока на VD; запоминание физического экрана Native-хоста из launch extra для requestUI; darkHostAppearance=true, connectionIcon=carplay_home_logo (§4/5). |
 | [Packaging/od/inject/vd_bypass.js](../Packaging/od/inject/vd_bypass.js) | Приоритет foreground app для процесса с DiPlaySessionService и запрет обычной выгрузки CarPlayHostActivity; защита снимается вместе с FGS (§4). |
-| [Packaging/od/inject/launcherdock.js](../Packaging/od/inject/launcherdock.js) | Отдельные записи VoyahTune и CarPlay, удаление дубликатов CarPlay; ActivityInfo label/icon, явный компонент и сохранение экрана All Apps; восстановление слоёв иконки при recycling; независимая инверсия короткого/долгого нажатия Home и All Apps, штатный callback или главная VoyahTune с CLEAR_TOP/SINGLE_TOP (§4). |
+| [Packaging/od/inject/launcherdock.js](../Packaging/od/inject/launcherdock.js) | Запись VoyahTune и удаление cached-записей CarPlay из All Apps; ActivityInfo label/icon, выбор корня сетки по дисплею 0/1 при запуске из All Apps, AppLauncher и дока; сохранение явных компонентов CarPlay; восстановление иконок при recycling; независимая инверсия Home/All Apps, возврат на сетку с CLEAR_TOP/SINGLE_TOP (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayLauncherActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayLauncherActivity.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayTarget.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayTarget.java) | Экспортированный MAIN/LAUNCHER-вход и bind fallback ярлыка, игнорирование позднего callback; стабильный component ID и выбор home/projection по целевому displayId (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/ui/dialogs/SettingsAppPicker.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/MainSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/MainSettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileOrderStore.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/tiles/TileOrderStore.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java)<br>[RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Отдельные настройки виджета CarPlay; общий picker для остальных приложений, размеры, блокировка autoStart ярлыка, физический displayId и поколения запусков/query (§4). |
 | [Native/app/src/main/java/ru/big/town/anative/AppDisplayLauncher.java](../Native/app/src/main/java/ru/big/town/anative/AppDisplayLauncher.java)<br>[Native/app/src/main/java/ru/big/town/anative/AppDisplayTaskPlan.java](../Native/app/src/main/java/ru/big/town/anative/AppDisplayTaskPlan.java)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesService.java](../Native/app/src/main/java/ru/big/town/anative/SetModesService.java) | Выбор projection для виджета и полноэкранного VD-хоста на физических 0/1; фильтрация tasks, очистка старого CarPlay VD после task removal независимо от Dashboard и закрытие прежнего полноэкранного хоста при переходе в виджет; сообщения 34/120/121/123, destroy контроллера (§4/6); включение Wi-Fi и Bluetooth при создании службы в обоих профилях (§5). |
@@ -1335,7 +1347,7 @@ Authentication assets и бинарную иконку сохранить отд
 | Категории DiPlay | AUDIO доступен с буферами, обработкой звука и аудиофокусом; выбор каналов скрыт. ADVANCED недоступен в меню, обзоре, поиске, ссылках и восстановлении сохранённой категории. Сохранённые audio/experimental preferences не очищать и не отключать автоматически. Без выбранного буфера использовать 1000 мс, сохраняя отдельное значение USB и наследование прежнего общего. |
 | Настройки громкости | Четыре фактических OEM-канала через Native; не заменять локальными preference-ползунками и не возвращать скрытый редактор аудиопотоков (§9). |
 | Dock preferences | `dockHomeShortVoyahTune`, `dockAllAppsShortVoyahTune`: default false; OD-only зеркалирование. Слоты сохраняют `dockOverride1/2=CarPlayTarget.ID` для CarPlay; это отдельный target внутри того же APK. |
-| Компоненты и ресурсы | MainActivity, DiPlayActivity, CarPlayHostActivity, CarPlayLauncherActivity и affinity по §3. Launcher CarPlay экспортирован; иконка `carplay_home_logo` общая с ярлыком 1×1, зелёные launcher assets не возвращать. |
+| Компоненты и ресурсы | MainActivity, PassengerDashboardActivity, DiPlayActivity, CarPlayHostActivity, CarPlayLauncherActivity и раздельные affinity по §3–4. Launcher CarPlay экспортирован; иконка `carplay_home_logo` общая с ярлыком 1×1, зелёные launcher assets не возвращать. |
 
 Различать три перехода жизненного цикла:
 
@@ -1377,6 +1389,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Нажатия OD-дока | `Packaging/tests/test_dock_navigation_actions.js`; перенос обоих config extras и OD guards проверить с двух сторон |
 | Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`; отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
 | Возврат на главную и фон | `Packaging/tests/test_carplay_dashboard_navigation.js`; app `carplay.CarPlayDashboardDisplayTest`; common `CarPlayHostUiNavigationTest` (requestUI/controller без Activity), `VoyahSessionTransferTest`; shared `media.VideoSurfaceHandoffTest` |
+| Независимые сетки и перенос OD | app `DashboardTaskIsolationTest` (manifest, affinity, маршруты и плитка настроек), `OdDashboardTransferPolicyTest` (OD/PI и исключения CarPlay); Native `AppDisplayTaskPlanTest` (сохранение соседней сетки и CarPlay); `Packaging/tests/test_carplay_dashboard_navigation.js` (оба OEM-входа, дисплеи 0/1 и сохранение маршрутов CarPlay) |
 | Task/component/display | Native `CarPlayTargetTest` (выбор компонента home на 0/1 и projection на VD со старым ID; полноэкранные входы направляются в VD-хост до разрешения intent), `AppDisplayTaskPlanTest`, `SplitHostTaskSnapshotTest` (CarPlay на своём VD, исключение Dashboard/launcher, unknown display); app `CarPlayDashboardDisplayTest` (возврат с полноэкранного VD на физический экран хоста); common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
 | Автоподключение и настройки | common `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `DefaultConnectionModeTest`, `VoyahEmbeddedEntryPointsTest`, `PhoneBluetoothReceiverTest` |
 | Способ Wi-Fi подключения | common `HotspotModeMigrationTest`, `ExistingWifiSettingsTest`: default Wi-Fi Direct, сохранение выбранного режима и реквизитов сетей |
