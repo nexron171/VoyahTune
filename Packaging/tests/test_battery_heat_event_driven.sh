@@ -116,8 +116,8 @@ UI_RECEIVER=$(awk '
 if printf '%s\n' "$UI_RECEIVER" | grep -Fq 'requestSettingsRefresh'; then
     fail "Battery heat UI receiver must never synchronously/implicitly query Settings"
 fi
-for REQUIRED in 'ACTION_REQUEST_BATTERY_HEAT.equals(a)' \
-        'requestBroadcastUpdate();' 'ACTION_BATTERY_HEAT_AUTO_CHANGED.equals(a)' \
+for REQUIRED in 'ACTION_REQUEST_BATTERY_HEAT.equals(action)' \
+        'requestBroadcastUpdate();' 'ACTION_BATTERY_HEAT_AUTO_CHANGED.equals(action)' \
         'applyAutoSettingChange'; do
     printf '%s\n' "$UI_RECEIVER" | grep -Fq "$REQUIRED" \
         || fail "Battery heat receiver lacks cached/event path: $REQUIRED"
@@ -171,7 +171,7 @@ for REQUIRED in activeInstance expectedCanBusEpoch ambientTemperatureEpoch \
 done
 
 # H97X and H97C are separate protocols: a zero H97X failure clears the previous reason, active or
-# initializing feedback suppresses duplicate activation, and either complete profile stops TX20.
+# initializing feedback suppresses duplicate activation, and complete profiles stop recovery reads.
 for REQUIRED in 'h97xFailReason = state;' \
         'BatteryHeatAutoPolicy.effectiveFailure(' \
         'BatteryHeatAutoPolicy.heatingActive(' \
