@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 
+import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
 import ru.big.town.common.ScenarioProtocol;
 import ru.big.town.common.ScreenBrightnessSettings;
@@ -37,6 +38,17 @@ public final class SplitConfigSync {
         pushKeyboard(context, prefs);
         pushScenarios(context, prefs);
         pushScreenBrightness(context, prefs);
+        pushClusterNavigation(context, prefs);
+    }
+
+    public static void pushClusterNavigation(Context context, SharedPreferences preferences) {
+        Intent intent = configIntent(ClusterNavigationSettings.ACTION_CONFIG);
+        intent.putExtra(
+                ClusterNavigationSettings.ENABLED,
+                preferences.getBoolean(
+                        ClusterNavigationSettings.ENABLED,
+                        ClusterNavigationSettings.DEFAULT_ENABLED));
+        context.sendBroadcast(intent);
     }
 
     /** Полный снимок сценариев; движок Native перечитывает его при изменении и на старте. */

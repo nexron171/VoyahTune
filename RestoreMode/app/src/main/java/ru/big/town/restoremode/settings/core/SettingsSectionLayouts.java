@@ -67,6 +67,7 @@ public final class SettingsSectionLayouts {
     };
     private static final Item[] APPS = {
         layout(R.layout.settings_apps_intro),
+        layout(R.layout.settings_apps_cluster_navigation),
         layout(R.layout.settings_apps_split_heading),
         dynamic(DynamicContent.SPLITS),
         layout(R.layout.settings_apps_add_split),

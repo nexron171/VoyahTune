@@ -20,6 +20,12 @@
   "com.qinggan.cluster": [
     "clusternavi.js"
   ],
+  "ru.yandex.yandexnavi": [
+    "clusternavi.js"
+  ],
+  "ru.dublgis.dgismobile": [
+    "clusternavi.js"
+  ],
   "com.qinggan.bluetoothphone": [
     "phone-num.js"
   ]

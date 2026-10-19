@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.provider.Settings;
 import android.util.Log;
 
+import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
 
 import java.lang.reflect.Method;
@@ -87,6 +88,17 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             Log.i(TAG, "APP_DPI_CONFIG зеркалирован + reload");
         } else if ("ru.big.town.anative.KEYBOARD_CONFIG".equals(action)) {
             applyKeyboardMode(context, intent.getStringExtra("keyboardMode"));
+        } else if (ClusterNavigationSettings.ACTION_CONFIG.equals(action)) {
+            boolean enabled =
+                    intent.getBooleanExtra(
+                            ClusterNavigationSettings.ENABLED,
+                            ClusterNavigationSettings.DEFAULT_ENABLED);
+            if (!Settings.Global.putInt(
+                    context.getContentResolver(),
+                    ClusterNavigationSettings.GLOBAL_ENABLED,
+                    enabled ? 1 : 0)) {
+                Log.e(TAG, "Cluster navigation setting was not saved");
+            }
         }
     }
 

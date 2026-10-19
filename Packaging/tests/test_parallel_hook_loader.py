@@ -59,6 +59,7 @@ case "$script" in
     app_client.js)
         echo '[app-client] hook ready v1'
         if [ ! -f "$root/missing_cluster_ready" ]; then echo '[cluster-units] hook ready v1'; fi
+        if [ ! -f "$root/missing_navigation_ready" ]; then echo '[navigation-source] hook ready v1'; fi
         if [ ! -f "$root/missing_rds_ready" ]; then echo '[rds-restore] hook ready v1'; fi
         gate=none ;;
     voyahtune_drive_reset.js)
@@ -206,6 +207,20 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
         self.rds_probe(package="com.qinggan.cluster", selected=False)
         self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_yandex_navigation_discovered_without_geometry_selection(self):
+        self.rds_probe(package="ru.yandex.yandexnavi", selected=False)
+        self.assertTrue((self.root / "voyahtune_app_client.ru.yandex.yandexnavi.pid").exists())
+
+    def test_dgis_navigation_supports_32_bit_without_geometry_selection(self):
+        self.rds_probe(package="ru.dublgis.dgismobile", selected=False,
+                       executable="/system/bin/app_process32")
+        self.assertTrue((self.root / "voyahtune_app_client.ru.dublgis.dgismobile.pid").exists())
+
+    def test_navigation_requires_specific_ready_marker(self):
+        (self.root / "missing_navigation_ready").touch()
+        self.rds_probe(package="ru.yandex.yandexnavi", selected=False)
+        self.assertFalse((self.root / "voyahtune_app_client.ru.yandex.yandexnavi.pid").exists())
 
     def test_cluster_units_supports_32_bit_process(self):
         self.rds_probe(package="com.qinggan.cluster", selected=False,

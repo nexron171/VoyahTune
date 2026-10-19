@@ -1021,6 +1021,11 @@ inject_app_client_bg() {
                 && ! grep -qF '[cluster-units] hook ready v1' "$FC_TRY"; then
             FC_READY_OK=0
         fi
+        case "$FC_TARGET_PACKAGE" in
+            ru.yandex.yandexnavi|ru.dublgis.dgismobile)
+                grep -qF '[navigation-source] hook ready v1' "$FC_TRY" || FC_READY_OK=0
+                ;;
+        esac
         if [ "$FC_READY_OK" -eq 1 ]; then
             FC_ID_AFTER=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE" 2>/dev/null) \
                 || FC_ID_AFTER=
@@ -1056,9 +1061,9 @@ discover_app_client() {
     case "$FC_FULLSCREEN_LIST" in null) FC_FULLSCREEN_LIST= ;; esac
     case "$FC_DPI_LIST" in null) FC_DPI_LIST= ;; esac
     FC_DPI_LIST=$(printf '%s' "$FC_DPI_LIST" | tr -d '[:space:]')
-    # RdsApp and Cluster have dedicated branches independent of geometry settings. Never
-    # launch the OEM app: only attach to an existing exact main process using the same circuit breaker.
-    FC_LIST="com.pateo.rdsapp,com.qinggan.cluster${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
+    # Navigation and OEM adapters run independently of geometry settings. Attach only to
+    # existing exact main processes, using the same circuit breaker; never launch an app.
+    FC_LIST="com.pateo.rdsapp,com.qinggan.cluster,ru.yandex.yandexnavi,ru.dublgis.dgismobile${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
     FC_SAVED_IFS=$IFS
     IFS=,
     for FC_DPI_PACKAGE in $FC_DPI_LIST; do
@@ -1127,10 +1132,11 @@ discover_app_client() {
         fi
         FC_EXE=$(readlink "/proc/$FC_PID/exe" 2>/dev/null)
         # The shipped arm64 injector also embeds the 32-bit agent (used by CAN hooks).
-        # OEM radio and Cluster adapters support either runtime ABI; other app-client
-        # targets remain 64-bit only.
+        # OEM and navigation adapters support either runtime ABI; other geometry targets
+        # remain 64-bit only.
         case "$FC_PACKAGE:$FC_EXE" in
-            *:*/app_process64|com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32) FC_INJECTOR=$FI ;;
+            *:*/app_process64|com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32|\
+            ru.yandex.yandexnavi:*/app_process32|ru.dublgis.dgismobile:*/app_process32) FC_INJECTOR=$FI ;;
             *)
                 reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
                 loge "app client unsupported process ABI package=$FC_PACKAGE exe=$FC_EXE"

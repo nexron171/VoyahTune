@@ -12,6 +12,7 @@ import android.widget.TextView;
 
 import androidx.lifecycle.ViewModelProvider;
 
+import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.apps.AppDpiStore;
@@ -525,6 +526,7 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected void bindSettingsRow() {
+        bindClusterNavigation();
         if (settingView(R.id.dockOverrideBlock) != null) {
             initDockOverride();
             bindClick(R.id.buttonDockApp1, view -> pickDockApp(1));
@@ -538,6 +540,26 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         }
         bindClick(R.id.buttonAddFullscreenApp, this::onAddFullscreenApp);
         bindClick(R.id.buttonAddSplit, this::onAddSplitPreset);
+    }
+
+    private void bindClusterNavigation() {
+        Switch toggle = settingView(R.id.switchClusterNavigation);
+        if (toggle == null) {
+            return;
+        }
+        toggle.setOnCheckedChangeListener(null);
+        toggle.setChecked(
+                preferences.getBoolean(
+                        ClusterNavigationSettings.ENABLED,
+                        ClusterNavigationSettings.DEFAULT_ENABLED));
+        toggle.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    preferences
+                            .edit()
+                            .putBoolean(ClusterNavigationSettings.ENABLED, checked)
+                            .apply();
+                    SplitConfigSync.pushClusterNavigation(requireContext(), preferences);
+                });
     }
 
     @Override

@@ -8,13 +8,13 @@ import android.os.Message;
 import android.os.Messenger;
 import android.util.Log;
 
-import java.util.Collections;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 import ru.big.town.common.CarPlayAudioProtocol;
 import ru.big.town.common.CarPlayVehicleProtocol;
 import ru.big.town.common.MessengerSubscription;
+
+import java.util.Collections;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Observes CAN only while the CarPlay session process owns a live subscription. */
 final class CarPlayVehicleController implements AutoCloseable {
@@ -24,7 +24,7 @@ final class CarPlayVehicleController implements AutoCloseable {
     private final ExecutorService lightQueryExecutor =
             Executors.newSingleThreadExecutor(task -> new Thread(task, "CarPlayLightQuery"));
     private final CanBusEventHub hub;
-    private final CarPlayClusterNavigation navigation;
+    private final ClusterNavigationController navigation;
     private final CarPlayAudioController audio;
     private final CarPlayLightState lightState;
     private Messenger owner;
@@ -50,17 +50,18 @@ final class CarPlayVehicleController implements AutoCloseable {
 
     CarPlayVehicleController(Context context, CarPlayAudioController audio) {
         hub = CanBusEventHub.get(context);
-        navigation = new CarPlayClusterNavigation(context);
+        navigation = ClusterNavigationController.get(context);
         this.audio = audio;
         Context applicationContext = context.getApplicationContext();
-        lightState = new CarPlayLightState(
-                lightQueryExecutor,
-                handler::post,
-                () -> readLightReason(applicationContext),
-                value -> {
-                    reason = value;
-                    publish();
-                });
+        lightState =
+                new CarPlayLightState(
+                        lightQueryExecutor,
+                        handler::post,
+                        () -> readLightReason(applicationContext),
+                        value -> {
+                            reason = value;
+                            publish();
+                        });
     }
 
     private static Integer readLightReason(Context context) {
@@ -84,7 +85,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         }
         if (message.what == CarPlayVehicleProtocol.NAVIGATION) {
             if (owner != null && owner.equals(message.replyTo) && client.active()) {
-                navigation.update(message.getData());
+                navigation.update(ClusterNavigationSources.Source.CARPLAY, message.getData());
             }
             return;
         }
@@ -94,7 +95,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         }
         if (message.replyTo == null) return;
         if (!message.replyTo.equals(owner)) {
-            navigation.clear();
+            navigation.clear(ClusterNavigationSources.Source.CARPLAY);
             audio.setFocus(CarPlayAudioProtocol.NONE);
         }
         owner = message.replyTo;
@@ -159,7 +160,6 @@ final class CarPlayVehicleController implements AutoCloseable {
 
     void destroy() {
         close();
-        navigation.destroy();
         lightQueryExecutor.shutdownNow();
     }
 
@@ -169,7 +169,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         client.clear();
         owner = null;
         lightState.reset();
-        navigation.clear();
+        navigation.clear(ClusterNavigationSources.Source.CARPLAY);
         audio.setFocus(CarPlayAudioProtocol.NONE);
         if (subscription != null) subscription.close();
         subscription = null;

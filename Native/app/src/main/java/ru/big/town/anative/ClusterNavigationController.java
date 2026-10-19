@@ -5,14 +5,17 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
+import android.database.ContentObserver;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.Log;
 
 import ru.big.town.common.CarPlayVehicleProtocol;
+import ru.big.town.common.ClusterNavigationSettings;
 
 import java.lang.reflect.Method;
 import java.util.Objects;
@@ -20,21 +23,31 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** Main-thread state and one coalescing OEM writer; no blocking Binder work on IPC/UI threads. */
-final class CarPlayClusterNavigation {
-    private static final String TAG = "CarPlayCluster";
+final class ClusterNavigationController {
+    private static final String TAG = "ClusterNavigation";
+    private static ClusterNavigationController instance;
     private static final String PACKAGE = "com.qinggan.cluster";
     private static final String DESCRIPTOR = "com.qinggan.cluster.IInstrumentClusterManagerService";
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker =
-            Executors.newSingleThreadExecutor(r -> new Thread(r, "CarPlayCluster"));
-    private final CarPlayNavigationLease lease = new CarPlayNavigationLease();
+            Executors.newSingleThreadExecutor(r -> new Thread(r, "ClusterNavigation"));
+    private final ClusterNavigationSources sources = new ClusterNavigationSources();
     private volatile IBinder binder;
-    private volatile CarPlayNavigationLease.Maneuver requested;
+    private volatile ClusterNavigationLease.Maneuver requested;
     private ServiceConnection connection;
-    private boolean busy, ownsOutput, watching, destroying, disposed;
-    private CarPlayNavigationLease.Maneuver applied;
+    private boolean busy;
+    private boolean ownsOutput;
+    private boolean watching;
+    private ClusterNavigationLease.Maneuver applied;
     private long nextBind;
+    private final ContentObserver settingsObserver =
+            new ContentObserver(main) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    refreshEnabled();
+                }
+            };
     private final Runnable bindTimeout =
             () -> {
                 if (connection != null && binder == null) {
@@ -47,66 +60,84 @@ final class CarPlayClusterNavigation {
                 @Override
                 public void run() {
                     pump();
-                    if (watching || ownsOutput || busy) main.postDelayed(this, 1000);
+                    if (watching || ownsOutput || busy) {
+                        main.postDelayed(this, 1000);
+                    }
                 }
             };
 
-    CarPlayClusterNavigation(Context context) {
-        this.context = context.getApplicationContext();
+    static ClusterNavigationController get(Context context) {
+        if (instance == null) {
+            instance = new ClusterNavigationController(context);
+        }
+        return instance;
     }
 
-    void update(Bundle values) {
-        if (destroying) return;
-        lease.update(
+    private ClusterNavigationController(Context context) {
+        this.context = context.getApplicationContext();
+        this.context
+                .getContentResolver()
+                .registerContentObserver(
+                        Settings.Global.getUriFor(ClusterNavigationSettings.GLOBAL_ENABLED),
+                        false,
+                        settingsObserver);
+        refreshEnabled();
+    }
+
+    private void refreshEnabled() {
+        boolean enabled =
+                Settings.Global.getInt(
+                                context.getContentResolver(),
+                                ClusterNavigationSettings.GLOBAL_ENABLED,
+                                ClusterNavigationSettings.DEFAULT_ENABLED ? 1 : 0)
+                        != 0;
+        sources.setEnabled(enabled, SystemClock.elapsedRealtime());
+        refreshOutput();
+    }
+
+    void update(ClusterNavigationSources.Source source, Bundle values) {
+        sources.update(
+                source,
                 values.getBoolean(CarPlayVehicleProtocol.NAV_ACTIVE),
                 values.getInt(CarPlayVehicleProtocol.NAV_ICON, -1),
                 values.getInt(CarPlayVehicleProtocol.NAV_DISTANCE, -1),
                 values.getString(CarPlayVehicleProtocol.NAV_ROAD),
                 values.getLong(CarPlayVehicleProtocol.NAV_TIME, -1),
                 SystemClock.elapsedRealtime());
-        watching = lease.current(SystemClock.elapsedRealtime()) != null;
-        main.removeCallbacks(tick);
-        tick.run();
+        refreshOutput();
     }
 
-    void clear() {
-        lease.clear();
-        watching = false;
-        main.removeCallbacks(tick);
-        tick.run();
+    void clear(ClusterNavigationSources.Source source) {
+        sources.clear(source);
+        refreshOutput();
     }
 
-    void destroy() {
-        destroying = true;
-        clear();
-        main.postDelayed(
-                () -> {
-                    if (ownsOutput || busy)
-                        Log.w(TAG, "Cluster clear was not confirmed before service shutdown");
-                    disposed = true;
-                    main.removeCallbacks(tick);
-                    disconnect();
-                    worker.shutdown();
-                },
-                5000);
+    private void refreshOutput() {
+        watching = sources.current(SystemClock.elapsedRealtime()) != null;
+        main.removeCallbacks(tick);
+        tick.run();
     }
 
     private void pump() {
-        if (disposed) return;
-        CarPlayNavigationLease.Maneuver wanted = lease.current(SystemClock.elapsedRealtime());
+        ClusterNavigationLease.Maneuver wanted = sources.current(SystemClock.elapsedRealtime());
         requested = wanted;
-        if (wanted == null) watching = false;
-        if (busy) return;
+        if (wanted == null) {
+            watching = false;
+        }
+        if (busy) {
+            return;
+        }
         if (wanted == null && !ownsOutput) {
             disconnect();
-            if (destroying) worker.shutdown();
             return;
         }
         if (binder == null) {
             bind();
             return;
         }
-        if (Objects.equals(wanted, applied) && wanted != null) return;
+        if (Objects.equals(wanted, applied) && wanted != null) {
+            return;
+        }
         IBinder target = binder;
         busy = true;
         worker.execute(
@@ -151,12 +182,16 @@ final class CarPlayClusterNavigation {
     }
 
     private void bind() {
-        if (connection != null || SystemClock.elapsedRealtime() < nextBind) return;
+        if (connection != null || SystemClock.elapsedRealtime() < nextBind) {
+            return;
+        }
         ServiceConnection next =
                 new ServiceConnection() {
                     @Override
                     public void onServiceConnected(ComponentName name, IBinder service) {
-                        if (connection != this) return;
+                        if (connection != this) {
+                            return;
+                        }
                         main.removeCallbacks(bindTimeout);
                         binder = service;
                         applied = null;
@@ -165,7 +200,9 @@ final class CarPlayClusterNavigation {
 
                     @Override
                     public void onServiceDisconnected(ComponentName name) {
-                        if (connection != this) return;
+                        if (connection != this) {
+                            return;
+                        }
                         binder = null;
                         applied = null;
                         main.removeCallbacks(bindTimeout);
@@ -183,7 +220,9 @@ final class CarPlayClusterNavigation {
                     }
 
                     private void failed() {
-                        if (connection != this) return;
+                        if (connection != this) {
+                            return;
+                        }
                         disconnect();
                         nextBind = SystemClock.elapsedRealtime() + 5000;
                     }
@@ -223,18 +262,22 @@ final class CarPlayClusterNavigation {
     /** Use the installed system APK's Parcelable/proxy instead of guessing transaction layouts. */
     private static final class OemWriter {
         private final Object proxy;
-        private final Class<?> info, guide;
+        private final Class<?> info;
+        private final Class<?> guide;
         private final Method update;
 
         OemWriter(Context context, IBinder binder) throws Exception {
-            if (!DESCRIPTOR.equals(binder.getInterfaceDescriptor()))
+            if (!DESCRIPTOR.equals(binder.getInterfaceDescriptor())) {
                 throw new IllegalStateException("Wrong cluster interface");
+            }
             ApplicationInfo application =
                     context.getPackageManager().getApplicationInfo(PACKAGE, 0);
             if ((application.flags
                             & (ApplicationInfo.FLAG_SYSTEM
                                     | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP))
-                    == 0) throw new IllegalStateException("Cluster must be a system package");
+                    == 0) {
+                throw new IllegalStateException("Cluster must be a system package");
+            }
             ClassLoader loader =
                     context.createPackageContext(
                                     PACKAGE,
@@ -250,7 +293,7 @@ final class CarPlayClusterNavigation {
             update = contract.getMethod("updateNaviInfo", info);
         }
 
-        void send(CarPlayNavigationLease.Maneuver maneuver) throws Exception {
+        void send(ClusterNavigationLease.Maneuver maneuver) throws Exception {
             Object data = info.getConstructor().newInstance();
             info.getMethod("setGuideState", guide)
                     .invoke(
