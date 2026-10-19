@@ -1,11 +1,9 @@
 package ru.big.town.restoremode.carplay;
 
-import android.app.ActivityOptions;
 import android.content.Context;
-import android.content.Intent;
-import android.os.Bundle;
 import android.util.Log;
 
+import ru.big.town.common.DashboardTarget;
 import ru.big.town.restoremode.MainActivity;
 import ru.big.town.restoremode.passenger.PassengerDashboardActivity;
 
@@ -27,7 +25,9 @@ public final class CarPlayDashboardLauncher {
     private CarPlayDashboardLauncher() {}
 
     public static void rememberDisplay(int displayId) {
-        if (displayId == 0 || displayId == 1) dashboardDisplayId = displayId;
+        if (displayId == 0 || displayId == 1) {
+            dashboardDisplayId = displayId;
+        }
     }
 
     static void rememberHostDisplay(int virtualDisplayId, int physicalDisplayId) {
@@ -54,19 +54,9 @@ public final class CarPlayDashboardLauncher {
 
     public static boolean open(Context context, int carPlayDisplayId) {
         int displayId = targetDisplayId(carPlayDisplayId);
-        Intent intent =
-                new Intent(context, dashboardActivityClass(displayId))
-                        .setAction(Intent.ACTION_MAIN)
-                        .addCategory(Intent.CATEGORY_LAUNCHER)
-                        .addFlags(
-                                Intent.FLAG_ACTIVITY_NEW_TASK
-                                        | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                                        | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        ActivityOptions options = ActivityOptions.makeBasic().setLaunchDisplayId(displayId);
-        Bundle bundle = options.toBundle();
-        bundle.putInt("android.activity.windowingMode", 1);
         try {
-            context.startActivity(intent, bundle);
+            context.startActivity(
+                    DashboardTarget.intent(displayId), DashboardTarget.options(displayId));
             return true;
         } catch (RuntimeException unavailable) {
             Log.w("VoyahCarPlay", "Cannot open Dashboard display=" + displayId, unavailable);

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.Application;
 import android.os.Bundle;
 
+import ru.big.town.restoremode.dashboard.OdDashboardTransferPolicy;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
 
 /** Start warmup when VoyahTune becomes visible, not when a provider wakes its process. */
@@ -51,10 +52,20 @@ public final class VoyahApplication extends Application {
                     }
 
                     @Override
-                    public void onActivityCreated(Activity activity, Bundle state) {}
+                    public void onActivityCreated(Activity activity, Bundle state) {
+                        OdDashboardTransferPolicy.apply(activity);
+                    }
 
                     @Override
-                    public void onActivityResumed(Activity activity) {}
+                    public void onActivityResumed(Activity activity) {
+                        // OEM controllers attach with DecorView, after the resume callback.
+                        activity.getWindow().getDecorView().post(
+                                () -> {
+                                    if (!activity.isFinishing() && !activity.isDestroyed()) {
+                                        OdDashboardTransferPolicy.apply(activity);
+                                    }
+                                });
+                    }
 
                     @Override
                     public void onActivityPaused(Activity activity) {}

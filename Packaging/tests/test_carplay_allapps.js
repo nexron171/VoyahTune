@@ -39,6 +39,7 @@ const c = {
     Intent: {$new(action) { return {action, addCategory(v) { this.category = v; return this; },
         setComponent(v) { this.component = v; return this; }, addFlags(v) { this.flags = v; return this; }}; }},
     ctx: () => ({}), isUserFullscreen: () => false,
+    openVoyahTuneOnDisplay(screen) { launches.push({dashboard: true, screen}); return true; },
     AppLauncher: {startApp(_, intent, screen) { launches.push({intent, screen}); }},
     pm: {
         getInstalledApplications: () => list([
@@ -75,11 +76,12 @@ assert.equal(c.loadIcon(restore), 'grey');
 assert.equal(c.ourInsetActivity('com.shilapi.xcertplay.DiPlayActivity'), true);
 assert.equal(c.ourInsetActivity('com.shilapi.xcertplay.CarPlayHostActivity'), true);
 assert.equal(c.ourInsetActivity('com.shilapi.xcertplay.OtherActivity'), false);
+assert.equal(c.ourInsetActivity('ru.big.town.restoremode.passenger.PassengerDashboardActivity'), true);
 c.invalidateIconCache(restore);
 assert.equal(Object.keys(c.iconCache).length, 0);
 for (const screen of [0, 1]) {
     assert.equal(c.launchAllApp(restore, screen), true);
-    assert.equal(launches.at(-1).intent.component.activity, restore + '.MainActivity');
+    assert.equal(launches.at(-1).dashboard, true);
     assert.equal(launches.at(-1).screen, screen);
 }
 const existing = list([bean(10, 20, restore)]);

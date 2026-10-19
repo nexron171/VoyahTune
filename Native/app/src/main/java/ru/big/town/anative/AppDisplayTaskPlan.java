@@ -1,6 +1,7 @@
 package ru.big.town.anative;
 
 import ru.big.town.common.CarPlayTarget;
+import ru.big.town.common.DashboardTarget;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -13,12 +14,20 @@ final class AppDisplayTaskPlan {
     static Set<Integer> retiring(
             List<SplitHostTaskSnapshot.TaskRecord> tasks, String pkg, int target) {
         Set<Integer> result = new LinkedHashSet<>();
+        if (DashboardTarget.isPhysicalDashboard(pkg, target)) {
+            return result;
+        }
         for (SplitHostTaskSnapshot.TaskRecord task : tasks) {
-            if (!pkg.equals(task.packageName)) continue;
-            if (task.displayId == null)
+            if (!pkg.equals(task.packageName)) {
+                continue;
+            }
+            if (task.displayId == null) {
                 throw new IllegalStateException("Unknown display for task " + task.taskId);
+            }
             // A released virtual display may already have moved the old CarPlay task to the target.
-            if (task.displayId != target || CarPlayTarget.isCarPlay(pkg)) result.add(task.taskId);
+            if (task.displayId != target || CarPlayTarget.isCarPlay(pkg)) {
+                result.add(task.taskId);
+            }
         }
         return result;
     }

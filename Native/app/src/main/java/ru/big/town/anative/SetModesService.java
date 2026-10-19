@@ -857,7 +857,7 @@ public class SetModesService extends Service {
 
             // Прямой запуск (Native — priv-app с START_ACTIVITIES_FROM_BACKGROUND).
             try {
-                startActivity(i);
+                startActivity(i, ru.big.town.common.DashboardTarget.options(0));
             } catch (Exception ignored) {
             }
 
@@ -876,7 +876,8 @@ public class SetModesService extends Service {
                                 0,
                                 i,
                                 android.app.PendingIntent.FLAG_IMMUTABLE
-                                        | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+                                        | android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                                ru.big.town.common.DashboardTarget.options(0));
                 Notification n =
                         new NotificationCompat.Builder(this, CH)
                                 .setSmallIcon(R.drawable.ic_launcher_foreground)

@@ -1562,6 +1562,11 @@ public class DashboardActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (DashboardProfile.displayId(this) != dashboardDisplayId) {
+            // A system-restored task can still arrive on a different physical display.
+            recreate();
+            return;
+        }
         ru.big.town.restoremode.carplay.CarPlayDashboardLauncher.rememberDisplay(
                 getWindowManager().getDefaultDisplay().getDisplayId());
         TripLocationPermission.atStartup(this);

@@ -8,6 +8,7 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import ru.big.town.common.CarPlayTarget;
+import ru.big.town.common.DashboardTarget;
 
 public class CarPlayTargetTest {
     @Test
@@ -21,7 +22,7 @@ public class CarPlayTargetTest {
                     CarPlayTarget.activityForDisplay(CarPlayTarget.ID, virtual));
         }
         for (int display : new int[] {0, 1, 9}) {
-            assertEquals(CarPlayTarget.PACKAGE + ".MainActivity",
+            assertEquals(display == 1 ? DashboardTarget.PASSENGER : DashboardTarget.DRIVER,
                     CarPlayTarget.activityForDisplay(CarPlayTarget.PACKAGE, display));
             assertNull(CarPlayTarget.activityForDisplay("app.music", display));
         }

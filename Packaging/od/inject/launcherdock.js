@@ -252,6 +252,7 @@ Java.perform(function () {
         act = cleanJavaString(act);
         return act.indexOf("SplitHostActivity") >= 0
             || act.indexOf("restoremode.MainActivity") >= 0
+            || act === "ru.big.town.restoremode.passenger.PassengerDashboardActivity"
             || act === "com.shilapi.xcertplay.DiPlayActivity"
             || act === "com.shilapi.xcertplay.CarPlayHostActivity"
             || act === "ru.big.town.restoremode.carplay.CarPlayLauncherActivity"
@@ -466,12 +467,24 @@ Java.perform(function () {
         } catch (e) { Log.e(TAG, "[dock] openVoyahTune err: " + e); return false; }
     }
 
+    function dashboardActivityForDisplay(displayId) {
+        return displayId === 1
+            ? "ru.big.town.restoremode.passenger.PassengerDashboardActivity"
+            : "ru.big.town.restoremode.MainActivity";
+    }
+
+    function isDashboardActivity(activityName) {
+        if (activityName && activityName.charAt(0) === ".") activityName = RESTORE_PKG + activityName;
+        return activityName === dashboardActivityForDisplay(0)
+            || activityName === dashboardActivityForDisplay(1);
+    }
+
     function openVoyahTuneOnDisplay(displayId) {
         try {
             if (displayId !== 0 && displayId !== 1) displayId = 0;
             // A distinct intent avoids launcher task-resume semantics when Settings is on top.
             var i = Intent.$new("ru.big.town.restoremode.OPEN_DASHBOARD");
-            i.setClassName(RESTORE_PKG, "ru.big.town.restoremode.MainActivity");
+            i.setClassName(RESTORE_PKG, dashboardActivityForDisplay(displayId));
             // Reuse Dashboard and remove any Settings activities above it.
             i.addFlags(0x10000000 | 0x04000000 | 0x20000000); // NEW_TASK | CLEAR_TOP | SINGLE_TOP
             var options = Java.use("android.app.ActivityOptions").makeBasic();
@@ -934,8 +947,13 @@ Java.perform(function () {
                 startAppIntent.implementation = function (context, intent, screenIdArg) {
                     var screenId = Number(screenIdArg);
                     var pkg = packageFromIntent(intent);
-                    // Preserve the explicit Dashboard/CarPlay entry and the OEM display routing.
-                    if (pkg === RESTORE_PKG) return startAppIntent.call(this, context, intent, screenIdArg);
+                    if (pkg === RESTORE_PKG) {
+                        var component = intent.getComponent();
+                        if (component !== null
+                                && isDashboardActivity(cleanJavaString(component.getClassName()))
+                                && openVoyahTuneOnDisplay(screenId)) return;
+                        return startAppIntent.call(this, context, intent, screenIdArg);
+                    }
                     if (returnDockAppToScreen(pkg, screenId)) return;
                     if (isUserFullscreen(pkg) && launchFullscreen(pkg, screenId)) return;
                     return startAppIntent.call(this, context, intent, screenIdArg);
@@ -945,7 +963,11 @@ Java.perform(function () {
                 startAppComponent.implementation = function (context, pkgArg, classArg, screenIdArg) {
                     var pkg = cleanJavaString(pkgArg);
                     var screenId = Number(screenIdArg);
-                    if (pkg === RESTORE_PKG) return startAppComponent.call(this, context, pkgArg, classArg, screenIdArg);
+                    if (pkg === RESTORE_PKG) {
+                        if (isDashboardActivity(cleanJavaString(classArg))
+                                && openVoyahTuneOnDisplay(screenId)) return;
+                        return startAppComponent.call(this, context, pkgArg, classArg, screenIdArg);
+                    }
                     if (returnDockAppToScreen(pkg, screenId)) return;
                     if (isUserFullscreen(pkg) && launchFullscreen(pkg, screenId)) return;
                     return startAppComponent.call(this,
@@ -960,6 +982,7 @@ Java.perform(function () {
                         Log.e(TAG, "[allapps] reject non-physical display=" + screenId + " for " + pkg);
                         return false;
                     }
+                    if (pkg === RESTORE_PKG) return openVoyahTuneOnDisplay(screenId);
                     var component = entryComponent(pkg);
                     if (component === null) {
                         if (isUserFullscreen(pkg)) return launchFullscreen(pkg, screenId);

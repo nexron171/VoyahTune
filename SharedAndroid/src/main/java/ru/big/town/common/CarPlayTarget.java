@@ -45,11 +45,16 @@ public final class CarPlayTarget {
 
     /** Saved targets stay stable; embedded CarPlay opens the projection, not its home screen. */
     public static String activityForDisplay(String target, int displayId) {
-        if (isCarPlay(target)) return displayId > 1 ? PROJECTION : ENTRY;
-        return PACKAGE.equals(target) ? PACKAGE + ".MainActivity" : null;
+        if (isCarPlay(target)) {
+            return displayId > 1 ? PROJECTION : ENTRY;
+        }
+        return PACKAGE.equals(target) ? DashboardTarget.activityForDisplay(displayId) : null;
     }
 
     public static Intent launchIntent(Context context, String target, int displayId) {
+        if (DashboardTarget.isPhysicalDashboard(target, displayId)) {
+            return DashboardTarget.intent(displayId);
+        }
         String activity = activityForDisplay(target, displayId);
         if (activity != null) {
             return new Intent(Intent.ACTION_MAIN)

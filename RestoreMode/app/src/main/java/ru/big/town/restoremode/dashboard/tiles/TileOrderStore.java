@@ -32,7 +32,8 @@ public class TileOrderStore {
         SystemWidgetLayout.CLEAR,
         MediaWidgetLayout.MEDIA,
         "tripCard",
-        "taskManagerTile"
+        "taskManagerTile",
+        "cardSettings"
     };
 
     public static class Tile {

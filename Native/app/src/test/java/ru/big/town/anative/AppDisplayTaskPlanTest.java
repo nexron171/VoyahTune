@@ -10,6 +10,22 @@ import java.util.Set;
 
 public class AppDisplayTaskPlanTest {
     @Test
+    public void dashboardLaunchPreservesBothPhysicalTasksAndCarPlay() {
+        String dashboard = ru.big.town.common.DashboardTarget.PACKAGE;
+        for (int displayId : new int[] {0, 1}) {
+            assertTrue(
+                    AppDisplayTaskPlan.retiring(
+                                    Arrays.asList(
+                                            task(10, dashboard, 0),
+                                            task(11, dashboard, 1),
+                                            task(12, dashboard, 9)),
+                                    dashboard,
+                                    displayId)
+                            .isEmpty());
+        }
+    }
+
+    @Test
     public void carPlayRetiresOldUiEvenAfterItsVirtualDisplayWasReleased() {
         String carPlay = ru.big.town.common.CarPlayTarget.ID;
         Set<Integer> retiring =

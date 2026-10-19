@@ -173,6 +173,7 @@
             android:name=".MainActivity"
             android:label="@string/voyahtune_app_name"
             android:icon="@mipmap/ic_restoremode"
+            android:launchMode="singleTask"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
