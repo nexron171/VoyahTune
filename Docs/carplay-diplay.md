@@ -47,7 +47,7 @@ flowchart LR
     Native --> Audio
     Audio <--> Policy[OEM AudioPolicy]
     Native <--> CAN[CanBusEventHub / OEM CAN]
-    Native --> Cluster[CarPlayClusterNavigation / OEM cluster]
+    Native --> Cluster[ClusterNavigationController / OEM cluster]
     Native -->|signature broadcast Siri| Bridge
     Bridge --> Integration[VoyahCarPlayIntegration]
     Integration --> Engine
@@ -826,8 +826,9 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
 
 ## 8. Манёвры на приборке
 
-В OD латинские единицы расстояния задаёт ветка `com.qinggan.cluster` в
-[app_client.js](../Packaging/od/inject/app_client.js): перехват
+В OD и PI латинские единицы расстояния задаёт `installClusterNavigation` в
+[app_client.js](../Packaging/od/inject/app_client.js) и
+[clusternavi.js](../Packaging/pi/inject/clusternavi.js): перехват
 `GuidanceFormat.toDistanceUnit(Context, int)` возвращает `m` до 1000 метров и
 `km` начиная с 1000. OEM Cluster сам кодирует строку UTF-8 и её длину в пакет.
 Это действует для всех источников манёвров, использующих этот форматтер.
@@ -839,7 +840,66 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
 Ограничения по модели автомобиля нет: требуется совместимый OEM метод, при его
 отсутствии сохраняется штатное поведение. Сборка пакета исследована на Cluster
 1.2.0 (7) H97X; другие прошивки и отображение единиц на приборке требуют
-проверки на автомобиле. PI не изменяется.
+проверки на автомобиле, включая PI.
+
+«Приложения → Манёвры на приборной панели» включено по умолчанию для OD и PI.
+Настройка `clusterNavigationEnabled` через защищённый `SetModesConfigReceiver`
+зеркалируется в `Settings.Global.voyahtune_cluster_navigation_enabled` при изменении,
+старте Native и пробуждении. Native наблюдает этот ключ, очищает все источники при
+выключении и не принимает новые подсказки до включения. Для возобновления требуется
+новый снимок; сообщения, созданные до изменения настройки, отбрасываются.
+
+Оба cluster-агента дополнительно фильтруют `updateNaviInfo(NaviInfo)` установленной
+реализации `IInstrumentClusterManagerService.Stub`. Реализация находится по полям
+живого `InstrumentClusterService`, с резервным обнаружением через `Stub.onTransact`;
+номера анонимных классов и Binder transactions не фиксируются. `ContentObserver`
+при выключении отправляет `MAN_STOP`; последующие записи подменяются новым пустым
+`NaviInfo`, не меняя объект источника. Фильтр охватывает все источники этого OEM API,
+включая CarPlay. Полноэкранная карта PI и единицы `m/km` от переключателя не зависят.
+Блоки `installClusterNavigation` в двух самостоятельных агентах одинаковы;
+их поведение и совпадение проверяет `Packaging/tests/test_cluster_navigation.js`.
+
+Для обычного запуска на ГУ добавлены одинаковые адаптеры `installNavigationSource`
+в OD `app_client.js` и PI `clusternavi.js`. Загрузчики подключаются только к уже
+работающим основным процессам `ru.yandex.yandexnavi` и `ru.dublgis.dgismobile`,
+независимо от полноэкранного режима/DPI. В PI используются существующий агент и
+`injects.json`; ожидание отсутствующего процесса больше не расходует попытки
+подключения, новый процесс получает свой лимит. Формат payload не меняется.
+
+Подтверждённые источники по предоставленным APK:
+
+- **Яндекс Навигатор 31.1.3 (739706920)**: `navikit.guidance.GuidanceBinding`,
+  `getNextManeuver()` с числовым расстоянием и `Windshield.getManoeuvres()` с `Action`.
+  Аннотация сопоставляется с точкой следующего манёвра. Объект обнаруживается через
+  конструктор/обычные getter-вызовы, без обхода heap. Слушатель ведения отслеживает
+  завершение и свежесть; вне маршрута и при потере совпадения подсказка очищается.
+- **2ГИС 7.30.0.633.26 (282010633)**: `IntegrationApplicationStateDispatcher`, тот же
+  источник, который использует экспортируемая `DashboardInformationService` API 2.
+  Наблюдаются `setNavigationState` и `setActiveNavigationMode`; принимается только
+  режим `car`. Расстояния `м/m/км/km`, десятичная запятая/точка и пробелы тысяч
+  переводятся в метры. Нераспознанная дистанция, плохая геопозиция и выход из
+  автомобильного ведения очищают подсказку. Строка описания передаётся в поле дороги.
+
+Снимок отправляется раз в секунду. Без событий движка данные устаревают через
+30 секунд; остановка/перестроение проверяются при каждом опросе. Неизвестному или
+неподдержанному направлению соответствует OEM icon 0, без подстановки похожей стрелки.
+Обращения к SDK выполняются на main looper навигатора, отправка в Native — на worker.
+APK навигаторов не перепаковываются. Будущие версии с изменёнными внутренними
+классами потребуют повторной проверки; отсутствие API оставляет штатную работу приложения.
+
+`ClusterNavigationProvider.call("maneuver")` принимает только два точных пакета;
+`getCallingPackage()` проверяется Android по Binder UID. Source нельзя задать в extras.
+Native как системный APK объявляет `forceQueryable`, чтобы provider был доступен
+приложениям без изменений их `<queries>`; это не снимает проверок прав других компонентов.
+Назначение атрибута описано в [Android manifest reference](https://developer.android.com/guide/topics/manifest/application-element#forceQueryable).
+
+`ClusterNavigationSources` выбирает свежий CarPlay, иначе последний начавший/возобновивший
+ведение обычный источник. Периодические сообщения не меняют приоритет. Остановка
+одного источника не очищает другой; при пропаже процесса его lease истекает через
+5 секунд и допускается переход только к свежему источнику. Все источники используют
+один `ClusterNavigationController` на процесс Native и один OEM writer.
+Локальные проверки адаптеров — `Packaging/tests/test_navigation_sources.js`;
+декомпиляция и mocks не заменяют испытание на ГУ/приборке.
 
 `VoyahNavigation` имеет отдельный owner-guarded `VoyahNavigationState`, использует
 парсер `BydHudRouteState(keepAcrossNoRoute=false)`, но **не включает BYD outputs**.
@@ -869,12 +929,12 @@ NUL пробелом, ограничивает дорогу 120 символам
 
 Bridge отправляет snapshot раз в секунду сообщением 123. Native принимает его только
 от `replyTo` текущего живого WATCH-владельца. При смене владельца, UNWATCH и потере
-подписчика маршрут очищается. `CarPlayNavigationLease` принимает icon 0…9,
+подписчика очищается только источник CarPlay. `ClusterNavigationLease` принимает icon 0…9,
 неотрицательное расстояние, timestamp не из будущего, возраст **<5000ms**; иначе
 очищает. Пропадание обновлений также очищает через 5 секунд. Это отдельный timeout
 доставки, не замена 30-секундному сроку route-state.
 
-`CarPlayClusterNavigation`:
+`ClusterNavigationController`:
 
 - явная служба `com.qinggan.cluster/.service.InstrumentClusterService`, action
   `com.qinggan.cluster.InstrumentClusterService`;
@@ -889,7 +949,8 @@ Bridge отправляет snapshot раз в секунду сообщение
   запрошенного состояния после загрузки OEM-классов. Не копировать номера Binder
   transaction/Parcel layout из другой прошивки и не блокировать main/iAP2 thread;
 - bind/retry с ограничением 5 секунд, отслеживание собственных записей для очистки;
-  destroy делает ограниченную best-effort очистку и освобождает ресурсы.
+  controller живёт в процессе Native, после очистки последней подсказки отсоединяется
+  от OEM службы. Закрытие CarPlay освобождает его источник, сохраняя обычную навигацию.
 
 Нужны оба APK с этим контрактом. На машине ещё требуется подтвердить права вызова,
 видимость/значения OEM-иконок и расстояний. После force-stop Native MAN_STOP не
@@ -1269,7 +1330,7 @@ app/Native/OD-файлы дополнительно перечислены в §
 | [Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java)<br>[Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java](../Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java) | Начальное TX57-чтение SWReason, последующие события; защита от устаревшего snapshot после события/reconnect/close (§6). |
 | [Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java) | Скорость, interests, OEM callback/getter в общем CAN hub (§6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java)<br>[RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml](../RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java](../Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java) | Выбор нажатия Siri, пояснение, экспорт действия и broadcast (§7). |
-| [Native/app/src/main/java/ru/big/town/anative/CarPlayNavigationLease.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayNavigationLease.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayClusterNavigation.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayClusterNavigation.java) | Срок действия snapshot и OEM writer (§8). |
+| [Native/app/src/main/java/ru/big/town/anative/ClusterNavigationLease.java](../Native/app/src/main/java/ru/big/town/anative/ClusterNavigationLease.java)<br>[Native/app/src/main/java/ru/big/town/anative/ClusterNavigationController.java](../Native/app/src/main/java/ru/big/town/anative/ClusterNavigationController.java) | Срок действия snapshot и OEM writer (§8). |
 
 Дополнительные точки последних изменений, обязательные при переносе:
 
@@ -1435,7 +1496,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Способ Wi-Fi подключения | common `HotspotModeMigrationTest`, `ExistingWifiSettingsTest`: default Wi-Fi Direct, сохранение выбранного режима и реквизитов сетей |
 | Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp), `CarPlayLightStateTest` (начальный SWReason, события и запоздавшие ответы); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest` |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
-| Манёвры | shared `hud.VoyahNavigationTest`; Native `CarPlayNavigationLeaseTest` |
+| Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/tests/test_navigation_sources.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
 | Скорость музыки и повторное заполнение | shared `media.MediaClockTrimTest`, `media.MediaClockTrimRecoveryTest`, `media.AudioClockTrimTest`, `media.MediaPacketLagGuardTest`, `media.AudioRebufferCapacityTest`: порции 300/1000 мс, дрейф ±0.76%, паузы, очередь декодера и вызов reset из AudioRenderer |
 
@@ -1489,7 +1550,7 @@ Native/gradlew -p Native :app:assembleDebug :app:testDebugUnitTest \
   --tests ru.big.town.anative.CarPlayTargetTest \
   --tests ru.big.town.anative.AppDisplayTaskPlanTest \
   --tests ru.big.town.anative.CanBusEventRouterTest \
-  --tests ru.big.town.anative.CarPlayNavigationLeaseTest \
+  --tests ru.big.town.anative.ClusterNavigationLeaseTest \
   -PvoyahReleaseVersion="$voyah_release_version" -PvoyahInfrastructure=od
 ```
 
