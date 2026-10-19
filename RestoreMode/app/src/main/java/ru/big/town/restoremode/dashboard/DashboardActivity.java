@@ -1334,7 +1334,6 @@ public class DashboardActivity extends AppCompatActivity {
      */
     private boolean isLaunchAppsTileCandidate(PackageManager pm, String pkg) {
         if (pkg.equals(getPackageName())
-                || pkg.equals("ru.big.town.anative")
                 || pkg.startsWith("com.qinggan")
                 || pkg.startsWith("com.android.car")) {
             return false;
@@ -1349,9 +1348,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Контекстное меню иконки «Быстрого запуска»: куда открыть приложение. */
     private void showLaunchAppMenu(View anchor, String pkg) {
-        final int idMainDisplay = 1;
-        final int idPassengerDisplay = 3;
-        final int idNoWidgets = 2;
+        final int idMainDisplay = 0;
+        final int idPassengerDisplay = 1;
+        final int idNoWidgets = 10;
         final int idWidgetBase = 100;
         java.util.List<AppWidgetStore.Entry> widgets = AppWidgetStore.load(sharedPreferences);
         android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
