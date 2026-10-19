@@ -241,7 +241,8 @@ final class MediaWidgetView extends View {
         float artTop = sourceRect.bottom + 12f;
         float artMaxHeight = controlsCenterY - controlRadius - artTop - 120f;
         float artSize = Math.min(widthDp - padding * 2, Math.max(70f, artMaxHeight));
-        artSize = Math.min(artSize, 230f);
+        float artCap = heightDp >= 440f ? 340f : 230f;
+        artSize = Math.min(artSize, artCap);
         float artLeft = (widthDp - artSize) / 2f;
         artRect.set(artLeft, artTop, artLeft + artSize, artTop + artSize);
 
