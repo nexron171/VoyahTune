@@ -1346,20 +1346,29 @@ app/Native/OD-файлы дополнительно перечислены в §
 
 [CarPlayDashboardScrollTouchListener](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayDashboardScrollTouchListener.java) оборачивает
 обработчик касаний TextureView в DashboardActivity. Один палец передаётся в
-проекцию без изменений. При втором пальце отправляется ACTION_CANCEL в прежний
-обработчик (включая long-press detector), а горизонтальный drag прокручивает
+проекцию без изменений. Второй палец тоже передаётся в CarPlay: до определения
+жеста проекция получает исходные события. Изменение взаимного положения пальцев
+больше touch slop (pinch/вращение) или преимущественно вертикальное движение
+закрепляет жест за CarPlay до UP/CANCEL, включая смену числа пальцев.
+Только совместное преимущественно горизонтальное движение всех пальцев за
+порог touch slop отправляет ACTION_CANCEL в прежний обработчик (включая
+long-press detector), после чего горизонтальный drag прокручивает
 HorizontalScrollView главной с существующим выравниванием по страницам при отпускании.
 Это позволяет выйти за пределы виджета шириной
-12 плиток. Жест захвачен до UP/CANCEL последнего пальца: оставшийся один палец
+12 плиток и сохраняет pinch-to-zoom внутри CarPlay. Захваченный Dashboard жест
+остаётся у него до UP/CANCEL последнего пальца: оставшийся один палец
 не возобновляет ввод в CarPlay. Смена числа пальцев переустанавливает опорную
-координату без скачка; смещение считается в экранных координатах, чтобы движение
+координату без скачка; начальные позиции сопоставляются по pointer ID.
+Смещение считается в экранных координатах, чтобы движение
 самого виджета при прокрутке не создавало обратную связь. Обычный touch slop
 отсекает дрожание. Для других приложений multi-touch остаётся прежним; тип
 текущего приложения читается из embeddedWidgetPackages, включая смену профиля.
 Полноэкранная Activity CarPlay и виджет-ярлык 1×1 этим обработчиком не затронуты.
 При переносе адаптации сохранять helper и его подключение в DashboardActivity.
-Проверка: `CarPlayDashboardScrollTouchListenerTest` (один/два пальца, смена числа
-пальцев, CANCEL, следующий жест, обычное приложение). Проверка на ГУ обязательна
+Проверка: `CarPlayDashboardScrollTouchListenerTest` (один палец, два пальца без
+прокрутки, горизонтальный/вертикальный/диагональный и асимметричный pinch,
+вертикальный drag, горизонтальная прокрутка, смена числа пальцев, CANCEL,
+следующий жест, обычное приложение). Проверка на ГУ обязательна
 для подтверждения UX и маршрута касаний через Native; локальный тест её не заменяет.
 
 ## 11. Восстановление после полной замены upstream
@@ -1488,7 +1497,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Два значка OD и безопасная область | `Packaging/tests/test_carplay_allapps.js`; app `CarPlaySafeAreaTest`; common `CarPlayWindowUiTest`, `CarPlayHostVideoSurfaceTest` |
 | Защита сессии в памяти OD | `Packaging/tests/test_carplay_memory_protection.js`: приоритет только при session FGS, снятие защиты, изоляция Activity/процессов, несовместимый ABI; `test_vd_stability.js`: установка и откат hooks. |
 | Нажатия OD-дока | `Packaging/tests/test_dock_navigation_actions.js`; перенос обоих config extras и OD guards проверить с двух сторон |
-| Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`; отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
+| Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`, `carplay.CarPlayDashboardScrollTouchListenerTest` (pinch в CarPlay и горизонтальная прокрутка Dashboard); отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
 | Возврат на главную и фон | `Packaging/tests/test_carplay_dashboard_navigation.js`; app `carplay.CarPlayDashboardDisplayTest`; common `CarPlayHostUiNavigationTest` (requestUI/controller без Activity), `VoyahSessionTransferTest`; shared `media.VideoSurfaceHandoffTest` |
 | Независимые сетки и перенос OD | app `DashboardTaskIsolationTest` (manifest, affinity, маршруты и плитка настроек), `OdDashboardTransferPolicyTest` (OD/PI и исключения CarPlay); Native `AppDisplayTaskPlanTest` (сохранение соседней сетки и CarPlay); `Packaging/tests/test_carplay_dashboard_navigation.js` (оба OEM-входа, дисплеи 0/1 и сохранение маршрутов CarPlay) |
 | Task/component/display | Native `CarPlayTargetTest` (выбор компонента home на 0/1 и projection на VD со старым ID; полноэкранные входы направляются в VD-хост до разрешения intent), `AppDisplayTaskPlanTest`, `SplitHostTaskSnapshotTest` (CarPlay на своём VD, исключение Dashboard/launcher, unknown display); app `CarPlayDashboardDisplayTest` (возврат с полноэкранного VD на физический экран хоста); common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
@@ -1567,6 +1576,7 @@ process/affinity), итоговые ABI/подписи/наличие assets, н
 | Launcher / 1×1 / 8×5 / 12×5 | Правильный физический экран хоста и projection на VD, работающие касания/resize; 1×1 не создаёт Surface внутри Dashboard. Полноэкранная панель и окно виджета обрезаются по 44dp; Home/возврат сохраняют VD без нового controller. |
 | Виджет ↔ Activity во время сессии | Старый UI уничтожен, iPhone переподключён, новый размер согласован; старый controller закрыт до нового, сервис/CAN-подписка перезапущены; неактивный виджет чёрный с иконкой, Dashboard не закрывается. |
 | Виджет CarPlay → системный Home → VoyahTune | Тот же VD, task и Host Activity; на Home Native принимает кадры в парковочную поверхность, после возврата живое изображение возвращается без нового подключения. |
+| Жесты внутри виджета CarPlay | Сведение/разведение пальцев масштабирует карту; совместное горизонтальное движение прокручивает Dashboard. Владелец распознанного жеста не меняется до отпускания всех пальцев; следующий жест обрабатывается независимо. |
 | Auto on/off, нет телефона, Back, home/settings | Нет нежелательных циклов запуска; все три UI показывают одно значение, таймера нет. |
 | Раздел CarPlay | Живое состояние; Disconnect завершает сессию, opening home не делает reconnect. |
 | Скорость/передача, отключённый GPS | km/h→m/s, корректные P/R/N/D, stale/unknown не передаются как действительные данные. |
