@@ -5,11 +5,13 @@ public final class MediaWidgetLayout {
     public static final String MEDIA = "mediaWidget";
 
     public static final int DEFAULT_WIDTH = 3;
-    public static final int DEFAULT_HEIGHT = 1;
+    public static final int DEFAULT_HEIGHT = 5;
 
     private static final int MIN_WIDTH = 1;
     private static final int MAX_WIDTH = 4;
-    private static final int MAX_HEIGHT = 2;
+    private static final int NARROW_WIDTH = 2;
+    private static final int NARROW_MAX_HEIGHT = 2;
+    private static final int MAX_HEIGHT = 5;
 
     private MediaWidgetLayout() {}
 
@@ -30,7 +32,10 @@ public final class MediaWidgetLayout {
     }
 
     public static int maxHeight(int columns) {
-        return columns <= MIN_WIDTH ? 1 : MAX_HEIGHT;
+        if (columns <= MIN_WIDTH) {
+            return 1;
+        }
+        return columns <= NARROW_WIDTH ? NARROW_MAX_HEIGHT : MAX_HEIGHT;
     }
 
     public static int width(int value) {

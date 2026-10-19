@@ -107,6 +107,50 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
+        // Media widget has no active session: the user picked a player to start in background.
+        if ("ru.big.town.anative.SET_MEDIA_AUTOSTART_PLAYER".equals(receivedIntent)) {
+            int sender = android.os.Binder.getCallingUid();
+            boolean trusted =
+                    sender == Process.myUid()
+                            || sender == Process.SYSTEM_UID
+                            || sender == Process.ROOT_UID
+                            || context.getPackageManager()
+                                            .checkSignatures(sender, Process.myUid())
+                                    == PackageManager.SIGNATURE_MATCH;
+            String pkg = intent.getStringExtra("pkg");
+            int displayId = intent.getIntExtra("display", 0);
+            if (!trusted) {
+                Log.w(TAG, "SET_MEDIA_AUTOSTART_PLAYER отклонён: uid=" + sender);
+            } else if (pkg == null || pkg.isEmpty()) {
+                Log.w(TAG, "SET_MEDIA_AUTOSTART_PLAYER отклонён: пустой пакет");
+            } else {
+                MediaPlayerAutostart.launchPlayerWithPlayback(
+                        context,
+                        pkg,
+                        displayId == 1 ? 1 : 0,
+                        new Handler(Looper.getMainLooper()));
+            }
+        }
+
+        // Media widget volume buttons: inject a hardware-like volume key so the OEM audio policy
+        // applies its focus group and volume overlay.
+        if ("ru.big.town.anative.ADJUST_VOLUME".equals(receivedIntent)) {
+            int sender = android.os.Binder.getCallingUid();
+            boolean trusted =
+                    sender == Process.myUid()
+                            || sender == Process.SYSTEM_UID
+                            || sender == Process.ROOT_UID
+                            || context.getPackageManager()
+                                            .checkSignatures(sender, Process.myUid())
+                                    == PackageManager.SIGNATURE_MATCH;
+            int direction = intent.getIntExtra("direction", 0);
+            if (trusted && direction != 0) {
+                VolumeKeyInjector.adjust(context, direction);
+            } else {
+                Log.w(TAG, "ADJUST_VOLUME отклонён: uid=" + sender);
+            }
+        }
+
         // Launcher hook routes an allowlisted All Apps tile here so ActivityOptions can normalize a
         // reused freeform task before the activity is resumed. The exported bridge accepts only the
         // exact package persisted by the protected fullscreen config receiver.

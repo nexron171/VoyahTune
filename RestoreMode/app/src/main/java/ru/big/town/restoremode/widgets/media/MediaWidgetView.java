@@ -29,6 +29,12 @@ final class MediaWidgetView extends View {
         void onCommand(Command command);
 
         void onOpenPlayer();
+
+        void onPickPlayer();
+
+        void onVolumeDown();
+
+        void onVolumeUp();
     }
 
     private static final int ZONE_NONE = 0;
@@ -36,6 +42,9 @@ final class MediaWidgetView extends View {
     private static final int ZONE_PLAY = 2;
     private static final int ZONE_NEXT = 3;
     private static final int ZONE_OPEN = 4;
+    private static final int ZONE_PICK_PLAYER = 5;
+    private static final int ZONE_VOLUME_DOWN = 6;
+    private static final int ZONE_VOLUME_UP = 7;
 
     private static final int ACCENT = 0xff79b5f1;
     private static final int CONTROL_BACKGROUND = 0x332f4c6a;
@@ -47,6 +56,9 @@ final class MediaWidgetView extends View {
     private final RectF previousRect = new RectF();
     private final RectF playRect = new RectF();
     private final RectF nextRect = new RectF();
+    private final RectF pickPlayerRect = new RectF();
+    private final RectF volumeDownRect = new RectF();
+    private final RectF volumeUpRect = new RectF();
     private final Drawable placeholder;
     private final Listener listener;
     private final float density;
@@ -99,7 +111,8 @@ final class MediaWidgetView extends View {
 
     private void updateContentDescription() {
         if (nowPlaying.isEmpty()) {
-            setContentDescription("Управление музыкой: ничего не играет");
+            setContentDescription(
+                    "Управление музыкой: ничего не играет. Выбрать плеер. Кнопки громкости.");
             return;
         }
         String state = nowPlaying.isPlaying() ? "воспроизведение" : "пауза";
@@ -126,12 +139,24 @@ final class MediaWidgetView extends View {
         previousRect.setEmpty();
         playRect.setEmpty();
         nextRect.setEmpty();
+        pickPlayerRect.setEmpty();
+        volumeDownRect.setEmpty();
+        volumeUpRect.setEmpty();
         if (widthDp <= 0 || heightDp <= 0) {
             return;
         }
         float padding = 8f;
         compact = widthDp < 200f;
         tall = heightDp >= 170f;
+        float buttonWidth = Math.min(widthDp - padding * 2, compact ? 120f : 240f);
+        float buttonHeight = compact ? 44f : 56f;
+        float buttonCenterX = widthDp / 2f;
+        float buttonCenterY = heightDp / 2f;
+        pickPlayerRect.set(
+                buttonCenterX - buttonWidth / 2,
+                buttonCenterY - buttonHeight / 2,
+                buttonCenterX + buttonWidth / 2,
+                buttonCenterY + buttonHeight / 2);
         if (compact) {
             float size = Math.min(widthDp, heightDp) - padding * 2;
             artRect.set(
@@ -155,6 +180,21 @@ final class MediaWidgetView extends View {
         artRect.set(padding, artTop, padding + artSize, artTop + artSize);
         textLeft = artRect.right + 14f;
         textRight = widthDp - padding;
+        if (tall) {
+            float volumeSize = 38f;
+            float volumeGap = 8f;
+            volumeUpRect.set(
+                    textRight - volumeSize,
+                    padding,
+                    textRight,
+                    padding + volumeSize);
+            volumeDownRect.set(
+                    volumeUpRect.left - volumeGap - volumeSize,
+                    padding,
+                    volumeUpRect.left - volumeGap,
+                    padding + volumeSize);
+            textRight = volumeDownRect.left - 12f;
+        }
 
         titleSize = tall ? 28f : widthDp < 360f ? 20f : 24f;
         subtitleSize = tall ? 20f : widthDp < 360f ? 16f : 18f;
@@ -210,6 +250,9 @@ final class MediaWidgetView extends View {
             }
             drawControls(canvas);
         }
+        if (tall) {
+            drawVolumeControls(canvas);
+        }
         canvas.restore();
     }
 
@@ -252,18 +295,44 @@ final class MediaWidgetView extends View {
     }
 
     private void drawEmpty(Canvas canvas) {
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(EnergyWidgetStyle.MUTED);
-        paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTextSize((compact ? 15f : 18f) * fontScale);
-        paint.setTypeface(Typeface.SANS_SERIF);
-        float x = compact ? widthDp / 2 : (textLeft + textRight) / 2;
-        float y = compact ? heightDp - 8f : artRect.centerY();
-        canvas.drawText("Ничего не играет", x, y, paint);
         if (!compact) {
-            paint.setTextSize(15f * fontScale);
-            canvas.drawText("Запустите плеер", x, y + 22f * fontScale, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(EnergyWidgetStyle.MUTED);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTextSize(16f * fontScale);
+            paint.setTypeface(Typeface.SANS_SERIF);
+            canvas.drawText(
+                    "Ничего не играет",
+                    pickPlayerRect.centerX(),
+                    pickPlayerRect.top - 14f * fontScale,
+                    paint);
         }
+        drawPickPlayerButton(canvas);
+    }
+
+    private void drawPickPlayerButton(Canvas canvas) {
+        float radius = pickPlayerRect.height() / 2f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(pressedZone == ZONE_PICK_PLAYER ? 0xff3b6f9e : 0xff2f5f8a);
+        canvas.drawRoundRect(pickPlayerRect, radius, radius, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(1f);
+        paint.setColor(ACCENT);
+        canvas.drawRoundRect(pickPlayerRect, radius, radius, paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setStrokeWidth(0f);
+        paint.setColor(0xffffffff);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(Typeface.SANS_SERIF);
+        paint.setTextSize((compact ? 15f : 18f) * fontScale);
+        float baseline =
+                pickPlayerRect.centerY()
+                        - (paint.descent() + paint.ascent()) / 2f;
+        canvas.drawText(
+                compact ? "Плеер" : "Выбрать плеер",
+                pickPlayerRect.centerX(),
+                baseline,
+                paint);
     }
 
     private void drawTrackText(Canvas canvas) {
@@ -332,6 +401,49 @@ final class MediaWidgetView extends View {
         drawSkip(canvas, previousRect, false);
         drawPlayPause(canvas, playRect);
         drawSkip(canvas, nextRect, true);
+    }
+
+    private void drawVolumeControls(Canvas canvas) {
+        drawRoundButton(canvas, volumeDownRect, ZONE_VOLUME_DOWN);
+        drawRoundButton(canvas, volumeUpRect, ZONE_VOLUME_UP);
+        drawVolumeGlyph(canvas, volumeDownRect, false);
+        drawVolumeGlyph(canvas, volumeUpRect, true);
+    }
+
+    private void drawRoundButton(Canvas canvas, RectF rect, int zone) {
+        if (rect.isEmpty()) {
+            return;
+        }
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(pressedZone == zone ? 0x665b7fa6 : CONTROL_BACKGROUND);
+        float radius = rect.height() / 2f;
+        canvas.drawRoundRect(rect, radius, radius, paint);
+    }
+
+    private void drawVolumeGlyph(Canvas canvas, RectF rect, boolean plus) {
+        if (rect.isEmpty()) {
+            return;
+        }
+        float size = Math.min(rect.width(), rect.height()) * .28f;
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(2.5f);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        paint.setColor(EnergyWidgetStyle.WHITE);
+        canvas.drawLine(
+                rect.centerX() - size,
+                rect.centerY(),
+                rect.centerX() + size,
+                rect.centerY(),
+                paint);
+        if (plus) {
+            canvas.drawLine(
+                    rect.centerX(),
+                    rect.centerY() - size,
+                    rect.centerX(),
+                    rect.centerY() + size,
+                    paint);
+        }
+        paint.setStrokeCap(Paint.Cap.BUTT);
     }
 
     private void drawControlBackground(Canvas canvas, RectF rect, int zone) {
@@ -494,6 +606,21 @@ final class MediaWidgetView extends View {
     }
 
     private void activate(int zone) {
+        if (zone == ZONE_VOLUME_DOWN) {
+            performClick();
+            listener.onVolumeDown();
+            return;
+        }
+        if (zone == ZONE_VOLUME_UP) {
+            performClick();
+            listener.onVolumeUp();
+            return;
+        }
+        if (zone == ZONE_PICK_PLAYER) {
+            performClick();
+            listener.onPickPlayer();
+            return;
+        }
         if (nowPlaying.isEmpty()) {
             return;
         }
@@ -510,8 +637,14 @@ final class MediaWidgetView extends View {
     }
 
     private int zoneAt(float x, float y) {
+        if (!volumeDownRect.isEmpty() && hit(volumeDownRect, x, y)) {
+            return ZONE_VOLUME_DOWN;
+        }
+        if (!volumeUpRect.isEmpty() && hit(volumeUpRect, x, y)) {
+            return ZONE_VOLUME_UP;
+        }
         if (nowPlaying.isEmpty()) {
-            return ZONE_NONE;
+            return hit(pickPlayerRect, x, y) ? ZONE_PICK_PLAYER : ZONE_NONE;
         }
         if (hit(playRect, x, y)) {
             return ZONE_PLAY;

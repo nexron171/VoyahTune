@@ -16,6 +16,7 @@ import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.PowerManager;
 import android.os.IBinder;
 import android.os.Process;
 import android.system.Os;
@@ -334,6 +335,7 @@ public class NowPlayingService extends Service {
                     @Override public void onPlaybackStateChanged(PlaybackState state) {
                         if (!isActiveWatcher(generation, watcherEpoch)) return;
                         boolean active = MediaControlRouter.isActiveState(state);
+                        rememberPlaybackState(watchedController, state, active);
                         PlaybackActivityTracker.Change change = activity.update(active);
                         if (change == PlaybackActivityTracker.Change.ENTERED_ACTIVE) {
                             notePlayingIfActive(watchedToken, generation, watcherEpoch);
@@ -358,6 +360,11 @@ public class NowPlayingService extends Service {
                     c.registerCallback(cb, callbacks);
                     watched.add(c);
                     watchedCbs.add(cb);
+                    PlaybackState initial = safePlaybackState(watchedController);
+                    rememberPlaybackState(
+                            watchedController,
+                            initial,
+                            MediaControlRouter.isActiveState(initial));
                 } catch (Exception ignored) {}
             }
         }
@@ -398,6 +405,36 @@ public class NowPlayingService extends Service {
         synchronized (INSTANCE_CALLBACK_LOCK) {
             if (!isActiveWatcher(generation, watcherEpoch)) return;
             MediaControlRouter.notePlaying(token, generation);
+        }
+    }
+
+    /** Persisted resume flag must follow user pauses, but not a system pause during sleep. */
+    private void rememberPlaybackState(
+            MediaController controller, PlaybackState state, boolean active) {
+        String packageName = controller == null ? "" : nz(controller.getPackageName());
+        if (packageName.isEmpty()) {
+            return;
+        }
+        if (active) {
+            MediaPlayerAutostart.rememberPlaying(this, packageName);
+            return;
+        }
+        if (state == null || !isScreenInteractive()) {
+            return;
+        }
+        int playbackState = state.getState();
+        if (playbackState == PlaybackState.STATE_PAUSED
+                || playbackState == PlaybackState.STATE_STOPPED) {
+            MediaPlayerAutostart.rememberPaused(this, packageName);
+        }
+    }
+
+    private boolean isScreenInteractive() {
+        try {
+            PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+            return powerManager == null || powerManager.isInteractive();
+        } catch (RuntimeException ignored) {
+            return true;
         }
     }
 
@@ -517,6 +554,9 @@ public class NowPlayingService extends Service {
                 }
                 PlaybackState ps = current.getPlaybackState();
                 if (ps != null) { state = ps.getState(); position = ps.getPosition(); }
+                if (ps != null && MediaControlRouter.isActiveState(ps)) {
+                    MediaPlayerAutostart.rememberPlaying(this, pkg);
+                }
             }
 
             synchronized (SNAPSHOT_COMMIT_LOCK) {

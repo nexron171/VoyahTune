@@ -19,7 +19,7 @@ public class MediaWidgetTest {
         Map<String, Object> saved = new HashMap<>();
         SharedPreferences prefs = prefs(saved);
         assertArrayEquals(
-                new int[] {3, 1},
+                new int[] {3, 5},
                 TileSizeStore.dimensions(
                         prefs,
                         MediaWidgetLayout.MEDIA,
@@ -29,19 +29,25 @@ public class MediaWidgetTest {
         TileSizeStore.setWidth(prefs, MediaWidgetLayout.MEDIA, 12);
         TileSizeStore.setHeight(prefs, MediaWidgetLayout.MEDIA, 5);
         assertArrayEquals(
-                new int[] {4, 2},
-                TileSizeStore.dimensions(prefs, MediaWidgetLayout.MEDIA, 3, 1));
+                new int[] {4, 5},
+                TileSizeStore.dimensions(prefs, MediaWidgetLayout.MEDIA, 3, 5));
 
         TileSizeStore.setWidth(prefs, MediaWidgetLayout.MEDIA, 1);
         assertArrayEquals(
                 new int[] {1, 1},
-                TileSizeStore.dimensions(prefs, MediaWidgetLayout.MEDIA, 3, 1));
+                TileSizeStore.dimensions(prefs, MediaWidgetLayout.MEDIA, 3, 5));
 
         TileSizeStore.setWidth(prefs, MediaWidgetLayout.MEDIA, 2);
-        TileSizeStore.setHeight(prefs, MediaWidgetLayout.MEDIA, 2);
+        TileSizeStore.setHeight(prefs, MediaWidgetLayout.MEDIA, 5);
         assertArrayEquals(
                 new int[] {2, 2},
-                TileSizeStore.dimensions(prefs, MediaWidgetLayout.MEDIA, 3, 1));
+                TileSizeStore.dimensions(prefs, MediaWidgetLayout.MEDIA, 3, 5));
+
+        TileSizeStore.setWidth(prefs, MediaWidgetLayout.MEDIA, 3);
+        TileSizeStore.setHeight(prefs, MediaWidgetLayout.MEDIA, 5);
+        assertArrayEquals(
+                new int[] {3, 5},
+                TileSizeStore.dimensions(prefs, MediaWidgetLayout.MEDIA, 3, 5));
     }
 
     @Test
