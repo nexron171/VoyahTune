@@ -17,30 +17,22 @@ import android.widget.TextView;
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
 
+import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.restoremode.R;
 
-/**
- * Экран «Логирование»: тумблер записи логов Native в файл (/sdcard/tmp), живая лента (опрос снимка
- * у Native раз в секунду) и «Выгрузить логи» (share файла из Native). Управление и файл — на
- * стороне Native (там всё логирование). См. SetModesService MSG_LOGGING_ENABLE/SHARE +
- * ACTION_REQUEST_LOG/LOG_UPDATE.
- */
 public class LogViewerActivity extends AppCompatActivity {
-
-    private static final String TAG = "$$$ LoggingActivity $$$";
     private static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
     private static final String ACTION_LOG_UPDATE = "ru.big.town.anative.LOG_UPDATE";
     private static final String ACTION_LOGGING_SET = "ru.big.town.anative.LOGGING_SET";
     private static final String ACTION_LOGGING_SHARE = "ru.big.town.anative.LOGGING_SHARE";
-    private static final String NATIVE_PKG = "ru.big.town.anative";
-    private static final long POLL_MS = 1000L;
+    private static final String NATIVE_PACKAGE = "ru.big.town.anative";
+    private static final long POLL_INTERVAL_MS = 1000;
 
-    private SharedPreferences prefs;
-    private Switch switchLogging;
-    private TextView textLog, textLogPath;
+    private TextView textLog;
+    private TextView textLogPath;
     private ScrollView scrollLog;
-    private final Handler uiHandler = new Handler(Looper.getMainLooper());
-
+    private SystemLogController systemLog;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private String lastContent = "";
     private boolean firstLoad = true;
 
@@ -48,52 +40,20 @@ public class LogViewerActivity extends AppCompatActivity {
             new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
-                    String log = intent.getStringExtra("log");
                     String path = intent.getStringExtra("path");
                     if (path != null) {
                         textLogPath.setText("Файл: " + path);
                     }
-                    if (log == null || log.equals(lastContent)) {
-                        return;
-                    } // нет изменений — не трогаем скролл
-
-                    // Якорь — расстояние от НИЗА (для tail-лога стабильно: переживает и дозапись
-                    // снизу,
-                    // и выпадение старых строк сверху из кольцевого буфера). У низа → следуем за
-                    // хвостом.
-                    int contentH =
-                            (scrollLog.getChildCount() > 0)
-                                    ? scrollLog.getChildAt(0).getHeight()
-                                    : 0;
-                    int viewportH = scrollLog.getHeight();
-                    final int prevFromBottom =
-                            Math.max(0, contentH - scrollLog.getScrollY() - viewportH);
-                    final boolean follow = firstLoad || prevFromBottom <= dp(12);
-                    lastContent = log;
-                    firstLoad = false;
-                    textLog.setText(log);
-                    scrollLog.post(
-                            () -> {
-                                if (follow) {
-                                    scrollLog.fullScroll(View.FOCUS_DOWN);
-                                    return;
-                                }
-                                int newH =
-                                        (scrollLog.getChildCount() > 0)
-                                                ? scrollLog.getChildAt(0).getHeight()
-                                                : 0;
-                                int y = Math.max(0, newH - scrollLog.getHeight() - prevFromBottom);
-                                scrollLog.scrollTo(0, y);
-                            });
+                    displayLog(intent.getStringExtra("log"));
                 }
             };
 
-    private final Runnable poll =
+    private final Runnable pollNative =
             new Runnable() {
                 @Override
                 public void run() {
-                    requestSnapshot();
-                    uiHandler.postDelayed(this, POLL_MS);
+                    sendBroadcast(new Intent(ACTION_REQUEST_LOG).setPackage(NATIVE_PACKAGE));
+                    handler.postDelayed(this, POLL_INTERVAL_MS);
                 }
             };
 
@@ -102,58 +62,99 @@ public class LogViewerActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-        setContentView(R.layout.activity_logging);
-
-        prefs = getSharedPreferences("DrivePreferences", MODE_PRIVATE);
-        switchLogging = findViewById(R.id.switchLogging);
+        boolean systemLogging = InfrastructureProfile.read(this) == InfrastructureProfile.OD;
+        setContentView(
+                systemLogging ? R.layout.activity_logging : R.layout.activity_native_logging);
         textLog = findViewById(R.id.textLog);
         textLogPath = findViewById(R.id.textLogPath);
         scrollLog = findViewById(R.id.scrollLog);
+        if (systemLogging) {
+            systemLog = new SystemLogController(this, this::displayLog);
+        } else {
+            SharedPreferences preferences = getSharedPreferences("DrivePreferences", MODE_PRIVATE);
+            Switch loggingSwitch = findViewById(R.id.switchLogging);
+            loggingSwitch.setChecked(preferences.getBoolean("loggingEnabled", false));
+            loggingSwitch.setOnCheckedChangeListener(
+                    (button, checked) -> {
+                        preferences.edit().putBoolean("loggingEnabled", checked).apply();
+                        Intent request = new Intent(ACTION_LOGGING_SET).setPackage(NATIVE_PACKAGE);
+                        request.putExtra("on", checked);
+                        sendBroadcast(request);
+                    });
+        }
+    }
 
-        switchLogging.setChecked(prefs.getBoolean("loggingEnabled", false));
-        switchLogging.setOnCheckedChangeListener(
-                (b, checked) -> {
-                    prefs.edit().putBoolean("loggingEnabled", checked).apply();
-                    Intent i = new Intent(ACTION_LOGGING_SET).setPackage(NATIVE_PKG);
-                    i.putExtra("on", checked);
-                    sendBroadcast(i);
+    private void displayLog(String log) {
+        if (log == null || log.equals(lastContent)) {
+            return;
+        }
+        // Anchor to the bottom while the oldest lines leave the bounded live view.
+        int contentHeight = scrollLog.getChildCount() > 0 ? scrollLog.getChildAt(0).getHeight() : 0;
+        int distanceFromBottom =
+                Math.max(0, contentHeight - scrollLog.getScrollY() - scrollLog.getHeight());
+        boolean follow =
+                firstLoad
+                        || distanceFromBottom
+                                <= Math.round(12 * getResources().getDisplayMetrics().density);
+        lastContent = log;
+        firstLoad = false;
+        textLog.setText(log);
+        scrollLog.post(
+                () -> {
+                    if (follow) {
+                        scrollLog.fullScroll(View.FOCUS_DOWN);
+                    } else {
+                        int newHeight =
+                                scrollLog.getChildCount() > 0
+                                        ? scrollLog.getChildAt(0).getHeight()
+                                        : 0;
+                        scrollLog.scrollTo(
+                                0,
+                                Math.max(
+                                        0, newHeight - scrollLog.getHeight() - distanceFromBottom));
+                    }
                 });
     }
 
-    public void onButtonBackLogging(View v) {
+    public void onButtonBackLogging(View view) {
         finish();
     }
 
-    /** «Выгрузить логи» → Native открывает share-чузер с лог-файлом. */
-    public void onButtonShareLog(View v) {
-        sendBroadcast(new Intent(ACTION_LOGGING_SHARE).setPackage(NATIVE_PKG));
-    }
-
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
-    }
-
-    private void requestSnapshot() {
-        Intent i = new Intent(ACTION_REQUEST_LOG);
-        i.setPackage("ru.big.town.anative");
-        sendBroadcast(i);
+    public void onButtonShareLog(View view) {
+        sendBroadcast(new Intent(ACTION_LOGGING_SHARE).setPackage(NATIVE_PACKAGE));
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        if (systemLog != null) {
+            systemLog.resume();
+            return;
+        }
         registerReceiver(logReceiver, new IntentFilter(ACTION_LOG_UPDATE), RECEIVER_EXPORTED);
-        uiHandler.removeCallbacks(poll);
-        uiHandler.post(poll);
+        handler.removeCallbacks(pollNative);
+        handler.post(pollNative);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        if (systemLog != null) {
+            systemLog.pause();
+            return;
+        }
         try {
             unregisterReceiver(logReceiver);
-        } catch (Exception ignored) {
+        } catch (IllegalArgumentException ignored) {
         }
-        uiHandler.removeCallbacks(poll);
+        handler.removeCallbacks(pollNative);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (systemLog != null) {
+            systemLog.close();
+        }
+        super.onDestroy();
     }
 }

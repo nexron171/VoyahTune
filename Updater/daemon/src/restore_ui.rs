@@ -23,6 +23,7 @@ pub fn capabilities() -> Vec<&'static str> {
         result.push("restoremode-ota-ui-v1");
         result.push("catalog-releases");
         result.push("select-release");
+        result.push("application-log-v1");
     }
     result
 }
