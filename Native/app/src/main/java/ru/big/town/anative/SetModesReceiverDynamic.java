@@ -132,25 +132,6 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
-        // Media widget volume buttons: inject a hardware-like volume key so the OEM audio policy
-        // applies its focus group and volume overlay.
-        if ("ru.big.town.anative.ADJUST_VOLUME".equals(receivedIntent)) {
-            int sender = android.os.Binder.getCallingUid();
-            boolean trusted =
-                    sender == Process.myUid()
-                            || sender == Process.SYSTEM_UID
-                            || sender == Process.ROOT_UID
-                            || context.getPackageManager()
-                                            .checkSignatures(sender, Process.myUid())
-                                    == PackageManager.SIGNATURE_MATCH;
-            int direction = intent.getIntExtra("direction", 0);
-            if (trusted && direction != 0) {
-                VolumeKeyInjector.adjust(context, direction);
-            } else {
-                Log.w(TAG, "ADJUST_VOLUME отклонён: uid=" + sender);
-            }
-        }
-
         // Launcher hook routes an allowlisted All Apps tile here so ActivityOptions can normalize a
         // reused freeform task before the activity is resumed. The exported bridge accepts only the
         // exact package persisted by the protected fullscreen config receiver.

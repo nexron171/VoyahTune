@@ -30,8 +30,8 @@ final class MediaPlayerPicker {
         Map<String, String> labels = candidates(context);
         if (labels.isEmpty()) {
             new MaterialAlertDialogBuilder(context, R.style.SettingsDialog)
-                    .setTitle("Выбор плеера")
-                    .setMessage("Не найдено приложений с поддержкой медиаплеера.")
+                    .setTitle("Выбор источника")
+                    .setMessage("Не найдено приложений-источников.")
                     .setPositiveButton("Понятно", null)
                     .show();
             return;
@@ -55,7 +55,7 @@ final class MediaPlayerPicker {
         }
 
         new MaterialAlertDialogBuilder(context, R.style.SettingsDialog)
-                .setTitle("Выбор плеера")
+                .setTitle("Выбор источника")
                 .setItems(
                         items,
                         (dialog, which) -> callback.onPicked(packages.get(which)))

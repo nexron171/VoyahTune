@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
-import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
@@ -25,7 +24,6 @@ public final class MediaWidgetDashboard {
     private static final long TICK_MS = 1000L;
     private static final String ACTION_SET_MEDIA_AUTOSTART_PLAYER =
             "ru.big.town.anative.SET_MEDIA_AUTOSTART_PLAYER";
-    private static final String ACTION_ADJUST_VOLUME = "ru.big.town.anative.ADJUST_VOLUME";
     private static final String BIND_SET_MODES_PERMISSION =
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
 
@@ -190,7 +188,7 @@ public final class MediaWidgetDashboard {
         }
     }
 
-    private void pickPlayer() {
+    private void chooseSource() {
         MediaPlayerPicker.show(
                 context,
                 packageName -> {
@@ -203,25 +201,11 @@ public final class MediaWidgetDashboard {
                                     .putExtra("display", DashboardProfile.displayId(context));
                     try {
                         context.sendBroadcast(request, BIND_SET_MODES_PERMISSION);
-                        notify.accept("Запускаем выбранный плеер");
+                        notify.accept("Запускаем выбранный источник");
                     } catch (RuntimeException error) {
-                        notify.accept("Не удалось запустить плеер");
+                        notify.accept("Не удалось запустить источник");
                     }
                 });
-    }
-
-    private void adjustMusicVolume(int direction) {
-        Intent request =
-                new Intent(ACTION_ADJUST_VOLUME)
-                        .setClassName(
-                                "ru.big.town.anative",
-                                "ru.big.town.anative.SetModesReceiverDynamic")
-                        .putExtra("direction", direction);
-        try {
-            context.sendBroadcast(request, BIND_SET_MODES_PERMISSION);
-        } catch (RuntimeException error) {
-            notify.accept("Не удалось изменить громкость");
-        }
     }
 
     private static String artKey(NowPlayingClient.NowPlaying value) {
@@ -259,18 +243,8 @@ public final class MediaWidgetDashboard {
         }
 
         @Override
-        public void onPickPlayer() {
-            pickPlayer();
-        }
-
-        @Override
-        public void onVolumeDown() {
-            adjustMusicVolume(AudioManager.ADJUST_LOWER);
-        }
-
-        @Override
-        public void onVolumeUp() {
-            adjustMusicVolume(AudioManager.ADJUST_RAISE);
+        public void onChooseSource() {
+            chooseSource();
         }
     }
 }
