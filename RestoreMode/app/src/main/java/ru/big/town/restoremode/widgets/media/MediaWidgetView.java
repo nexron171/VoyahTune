@@ -43,6 +43,11 @@ final class MediaWidgetView extends View {
     private static final int ACCENT = 0xff79b5f1;
     private static final int CONTROL_BACKGROUND = 0x332f4c6a;
     private static final int PLACEHOLDER = 0xff263646;
+    // Source picker stays neutral so it does not compete with the transport accent color.
+    private static final int SOURCE_BACKGROUND = 0xff3c4249;
+    private static final int SOURCE_BACKGROUND_PRESSED = 0xff4a515a;
+    private static final int SOURCE_BORDER = 0xff626a74;
+    private static final int SOURCE_TEXT = 0xffe7e9ec;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -344,15 +349,15 @@ final class MediaWidgetView extends View {
         }
         float radius = rect.height() / 2f;
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(pressedZone == zone ? 0xff3b6f9e : 0xff2f5f8a);
+        paint.setColor(pressedZone == zone ? SOURCE_BACKGROUND_PRESSED : SOURCE_BACKGROUND);
         canvas.drawRoundRect(rect, radius, radius, paint);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(1f);
-        paint.setColor(ACCENT);
+        paint.setColor(SOURCE_BORDER);
         canvas.drawRoundRect(rect, radius, radius, paint);
         paint.setStyle(Paint.Style.FILL);
         paint.setStrokeWidth(0f);
-        paint.setColor(0xffffffff);
+        paint.setColor(SOURCE_TEXT);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setTypeface(Typeface.SANS_SERIF);
         float textSize = Math.min(18f, rect.height() * .38f);
@@ -369,7 +374,7 @@ final class MediaWidgetView extends View {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(2f);
             paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setColor(0xffffffff);
+            paint.setColor(SOURCE_TEXT);
             canvas.drawLine(centerX - 5f, centerY - 2f, centerX, centerY + 3f, paint);
             canvas.drawLine(centerX, centerY + 3f, centerX + 5f, centerY - 2f, paint);
             paint.setStrokeCap(Paint.Cap.BUTT);
