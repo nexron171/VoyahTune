@@ -96,11 +96,13 @@ import ru.big.town.restoremode.widgets.suspension.SuspensionWidgetView;
 import ru.big.town.restoremode.widgets.system.SystemWidgetDashboard;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
+import java.lang.ref.WeakReference;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -249,6 +251,9 @@ public class DashboardActivity extends AppCompatActivity {
     private boolean gridSnapPending;
     private int gridSnapAppliedPx = -1;
     private final Runnable gridSnapIdle = this::runGridSnap;
+    // Both physical screens run in one process. A cross-screen exchange needs the other screen's
+    // TextureView surface and running package, so live dashboards register themselves here.
+    private static final List<WeakReference<DashboardActivity>> liveDashboards = new ArrayList<>();
     private final Map<String, TextureView> embeddedWidgetSurfaces = new HashMap<>();
     private final Map<String, Surface> embeddedWidgetOutputs = new HashMap<>();
     // Пакет и DPI запущенного в виджете приложения. Хранятся отдельно от настроек виджета,
@@ -1085,6 +1090,7 @@ public class DashboardActivity extends AppCompatActivity {
         dashboardProfile = resolveDashboardProfile(dashboardDisplayId);
         settingsPreferences = dashboardProfile.settingsPreferences(this);
         sharedPreferences = dashboardProfile.layoutPreferences(this);
+        registerLiveDashboard();
 
         bindToMessengerService();
 
@@ -2413,6 +2419,56 @@ public class DashboardActivity extends AppCompatActivity {
         return AppWidgetSessionStore.sessionId(this, settingsPreferences);
     }
 
+    /** Registers this dashboard so the other physical screen can exchange app instances. */
+    private void registerLiveDashboard() {
+        for (Iterator<WeakReference<DashboardActivity>> iterator = liveDashboards.iterator();
+                iterator.hasNext(); ) {
+            DashboardActivity activity = iterator.next().get();
+            if (activity == null || activity.isDestroyed()) {
+                iterator.remove();
+            } else if (activity == this) {
+                return;
+            }
+        }
+        liveDashboards.add(new WeakReference<>(this));
+    }
+
+    private void unregisterLiveDashboard() {
+        for (Iterator<WeakReference<DashboardActivity>> iterator = liveDashboards.iterator();
+                iterator.hasNext(); ) {
+            DashboardActivity activity = iterator.next().get();
+            if (activity == null || activity == this) {
+                iterator.remove();
+            }
+        }
+    }
+
+    /** The other physical screen when it is open in this process. */
+    private DashboardActivity otherScreen() {
+        for (WeakReference<DashboardActivity> reference : liveDashboards) {
+            DashboardActivity activity = reference.get();
+            if (activity == null
+                    || activity == this
+                    || activity.isFinishing()
+                    || activity.isDestroyed()) {
+                continue;
+            }
+            if (activity.dashboardProfile.isPassenger() != dashboardProfile.isPassenger()) {
+                return activity;
+            }
+        }
+        return null;
+    }
+
+    private String screenLabel() {
+        return dashboardProfile.isPassenger() ? "пассажирский" : "водительский";
+    }
+
+    private void saveWidgetSessionLaunch(String widgetId, String packageName, int dpi) {
+        AppWidgetSessionStore.saveLaunch(
+                sharedPreferences, currentWidgetSessionId(), widgetId, packageName, dpi);
+    }
+
     /** Open an embedded app in the tile on user action and remember it for this session. */
     private void launchEmbeddedAppWidget(
             View widgetView,
@@ -3272,34 +3328,43 @@ public class DashboardActivity extends AppCompatActivity {
         }
     }
 
+    /** Candidate for the exchange menu: a widget of this screen or of the other one. */
+    private static final class SwapTarget {
+        final DashboardActivity screen;
+        final String widgetId;
+        final String title;
+
+        SwapTarget(DashboardActivity screen, String widgetId, String title) {
+            this.screen = screen;
+            this.widgetId = widgetId;
+            this.title = title;
+        }
+    }
+
     /**
-     * Кнопка «Обмен»: при двух виджетах цель очевидна, при трёх и более — выбор во всплывающем
-     * меню. Обмен и перенос выполняются только для запущенных экземпляров приложений.
+     * Кнопка «Обмен»: при одном виджете на своём экране цель очевидна, при нескольких или при
+     * виджетах второго экрана — выбор во всплывающем меню. Обмен и перенос выполняются только для
+     * запущенных экземпляров приложений.
      */
     private void showSwapAppWidgetMenu(View anchor, String widgetId) {
-        List<AppWidgetStore.Entry> others = new ArrayList<>();
-        for (AppWidgetStore.Entry entry : AppWidgetStore.load(sharedPreferences)) {
-            if (!entry.id.equals(widgetId)) {
-                others.add(entry);
-            }
-        }
-        if (others.isEmpty()) {
+        List<SwapTarget> targets = swapTargets(widgetId);
+        if (targets.isEmpty()) {
             showSnack("Нет другого виджета для обмена");
             return;
         }
-        if (others.size() == 1) {
-            onSwapAppWidgetChosen(widgetId, others.get(0).id);
+        if (targets.size() == 1 && targets.get(0).screen == this) {
+            onSwapAppWidgetChosen(widgetId, targets.get(0));
             return;
         }
         android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
-        for (int i = 0; i < others.size(); i++) {
-            menu.getMenu().add(0, i, i, "Обменять с " + appWidgetTitle(others.get(i)));
+        for (int i = 0; i < targets.size(); i++) {
+            menu.getMenu().add(0, i, i, "Обменять с " + targets.get(i).title);
         }
         menu.setOnMenuItemClickListener(
                 item -> {
                     int index = item.getItemId();
-                    if (index >= 0 && index < others.size()) {
-                        onSwapAppWidgetChosen(widgetId, others.get(index).id);
+                    if (index >= 0 && index < targets.size()) {
+                        onSwapAppWidgetChosen(widgetId, targets.get(index));
                         return true;
                     }
                     return false;
@@ -3307,39 +3372,183 @@ public class DashboardActivity extends AppCompatActivity {
         menu.show();
     }
 
+    /** Виджеты своего экрана плюс виджеты второго экрана, если он открыт. */
+    private List<SwapTarget> swapTargets(String widgetId) {
+        List<SwapTarget> targets = new ArrayList<>();
+        for (AppWidgetStore.Entry entry : AppWidgetStore.load(sharedPreferences)) {
+            if (!entry.id.equals(widgetId)) {
+                targets.add(new SwapTarget(this, entry.id, appWidgetTitle(entry)));
+            }
+        }
+        DashboardActivity other = otherScreen();
+        if (other != null) {
+            String suffix = " (" + other.screenLabel() + " экран)";
+            for (AppWidgetStore.Entry entry : AppWidgetStore.load(other.sharedPreferences)) {
+                // CarPlay widgets are not created on the passenger screen.
+                if (CarPlayTarget.isCarPlay(entry.packageName)) {
+                    continue;
+                }
+                targets.add(
+                        new SwapTarget(other, entry.id, other.appWidgetTitle(entry) + suffix));
+            }
+        }
+        return targets;
+    }
+
     /**
      * Обмен или перенос запущенных экземпляров: - оба виджета работают → экземпляры меняются
      * местами; - работает только текущий → предлагаем отправить его в другой виджет; - работает
      * только другой → переносим его экземпляр в текущий виджет.
      */
-    private void onSwapAppWidgetChosen(String currentId, String targetId) {
-        if (currentId == null || targetId == null || currentId.equals(targetId)) {
+    private void onSwapAppWidgetChosen(String currentId, SwapTarget target) {
+        if (target == null || currentId == null || currentId.equals(target.widgetId)) {
             return;
         }
+        DashboardActivity screen = target.screen == null ? this : target.screen;
         boolean currentRunning = embeddedWidgetSurfaces.containsKey(currentId);
-        boolean targetRunning = embeddedWidgetSurfaces.containsKey(targetId);
+        if (screen == this) {
+            boolean targetRunning = embeddedWidgetSurfaces.containsKey(target.widgetId);
+            if (currentRunning && targetRunning) {
+                swapAppWidgetInstances(currentId, target.widgetId);
+            } else if (currentRunning) {
+                confirmSendAppWidgetInstance(currentId, target);
+            } else if (targetRunning) {
+                moveAppWidgetInstance(target.widgetId, currentId);
+            } else {
+                showSnack("В этом виджете нет запущенного приложения");
+            }
+            return;
+        }
+        if (!checkOtherScreenReady(screen)) {
+            return;
+        }
+        String runningPackage = embeddedWidgetPackages.get(currentId);
+        if (runningPackage != null && CarPlayTarget.isCarPlay(runningPackage)) {
+            showSnack("CarPlay нельзя перенести на " + screen.screenLabel() + " экран");
+            return;
+        }
+        boolean targetRunning = screen.embeddedWidgetSurfaces.containsKey(target.widgetId);
         if (currentRunning && targetRunning) {
-            swapAppWidgetInstances(currentId, targetId);
+            swapAppWidgetInstancesAcrossScreen(screen, currentId, target.widgetId);
         } else if (currentRunning) {
-            confirmSendAppWidgetInstance(currentId, targetId);
+            confirmSendAppWidgetInstance(currentId, target);
         } else if (targetRunning) {
-            moveAppWidgetInstance(targetId, currentId);
+            moveAppWidgetInstanceAcrossScreen(screen, target.widgetId, this, currentId);
         } else {
             showSnack("В этом виджете нет запущенного приложения");
         }
     }
 
+    /** Второй экран должен быть открыт: его плитки создают поверхности для обмена. */
+    private boolean checkOtherScreenReady(DashboardActivity screen) {
+        if (screen != null && !screen.isFinishing() && !screen.isDestroyed()
+                && screen.suspensionScreenResumed) {
+            return true;
+        }
+        showSnack(
+                "Откройте "
+                        + (screen == null ? "второй" : screen.screenLabel())
+                        + " экран, чтобы обменяться приложениями");
+        return false;
+    }
+
     /** Перед отправкой запущенного приложения в другой виджет спрашиваем подтверждение. */
-    private void confirmSendAppWidgetInstance(String fromWidgetId, String toWidgetId) {
-        String designation = AppWidgetStore.designation(sharedPreferences, toWidgetId);
+    private void confirmSendAppWidgetInstance(String fromWidgetId, SwapTarget target) {
+        DashboardActivity screen = target.screen == null ? this : target.screen;
+        String designation = AppWidgetStore.designation(screen.sharedPreferences, target.widgetId);
         String title = designation.isEmpty() ? "другой виджет" : "виджет " + designation;
+        if (screen != this) {
+            title += " на " + screen.screenLabel() + " экране";
+        }
         new android.app.AlertDialog.Builder(this)
                 .setMessage("Отправить запущенное приложение в " + title + "?")
                 .setPositiveButton(
                         "Отправить",
-                        (dialog, which) -> moveAppWidgetInstance(fromWidgetId, toWidgetId))
+                        (dialog, which) -> {
+                            if (screen == this) {
+                                moveAppWidgetInstance(fromWidgetId, target.widgetId);
+                            } else {
+                                moveAppWidgetInstanceAcrossScreen(
+                                        this, fromWidgetId, screen, target.widgetId);
+                            }
+                        })
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    /**
+     * Обмен экземплярами между экранами: поверхности принадлежат двум активностям, поэтому обе
+     * передаются одним сообщением Native, а карты и сеансы обновляются на обоих экранах.
+     */
+    private void swapAppWidgetInstancesAcrossScreen(
+            DashboardActivity other, String idA, String idB) {
+        String packageA = embeddedWidgetPackages.get(idA);
+        String packageB = other.embeddedWidgetPackages.get(idB);
+        Surface surfaceA = embeddedWidgetOutputs.get(idA);
+        Surface surfaceB = other.embeddedWidgetOutputs.get(idB);
+        if (packageA == null
+                || packageB == null
+                || surfaceA == null
+                || surfaceB == null
+                || !surfaceA.isValid()
+                || !surfaceB.isValid()) {
+            showSnack("Для обмена нужны запущенные приложения в обоих виджетах");
+            return;
+        }
+        if (CarPlayTarget.isCarPlay(packageA) || CarPlayTarget.isCarPlay(packageB)) {
+            showSnack("CarPlay нельзя обменять между экранами");
+            return;
+        }
+        int dpiA = runningDpi(idA);
+        int dpiB = other.runningDpi(idB);
+        sendEmbeddedSwap(
+                idA,
+                idB,
+                surfaceA,
+                surfaceB,
+                embeddedPixelWidth(idA),
+                embeddedPixelHeight(idA),
+                dpiA,
+                other.embeddedPixelWidth(idB),
+                other.embeddedPixelHeight(idB),
+                dpiB);
+        embeddedWidgetPackages.put(idA, packageB);
+        embeddedWidgetDpi.put(idA, dpiB);
+        other.embeddedWidgetPackages.put(idB, packageA);
+        other.embeddedWidgetDpi.put(idB, dpiA);
+        saveWidgetSessionLaunch(idA, packageB, dpiB);
+        other.saveWidgetSessionLaunch(idB, packageA, dpiA);
+        showSnack("Экраны обменялись запущенными приложениями");
+    }
+
+    /**
+     * Перенос между экранами: поверхность создаёт принимающий экран, Native переносит тот же
+     * VirtualDisplay, исходный экран только снимает поверхность без освобождения дисплея.
+     */
+    private void moveAppWidgetInstanceAcrossScreen(
+            DashboardActivity source, String fromId, DashboardActivity destination, String toId) {
+        String packageName = source.embeddedWidgetPackages.get(fromId);
+        View fromView = source.appWidgetTileViews.get(fromId);
+        View toView = destination.appWidgetTileViews.get(toId);
+        AppWidgetStore.Entry toEntry = AppWidgetStore.find(destination.sharedPreferences, toId);
+        if (packageName == null || fromView == null || toView == null || toEntry == null) {
+            showSnack("Не удалось перенести приложение");
+            return;
+        }
+        int dpi = source.runningDpi(fromId);
+        // Сначала встраиваем целевой виджет: поверхность появится асинхронно, и только затем
+        // Native перенесёт на неё работающий дисплей.
+        destination.showEmbeddedAppWidget(toView, toEntry, packageName, dpi, fromId);
+        if (!destination.embeddedWidgetSurfaces.containsKey(toId)) {
+            destination.removeEmbeddedSurface(toId, toView);
+            showSnack("Не удалось перенести приложение на " + destination.screenLabel() + " экран");
+            return;
+        }
+        destination.saveWidgetSessionLaunch(toId, packageName, dpi);
+        AppWidgetSessionStore.forgetLaunch(
+                source.sharedPreferences, source.currentWidgetSessionId(), fromId);
+        source.detachEmbeddedWidget(fromId, fromView);
+        showSnack("Приложение перенесено на " + destination.screenLabel() + " экран");
     }
 
     /** Меняем дисплеи местами: приложения продолжают работать, состояние сохраняется. */
@@ -3479,11 +3688,37 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Поменять местами работающие экземпляры двух виджетов; состояние приложений сохраняется. */
     private void sendEmbeddedSwap(String idA, String idB) {
+        sendEmbeddedSwap(
+                idA,
+                idB,
+                embeddedWidgetOutputs.get(idA),
+                embeddedWidgetOutputs.get(idB),
+                embeddedPixelWidth(idA),
+                embeddedPixelHeight(idA),
+                runningDpi(idA),
+                embeddedPixelWidth(idB),
+                embeddedPixelHeight(idB),
+                runningDpi(idB));
+    }
+
+    /**
+     * Обмен экземплярами между экранами: поверхности принадлежат разным активностям, поэтому обе
+     * передаются в одном сообщении Native.
+     */
+    private void sendEmbeddedSwap(
+            String idA,
+            String idB,
+            Surface surfaceA,
+            Surface surfaceB,
+            int widthA,
+            int heightA,
+            int dpiA,
+            int widthB,
+            int heightB,
+            int dpiB) {
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
             return;
         }
-        Surface surfaceA = embeddedWidgetOutputs.get(idA);
-        Surface surfaceB = embeddedWidgetOutputs.get(idB);
         if (surfaceA == null || surfaceB == null) {
             return;
         }
@@ -3495,12 +3730,12 @@ public class DashboardActivity extends AppCompatActivity {
             data.putString("widgetId2", idB);
             data.putParcelable("surface", surfaceA);
             data.putParcelable("surface2", surfaceB);
-            data.putInt("width", embeddedPixelWidth(idA));
-            data.putInt("height", embeddedPixelHeight(idA));
-            data.putInt("dpi", runningDpi(idA));
-            data.putInt("width2", embeddedPixelWidth(idB));
-            data.putInt("height2", embeddedPixelHeight(idB));
-            data.putInt("dpi2", runningDpi(idB));
+            data.putInt("width", widthA);
+            data.putInt("height", heightA);
+            data.putInt("dpi", dpiA);
+            data.putInt("width2", widthB);
+            data.putInt("height2", heightB);
+            data.putInt("dpi2", dpiB);
             message.setData(data);
             message.replyTo = clientMessenger;
             GlobalVars.serviceMessenger.send(message);
@@ -3807,6 +4042,7 @@ public class DashboardActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        unregisterLiveDashboard();
         systemWidgets.close();
         mediaWidgets.close();
         headlightWidget.close();
