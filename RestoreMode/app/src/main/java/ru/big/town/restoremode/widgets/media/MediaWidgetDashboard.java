@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 
+import ru.big.town.restoremode.dashboard.DashboardProfile;
 import ru.big.town.restoremode.integration.media.NowPlayingClient;
 
 import java.util.ArrayList;
@@ -21,6 +22,10 @@ import java.util.function.Consumer;
 /** Owns the “now playing” snapshot and shares it with every visible media card. */
 public final class MediaWidgetDashboard {
     private static final long TICK_MS = 1000L;
+    private static final String ACTION_SET_MEDIA_AUTOSTART_PLAYER =
+            "ru.big.town.anative.SET_MEDIA_AUTOSTART_PLAYER";
+    private static final String BIND_SET_MODES_PERMISSION =
+            "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
 
     private final Context context;
     private final Consumer<String> notify;
@@ -183,6 +188,26 @@ public final class MediaWidgetDashboard {
         }
     }
 
+    private void chooseSource() {
+        MediaPlayerPicker.show(
+                context,
+                packageName -> {
+                    Intent request =
+                            new Intent(ACTION_SET_MEDIA_AUTOSTART_PLAYER)
+                                    .setClassName(
+                                            "ru.big.town.anative",
+                                            "ru.big.town.anative.SetModesReceiverDynamic")
+                                    .putExtra("pkg", packageName)
+                                    .putExtra("display", DashboardProfile.displayId(context));
+                    try {
+                        context.sendBroadcast(request, BIND_SET_MODES_PERMISSION);
+                        notify.accept("Запускаем выбранный источник");
+                    } catch (RuntimeException error) {
+                        notify.accept("Не удалось запустить источник");
+                    }
+                });
+    }
+
     private static String artKey(NowPlayingClient.NowPlaying value) {
         if (value == null || !value.hasArt) {
             return "";
@@ -215,6 +240,11 @@ public final class MediaWidgetDashboard {
         @Override
         public void onOpenPlayer() {
             openPlayer();
+        }
+
+        @Override
+        public void onChooseSource() {
+            chooseSource();
         }
     }
 }

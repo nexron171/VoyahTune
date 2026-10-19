@@ -17,7 +17,7 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.integration.media.NowPlayingClient;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetStyle;
 
-/** Self-drawn current-player card with three transport zones and an album-art panel. */
+/** Self-drawn current-player card with source selection, album art and transport zones. */
 final class MediaWidgetView extends View {
     enum Command {
         PREVIOUS,
@@ -29,6 +29,8 @@ final class MediaWidgetView extends View {
         void onCommand(Command command);
 
         void onOpenPlayer();
+
+        void onChooseSource();
     }
 
     private static final int ZONE_NONE = 0;
@@ -36,10 +38,16 @@ final class MediaWidgetView extends View {
     private static final int ZONE_PLAY = 2;
     private static final int ZONE_NEXT = 3;
     private static final int ZONE_OPEN = 4;
+    private static final int ZONE_SOURCES = 5;
 
     private static final int ACCENT = 0xff79b5f1;
     private static final int CONTROL_BACKGROUND = 0x332f4c6a;
     private static final int PLACEHOLDER = 0xff263646;
+    // Source picker stays neutral so it does not compete with the transport accent color.
+    private static final int SOURCE_BACKGROUND = 0xff3c4249;
+    private static final int SOURCE_BACKGROUND_PRESSED = 0xff4a515a;
+    private static final int SOURCE_BORDER = 0xff626a74;
+    private static final int SOURCE_TEXT = 0xffe7e9ec;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -47,6 +55,8 @@ final class MediaWidgetView extends View {
     private final RectF previousRect = new RectF();
     private final RectF playRect = new RectF();
     private final RectF nextRect = new RectF();
+    private final RectF emptySourceRect = new RectF();
+    private final RectF sourceRect = new RectF();
     private final Drawable placeholder;
     private final Listener listener;
     private final float density;
@@ -66,6 +76,7 @@ final class MediaWidgetView extends View {
     private float progressY;
     private boolean compact;
     private boolean tall;
+    private boolean poster;
     private int pressedZone;
     private float downX;
     private float downY;
@@ -99,7 +110,8 @@ final class MediaWidgetView extends View {
 
     private void updateContentDescription() {
         if (nowPlaying.isEmpty()) {
-            setContentDescription("Управление музыкой: ничего не играет");
+            setContentDescription(
+                    "Управление музыкой: ничего не играет. Выбрать источник.");
             return;
         }
         String state = nowPlaying.isPlaying() ? "воспроизведение" : "пауза";
@@ -110,7 +122,7 @@ final class MediaWidgetView extends View {
                         + (subtitle.isEmpty() ? "" : ", " + subtitle)
                         + ". Состояние: "
                         + state
-                        + ". Кнопки управления музыкой.");
+                        + ". Кнопки управления музыкой и выбор источника.");
     }
 
     @Override
@@ -126,12 +138,24 @@ final class MediaWidgetView extends View {
         previousRect.setEmpty();
         playRect.setEmpty();
         nextRect.setEmpty();
+        emptySourceRect.setEmpty();
+        sourceRect.setEmpty();
         if (widthDp <= 0 || heightDp <= 0) {
             return;
         }
         float padding = 8f;
         compact = widthDp < 200f;
         tall = heightDp >= 170f;
+        poster = !compact && heightDp >= 300f;
+
+        float buttonWidth = Math.min(widthDp - padding * 2, compact ? 140f : 260f);
+        float buttonHeight = compact ? 44f : 56f;
+        emptySourceRect.set(
+                (widthDp - buttonWidth) / 2,
+                (heightDp - buttonHeight) / 2,
+                (widthDp + buttonWidth) / 2,
+                (heightDp + buttonHeight) / 2);
+
         if (compact) {
             float size = Math.min(widthDp, heightDp) - padding * 2;
             artRect.set(
@@ -146,6 +170,11 @@ final class MediaWidgetView extends View {
                     widthDp / 2 + radius,
                     heightDp / 2 + radius);
             progressY = heightDp - padding;
+            return;
+        }
+
+        if (poster) {
+            layoutPoster();
             return;
         }
 
@@ -188,6 +217,49 @@ final class MediaWidgetView extends View {
         progressY = tall ? heightDp - padding - 14f : heightDp - padding;
     }
 
+    private void layoutPoster() {
+        float padding = 14f;
+        float sourceHeight = 44f;
+        sourceRect.set(padding, padding, widthDp - padding, padding + sourceHeight);
+
+        float controlRadius = Math.min(26f, Math.max(18f, widthDp * .07f));
+        float gap = Math.max(14f, controlRadius * .55f);
+        float controlsCenterY = heightDp - padding - controlRadius;
+        float total = controlRadius * 6 + gap * 2;
+        float left = (widthDp - total) / 2f;
+        previousRect.set(
+                left,
+                controlsCenterY - controlRadius,
+                left + controlRadius * 2,
+                controlsCenterY + controlRadius);
+        playRect.set(
+                previousRect.right + gap,
+                controlsCenterY - controlRadius,
+                previousRect.right + gap + controlRadius * 2,
+                controlsCenterY + controlRadius);
+        nextRect.set(
+                playRect.right + gap,
+                controlsCenterY - controlRadius,
+                playRect.right + gap + controlRadius * 2,
+                controlsCenterY + controlRadius);
+
+        float artTop = sourceRect.bottom + 12f;
+        float artMaxHeight = controlsCenterY - controlRadius - artTop - 120f;
+        float artSize = Math.min(widthDp - padding * 2, Math.max(70f, artMaxHeight));
+        float artCap = heightDp >= 440f ? 340f : 230f;
+        artSize = Math.min(artSize, artCap);
+        float artLeft = (widthDp - artSize) / 2f;
+        artRect.set(artLeft, artTop, artLeft + artSize, artTop + artSize);
+
+        textLeft = padding;
+        textRight = widthDp - padding;
+        titleSize = 26f;
+        subtitleSize = 18f;
+        titleBaseline = artRect.bottom + 26f;
+        subtitleBaseline = titleBaseline + 22f;
+        progressY = Math.min(subtitleBaseline + 26f, controlsCenterY - controlRadius - 20f);
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
@@ -197,17 +269,23 @@ final class MediaWidgetView extends View {
         canvas.save();
         canvas.scale(density, density);
 
-        drawArt(canvas);
-        boolean empty = nowPlaying.isEmpty();
-        if (empty) {
+        if (nowPlaying.isEmpty()) {
             drawEmpty(canvas);
+            canvas.restore();
+            return;
+        }
+        drawArt(canvas);
+        if (poster) {
+            drawSourceButton(canvas);
+            drawPosterTrackText(canvas);
+            drawProgress(canvas);
+            drawControls(canvas);
+        } else if (compact) {
+            drawCompactProgress(canvas);
+            drawControls(canvas);
         } else {
-            if (!compact) {
-                drawTrackText(canvas);
-                drawProgress(canvas);
-            } else {
-                drawCompactProgress(canvas);
-            }
+            drawTrackText(canvas);
+            drawProgress(canvas);
             drawControls(canvas);
         }
         canvas.restore();
@@ -252,17 +330,54 @@ final class MediaWidgetView extends View {
     }
 
     private void drawEmpty(Canvas canvas) {
+        drawActionButton(
+                canvas,
+                emptySourceRect,
+                ZONE_SOURCES,
+                compact ? "Источник" : "Выбрать источник",
+                false);
+    }
+
+    private void drawSourceButton(Canvas canvas) {
+        drawActionButton(canvas, sourceRect, ZONE_SOURCES, "Источник", true);
+    }
+
+    private void drawActionButton(
+            Canvas canvas, RectF rect, int zone, String label, boolean chevron) {
+        if (rect.isEmpty()) {
+            return;
+        }
+        float radius = rect.height() / 2f;
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(EnergyWidgetStyle.MUTED);
+        paint.setColor(pressedZone == zone ? SOURCE_BACKGROUND_PRESSED : SOURCE_BACKGROUND);
+        canvas.drawRoundRect(rect, radius, radius, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(1f);
+        paint.setColor(SOURCE_BORDER);
+        canvas.drawRoundRect(rect, radius, radius, paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setStrokeWidth(0f);
+        paint.setColor(SOURCE_TEXT);
         paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTextSize((compact ? 15f : 18f) * fontScale);
         paint.setTypeface(Typeface.SANS_SERIF);
-        float x = compact ? widthDp / 2 : (textLeft + textRight) / 2;
-        float y = compact ? heightDp - 8f : artRect.centerY();
-        canvas.drawText("Ничего не играет", x, y, paint);
-        if (!compact) {
-            paint.setTextSize(15f * fontScale);
-            canvas.drawText("Запустите плеер", x, y + 22f * fontScale, paint);
+        float textSize = Math.min(18f, rect.height() * .38f);
+        paint.setTextSize(textSize * fontScale);
+        float baseline = rect.centerY() - (paint.descent() + paint.ascent()) / 2f;
+        canvas.drawText(
+                label,
+                rect.centerX() - (chevron ? 10f : 0f),
+                baseline,
+                paint);
+        if (chevron) {
+            float centerX = rect.right - 22f;
+            float centerY = rect.centerY();
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(2f);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setColor(SOURCE_TEXT);
+            canvas.drawLine(centerX - 5f, centerY - 2f, centerX, centerY + 3f, paint);
+            canvas.drawLine(centerX, centerY + 3f, centerX + 5f, centerY - 2f, paint);
+            paint.setStrokeCap(Paint.Cap.BUTT);
         }
     }
 
@@ -275,6 +390,27 @@ final class MediaWidgetView extends View {
         subtitle = fitText(subtitle, textRight - textLeft, subtitleSize);
         text(canvas, title, textLeft, titleBaseline, titleSize, EnergyWidgetStyle.WHITE);
         text(canvas, subtitle, textLeft, subtitleBaseline, subtitleSize, EnergyWidgetStyle.MUTED);
+    }
+
+    private void drawPosterTrackText(Canvas canvas) {
+        String title = fitText(nowPlaying.title, textRight - textLeft, titleSize);
+        String subtitle = !nowPlaying.artist.isEmpty() ? nowPlaying.artist : nowPlaying.appLabel;
+        if (subtitle.isEmpty()) {
+            subtitle = nowPlaying.packageName;
+        }
+        subtitle = fitText(subtitle, textRight - textLeft, subtitleSize);
+        centeredText(canvas, title, widthDp / 2f, titleBaseline, titleSize);
+        centeredText(canvas, subtitle, widthDp / 2f, subtitleBaseline, subtitleSize);
+    }
+
+    private void centeredText(
+            Canvas canvas, String value, float x, float baseline, float size) {
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(EnergyWidgetStyle.WHITE);
+        paint.setTextSize(size * fontScale);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(Typeface.SANS_SERIF);
+        canvas.drawText(value, x, baseline, paint);
     }
 
     private void drawProgress(Canvas canvas) {
@@ -494,6 +630,11 @@ final class MediaWidgetView extends View {
     }
 
     private void activate(int zone) {
+        if (zone == ZONE_SOURCES) {
+            performClick();
+            listener.onChooseSource();
+            return;
+        }
         if (nowPlaying.isEmpty()) {
             return;
         }
@@ -511,7 +652,10 @@ final class MediaWidgetView extends View {
 
     private int zoneAt(float x, float y) {
         if (nowPlaying.isEmpty()) {
-            return ZONE_NONE;
+            return hit(emptySourceRect, x, y) ? ZONE_SOURCES : ZONE_NONE;
+        }
+        if (poster && hit(sourceRect, x, y)) {
+            return ZONE_SOURCES;
         }
         if (hit(playRect, x, y)) {
             return ZONE_PLAY;

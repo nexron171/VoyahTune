@@ -77,6 +77,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     }
 
     private void bindMainWidgetSwitches() {
+        bindMediaAutoStart();
         bindShowSwitch(
                 R.id.switchShowPassengerDashboardTile,
                 "showPassengerDashboardTile",
@@ -1027,6 +1028,21 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         autoStart.setOnCheckedChangeListener(
                 (button, checked) ->
                         globalPreferences.edit().putBoolean("passengerAutoStart", checked).apply());
+    }
+
+    private void bindMediaAutoStart() {
+        Switch autoStart = settingView(R.id.switchMediaAutoStart);
+        if (autoStart == null) {
+            return;
+        }
+        autoStart.setChecked(
+                globalPreferences.getBoolean("mediaAutoStartLastPlayer", false));
+        autoStart.setOnCheckedChangeListener(
+                (button, checked) ->
+                        globalPreferences
+                                .edit()
+                                .putBoolean("mediaAutoStartLastPlayer", checked)
+                                .apply());
     }
 
     @Override

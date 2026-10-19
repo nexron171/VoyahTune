@@ -107,6 +107,8 @@ public class SetModesService extends Service {
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
     static final String RESTOREMODE_PKG = "ru.big.town.restoremode";
     static final String RESTOREMODE_MAIN = "ru.big.town.restoremode.MainActivity";
+    static final String RESTOREMODE_PASSENGER_MAIN =
+            "ru.big.town.restoremode.passenger.PassengerDashboardActivity";
     private static final String RESTOREMODE_CONFIG_SYNC_ACTION =
             "ru.big.town.restoremode.SYNC_SAVED_CONFIG";
     private static final String RESTOREMODE_CONFIG_SYNC_RECEIVER =
@@ -723,6 +725,7 @@ public class SetModesService extends Service {
     // дебаунсом.
     private long lastAutoLaunch = Long.MIN_VALUE / 2;
     private long lastPassengerAutoLaunch = Long.MIN_VALUE / 2;
+    private long lastMediaAutoLaunch = Long.MIN_VALUE / 2;
     private static final long AUTO_LAUNCH_DEBOUNCE_MS = 60_000L;
 
     /** На пробуждении: если включён «Автозапуск VoyahTune», открываем RestoreMode поверх. */
@@ -789,6 +792,44 @@ public class SetModesService extends Service {
         }
         lastPassengerAutoLaunch = now;
         SetModesReceiverDynamic.openPassengerDashboard(this);
+    }
+
+    private boolean readMediaAutoStartFromProvider() {
+        try {
+            android.database.Cursor c =
+                    getContentResolver()
+                            .query(
+                                    android.net.Uri.parse(
+                                            "content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                                    null,
+                                    null,
+                                    null,
+                                    null);
+            if (c != null) {
+                try {
+                    if (c.moveToFirst() && c.getColumnCount() > 42) return c.getInt(42) == 1;
+                } finally {
+                    c.close();
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "readMediaAutoStartFromProvider: " + e.getMessage());
+        }
+        return false;
+    }
+
+    private void maybeAutoLaunchLastMediaPlayer() {
+        if (!readMediaAutoStartFromProvider()) {
+            Log.i(TAG, "maybeAutoLaunchLastMediaPlayer: disabled — пропуск");
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastMediaAutoLaunch < AUTO_LAUNCH_DEBOUNCE_MS) {
+            Log.i(TAG, "maybeAutoLaunchLastMediaPlayer: пропуск (дебаунс)");
+            return;
+        }
+        lastMediaAutoLaunch = now;
+        MediaPlayerAutostart.launchLastPlayer(this, mainHandler);
     }
 
     private void maybeAutoLaunchRestoreMode() {
@@ -1895,6 +1936,7 @@ public class SetModesService extends Service {
     private final Runnable reassertFloatingBackRunnable = this::reassertFloatingBack;
     private final Runnable autoLaunchRunnable = this::maybeAutoLaunchRestoreMode;
     private final Runnable passengerAutoLaunchRunnable = this::maybeAutoLaunchPassengerDashboard;
+    private final Runnable mediaAutoLaunchRunnable = this::maybeAutoLaunchLastMediaPlayer;
     private final Runnable floatingBackEnableRunnable =
             () -> BackButtonService.setFloatingButtonEnabled(this, true);
     private final Runnable carPowerReconnectRunnable = this::reconnectCarPowerOnWorker;
@@ -1976,6 +2018,8 @@ public class SetModesService extends Service {
         mainHandler.postDelayed(autoLaunchRunnable, 5000);
         mainHandler.removeCallbacks(passengerAutoLaunchRunnable);
         mainHandler.postDelayed(passengerAutoLaunchRunnable, 5500);
+        mainHandler.removeCallbacks(mediaAutoLaunchRunnable);
+        mainHandler.postDelayed(mediaAutoLaunchRunnable, 7000);
     }
 
     private void cancelAncillaryWakeTasks() {
@@ -1983,6 +2027,7 @@ public class SetModesService extends Service {
         mainHandler.removeCallbacks(reassertFloatingBackRunnable);
         mainHandler.removeCallbacks(autoLaunchRunnable);
         mainHandler.removeCallbacks(passengerAutoLaunchRunnable);
+        mainHandler.removeCallbacks(mediaAutoLaunchRunnable);
         mainHandler.removeCallbacks(floatingBackEnableRunnable);
     }
 

@@ -107,6 +107,31 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             }
         }
 
+        // Media widget has no active session: the user picked a player to start in background.
+        if ("ru.big.town.anative.SET_MEDIA_AUTOSTART_PLAYER".equals(receivedIntent)) {
+            int sender = android.os.Binder.getCallingUid();
+            boolean trusted =
+                    sender == Process.myUid()
+                            || sender == Process.SYSTEM_UID
+                            || sender == Process.ROOT_UID
+                            || context.getPackageManager()
+                                            .checkSignatures(sender, Process.myUid())
+                                    == PackageManager.SIGNATURE_MATCH;
+            String pkg = intent.getStringExtra("pkg");
+            int displayId = intent.getIntExtra("display", 0);
+            if (!trusted) {
+                Log.w(TAG, "SET_MEDIA_AUTOSTART_PLAYER отклонён: uid=" + sender);
+            } else if (pkg == null || pkg.isEmpty()) {
+                Log.w(TAG, "SET_MEDIA_AUTOSTART_PLAYER отклонён: пустой пакет");
+            } else {
+                MediaPlayerAutostart.launchPlayerWithPlayback(
+                        context,
+                        pkg,
+                        displayId == 1 ? 1 : 0,
+                        new Handler(Looper.getMainLooper()));
+            }
+        }
+
         // Launcher hook routes an allowlisted All Apps tile here so ActivityOptions can normalize a
         // reused freeform task before the activity is resumed. The exported bridge accepts only the
         // exact package persisted by the protected fullscreen config receiver.
@@ -821,15 +846,14 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                                 .show());
     }
 
-    /** Открыть MainActivity на пассажирском дисплее, не трогая водительскую задачу. */
+    /** Открыть отдельную пассажирскую activity на дисплее 1, не трогая водительскую задачу. */
     static void openPassengerDashboard(Context context) {
         try {
             Intent intent = new Intent();
-            intent.setClassName(SetModesService.RESTOREMODE_PKG, SetModesService.RESTOREMODE_MAIN);
-            intent.addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK
-                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            intent.setClassName(
+                    SetModesService.RESTOREMODE_PKG,
+                    SetModesService.RESTOREMODE_PASSENGER_MAIN);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
             options.setLaunchDisplayId(1);
             android.os.Bundle bundle = options.toBundle();

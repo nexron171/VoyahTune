@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../od/inject/launcherdock.js'), 'utf8');
 const restore = 'ru.big.town.restoremode';
 const carplay = restore + '/ru.big.town.restoremode.carplay.CarPlayLauncherActivity';
+const passenger = restore + '/ru.big.town.restoremode.passenger.PassengerDashboardActivity';
 const prefix = '__voyahtune_allapps__:';
 // Run production All Apps routing for both explicit RestoreMode activities.
 function production(name) {
@@ -28,7 +29,8 @@ function bean(icon, name, pkg) {
 }
 const launches = [];
 const c = {
-    RESTORE_PKG: restore, CARPLAY_ENTRY: carplay, SYNTHETIC_PREFIX: prefix, FLAG_SYSTEM: 1,
+    RESTORE_PKG: restore, CARPLAY_ENTRY: carplay, PASSENGER_ENTRY: passenger,
+    SYNTHETIC_PREFIX: prefix, FLAG_SYSTEM: 1,
     installedSnapshot: null, resourceTemplate: null, iconCache: {}, getAll: null,
     TAG: 'test', Log: {i() {}, e(_, msg) { throw Error(msg); }},
     ApplicationInfo: {}, Java: {cast: value => value, retain: value => value},
@@ -47,10 +49,13 @@ const c = {
         getLaunchIntentForPackage: pkg => ({package: pkg, addFlags() {}}),
         getActivityInfo(component) {
             const isCarPlay = component.activity.endsWith('CarPlayLauncherActivity');
+            const isPassenger = component.activity.endsWith('PassengerDashboardActivity');
             return {enabled: {value: true}, exported: {value: true},
-                loadLabel: () => isCarPlay ? 'VoyahTune CarPlay' : 'VoyahTune'};
+                loadLabel: () => isCarPlay ? 'VoyahTune CarPlay'
+                        : isPassenger ? 'VoyahTune Пассажир' : 'VoyahTune'};
         },
-        getActivityIcon: component => component.activity.endsWith('CarPlayLauncherActivity') ? 'dark-carplay' : 'grey',
+        getActivityIcon: component => component.activity.endsWith('CarPlayLauncherActivity') ? 'dark-carplay'
+                : component.activity.endsWith('PassengerDashboardActivity') ? 'passenger-icon' : 'grey',
         getApplicationIcon: () => 'package icon', getApplicationInfo: pkg => pkg,
         getApplicationLabel: () => 'DiPlay',
     },
@@ -94,4 +99,15 @@ for (const screen of [0, 1]) {
     assert.equal(launches.at(-1).intent.component.activity, restore + '.carplay.CarPlayLauncherActivity');
     assert.equal(launches.at(-1).screen, screen);
 }
-console.log('PASS: OD All Apps hides CarPlay, removes cached entries and preserves explicit launch routing');
+const passengerList = list([bean(10, 20, 'oem.app'), bean(10, 20, restore)]);
+c.addMissingAppsImpl(passengerList, 1);
+c.addMissingAppsImpl(passengerList, 1);
+assert.deepEqual(passengerList.items.map(b => c.syntheticPackage(b) || b.getPackageName()),
+    ['oem.app', 'app.music', passenger]);
+assert.equal(c.loadLabel(passenger), 'VoyahTune Пассажир');
+assert.equal(c.loadIcon(passenger), 'passenger-icon');
+assert.equal(c.launchAllApp(passenger, 1), true);
+assert.equal(launches.at(-1).intent.component.activity,
+    'ru.big.town.restoremode.passenger.PassengerDashboardActivity');
+assert.equal(launches.at(-1).screen, 1);
+console.log('PASS: OD All Apps hides CarPlay, separates passenger dashboard and preserves explicit launch routing');

@@ -881,6 +881,8 @@ Java.perform(function () {
             var SYNTHETIC_PREFIX = "__voyahtune_allapps__:";
             // Recognize the old synthetic shortcut so reused OEM lists can discard it.
             var CARPLAY_ENTRY = RESTORE_PKG + "/ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
+            var PASSENGER_ENTRY = RESTORE_PKG
+                    + "/ru.big.town.restoremode.passenger.PassengerDashboardActivity";
             var ComponentName = Java.use("android.content.ComponentName");
             var resourceTemplate = null;
             var WeakHashMap = Java.use("java.util.WeakHashMap");
@@ -889,11 +891,12 @@ Java.perform(function () {
             var IconDrawable = Java.use("android.graphics.drawable.Drawable");
 
             function entryPackage(target) {
-                return target === CARPLAY_ENTRY ? RESTORE_PKG : target;
+                return target === CARPLAY_ENTRY || target === PASSENGER_ENTRY
+                        ? RESTORE_PKG : target;
             }
 
             function entryComponent(target) {
-                if (target === CARPLAY_ENTRY) {
+                if (target === CARPLAY_ENTRY || target === PASSENGER_ENTRY) {
                     return ComponentName.$new(RESTORE_PKG, target.substring(target.indexOf("/") + 1));
                 }
                 if (target === RESTORE_PKG) {
@@ -1038,20 +1041,25 @@ Java.perform(function () {
             // проходит через наш же хук ниже.
             var addingApps = false;
 
-            function addMissingApps(list) {
+            function addMissingApps(list, screenId) {
                 if (list === null || list === undefined || addingApps) return;
                 addingApps = true;
-                try { addMissingAppsImpl(list); }
+                try { addMissingAppsImpl(list, screenId); }
                 finally { addingApps = false; }
             }
 
-            function addMissingAppsImpl(list) {
+            function addMissingAppsImpl(list, screenId) {
+                // Driver keeps the normal VoyahTune entry; the passenger list gets the dedicated
+                // activity instead, otherwise its stock icon would move the driver task to display 1.
+                var screen = screenId === 1 ? 1 : 0;
                 var existing = {};
                 for (var i = list.size() - 1; i >= 0; i--) {
                     try {
                         var current = Java.cast(list.get(i), AppBean);
                         var existingTarget = syntheticPackage(current) || "" + current.getPackageName();
-                        if (existingTarget === CARPLAY_ENTRY) {
+                        if (existingTarget === CARPLAY_ENTRY
+                                || (existingTarget === PASSENGER_ENTRY && screen !== 1)
+                                || (screen === 1 && existingTarget === RESTORE_PKG)) {
                             list.remove(i);
                             continue;
                         }
@@ -1066,6 +1074,7 @@ Java.perform(function () {
                 var template = null;
                 for (var j = 0; j < apps.length; j++) {
                     var target = apps[j];
+                    if (screen === 1 && target === RESTORE_PKG) continue;
                     var pkg = entryPackage(target);
                     if (existing["pkg:" + target]) continue;
                     try {
@@ -1086,6 +1095,23 @@ Java.perform(function () {
                         existing["pkg:" + target] = true;
                     } catch (e) { Log.e(TAG, "[allapps] add " + pkg + ": " + e); }
                 }
+
+                if (screen === 1 && !existing["pkg:" + PASSENGER_ENTRY]) {
+                    try {
+                        if (template === null) template = findAppTemplate(list);
+                        if (template === null && getAll !== null && getAll !== undefined) {
+                            template = findAppTemplate(getAll.call(Data, 0));
+                        }
+                        if (template === null) {
+                            Log.e(TAG, "[allapps] no template for passenger dashboard entry");
+                            return;
+                        }
+                        var passengerBean = AppBean.$new(template.icon, template.name, RESTORE_PKG);
+                        passengerBean.setSubType(SYNTHETIC_PREFIX + PASSENGER_ENTRY);
+                        list.add(passengerBean);
+                        existing["pkg:" + PASSENGER_ENTRY] = true;
+                    } catch (e) { Log.e(TAG, "[allapps] add passenger dashboard: " + e); }
+                }
             }
 
             function beanAt(adapter, position) {
@@ -1100,6 +1126,7 @@ Java.perform(function () {
                     var pkg = "" + bean.getPackageName();
                     var subType = "" + bean.getSubType();
                     if (pkg === RESTORE_PKG && subType === SYNTHETIC_PREFIX + CARPLAY_ENTRY) return CARPLAY_ENTRY;
+                    if (pkg === RESTORE_PKG && subType === SYNTHETIC_PREFIX + PASSENGER_ENTRY) return PASSENGER_ENTRY;
                     if (!pkg || subType !== SYNTHETIC_PREFIX + pkg) return null;
                     return pkg;
                 } catch (ignored) {
@@ -1294,7 +1321,7 @@ Java.perform(function () {
             var getAll = Data.getAllApps.overload('int');
             getAll.implementation = function (screenId) {
                 var list = getAll.call(this, screenId);
-                if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list);
+                if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list, screenId);
                 return list;
             };
 
@@ -1333,16 +1360,19 @@ Java.perform(function () {
                 try {
                     var manager = dataManager();
                     if (manager === null) return;
-                    var fields = ["mMainAllApps", "mSecondAllApps"];
+                    var fields = [
+                        {name: "mMainAllApps", screen: 0},
+                        {name: "mSecondAllApps", screen: 1}
+                    ];
                     var total = 0;
                     for (var i = 0; i < fields.length; i++) {
-                        var list = screenList(manager, fields[i]);
+                        var list = screenList(manager, fields[i].name);
                         if (list === null) continue;
                         var before = list.size();
-                        addMissingApps(list);
+                        addMissingApps(list, fields[i].screen);
                         var added = list.size() - before;
                         if (added > 0) {
-                            Log.i(TAG, "[allapps] " + fields[i] + " += " + added);
+                            Log.i(TAG, "[allapps] " + fields[i].name + " += " + added);
                             total += added;
                         }
                     }

@@ -152,7 +152,7 @@
                         app:settingsPreviewKind="grid"
                         app:settingsTileKey="mediaWidget"
                         app:settingsTileWidth="3"
-                        app:settingsTileHeight="1"
+                        app:settingsTileHeight="5"
                         android:tag="settings.cell-grid" />
                 </LinearLayout>
                 <TextView
@@ -164,6 +164,45 @@
                     android:includeFontPadding="false"
                     android:tag="settings.off-note" />
             </LinearLayout>
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="22dp"
+            android:background="@color/settings_inset">
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_weight="1">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Возобновлять последний плеер"
+                    android:textSize="20sp"
+                    android:textColor="#f3f5fa"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="После сна или перезагрузки продолжать воспроизведение, если плеер играл перед выключением"
+                    android:textSize="16sp"
+                    android:textColor="#95a5bd"
+                    android:includeFontPadding="false"
+                    android:layout_marginTop="7dp"
+                    android:lineSpacingMultiplier="1.45" />
+            </LinearLayout>
+            <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+                android:id="@+id/switchMediaAutoStart"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="16dp"
+                android:contentDescription="Возобновлять последний плеер"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
         </LinearLayout>
     </ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard>
 </ru.big.town.restoremode.settings.ui.layout.SettingsGrid>

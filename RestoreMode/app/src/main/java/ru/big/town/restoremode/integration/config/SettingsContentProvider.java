@@ -59,6 +59,7 @@ public class SettingsContentProvider extends ContentProvider {
     private String customCommandStarButton2 = "";
     private boolean autoLaunchOnWake = false;
     private boolean passengerAutoStart = false;
+    private boolean mediaAutoStartLastPlayer = false;
     private boolean batteryHeatAuto = false;
     private boolean pauseMediaOnDoor = false;
     private boolean fragranceEnabled = FragranceSettings.DEFAULT_ENABLED;
@@ -305,6 +306,8 @@ public class SettingsContentProvider extends ContentProvider {
         customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
         autoLaunchOnWake = sharedPreferences.getBoolean("autoLaunchOnWake", false);
         passengerAutoStart = sharedPreferences.getBoolean("passengerAutoStart", false);
+        mediaAutoStartLastPlayer =
+                sharedPreferences.getBoolean("mediaAutoStartLastPlayer", false);
         batteryHeatAuto = sharedPreferences.getBoolean("batteryHeatAuto", false);
         pauseMediaOnDoor = sharedPreferences.getBoolean("pauseMediaOnDoor", false);
         fragranceEnabled =
@@ -391,6 +394,7 @@ public class SettingsContentProvider extends ContentProvider {
                             ApolloSettings.SPEED_MODE, // 39 — режим ISA/ISLC (OD)
                             ApolloSettings.SPEED_WARNING, // 40 — предупреждение о превышении (OD)
                             "passengerAutoStart", // 41 — автозапуск сетки пассажира
+                            "mediaAutoStartLastPlayer", // 42 — автозапуск последнего плеера
                         });
 
         cursor.addRow(
@@ -439,6 +443,7 @@ public class SettingsContentProvider extends ContentProvider {
                     apolloSpeedMode,
                     apolloSpeedWarningEnabled ? 1 : 0,
                     passengerAutoStart ? 1 : 0,
+                    mediaAutoStartLastPlayer ? 1 : 0,
                 });
         return cursor;
     }
