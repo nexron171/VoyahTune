@@ -12,6 +12,9 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+
+mod od_postboot_check;
+
 pub const BLOCK: &str = "/data/local/bin/voyahtune-update.block";
 pub const LOCK: &str = "/data/local/voyahtune-install.lock";
 const STABLE: &[&str] = &[
@@ -814,8 +817,10 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
         thread::sleep(Duration::from_secs(3));
     }
     if crate::restore_ui::enabled() {
-        repair_native_data()?;
-        let (payload, claims) = workflow::verified(shared)?;
+        let (payload, claims) = od_postboot_check::run(|| {
+            repair_native_data()?;
+            workflow::verified(shared)
+        })?;
         return finish_installation(shared, &payload, &claims);
     }
     // apply() has already installed both APKs for user 0. Postboot only observes
