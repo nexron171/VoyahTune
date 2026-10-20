@@ -143,4 +143,198 @@ class VehicleStateProtocolTest {
         }
         assertEquals(listOf(4.0, 3.0, 7.0, 0.0), received)
     }
+
+    @Test
+    fun ventsDescribeReadonlyDirectionArraysAndShareFrontAutoMode() {
+        VehicleClimate.update(mapOf("ventUpper" to 0.0, "ventMiddle" to 1.0, "ventLower" to 1.0, "auto" to 0.0))
+        request("configRequest")
+        val accessories = (replies.last()["values"] as Map<*, *>)["accessories"] as List<*>
+        val climate = accessories.map { it as Map<*, *> }.single { it["iid"] == 512L }
+        val vents = (climate["services"] as List<*>).map { it as Map<*, *> }
+            .filter { it["type"] == 0x11000006L }
+        assertEquals(3, vents.size)
+        val fields = vents.flatMap { it["characteristics"] as List<*> }.map { it as Map<*, *> }
+        for ((id, direction) in mapOf(551L to 2L, 556L to 4L, 561L to 16L)) {
+            val field = fields.single { it["iid"] == id }
+            assertEquals(13L, field["format"])
+            assertEquals(listOf(direction), field["initialValue"])
+            assertEquals(false, field["writable"])
+        }
+        request("readRequest", values = listOf(549, 554, 559, 550, 555, 560))
+        assertEquals(
+            mapOf(549L to false, 554L to true, 559L to true, 550L to false, 555L to false, 560L to false),
+            replies.last()["values"],
+        )
+        request("writeRequest", 2, mapOf(551 to listOf(16)))
+        assertEquals(mapOf(551L to -6705L), replies.last()["errors"])
+    }
+
+    @Test
+    fun seatsHaveIndependentPositionsThreeLevelsAndNoSyntheticInitialState() {
+        request("configRequest")
+        val accessories = (replies.last()["values"] as Map<*, *>)["accessories"] as List<*>
+        val seats = accessories.map { it as Map<*, *> }.single { it["type"] == 0x01500001L }
+        val services = (seats["services"] as List<*>).map { it as Map<*, *> }
+        assertEquals(4, services.count { it["type"] == 0x22000001L })
+        assertEquals(2, services.count { it["type"] == 0x22000002L })
+        for (service in services) {
+            val fields = (service["characteristics"] as List<*>).map { it as Map<*, *> }
+            val level = fields.first()
+            assertEquals(0L, level["minimumValue"])
+            assertEquals(3L, level["maximumValue"])
+            assertEquals(1L, level["stepValue"])
+            assertEquals(if (service["type"] == 0x22000001L) 7L else 1L, level["format"])
+            assertFalse(level.containsKey("initialValue"))
+        }
+        val positions = services.associate { service ->
+            val layout = (service["characteristics"] as List<*>).map { it as Map<*, *> }
+                .single { it["type"] == 0x36000065L }
+            service["iid"] to layout["initialValue"]
+        }
+        assertEquals("seat_2ndRow_left", positions[1033L])
+        assertEquals("seat_2ndRow_right", positions[1037L])
+        assertEquals("seat_front_left", positions[1041L])
+        assertEquals("seat_front_right", positions[1045L])
+        val allIds = accessories.flatMap { (it as Map<*, *>)["services"] as List<*> }
+            .flatMap { (it as Map<*, *>)["characteristics"] as List<*> }
+            .map { (it as Map<*, *>)["iid"] }
+        assertEquals(allIds.size, allIds.toSet().size)
+        assertTrue(allIds.size <= 64)
+        request("readRequest", values = listOf(770, 1034, 1042))
+        assertEquals(mapOf(770L to "5Seater"), replies.last()["values"])
+        assertEquals(mapOf(1034L to -6727L, 1042L to -6727L), replies.last()["errors"])
+    }
+
+    @Test
+    fun seatAndVentWritesPreserveFieldRoutingAndPublishOnlyObservedChanges() {
+        val received = ArrayList<Pair<String, Double>>()
+        val pending = ArrayList<VehicleClimate.Result>()
+        VehicleClimate.install(object : VehicleClimate.Host {
+            override fun write(
+                field: String,
+                value: Double,
+                current: BooleanSupplier,
+                result: VehicleClimate.Result,
+            ) {
+                received.add(field to value)
+                pending.add(result)
+            }
+        })
+        val before = mapOf(
+            "rearLeftSeatHeatingLevel" to 0.0,
+            "rearLeftSeatHeatingOn" to 0.0,
+            "driverSeatVentilationLevel" to 0.0,
+            "ventUpper" to 0.0,
+        )
+        VehicleClimate.update(before)
+        request("registerRequest", values = listOf(1034, 1035, 1042, 549))
+        request("writeRequest", 2, mapOf(1034 to 3, 1042 to 2, 549 to true))
+        assertEquals(
+            listOf("rearLeftSeatHeatingLevel" to 3.0, "driverSeatVentilationLevel" to 2.0, "ventUpper" to 1.0),
+            received,
+        )
+        assertEquals(before, VehicleClimate.snapshot())
+        assertTrue(replies.none { it["command"] == "writeResponse" })
+        VehicleClimate.update(
+            before + mapOf("rearLeftSeatHeatingLevel" to 3.0, "rearLeftSeatHeatingOn" to 1.0),
+        )
+        pending[0].complete(0)
+        pending[1].complete(-6722)
+        pending[2].complete(-6727)
+        assertEquals(
+            mapOf(1034L to 0L, 1042L to -6722L, 549L to -6727L),
+            replies.last { it["command"] == "writeResponse" }["errors"],
+        )
+        request("readRequest", values = listOf(1034, 1035, 1042))
+        assertEquals(mapOf(1034L to 3L, 1035L to true, 1042L to 0L), replies.last()["values"])
+        request("writeRequest", 3, mapOf(1034 to -1, 1042 to 4, 1035 to 2, 1046 to 1.5))
+        assertEquals(
+            mapOf(1034L to -6705L, 1042L to -6705L, 1035L to -6705L, 1046L to -6705L),
+            replies.last { it["command"] == "writeResponse" }["errors"],
+        )
+        assertEquals(3, received.size)
+    }
+
+    @Test
+    fun steeringHeatingUsesAppleClimateServiceWithOneIntegerStage() {
+        VehicleClimate.update(emptyMap())
+        request("configRequest")
+        val accessories = (replies.last()["values"] as Map<*, *>)["accessories"] as List<*>
+        val climate = accessories.map { it as Map<*, *> }.single { it["type"] == 0x01000001L }
+        val steering = (climate["services"] as List<*>).map { it as Map<*, *> }
+            .single { it["type"] == 0x11000003L }
+        assertEquals(563L, steering["iid"])
+        val level = (steering["characteristics"] as List<*>).single() as Map<*, *>
+        assertEquals(564L, level["iid"])
+        assertEquals(0x31000021L, level["type"])
+        assertEquals(7L, level["format"])
+        assertEquals(0L, level["minimumValue"])
+        assertEquals(1L, level["maximumValue"])
+        assertEquals(1L, level["stepValue"])
+        assertEquals(true, level["writable"])
+        assertEquals(true, level["supportsInvalid"])
+        assertFalse(level.containsKey("initialValue"))
+
+        request("readRequest", values = listOf(564))
+        assertEquals(mapOf(564L to -6727L), replies.last()["errors"])
+        host()
+        for ((index, invalid) in listOf(-1, 2, 0.5, true).withIndex()) {
+            request("writeRequest", 100L + index, mapOf(564 to invalid))
+            assertEquals(mapOf(564L to -6705L), replies.last()["errors"])
+        }
+        assertEquals(0, commands)
+    }
+
+    @Test
+    fun steeringWritesWaitForReadbackAndFaultClearsTheLastKnownLevel() {
+        val received = ArrayList<Double>()
+        VehicleClimate.install(object : VehicleClimate.Host {
+            override fun write(
+                field: String,
+                value: Double,
+                current: BooleanSupplier,
+                result: VehicleClimate.Result,
+            ) {
+                assertEquals("steeringWheelHeatingLevel", field)
+                received.add(value)
+                completion = result
+            }
+        })
+        val otherClimate = mapOf("driverTemperature" to 21.0)
+        VehicleClimate.update(otherClimate + ("steeringWheelHeatingLevel" to 0.0))
+        request("registerRequest", values = listOf(564))
+
+        for ((index, level) in listOf(1.0, 0.0).withIndex()) {
+            val before = VehicleClimate.snapshot()
+            val transaction = 10L + index
+            request("writeRequest", transaction, mapOf(564 to level.toLong()))
+            request("writeRequest", transaction, mapOf(564 to level.toLong()))
+            assertEquals(index + 1, received.size)
+            assertEquals(before, VehicleClimate.snapshot())
+            assertTrue(replies.none { it["command"] == "writeResponse" && it["transactionID"] == transaction })
+            VehicleClimate.update(otherClimate + ("steeringWheelHeatingLevel" to level))
+            completion!!.complete(0)
+            assertEquals(
+                mapOf(564L to 0L),
+                replies.last { it["command"] == "writeResponse" }["errors"],
+            )
+            request("readRequest", values = listOf(564))
+            assertEquals(mapOf(564L to level.toLong()), replies.last()["values"])
+        }
+        assertEquals(listOf(1.0, 0.0), received)
+
+        // Native omits the field when the OEM reports a heating fault.
+        VehicleClimate.update(otherClimate)
+        assertEquals("updateNotify", replies.last()["command"])
+        assertEquals(mapOf(564L to null), replies.last()["values"])
+        request("writeRequest", 20, mapOf(564 to 1))
+        completion!!.complete(-6727)
+        assertEquals(
+            mapOf(564L to -6727L),
+            replies.single { it["command"] == "writeResponse" && it["transactionID"] == 20L }["errors"],
+        )
+        request("readRequest", values = listOf(564))
+        assertEquals(mapOf(564L to -6727L), replies.last()["errors"])
+        assertEquals(otherClimate, VehicleClimate.snapshot())
+    }
 }

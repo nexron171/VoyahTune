@@ -20,6 +20,22 @@ public final class CarPlayClimateProtocol {
     public static final String AUTO = "auto";
     public static final String SYNC = "sync";
     public static final String RECIRCULATION = "recirculation";
+    public static final String VENT_UPPER = "ventUpper";
+    public static final String VENT_MIDDLE = "ventMiddle";
+    public static final String VENT_LOWER = "ventLower";
+    public static final String DRIVER_HEATING_LEVEL = "driverSeatHeatingLevel";
+    public static final String DRIVER_HEATING_ON = "driverSeatHeatingOn";
+    public static final String PASSENGER_HEATING_LEVEL = "passengerSeatHeatingLevel";
+    public static final String PASSENGER_HEATING_ON = "passengerSeatHeatingOn";
+    public static final String REAR_LEFT_HEATING_LEVEL = "rearLeftSeatHeatingLevel";
+    public static final String REAR_LEFT_HEATING_ON = "rearLeftSeatHeatingOn";
+    public static final String REAR_RIGHT_HEATING_LEVEL = "rearRightSeatHeatingLevel";
+    public static final String REAR_RIGHT_HEATING_ON = "rearRightSeatHeatingOn";
+    public static final String DRIVER_VENTILATION_LEVEL = "driverSeatVentilationLevel";
+    public static final String DRIVER_VENTILATION_ON = "driverSeatVentilationOn";
+    public static final String PASSENGER_VENTILATION_LEVEL = "passengerSeatVentilationLevel";
+    public static final String PASSENGER_VENTILATION_ON = "passengerSeatVentilationOn";
+    public static final String STEERING_WHEEL_HEATING_LEVEL = "steeringWheelHeatingLevel";
 
     public static final int SUCCESS = 0;
     public static final int UNAVAILABLE = -6727;

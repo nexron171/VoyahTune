@@ -31,6 +31,9 @@ final class ClimateCommand {
             case CarPlayClimateProtocol.AUTO:
             case CarPlayClimateProtocol.SYNC:
             case CarPlayClimateProtocol.RECIRCULATION:
+            case CarPlayClimateProtocol.VENT_UPPER:
+            case CarPlayClimateProtocol.VENT_MIDDLE:
+            case CarPlayClimateProtocol.VENT_LOWER:
                 return value == 0 || value == 1;
             default:
                 return false;
@@ -41,6 +44,9 @@ final class ClimateCommand {
         Double observed = state.values().get(field);
         if (observed == null || observed != target) {
             return false;
+        }
+        if (ClimateAirDistribution.handles(field)) {
+            return state.power == 1 && state.automatic == 0;
         }
         if (!CarPlayClimateProtocol.FAN.equals(field)) {
             return true;
@@ -56,6 +62,12 @@ final class ClimateCommand {
                 CarPlayClimateProtocol.RECIRCULATION.equals(field) && state.circulation == 2;
         if (state.values().get(field) == null && !automaticCirculation) {
             return null;
+        }
+        if (ClimateAirDistribution.handles(field)) {
+            int mode = ClimateAirDistribution.targetMode(state.airDistribution, field, target == 1);
+            return state.power == 1 && mode >= 0
+                    ? new ClimateCommand("AC_FLOW_MODE", 13, mode)
+                    : null;
         }
         switch (field) {
             case CarPlayClimateProtocol.DRIVER_TEMPERATURE:

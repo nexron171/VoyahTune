@@ -20,10 +20,12 @@ import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.SmartSaveSettings;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -150,6 +152,12 @@ final class OemVehicleStateTransport {
         boolean send(ClimateCommand command);
     }
 
+    interface ComfortClimateSession {
+        OemComfortClimateState read();
+
+        boolean send(StateValue command);
+    }
+
     private static final OemVehicleStateTransport INSTANCE = new OemVehicleStateTransport();
 
     private final Object connectionLock = new Object();
@@ -258,6 +266,26 @@ final class OemVehicleStateTransport {
         return binder == null ? null : INSTANCE.new BoundClimateSession(binder);
     }
 
+    static ComfortClimateSession openComfortClimateSession(Context context) {
+        Context app = INSTANCE.applicationContext(context);
+        if (app == null) {
+            return null;
+        }
+        List<StateKey> keys = new ArrayList<>();
+        if (INSTANCE.resolveStates(app, OemSeatClimateState.KEYS)) {
+            keys.addAll(OemSeatClimateState.KEYS);
+        }
+        if (INSTANCE.resolveStates(
+                app, Collections.singleton(OemComfortClimateState.STEERING_WHEEL_HEATING))) {
+            keys.add(OemComfortClimateState.STEERING_WHEEL_HEATING);
+        }
+        if (keys.isEmpty()) {
+            return null;
+        }
+        IBinder binder = INSTANCE.acquireBinder(app);
+        return binder == null ? null : INSTANCE.new BoundComfortClimateSession(binder, keys);
+    }
+
     private boolean resolveClimateSchema(Context context) {
         synchronized (schemaLock) {
             if (!climateOrdinals.isEmpty()) return true;
@@ -277,6 +305,7 @@ final class OemVehicleStateTransport {
                 expected.put("AC_POWER_SWITCH", 8);
                 expected.put("AC_RECIRC_AIR", 11);
                 expected.put("AC_DUAL", 12);
+                expected.put("AC_FLOW_MODE", 13);
                 Map<String, Integer> resolved = new HashMap<>();
                 Object[] constants = schema.getEnumConstants();
                 if (constants == null) return false;
@@ -295,6 +324,44 @@ final class OemVehicleStateTransport {
                     | RuntimeException error) {
                 Log.w(TAG, "Installed climate schema unavailable", error);
                 return false;
+            }
+        }
+    }
+
+    private final class BoundComfortClimateSession implements ComfortClimateSession {
+        private final IBinder binder;
+        private final List<StateKey> keys;
+
+        BoundComfortClimateSession(IBinder binder, List<StateKey> keys) {
+            this.binder = binder;
+            this.keys = Collections.unmodifiableList(new ArrayList<>(keys));
+        }
+
+        @Override
+        public OemComfortClimateState read() {
+            synchronized (transactionLock) {
+                if (!isCurrentBinder(binder)) {
+                    return null;
+                }
+                Map<StateKey, Integer> values = new LinkedHashMap<>();
+                for (StateKey key : keys) {
+                    Integer value = transactVehicleState(binder, key, false);
+                    if (value == null) {
+                        return null;
+                    }
+                    values.put(key, value);
+                }
+                return new OemComfortClimateState(values);
+            }
+        }
+
+        @Override
+        public boolean send(StateValue command) {
+            if (command == null || !keys.contains(command.key)) {
+                return false;
+            }
+            synchronized (transactionLock) {
+                return transactSingle(binder, command, "CarPlay comfort climate").accepted();
             }
         }
     }
@@ -942,6 +1009,10 @@ final class OemVehicleStateTransport {
     }
 
     private Integer transactVehicleState(IBinder binder, StateKey key) {
+        return transactVehicleState(binder, key, true);
+    }
+
+    private Integer transactVehicleState(IBinder binder, StateKey key, boolean logRead) {
         Integer ordinal;
         synchronized (schemaLock) {
             ordinal = resolvedOrdinals.get(key);
@@ -961,7 +1032,9 @@ final class OemVehicleStateTransport {
             }
             reply.readException();
             int value = reply.readInt();
-            Log.i(TAG, "TX57 getVehicleState " + key + "=" + value);
+            if (logRead) {
+                Log.i(TAG, "TX57 getVehicleState " + key + "=" + value);
+            }
             return value;
         } catch (RemoteException | RuntimeException e) {
             Log.e(TAG, "TX57 getVehicleState failed " + key, e);

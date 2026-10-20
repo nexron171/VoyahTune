@@ -18,6 +18,7 @@ final class OemClimateState {
     final int automatic;
     final int dual;
     final int circulation;
+    final int airDistribution;
     final float driverTemperature;
     final float passengerTemperature;
     final int outsideTemperature;
@@ -29,6 +30,7 @@ final class OemClimateState {
         power = fields[0];
         compressor = fields[1];
         dual = fields[4];
+        airDistribution = fields[8];
         fan = fields[10];
         driverTemperature = Float.intBitsToFloat(fields[11]);
         passengerTemperature = Float.intBitsToFloat(fields[12]);
@@ -63,6 +65,17 @@ final class OemClimateState {
         }
         if (circulation == 0 || circulation == 1) {
             values.put(CarPlayClimateProtocol.RECIRCULATION, (double) circulation);
+        }
+        for (String field :
+                new String[] {
+                    CarPlayClimateProtocol.VENT_UPPER,
+                    CarPlayClimateProtocol.VENT_MIDDLE,
+                    CarPlayClimateProtocol.VENT_LOWER
+                }) {
+            Double direction = ClimateAirDistribution.observed(airDistribution, field);
+            if (direction != null) {
+                values.put(field, direction);
+            }
         }
         return Collections.unmodifiableMap(values);
     }

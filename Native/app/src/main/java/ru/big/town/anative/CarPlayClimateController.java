@@ -35,6 +35,9 @@ final class CarPlayClimateController implements AutoCloseable {
     private Messenger owner;
     private Bundle state = new Bundle();
     private long sampledAt;
+    private Bundle comfortState = new Bundle();
+    private long comfortSampledAt;
+    private Object comfortQuery;
     private final Runnable poll =
             new Runnable() {
                 @Override
@@ -47,7 +50,14 @@ final class CarPlayClimateController implements AutoCloseable {
                         sampledAt = 0;
                         changed.run();
                     }
+                    if (comfortSampledAt > 0
+                            && SystemClock.elapsedRealtime() - comfortSampledAt > 5000) {
+                        comfortState.clear();
+                        comfortSampledAt = 0;
+                        changed.run();
+                    }
                     hub.requestClimateSnapshot();
+                    requestComfortSnapshot();
                     handler.postDelayed(this, 1000);
                 }
             };
@@ -67,8 +77,12 @@ final class CarPlayClimateController implements AutoCloseable {
         owner = client;
         subscription =
                 hub.subscribe(
-                        CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_CLIMATE,
-                        null,
+                        CanBusEventRouter.INTEREST_CONNECTION
+                                | CanBusEventRouter.INTEREST_CLIMATE
+                                | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                        OemComfortClimateState.KEYS.stream()
+                                .mapToInt(key -> key.stableId)
+                                .toArray(),
                         handler,
                         event -> {
                             if (owner == null) {
@@ -77,13 +91,21 @@ final class CarPlayClimateController implements AutoCloseable {
                             if (event.kind == CanBusEvent.Kind.CLIMATE) {
                                 sampledAt = event.elapsedRealtime;
                                 state = bundle(event.climate.values());
+                            } else if (event.kind == CanBusEvent.Kind.VEHICLE_STATE) {
+                                // OEM publishes power and level separately; read a complete pair.
+                                requestComfortSnapshot();
+                                return;
                             } else {
                                 generation++;
                                 commands.getQueue().clear();
                                 state.clear();
                                 sampledAt = 0;
+                                comfortState.clear();
+                                comfortSampledAt = 0;
+                                comfortQuery = null;
                                 if (event.kind == CanBusEvent.Kind.CONNECTION) {
                                     hub.requestClimateSnapshot();
+                                    requestComfortSnapshot();
                                 }
                             }
                             changed.run();
@@ -92,7 +114,44 @@ final class CarPlayClimateController implements AutoCloseable {
     }
 
     Bundle snapshot() {
-        return new Bundle(state);
+        Bundle snapshot = new Bundle(state);
+        snapshot.putAll(comfortState);
+        return snapshot;
+    }
+
+    private void requestComfortSnapshot() {
+        if (owner == null || comfortQuery != null) {
+            return;
+        }
+        Object query = new Object();
+        comfortQuery = query;
+        long expectedGeneration = generation;
+        try {
+            commands.execute(
+                    () -> {
+                        if (generation != expectedGeneration) {
+                            return;
+                        }
+                        OemVehicleStateTransport.ComfortClimateSession session =
+                                OemVehicleStateTransport.openComfortClimateSession(context);
+                        OemComfortClimateState observed = session == null ? null : session.read();
+                        long observedAt = SystemClock.elapsedRealtime();
+                        handler.post(
+                                () -> {
+                                    if (comfortQuery != query || generation != expectedGeneration) {
+                                        return;
+                                    }
+                                    comfortQuery = null;
+                                    if (observed != null && observedAt >= comfortSampledAt) {
+                                        comfortState = bundle(observed.values());
+                                        comfortSampledAt = observedAt;
+                                        changed.run();
+                                    }
+                                });
+                    });
+        } catch (RejectedExecutionException full) {
+            comfortQuery = null;
+        }
     }
 
     void handle(Message message) {
@@ -109,7 +168,10 @@ final class CarPlayClimateController implements AutoCloseable {
                         SystemClock.elapsedRealtime() + 3000);
         long expectedGeneration = generation;
         Messenger recipient = owner;
-        if (!ClimateCommand.valid(field, value)) {
+        boolean comfortCommand = OemComfortClimateState.handles(field);
+        if (!(comfortCommand
+                ? OemComfortClimateState.valid(field, value)
+                : ClimateCommand.valid(field, value))) {
             respond(recipient, request, CarPlayClimateProtocol.INVALID, expectedGeneration);
             return;
         }
@@ -117,15 +179,24 @@ final class CarPlayClimateController implements AutoCloseable {
             commands.execute(
                     () -> {
                         OemClimateState[] observed = {null};
+                        OemComfortClimateState[] observedComfort = {null};
                         long[] observedAt = {0};
                         int result =
-                                apply(
-                                        field,
-                                        value,
-                                        deadline,
-                                        expectedGeneration,
-                                        observed,
-                                        observedAt);
+                                comfortCommand
+                                        ? applyComfort(
+                                                field,
+                                                value,
+                                                deadline,
+                                                expectedGeneration,
+                                                observedComfort,
+                                                observedAt)
+                                        : apply(
+                                                field,
+                                                value,
+                                                deadline,
+                                                expectedGeneration,
+                                                observed,
+                                                observedAt);
                         handler.post(
                                 () -> {
                                     if (generation != expectedGeneration) {
@@ -136,13 +207,74 @@ final class CarPlayClimateController implements AutoCloseable {
                                         sampledAt = observedAt[0];
                                         changed.run();
                                     }
+                                    if (observedComfort[0] != null
+                                            && observedAt[0] >= comfortSampledAt) {
+                                        comfortState = bundle(observedComfort[0].values());
+                                        comfortSampledAt = observedAt[0];
+                                        changed.run();
+                                    }
                                     hub.requestClimateSnapshot();
+                                    requestComfortSnapshot();
                                     respond(recipient, request, result, expectedGeneration);
                                 });
                     });
         } catch (RejectedExecutionException full) {
             respond(recipient, request, CarPlayClimateProtocol.BUSY, expectedGeneration);
         }
+    }
+
+    private int applyComfort(
+            String field,
+            double target,
+            long deadline,
+            long expectedGeneration,
+            OemComfortClimateState[] latest,
+            long[] sampled) {
+        if (!current(expectedGeneration, deadline)) {
+            return CarPlayClimateProtocol.TIMEOUT;
+        }
+        OemVehicleStateTransport.ComfortClimateSession session =
+                OemVehicleStateTransport.openComfortClimateSession(context);
+        if (session == null) {
+            return CarPlayClimateProtocol.UNAVAILABLE;
+        }
+        OemComfortClimateState before = session.read();
+        if (before == null) {
+            return CarPlayClimateProtocol.UNAVAILABLE;
+        }
+        latest[0] = before;
+        sampled[0] = SystemClock.elapsedRealtime();
+        if (before.reached(field, target)) {
+            return CarPlayClimateProtocol.SUCCESS;
+        }
+        OemVehicleStateTransport.StateValue command = before.command(field, target);
+        if (command == null) {
+            return CarPlayClimateProtocol.UNAVAILABLE;
+        }
+        if (!current(expectedGeneration, deadline)) {
+            return CarPlayClimateProtocol.TIMEOUT;
+        }
+        if (!session.send(command)) {
+            return CarPlayClimateProtocol.UNAVAILABLE;
+        }
+        while (current(expectedGeneration, deadline)) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return CarPlayClimateProtocol.UNAVAILABLE;
+            }
+            OemComfortClimateState observed = session.read();
+            if (observed == null) {
+                return CarPlayClimateProtocol.UNAVAILABLE;
+            }
+            latest[0] = observed;
+            sampled[0] = SystemClock.elapsedRealtime();
+            if (observed.reached(field, target)) {
+                return CarPlayClimateProtocol.SUCCESS;
+            }
+        }
+        return CarPlayClimateProtocol.TIMEOUT;
     }
 
     private int apply(
@@ -252,6 +384,9 @@ final class CarPlayClimateController implements AutoCloseable {
         subscription = null;
         state.clear();
         sampledAt = 0;
+        comfortState.clear();
+        comfortSampledAt = 0;
+        comfortQuery = null;
     }
 
     void destroy() {
