@@ -29,8 +29,14 @@ object AirPlayInfoPlist {
         if (config.disableAudioOutput) CARPLAY_FEATURES_NO_AUDIO else CARPLAY_FEATURES
 
     fun build(config: AirPlayConfig): Map<String, Any?> {
+        val climateAvailable = VehicleClimate.available
         val displays = arrayListOf(
-            displayEntry(config.main, STREAM_TYPE_MAIN_SCREEN, MAIN_UUID),
+            displayEntry(
+                config.main,
+                STREAM_TYPE_MAIN_SCREEN,
+                MAIN_UUID,
+                defaultDockEdge = if (climateAvailable) DOCK_EDGE_BOTTOM else null,
+            ),
         )
         config.cluster?.let { displays.add(displayEntry(it, STREAM_TYPE_ALT_SCREEN, ALT_UUID)) }
 
@@ -55,7 +61,7 @@ object AirPlayInfoPlist {
         }
         info["extendedFeatures"] = listOf("vocoderInfo", "enhancedRequestCarUI")
         info["displays"] = displays
-        if (VehicleClimate.available) {
+        if (climateAvailable) {
             info["vehicleStateProtocolInfo"] = VehicleStateProtocol.descriptor()
             info["displayPanels"] = VehicleStateDisplayPanels.build(displays)
         }
@@ -191,7 +197,12 @@ object AirPlayInfoPlist {
         ),
     )
 
-    private fun displayEntry(display: AirPlayDisplayConfig, type: Int, uuid: String): Map<String, Any?> {
+    private fun displayEntry(
+        display: AirPlayDisplayConfig,
+        type: Int,
+        uuid: String,
+        defaultDockEdge: Int? = null,
+    ): Map<String, Any?> {
         val widthPhysical = AirPlayDisplaySettings.sanitizeReportedPhysicalMm(
             display.widthPhysicalMm ?: AirPlayDisplaySettings.DEFAULT_WIDTH_PHYSICAL_MM,
         )
@@ -224,7 +235,9 @@ object AirPlayInfoPlist {
         // screen) with updateViewArea, without reconnecting.
         val areas = display.viewAreas?.takeIf { it.isNotEmpty() }
         val disableSafeArea = uuid == MAIN_UUID && display.mainDisplayDisableSafeArea
-        entry["viewAreas"] = areas?.map { areaDict(display, it, disableSafeArea) } ?: listOf(areaDict(display, null, disableSafeArea))
+        entry["viewAreas"] = areas?.map {
+            areaDict(display, it, disableSafeArea, defaultDockEdge)
+        } ?: listOf(areaDict(display, null, disableSafeArea, defaultDockEdge))
         entry["initialViewArea"] = if (areas == null) 0 else display.initialViewArea.coerceIn(0, areas.lastIndex)
         if (uuid == MAIN_UUID && display.mainDisplayCornerMasks != null) entry["cornerMasks"] = display.mainDisplayCornerMasks
         if (areas != null && areas.size > 1) entry["viewAreaTransitionControl"] = true
@@ -236,6 +249,7 @@ object AirPlayInfoPlist {
         display: AirPlayDisplayConfig,
         area: AirPlayViewArea? = null,
         disableSafeArea: Boolean = false,
+        defaultDockEdge: Int? = null,
     ): Map<String, Any?> {
         // The session SETUP response enables "viewAreas", so /info must always describe one.
         // A display without custom insets uses the full panel for both the view and safe areas; an
@@ -252,7 +266,8 @@ object AirPlayInfoPlist {
             "originXPixels" to view.left,
             "originYPixels" to view.top,
         )
-        area?.dockEdge?.let { result["viewAreaStatusBarEdge"] = it }
+        // The bottom dock accommodates both climate zones without a custom Ultra theme.
+        (area?.dockEdge ?: defaultDockEdge)?.let { result["viewAreaStatusBarEdge"] = it }
         if (!disableSafeArea) {
             val displaySafe = display.safeArea ?: AirPlayInsets()
             val clipped = if (area == null) displaySafe else AirPlayInsets(

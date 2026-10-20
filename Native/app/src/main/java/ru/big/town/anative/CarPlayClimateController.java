@@ -39,7 +39,9 @@ final class CarPlayClimateController implements AutoCloseable {
             new Runnable() {
                 @Override
                 public void run() {
-                    if (owner == null) return;
+                    if (owner == null) {
+                        return;
+                    }
                     if (sampledAt > 0 && SystemClock.elapsedRealtime() - sampledAt > 5000) {
                         state.clear();
                         sampledAt = 0;
@@ -58,7 +60,9 @@ final class CarPlayClimateController implements AutoCloseable {
     }
 
     void start(Messenger client) {
-        if (client.equals(owner)) return;
+        if (client.equals(owner)) {
+            return;
+        }
         close();
         owner = client;
         subscription =
@@ -67,7 +71,9 @@ final class CarPlayClimateController implements AutoCloseable {
                         null,
                         handler,
                         event -> {
-                            if (owner == null) return;
+                            if (owner == null) {
+                                return;
+                            }
                             if (event.kind == CanBusEvent.Kind.CLIMATE) {
                                 sampledAt = event.elapsedRealtime;
                                 state = bundle(event.climate.values());
@@ -76,8 +82,9 @@ final class CarPlayClimateController implements AutoCloseable {
                                 commands.getQueue().clear();
                                 state.clear();
                                 sampledAt = 0;
-                                if (event.kind == CanBusEvent.Kind.CONNECTION)
+                                if (event.kind == CanBusEvent.Kind.CONNECTION) {
                                     hub.requestClimateSnapshot();
+                                }
                             }
                             changed.run();
                         });
@@ -89,7 +96,9 @@ final class CarPlayClimateController implements AutoCloseable {
     }
 
     void handle(Message message) {
-        if (owner == null || !owner.equals(message.replyTo)) return;
+        if (owner == null || !owner.equals(message.replyTo)) {
+            return;
+        }
         Bundle input = message.getData();
         int request = input.getInt(CarPlayClimateProtocol.REQUEST);
         String field = input.getString(CarPlayClimateProtocol.FIELD, "");
@@ -119,7 +128,9 @@ final class CarPlayClimateController implements AutoCloseable {
                                         observedAt);
                         handler.post(
                                 () -> {
-                                    if (generation != expectedGeneration) return;
+                                    if (generation != expectedGeneration) {
+                                        return;
+                                    }
                                     if (observed[0] != null && observedAt[0] >= sampledAt) {
                                         state = bundle(observed[0].values());
                                         sampledAt = observedAt[0];
@@ -141,19 +152,33 @@ final class CarPlayClimateController implements AutoCloseable {
             long expectedGeneration,
             OemClimateState[] latest,
             long[] sampled) {
-        if (!current(expectedGeneration, deadline)) return CarPlayClimateProtocol.TIMEOUT;
+        if (!current(expectedGeneration, deadline)) {
+            return CarPlayClimateProtocol.TIMEOUT;
+        }
         OemVehicleStateTransport.ClimateSession session =
                 OemVehicleStateTransport.openClimateSession(context);
-        if (session == null) return CarPlayClimateProtocol.UNAVAILABLE;
+        if (session == null) {
+            return CarPlayClimateProtocol.UNAVAILABLE;
+        }
         OemClimateState before = session.read();
-        if (before == null) return CarPlayClimateProtocol.UNAVAILABLE;
+        if (before == null) {
+            return CarPlayClimateProtocol.UNAVAILABLE;
+        }
         latest[0] = before;
         sampled[0] = SystemClock.elapsedRealtime();
-        if (ClimateCommand.reached(before, field, target)) return CarPlayClimateProtocol.SUCCESS;
+        if (ClimateCommand.reached(before, field, target)) {
+            return CarPlayClimateProtocol.SUCCESS;
+        }
         ClimateCommand command = ClimateCommand.from(before, field, target);
-        if (command == null) return CarPlayClimateProtocol.UNAVAILABLE;
-        if (!current(expectedGeneration, deadline)) return CarPlayClimateProtocol.TIMEOUT;
-        if (!session.send(command)) return CarPlayClimateProtocol.UNAVAILABLE;
+        if (command == null) {
+            return CarPlayClimateProtocol.UNAVAILABLE;
+        }
+        if (!current(expectedGeneration, deadline)) {
+            return CarPlayClimateProtocol.TIMEOUT;
+        }
+        if (!session.send(command)) {
+            return CarPlayClimateProtocol.UNAVAILABLE;
+        }
         boolean circulationAdvanceAvailable = CarPlayClimateProtocol.RECIRCULATION.equals(field);
         while (current(expectedGeneration, deadline)) {
             try {
@@ -163,19 +188,25 @@ final class CarPlayClimateController implements AutoCloseable {
                 return CarPlayClimateProtocol.UNAVAILABLE;
             }
             OemClimateState observed = session.read();
-            if (observed == null) return CarPlayClimateProtocol.UNAVAILABLE;
+            if (observed == null) {
+                return CarPlayClimateProtocol.UNAVAILABLE;
+            }
             latest[0] = observed;
             sampled[0] = SystemClock.elapsedRealtime();
-            if (ClimateCommand.reached(observed, field, target))
+            if (ClimateCommand.reached(observed, field, target)) {
                 return CarPlayClimateProtocol.SUCCESS;
-            // AUTO circulation lies between external and internal on firmware with three modes.
-            // A second pulse follows confirmed advancement, never an uncertain first write.
+            }
+            // Three circulation modes may require two pulses, including when starting in AUTO.
+            // Only a confirmed first transition permits the second pulse.
             if (circulationAdvanceAvailable
-                    && observed.circulation == 2
-                    && before.circulation != 2) {
+                    && ClimateCommand.circulationAdvanced(before, observed)) {
                 circulationAdvanceAvailable = false;
-                if (!current(expectedGeneration, deadline)) break;
-                if (!session.send(command)) return CarPlayClimateProtocol.UNAVAILABLE;
+                if (!current(expectedGeneration, deadline)) {
+                    break;
+                }
+                if (!session.send(command)) {
+                    return CarPlayClimateProtocol.UNAVAILABLE;
+                }
             }
         }
         return CarPlayClimateProtocol.TIMEOUT;
@@ -186,7 +217,9 @@ final class CarPlayClimateController implements AutoCloseable {
     }
 
     private void respond(Messenger recipient, int request, int error, long expectedGeneration) {
-        if (generation != expectedGeneration) return;
+        if (generation != expectedGeneration) {
+            return;
+        }
         Message response = Message.obtain(null, CarPlayClimateProtocol.RESULT);
         Bundle data = new Bundle();
         data.putInt(CarPlayClimateProtocol.REQUEST, request);
@@ -201,8 +234,9 @@ final class CarPlayClimateController implements AutoCloseable {
 
     private static Bundle bundle(Map<String, Double> values) {
         Bundle result = new Bundle();
-        for (Map.Entry<String, Double> value : values.entrySet())
+        for (Map.Entry<String, Double> value : values.entrySet()) {
             result.putDouble(value.getKey(), value.getValue());
+        }
         return result;
     }
 
@@ -212,7 +246,9 @@ final class CarPlayClimateController implements AutoCloseable {
         owner = null;
         handler.removeCallbacks(poll);
         commands.getQueue().clear();
-        if (subscription != null) subscription.close();
+        if (subscription != null) {
+            subscription.close();
+        }
         subscription = null;
         state.clear();
         sampledAt = 0;

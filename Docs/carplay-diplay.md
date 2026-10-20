@@ -860,9 +860,34 @@ writer с очередью до 32 пакетов; переполнение за
 updateNotify. Повторная write-транзакция возвращает сохранённый ответ без новой
 OEM-команды. Телефон может управлять двумя температурами, питанием, A/C, вентилятором,
 AUTO, SYNC и рециркуляцией. Температуры: 15,5–30,5 с шагом 0,5; крайние значения
-соответствуют OEM LO/HI. Вентилятор: 0–8. Измеренная температура салона не объявляется:
+соответствуют OEM LO/HI. Вентилятор: 0–7, где 0 выключает HVAC. Измеренная температура салона не объявляется:
 исследованная машина возвращает −9999. Нет фиксированных «показаний» или климатического
 Android overlay; интерфейс рисует iPhone.
+
+При доступном `VehicleClimate` автоматический выбор дока главного дисплея заменяется
+на `viewAreaStatusBarEdge=1` (снизу): такая компоновка с двумя температурами показана
+в [примере LIVI](https://github.com/f-io/LIVI/blob/19baaa7447606ae36d75840add21b79a236b937f/docs/media/climate/climate_01.png).
+Явно выбранные края дока сохраняют приоритет; геометрия view/safe areas и приборный
+дисплей не меняются. Без климатического адаптера выбор остаётся за iPhone.
+Настройка объявляется в `/info` и требует переподключения. Появление обеих температур
+на Voyah ещё не проверено; проверять на главном экране или в другом приложении CarPlay:
+в полном климатическом экране док может скрывать эти повторяющиеся элементы.
+
+`VehicleResources → VehicleVariant → InteriorStyle = "5Seater"` — идентификатор
+варианта, а не встроенное изображение салона. Его наличие без соответствующих
+ресурсов не создаёт картинку; это следует и из
+[примера Apple WWDC24, 13:12](https://developer.apple.com/videos/play/wwdc2024/10111/?time=792).
+В исследованном пакете Ultra изображение задаётся через `Extras/manifest.json`
+(`cabin` с вариантом interiorStyle), а размещение зон — через `vehicleLayout`.
+Двойные статус-бары задаёт `systemUILayout.hasDualStatusBar` описания centerConsole
+в пакете темы, а не две view areas. Текущий стек не доставляет такой пакет;
+изображение пятиместного салона и двойные боковые панели пока не реализованы.
+Обычный VSP CustomImageArchive для именованных значков не подтверждён как способ
+подмены изображения салона.
+Группа 7 `CarPlayStartSession` (`Iap2ClusterAsset`) передаёт идентификатор и версию
+пакета, без PNG или адреса его загрузки. Наличие этого поля в iAP2-кодеке не даёт
+канала загрузки собственного пакета. Подготовка PNG, `Extras/manifest.json`
+и координат `vehicleLayout` сама по себе не включает изображение на iPhone.
 
 `CarPlayClimateController` подписан на общий `CanBusEventHub` (callback 4), получает
 TX30-снимок раз в секунду и очищает данные старше 5 секунд. Снимок не может затереть
@@ -870,9 +895,15 @@ TX30-снимок раз в секунду и очищает данные ста
 существующий Binder и проверяет имена, stable ID и ordinal установленного
 `AirConditionState.getState()`. Температурная TX31-команда передаёт десятые доли градуса.
 Питание, A/C и DUAL — условные импульсы `1` после свежего чтения, не абсолютные boolean.
-Выключение AUTO задаёт наблюдаемый ручной уровень вентилятора; уровень 0 выключает HVAC.
-Рециркуляция допускает второй импульс только после подтверждённого перехода первого
-в AUTO; неопределённая запись не повторяется. Очередь ограничена 16 запросами, срок
+В исследованном OEM CAN service 1.2.0, model97, `airWindSpeed` сообщает уровни 1–7,
+а `AC_BLOWER` принимает соответствующие команды 2–8 (`уровень + 1`).
+Выключение AUTO использует то же преобразование наблюдаемого ручного уровня.
+Уровень 0 отправляет условный импульс питания; успех требует readback выключенного HVAC.
+Рециркуляция: 0 — внешний воздух, 1 — внутренний, 2 — автоматический режим.
+Автоматический режим не выдаётся за известное бинарное положение заслонки, но
+адаптер принимает команду выхода из него. Второй импульс допускается только после
+подтверждённой смены первого режима; максимум два импульса, неопределённая запись
+не повторяется. Очередь ограничена 16 запросами, срок
 команды — не более 3 секунд, результат подтверждается чтением. Переподключение CAN
 или смена владельца отменяет ожидающие команды; подтверждённые снимки доставляются
 перед ответом на запись. Неподдержанные состояния остаются недоступными.
@@ -1341,6 +1372,10 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 `VehicleStateProtocol.kt`, `VehicleStateChannel.kt`, `VehicleStateConnection.kt`,
 `VehicleStateDisplayPanels.kt`.
 Точки подключения: `AirPlayInfoPlist`, `AirPlaySession`, `CarPlayMediaEngine`.
+`AirPlayInfoPlist` выбирает нижний док главного экрана при доступном климате,
+если край явно не задан. `VehicleStateProtocolTest` фиксирует диапазон вентилятора
+в передаваемых единицах; `VehicleClimateDockTest` — выбор дока, приоритет
+настроек и сохранение геометрии.
 При обновлении upstream переносить VSP отдельно от iAP2 VehicleStatus и video settings.
 
 Перечисленные собственные файлы реализации не придут из upstream; их нужно сохранить/перенести
@@ -1602,7 +1637,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Способ Wi-Fi подключения | common `HotspotModeMigrationTest`, `ExistingWifiSettingsTest`: default Wi-Fi Direct, сохранение выбранного режима и реквизитов сетей |
 | Приостановка поиска Wi-Fi OD | shared `WifiScanPauseTest`: отменённый acquire, release и отсутствие ADB; app `CarPlayWifiScanBridgeTest`: несколько владельцев, закрытие до доставки и reconnect; Native `CarPlayWifiScanProtocolTest`: исходное время heartbeat, просроченные/будущие запросы; `Packaging/tests/test_carplay_wifi_scan_pause.js`: исполнение OD-агента на Wi-Fi Handler, expiry/boot, исходная и внешняя политика, частичная ошибка, rollback. |
 | Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp), `CarPlayLightStateTest` (начальный SWReason, события и запоздавшие ответы); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest` |
-| Климат VSP | shared `OpackCodecTest` (iPhone/Apple SDK vectors, границы), `VehicleStateProtocolTest` (неизвестные значения, readback, дедупликация), `VehicleStateChannelTest` (шифрование, фрагментация, ACK/token), `VehicleStateDisplayPanelsTest` (панели без дополнительного видеопотока); Native `ClimateCommandTest`, `CanBusEventRouterTest`; компиляция обеих сторон IPC. На ГУ отдельно проверить физический результат, обратное изменение штатной кнопкой и reconnect. |
+| Климат VSP | shared `OpackCodecTest` (iPhone/Apple SDK vectors, границы), `VehicleStateProtocolTest` (неизвестные значения, readback, дедупликация, диапазон вентилятора 0–7), `VehicleStateChannelTest` (шифрование, фрагментация, ACK/token), `VehicleStateDisplayPanelsTest` (панели без дополнительного видеопотока), `VehicleClimateDockTest` и `AirPlayInfoPlistTest` (док, приоритет сохранённого края, main/cluster и геометрия); Native `ClimateCommandTest` (OEM-кодирование вентилятора и режимы рециркуляции), `CanBusEventRouterTest`; компиляция обеих сторон IPC. На ГУ отдельно проверить физический результат, обратное изменение штатной кнопкой, температуры в доке вне приложения «Климат» и reconnect. |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/tests/test_navigation_sources.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
@@ -1693,6 +1728,17 @@ IPC/CAN/cluster/запуска нужен согласованный Native APK.
 автоматически из задачи обновления библиотеки.
 
 ## 13. Подтверждённое состояние и ограничения
+
+### Исправления климата и настройка дока, 20 октября 2026
+
+Исправлены OEM-кодирование вентилятора и полярность рециркуляции; main display
+получает нижний док при автоматическом выборе. Успешны 30 целевых тестов:
+Native `ClimateCommandTest` (6), shared `VehicleStateProtocolTest` (4),
+`VehicleClimateDockTest` (3), `AirPlayInfoPlistTest` (17).
+Оба debug APK собраны как `4.4.0-od`. Проверены `git diff --check` и локальные
+ссылки документации. Машина недоступна; установка, физические команды и показ
+температур в доке после этих изменений не проверены. Изображение `5Seater`
+не подключено: отсутствует интеграция пакета ресурсов салона, см. §6.
 
 ### Первый климатический VSP, 19 октября 2026
 

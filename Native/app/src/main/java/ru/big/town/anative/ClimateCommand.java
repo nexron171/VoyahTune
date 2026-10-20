@@ -15,13 +15,17 @@ final class ClimateCommand {
     }
 
     static boolean valid(String field, double value) {
-        if (!Double.isFinite(value)) return false;
+        if (!Double.isFinite(value)) {
+            return false;
+        }
         switch (field) {
             case CarPlayClimateProtocol.DRIVER_TEMPERATURE:
             case CarPlayClimateProtocol.PASSENGER_TEMPERATURE:
                 return value >= 15.5 && value <= 30.5 && value * 2 == Math.rint(value * 2);
             case CarPlayClimateProtocol.FAN:
-                return value >= 0 && value <= 8 && value == Math.rint(value);
+                return value >= 0
+                        && value <= OemClimateState.MAX_FAN_LEVEL
+                        && value == Math.rint(value);
             case CarPlayClimateProtocol.POWER:
             case CarPlayClimateProtocol.COMPRESSOR:
             case CarPlayClimateProtocol.AUTO:
@@ -35,15 +39,24 @@ final class ClimateCommand {
 
     static boolean reached(OemClimateState state, String field, double target) {
         Double observed = state.values().get(field);
-        if (observed == null || observed != target) return false;
-        return !CarPlayClimateProtocol.FAN.equals(field)
-                || target == 0
-                || (state.automatic == 0 && state.power == 1);
+        if (observed == null || observed != target) {
+            return false;
+        }
+        if (!CarPlayClimateProtocol.FAN.equals(field)) {
+            return true;
+        }
+        return target == 0 ? state.power == 0 : state.automatic == 0 && state.power == 1;
     }
 
     static ClimateCommand from(OemClimateState state, String field, double target) {
-        if (!valid(field, target)) return null;
-        if (state.values().get(field) == null) return null;
+        if (!valid(field, target)) {
+            return null;
+        }
+        boolean automaticCirculation =
+                CarPlayClimateProtocol.RECIRCULATION.equals(field) && state.circulation == 2;
+        if (state.values().get(field) == null && !automaticCirculation) {
+            return null;
+        }
         switch (field) {
             case CarPlayClimateProtocol.DRIVER_TEMPERATURE:
                 return new ClimateCommand("AC_LEFT_TEMP", 3, (int) Math.round(target * 10));
@@ -56,19 +69,34 @@ final class ClimateCommand {
             case CarPlayClimateProtocol.SYNC:
                 return new ClimateCommand("AC_DUAL", 12, 1);
             case CarPlayClimateProtocol.AUTO:
-                if (target == 1) return new ClimateCommand("AC_AUTO", 7, 1);
-                return state.fan >= 1 && state.fan <= 8
-                        ? new ClimateCommand("AC_BLOWER", 1, state.fan)
-                        : null;
+                if (target == 1) {
+                    return new ClimateCommand("AC_AUTO", 7, 1);
+                }
+                return manualFan(state.fan);
             case CarPlayClimateProtocol.FAN:
                 if (target == 0) {
                     return state.power == 1 ? new ClimateCommand("AC_POWER_SWITCH", 8, 1) : null;
                 }
-                return new ClimateCommand("AC_BLOWER", 1, (int) target);
+                return manualFan((int) target);
             case CarPlayClimateProtocol.RECIRCULATION:
                 return new ClimateCommand("AC_RECIRC_AIR", 11, 1);
             default:
                 return null;
         }
+    }
+
+    static boolean circulationAdvanced(OemClimateState before, OemClimateState after) {
+        return before.circulation >= 0
+                && before.circulation <= 2
+                && after.circulation >= 0
+                && after.circulation <= 2
+                && before.circulation != after.circulation;
+    }
+
+    private static ClimateCommand manualFan(int level) {
+        // Model97 reports levels 1–7, but AC_BLOWER accepts the corresponding commands 2–8.
+        return level >= 1 && level <= OemClimateState.MAX_FAN_LEVEL
+                ? new ClimateCommand("AC_BLOWER", 1, level + 1)
+                : null;
     }
 }

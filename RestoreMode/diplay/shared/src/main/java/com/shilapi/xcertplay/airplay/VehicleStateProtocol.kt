@@ -11,7 +11,10 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
     private val subscribed = LinkedHashSet<Long>()
     private val writes = LinkedHashMap<Long, PendingWrite>()
     private var lastValues = observed()
-    @Volatile private var closed = false
+
+    @Volatile
+    private var closed = false
+
     private val deadlines = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "CarPlayClimateDeadline").apply { isDaemon = true }
     }
@@ -33,7 +36,13 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
         val command = request["command"] as? String ?: return
         val values = request["values"]
         when (command) {
-            "configRequest" -> answer(highPriority, "configResponse", transaction, mapOf("accessories" to accessories()))
+            "configRequest" -> answer(
+                highPriority,
+                "configResponse",
+                transaction,
+                mapOf("accessories" to accessories()),
+            )
+
             "registerRequest", "readRequest" -> {
                 val identifiers = values as? List<*> ?: return
                 require(identifiers.size <= 64) { "Too many VSP characteristics" }
@@ -42,18 +51,30 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
                 val errors = LinkedHashMap<Long, Int>()
                 for (identifier in identifiers) {
                     val id = identifier as? Long ?: continue
-                    if (command == "registerRequest" && characteristics.any { it.id == id }) subscribed.add(id)
-                    if (current[id] != null) available[id] = current[id] else errors[id] = NO_VALUE
+                    if (command == "registerRequest" && characteristics.any { it.id == id }) {
+                        subscribed.add(id)
+                    }
+                    if (current[id] != null) {
+                        available[id] = current[id]
+                    } else {
+                        errors[id] = NO_VALUE
+                    }
                 }
                 answer(highPriority, command.replace("Request", "Response"), transaction, available, errors)
             }
+
             "unregisterRequest" -> {
                 val identifiers = (values as? List<*>)?.filterIsInstance<Long>() ?: subscribed.toList()
                 subscribed.removeAll(identifiers.toSet())
                 answer(highPriority, "unregisterResponse", transaction, errors = identifiers.associateWith { 0 })
             }
+
             "writeRequest" -> write(highPriority, transaction, data, values as? Map<*, *> ?: return)
-            else -> send(highPriority, wrap(mapOf("command" to "generalError", "transactionID" to transaction, "error" to -6735)))
+
+            else -> send(
+                highPriority,
+                wrap(mapOf("command" to "generalError", "transactionID" to transaction, "error" to -6735)),
+            )
         }
     }
 
@@ -65,17 +86,26 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
             return
         }
         if (writes.count { it.value.response == null } >= 16) {
-            answer(highPriority, "writeResponse", transaction, errors = values.keys.filterIsInstance<Long>().associateWith { -6721 })
+            answer(
+                highPriority,
+                "writeResponse",
+                transaction,
+                errors = values.keys.filterIsInstance<Long>().associateWith { -6721 },
+            )
             return
         }
+
         val errors = LinkedHashMap<Long, Int>()
         val accepted = LinkedHashMap<Long, Pair<Characteristic, Double>>()
         values.forEach { (key, value) ->
             val identifier = key as? Long ?: return@forEach
             val characteristic = characteristics.find { it.id == identifier }
             val normalized = characteristic?.normalize(value)
-            if (normalized == null || characteristic.field == null) errors[identifier] = -6705
-            else accepted[identifier] = characteristic to normalized
+            if (normalized == null || characteristic.field == null) {
+                errors[identifier] = -6705
+            } else {
+                accepted[identifier] = characteristic to normalized
+            }
         }
         val pending = PendingWrite(bytes.copyOf(), errors).apply { remaining = accepted.size }
         writes[transaction] = pending
@@ -83,26 +113,38 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
             val completed = writes.entries.firstOrNull { it.value.response != null } ?: break
             writes.remove(completed.key)
         }
+
         fun finish() {
             if (closed || pending.response != null || pending.remaining != 0) return
-            val response = wrap(mapOf("command" to "writeResponse", "transactionID" to transaction, "errors" to errors.toMap()))
+            val response = wrap(
+                mapOf(
+                    "command" to "writeResponse",
+                    "transactionID" to transaction,
+                    "errors" to errors.toMap(),
+                ),
+            )
             pending.response = response
             send(highPriority, response)
             notifyValues(observed().filterKeys { it in subscribed && it in values.keys })
         }
+
         if (accepted.isEmpty()) {
             finish()
             return
         }
-        val timeout = deadlines.schedule({
-            synchronized(this) {
-                if (pending.response == null && !closed) {
-                    accepted.keys.filter { it !in errors }.forEach { errors[it] = -6722 }
-                    pending.remaining = 0
-                    finish()
+        val timeout = deadlines.schedule(
+            {
+                synchronized(this) {
+                    if (pending.response == null && !closed) {
+                        accepted.keys.filter { it !in errors }.forEach { errors[it] = -6722 }
+                        pending.remaining = 0
+                        finish()
+                    }
                 }
-            }
-        }, 4, TimeUnit.SECONDS)
+            },
+            4,
+            TimeUnit.SECONDS,
+        )
         accepted.forEach { (identifier, target) ->
             VehicleClimate.write(target.first.field!!, target.second, { !closed }) { error ->
                 synchronized(this) {
@@ -117,23 +159,33 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
         }
     }
 
-    private fun answer(high: Boolean, command: String, transaction: Long, values: Any? = null, errors: Map<Long, Int> = emptyMap()) {
+    private fun answer(
+        highPriority: Boolean,
+        command: String,
+        transaction: Long,
+        values: Any? = null,
+        errors: Map<Long, Int> = emptyMap(),
+    ) {
         val response = linkedMapOf<String, Any?>("command" to command, "transactionID" to transaction)
         if (values != null) response["values"] = values
         if (errors.isNotEmpty()) response["errors"] = errors
-        send(high, wrap(response))
+        send(highPriority, wrap(response))
     }
 
     private fun update(snapshot: Map<String, Double>) {
         if (closed) return
         val next = observed(snapshot)
-        val changed = next.filter { (identifier, value) -> identifier in subscribed && value != lastValues[identifier] }
+        val changed = next.filter { (identifier, value) ->
+            identifier in subscribed && value != lastValues[identifier]
+        }
         lastValues = next
         notifyValues(changed)
     }
 
     private fun notifyValues(values: Map<Long, Any?>) {
-        if (values.isNotEmpty()) send(true, wrap(mapOf("command" to "updateNotify", "values" to values)))
+        if (values.isNotEmpty()) {
+            send(true, wrap(mapOf("command" to "updateNotify", "values" to values)))
+        }
     }
 
     @Synchronized
@@ -168,7 +220,12 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
             fixed?.let { return it }
             val raw = snapshot[field] ?: return null
             return when (format) {
-                0 -> when (raw) { 0.0 -> false; 1.0 -> true; else -> null }
+                0 -> when (raw) {
+                    0.0 -> false
+                    1.0 -> true
+                    else -> null
+                }
+
                 1 -> raw.toLong().takeIf { normalize(raw) != null }
                 else -> raw.takeIf { normalize(raw) != null }
             }
@@ -176,10 +233,19 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
 
         fun describe(snapshot: Map<String, Double>): Map<String, Any?> {
             val result = linkedMapOf<String, Any?>(
-                "iid" to id, "type" to type, "format" to format, "mutable" to (fixed == null),
-                "writable" to (fixed == null), "oemWritable" to true, "priority" to 1,
+                "iid" to id,
+                "type" to type,
+                "format" to format,
+                "mutable" to (fixed == null),
+                "writable" to (fixed == null),
+                "oemWritable" to true,
+                "priority" to 1,
             )
-            if (fixed != null) result["maximumLength"] = 65535 else result["supportsInvalid"] = true
+            if (fixed != null) {
+                result["maximumLength"] = 65535
+            } else {
+                result["supportsInvalid"] = true
+            }
             if (minimum != null) {
                 result["minimumValue"] = if (format == 9) minimum else minimum.toLong()
                 result["maximumValue"] = if (format == 9) maximum else maximum!!.toLong()
@@ -198,17 +264,36 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
         private const val NO_VALUE = -6727
 
         private fun flag(id: Long, type: Long, field: String) = Characteristic(id, type, 0, field)
+
         private fun layout(id: Long, name: String) = Characteristic(id, 0x36000065, 10, fixed = name)
-        private fun temperature(id: Long, field: String) = Characteristic(id, 0x31000017, 9, field, minimum = 15.5, maximum = 30.5, step = 0.5)
+
+        private fun temperature(id: Long, field: String) = Characteristic(
+            id,
+            0x31000017,
+            9,
+            field,
+            minimum = 15.5,
+            maximum = 30.5,
+            step = 0.5,
+        )
 
         private val characteristics = listOf(
-            flag(514, 0x31000002, "power"), flag(515, 0x31000003, "compressor"),
-            flag(519, 0x30000002, "power"), temperature(520, "driverTemperature"), layout(522, "seat_front_left"),
-            flag(533, 0x30000002, "power"), temperature(534, "passengerTemperature"), layout(536, "seat_front_right"),
-            flag(524, 0x30000002, "power"), Characteristic(525, 0x31000012, 1, "fan", minimum = 0.0, maximum = 8.0, step = 1.0),
-            flag(526, 0x3000005f, "auto"), layout(531, "seat_front"),
-            flag(528, 0x30000002, "recirculation"), flag(530, 0x30000002, "auto"),
-            flag(538, 0x30000002, "sync"), layout(539, "seat_front"),
+            flag(514, 0x31000002, "power"),
+            flag(515, 0x31000003, "compressor"),
+            flag(519, 0x30000002, "power"),
+            temperature(520, "driverTemperature"),
+            layout(522, "seat_front_left"),
+            flag(533, 0x30000002, "power"),
+            temperature(534, "passengerTemperature"),
+            layout(536, "seat_front_right"),
+            flag(524, 0x30000002, "power"),
+            Characteristic(525, 0x31000012, 1, "fan", minimum = 0.0, maximum = 7.0, step = 1.0),
+            flag(526, 0x3000005f, "auto"),
+            layout(531, "seat_front"),
+            flag(528, 0x30000002, "recirculation"),
+            flag(530, 0x30000002, "auto"),
+            flag(538, 0x30000002, "sync"),
+            layout(539, "seat_front"),
             Characteristic(770, 0x48000004, 10, fixed = "5Seater"),
         )
 
@@ -218,21 +303,41 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
         private fun accessories(): List<Map<String, Any?>> {
             val snapshot = VehicleClimate.snapshot()
             fun service(id: Int, type: Int, vararg identifiers: Long): Map<String, Any?> = mapOf(
-                "iid" to id, "type" to type,
-                "characteristics" to identifiers.map { identifier -> characteristics.first { it.id == identifier }.describe(snapshot) },
+                "iid" to id,
+                "type" to type,
+                "characteristics" to identifiers.map { identifier ->
+                    characteristics.first { it.id == identifier }.describe(snapshot)
+                },
             )
+
             return listOf(
-                mapOf("iid" to 512, "type" to 0x01000001, "version" to "1.0", "services" to listOf(
-                    service(513, 0x11000001, 514, 515), service(518, 0x11000002, 519, 520, 522),
-                    service(532, 0x11000002, 533, 534, 536), service(523, 0x11000007, 524, 525, 526, 531),
-                    service(527, 0x11000011, 528), service(529, 0x11000008, 530), service(537, 0x11000012, 538, 539),
-                )),
-                mapOf("iid" to 768, "type" to 0x01200002, "version" to "1.0", "services" to listOf(service(769, 0x20000001, 770))),
+                mapOf(
+                    "iid" to 512,
+                    "type" to 0x01000001,
+                    "version" to "1.0",
+                    "services" to listOf(
+                        service(513, 0x11000001, 514, 515),
+                        service(518, 0x11000002, 519, 520, 522),
+                        service(532, 0x11000002, 533, 534, 536),
+                        service(523, 0x11000007, 524, 525, 526, 531),
+                        service(527, 0x11000011, 528),
+                        service(529, 0x11000008, 530),
+                        service(537, 0x11000012, 538, 539),
+                    ),
+                ),
+                mapOf(
+                    "iid" to 768,
+                    "type" to 0x01200002,
+                    "version" to "1.0",
+                    "services" to listOf(service(769, 0x20000001, 770)),
+                ),
             )
         }
 
         fun descriptor(): Map<String, Any?> = mapOf(
-            "protocolVersion" to "1.0", "pluginCount" to 1, "pluginMapping" to mapOf("VoyahTune" to 0),
+            "protocolVersion" to "1.0",
+            "pluginCount" to 1,
+            "pluginMapping" to mapOf("VoyahTune" to 0),
             "pluginConfigs" to listOf(mapOf("name" to "VoyahTune", "pluginID" to 0, "accessories" to accessories())),
         )
 

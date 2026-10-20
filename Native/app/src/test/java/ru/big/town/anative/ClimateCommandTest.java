@@ -31,7 +31,7 @@ public class ClimateCommandTest {
         assertEquals(21.0, state.values().get(CarPlayClimateProtocol.DRIVER_TEMPERATURE), 0);
         assertEquals(0.0, state.values().get(CarPlayClimateProtocol.POWER), 0);
         assertEquals(1.0, state.values().get(CarPlayClimateProtocol.SYNC), 0);
-        assertEquals(0.0, state.values().get(CarPlayClimateProtocol.RECIRCULATION), 0);
+        assertEquals(1.0, state.values().get(CarPlayClimateProtocol.RECIRCULATION), 0);
         assertEquals(19, state.outsideTemperature);
         assertFalse(state(-1, -1, -1, 2).values().containsKey(CarPlayClimateProtocol.POWER));
         assertFalse(
@@ -70,10 +70,44 @@ public class ClimateCommandTest {
         ClimateCommand manual =
                 ClimateCommand.from(state(1, 1, 3, 1), CarPlayClimateProtocol.AUTO, 0);
         assertEquals("AC_BLOWER", manual.field);
-        assertEquals(3, manual.value);
+        assertEquals(4, manual.value);
         assertNull(ClimateCommand.from(state(1, 1, 0, 1), CarPlayClimateProtocol.AUTO, 0));
         assertEquals(
                 "AC_POWER_SWITCH",
                 ClimateCommand.from(state(1, 0, 3, 1), CarPlayClimateProtocol.FAN, 0).field);
+    }
+
+    @Test
+    public void fanCommandsUseOemEncodingAndKeepReportedLevelsUnshifted() {
+        for (int level = 1; level <= 7; level++) {
+            OemClimateState observed = state(1, 0, level, 1);
+            ClimateCommand command =
+                    ClimateCommand.from(observed, CarPlayClimateProtocol.FAN, level);
+            assertEquals("AC_BLOWER", command.field);
+            assertEquals(level + 1, command.value);
+            assertEquals(level, observed.values().get(CarPlayClimateProtocol.FAN), 0);
+        }
+        assertFalse(ClimateCommand.valid(CarPlayClimateProtocol.FAN, 8));
+        assertFalse(ClimateCommand.valid(CarPlayClimateProtocol.FAN, 1.5));
+        assertFalse(state(1, 0, 8, 1).values().containsKey(CarPlayClimateProtocol.FAN));
+        assertFalse(ClimateCommand.reached(state(1, 0, 0, 1), CarPlayClimateProtocol.FAN, 0));
+        assertTrue(ClimateCommand.reached(state(0, 0, 0, 1), CarPlayClimateProtocol.FAN, 0));
+    }
+
+    @Test
+    public void circulationUsesInternalModeOneAndCanLeaveAutomaticMode() {
+        OemClimateState external = state(1, 0, 3, 0);
+        OemClimateState internal = state(1, 0, 3, 1);
+        OemClimateState automatic = state(1, 0, 3, 2);
+        OemClimateState unknown = state(1, 0, 3, -1);
+        assertTrue(ClimateCommand.reached(external, CarPlayClimateProtocol.RECIRCULATION, 0));
+        assertTrue(ClimateCommand.reached(internal, CarPlayClimateProtocol.RECIRCULATION, 1));
+        assertFalse(ClimateCommand.reached(automatic, CarPlayClimateProtocol.RECIRCULATION, 0));
+        assertNotNull(ClimateCommand.from(automatic, CarPlayClimateProtocol.RECIRCULATION, 1));
+        assertNull(ClimateCommand.from(unknown, CarPlayClimateProtocol.RECIRCULATION, 1));
+        assertTrue(ClimateCommand.circulationAdvanced(external, automatic));
+        assertTrue(ClimateCommand.circulationAdvanced(automatic, external));
+        assertFalse(ClimateCommand.circulationAdvanced(external, external));
+        assertFalse(ClimateCommand.circulationAdvanced(external, unknown));
     }
 }
