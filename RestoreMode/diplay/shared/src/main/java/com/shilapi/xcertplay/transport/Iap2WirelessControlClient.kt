@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.transport
 
 import com.shilapi.xcertplay.iap2.message.Iap2CarPlayMessages
+import com.shilapi.xcertplay.iap2.message.Iap2ClusterAsset
 import com.shilapi.xcertplay.iap2.message.Iap2WirelessMessages
 import com.shilapi.xcertplay.iap2.message.Iap2WirelessSessionParameters
 import com.shilapi.xcertplay.iap2.session.Iap2Session
@@ -277,6 +278,8 @@ class Iap2WirelessControlClient(
                 deviceIdentifier = endpoint.deviceIdentifier,
                 publicKey = endpoint.publicKey,
                 sourceVersion = endpoint.sourceVersion,
+                sdkVersion = endpoint.sdkVersion,
+                clusterAsset = endpoint.clusterAsset,
             )
 
         private fun later(
@@ -307,6 +310,8 @@ class Iap2WirelessCarPlayEndpoint(
     val publicKey: String,
     val sourceVersion: String,
     accessPointBssid: ByteArray? = null,
+    val sdkVersion: String? = null,
+    val clusterAsset: Iap2ClusterAsset? = null,
 ) {
     val ipAddresses: List<String> = ipAddresses.toList()
     val accessPointBssid: ByteArray? = accessPointBssid?.copyOf()

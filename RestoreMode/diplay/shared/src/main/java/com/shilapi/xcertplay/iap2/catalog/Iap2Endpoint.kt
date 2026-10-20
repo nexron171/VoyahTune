@@ -102,6 +102,7 @@ object Iap2Endpoints {
                     field(2, "isSupported", Iap2WireType.VOID),
                     field(3, "interfaceNumber", Iap2WireType.U8),
                     field(4, "isAvailable", Iap2WireType.VOID),
+                    field(6, "carPlayThemeAssetIdentifier", Iap2WireType.STRING),
                 ),
             ),
             field(
@@ -131,6 +132,7 @@ object Iap2Endpoints {
                     field(3, "transportIdentifier", Iap2WireType.U16),
                     field(4, "isAvailable", Iap2WireType.VOID),
                     field(5, "isEnabled", Iap2WireType.VOID),
+                    field(6, "carPlayThemeAssetIdentifier", Iap2WireType.STRING),
                 ),
             ),
             field(

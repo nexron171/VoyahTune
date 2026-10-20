@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.transport
 
 import com.shilapi.xcertplay.iap2.message.Iap2CarPlayMessages
+import com.shilapi.xcertplay.iap2.message.Iap2ClusterAsset
 import com.shilapi.xcertplay.iap2.message.Iap2ControlMessages
 import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
@@ -150,6 +151,8 @@ class Iap2WiredControlClient(
                 deviceIdentifier = endpoint.deviceIdentifier,
                 publicKey = endpoint.publicKey,
                 sourceVersion = endpoint.sourceVersion,
+                sdkVersion = endpoint.sdkVersion,
+                clusterAsset = endpoint.clusterAsset,
             )
 
         fun carPlayAvailabilitySummary(payload: ByteArray): String {
@@ -179,6 +182,8 @@ class Iap2WiredCarPlayEndpoint(
     val publicKey: String,
     val sourceVersion: String,
     val deviceIdentifier: String? = null,
+    val sdkVersion: String? = null,
+    val clusterAsset: Iap2ClusterAsset? = null,
 ) {
     /** A stable copy so a caller cannot mutate a validated endpoint before it is encoded. */
     val ipv6Addresses: List<String> = ipv6Addresses.toList()

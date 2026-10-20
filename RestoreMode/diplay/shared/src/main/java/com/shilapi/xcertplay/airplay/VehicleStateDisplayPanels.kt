@@ -6,11 +6,14 @@ internal object VehicleStateDisplayPanels {
     private const val LOCAL_PANEL_UUID = "b7e6c5a0-3333-4000-8000-000000000003"
     private val dimensions = listOf("widthPixels", "heightPixels", "widthPhysical", "heightPhysical")
 
-    fun build(displays: List<Map<String, Any?>>): List<Map<String, Any?>> {
+    fun build(
+        displays: List<Map<String, Any?>>,
+        namedMainPanel: String? = null,
+    ): List<Map<String, Any?>> {
         val panels = displays.map { display ->
             val uuid = display.getValue("uuid")
             dimensions.associateWith { display[it] }.toMutableMap().apply {
-                this["uid"] = "$uuid-panel"
+                this["uid"] = if (uuid == namedMainPanel) uuid else "$uuid-panel"
                 this["properties"] = if (uuid == AirPlayInfoPlist.ALT_UUID) {
                     listOf("showsInstruments")
                 } else {

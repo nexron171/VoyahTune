@@ -754,7 +754,8 @@
     <string name="carplay_dock_automatic">Automatic</string>
     <string name="carplay_dock_driver_side">Driver\'s side</string>
     <string name="carplay_dock_bottom">Bottom</string>
-    <string name="carplay_dock_hint">Where CarPlay shows its apps, clock and status. Between Driver\'s side and Bottom it moves at once; Automatic leaves it to the iPhone and applies after a reconnect.</string>
+    <string name="carplay_dock_dual_sides">Both sides</string>
+    <string name="carplay_dock_hint">Where CarPlay shows its apps, clock and status. Driver\'s side and Bottom switch immediately. Automatic and Both sides apply after saving and reconnecting. Both sides uses a fixed layout; resolution and text size settings apply to the other modes.</string>
     <string name="split_screen_areas">CarPlay in the head unit\'s split screen</string>
     <string name="split_screen_areas_description">When the head unit shows DiPlay in split screen, CarPlay redraws for that window instead of shrinking with black bars, and back to full screen without reconnecting. The window\'s size is learned the first time, so the picture fits exactly from the next connection. With the dock on Automatic, CarPlay then puts it at the bottom. Applies at the next connection.</string>
     <string name="carplay_rotation">Turn CarPlay with the screen without reconnecting</string>

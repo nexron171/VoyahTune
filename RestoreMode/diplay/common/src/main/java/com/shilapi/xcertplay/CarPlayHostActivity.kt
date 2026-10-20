@@ -4046,6 +4046,7 @@ class CarPlayHostActivity : ComponentActivity() {
             CarPlayDock.AUTOMATIC to R.string.carplay_dock_automatic,
             CarPlayDock.DRIVER_SIDE to R.string.carplay_dock_driver_side,
             CarPlayDock.BOTTOM to R.string.carplay_dock_bottom,
+            CarPlayDock.DUAL_SIDES to R.string.carplay_dock_dual_sides,
         )
         val buttons = CarPlayDock.entries.associateWith { dock ->
             RadioButton(this).apply {
@@ -4857,11 +4858,53 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun createAirPlayConfig(size: DisplaySize): AirPlayConfig {
         // The home settings page can change the name while this host stays alive.
         if (!menuOpen) oemLabel = AirPlayPersistence.loadOemLabel(this)
+        val dock = CarPlayDock.load(this).also { sessionDock = it }
+        val mainDisplay = createMainDisplayConfig(size, dock)
+        val carBluetoothAudio = AirPlayPersistence.loadCarBluetoothAudio(this)
+        if (carBluetoothAudio) logCarBluetoothAudio()
+        return AirPlayConfig(
+            deviceName = "DiPlay",
+            deviceId = DiPlayBootstrap.deviceId(airPlayIdentity),
+            btMac = DiPlayBluetooth.localAddress(this) ?: DiPlayBootstrap.deviceId(airPlayIdentity),
+            sourceVersion = "950.7.1",
+            main = mainDisplay,
+            cluster = clusterDisplayConfig(),
+            rightHandDrive = rightHandDrive,
+            hevc = sessionHevc,
+            microphone = microphoneAvailable,
+            microphoneOpus = com.shilapi.xcertplay.media.OpusEncoderSupport.isAvailable(),
+            manufacturer = normalizedManufacturer(),
+            model = normalizedModel(),
+            oemLabel = oemLabel,
+            icons = listOf(loadAirPlayIcon()),
+            videoInCar = com.shilapi.xcertplay.hud.BydOutputSettings.videoWhileParkedActive(this),
+            mainBufferedAudio = AirPlayPersistence.loadMainBufferedAudio(this),
+            speechWithout8And16Khz = AirPlayPersistence.loadSpeechWithout8And16Khz(this),
+            disableAudioOutput = carBluetoothAudio,
+            vehicleTheme = dock.theme,
+        )
+    }
+
+    private fun createMainDisplayConfig(size: DisplaySize, dock: CarPlayDock): AirPlayDisplayConfig {
+        val knobPrimary = AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this)
+        dock.theme?.let { theme ->
+            val display = theme.mainDisplay(fps, if (knobPrimary) 3 else 1)
+            pendingViewAreas = null
+            val request = "Display request dock=$dock surface=${size.width}x${size.height}"
+            val details = "Vehicle theme asset=${theme.assetIdentifier} version=${theme.assetVersion} sdk=${theme.sdkVersion}"
+            val effective = "Display effective canvas=${display.widthPixels}x${display.heightPixels} " +
+                "physical=${display.widthPhysicalMm}x${display.heightPhysicalMm}mm layout=fixed " +
+                "display=${theme.mainDisplayIdentifier}"
+            displayDiagnosticAttempt = DisplayDiagnosticSnapshot.begin(this, request, details, effective)
+            appendLog(request)
+            appendLog(details)
+            appendLog(effective)
+            return display
+        }
         val safeWidth = (size.width / 2 * 2).coerceAtLeast(2)
         val safeHeight = (size.height / 2 * 2).coerceAtLeast(2)
         val alignedSize = DisplaySize(safeWidth, safeHeight)
         val physical = resolvePhysicalSize(alignedSize)
-        val knobPrimary = AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this)
         val baseDisplay = AirPlayDisplayConfig(
             widthPixels = alignedSize.width,
             heightPixels = alignedSize.height,
@@ -4946,7 +4989,6 @@ class CarPlayHostActivity : ComponentActivity() {
         // between live. A session that starts in split screen sizes its canvas to that window, so it keeps
         // the plain canvas and one area for it.
         val inSplitScreen = isMultiWindowActive()
-        val dock = CarPlayDock.load(this).also { sessionDock = it }
         // The whole screen and CarPlay's full window in each orientation: the system bars take their
         // place in both, so a remembered split window is sized against the window of its orientation.
         val screen = android.util.DisplayMetrics().also { windowManager.defaultDisplay.getRealMetrics(it) }
@@ -5019,28 +5061,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         appendLog(support.details)
         appendLog(effectiveSummary)
-        val carBluetoothAudio = AirPlayPersistence.loadCarBluetoothAudio(this)
-        if (carBluetoothAudio) logCarBluetoothAudio()
-        return AirPlayConfig(
-            deviceName = "DiPlay",
-            deviceId = DiPlayBootstrap.deviceId(airPlayIdentity),
-            btMac = DiPlayBluetooth.localAddress(this) ?: DiPlayBootstrap.deviceId(airPlayIdentity),
-            sourceVersion = "950.7.1",
-            main = declared,
-            cluster = clusterDisplayConfig(),
-            rightHandDrive = rightHandDrive,
-            hevc = sessionHevc,
-            microphone = microphoneAvailable,
-            microphoneOpus = com.shilapi.xcertplay.media.OpusEncoderSupport.isAvailable(),
-            manufacturer = normalizedManufacturer(),
-            model = normalizedModel(),
-            oemLabel = oemLabel,
-            icons = listOf(loadAirPlayIcon()),
-            videoInCar = com.shilapi.xcertplay.hud.BydOutputSettings.videoWhileParkedActive(this),
-            mainBufferedAudio = AirPlayPersistence.loadMainBufferedAudio(this),
-            speechWithout8And16Khz = AirPlayPersistence.loadSpeechWithout8And16Khz(this),
-            disableAudioOutput = carBluetoothAudio,
-        )
+        return declared
     }
 
     /** Car Bluetooth audio: shows whether the iPhone keeps A2DP/HFP with the car now and once CarPlay runs. */

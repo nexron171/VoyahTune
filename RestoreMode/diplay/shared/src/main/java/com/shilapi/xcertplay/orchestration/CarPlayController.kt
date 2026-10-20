@@ -187,6 +187,9 @@ class CarPlayController(
     private enum class Phase { IDLE, MFI, WIRELESS, IPHONE, REENUMERATION, DATAPATHS, CONTROL }
 
     private val appContext = context.applicationContext
+    private val sessionIdentification = config.identification.copy(
+        carPlayThemeAssetIdentifier = airPlayConfig.vehicleTheme?.assetIdentifier,
+    )
     private val diagnosticAttempt = diagnosticAttempts.incrementAndGet()
     private val diagnosticRun = AtomicInteger()
     private val usbManager: UsbManager? = context.getSystemService(UsbManager::class.java)
@@ -1555,11 +1558,11 @@ class CarPlayController(
                 return
             }
             val wirelessIdentification = Iap2WirelessIdentification(hostBluetoothMac, hotspotInfo.ssid)
-            val bootstrapIdentification = config.identification.forWirelessLink(
+            val bootstrapIdentification = sessionIdentification.forWirelessLink(
                 Iap2WirelessLinkRole.BLUETOOTH_BOOTSTRAP,
                 wirelessIdentification,
             )
-            val runtimeIdentification = config.identification.forWirelessLink(
+            val runtimeIdentification = sessionIdentification.forWirelessLink(
                 Iap2WirelessLinkRole.RUNTIME_TUNNEL,
                 wirelessIdentification,
             )
@@ -1574,6 +1577,8 @@ class CarPlayController(
                 publicKey = identity.publicKeyHex,
                 sourceVersion = airPlayConfig.sourceVersion,
                 accessPointBssid = hotspotInfo.accessPointBssid,
+                sdkVersion = airPlayConfig.vehicleTheme?.sdkVersion,
+                clusterAsset = airPlayConfig.vehicleTheme?.clusterAsset,
             )
             wirelessRuntimeIdentification = runtimeIdentification
             wirelessAirPlayEndpoint = endpoint
@@ -2356,6 +2361,8 @@ class CarPlayController(
                 publicKey = identity.publicKeyHex,
                 sourceVersion = airPlayConfig.sourceVersion,
                 deviceIdentifier = ncmHostMac.macString(),
+                sdkVersion = airPlayConfig.vehicleTheme?.sdkVersion,
+                clusterAsset = airPlayConfig.vehicleTheme?.clusterAsset,
             )
             onStatus(CarPlayStatus.RunningControl)
             lateinit var startWatchdog: WiredStartWatchdog
@@ -2384,7 +2391,7 @@ class CarPlayController(
                     "vehicleStatus=${config.identification.vehicleStatusEnabled}",
             )
             val result = Iap2WiredControlClient(csm, Iap2MfiAuthenticationClient(mfi)).run(
-                identification = config.identification,
+                identification = sessionIdentification,
                 endpoint = endpoint,
                 availableCurrentMilliAmps = config.availableCurrentMilliAmps,
                 timeoutMillis = controlLoopTimeoutMillis(),

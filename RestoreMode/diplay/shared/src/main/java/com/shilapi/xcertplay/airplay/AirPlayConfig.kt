@@ -98,7 +98,11 @@ data class AirPlayConfig(
      * default stream (#148, #341). When set, 8 and 16 kHz are not offered for default and alert audio.
      */
     val speechWithout8And16Khz: Boolean = false,
-)
+    val vehicleTheme: AirPlayVehicleTheme? = null,
+) {
+    val mainDisplayIdentifier: String
+        get() = vehicleTheme?.mainDisplayIdentifier ?: AirPlayInfoPlist.MAIN_UUID
+}
 
 /** The offer, SETUP and controls must all honor the user's audio-output setting. */
 internal val AirPlayConfig.bufferedAudioOutputEnabled: Boolean

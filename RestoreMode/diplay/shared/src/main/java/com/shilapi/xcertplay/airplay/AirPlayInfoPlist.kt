@@ -34,7 +34,7 @@ object AirPlayInfoPlist {
             displayEntry(
                 config.main,
                 STREAM_TYPE_MAIN_SCREEN,
-                MAIN_UUID,
+                config.mainDisplayIdentifier,
                 defaultDockEdge = if (climateAvailable) DOCK_EDGE_BOTTOM else null,
             ),
         )
@@ -63,13 +63,18 @@ object AirPlayInfoPlist {
         info["displays"] = displays
         if (climateAvailable) {
             info["vehicleStateProtocolInfo"] = VehicleStateProtocol.descriptor()
-            info["displayPanels"] = VehicleStateDisplayPanels.build(displays)
+        }
+        if (climateAvailable || config.vehicleTheme != null) {
+            info["displayPanels"] = VehicleStateDisplayPanels.build(
+                displays,
+                namedMainPanel = config.vehicleTheme?.mainDisplayIdentifier,
+            )
         }
         info["hidDevices"] = listOf(
-            AirPlayHid.touchHidDevice(config.main.widthPixels, config.main.heightPixels, MAIN_UUID),
-            AirPlayHid.knobHidDevice(MAIN_UUID),
-            AirPlayHid.mediaHidDevice(MAIN_UUID),
-            AirPlayHid.telephonyHidDevice(MAIN_UUID),
+            AirPlayHid.touchHidDevice(config.main.widthPixels, config.main.heightPixels, config.mainDisplayIdentifier),
+            AirPlayHid.knobHidDevice(config.mainDisplayIdentifier),
+            AirPlayHid.mediaHidDevice(config.mainDisplayIdentifier),
+            AirPlayHid.telephonyHidDevice(config.mainDisplayIdentifier),
         )
         if (config.icons.isNotEmpty()) {
             info["oemIconVisible"] = true
@@ -187,10 +192,14 @@ object AirPlayInfoPlist {
      * updateViewArea for the main screen. Seen on a Tang with iOS 27: the iPhone acts on it only with an
      * animation duration and the adjacent areas, the arguments CarPlaySDK's ViewAreaUpdate takes.
      */
-    fun viewAreaCommand(index: Int, areaCount: Int): Map<String, Any?> = linkedMapOf(
+    fun viewAreaCommand(
+        index: Int,
+        areaCount: Int,
+        displayIdentifier: String = MAIN_UUID,
+    ): Map<String, Any?> = linkedMapOf(
         "type" to "updateViewArea",
         "params" to linkedMapOf(
-            "uuid" to MAIN_UUID,
+            "uuid" to displayIdentifier,
             "viewAreaIndex" to index,
             "animationDurationMillis" to VIEW_AREA_ANIMATION_MILLIS,
             "adjacentViewAreas" to (0 until areaCount).filter { it != index },
@@ -234,12 +243,14 @@ object AirPlayInfoPlist {
         // Several areas let the car move CarPlay between them (another dock edge, the head unit's split
         // screen) with updateViewArea, without reconnecting.
         val areas = display.viewAreas?.takeIf { it.isNotEmpty() }
-        val disableSafeArea = uuid == MAIN_UUID && display.mainDisplayDisableSafeArea
+        val disableSafeArea = type == STREAM_TYPE_MAIN_SCREEN && display.mainDisplayDisableSafeArea
         entry["viewAreas"] = areas?.map {
             areaDict(display, it, disableSafeArea, defaultDockEdge)
         } ?: listOf(areaDict(display, null, disableSafeArea, defaultDockEdge))
         entry["initialViewArea"] = if (areas == null) 0 else display.initialViewArea.coerceIn(0, areas.lastIndex)
-        if (uuid == MAIN_UUID && display.mainDisplayCornerMasks != null) entry["cornerMasks"] = display.mainDisplayCornerMasks
+        if (type == STREAM_TYPE_MAIN_SCREEN && display.mainDisplayCornerMasks != null) {
+            entry["cornerMasks"] = display.mainDisplayCornerMasks
+        }
         if (areas != null && areas.size > 1) entry["viewAreaTransitionControl"] = true
         if (display.initialUrl != null) entry["initialURL"] = display.initialUrl
         return entry

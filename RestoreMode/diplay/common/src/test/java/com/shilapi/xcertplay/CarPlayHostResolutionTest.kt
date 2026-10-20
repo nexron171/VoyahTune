@@ -103,6 +103,30 @@ class CarPlayHostResolutionTest {
         assertEquals(100, get("displayScalePercent"))
     }
 
+    @Test fun dualDocksKeepTheThemeCanvasWithoutChangingSavedResolutionSettings() {
+        CarPlayDock.save(activity, CarPlayDock.DUAL_SIDES)
+        set("mainDisplayDisableSafeArea", true)
+        val themed = config(160, uiPercent = 115, width = 1763, height = 658)
+
+        assertEquals("Center_Display", themed.mainDisplayIdentifier)
+        assertEquals(1920, themed.main.widthPixels)
+        assertEquals(720, themed.main.heightPixels)
+        assertEquals(311, themed.main.widthPhysicalMm)
+        assertEquals(116, themed.main.heightPhysicalMm)
+        assertNull(themed.main.safeArea)
+        assertFalse(themed.main.mainDisplayDisableSafeArea)
+        assertEquals(1, themed.main.viewAreas?.size)
+        assertNull(get("pendingViewAreas"))
+        assertEquals(160, AirPlayPersistence.loadDisplayScalePercent(activity))
+        assertEquals(115, AirPlayPersistence.loadUiScalePercent(activity))
+
+        CarPlayDock.save(activity, CarPlayDock.AUTOMATIC)
+        val ordinary = config(100)
+        assertEquals(1920, ordinary.main.widthPixels)
+        assertEquals(990, ordinary.main.heightPixels)
+        assertNull(ordinary.vehicleTheme)
+    }
+
     @Test fun supersamplingDoesNotSilentlyFallBackToASoftwareDecoder() {
         decoder(maxWidth = 3840, maxHeight = 2160, hardware = false)
         val display = config(160).main
