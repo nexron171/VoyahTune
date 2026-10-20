@@ -29,6 +29,8 @@ import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
 
@@ -45,7 +47,7 @@ import java.util.function.BooleanSupplier;
 /**
  * Hosts one app or a split on Native-owned virtual displays.
  *
- * <p>Fullscreen CarPlay uses a clipped TextureView and parks its VD while hidden. Other panes use
+ * <p>Fullscreen CarPlay uses a TextureView and parks its VD while hidden. Other panes use
  * SurfaceView. VD dimensions and density define each app's layout; touch forwarding requires
  * Native's privileged input path. A process-wide lease retires older host generations.
  */
@@ -114,6 +116,8 @@ public class SplitHostActivity extends Activity {
     private boolean screenLiftReceiverRegistered;
     private int screenLiftType = SCREEN_LIFT_UP;
     private boolean fullscreenCarPlay;
+    private int reportedCarPlayDisplayId = -1;
+    private int reportedCarPlayHostDisplayId = -1;
 
     private final BroadcastReceiver screenLiftReceiver =
             new BroadcastReceiver() {
@@ -181,6 +185,7 @@ public class SplitHostActivity extends Activity {
                 public void run() {
                     if (!watchActive || hostDestroyed) return;
                     try {
+                        reportCarPlayHostDisplay();
                         requestSupervisionSnapshot();
                     } catch (Exception e) {
                         Log.w(TAG, "supervise: " + e.getMessage());
@@ -209,7 +214,6 @@ public class SplitHostActivity extends Activity {
         getWindow().setDecorFitsSystemWindows(false);
         setContentView(R.layout.activity_split_host);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-        applyWindowInsets();
 
         displayManager = (DisplayManager) getSystemService(DISPLAY_SERVICE);
         defaultDpi = getResources().getDisplayMetrics().densityDpi;
@@ -233,6 +237,8 @@ public class SplitHostActivity extends Activity {
         // Одиночный режим (ярлык): правый пакет пуст → одно окно на всю ширину, без разделителя.
         boolean single = (right.pkg == null || right.pkg.isEmpty());
         fullscreenCarPlay = single && CarPlayTarget.isCarPlay(left.pkg);
+        applyCarPlayImmersiveWindow();
+        applyWindowInsets();
         applyScreenLiftSize(readScreenLiftType());
         registerScreenLiftReceiver();
 
@@ -380,6 +386,10 @@ public class SplitHostActivity extends Activity {
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(
                 root,
                 (v, insets) -> {
+                    if (fullscreenCarPlay && usesFullPhysicalDisplay()) {
+                        v.setPadding(0, 0, 0, 0);
+                        return androidx.core.view.WindowInsetsCompat.CONSUMED;
+                    }
                     androidx.core.graphics.Insets sb =
                             insets.getInsets(
                                     androidx.core.view.WindowInsetsCompat.Type.systemBars());
@@ -396,6 +406,33 @@ public class SplitHostActivity extends Activity {
                             nativeDock + sb.left + gap, top + gap, sb.right + gap, sb.bottom + gap);
                     return insets;
                 });
+    }
+
+    protected boolean usesFullPhysicalDisplay() {
+        return false;
+    }
+
+    private void applyCarPlayImmersiveWindow() {
+        if (!fullscreenCarPlay || !usesFullPhysicalDisplay()) return;
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow()
+                .setLayout(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        getWindow()
+                .getDecorView()
+                .setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        WindowInsetsController controller = getWindow().getInsetsController();
+        if (controller != null) {
+            controller.setSystemBarsBehavior(
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            controller.hide(WindowInsets.Type.systemBars());
+        }
     }
 
     // Вес левого окна по соотношению (0=3:4,1=1:1,2=4:3,3=5:2,4=2:5) — как во freeform-движке.
@@ -1424,6 +1461,7 @@ public class SplitHostActivity extends Activity {
     }
 
     private float cornerRadius(Pane pane) {
+        if (fullscreenCarPlay && usesFullPhysicalDisplay()) return 0;
         return fullscreenCarPlay && pane == left
                 ? getResources().getDimension(R.dimen.carplay_fullscreen_corner_radius)
                 : getResources().getDisplayMetrics().density * 18f;
@@ -1502,6 +1540,8 @@ public class SplitHostActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (hostDestroyed) return;
+        applyCarPlayImmersiveWindow();
+        reportCarPlayHostDisplay();
         // Стережём панели только пока сплит на переднем плане: свёрнутый сплит приложения не
         // показывает,
         // и «пропажа» там ожидаема — перезапускать нечего.
@@ -1509,6 +1549,39 @@ public class SplitHostActivity extends Activity {
         if (workGate != null) workGate.resumeSupervision();
         watchHandler.removeCallbacks(watchTick);
         watchHandler.postDelayed(watchTick, WATCH_PERIOD_MS);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && !hostDestroyed) {
+            applyCarPlayImmersiveWindow();
+            reportCarPlayHostDisplay();
+        }
+    }
+
+    protected final void reportCarPlayHostDisplay() {
+        if (!fullscreenCarPlay || hostDestroyed || activeHost.get() != this) return;
+        Integer projectionDisplayId = paneDisplayId(left);
+        if (projectionDisplayId == null) return;
+        int physicalDisplayId = physicalCarPlayHostDisplay(projectionDisplayId);
+        if (physicalDisplayId < 0
+                || (projectionDisplayId == reportedCarPlayDisplayId
+                        && physicalDisplayId == reportedCarPlayHostDisplayId)) return;
+        Intent intent =
+                new Intent(CarPlayTarget.ACTION_HOST_DISPLAY_CHANGED)
+                        .setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.HOST_DISPLAY_RECEIVER)
+                        .putExtra(
+                                CarPlayTarget.EXTRA_PROJECTION_DISPLAY_ID,
+                                projectionDisplayId.intValue())
+                        .putExtra(CarPlayTarget.EXTRA_HOST_DISPLAY_ID, physicalDisplayId);
+        try {
+            sendBroadcast(intent, ru.big.town.common.CarPlayVehicleProtocol.PERMISSION);
+            reportedCarPlayDisplayId = projectionDisplayId;
+            reportedCarPlayHostDisplayId = physicalDisplayId;
+        } catch (RuntimeException unavailable) {
+            Log.w(TAG, "Cannot report CarPlay host display=" + physicalDisplayId, unavailable);
+        }
     }
 
     @Override
@@ -1622,7 +1695,12 @@ public class SplitHostActivity extends Activity {
     static void startSingleHost(android.content.Context ctx, String pkg, int dpi, int displayId) {
         if (resumeFullscreenCarPlay(pkg, dpi, displayId)) return;
         try {
-            Intent i = new Intent(ctx, SplitHostActivity.class);
+            Intent i =
+                    new Intent(
+                            ctx,
+                            CarPlayTarget.isCarPlay(pkg)
+                                    ? CarPlayFullscreenActivity.class
+                                    : SplitHostActivity.class);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             i.putExtra(EXTRA_LEFT, pkg);
             i.putExtra(EXTRA_RIGHT, "");

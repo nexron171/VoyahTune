@@ -38,6 +38,13 @@ public final class CarPlayDashboardLauncher {
         }
     }
 
+    static void rememberInitialHostDisplay(int virtualDisplayId, int physicalDisplayId) {
+        HostDisplay host = hostDisplay;
+        if (host == null || host.virtualDisplayId != virtualDisplayId) {
+            rememberHostDisplay(virtualDisplayId, physicalDisplayId);
+        }
+    }
+
     static int targetDisplayId(int carPlayDisplayId) {
         HostDisplay host = hostDisplay;
         if (host != null && host.virtualDisplayId == carPlayDisplayId) {

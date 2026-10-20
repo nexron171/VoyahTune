@@ -293,6 +293,17 @@
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density" />
 
         <activity
+            android:name=".CarPlayFullscreenActivity"
+            android:exported="false"
+            android:label="CarPlay"
+            android:launchMode="singleTop"
+            android:taskAffinity="ru.big.town.anative.carplay"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:resizeableActivity="true"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density" />
+
+        <activity
             android:name=".ClusterMediaHostActivity"
             android:exported="false"
             android:taskAffinity="ru.big.town.anative.cluster"

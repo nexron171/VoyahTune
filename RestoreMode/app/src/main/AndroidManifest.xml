@@ -130,6 +130,11 @@
             android:exported="true"
             android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
 
+        <receiver
+            android:name=".carplay.CarPlayHostDisplayReceiver"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+
         <!-- Native reports an explicitly closed tile task. A manifest receiver also clears the
              session launch memory while Dashboard is not running, so "Close all" stays closed. -->
         <receiver

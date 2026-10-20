@@ -38,6 +38,8 @@ Java.perform(function () {
     var OUR_PKG    = "ru.big.town.anative";           // наш VD-хост (SplitHostActivity) для подсветки
     var CARPLAY_TARGET = "ru.big.town.restoremode/com.shilapi.xcertplay.DiPlayActivity";
     var CARPLAY_LAUNCHER = "ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
+    var CARPLAY_FULLSCREEN_HOST = "ru.big.town.anative.CarPlayFullscreenActivity";
+    var restoringCarPlayDock = [false, false];
     var RESTORE_PKG = "ru.big.town.restoremode";      // VoyahTune (UI) — открывается долгим тапом по «меню»
 
     var ActivityThread = Java.use("android.app.ActivityThread");
@@ -243,6 +245,24 @@ Java.perform(function () {
     function isUserFullscreen(pkg) {
         pkg = cleanJavaString(pkg);
         return !!pkg && cache.fullscreen[pkg] === true;
+    }
+
+    function isCarPlayFullscreen(foreground) {
+        if (!foreground || !foreground.live || foreground.pkg !== OUR_PKG) return false;
+        var activity = cleanJavaString(foreground.act);
+        if (activity.charAt(0) === ".") activity = foreground.pkg + activity;
+        return activity === CARPLAY_FULLSCREEN_HOST;
+    }
+
+    function hidesPhysicalDock(foreground, displayId) {
+        if (restoringCarPlayDock[displayId]) return false;
+        return isUserFullscreen(foreground.pkg) || isCarPlayFullscreen(foreground);
+    }
+
+    // An unknown/live-failed foreground releases our claim instead of trusting a dead Activity.
+    function carPlayChromeTransition(foreground, hidden) {
+        var next = isCarPlayFullscreen(foreground);
+        return { hidden: next, changed: next !== hidden, restore: hidden && !next };
     }
 
     // Наши активити, которые САМИ отступают на полосу родного дока (их контент туда не залезает).
@@ -645,7 +665,7 @@ Java.perform(function () {
     function applyScreenLiftDock(instance, type, fallbackScreen) {
         var sid = managedScreenId(instance, fallbackScreen);
         if (sid !== 0) return; // passenger compact remains completely OEM-controlled (Home only)
-        if (isUserFullscreen(topActivityForScreen(0, null).pkg)) {
+        if (hidesPhysicalDock(topActivityForScreen(0, null), 0)) {
             // Bounded boot/reload icon passes must never expose children of the detached fullscreen dock.
             var hiddenViews = dockViews(instance);
             setDockViewVisibility(hiddenViews.up, 8, "fullscreen screenUp");
@@ -1642,7 +1662,7 @@ Java.perform(function () {
                 try {
                     var sid = managedScreenId(this, -1);
                     if (sid === 0) {
-                        if (isUserFullscreen(topActivityForScreen(0, null).pkg)) {
+                        if (hidesPhysicalDock(topActivityForScreen(0, null), 0)) {
                             forceHideDockController(this, "screen-lift driver");
                             return result;
                         }
@@ -1663,7 +1683,7 @@ Java.perform(function () {
             controllerShow.implementation = function () {
                 var sid = managedScreenId(this, -1);
                 if ((sid === 0 || sid === 1)
-                        && isUserFullscreen(topActivityForScreen(sid, null).pkg)) {
+                        && hidesPhysicalDock(topActivityForScreen(sid, null), sid)) {
                     forceHideDockController(this, "blocked show display=" + sid);
                     return;
                 }
@@ -1714,7 +1734,7 @@ Java.perform(function () {
                     try {
                         // Fullscreen policy wins over stale transfer/launch guards. Do not enter the
                         // asynchronous OEM dismiss path: hide and detach the attached root now.
-                        if (isUserFullscreen(fg.pkg)) {
+                        if (hidesPhysicalDock(fg, sid)) {
                             if (forceHideDockController(this, "dismiss fullscreen " + label
                                     + " display=" + sid)) return;
                             return origDismiss.call(this); // firmware fallback without controller fields
@@ -1759,6 +1779,86 @@ Java.perform(function () {
         try {
             var TopLM = Java.use("com.qinggan.app.launcher.LauncherModel");
             var retainedLauncherModel = null;
+            var carPlayChromePreferences = ctx().getSharedPreferences("voyahtune_carplay_chrome", 0);
+            var carPlayChromeHidden = [
+                carPlayChromePreferences.getBoolean("hidden0", false),
+                carPlayChromePreferences.getBoolean("hidden1", false)
+            ];
+            var carPlayChromeCheckPending = false;
+            var carPlayStatusBus = null;
+            var carPlayStatusBarRequest = [null, null];
+
+            function rememberCarPlayChrome(displayId, hidden) {
+                carPlayChromeHidden[displayId] = hidden;
+                carPlayChromePreferences.edit().putBoolean("hidden" + displayId, hidden).apply();
+            }
+
+            function setCarPlayStatusBarVisible(displayId, visible) {
+                try {
+                    if (carPlayStatusBus === null) {
+                        carPlayStatusBus = Java.use("com.qinggan.bus.QGBus").$new(ctx());
+                    }
+                    var event = Java.use("com.qinggan.bus.QGBusEvent").$new();
+                    var data = Java.use("android.os.Bundle").$new();
+                    data.putBoolean("isVisible", visible);
+                    data.putInt("displayId", displayId);
+                    event.setDestination("com.qinggan.systemui");
+                    event.setEventType("SYSTEMUI_STATUS_BAR_MODE_VISIBLE");
+                    event.setData(data);
+                    carPlayStatusBus.publish(event);
+                    return true;
+                } catch (error) {
+                    Log.e(TAG, "[carplay-chrome] status-bar request failed display=" + displayId + ": " + error);
+                    return false;
+                }
+            }
+
+            function reconcileCarPlayStatusBar(displayId, foreground) {
+                var transition = carPlayChromeTransition(foreground, carPlayChromeHidden[displayId]);
+                if (transition.hidden && transition.changed) rememberCarPlayChrome(displayId, true);
+                if (transition.hidden || transition.restore) {
+                    var visible = !transition.hidden;
+                    // OEM transitions or a SystemUI restart can replace our last visibility request.
+                    if (setCarPlayStatusBarVisible(displayId, visible)) {
+                        if (carPlayStatusBarRequest[displayId] !== visible) {
+                            Log.i(TAG, "[carplay-chrome] status-bar requested visible=" + visible
+                                    + " display=" + displayId + " top=" + foreground.pkg + "/" + foreground.act);
+                        }
+                        carPlayStatusBarRequest[displayId] = visible;
+                    } else {
+                        carPlayStatusBarRequest[displayId] = null;
+                    }
+                }
+                transition.statusBarRestored = carPlayStatusBarRequest[displayId] === true;
+                return transition;
+            }
+
+            function reconcilePhysicalDisplays(model, context, reason) {
+                for (var displayId = 0; displayId <= 1; displayId++) {
+                    try {
+                        reconcilePhysicalDock(model, context, displayId, reason);
+                    } catch (error) {
+                        Log.e(TAG, "[carplay-chrome] recovery failed display=" + displayId + ": " + error);
+                    }
+                }
+            }
+
+            // TOP_ACTIVITY_CHANGED is primary; poll only while we own hidden chrome to cover process death.
+            function scheduleCarPlayChromeCheck() {
+                if (carPlayChromeCheckPending || retainedLauncherModel === null
+                        || !carPlayChromeHidden.some(function (hidden) { return hidden; })) return;
+                carPlayChromeCheckPending = true;
+                setTimeout(function () {
+                    Java.scheduleOnMainThread(function () {
+                        try {
+                            reconcilePhysicalDisplays(retainedLauncherModel, ctx(), "CarPlay foreground check");
+                        } finally {
+                            carPlayChromeCheckPending = false;
+                        }
+                        scheduleCarPlayChromeCheck();
+                    });
+                }, 1000);
+            }
 
             function modelDockController(model, displayId) {
                 var controllerField = displayId === 0
@@ -1779,7 +1879,10 @@ Java.perform(function () {
                     // With no live helper answer, the request is fresher than updateSelectedApp cache.
                     var decisionPkg = foreground.live
                             ? foreground.pkg : (requestedPkg || foreground.pkg);
-                    if (!isUserFullscreen(decisionPkg)) {
+                    var decisionActivity = foreground.live
+                            ? foreground.act : (cleanJavaString(actArg) || foreground.act);
+                    if (!hidesPhysicalDock(
+                            {pkg: decisionPkg, act: decisionActivity, live: foreground.live}, displayId)) {
                         return original.call(this, pkgArg, actArg, visible);
                     }
                     fgByScreen[displayId].pkg = decisionPkg;
@@ -1810,16 +1913,35 @@ Java.perform(function () {
                 var foreground = topActivityForScreen(displayId, context);
                 var pkg = foreground.pkg;
                 var act = foreground.act;
-                if (isUserFullscreen(pkg)) {
-                    if (displayId === 0) model.handleUpdateMainNavigationBar(pkg, act, false);
-                    else model.handleUpdateSecondNavigationBar(pkg, act, false);
-                    Log.i("voyahdock", reason + " hid display=" + displayId + " dock for " + pkg);
-                    return;
+                var chrome = reconcileCarPlayStatusBar(displayId, foreground);
+                try {
+                    if (chrome.restore) {
+                        restoringCarPlayDock[displayId] = true;
+                        try {
+                            var controller = modelDockController(model, displayId);
+                            if (controller !== null) controller.show();
+                            else if (displayId === 0) model.handleUpdateMainNavigationBar(pkg, act, true);
+                            else model.handleUpdateSecondNavigationBar(pkg, act, true);
+                        } finally {
+                            restoringCarPlayDock[displayId] = false;
+                        }
+                        if (chrome.statusBarRestored) rememberCarPlayChrome(displayId, false);
+                        Log.i(TAG, "[carplay-chrome] dock restored display=" + displayId + " reason=" + reason);
+                        return;
+                    }
+                    if (hidesPhysicalDock(foreground, displayId)) {
+                        if (displayId === 0) model.handleUpdateMainNavigationBar(pkg, act, false);
+                        else model.handleUpdateSecondNavigationBar(pkg, act, false);
+                        Log.i("voyahdock", reason + " hid display=" + displayId + " dock for " + pkg);
+                        return;
+                    }
+                    if (!dockKept(pkg, act)) return;
+                    if (displayId === 0) model.handleUpdateMainNavigationBar(pkg, act, true);
+                    else model.handleUpdateSecondNavigationBar(pkg, act, true);
+                    Log.i("voyahdock", reason + " restored display=" + displayId + " dock for " + pkg);
+                } finally {
+                    scheduleCarPlayChromeCheck();
                 }
-                if (!dockKept(pkg, act)) return;
-                if (displayId === 0) model.handleUpdateMainNavigationBar(pkg, act, true);
-                else model.handleUpdateSecondNavigationBar(pkg, act, true);
-                Log.i("voyahdock", reason + " restored display=" + displayId + " dock for " + pkg);
             }
 
             schedulePhysicalDockRecovery = function (model, reason) {
@@ -1827,10 +1949,7 @@ Java.perform(function () {
                     if (retainedLauncherModel === null) retainedLauncherModel = Java.retain(model);
                     setTimeout(function () {
                         Java.scheduleOnMainThread(function () {
-                            try {
-                                reconcilePhysicalDock(retainedLauncherModel, ctx(), 0, reason);
-                                reconcilePhysicalDock(retainedLauncherModel, ctx(), 1, reason);
-                            } catch (e) { Log.e(TAG, "[dock] delayed transfer recovery: " + e); }
+                            reconcilePhysicalDisplays(retainedLauncherModel, ctx(), reason);
                         });
                     }, 300);
                 } catch (e) { Log.e(TAG, "[dock] schedule transfer recovery: " + e); }
@@ -1843,7 +1962,9 @@ Java.perform(function () {
                     if (intent === null || ("" + intent.getAction()) !==
                             "android.intent.action.TOP_ACTIVITY_CHANGED") return result;
                     var displayId = intent.getIntExtra("displayId", -1);
-                    reconcilePhysicalDock(this, context, displayId, "TOP_ACTIVITY_CHANGED");
+                    if (displayId !== 0 && displayId !== 1) return result;
+                    reconcilePhysicalDisplays(this, context, "TOP_ACTIVITY_CHANGED");
+                    schedulePhysicalDockRecovery(this, "top activity settled");
                 } catch (e) { Log.e(TAG, "[dock] TOP_ACTIVITY_CHANGED recovery: " + e); }
                 return result;
             };

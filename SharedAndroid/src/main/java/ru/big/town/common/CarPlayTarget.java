@@ -14,6 +14,11 @@ public final class CarPlayTarget {
     public static final String ID = PACKAGE + "/" + ACTIVITY;
     public static final String LABEL = "VoyahTune CarPlay";
     public static final String EXTRA_HOST_DISPLAY_ID = "carPlayHostDisplayId";
+    public static final String EXTRA_PROJECTION_DISPLAY_ID = "carPlayProjectionDisplayId";
+    public static final String ACTION_HOST_DISPLAY_CHANGED =
+            PACKAGE + ".CARPLAY_HOST_DISPLAY_CHANGED";
+    public static final String HOST_DISPLAY_RECEIVER =
+            PACKAGE + ".carplay.CarPlayHostDisplayReceiver";
 
     private CarPlayTarget() {}
 

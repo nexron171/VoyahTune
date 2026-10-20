@@ -30,7 +30,7 @@ public final class CarPlayWindowPolicy implements CarPlayWindowUi.Policy {
         Display display = view.getDisplay();
         if (display == null) display = activity.getWindowManager().getDefaultDisplay();
         if (activity.getIntent().hasExtra(CarPlayTarget.EXTRA_HOST_DISPLAY_ID)) {
-            CarPlayDashboardLauncher.rememberHostDisplay(
+            CarPlayDashboardLauncher.rememberInitialHostDisplay(
                     display.getDisplayId(),
                     activity.getIntent().getIntExtra(CarPlayTarget.EXTRA_HOST_DISPLAY_ID, -1));
         }
