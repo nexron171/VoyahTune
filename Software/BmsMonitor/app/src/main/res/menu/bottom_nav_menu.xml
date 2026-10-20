@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_temp"
+        android:icon="@drawable/ic_temp"
+        android:title="@string/menu_temp" />
+    <item
+        android:id="@+id/nav_cells"
+        android:icon="@drawable/ic_battery_h"
+        android:title="@string/menu_cells" />
+</menu>

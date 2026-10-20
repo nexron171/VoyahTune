@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="0dp">
+
+    <!-- Резиновая иконка: растягивается на ширину колонки,
+         высота следует из пропорции вектора (48:16.8) -->
+    <ImageView
+        android:id="@+id/cellIcon"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:adjustViewBounds="true"
+        android:src="@drawable/ic_battery_h" />
+
+    <TextView
+        android:id="@+id/cellValue"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:shadowColor="#AA000000"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="2"
+        android:textColor="#ffffff"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+</FrameLayout>

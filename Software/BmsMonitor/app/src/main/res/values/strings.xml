@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BMS Monitor</string>
+    <string name="menu_temp">Температуры</string>
+    <string name="menu_cells">Ячейки</string>
+    <string name="btn_refresh">Обновить</string>
+    <string name="label_temp_max">bms_packTempMax</string>
+    <string name="label_temp_min">bms_packTempMin</string>
+    <string name="label_iso">bms_isolationResistance</string>
+    <string name="value_iso">%1$d кОм</string>
+    <!-- bms_packTempMax/MinModuleIdx и …SensorIdx (0x574) -->
+    <string name="value_idx">модуль %1$d · датчик %2$d</string>
+    <string name="label_temp_inlet">bms_tempInletCoolant</string>
+    <string name="label_temp_outlet">bms_tempOutletCoolant</string>
+    <string name="label_soh">bms_SOH</string>
+    <string name="label_soc">bms_SOC</string>
+    <string name="label_soe">bms_SOE</string>
+    <string name="label_sensor">T%1$d</string>
+    <!-- Предел тягового тока батареи: оценка по packTempMax (Parsers.estimateDrivingCurrentLimit) -->
+    <string name="label_dcl">drivingCurrentLimit</string>
+    <!-- Подпись плитки bms_isolationResistance в нижней строке -->
+    <string name="label_iso_short">IsoRes</string>
+    <string name="value_dcl">≈%1$.0f А</string>
+    <string name="btn_log_start">● Запись</string>
+    <string name="btn_log_stop">■ Стоп</string>
+</resources>

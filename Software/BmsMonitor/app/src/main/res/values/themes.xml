@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.BmsMonitor" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#57A3EF</item>
+        <item name="bottomNavigationStyle">@style/BmsBottomNav</item>
+    </style>
+
+    <!-- Нижняя навигация: шрифт пунктов = шрифт значений батареек (16sp) -->
+    <style name="BmsBottomNav" parent="Widget.Material3.BottomNavigationView">
+        <item name="itemTextColor">@color/nav_item_color</item>
+        <item name="itemIconTint">@color/nav_item_color</item>
+        <item name="itemTextAppearanceActive">@style/BmsNavText</item>
+        <item name="itemTextAppearanceInactive">@style/BmsNavText</item>
+    </style>
+
+    <style name="BmsNavText" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:textSize">16sp</item>
+    </style>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <!-- Серии графика температур и подписи карточек -->
+    <color name="series_max">#FF7043</color>
+    <color name="series_min">#4FC3F7</color>
+    <!-- Подпись и значение (темнее) карточки bms_isolationResistance (на графике нет) -->
+    <color name="label_iso">#E0BC45</color>
+    <color name="value_iso">#B89A38</color>
+    <color name="series_inlet">#4DB6AC</color>
+    <color name="series_outlet">#BA68C8</color>
+    <color name="series_soc">#F06292</color>
+</resources>
