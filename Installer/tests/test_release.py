@@ -3,11 +3,14 @@
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -98,20 +101,50 @@ class ReleaseTests(unittest.TestCase):
             )
             (dest / "build-info.json").write_text(json.dumps(record))
 
-    def run_release(self, *flags):
+    def shell_arguments(self, *arguments):
+        script = self.root / "make_release.sh"
+        script.write_text((REPO / "make_release.sh").read_text())
+        executables = self.root / "bin"
+        executables.mkdir(exist_ok=True)
+        python = executables / "python3"
+        python.write_text(
+            f"#!{sys.executable}\n"
+            "import json\n"
+            "import sys\n"
+            "print(json.dumps(sys.argv[1:]))\n"
+        )
+        python.chmod(0o755)
+        result = subprocess.run(
+            ["sh", str(script), *arguments],
+            env={
+                **os.environ,
+                "PATH": str(executables) + os.pathsep + os.environ["PATH"],
+            },
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        command = json.loads(result.stdout)
+        self.assertEqual(command[0], str(self.root / "Installer/scripts/release.py"))
+        return command
+
+    def run_release(self, *flags, through_shell=False):
         self.generation += 1
+        arguments = [
+            "release.py",
+            "4.5.6",
+            "--revision",
+            "fixture",
+            *(["--od"] if "--pi" not in flags and "--od" not in flags else []),
+            *flags,
+        ]
+        if through_shell:
+            arguments = self.shell_arguments(*arguments[1:])
         with patch.object(release, "ROOT", self.root), patch.object(
             release, "run", self.fake_run
         ), patch.object(release.platform, "system", return_value="Darwin"), patch(
-            "sys.argv",
-            [
-                "release.py",
-                "4.5.6",
-                "--revision",
-                "fixture",
-                *(["--od"] if "--pi" not in flags and "--od" not in flags else []),
-                *flags,
-            ],
+            "sys.argv", arguments
         ):
             release.main()
 
@@ -161,11 +194,64 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(entry["minimumInstallerVersion"], "1.0.0")
         self.assertEqual(entry["minimumOtaVersion"], "4.0.0")
         self.assertEqual(entry["size"], archive.stat().st_size)
-        import zipfile
-
-        with zipfile.ZipFile(archive) as z:
-            self.assertIn("manifest.json", z.namelist())
+        with zipfile.ZipFile(archive) as payload_archive:
+            self.assertIn("manifest.json", payload_archive.namelist())
         self.assertFalse((archive.parent / "VoyahTune-Installer-1.0.0").exists())
+
+    def test_od_default_creates_payload_with_root_manifest(self):
+        self.run_release(through_shell=True)
+        archive = self.root / "Releases/dist/payload_4.5.6-od.zip"
+        with zipfile.ZipFile(archive) as payload_archive:
+            manifest = json.loads(payload_archive.read("manifest.json"))
+        self.assertEqual(manifest["schema"], 4)
+        self.assertEqual(manifest["releaseVersion"], "4.5.6-od")
+        self.assertEqual(manifest["infrastructure"], "od")
+        self.assertEqual(self.selected, [])
+        self.assertFalse((archive.parent / "VoyahTune-Installer-1.0.0").exists())
+
+    def test_od_default_forwards_release_options(self):
+        for arguments in [
+            ["4.3.3", "--od"],
+            ["--od", "4.3.3"],
+            ["4.3.3-od", "--od", "--no-build", "--no-zip"],
+            [
+                "4.3.3-beta-od",
+                "--od",
+                "--minimum-ota-version",
+                "4.2.1",
+                "--catalog-url",
+                "https://example.com/index.json",
+                "--revision",
+                "fixture",
+            ],
+        ]:
+            with self.subTest(arguments=arguments):
+                command = self.shell_arguments(*arguments)
+                self.assertEqual(command[1:], [*arguments, "--payload"])
+
+    def test_explicit_build_modes_keep_their_arguments(self):
+        for profile in ("--od", "--pi"):
+            for flag in ("--payload", "--installers", "--mac", "--windows", "--linux"):
+                arguments = ["4.3.3", profile, flag]
+                with self.subTest(arguments=arguments):
+                    command = self.shell_arguments(*arguments)
+                    self.assertEqual(command[1:], arguments)
+
+    def test_classic_mode_requires_legacy_for_od_only(self):
+        for arguments in [
+            ["--legacy", "4.3.3", "--od"],
+            ["4.3.3", "--pi"],
+        ]:
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    ["sh", str(REPO / "make_release.sh"), *arguments, "--help"],
+                    text=True,
+                    capture_output=True,
+                    timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("classic ZIP", result.stdout)
+                self.assertNotIn("release.py", result.stdout)
 
     def test_ota_minimum_can_require_usb_for_a_root_service_update(self):
         self.run_release("--payload", "--minimum-ota-version", "4.1.0")
@@ -210,14 +296,14 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual((path / "value").read_text(), path.name)
 
     def test_mac_flag_dispatches_without_installers_flag(self):
-        r = subprocess.run(
+        result = subprocess.run(
             ["sh", str(REPO / "make_release.sh"), "4.5.6", "--mac", "--help"],
             text=True,
             capture_output=True,
         )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("--windows", r.stdout)
-        self.assertIn("release.py", r.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--windows", result.stdout)
+        self.assertIn("release.py", result.stdout)
 
     def test_prebuild_checks_exist_and_match_classic_release(self):
         with patch.object(self, "fake_run", wraps=self.fake_run) as fake:

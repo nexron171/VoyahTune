@@ -1,29 +1,36 @@
 #!/bin/sh
-# ./make_release.sh VERSION (--pi|--od) → ZIP VoyahTune со скриптами установки и удаления.
-# ./make_release.sh VERSION (--pi|--od) --installers → три автономных GUI-установщика.
-# ./make_release.sh VERSION (--pi|--od) --mac [--windows] [--linux] → выбранные установщики.
+# ./make_release.sh VERSION --od → payload ZIP with manifest.json for the GUI installer.
+# ./make_release.sh VERSION (--pi|--od) --payload → explicit payload-only build.
+# ./make_release.sh VERSION (--pi|--od) --installers → payload and all GUI installers.
+# ./make_release.sh VERSION (--pi|--od) --mac [--windows] [--linux] → selected installers.
 #
-#   ./make_release.sh 3.2.2 --od              → Releases/build/VoyahTune-3.2.2-od
-#   ./make_release.sh 3.2.2 --pi --no-build   → не пересобирать APK, только переразложить файлы
-#                                          (APK берутся из уже существующей папки сборки)
-#   ./make_release.sh 3.2.2 --od --no-zip     → не паковать архивы
+# ./make_release.sh --legacy VERSION (--pi|--od) → classic ZIP with install/remove scripts.
+# PI defaults to the classic ZIP; use --payload for the GUI-compatible format.
 #
-# Источник всего, кроме APK — Packaging/ (см. Packaging/README.md). Он В GIT.
-# Releases/ — ТОЛЬКО вывод и целиком в .gitignore: сборки в Releases/build/, готовые к
-# раздаче архивы в Releases/dist/. В репозитории релизы больше не хранятся.
-# Папка релиза остаётся ПЛОСКОЙ: install.sh ищет файлы рядом с собой, его править не нужно.
+# --no-build reuses matching APKs; classic builds read APKs from their release directory.
+# --no-zip builds the release directory without creating a ZIP.
+#
+# Sources: Packaging/ and Android projects. Outputs: Releases/build/ and Releases/dist/.
+# OD payload ZIP: Releases/dist/payload_VERSION-od.zip (VERSION without a profile suffix).
+# Classic ZIP: Releases/dist/VoyahTune-VERSION-od.zip (VERSION without a profile suffix).
 set -e
-# Preserve the classic shell-only default. The Python branch consumes --installers.
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+OD_PAYLOAD_DEFAULT=0
 for release_arg in "$@"; do
     case "$release_arg" in
         --payload|--installers|--mac|--windows|--windows-arch|--linux)
-            exec python3 "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/Installer/scripts/release.py" "$@" ;;
+            exec python3 "$ROOT/Installer/scripts/release.py" "$@" ;;
+        --od)
+            OD_PAYLOAD_DEFAULT=1 ;;
     esac
 done
-if [ "${1:-}" = --legacy ]; then shift; fi
+if [ "${1:-}" = --legacy ]; then
+    shift
+elif [ "$OD_PAYLOAD_DEFAULT" = 1 ]; then
+    exec python3 "$ROOT/Installer/scripts/release.py" "$@" --payload
+fi
 
-
-ROOT="$(cd "$(dirname "$0")" && pwd)"
 COMMON="$ROOT/Packaging"
 BUILD="$ROOT/Releases/build"
 DIST="$ROOT/Releases/dist"
@@ -46,7 +53,7 @@ for arg in "$@"; do
             INFRASTRUCTURE=${arg#--} ;;
         --no-build)   DO_BUILD=0 ;;
         --no-zip)     DO_ZIP=0 ;;
-        -h|--help)    sed -n '2,16p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,15s/^# *//p' "$0"; exit 0 ;;
         -*)           echo "Неизвестный флаг: $arg" >&2; exit 1 ;;
         *)            VERSION="$arg" ;;
     esac
