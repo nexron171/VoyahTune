@@ -1,0 +1,225 @@
+package ru.big.town.anative;
+
+import android.content.Context;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
+import android.os.Messenger;
+import android.os.RemoteException;
+import android.os.SystemClock;
+
+import ru.big.town.common.CarPlayClimateProtocol;
+
+import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
+/** Bounded user commands; success requires OEM readback and never optimistic state. */
+final class CarPlayClimateController implements AutoCloseable {
+    private final Context context;
+    private final CanBusEventHub hub;
+    private final Handler handler;
+    private final Runnable changed;
+    private final ThreadPoolExecutor commands =
+            new ThreadPoolExecutor(
+                    1,
+                    1,
+                    0,
+                    TimeUnit.MILLISECONDS,
+                    new ArrayBlockingQueue<>(16),
+                    task -> new Thread(task, "CarPlayClimateCommand"));
+    private CanBusEventHub.Subscription subscription;
+    private volatile long generation;
+    private Messenger owner;
+    private Bundle state = new Bundle();
+    private long sampledAt;
+    private final Runnable poll =
+            new Runnable() {
+                @Override
+                public void run() {
+                    if (owner == null) return;
+                    if (sampledAt > 0 && SystemClock.elapsedRealtime() - sampledAt > 5000) {
+                        state.clear();
+                        sampledAt = 0;
+                        changed.run();
+                    }
+                    hub.requestClimateSnapshot();
+                    handler.postDelayed(this, 1000);
+                }
+            };
+
+    CarPlayClimateController(Context context, Handler handler, Runnable changed) {
+        this.context = context.getApplicationContext();
+        this.hub = CanBusEventHub.get(context);
+        this.handler = handler;
+        this.changed = changed;
+    }
+
+    void start(Messenger client) {
+        if (client.equals(owner)) return;
+        close();
+        owner = client;
+        subscription =
+                hub.subscribe(
+                        CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_CLIMATE,
+                        null,
+                        handler,
+                        event -> {
+                            if (owner == null) return;
+                            if (event.kind == CanBusEvent.Kind.CLIMATE) {
+                                sampledAt = event.elapsedRealtime;
+                                state = bundle(event.climate.values());
+                            } else {
+                                generation++;
+                                commands.getQueue().clear();
+                                state.clear();
+                                sampledAt = 0;
+                                if (event.kind == CanBusEvent.Kind.CONNECTION)
+                                    hub.requestClimateSnapshot();
+                            }
+                            changed.run();
+                        });
+        handler.post(poll);
+    }
+
+    Bundle snapshot() {
+        return new Bundle(state);
+    }
+
+    void handle(Message message) {
+        if (owner == null || !owner.equals(message.replyTo)) return;
+        Bundle input = message.getData();
+        int request = input.getInt(CarPlayClimateProtocol.REQUEST);
+        String field = input.getString(CarPlayClimateProtocol.FIELD, "");
+        double value = input.getDouble(CarPlayClimateProtocol.VALUE, Double.NaN);
+        long deadline =
+                Math.min(
+                        input.getLong(CarPlayClimateProtocol.DEADLINE),
+                        SystemClock.elapsedRealtime() + 3000);
+        long expectedGeneration = generation;
+        Messenger recipient = owner;
+        if (!ClimateCommand.valid(field, value)) {
+            respond(recipient, request, CarPlayClimateProtocol.INVALID, expectedGeneration);
+            return;
+        }
+        try {
+            commands.execute(
+                    () -> {
+                        OemClimateState[] observed = {null};
+                        long[] observedAt = {0};
+                        int result =
+                                apply(
+                                        field,
+                                        value,
+                                        deadline,
+                                        expectedGeneration,
+                                        observed,
+                                        observedAt);
+                        handler.post(
+                                () -> {
+                                    if (generation != expectedGeneration) return;
+                                    if (observed[0] != null && observedAt[0] >= sampledAt) {
+                                        state = bundle(observed[0].values());
+                                        sampledAt = observedAt[0];
+                                        changed.run();
+                                    }
+                                    hub.requestClimateSnapshot();
+                                    respond(recipient, request, result, expectedGeneration);
+                                });
+                    });
+        } catch (RejectedExecutionException full) {
+            respond(recipient, request, CarPlayClimateProtocol.BUSY, expectedGeneration);
+        }
+    }
+
+    private int apply(
+            String field,
+            double target,
+            long deadline,
+            long expectedGeneration,
+            OemClimateState[] latest,
+            long[] sampled) {
+        if (!current(expectedGeneration, deadline)) return CarPlayClimateProtocol.TIMEOUT;
+        OemVehicleStateTransport.ClimateSession session =
+                OemVehicleStateTransport.openClimateSession(context);
+        if (session == null) return CarPlayClimateProtocol.UNAVAILABLE;
+        OemClimateState before = session.read();
+        if (before == null) return CarPlayClimateProtocol.UNAVAILABLE;
+        latest[0] = before;
+        sampled[0] = SystemClock.elapsedRealtime();
+        if (ClimateCommand.reached(before, field, target)) return CarPlayClimateProtocol.SUCCESS;
+        ClimateCommand command = ClimateCommand.from(before, field, target);
+        if (command == null) return CarPlayClimateProtocol.UNAVAILABLE;
+        if (!current(expectedGeneration, deadline)) return CarPlayClimateProtocol.TIMEOUT;
+        if (!session.send(command)) return CarPlayClimateProtocol.UNAVAILABLE;
+        boolean circulationAdvanceAvailable = CarPlayClimateProtocol.RECIRCULATION.equals(field);
+        while (current(expectedGeneration, deadline)) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return CarPlayClimateProtocol.UNAVAILABLE;
+            }
+            OemClimateState observed = session.read();
+            if (observed == null) return CarPlayClimateProtocol.UNAVAILABLE;
+            latest[0] = observed;
+            sampled[0] = SystemClock.elapsedRealtime();
+            if (ClimateCommand.reached(observed, field, target))
+                return CarPlayClimateProtocol.SUCCESS;
+            // AUTO circulation lies between external and internal on firmware with three modes.
+            // A second pulse follows confirmed advancement, never an uncertain first write.
+            if (circulationAdvanceAvailable
+                    && observed.circulation == 2
+                    && before.circulation != 2) {
+                circulationAdvanceAvailable = false;
+                if (!current(expectedGeneration, deadline)) break;
+                if (!session.send(command)) return CarPlayClimateProtocol.UNAVAILABLE;
+            }
+        }
+        return CarPlayClimateProtocol.TIMEOUT;
+    }
+
+    private boolean current(long expectedGeneration, long deadline) {
+        return generation == expectedGeneration && SystemClock.elapsedRealtime() < deadline;
+    }
+
+    private void respond(Messenger recipient, int request, int error, long expectedGeneration) {
+        if (generation != expectedGeneration) return;
+        Message response = Message.obtain(null, CarPlayClimateProtocol.RESULT);
+        Bundle data = new Bundle();
+        data.putInt(CarPlayClimateProtocol.REQUEST, request);
+        data.putInt(CarPlayClimateProtocol.ERROR, error);
+        response.setData(data);
+        try {
+            recipient.send(response);
+        } catch (RemoteException disconnected) {
+            close();
+        }
+    }
+
+    private static Bundle bundle(Map<String, Double> values) {
+        Bundle result = new Bundle();
+        for (Map.Entry<String, Double> value : values.entrySet())
+            result.putDouble(value.getKey(), value.getValue());
+        return result;
+    }
+
+    @Override
+    public void close() {
+        generation++;
+        owner = null;
+        handler.removeCallbacks(poll);
+        commands.getQueue().clear();
+        if (subscription != null) subscription.close();
+        subscription = null;
+        state.clear();
+        sampledAt = 0;
+    }
+
+    void destroy() {
+        close();
+        commands.shutdownNow();
+    }
+}

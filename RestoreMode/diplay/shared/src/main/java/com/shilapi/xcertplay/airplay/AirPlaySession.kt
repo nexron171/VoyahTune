@@ -114,6 +114,8 @@ class AirPlaySession(
     val controllerId: String? get() = pairVerify.verifiedControllerId
     val sharedSecret: ByteArray? get() = pairVerify.shared?.copyOf()
     val videoInCar: Boolean get() = config.videoInCar
+    @Volatile var vehicleStateEnabled: Boolean = false
+        private set
     private val videoPlaybackAvailability = VideoPlaybackAvailability { allowed ->
         sendCommand(
             linkedMapOf(
@@ -675,6 +677,7 @@ class AirPlaySession(
             response["keepAlivePort"] = openKeepAlive()
         }
         val features = setupEnabledFeatures(config, dict["features"] as? List<*>)
+        vehicleStateEnabled = VehicleStateProtocol.FEATURE in features
         val videoPlaybackEnabled = VideoInCar.FEATURE in features
         val videoDelivery = videoPlaybackAvailability.setFeatureEnabled(videoPlaybackEnabled)
         debugLog("airplay video playback negotiated=$videoPlaybackEnabled availability=$videoDelivery")
@@ -1006,6 +1009,9 @@ internal fun findIphoneCornerMask(value: Any?, depth: Int = 0): ByteArray? {
 
 internal fun setupEnabledFeatures(config: AirPlayConfig, proposed: List<*>?): List<String> {
     val features = mutableListOf<String>()
+    if (VehicleClimate.available && proposed.orEmpty().contains(VehicleStateProtocol.FEATURE)) {
+        features.add(VehicleStateProtocol.FEATURE)
+    }
     if (config.hevc) features.add("hevc")
     features.add("iAPChannel")
     features.add("viewAreas")

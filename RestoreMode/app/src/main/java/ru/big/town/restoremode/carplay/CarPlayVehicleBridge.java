@@ -17,27 +17,43 @@ import android.os.RemoteException;
 import androidx.core.content.ContextCompat;
 
 import com.shilapi.xcertplay.VoyahCarPlayIntegration;
+import com.shilapi.xcertplay.airplay.VehicleClimate;
 import com.shilapi.xcertplay.network.VoyahWifiScanPause;
 
-import java.util.Collections;
-import java.util.IdentityHashMap;
-import java.util.Set;
-import java.util.function.BooleanSupplier;
-
-import ru.big.town.common.CarPlayVehicleProtocol;
 import ru.big.town.common.CarPlayAudioProtocol;
+import ru.big.town.common.CarPlayClimateProtocol;
+import ru.big.town.common.CarPlayVehicleProtocol;
 import ru.big.town.common.CarPlayWifiScanProtocol;
 import ru.big.town.restoremode.voice.commands.VoiceSteeringPolicy;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.BooleanSupplier;
+
 /** One subscription per foreground CarPlay session, including UI/display transfers. */
 public final class CarPlayVehicleBridge
-        implements VoyahCarPlayIntegration.Host, VoyahWifiScanPause.Host {
+        implements VoyahCarPlayIntegration.Host, VoyahWifiScanPause.Host, VehicleClimate.Host {
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Messenger replies;
     private int generation;
-    private final Set<Object> wifiScanOwners =
-            Collections.newSetFromMap(new IdentityHashMap<>());
+    private int nextClimateRequest;
+    private final Map<Integer, ClimateReply> climateReplies = new HashMap<>();
+
+    private static final class ClimateReply {
+        final VehicleClimate.Result result;
+        final Runnable timeout;
+
+        ClimateReply(VehicleClimate.Result result, Runnable timeout) {
+            this.result = result;
+            this.timeout = timeout;
+        }
+    }
+
+    private final Set<Object> wifiScanOwners = Collections.newSetFromMap(new IdentityHashMap<>());
 
     private Messenger createReplies() {
         int expectedGeneration = ++generation;
@@ -45,10 +61,28 @@ public final class CarPlayVehicleBridge
                 new Handler(
                         Looper.getMainLooper(),
                         message -> {
-                            if (message.what != CarPlayVehicleProtocol.STATE
-                                    || !started
-                                    || expectedGeneration != generation) return true;
+                            if (!started || expectedGeneration != generation) return true;
+                            if (message.what == CarPlayClimateProtocol.RESULT) {
+                                Bundle response = message.getData();
+                                finishClimate(
+                                        response.getInt(CarPlayClimateProtocol.REQUEST),
+                                        response.getInt(
+                                                CarPlayClimateProtocol.ERROR,
+                                                CarPlayClimateProtocol.UNAVAILABLE));
+                                return true;
+                            }
+                            if (message.what != CarPlayVehicleProtocol.STATE) return true;
                             Bundle values = message.getData();
+                            Bundle climate = values.getBundle(CarPlayClimateProtocol.STATE);
+                            Map<String, Double> observed = new HashMap<>();
+                            if (climate != null) {
+                                for (String field : climate.keySet()) {
+                                    Object value = climate.get(field);
+                                    if (value instanceof Double)
+                                        observed.put(field, (Double) value);
+                                }
+                            }
+                            VehicleClimate.update(observed);
                             VoyahCarPlayIntegration.update(
                                     values.getInt(CarPlayVehicleProtocol.SPEED_KMH, -1),
                                     values.getInt(CarPlayVehicleProtocol.GEAR, -1),
@@ -112,6 +146,7 @@ public final class CarPlayVehicleBridge
                     generation++;
                     service = null;
                     VoyahCarPlayIntegration.reset();
+                    resetClimate();
                 }
 
                 @Override
@@ -140,6 +175,56 @@ public final class CarPlayVehicleBridge
 
     public CarPlayVehicleBridge(Context context) {
         this.context = context.getApplicationContext();
+        VehicleClimate.install(this);
+    }
+
+    @Override
+    public void write(
+            String field, double value, BooleanSupplier current, VehicleClimate.Result result) {
+        handler.post(
+                () -> {
+                    if (!started || service == null || !current.getAsBoolean()) {
+                        result.complete(CarPlayClimateProtocol.UNAVAILABLE);
+                        return;
+                    }
+                    if (climateReplies.size() >= 16) {
+                        result.complete(CarPlayClimateProtocol.BUSY);
+                        return;
+                    }
+                    int request = ++nextClimateRequest;
+                    Runnable timeout = () -> finishClimate(request, CarPlayClimateProtocol.TIMEOUT);
+                    climateReplies.put(request, new ClimateReply(result, timeout));
+                    handler.postDelayed(timeout, 3500);
+                    Bundle data = new Bundle();
+                    data.putInt(CarPlayClimateProtocol.REQUEST, request);
+                    data.putString(CarPlayClimateProtocol.FIELD, field);
+                    data.putDouble(CarPlayClimateProtocol.VALUE, value);
+                    data.putLong(
+                            CarPlayClimateProtocol.DEADLINE,
+                            android.os.SystemClock.elapsedRealtime() + 3000);
+                    Message message = Message.obtain(null, CarPlayClimateProtocol.SET);
+                    message.replyTo = replies;
+                    message.setData(data);
+                    try {
+                        service.send(message);
+                    } catch (RemoteException disconnected) {
+                        reconnect();
+                    }
+                });
+    }
+
+    private void finishClimate(int request, int error) {
+        ClimateReply reply = climateReplies.remove(request);
+        if (reply == null) return;
+        handler.removeCallbacks(reply.timeout);
+        reply.result.complete(error);
+    }
+
+    private void resetClimate() {
+        VehicleClimate.update(Collections.emptyMap());
+        for (Integer request : new java.util.ArrayList<>(climateReplies.keySet())) {
+            finishClimate(request, CarPlayClimateProtocol.UNAVAILABLE);
+        }
     }
 
     @Override
@@ -162,7 +247,8 @@ public final class CarPlayVehicleBridge
 
     @Override
     public void audioFocus(int stream) {
-        if (stream != CarPlayAudioProtocol.NONE && !CarPlayAudioProtocol.validStream(stream)) return;
+        if (stream != CarPlayAudioProtocol.NONE && !CarPlayAudioProtocol.validStream(stream))
+            return;
         audioStream = stream;
         sendAudioFocus();
     }
@@ -228,6 +314,7 @@ public final class CarPlayVehicleBridge
         generation++;
         service = null;
         VoyahCarPlayIntegration.reset();
+        resetClimate();
         if (bound) context.unbindService(connection);
         bound = false;
         handler.removeCallbacks(retry);
@@ -260,5 +347,6 @@ public final class CarPlayVehicleBridge
         bound = false;
         service = null;
         VoyahCarPlayIntegration.reset();
+        resetClimate();
     }
 }

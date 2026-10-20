@@ -144,12 +144,19 @@ final class OemVehicleStateTransport {
         T run(Session session);
     }
 
+    interface ClimateSession {
+        OemClimateState read();
+
+        boolean send(ClimateCommand command);
+    }
+
     private static final OemVehicleStateTransport INSTANCE = new OemVehicleStateTransport();
 
     private final Object connectionLock = new Object();
     private final Object schemaLock = new Object();
     private final Object transactionLock = new Object();
     private final Map<StateKey, Integer> resolvedOrdinals = new HashMap<>();
+    private final Map<String, Integer> climateOrdinals = new HashMap<>();
 
     private Context appContext;
     private IBinder canBusBinder;
@@ -242,6 +249,115 @@ final class OemVehicleStateTransport {
 
     static Result sendBundle(Context context, Map<StateKey, Integer> values, String label) {
         return INSTANCE.sendBundleInternal(context, immutableCopy(values), label);
+    }
+
+    static ClimateSession openClimateSession(Context context) {
+        Context app = INSTANCE.applicationContext(context);
+        if (app == null || !INSTANCE.resolveClimateSchema(app)) return null;
+        IBinder binder = INSTANCE.acquireBinder(app);
+        return binder == null ? null : INSTANCE.new BoundClimateSession(binder);
+    }
+
+    private boolean resolveClimateSchema(Context context) {
+        synchronized (schemaLock) {
+            if (!climateOrdinals.isEmpty()) return true;
+            try {
+                ApplicationInfo info =
+                        context.getPackageManager().getApplicationInfo(CANBUS_PACKAGE, 0);
+                ClassLoader loader = new PathClassLoader(info.sourceDir, context.getClassLoader());
+                Class<?> schema =
+                        Class.forName("com.qinggan.canbus.AirConditionState", true, loader);
+                Method getState = schema.getMethod("getState");
+                Map<String, Integer> expected = new LinkedHashMap<>();
+                expected.put("AC_BLOWER", 1);
+                expected.put("AC_LEFT_TEMP", 3);
+                expected.put("AC_RIGHT_TEMP", 4);
+                expected.put("AC_SWITCH", 5);
+                expected.put("AC_AUTO", 7);
+                expected.put("AC_POWER_SWITCH", 8);
+                expected.put("AC_RECIRC_AIR", 11);
+                expected.put("AC_DUAL", 12);
+                Map<String, Integer> resolved = new HashMap<>();
+                Object[] constants = schema.getEnumConstants();
+                if (constants == null) return false;
+                for (Object item : constants) {
+                    Enum<?> entry = (Enum<?>) item;
+                    Integer stableId = expected.get(entry.name());
+                    if (stableId == null) continue;
+                    if (!stableId.equals(getState.invoke(entry))) return false;
+                    resolved.put(entry.name(), entry.ordinal());
+                }
+                if (resolved.size() != expected.size()) return false;
+                climateOrdinals.putAll(resolved);
+                return true;
+            } catch (PackageManager.NameNotFoundException
+                    | ReflectiveOperationException
+                    | RuntimeException error) {
+                Log.w(TAG, "Installed climate schema unavailable", error);
+                return false;
+            }
+        }
+    }
+
+    private final class BoundClimateSession implements ClimateSession {
+        private final IBinder binder;
+
+        BoundClimateSession(IBinder binder) {
+            this.binder = binder;
+        }
+
+        @Override
+        public OemClimateState read() {
+            synchronized (transactionLock) {
+                if (!isCurrentBinder(binder)) return null;
+                Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                try {
+                    data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                    if (!binder.transact(30, data, reply, 0)) return null;
+                    reply.readException();
+                    return reply.readInt() == 0 ? null : OemClimateState.read(reply);
+                } catch (RemoteException | RuntimeException error) {
+                    Log.w(TAG, "Climate read unavailable", error);
+                    return null;
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+            }
+        }
+
+        @Override
+        public boolean send(ClimateCommand command) {
+            Integer ordinal;
+            synchronized (schemaLock) {
+                ordinal = climateOrdinals.get(command.field);
+            }
+            if (ordinal == null) return false;
+            synchronized (transactionLock) {
+                if (!isCurrentBinder(binder)) return false;
+                Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                try {
+                    data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                    data.writeInt(1);
+                    data.writeInt(ordinal);
+                    data.writeInt(command.stableId);
+                    data.writeInt(command.value);
+                    if (!CanSender.beginFrameAttemptForCurrentGuard()) return false;
+                    if (!binder.transact(31, data, reply, 0)) return false;
+                    reply.readException();
+                    Log.i(
+                            TAG,
+                            "Climate accepted-unconfirmed " + command.field + "=" + command.value);
+                    return true;
+                } catch (RemoteException | RuntimeException error) {
+                    Log.w(TAG, "Climate write failed; not retried", error);
+                    return false;
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+            }
+        }
     }
 
     static Result sendTemporaryEnergyMode(Context context, int mode, long revision, long cycle) {

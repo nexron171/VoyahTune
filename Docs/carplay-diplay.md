@@ -41,7 +41,7 @@ flowchart LR
     Engine <--> Phone[iPhone: USB / wireless]
     Engine --> Session[DiPlaySessionService]
     Session --> Bridge[CarPlayVehicleBridge]
-    Bridge <-->|Messenger 120–126| Native[Native: CarPlayVehicleController]
+    Bridge <-->|Messenger 120–126, 180–181| Native[Native: CarPlayVehicleController]
     UI --> Volumes[CarPlayAudioClient]
     Volumes <-->|Messenger 127–129| Audio[Native: CarPlayAudioController]
     Native --> Audio
@@ -734,6 +734,8 @@ Android Back из проекции открывает home с `page=home`, со�
 | 127 QUERY | RestoreMode → Native | Отдельный settings `replyTo`, `audioRequest: long`; чтение громкости без WATCH. |
 | 128 SET | RestoreMode → Native | Settings `replyTo`, `audioRequest: long`, `audioStream: int`, `audioLevel: int`; только четыре разрешённых stream, уровень ограничен OEM maximum. |
 | 129 VALUES | Native → settings replyTo | `audioRequest: long`, `audioLevels: int[]`, `audioMaxima: int[]`; порядок музыка/навигация/звонок/Siri, неизвестная пара −1/−1. |
+| 180 CLIMATE SET | RestoreMode → Native | `replyTo` WATCH-владельца, `request: int`, `field: String`, `value: double`, `deadline: long` в elapsedRealtime. |
+| 181 CLIMATE RESULT | Native → WATCH replyTo | `request: int`, `error: int`; 0 означает подтверждение OEM-снимком, а не только принятую запись Binder. |
 
 Аудиочасть определяет
 [CarPlayAudioProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayAudioProtocol.java).
@@ -827,6 +829,59 @@ DARK/LIGHT/AUTO сохраняется, AUTO в VEHICLE следует сист�
 оформление приложения и `commandWritten`. Успешная запись не доказывает изменение
 экрана iPhone; его собственная настройка темы также влияет на результат.
 Не выполнять сетевую отправку из CAN callback. **Заряд и запас хода не подключены**.
+
+### Климат через Vehicle State Protocol
+
+Контракт [CarPlayClimateProtocol](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayClimateProtocol.java)
+дополняет STATE/122 полем `climate: Bundle`: известные значения передаются как
+`double`, неизвестные ключи отсутствуют. `VehicleClimate` получает снимки и команды
+через существующий `CarPlayVehicleBridge`; зависимости shared на Native нет.
+Потеря IPC очищает снимок и завершает ожидающие команды ошибкой.
+
+При установленном адаптере `/info` объявляет `vehicleStateProtocolInfo` версии 1.0,
+один plug-in VoyahTune и аксессуары Climate/VehicleResources. SETUP принимает
+`vehicleStateProtocol` только если его предложил iPhone. `displayPanels` описывает
+видеодисплеи и служебную панель `showsInstruments` с пустым Local UI plug-in:
+без неё исследованный iPhone не показывает «Климат». У служебной панели нет
+видеопотока или Android-дисплея; это совместимость климатического UI, а не реализация
+приборной панели Ultra. Геометрия берётся из настроенного дисплея, `displays` не расширяется.
+Два DataStream UUID
+`3E2F3C61-AAD0-42CB-A8AA-BF22186DA62E` и
+`FF4A6720-F2BE-4F56-A3E1-DB3B4E37D634` принадлежат одной AirPlay-сессии.
+Ключи HKDF-SHA512 выводятся из session secret и `DataStream-Salt<seed>`;
+ChaCha20-Poly1305, 2-байтная little-endian длина, 32-байтный заголовок.
+Ответ на `sync` сохраняет token; исходящий `asyn/cmnd` имеет **нулевой token**.
+ACK и команды разделяют сериализованный счётчик nonce. Закрытие сессии освобождает
+оба канала, подписки и ожидающие ответы. Исходящие команды выполняются отдельным
+writer с очередью до 32 пакетов; переполнение закрывает канал, не блокируя UI/Native IPC.
+
+`OpackCodec` сохраняет 64-битные transactionID и числовые ключи, ограничивает размер,
+глубину и число объектов. Поддержаны config/register/read/unregister/write и
+updateNotify. Повторная write-транзакция возвращает сохранённый ответ без новой
+OEM-команды. Телефон может управлять двумя температурами, питанием, A/C, вентилятором,
+AUTO, SYNC и рециркуляцией. Температуры: 15,5–30,5 с шагом 0,5; крайние значения
+соответствуют OEM LO/HI. Вентилятор: 0–8. Измеренная температура салона не объявляется:
+исследованная машина возвращает −9999. Нет фиксированных «показаний» или климатического
+Android overlay; интерфейс рисует iPhone.
+
+`CarPlayClimateController` подписан на общий `CanBusEventHub` (callback 4), получает
+TX30-снимок раз в секунду и очищает данные старше 5 секунд. Снимок не может затереть
+более новый callback другого поколения. `OemVehicleStateTransport` использует свой
+существующий Binder и проверяет имена, stable ID и ordinal установленного
+`AirConditionState.getState()`. Температурная TX31-команда передаёт десятые доли градуса.
+Питание, A/C и DUAL — условные импульсы `1` после свежего чтения, не абсолютные boolean.
+Выключение AUTO задаёт наблюдаемый ручной уровень вентилятора; уровень 0 выключает HVAC.
+Рециркуляция допускает второй импульс только после подтверждённого перехода первого
+в AUTO; неопределённая запись не повторяется. Очередь ограничена 16 запросами, срок
+команды — не более 3 секунд, результат подтверждается чтением. Переподключение CAN
+или смена владельца отменяет ожидающие команды; подтверждённые снимки доставляются
+перед ответом на запись. Неподдержанные состояния остаются недоступными.
+
+Схема/OPACK/фрейминг и описание панелей адаптированы из
+[LIVI](https://github.com/f-io/LIVI/tree/19baaa7447606ae36d75840add21b79a236b937f),
+GPL-3.0-or-later, Lasse Heitgres. Сиденья, MAX A/C, обдув стёкол и распределение
+воздуха не входят в этот первый набор. Установщик и инфраструктура PI/OD не меняются;
+нужны согласованные APK Native и RestoreMode.
 
 ## 7. Siri, кнопки руля, медиа и звонки
 
@@ -1282,7 +1337,13 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 
 ### 10.2. Собственные файлы внутри DiPlay
 
-Эти **14 файлов реализации** не придут из upstream; их нужно сохранить/перенести
+Климат (§6): `shared/.../airplay/OpackCodec.kt`, `VehicleClimate.kt`,
+`VehicleStateProtocol.kt`, `VehicleStateChannel.kt`, `VehicleStateConnection.kt`,
+`VehicleStateDisplayPanels.kt`.
+Точки подключения: `AirPlayInfoPlist`, `AirPlaySession`, `CarPlayMediaEngine`.
+При обновлении upstream переносить VSP отдельно от iAP2 VehicleStatus и video settings.
+
+Перечисленные собственные файлы реализации не придут из upstream; их нужно сохранить/перенести
 вместе с собственными тестами. `AGENTS.md` и наш `README.md` также не заменять upstream-версией.
 
 | Файл | Назначение |
@@ -1331,6 +1392,11 @@ Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
 app/Native/OD-файлы дополнительно перечислены в §10.3.
 
 ### 10.3. Код вне vendored дерева
+
+Климат (§6): `SharedAndroid/.../CarPlayClimateProtocol.java`; Native
+`OemClimateState`, `ClimateCommand`, `CarPlayClimateController` и расширения
+`CanBusEvent`, `CanBusEventRouter`, `CanBusEventHub`, `OemVehicleStateTransport`,
+`CarPlayVehicleController`, `SetModesService`; app `CarPlayVehicleBridge`.
 
 Замена только `RestoreMode/diplay` не восстанавливает перечисленные ниже точки.
 Сохранить их в checkout и заново связать с новой версией библиотеки.
@@ -1536,6 +1602,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Способ Wi-Fi подключения | common `HotspotModeMigrationTest`, `ExistingWifiSettingsTest`: default Wi-Fi Direct, сохранение выбранного режима и реквизитов сетей |
 | Приостановка поиска Wi-Fi OD | shared `WifiScanPauseTest`: отменённый acquire, release и отсутствие ADB; app `CarPlayWifiScanBridgeTest`: несколько владельцев, закрытие до доставки и reconnect; Native `CarPlayWifiScanProtocolTest`: исходное время heartbeat, просроченные/будущие запросы; `Packaging/tests/test_carplay_wifi_scan_pause.js`: исполнение OD-агента на Wi-Fi Handler, expiry/boot, исходная и внешняя политика, частичная ошибка, rollback. |
 | Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp), `CarPlayLightStateTest` (начальный SWReason, события и запоздавшие ответы); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest` |
+| Климат VSP | shared `OpackCodecTest` (iPhone/Apple SDK vectors, границы), `VehicleStateProtocolTest` (неизвестные значения, readback, дедупликация), `VehicleStateChannelTest` (шифрование, фрагментация, ACK/token), `VehicleStateDisplayPanelsTest` (панели без дополнительного видеопотока); Native `ClimateCommandTest`, `CanBusEventRouterTest`; компиляция обеих сторон IPC. На ГУ отдельно проверить физический результат, обратное изменение штатной кнопкой и reconnect. |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/tests/test_navigation_sources.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
@@ -1626,6 +1693,27 @@ IPC/CAN/cluster/запуска нужен согласованный Native APK.
 автоматически из задачи обновления библиотеки.
 
 ## 13. Подтверждённое состояние и ограничения
+
+### Первый климатический VSP, 19 октября 2026
+
+На OD 4.3.3, Android 11, iPhone с iOS 27.0.1 временный прототип показал штатный
+климатический экран. Получены config/register/write, отправлены ответы и updateNotify;
+пользователь подтвердил изменение синтетического setpoint 21 → 21,5 → 22 °C.
+Повторная проверка без `displayPanels` и только с основной панелью не показала
+«Климат»; возвращение служебной панели с Local UI plug-in снова включило интерфейс.
+Для него не требуется объявлять неизвестную измеренную температуру салона.
+Из Native прочитан реальный TX30-снимок (обе зоны 21 °C) и проверена установленная
+схема enum OEM service 1.2.0. После согласованной установки Native и RestoreMode
+`4.4.0-od` пользователь подтвердил реальное изменение водительской температуры
+из штатного экрана CarPlay, а затем отражение изменения штатной панелью машины
+обратно в CarPlay. После переподключения в 20:03 МСК повторно открыты VSP-каналы
+3001/3002; экран CarPlay и штатный док показывают одинаковые 21 °C. В журнале Native
+за время переподключения новых климатических команд нет.
+Пользователь также подтвердил, что после переподключения «Климат» открывается
+и показывает актуальную температуру машины.
+Это проверка постоянной реализации без Frida. Остальные команды
+первого набора реализованы, но отдельно на машине не проверялись; наличие пункта
+Ultra не означает полный Ultra.
 
 ### Обновление до 0.2.21, 18 октября 2026
 

@@ -9,6 +9,7 @@ import android.os.Messenger;
 import android.util.Log;
 
 import ru.big.town.common.CarPlayAudioProtocol;
+import ru.big.town.common.CarPlayClimateProtocol;
 import ru.big.town.common.CarPlayVehicleProtocol;
 import ru.big.town.common.CarPlayWifiScanProtocol;
 import ru.big.town.common.InfrastructureProfile;
@@ -28,6 +29,7 @@ final class CarPlayVehicleController implements AutoCloseable {
     private final CanBusEventHub hub;
     private final ClusterNavigationController navigation;
     private final CarPlayAudioController audio;
+    private final CarPlayClimateController climate;
     private final CarPlayLightState lightState;
     private final CarPlayWifiScanController wifiScan;
     private Messenger owner;
@@ -55,9 +57,12 @@ final class CarPlayVehicleController implements AutoCloseable {
         hub = CanBusEventHub.get(context);
         navigation = ClusterNavigationController.get(context);
         this.audio = audio;
+        climate = new CarPlayClimateController(context, handler, this::publish);
         Context applicationContext = context.getApplicationContext();
-        wifiScan = InfrastructureProfile.read(applicationContext) == InfrastructureProfile.OD
-                ? new CarPlayWifiScanController(applicationContext) : null;
+        wifiScan =
+                InfrastructureProfile.read(applicationContext) == InfrastructureProfile.OD
+                        ? new CarPlayWifiScanController(applicationContext)
+                        : null;
         lightState =
                 new CarPlayLightState(
                         lightQueryExecutor,
@@ -82,6 +87,11 @@ final class CarPlayVehicleController implements AutoCloseable {
     }
 
     void handle(Message message) {
+        if (message.what == CarPlayClimateProtocol.SET) {
+            if (owner != null && owner.equals(message.replyTo) && client.active())
+                climate.handle(message);
+            return;
+        }
         if (message.what == CarPlayAudioProtocol.FOCUS) {
             if (owner != null && owner.equals(message.replyTo) && client.active()) {
                 audio.setFocus(message.getData().getInt(CarPlayAudioProtocol.STREAM, -1));
@@ -111,6 +121,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         }
         owner = message.replyTo;
         client.set(message.replyTo);
+        climate.start(message.replyTo);
         if (subscription == null) {
             subscription =
                     hub.subscribe(
@@ -164,6 +175,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         values.putLong(CarPlayVehicleProtocol.SPEED_TIME, speedTime);
         values.putInt(CarPlayVehicleProtocol.GEAR, gear);
         values.putInt(CarPlayVehicleProtocol.SW_REASON, reason);
+        values.putBundle(CarPlayClimateProtocol.STATE, climate.snapshot());
         Message message = Message.obtain(null, CarPlayVehicleProtocol.STATE);
         message.setData(values);
         if (!client.send(message)) close();
@@ -173,11 +185,13 @@ final class CarPlayVehicleController implements AutoCloseable {
         close();
         if (wifiScan != null) wifiScan.close();
         lightQueryExecutor.shutdownNow();
+        climate.destroy();
     }
 
     @Override
     public void close() {
         handler.removeCallbacks(poll);
+        climate.close();
         client.clear();
         owner = null;
         lightState.reset();

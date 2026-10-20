@@ -29,7 +29,7 @@ object AirPlayInfoPlist {
         if (config.disableAudioOutput) CARPLAY_FEATURES_NO_AUDIO else CARPLAY_FEATURES
 
     fun build(config: AirPlayConfig): Map<String, Any?> {
-        val displays = arrayListOf<Any?>(
+        val displays = arrayListOf(
             displayEntry(config.main, STREAM_TYPE_MAIN_SCREEN, MAIN_UUID),
         )
         config.cluster?.let { displays.add(displayEntry(it, STREAM_TYPE_ALT_SCREEN, ALT_UUID)) }
@@ -55,6 +55,10 @@ object AirPlayInfoPlist {
         }
         info["extendedFeatures"] = listOf("vocoderInfo", "enhancedRequestCarUI")
         info["displays"] = displays
+        if (VehicleClimate.available) {
+            info["vehicleStateProtocolInfo"] = VehicleStateProtocol.descriptor()
+            info["displayPanels"] = VehicleStateDisplayPanels.build(displays)
+        }
         info["hidDevices"] = listOf(
             AirPlayHid.touchHidDevice(config.main.widthPixels, config.main.heightPixels, MAIN_UUID),
             AirPlayHid.knobHidDevice(MAIN_UUID),

@@ -90,6 +90,7 @@ class CarPlayMediaEngine(
     private val audioCaptures = ConcurrentHashMap<StreamKey, AudioPacketCapture>()
     private val pendingIapTunnels = ConcurrentHashMap<AirPlaySession, PendingIapTunnel>()
     private val videoSettingsChannels = ConcurrentHashMap<AirPlaySession, VideoSettingsChannel>()
+    private val vehicleStateConnections = ConcurrentHashMap<AirPlaySession, VehicleStateConnection>()
     private val bufferedStreams = ConcurrentHashMap<AirPlaySession, BufferedStream>()
     private val microphoneScheduler by lazy {
         ScheduledThreadPoolExecutor(1) { task -> Thread(task, "carplay-mic-start").apply { isDaemon = true } }.apply {
@@ -370,6 +371,9 @@ class CarPlayMediaEngine(
 
     override fun onDataStream(session: AirPlaySession, stream: Map<String, Any?>): Map<String, Any?>? {
         val uuid = (stream["clientTypeUUID"] as? String)?.uppercase() ?: return null
+        if (session.vehicleStateEnabled && (uuid == VehicleStateProtocol.NORMAL_UUID || uuid == VehicleStateProtocol.HIGH_UUID)) {
+            return vehicleStateConnections.computeIfAbsent(session) { VehicleStateConnection(it) }.open(uuid, stream)
+        }
         if (session.videoInCar) videoDataStream(session, uuid, stream)?.let { return it }
         if (uuid != IAP_DATASTREAM_UUID) return null
         val shared = session.sharedSecret ?: return null
@@ -550,6 +554,7 @@ class CarPlayMediaEngine(
         clearPendingIapTunnel(session)
         retireBuffered(session)
         videoSettingsChannels.remove(session)?.close()
+        vehicleStateConnections.remove(session)?.close()
         val sessionStreams = streams.keys.filter {
             it.session === session && it.type != BufferedAudioStream.STREAM_TYPE
         }
