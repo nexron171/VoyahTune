@@ -839,7 +839,7 @@ DARK/LIGHT/AUTO сохраняется, AUTO в VEHICLE следует сист�
 Потеря IPC очищает снимок и завершает ожидающие команды ошибкой.
 
 При установленном адаптере `/info` объявляет `vehicleStateProtocolInfo` версии 1.0,
-один plug-in VoyahTune и аксессуары Climate/VehicleResources. SETUP принимает
+один plug-in VoyahTune и аксессуары Climate/VehicleResources/Seats. SETUP принимает
 `vehicleStateProtocol` только если его предложил iPhone. `displayPanels` описывает
 видеодисплеи и служебную панель `showsInstruments` с пустым Local UI plug-in:
 без неё исследованный iPhone не показывает «Климат». У служебной панели нет
@@ -859,7 +859,9 @@ writer с очередью до 32 пакетов; переполнение за
 глубину и число объектов. Поддержаны config/register/read/unregister/write и
 updateNotify. Повторная write-транзакция возвращает сохранённый ответ без новой
 OEM-команды. Телефон может управлять двумя температурами, питанием, A/C, вентилятором,
-AUTO, SYNC и рециркуляцией. Температуры: 15,5–30,5 с шагом 0,5; крайние значения
+AUTO, SYNC, рециркуляцией и направлениями обдува. Добавлены четыре подогрева сидений
+и две передние вентиляции: уровни 0–3 и отдельное включение/выключение.
+Температуры: 15,5–30,5 с шагом 0,5; крайние значения
 соответствуют OEM LO/HI. Вентилятор: 0–7, где 0 выключает HVAC. Измеренная температура салона не объявляется:
 исследованная машина возвращает −9999. Нет фиксированных «показаний» или климатического
 Android overlay; интерфейс рисует iPhone.
@@ -908,10 +910,91 @@ TX30-снимок раз в секунду и очищает данные ста
 или смена владельца отменяет ожидающие команды; подтверждённые снимки доставляются
 перед ответом на запись. Неподдержанные состояния остаются недоступными.
 
+Распределение воздуха читает `airSupplyStatus` (поле 8 parcel) и пишет
+`AC_FLOW_MODE` (stable ID 13). В адаптере H97 используются режимы:
+0 — середина, 1 — середина + низ, 2 — низ, 3 — верх + низ, 4 — верх.
+«Верх» означает выходы на стекло; MAX defrost отдельной командой не включается.
+Включение верха заменяет середину и наоборот, сохраняя низ. Закрытие последнего
+выхода отклоняется; питание HVAC самостоятельно не переключается. Ручной выбор
+требует включённого HVAC и подтверждения режима при AUTO=0.
+Это таблица штатных `setBlowFaceH97/setBlowFootH97/setBlowWindowH97`
+из исследованного `qinggan_vehicle` 1.0, а не доказательство физического запрета:
+ветка H56 того же приложения использует ещё 5/6, CAN-сервис H97C записывает
+трёхбитное значение без явного запрета этих кодов. На H97 их поддержка не проверена;
+значения вне 0–4 публикуются как неизвестные.
+
+VSP описывает три Vent-сервиса `0x11000006`, IID 548/553/558. Их фиксированные
+`VentCombinations` (`0x31000025`, format Array=13) содержат соответственно
+`[2]`/`[4]`/`[16]` для верха/низа/середины; `vehicleLayoutKey=seat_front`.
+Флаг AUTO общий с HVAC. ID существовавших характеристик сохранены.
+Аксессуар Seats (`0x01500001`, IID 1024) содержит четыре HeatingCooling-сервиса
+`0x22000001` (IID 1025/1029/1033/1037, уровень `0x31000021`, Int32=7).
+Позиции — `seat_front_left/right` и `seat_2ndRow_left/right`; среднего заднего
+подогрева нет. Для двух передних SeatFan используется тип
+`0x22000002` (IID 1041/1045), уровень `0x31000012`, UInt8=1.
+Модель свойств `CAFSeatFan` подтверждается публичным runtime-header iOS 26;
+числовой тип подтверждён `+[CAFSeatFan serviceIdentifier]` и константой
+`_CAFServiceTypeSeatFan` в бинарнике Apple iOS 27.0 (источник ниже).
+Принятие и отображение на iPhone остаются отдельной проверкой.
+Vent и HeatingCooling сверены с закреплённой версией LIVI ниже.
+
+`OemSeatClimateState` сопоставляет включение с `VehicleState.*_SWITCH`
+(1 — выключено, 2 — включено), а уровень с `*_COMMAND` (1–3).
+Выключенное сиденье сообщает уровень 0 независимо от сохранённого OEM уровня.
+Запись уровня 1–3 включает канал в том же OEM кадре; уровень 0 отправляет
+SWITCH=1. Отдельное включение использует известный сохранённый уровень,
+не подставляя максимум или другое тестовое значение.
+Stable ID COMMAND/SWITCH: подогрев водитель 261/698, пассажир 260/697,
+задний левый 1030/1028, задний правый 1029/1027; вентиляция водитель 263/700,
+пассажир 262/699. Эти пути передачи и readback подтверждены декомпиляцией
+CAN service 1.2.0 `DongfengH97CCanBusComponentImpl`, включая задние подогревы.
+Поддержка задней вентиляции для H97C не установлена и не объявляется.
+
+Сиденья используют тот же `OemVehicleStateTransport`: проверку runtime enum,
+TX57 для чтения и TX58 для команды. `ComfortClimateSession` удерживает один Binder,
+а общий transaction lock берётся только на чтение/отправку, не на ожидание
+подтверждения. Снимок обновляется раз в секунду и по отфильтрованным событиям
+`CanBusEventHub`; одновременно ожидает не более одного фонового запроса.
+Парные power/level читаются вместе, поскольку OEM callback публикует их отдельно.
+Данные сидений имеют собственный срок свежести 5 секунд и не затираются
+климатическим callback. Очередь команд и отмена при смене поколения общие с HVAC.
+Успех требует обратного чтения; неизвестные switch/level не превращаются в нули.
+Наличие enum и чтение кэша OEM сами по себе не подтверждают установленное оборудование.
+
+Подогрев руля использует IPC `steeringWheelHeatingLevel`, который
+принимает только 0/1. `OemComfortClimateState` переводит их в
+`STEER_WHEEL_HEAT_SWITCH` (stable ID 1098): 1 — выключение, 2 — включение.
+CAN service 1.2.0 H97C публикует подтверждение в том же VehicleState; значение
+10 означает ошибку нагревателя. Ошибка, отсутствующее поле и неизвестные
+значения не публикуются как выключение и не допускают команду.
+Сиденья и руль используют один цикл чтения/подтверждения; отсутствие enum руля
+не блокирует сиденья. Наличие аппаратного подогрева OEM UI отдельно проверяет
+через `SWC_HEAT=1`; чтение enum эту проверку не заменяет.
+
+VSP Climate содержит SteeringWheelHeatingCooling `0x11000003` (IID 563).
+Единственная характеристика `HeatingCoolingLevel` — `0x31000021`, IID 564,
+Int32 (format=7), диапазон 0–1 с шагом 1. Она двусторонняя; неизвестное состояние
+не получает `initialValue`, потеря данных отправляет invalid. Необязательный
+AUTO руля не объявляется; охлаждение и несколько ступеней OEM не поддерживает.
+Существующие IID сохранены. Сервис подключён через обычные VSP read/write/notify,
+без Android overlay; фактический вид управления определяет iPhone.
+
+Числовые типы проверены по неизменённому `CarAccessoryFramework` из Xcode
+iOS DeviceSupport: iOS 27.0 (24A437), arm64e,
+UUID `DC950ED0-E759-3FF1-9DBF-D156578262C5`,
+SHA-256 `b8e3cb3794546d7f51cf5805a9d76e03b0d22b04e5008892c54928ef39aa51b4`.
+`+[CAFSteeringWheelHeatingCooling serviceIdentifier]` по адресу `0x2572f99d4`
+загружает `_CAFServiceTypeSteeringWheelHeatingCooling` (`0x26953a248`),
+ссылающийся на CFString `0x0000000011000003`.
+`_CAFCharacteristicTypeHeatingCoolingLevel` (`0x26953a918`) содержит
+`0x0000000031000021`. Для SeatFan метод `0x25731ff50` загружает константу
+`0x26953a2f0` со строкой `0x0000000022000002`.
+Это проверка реализации Apple; она не заменяет испытание UI/команд в автомобиле.
+
 Схема/OPACK/фрейминг и описание панелей адаптированы из
 [LIVI](https://github.com/f-io/LIVI/tree/19baaa7447606ae36d75840add21b79a236b937f),
-GPL-3.0-or-later, Lasse Heitgres. Сиденья, MAX A/C, обдув стёкол и распределение
-воздуха не входят в этот первый набор. Установщик и инфраструктура PI/OD не меняются;
+GPL-3.0-or-later, Lasse Heitgres. MAX A/C и отдельные обогревы/размораживание стёкол
+не входят в этот набор. Установщик и инфраструктура PI/OD не меняются;
 нужны согласованные APK Native и RestoreMode.
 
 ## 7. Siri, кнопки руля, медиа и звонки
@@ -1374,7 +1457,9 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 Точки подключения: `AirPlayInfoPlist`, `AirPlaySession`, `CarPlayMediaEngine`.
 `AirPlayInfoPlist` выбирает нижний док главного экрана при доступном климате,
 если край явно не задан. `VehicleStateProtocolTest` фиксирует диапазон вентилятора
-в передаваемых единицах; `VehicleClimateDockTest` — выбор дока, приоритет
+в передаваемых единицах, VentCombinations, позиции/диапазоны сидений,
+тип и диапазон подогрева руля, маршрутизацию
+и отсутствие оптимистических обновлений; `VehicleClimateDockTest` — выбор дока, приоритет
 настроек и сохранение геометрии.
 При обновлении upstream переносить VSP отдельно от iAP2 VehicleStatus и video settings.
 
@@ -1429,7 +1514,8 @@ app/Native/OD-файлы дополнительно перечислены в §
 ### 10.3. Код вне vendored дерева
 
 Климат (§6): `SharedAndroid/.../CarPlayClimateProtocol.java`; Native
-`OemClimateState`, `ClimateCommand`, `CarPlayClimateController` и расширения
+`OemClimateState`, `ClimateCommand`, `ClimateAirDistribution`,
+`OemSeatClimateState`, `OemComfortClimateState`, `CarPlayClimateController` и расширения
 `CanBusEvent`, `CanBusEventRouter`, `CanBusEventHub`, `OemVehicleStateTransport`,
 `CarPlayVehicleController`, `SetModesService`; app `CarPlayVehicleBridge`.
 
@@ -1637,7 +1723,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Способ Wi-Fi подключения | common `HotspotModeMigrationTest`, `ExistingWifiSettingsTest`: default Wi-Fi Direct, сохранение выбранного режима и реквизитов сетей |
 | Приостановка поиска Wi-Fi OD | shared `WifiScanPauseTest`: отменённый acquire, release и отсутствие ADB; app `CarPlayWifiScanBridgeTest`: несколько владельцев, закрытие до доставки и reconnect; Native `CarPlayWifiScanProtocolTest`: исходное время heartbeat, просроченные/будущие запросы; `Packaging/tests/test_carplay_wifi_scan_pause.js`: исполнение OD-агента на Wi-Fi Handler, expiry/boot, исходная и внешняя политика, частичная ошибка, rollback. |
 | Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp), `CarPlayLightStateTest` (начальный SWReason, события и запоздавшие ответы); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest` |
-| Климат VSP | shared `OpackCodecTest` (iPhone/Apple SDK vectors, границы), `VehicleStateProtocolTest` (неизвестные значения, readback, дедупликация, диапазон вентилятора 0–7), `VehicleStateChannelTest` (шифрование, фрагментация, ACK/token), `VehicleStateDisplayPanelsTest` (панели без дополнительного видеопотока), `VehicleClimateDockTest` и `AirPlayInfoPlistTest` (док, приоритет сохранённого края, main/cluster и геометрия); Native `ClimateCommandTest` (OEM-кодирование вентилятора и режимы рециркуляции), `CanBusEventRouterTest`; компиляция обеих сторон IPC. На ГУ отдельно проверить физический результат, обратное изменение штатной кнопкой, температуры в доке вне приложения «Климат» и reconnect. |
+| Климат VSP | shared `OpackCodecTest` (iPhone/Apple SDK vectors, границы), `VehicleStateProtocolTest` (неизвестные значения, readback, дедупликация, диапазоны, VentCombinations, позиции сидений и маршрутизация команд), `VehicleStateChannelTest` (шифрование, фрагментация, ACK/token), `VehicleStateDisplayPanelsTest` (панели без дополнительного видеопотока), `VehicleClimateDockTest` и `AirPlayInfoPlistTest` (док, приоритет сохранённого края, main/cluster и геометрия); Native `ClimateCommandTest`, `ClimateAirDistributionTest` (режимы H97 и сохранение нижнего выхода), `OemSeatClimateStateTest` (реальные switch/level, отдельные места, unknown и выключение), `OemComfortClimateStateTest` (руль 0/1, ошибка 10, подтверждение и независимость сидений), `CanBusEventRouterTest`; компиляция обеих сторон IPC. На ГУ отдельно проверить принятие SeatFan, все позиции/уровни, физический результат, обратное изменение штатной кнопкой, температуры в доке вне приложения «Климат», потерю CAN и reconnect. |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/tests/test_navigation_sources.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
@@ -1728,6 +1814,30 @@ IPC/CAN/cluster/запуска нужен согласованный Native APK.
 автоматически из задачи обновления библиотеки.
 
 ## 13. Подтверждённое состояние и ограничения
+
+### Подогрев руля, 20 октября 2026
+
+Добавлены команды и обратное чтение через общий Native IPC и VSP-сервис
+`0x11000003`. Номер подтверждён бинарником Apple iOS 27.0 (§6).
+Прошли `OemComfortClimateStateTest` (4) и `OemSeatClimateStateTest` (5);
+после подключения VSP — `VehicleStateProtocolTest` (9), включая тип/диапазон,
+маршрутизацию 0/1, ожидание readback, дедупликацию и недоступность при ошибке OEM.
+Собраны согласованные debug APK Native и RestoreMode `4.4.0-od`.
+Проверены `git diff --check` и локальные ссылки документации.
+На машине не проверялось. После установки APK требуется переподключение CarPlay
+для новой VSP-конфигурации; установщик менять не требуется.
+
+### Обдув и сиденья, 20 октября 2026
+
+Локально добавлены три направления обдува с таблицей штатного H97, четыре
+подогрева и две передние вентиляции через общий Native IPC. Сохранён `5Seater`.
+Прошли 22 целевых теста: Native `ClimateCommandTest` (6),
+`ClimateAirDistributionTest` (4), `OemSeatClimateStateTest` (5), shared
+`VehicleStateProtocolTest` (7). Оба debug APK `4.4.0-od` собраны.
+На автомобиль не устанавливались. UI, физические уровни/направления, обратное
+управление и переподключение после этого расширения не проверены.
+Числовой VSP-тип SeatFan подтверждён при последующей проверке бинарника Apple, см. §6.
+Обновлять установщик не требуется: его код, recipe и встроенные ресурсы не менялись.
 
 ### Исправления климата и настройка дока, 20 октября 2026
 
