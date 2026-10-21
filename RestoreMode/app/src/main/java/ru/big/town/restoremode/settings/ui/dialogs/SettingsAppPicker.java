@@ -35,7 +35,9 @@ public final class SettingsAppPicker {
             }
         }
 
-        if (includeCarPlay) labels.put(CarPlayTarget.ID, CarPlayTarget.LABEL);
+        if (includeCarPlay && ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)) {
+            labels.put(CarPlayTarget.ID, CarPlayTarget.LABEL);
+        }
 
         final java.util.List<String> packages = new java.util.ArrayList<>(labels.keySet());
 
@@ -65,9 +67,14 @@ public final class SettingsAppPicker {
                 .setTitle(title)
                 .setItems(
                         items,
-                        (dialog, which) ->
-                                callback.onPicked(
-                                        packages.get(which), labels.get(packages.get(which))))
+                        (dialog, which) -> {
+                            String packageName = packages.get(which);
+                            if (CarPlayTarget.isCarPlay(packageName)
+                                    && !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)) {
+                                return;
+                            }
+                            callback.onPicked(packageName, labels.get(packageName));
+                        })
                 .setNegativeButton("Отмена", null)
                 .show();
     }

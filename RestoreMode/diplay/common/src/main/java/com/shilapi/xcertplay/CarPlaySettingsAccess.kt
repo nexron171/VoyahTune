@@ -4,7 +4,20 @@ import android.content.Context
 
 /** Process-local access for the host settings, using DiPlay's own preferences and session. */
 object CarPlaySettingsAccess {
+    private const val AVAILABILITY_PREFERENCES = "voyah_carplay_availability"
+
     enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }
+
+    @JvmStatic
+    fun isEnabled(context: Context): Boolean =
+        context.getSharedPreferences(AVAILABILITY_PREFERENCES, Context.MODE_PRIVATE)
+            .getBoolean("enabled", true)
+
+    @JvmStatic
+    fun setEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(AVAILABILITY_PREFERENCES, Context.MODE_PRIVATE)
+            .edit().putBoolean("enabled", enabled).apply()
+    }
 
     @JvmStatic
     fun autoConnect(context: Context): Boolean = DiPlayPreferences.autoConnect(context)

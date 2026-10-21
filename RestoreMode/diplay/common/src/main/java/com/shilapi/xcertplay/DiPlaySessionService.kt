@@ -21,7 +21,7 @@ class DiPlaySessionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        VoyahCarPlayIntegration.start()
+        if (CarPlaySettingsAccess.isEnabled(this)) VoyahCarPlayIntegration.start()
     }
 
     override fun onDestroy() {
@@ -31,7 +31,7 @@ class DiPlaySessionService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
+        if (!CarPlaySettingsAccess.isEnabled(this) || intent?.action == ACTION_STOP) {
             CarPlayBackgroundSession.stop()
             stopSelf()
             return START_NOT_STICKY

@@ -98,6 +98,12 @@ public final class SplitConfigSync {
         String p1 = prefs.getString("dockOverride1", "");
         String p2 = prefs.getString("dockOverride2", "");
         Intent i = configIntent("ru.big.town.anative.DOCK_CONFIG");
+        boolean carPlayEnabled = ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context);
+        i.putExtra(ru.big.town.common.CarPlayTarget.ENABLED, carPlayEnabled);
+        if (!carPlayEnabled) {
+            if (ru.big.town.common.CarPlayTarget.isCarPlay(p1)) p1 = "";
+            if (ru.big.town.common.CarPlayTarget.isCarPlay(p2)) p2 = "";
+        }
         i.putExtra("dock1", p1.isEmpty() ? "none" : p1);
         i.putExtra("dock2", p2.isEmpty() ? "none" : p2);
         i.putExtra("dock1Dpi", p1.isEmpty() ? 0 : AppDpiStore.get(prefs, p1));
@@ -141,7 +147,8 @@ public final class SplitConfigSync {
                             prefs.getBoolean(VoiceCommands.ENABLED, false),
                             prefs.getString(
                                     VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG),
-                            prefs.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false),
+                            ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)
+                                    && prefs.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false),
                             key,
                             resolveSteerActions(prefs.getString(key, "none"), prefs)));
         }

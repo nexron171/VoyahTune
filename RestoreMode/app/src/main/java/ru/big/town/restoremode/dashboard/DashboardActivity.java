@@ -120,6 +120,16 @@ public class DashboardActivity extends AppCompatActivity {
 
     private SharedPreferences sharedPreferences;
     private SharedPreferences settingsPreferences;
+    private boolean carPlayFeatureReceiverRegistered;
+    private final BroadcastReceiver carPlayFeatureReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            carPlayWidgetGeneration++;
+            TileOrderStore.sync(sharedPreferences, settingsPreferences, getPackageManager(),
+                    dashboardProfile.isPassenger());
+            renderSplitTiles();
+        }
+    };
     private DashboardProfile dashboardProfile = DashboardProfile.driver();
     private int dashboardDisplayId;
     static final int MSG_RESULT = 4;
@@ -1573,6 +1583,10 @@ public class DashboardActivity extends AppCompatActivity {
         TripLocationPermission.refresh(this);
         TripLocationPermission.sync(this);
         suspensionScreenResumed = true;
+        registerReceiver(carPlayFeatureReceiver,
+                new IntentFilter(ru.big.town.restoremode.carplay.CarPlayFeature.ACTION_CHANGED),
+                RECEIVER_NOT_EXPORTED);
+        carPlayFeatureReceiverRegistered = true;
         registerReceiver(
                 tripReceiver,
                 new IntentFilter(ACTION_TRIP_UPDATE),
@@ -2982,6 +2996,10 @@ public class DashboardActivity extends AppCompatActivity {
             int profileDpi,
             String moveFromWidgetId,
             boolean retainedCarPlay) {
+        if (CarPlayTarget.isCarPlay(packageName)
+                && !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(this)) {
+            return;
+        }
         if (CarPlayTarget.opensActivity(packageName, entry.width, entry.height)) {
             if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
                 openAppOnDashboardDisplay(packageName);
@@ -3873,6 +3891,7 @@ public class DashboardActivity extends AppCompatActivity {
     private void requestCarPlayWidgets() {
         if (!suspensionScreenResumed
                 || destroyed
+                || !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(this)
                 || !GlobalVars.isBound
                 || GlobalVars.serviceMessenger == null) return;
         try {
@@ -3891,6 +3910,7 @@ public class DashboardActivity extends AppCompatActivity {
     private void restoreCarPlayWidgets(Bundle data) {
         if (!suspensionScreenResumed
                 || destroyed
+                || !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(this)
                 || data == null
                 || data.getLong(CarPlayWidgetProtocol.GENERATION) != carPlayWidgetGeneration)
             return;
@@ -4061,6 +4081,10 @@ public class DashboardActivity extends AppCompatActivity {
         cancelGridSnap();
         dashboardOpening = false;
         suspensionScreenResumed = false;
+        if (carPlayFeatureReceiverRegistered) {
+            unregisterReceiver(carPlayFeatureReceiver);
+            carPlayFeatureReceiverRegistered = false;
+        }
         carPlayWidgetGeneration++;
         systemWidgets.setResumed(false);
         mediaWidgets.setActive(false);

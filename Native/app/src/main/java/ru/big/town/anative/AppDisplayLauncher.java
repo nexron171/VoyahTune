@@ -60,6 +60,10 @@ final class AppDisplayLauncher {
             boolean fullscreen,
             BooleanSupplier valid,
             Runnable onFailure) {
+        if (CarPlayTarget.isCarPlay(pkg) && !CarPlayTarget.isEnabled(context)) {
+            onFailure.run();
+            return;
+        }
         long generation = next(pkg);
         if (CarPlayTarget.isCarPlay(pkg) && (displayId == 0 || displayId == 1)) {
             SplitHostActivity.launchSingle(

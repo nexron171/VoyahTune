@@ -1,6 +1,9 @@
 package ru.big.town.restoremode.settings.core;
 
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Parcelable;
@@ -29,8 +32,29 @@ public abstract class SettingsSectionFragment extends Fragment {
     protected View bindingRoot;
     private SettingsSectionViewModel stateModel;
     private final Map<Integer, SettingsList.Row> staticRows = new HashMap<>();
+    private final BroadcastReceiver carPlayFeatureReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            staticRows.clear();
+            refreshSettingsRows();
+        }
+    };
 
     public abstract SettingsSection section();
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        requireContext().registerReceiver(carPlayFeatureReceiver,
+                new IntentFilter(ru.big.town.restoremode.carplay.CarPlayFeature.ACTION_CHANGED),
+                Context.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override
+    public void onPause() {
+        requireContext().unregisterReceiver(carPlayFeatureReceiver);
+        super.onPause();
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {

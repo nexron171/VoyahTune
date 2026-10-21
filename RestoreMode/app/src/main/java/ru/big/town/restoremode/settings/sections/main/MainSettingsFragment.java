@@ -620,6 +620,9 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     }
 
     private void addCarPlayWidgetRows(List<SettingsList.Row> rows) {
+        if (!ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(requireContext())) {
+            return;
+        }
         List<AppWidgetStore.Entry> entries = AppWidgetStore.load(preferences);
         entries.removeIf(entry -> !CarPlayWidgetSettings.isDedicated(entry));
         if (entries.isEmpty()) {
@@ -1078,11 +1081,16 @@ public class MainSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected boolean cacheLayout(int layout) {
-        return layout != R.layout.settings_main_add_shortcut;
+        return layout != R.layout.settings_main_add_shortcut
+                && layout != R.layout.settings_main_carplay_heading;
     }
 
     @Override
     protected View decorateSettingsRow(int layout, View row) {
+        if (layout == R.layout.settings_main_carplay_heading) {
+            row.setVisibility(ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(requireContext())
+                    ? View.VISIBLE : View.GONE);
+        }
         if (profile().isPassenger()) {
             useLayoutPreferences(row);
         }

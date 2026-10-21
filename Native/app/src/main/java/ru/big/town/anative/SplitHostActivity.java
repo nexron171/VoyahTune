@@ -1635,6 +1635,7 @@ public class SplitHostActivity extends Activity {
     static boolean resumeFullscreenCarPlay(String packageName, int dpi, int displayId) {
         SplitHostActivity host = activeHost.get();
         if (host == null || !host.canResumeCarPlay(packageName, dpi, displayId)) return false;
+        if (!CarPlayTarget.isEnabled(host)) return false;
         try {
             ActivityManager manager = host.getSystemService(ActivityManager.class);
             manager.moveTaskToFront(host.getTaskId(), 0);
@@ -1693,6 +1694,7 @@ public class SplitHostActivity extends Activity {
 
     /** Called on main only after the process lane has resolved the target package. */
     static void startSingleHost(android.content.Context ctx, String pkg, int dpi, int displayId) {
+        if (CarPlayTarget.isCarPlay(pkg) && !CarPlayTarget.isEnabled(ctx)) return;
         if (resumeFullscreenCarPlay(pkg, dpi, displayId)) return;
         try {
             Intent i =

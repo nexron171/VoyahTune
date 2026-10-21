@@ -1315,6 +1315,7 @@ public class SetModesService extends Service {
 
     protected void startEmbeddedDisplay(
             String widgetId, String packageName, Surface surface, int width, int height, int dpi) {
+        if (CarPlayTarget.isCarPlay(packageName) && !CarPlayTarget.isEnabled(this)) return;
         if (widgetId == null
                 || widgetId.isEmpty()
                 || packageName == null
@@ -1960,6 +1961,11 @@ public class SetModesService extends Service {
      */
     static void notifyEmbeddedTaskLeft(Context context, String pkg) {
         notifyEmbeddedTaskLeft(context, pkg, false);
+    }
+
+    static void stopCarPlayHosts(Context context) {
+        notifyEmbeddedTaskLeft(context, CarPlayTarget.ID, true);
+        SplitHostActivity.closeFullscreenCarPlayHostExcept(-1);
     }
 
     static void notifyEmbeddedTaskLeft(Context context, String pkg, boolean closed) {

@@ -28,6 +28,7 @@ function bean(icon, name, pkg) {
         setSubType(v) { this.subType = v; } };
 }
 const launches = [];
+let carPlayEnabled = true;
 const c = {
     RESTORE_PKG: restore, CARPLAY_ENTRY: carplay, PASSENGER_ENTRY: passenger,
     SYNTHETIC_PREFIX: prefix, FLAG_SYSTEM: 1,
@@ -51,7 +52,7 @@ const c = {
         getActivityInfo(component) {
             const isCarPlay = component.activity.endsWith('CarPlayLauncherActivity');
             const isPassenger = component.activity.endsWith('PassengerDashboardActivity');
-            return {enabled: {value: true}, exported: {value: true},
+            return {enabled: {value: !isCarPlay || carPlayEnabled}, exported: {value: true},
                 loadLabel: () => isCarPlay ? 'VoyahTune CarPlay'
                         : isPassenger ? 'VoyahTune Пассажир' : 'VoyahTune'};
         },
@@ -62,14 +63,14 @@ const c = {
     },
 };
 vm.createContext(c);
-vm.runInContext(['cleanJavaString', 'ourInsetActivity', 'entryPackage', 'entryComponent', 'launchAllApp', 'snapshotInstalled',
+vm.runInContext(['cleanJavaString', 'ourInsetActivity', 'entryPackage', 'entryComponent', 'carPlayEntryEnabled', 'launchAllApp', 'snapshotInstalled',
     'findAppTemplate', 'addMissingAppsImpl', 'syntheticPackage', 'loadIcon', 'loadLabel',
     'invalidateIconCache'].map(production).join('\n'), c);
 const apps = list([bean(10, 20, 'oem.app')]);
 c.addMissingAppsImpl(apps);
 c.addMissingAppsImpl(apps);
-assert.equal(apps.size(), 3); // OEM + VoyahTune + music.
-assert.deepEqual(apps.items.slice(1).map(b => c.syntheticPackage(b)), [restore, 'app.music']);
+assert.equal(apps.size(), 4); // OEM + VoyahTune + CarPlay + music.
+assert.deepEqual(apps.items.slice(1).map(b => c.syntheticPackage(b)), [restore, carplay, 'app.music']);
 assert.equal(apps.get(1).getPackageName(), restore);
 assert.equal(c.loadLabel(restore), 'VoyahTune');
 assert.equal(c.loadIcon(restore), 'grey');
@@ -86,7 +87,7 @@ for (const screen of [0, 1]) {
 }
 const existing = list([bean(10, 20, restore)]);
 c.addMissingAppsImpl(existing);
-assert.equal(existing.size(), 2);
+assert.equal(existing.size(), 3);
 assert.equal(c.syntheticPackage(existing.get(0)), restore);
 const legacy = [bean(10, 20, restore), bean(10, 20, restore)];
 for (const entry of legacy) entry.setSubType(prefix + carplay);
@@ -94,7 +95,7 @@ const cached = list([bean(10, 20, 'oem.app'), ...legacy, bean(10, 20, restore)])
 c.addMissingAppsImpl(cached);
 c.addMissingAppsImpl(cached);
 assert.deepEqual(cached.items.map(b => c.syntheticPackage(b) || b.getPackageName()),
-    ['oem.app', restore, 'app.music']);
+    ['oem.app', carplay, restore, 'app.music']);
 assert.equal(c.loadIcon(carplay), 'dark-carplay');
 for (const screen of [0, 1]) {
     assert.equal(c.launchAllApp(carplay, screen), true);
@@ -105,11 +106,28 @@ const passengerList = list([bean(10, 20, 'oem.app'), bean(10, 20, restore)]);
 c.addMissingAppsImpl(passengerList, 1);
 c.addMissingAppsImpl(passengerList, 1);
 assert.deepEqual(passengerList.items.map(b => c.syntheticPackage(b) || b.getPackageName()),
-    ['oem.app', 'app.music', passenger]);
+    ['oem.app', carplay, 'app.music', passenger]);
 assert.equal(c.loadLabel(passenger), 'VoyahTune Пассажир');
 assert.equal(c.loadIcon(passenger), 'passenger-icon');
 assert.equal(c.launchAllApp(passenger, 1), true);
 assert.equal(launches.at(-1).intent.component.activity,
     'ru.big.town.restoremode.passenger.PassengerDashboardActivity');
 assert.equal(launches.at(-1).screen, 1);
-console.log('PASS: OD All Apps hides CarPlay, separates passenger dashboard and preserves explicit launch routing');
+carPlayEnabled = false;
+c.addMissingAppsImpl(cached);
+assert.deepEqual(cached.items.map(b => c.syntheticPackage(b) || b.getPackageName()),
+    ['oem.app', restore, 'app.music']);
+c.addMissingAppsImpl(passengerList, 1);
+assert.deepEqual(passengerList.items.map(b => c.syntheticPackage(b) || b.getPackageName()),
+    ['oem.app', 'app.music', passenger]);
+const count = launches.length;
+assert.equal(c.launchAllApp(carplay, 0), false);
+assert.equal(launches.length, count);
+assert.equal(c.launchAllApp(restore, 1), true);
+assert.equal(launches.at(-1).dashboard, true);
+carPlayEnabled = true;
+c.installedSnapshot = null;
+c.addMissingAppsImpl(cached);
+c.addMissingAppsImpl(cached);
+assert.equal(cached.items.filter(b => c.syntheticPackage(b) === carplay).length, 1);
+console.log('PASS: OD All Apps gates CarPlay, separates passenger dashboard and preserves independent launch routing');

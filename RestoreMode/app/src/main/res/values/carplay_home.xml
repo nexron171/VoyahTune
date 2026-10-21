@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="carplay_enabled">Включить CarPlay</string>
+    <string name="carplay_layout_title">Тема CarPlay</string>
+    <string name="carplay_layout_classic">Обычный</string>
+    <string name="carplay_layout_bottom">Док снизу</string>
+    <string name="carplay_layout_aston">Aston Martin</string>
+    <string name="carplay_layout_reconnect">Тема применится при следующем переподключении CarPlay.</string>
     <string name="carplay_authentication_error">Не удалось загрузить ключи CarPlay. Установите полную сборку VoyahTune поверх текущей. Удалять приложение или сбрасывать его данные не требуется.</string>
     <string name="carplay_home_title">CarPlay</string>
     <string name="carplay_home_brand">VoyahTune</string>

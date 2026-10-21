@@ -926,7 +926,7 @@ Java.perform(function () {
             var packageRefreshTimer = null;
             var FLAG_SYSTEM = 0x00000001;
             var SYNTHETIC_PREFIX = "__voyahtune_allapps__:";
-            // Recognize the old synthetic shortcut so reused OEM lists can discard it.
+            // A component target keeps CarPlay independent of the package's dashboard shortcut.
             var CARPLAY_ENTRY = RESTORE_PKG + "/ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
             var PASSENGER_ENTRY = RESTORE_PKG
                     + "/ru.big.town.restoremode.passenger.PassengerDashboardActivity";
@@ -950,6 +950,15 @@ Java.perform(function () {
                     return ComponentName.$new(RESTORE_PKG, RESTORE_PKG + ".MainActivity");
                 }
                 return null;
+            }
+
+            function carPlayEntryEnabled() {
+                try {
+                    var activity = pm.getActivityInfo(entryComponent(CARPLAY_ENTRY), 0);
+                    return !!activity.enabled.value && !!activity.exported.value;
+                } catch (unavailable) {
+                    return false;
+                }
             }
 
             function packageFromIntent(intent) {
@@ -983,8 +992,8 @@ Java.perform(function () {
                     var pkg = packageFromIntent(intent);
                     if (pkg === RESTORE_PKG) {
                         var component = intent.getComponent();
-                        if (component !== null
-                                && isDashboardActivity(cleanJavaString(component.getClassName()))
+                        if ((component === null
+                                || isDashboardActivity(cleanJavaString(component.getClassName())))
                                 && openVoyahTuneOnDisplay(screenId)) return;
                         return startAppIntent.call(this, context, intent, screenIdArg);
                     }
@@ -1017,6 +1026,7 @@ Java.perform(function () {
                         return false;
                     }
                     if (pkg === RESTORE_PKG) return openVoyahTuneOnDisplay(screenId);
+                    if (pkg === CARPLAY_ENTRY && !carPlayEntryEnabled()) return false;
                     var component = entryComponent(pkg);
                     if (component === null) {
                         if (isUserFullscreen(pkg)) return launchFullscreen(pkg, screenId);
@@ -1064,6 +1074,7 @@ Java.perform(function () {
                                 || pkg === "com.qinggan.app.launcher" || !ai.enabled.value) continue;
                         if (pm.getLaunchIntentForPackage(pkg) === null) continue;
                         result.push(pkg);
+                        if (pkg === RESTORE_PKG && carPlayEntryEnabled()) result.push(CARPLAY_ENTRY);
                     } catch (ignored) {}
                 }
                 installedSnapshot = result;
@@ -1114,7 +1125,8 @@ Java.perform(function () {
                     try {
                         var current = Java.cast(list.get(i), AppBean);
                         var existingTarget = syntheticPackage(current) || "" + current.getPackageName();
-                        if (existingTarget === CARPLAY_ENTRY
+                        if ((existingTarget === CARPLAY_ENTRY
+                                && (!carPlayEntryEnabled() || existing["pkg:" + existingTarget]))
                                 || (existingTarget === PASSENGER_ENTRY && screen !== 1)
                                 || (screen === 1 && existingTarget === RESTORE_PKG)) {
                             list.remove(i);
@@ -1132,6 +1144,7 @@ Java.perform(function () {
                 for (var j = 0; j < apps.length; j++) {
                     var target = apps[j];
                     if (screen === 1 && target === RESTORE_PKG) continue;
+                    if (target === CARPLAY_ENTRY && !carPlayEntryEnabled()) continue;
                     var pkg = entryPackage(target);
                     if (existing["pkg:" + target]) continue;
                     try {

@@ -29,6 +29,7 @@ public final class VoyahApplication extends Application {
         if (isOtaProcess()) {
             return;
         }
+        ru.big.town.restoremode.carplay.CarPlayFeature.initialize(this);
         ru.big.town.restoremode.carplay.CarPlayVehicleBridge carPlayBridge =
                 new ru.big.town.restoremode.carplay.CarPlayVehicleBridge(this);
         com.shilapi.xcertplay.VoyahCarPlayIntegration.install(carPlayBridge);

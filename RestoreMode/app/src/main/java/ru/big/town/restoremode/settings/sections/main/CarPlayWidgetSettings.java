@@ -61,7 +61,8 @@ final class CarPlayWidgetSettings {
                 .setVisibility(entry == null ? View.GONE : View.VISIBLE);
         enabled.setOnCheckedChangeListener((button, checked) -> {
             if (checked && entry == null) {
-                if (!canAdd.getAsBoolean()) {
+                if (!ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)
+                        || !canAdd.getAsBoolean()) {
                     enabled.setChecked(false);
                     return;
                 }

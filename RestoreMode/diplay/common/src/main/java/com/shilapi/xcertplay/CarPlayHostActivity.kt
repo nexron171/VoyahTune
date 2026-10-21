@@ -794,6 +794,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!CarPlaySettingsAccess.isEnabled(this)) {
+            finish()
+            return
+        }
         NavigationWidgetUpdater.attach(applicationContext)
         CarPlayCallKeys.install(applicationContext)
         CenterMapOverlay.requestShow = ::showCenterMap
@@ -1139,6 +1143,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!CarPlaySettingsAccess.isEnabled(this)) {
+            finish()
+            return
+        }
         WheelKeyService.restoreIfNeeded(this)
         hostAppearanceResumed = true
         reloadCarPlayNightSettings()
@@ -5564,7 +5572,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun startCarPlay(size: DisplaySize) {
-        if (isFinishing || isDestroyed) return
+        if (isFinishing || isDestroyed || !CarPlaySettingsAccess.isEnabled(this)) return
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) return
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || controller != null) return
         val controllerGeneration = restartGeneration

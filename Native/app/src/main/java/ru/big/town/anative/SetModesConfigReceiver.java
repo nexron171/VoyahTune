@@ -47,6 +47,10 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             BackButtonService.setSteeringBackEnabled(context, needsBackService);
             Log.i(TAG, "STEER_CONFIG зеркалирован");
         } else if ("ru.big.town.anative.DOCK_CONFIG".equals(action)) {
+            if (!intent.getBooleanExtra(ru.big.town.common.CarPlayTarget.ENABLED, true)
+                    && !ru.big.town.common.CarPlayTarget.isEnabled(context)) {
+                SetModesService.stopCarPlayHosts(context);
+            }
             SetModesReceiverDynamic.mirrorDock(context, intent, 1);
             SetModesReceiverDynamic.mirrorDock(context, intent, 2);
             SetModesReceiverDynamic.clearLegacyPassengerDock(context);

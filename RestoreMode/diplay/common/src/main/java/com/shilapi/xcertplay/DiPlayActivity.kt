@@ -377,6 +377,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!CarPlaySettingsAccess.isEnabled(this)) {
+            finish()
+            return
+        }
         automaticConnectionPending = savedInstanceState?.getBoolean("automatic_connection_pending", false)
             ?: !intent.hasExtra("page")
         VoyahCarPlayDefaults.initialize(this)
@@ -528,6 +532,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     override fun onResume() {
         super.onResume()
+        if (!CarPlaySettingsAccess.isEnabled(this)) {
+            finish()
+            return
+        }
         WheelKeyService.restoreIfNeeded(this)
         applyFullscreenMode()
         // Returning from another activity can bring the head unit's own density back.
@@ -5550,6 +5558,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             getString(R.string.carplay_dock_automatic),
             getString(R.string.carplay_dock_driver_side),
             getString(R.string.carplay_dock_bottom),
+            getString(R.string.carplay_dock_dual_sides),
         ), docks.indexOf(CarPlayDock.load(this)), reconnects = false) {
             val from = CarPlayDock.load(this)
             val to = docks[it]
@@ -5655,6 +5664,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun connect(wireless: Boolean) {
+        if (isFinishing || isDestroyed || !CarPlaySettingsAccess.isEnabled(this)) return
         startupHotspotCancelled = true
         if (wireless && pendingCarHotspotSetup) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
         if (setupError != null) { toast(setupError!!); return }
@@ -5686,7 +5696,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
     private var projectionLaunchPending = false
     private fun openProjection() {
-        if (projectionLaunchPending) return
+        if (projectionLaunchPending || isFinishing || isDestroyed || !CarPlaySettingsAccess.isEnabled(this)) return
         val displayId = window.decorView.display?.displayId ?: windowManager.defaultDisplay.displayId
         if (displayId > 1 && VoyahCarPlayIntegration.available) {
             projectionLaunchPending = true

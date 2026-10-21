@@ -6,17 +6,20 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
+import android.widget.RadioGroup;
 import android.widget.Switch;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
 import com.shilapi.xcertplay.CarPlaySettingsAccess;
+import com.shilapi.xcertplay.CarPlayDock;
 import com.shilapi.xcertplay.DiPlayActivity;
 import com.shilapi.xcertplay.media.CarPlayAudioSettings;
 
 import ru.big.town.restoremode.R;
 import ru.big.town.common.CarPlayAudioProtocol;
 import ru.big.town.restoremode.carplay.CarPlayAudioClient;
+import ru.big.town.restoremode.carplay.CarPlayFeature;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 
@@ -40,7 +43,7 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                 @Override
                 public void run() {
                     updateState();
-                    if (audio != null) {
+                    if (audio != null && CarPlayFeature.isEnabled(requireContext())) {
                         audio.query();
                     }
                     handler.postDelayed(this, 1000);
@@ -60,6 +63,37 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected void bindSettingsRow() {
+        cancelVolumeWrites();
+        Switch carPlayEnabled = settingView(R.id.carPlayEnabled);
+        carPlayEnabled.setSaveEnabled(false);
+        carPlayEnabled.setOnCheckedChangeListener((button, checked) -> {
+            if (updating) {
+                return;
+            }
+            if (!checked) {
+                cancelVolumeWrites();
+            }
+            CarPlayFeature.setEnabled(requireContext(), checked);
+            if (audio != null) {
+                if (checked && isResumed()) {
+                    audio.start();
+                } else {
+                    audio.stop();
+                }
+            }
+            updateState();
+        });
+        RadioGroup layouts = settingView(R.id.carPlayLayoutChoices);
+        layouts.setSaveEnabled(false);
+        layouts.setOnCheckedChangeListener((group, selected) -> {
+            if (updating || !CarPlayFeature.isEnabled(requireContext())) {
+                return;
+            }
+            CarPlayDock dock = selected == R.id.carPlayLayoutAston ? CarPlayDock.DUAL_SIDES
+                    : selected == R.id.carPlayLayoutBottom ? CarPlayDock.BOTTOM
+                    : CarPlayDock.DRIVER_SIDE;
+            CarPlayDock.Companion.save(requireContext(), dock);
+        });
         for (int i = 0; i < SLIDERS.length; i++) {
             bindVolume(i);
         }
@@ -114,7 +148,8 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                 return;
             }
             pending[index] = false;
-            if (audio != null && getView() != null && slider.isEnabled()) {
+            if (audio != null && getView() != null && slider.isEnabled()
+                    && CarPlayFeature.isEnabled(requireContext())) {
                 audio.setVolume(CarPlayAudioProtocol.streams()[index], slider.getProgress());
             }
         };
@@ -178,6 +213,15 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         }
         boolean hasPhone = CarPlaySettingsAccess.hasPhone(requireContext());
         updating = true;
+        boolean enabled = CarPlayFeature.isEnabled(requireContext());
+        ((Switch) settingView(R.id.carPlayEnabled)).setChecked(enabled);
+        settingView(R.id.carPlayEnabledContent).setVisibility(enabled ? View.VISIBLE : View.GONE);
+        CarPlayDock dock = CarPlayDock.Companion.load(requireContext());
+        // The existing automatic Voyah profile uses the lower climate dock.
+        int selected = dock == CarPlayDock.DUAL_SIDES ? R.id.carPlayLayoutAston
+                : dock == CarPlayDock.DRIVER_SIDE ? R.id.carPlayLayoutClassic
+                : R.id.carPlayLayoutBottom;
+        ((RadioGroup) settingView(R.id.carPlayLayoutChoices)).check(selected);
         Switch duckMusic = settingView(R.id.carPlayDuckMusic);
         if (duckMusic != null) {
             duckMusic.setChecked(CarPlayAudioSettings.duckMusic(requireContext()));
@@ -210,7 +254,7 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     @Override
     public void onResume() {
         super.onResume();
-        if (audio != null) {
+        if (audio != null && CarPlayFeature.isEnabled(requireContext())) {
             audio.start();
         }
         handler.removeCallbacks(refresh);
@@ -244,13 +288,17 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         }
         audio = null;
         volumes = new CarPlayAudioClient.Volumes(null, null);
+        cancelVolumeWrites();
+        java.util.Arrays.fill(volumeWrites, null);
+        handler.removeCallbacks(refresh);
+    }
+
+    private void cancelVolumeWrites() {
         for (int i = 0; i < volumeWrites.length; i++) {
             if (volumeWrites[i] != null) {
                 handler.removeCallbacks(volumeWrites[i]);
             }
-            volumeWrites[i] = null;
             pending[i] = dragging[i] = false;
         }
-        handler.removeCallbacks(refresh);
     }
 }

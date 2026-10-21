@@ -49,10 +49,14 @@ public final class SettingsActionPicker {
     }
 
     private void pick() {
-        final int staticCount = SteeringActions.ALL.size();
+        List<SteeringActions.Action> actions = new java.util.ArrayList<>(SteeringActions.ALL);
+        if (!ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)) {
+            actions.removeIf(action -> "open_carplay".equals(action.id));
+        }
+        final int staticCount = actions.size();
         final CharSequence[] labels = new CharSequence[staticCount + 4];
         for (int i = 0; i < staticCount; i++) {
-            labels[i] = SteeringActions.ALL.get(i).label;
+            labels[i] = actions.get(i).label;
         }
         labels[staticCount] = "Открыть сплит…";
         labels[staticCount + 1] = "Открыть приложение…";
@@ -65,7 +69,12 @@ public final class SettingsActionPicker {
                         labels,
                         (d, which) -> {
                             if (which < staticCount) {
-                                onPicked.accept(SteeringActions.ALL.get(which).id);
+                                String action = actions.get(which).id;
+                                if ("open_carplay".equals(action)
+                                        && !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)) {
+                                    return;
+                                }
+                                onPicked.accept(action);
                             } else if (which == staticCount) {
                                 pickSplit();
                             } else if (which == staticCount + 1) {
