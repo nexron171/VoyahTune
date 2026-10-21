@@ -305,13 +305,16 @@ final class CarPlayClimateController implements AutoCloseable {
         if (command == null) {
             return CarPlayClimateProtocol.UNAVAILABLE;
         }
+        boolean circulationCycle = CarPlayClimateProtocol.CYCLE_RECIRCULATION.equals(field);
+        int circulationTarget = circulationCycle ? ClimateCommand.nextCirculationMode(before) : -1;
         if (!current(expectedGeneration, deadline)) {
             return CarPlayClimateProtocol.TIMEOUT;
         }
         if (!session.send(command)) {
             return CarPlayClimateProtocol.UNAVAILABLE;
         }
-        boolean circulationAdvanceAvailable = CarPlayClimateProtocol.RECIRCULATION.equals(field);
+        boolean circulationAdvanceAvailable =
+                circulationCycle || CarPlayClimateProtocol.RECIRCULATION.equals(field);
         while (current(expectedGeneration, deadline)) {
             try {
                 Thread.sleep(100);
@@ -325,11 +328,12 @@ final class CarPlayClimateController implements AutoCloseable {
             }
             latest[0] = observed;
             sampled[0] = SystemClock.elapsedRealtime();
-            if (ClimateCommand.reached(observed, field, target)) {
+            if (circulationCycle
+                    ? observed.circulation == circulationTarget
+                    : ClimateCommand.reached(observed, field, target)) {
                 return CarPlayClimateProtocol.SUCCESS;
             }
-            // Three circulation modes may require two pulses, including when starting in AUTO.
-            // Only a confirmed first transition permits the second pulse.
+            // A second pulse toward the target requires a confirmed first transition.
             if (circulationAdvanceAvailable
                     && ClimateCommand.circulationAdvanced(before, observed)) {
                 circulationAdvanceAvailable = false;

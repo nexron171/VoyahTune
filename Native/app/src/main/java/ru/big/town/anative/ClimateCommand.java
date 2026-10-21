@@ -26,6 +26,8 @@ final class ClimateCommand {
                 return value >= 0
                         && value <= OemClimateState.MAX_FAN_LEVEL
                         && value == Math.rint(value);
+            case CarPlayClimateProtocol.CYCLE_RECIRCULATION:
+                return value == 1;
             case CarPlayClimateProtocol.POWER:
             case CarPlayClimateProtocol.COMPRESSOR:
             case CarPlayClimateProtocol.AUTO:
@@ -41,6 +43,10 @@ final class ClimateCommand {
     }
 
     static boolean reached(OemClimateState state, String field, double target) {
+        if (CarPlayClimateProtocol.RECIRCULATION.equals(field)
+                && state.circulation == OemClimateState.CIRCULATION_AUTOMATIC) {
+            return false;
+        }
         Double observed = state.values().get(field);
         if (observed == null || observed != target) {
             return false;
@@ -58,9 +64,10 @@ final class ClimateCommand {
         if (!valid(field, target)) {
             return null;
         }
-        boolean automaticCirculation =
-                CarPlayClimateProtocol.RECIRCULATION.equals(field) && state.circulation == 2;
-        if (state.values().get(field) == null && !automaticCirculation) {
+        boolean circulationCommand =
+                CarPlayClimateProtocol.RECIRCULATION.equals(field)
+                        || CarPlayClimateProtocol.CYCLE_RECIRCULATION.equals(field);
+        if (circulationCommand ? !state.hasCirculation() : state.values().get(field) == null) {
             return null;
         }
         if (ClimateAirDistribution.handles(field)) {
@@ -91,6 +98,7 @@ final class ClimateCommand {
                 }
                 return manualFan((int) target);
             case CarPlayClimateProtocol.RECIRCULATION:
+            case CarPlayClimateProtocol.CYCLE_RECIRCULATION:
                 return new ClimateCommand("AC_RECIRC_AIR", 11, 1);
             default:
                 return null;
@@ -98,11 +106,22 @@ final class ClimateCommand {
     }
 
     static boolean circulationAdvanced(OemClimateState before, OemClimateState after) {
-        return before.circulation >= 0
-                && before.circulation <= 2
-                && after.circulation >= 0
-                && after.circulation <= 2
+        return before.hasCirculation()
+                && after.hasCirculation()
                 && before.circulation != after.circulation;
+    }
+
+    static int nextCirculationMode(OemClimateState state) {
+        switch (state.circulation) {
+            case OemClimateState.CIRCULATION_INTERNAL:
+                return OemClimateState.CIRCULATION_EXTERNAL;
+            case OemClimateState.CIRCULATION_EXTERNAL:
+                return OemClimateState.CIRCULATION_AUTOMATIC;
+            case OemClimateState.CIRCULATION_AUTOMATIC:
+                return OemClimateState.CIRCULATION_INTERNAL;
+            default:
+                return -1;
+        }
     }
 
     private static ClimateCommand manualFan(int level) {

@@ -100,7 +100,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
         values.forEach { (key, value) ->
             val identifier = key as? Long ?: return@forEach
             val characteristic = characteristics.find { it.id == identifier }
-            val normalized = characteristic?.normalize(value)
+            val normalized = characteristic?.takeIf { it.writable }?.normalize(value)
             if (normalized == null || characteristic.field == null) {
                 errors[identifier] = -6705
             } else {
@@ -146,7 +146,10 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
             TimeUnit.SECONDS,
         )
         accepted.forEach { (identifier, target) ->
-            VehicleClimate.write(target.first.field!!, target.second, { !closed }) { error ->
+            val field = target.first.field!!
+            val commandField = if (field == "recirculation") "cycleRecirculation" else field
+            val commandValue = if (field == "recirculation") 1.0 else target.second
+            VehicleClimate.write(commandField, commandValue, { !closed }) { error ->
                 synchronized(this) {
                     if (!closed && pending.response == null && identifier !in errors) {
                         errors[identifier] = error
@@ -206,6 +209,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
         val minimum: Double? = null,
         val maximum: Double? = null,
         val step: Double? = null,
+        val writable: Boolean = fixed == null,
     ) {
         fun normalize(value: Any?): Double? {
             if (fixed != null) return null
@@ -237,7 +241,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
                 "type" to type,
                 "format" to format,
                 "mutable" to (fixed == null),
-                "writable" to (fixed == null),
+                "writable" to writable,
                 "oemWritable" to true,
                 "priority" to 1,
             )
@@ -338,6 +342,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
             flag(526, 0x3000005f, "auto"),
             layout(531, "seat_front"),
             flag(528, 0x30000002, "recirculation"),
+            Characteristic(566, 0x3000005f, 0, "recirculationAuto", writable = false),
             flag(530, 0x30000002, "auto"),
             flag(538, 0x30000002, "sync"),
             layout(539, "seat_front"),
@@ -376,7 +381,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
                         service(518, 0x11000002, 519, 520, 522),
                         service(532, 0x11000002, 533, 534, 536),
                         service(523, 0x11000007, 524, 525, 526, 531),
-                        service(527, 0x11000011, 528),
+                        service(527, 0x11000011, 528, 566),
                         service(529, 0x11000008, 530),
                         service(537, 0x11000012, 538, 539),
                         service(563, 0x11000003, 564),

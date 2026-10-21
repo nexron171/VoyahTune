@@ -145,6 +145,89 @@ class VehicleStateProtocolTest {
     }
 
     @Test
+    fun recirculationExposesReadonlyAutoModeWithoutConfusingItWithHvacAuto() {
+        VehicleClimate.update(mapOf("recirculation" to 0.0, "recirculationAuto" to 1.0, "auto" to 0.0))
+        request("configRequest")
+        val accessories = (replies.last()["values"] as Map<*, *>)["accessories"] as List<*>
+        val services = accessories.flatMap { (it as Map<*, *>)["services"] as List<*> }
+        val service = services.map { it as Map<*, *> }.single { it["type"] == 0x11000011L }
+        val fields = (service["characteristics"] as List<*>).map { it as Map<*, *> }
+        assertEquals(setOf(528L, 566L), fields.map { it["iid"] }.toSet())
+        val automatic = fields.single { it["iid"] == 566L }
+        assertEquals(0x3000005fL, automatic["type"])
+        assertEquals(0L, automatic["format"])
+        assertEquals(true, automatic["mutable"])
+        assertEquals(false, automatic["writable"])
+        assertEquals(true, automatic["initialValue"])
+        assertEquals(false, fields.single { it["iid"] == 528L }["initialValue"])
+
+        request("readRequest", 2, listOf(528, 566, 530))
+        assertEquals(mapOf(528L to false, 566L to true, 530L to false), replies.last()["values"])
+        host()
+        request("writeRequest", 3, mapOf(566 to false, 528 to 2))
+        assertEquals(mapOf(566L to -6705L, 528L to -6705L), replies.last()["errors"])
+        assertEquals(0, commands)
+
+        request("registerRequest", 4, listOf(528, 566))
+        VehicleClimate.update(emptyMap())
+        assertEquals("updateNotify", replies.last()["command"])
+        assertEquals(mapOf(528L to null, 566L to null), replies.last()["values"])
+        request("readRequest", 5, listOf(528, 566))
+        assertEquals(mapOf(528L to -6727L, 566L to -6727L), replies.last()["errors"])
+    }
+
+    @Test
+    fun recirculationTapCyclesRegardlessOfCachedOnBitAndRetransmissionNeverCyclesTwice() {
+        VehicleClimate.install(object : VehicleClimate.Host {
+            override fun write(
+                field: String,
+                value: Double,
+                current: BooleanSupplier,
+                result: VehicleClimate.Result,
+            ) {
+                assertEquals("cycleRecirculation", field)
+                assertEquals(1.0, value, 0.0)
+                commands++
+                completion = result
+                this@VehicleStateProtocolTest.current = current
+            }
+        })
+        val modes = listOf(
+            mapOf("recirculation" to 1.0, "recirculationAuto" to 0.0),
+            mapOf("recirculation" to 0.0, "recirculationAuto" to 0.0),
+            mapOf("recirculation" to 0.0, "recirculationAuto" to 1.0),
+            mapOf("recirculation" to 1.0, "recirculationAuto" to 0.0),
+        )
+        VehicleClimate.update(modes.first())
+        request("registerRequest", values = listOf(528, 566))
+        for (index in 0..2) {
+            val transaction = 100L + index
+            val press = mapOf(528 to (modes[index].getValue("recirculation") == 0.0))
+            request("writeRequest", transaction, press)
+            request("writeRequest", transaction, press)
+            assertEquals(index + 1, commands)
+            assertEquals(modes[index], VehicleClimate.snapshot())
+            assertTrue(replies.none { it["command"] == "writeResponse" && it["transactionID"] == transaction })
+
+            VehicleClimate.update(modes[index + 1])
+            completion!!.complete(0)
+            assertEquals(mapOf(528L to 0L), replies.last { it["command"] == "writeResponse" }["errors"])
+            request("readRequest", 200L + index, listOf(528, 566))
+            assertEquals(
+                mapOf(
+                    528L to (modes[index + 1].getValue("recirculation") == 1.0),
+                    566L to (modes[index + 1].getValue("recirculationAuto") == 1.0),
+                ),
+                replies.last()["values"],
+            )
+            request("writeRequest", transaction, press)
+            assertEquals(index + 1, commands)
+        }
+        protocol.close()
+        assertFalse(current!!.asBoolean)
+    }
+
+    @Test
     fun ventsDescribeReadonlyDirectionArraysAndShareFrontAutoMode() {
         VehicleClimate.update(mapOf("ventUpper" to 0.0, "ventMiddle" to 1.0, "ventLower" to 1.0, "auto" to 0.0))
         request("configRequest")
