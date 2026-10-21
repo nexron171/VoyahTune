@@ -16,9 +16,11 @@ import org.robolectric.annotation.Implements
 @Config(sdk = [25, 28, 33], manifest = Config.NONE, shadows = [AudioRebufferCapacityTest.CapacityTrack::class])
 class AudioRebufferCapacityTest {
     @Test fun residualAudioCountsTowardRestartBeforeAPausedTrackFills() {
-        for (millis in MediaAudioBuffer.presets) {
+        for (millis in MediaAudioBuffer.presets) for (rebuffers in listOf(0, 7)) {
             val plan = MediaAudioBuffer.plan(true, 48_000, 2, 4096, millis)
-            val threshold = MediaAudioBuffer.startBytesFor(plan.startBytes, plan.trackBufferBytes, 4096)
+            // After several rebuffers the restart level is the whole cushion above the chosen delay.
+            val threshold = if (rebuffers == 0) MediaAudioBuffer.startBytesFor(plan.startBytes, plan.trackBufferBytes, 4096)
+            else MediaAudioBuffer.startBytesFor(plan.maxStartBytes, plan.trackBufferBytes, 4096)
             CapacityTrack.capacity = plan.trackBufferBytes
             CapacityTrack.queued = threshold / 2
             CapacityTrack.playing = true
@@ -40,13 +42,18 @@ class AudioRebufferCapacityTest {
                 set("mappedChannel", AudioChannel.MEDIA)
                 set("playbackStarted", true)
                 set("startThresholdBytes", threshold)
+                set("maxStartThresholdBytes", MediaAudioBuffer.startBytesFor(plan.maxStartBytes, plan.trackBufferBytes, 4096))
+                set("bytesPerSecond", 192_000)
                 set("lastPcmWriteNs", System.nanoTime())
                 (get("bufferProgress") as AudioBufferProgress).written(CapacityTrack.queued)
                 type.getDeclaredMethod("maintainPlaybackBuffer").apply { isAccessible = true }.invoke(renderer)
                 assertFalse(CapacityTrack.playing)
+                val restart = get("startThresholdBytes") as Int
+                // A rebuffer restarts 100 ms later, but never above the whole cushion.
+                assertEquals("${millis}ms", minOf(threshold + 19_200, get("maxStartThresholdBytes") as Int), restart)
                 type.getDeclaredMethod("writePcm", ByteArray::class.java, Int::class.javaPrimitiveType,
                     Int::class.javaPrimitiveType).apply { isAccessible = true }
-                    .invoke(renderer, ByteArray(threshold), 0, threshold)
+                    .invoke(renderer, ByteArray(restart), 0, restart)
                 assertFalse("${millis}ms buffer blocked before play()", CapacityTrack.blocked)
                 assertTrue("${millis}ms buffer never resumed", CapacityTrack.playing)
             } finally { track.release() }

@@ -1,123 +1,158 @@
 package com.shilapi.xcertplay.media
 
-import kotlin.math.exp
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** Aligns music clocks using the time-averaged buffer level, excluding pauses and decoder backpressure. */
+/** Measures hardware clock drift from window peaks, excluding network stalls and playback pauses. */
 internal class MediaClockTrim(
     private val sampleRate: Int,
     private val targetFrames: Long,
-    private var integral: Double = learnedTrim,
+    private var trim: Double = learnedTrim,
 ) {
-    private var averagedLevelError: Double? = null
-    private var lastSampleNanos = 0L
-    private var lastBufferedFrames = 0L
+    /** Each finished window contributes its end time and peak buffered level. */
+    private val windowEndNanos = LongArray(MAX_WINDOWS)
+    private val windowPeakFrames = LongArray(MAX_WINDOWS)
+    private var windowCount = 0
+    private var windowStartNanos: Long? = null
+    private var currentPeakFrames = Long.MIN_VALUE
+    private var lastSampleNanos: Long? = null
+    private var appliedTrim = trim
     private var lastUpdateNanos: Long? = null
-    private var observedPlaybackSeconds = 0.0
     private var compressedBacklog = false
-    private var playbackRestarted = false
 
     /** The playback rate last asked of the track, in Hz. */
     var rate = sampleRate
         private set
 
-    /** A paused track does not drain while it refills; keep its clock correction, not its buffer history. */
-    fun onPlaybackStarted() {
-        averagedLevelError = null
-        lastUpdateNanos = null
-        observedPlaybackSeconds = 0.0
+    /** Paused PCM does not measure drift; keep the learned clock across every playback restart. */
+    fun onPlaybackStarted(nowNanos: Long? = null) {
+        restart(nowNanos)
+        lastSampleNanos = null
         compressedBacklog = false
-        playbackRestarted = true
+        if (nowNanos != null && lastUpdateNanos != null) lastUpdateNanos = nowNanos
     }
 
-    /** Include compressed packets waiting for decode: those frames are already queued audio. */
-    fun sample(queuedFrames: Long, nowNs: Long, compressedFrames: Long = 0L) {
+    /** Include pending compressed audio in the level; it already belongs to the playback queue. */
+    fun sample(queuedFrames: Long, nowNanos: Long, compressedFrames: Long = 0L) {
         if (targetFrames <= 0L) return
-
+        val previousSampleNanos = lastSampleNanos
+        lastSampleNanos = nowNanos
         val previousCompressedBacklog = compressedBacklog
-        compressedBacklog = compressedFrames > targetFrames
-        val bufferedFrames = queuedFrames.coerceAtLeast(0L) +
-            compressedFrames.coerceIn(0L, sampleRate.toLong() * 16L)
-        val previousLevelError = averagedLevelError
-        val elapsedNanos = (nowNs - lastSampleNanos).coerceAtLeast(0L)
-
-        when {
-            previousLevelError == null -> {
-                averagedLevelError = if (compressedBacklog || playbackRestarted) {
-                    0.0
-                } else {
-                    levelError(bufferedFrames.toDouble())
-                }
-            }
-
-            elapsedNanos > STALE_SAMPLE_NANOS -> {
-                // A resumed burst cannot measure drift during the silence; retain only the learned clock.
-                averagedLevelError = 0.0
-                observedPlaybackSeconds = 0.0
-            }
-
-            !previousCompressedBacklog -> {
-                // Writes sample burst peaks. Account for the audio consumed between them instead.
-                val meanBufferedFrames = drainedMean(lastBufferedFrames.toDouble(), rate * elapsedNanos / 1e9)
-                val weight = 1.0 - exp(-elapsedNanos.toDouble() / AVERAGING_TIME_NANOS)
-                averagedLevelError = previousLevelError + (levelError(meanBufferedFrames) - previousLevelError) * weight
-                observedPlaybackSeconds = (observedPlaybackSeconds + elapsedNanos / 1e9)
-                    .coerceAtMost(MAX_INTEGRATION_SECONDS)
-            }
+        // A normal wireless burst can exceed the 300 ms preset without decoder backpressure.
+        compressedBacklog = compressedFrames > maxOf(targetFrames, sampleRate.toLong())
+        if (
+            previousSampleNanos == null || nowNanos - previousSampleNanos > STALE_NS ||
+            compressedBacklog || previousCompressedBacklog
+        ) {
+            restart(nowNanos)
+            return
         }
-
-        // Congested intervals never enter the average or the clock learned by the next stream.
-        lastBufferedFrames = bufferedFrames
-        lastSampleNanos = nowNs
-        playbackRestarted = false
+        // Windows measured while the rate glides would mix two rates.
+        if (appliedTrim != trim) return
+        val bufferedFrames = queuedFrames.coerceAtLeast(0L) + compressedFrames.coerceAtLeast(0L)
+        val windowStartedAt = windowStartNanos ?: nowNanos.also { windowStartNanos = it }
+        currentPeakFrames = maxOf(currentPeakFrames, bufferedFrames)
+        if (nowNanos - windowStartedAt < WINDOW_NS) return
+        if (windowCount == MAX_WINDOWS) {
+            windowEndNanos.copyInto(windowEndNanos, 0, 1)
+            windowPeakFrames.copyInto(windowPeakFrames, 0, 1)
+            windowCount--
+        }
+        windowEndNanos[windowCount] = nowNanos
+        windowPeakFrames[windowCount] = currentPeakFrames
+        windowCount++
+        windowStartNanos = nowNanos
+        currentPeakFrames = Long.MIN_VALUE
     }
 
-    private fun levelError(frames: Double): Double = (frames - targetFrames) / targetFrames
-
-    /** The mean of a level that starts at [start] and drains [drained] frames at a steady pace, stopping at 0. */
-    private fun drainedMean(start: Double, drained: Double): Double = when {
-        drained <= 0.0 -> start
-        drained <= start -> start - drained / 2
-        else -> start * start / (2 * drained)
+    /** A rebuffer, a skip or dropped packets moved the level at once: measure the drift again from here. */
+    fun restart(nowNanos: Long? = null) {
+        windowCount = 0
+        windowStartNanos = nowNanos
+        currentPeakFrames = Long.MIN_VALUE
     }
 
     /** The playback rate to set now, or null to keep the current one. */
-    fun rateDue(nowNs: Long): Int? {
-        val error = averagedLevelError ?: return null
-        if (compressedBacklog || nowNs - lastSampleNanos > STALE_SAMPLE_NANOS) return null
-
+    fun rateDue(nowNanos: Long): Int? {
         val previousUpdateNanos = lastUpdateNanos
-        if (previousUpdateNanos != null && nowNs - previousUpdateNanos < UPDATE_INTERVAL_NANOS) return null
-        lastUpdateNanos = nowNs
-
-        // Count observed playback, not time spent paused or blocked behind the decoder.
-        integral = (integral + INTEGRAL_GAIN * error * observedPlaybackSeconds)
-            .coerceIn(-MAX_RATE_ADJUSTMENT, MAX_RATE_ADJUSTMENT)
-        learnedTrim = integral
-        observedPlaybackSeconds = 0.0
-
-        val adjustment = (PROPORTIONAL_GAIN * error + integral)
-            .coerceIn(-MAX_RATE_ADJUSTMENT, MAX_RATE_ADJUSTMENT)
-        val nextRate = (sampleRate * (1.0 + adjustment)).roundToInt()
+        if (previousUpdateNanos != null && nowNanos - previousUpdateNanos < UPDATE_NS) return null
+        lastUpdateNanos = nowNanos
+        measure()
+        if (appliedTrim != trim) {
+            val seconds = if (previousUpdateNanos == null) Double.MAX_VALUE else (nowNanos - previousUpdateNanos) / 1e9
+            val step = MAX_GLIDE_PER_SECOND * seconds.coerceAtMost(MAX_STEP_SECONDS)
+            // The first rate of a stream is the trim the last one learned: no glide into it.
+            appliedTrim = if (previousUpdateNanos == null || abs(trim - appliedTrim) <= step) {
+                trim
+            } else {
+                appliedTrim + step * Math.signum(trim - appliedTrim)
+            }
+            if (appliedTrim == trim) restart(nowNanos)
+        }
+        val nextRate = (sampleRate * (1.0 + appliedTrim)).roundToInt()
         if (nextRate == rate) return null
 
         rate = nextRate
         return nextRate
     }
 
+    private fun measure() {
+        if (appliedTrim != trim || windowCount < MIN_WINDOWS) return
+        val slope = robustSlope() // frames per second the buffer gains
+        val spanSeconds = (windowEndNanos[windowCount - 1] - windowEndNanos[0]) / 1e9
+        if (abs(slope) * spanSeconds < sampleRate * SIGNIFICANT_FRAMES_MS / 1000.0) return
+        // A Wi-Fi slowdown can hold the level down for a minute; only a faulty clock is that fast for longer.
+        if (abs(slope) < sampleRate * FAST_DRIFT && spanSeconds < SLOW_DRIFT_SPAN_SECONDS) return
+        // The buffer gains what the iPhone sends minus what the track plays: play that much faster or slower.
+        trim = (trim + slope / sampleRate).coerceIn(-MAX_TRIM, MAX_TRIM)
+        learnedTrim = trim
+        restart()
+    }
+
+    /** Theil–Sen rejects isolated outliers by taking the median slope between window pairs. */
+    private fun robustSlope(): Double {
+        val slopes = DoubleArray(windowCount * (windowCount - 1) / 2)
+        var count = 0
+        for (firstWindow in 0 until windowCount) {
+            for (nextWindow in firstWindow + 1 until windowCount) {
+                val elapsedSeconds = (windowEndNanos[nextWindow] - windowEndNanos[firstWindow]) / 1e9
+                slopes[count++] = (windowPeakFrames[nextWindow] - windowPeakFrames[firstWindow]) / elapsedSeconds
+            }
+        }
+        slopes.sort()
+        val middle = count / 2
+        return if (count % 2 == 1) slopes[middle] else (slopes[middle - 1] + slopes[middle]) / 2
+    }
+
     internal companion object {
-        /** At most 1.5 % slower or faster: 26 cents, above the 0.76 % seen on #610. */
-        const val MAX_RATE_ADJUSTMENT = 0.015
-        const val PROPORTIONAL_GAIN = 0.03
+        /** At most 1.5 % slower or faster, above the 0.76 % seen on #610. */
+        const val MAX_TRIM = 0.015
 
-        /** Per second, per unit of level error. */
-        const val INTEGRAL_GAIN = 0.001
-        const val AVERAGING_TIME_NANOS = 5_000_000_000.0
-        const val UPDATE_INTERVAL_NANOS = 1_000_000_000L
+        /** Long enough to hold several of the iPhone's 0.4 s Wi-Fi bursts, so its peak comes after an on-time one. */
+        const val WINDOW_NS = 5_000_000_000L
 
-        /** Longer than the typical 0.4 s between wireless bursts. */
-        const val STALE_SAMPLE_NANOS = 1_000_000_000L
-        const val MAX_INTEGRATION_SECONDS = 2.0
+        /** 20 s of peaks before a first estimate; a 0.76 % drift moves the buffer 150 ms in that time. */
+        const val MIN_WINDOWS = 4
+
+        /** A drift this large (13 cents, #610 was 0.76 %) is tuned after [MIN_WINDOWS]; a smaller one needs longer. */
+        const val FAST_DRIFT = 0.003
+
+        /** On a wireless head unit a slower iPhone send rate held the level down by 0.065 % for a minute. */
+        const val SLOW_DRIFT_SPAN_SECONDS = 120.0
+
+        /** Five minutes of peaks: a drift of 0.013 % then also moves the buffer by [SIGNIFICANT_FRAMES_MS]. */
+        const val MAX_WINDOWS = 60
+
+        /** Far above the tens of ms the peaks scatter by, so Wi-Fi alone never changes the rate. */
+        const val SIGNIFICANT_FRAMES_MS = 40
+
+        /** About 0.9 cents a second: a 0.76 % correction takes 15 s, once per run. */
+        const val MAX_GLIDE_PER_SECOND = 0.0005
+        const val UPDATE_NS = 1_000_000_000L
+
+        /** Longer than the 0.4 s between the iPhone's bursts over Wi-Fi: a longer silence is a pause or a stall. */
+        const val STALE_NS = 1_000_000_000L
+        const val MAX_STEP_SECONDS = 2.0
 
         /** The drift the last music stream settled on. Each process plays to one head unit. */
         @Volatile

@@ -41,7 +41,7 @@ class MediaClockTrimRecoveryTest {
         trim.sample(48_000, 0)
         trim.rateDue(0)
 
-        trim.onPlaybackStarted()
+        trim.onPlaybackStarted(400_000_000L)
         trim.sample(62_400, 400_000_000L)
 
         assertNull(trim.rateDue(400_000_000L))
@@ -77,6 +77,41 @@ class MediaClockTrimRecoveryTest {
     }
 
     @Test
+    fun aShortRebufferDoesNotJoinTwoDifferentLevelsIntoADrift() {
+        val trim = MediaClockTrim(48_000, 14_400)
+        observeLevel(trim, 0, 150, 30_000)
+
+        trim.onPlaybackStarted(15_100_000_000L)
+        observeLevel(trim, 151, 301, 14_400)
+
+        assertEquals(48_000, trim.rate)
+        assertEquals(0.0, MediaClockTrim.learnedTrim, 0.0)
+    }
+
+    @Test
+    fun decoderBackpressureSeparatesTheObservationsBeforeAndAfterIt() {
+        val trim = MediaClockTrim(48_000, 14_400)
+        observeLevel(trim, 0, 150, 30_000)
+        for (step in 151..170) {
+            val nowNanos = step * 100_000_000L
+            trim.sample(30_000, nowNanos, compressedFrames = 96_000)
+            trim.rateDue(nowNanos)
+        }
+        observeLevel(trim, 171, 321, 14_400)
+
+        assertEquals(48_000, trim.rate)
+        assertEquals(0.0, MediaClockTrim.learnedTrim, 0.0)
+    }
+
+    private fun observeLevel(trim: MediaClockTrim, firstStep: Int, lastStep: Int, frames: Long) {
+        for (step in firstStep..lastStep) {
+            val nowNanos = step * 100_000_000L
+            trim.sample(frames, nowNanos)
+            trim.rateDue(nowNanos)
+        }
+    }
+
+    @Test
     fun aOneSecondBufferKeepsABatchedTrackNearItsRealRate() {
         for (seed in 1..3) {
             MediaClockTrim.learnedTrim = 0.0
@@ -85,10 +120,10 @@ class MediaClockTrimRecoveryTest {
             playback.run(seconds = 300)
 
             assertEquals("Seed $seed underruns", 0, playback.underruns)
-            assertEquals(48_000.0, playback.settledRates.average(), 20.0)
+            assertEquals(48_000.0, playback.settledRates.average(), 0.0)
             assertTrue(
                 "Seed $seed rates: ${playback.settledRates.min()}..${playback.settledRates.max()}",
-                playback.settledRates.all { it in 47_880..48_120 },
+                playback.settledRates.all { it == 48_000 },
             )
         }
     }
@@ -102,7 +137,8 @@ class MediaClockTrimRecoveryTest {
             playback.run(seconds = 300)
 
             assertEquals("Drift $drift", 0, playback.settledUnderruns)
-            assertEquals(48_000 / (1 + drift), playback.settledRates.average(), 25.0)
+            assertEquals("Drift $drift, final rate ${playback.settledRates.last()}",
+                48_000 / (1 + drift), playback.settledRates.average(), 25.0)
             assertEquals(1 / (1 + drift) - 1, MediaClockTrim.learnedTrim, 0.0005)
         }
     }
@@ -115,10 +151,13 @@ class MediaClockTrimRecoveryTest {
     ) {
         private val random = Random(seed)
         private val targetFrames = 48L * bufferMillis
-        private val capacityFrames = 48L * (bufferMillis + 200)
+        private val capacityFrames = MediaAudioBuffer.plan(true, 48_000, 2, 4096, bufferMillis)
+            .trackBufferBytes / 4L
         private val trim = MediaClockTrim(48_000, targetFrames)
         private var queuedFrames = maxOf(targetFrames, 19_200L).toDouble()
         private var compressedFrames = 0L
+        private var playing = true
+        private var restartFrames = targetFrames
 
         var underruns = 0
             private set
@@ -133,11 +172,16 @@ class MediaClockTrimRecoveryTest {
             var burstNumber = 1
 
             for (elapsedMillis in 0 until seconds * 1000) {
-                queuedFrames -= trim.rate * (1 + drift) / 1000
-                if (queuedFrames < 0) {
-                    queuedFrames = 0.0
-                    underruns++
-                    if (elapsedMillis >= 60_000) settledUnderruns++
+                if (playing) {
+                    queuedFrames -= trim.rate * (1 + drift) / 1000
+                    if (queuedFrames < 0) {
+                        queuedFrames = 0.0
+                        playing = false
+                        restartFrames = minOf(restartFrames + 4800, targetFrames + 28_800)
+                        trim.restart(elapsedMillis * 1_000_000L)
+                        underruns++
+                        if (elapsedMillis >= 60_000) settledUnderruns++
+                    }
                 }
 
                 if (elapsedMillis >= nextBurstMillis) {
@@ -150,8 +194,13 @@ class MediaClockTrimRecoveryTest {
                     compressedFrames -= 1024
                     queuedFrames += 1024
                     val nowNanos = elapsedMillis * 1_000_000L
-                    trim.sample(queuedFrames.toLong(), nowNanos, compressedFrames)
-                    trim.rateDue(nowNanos)
+                    if (playing) {
+                        trim.sample(queuedFrames.toLong(), nowNanos, compressedFrames)
+                        trim.rateDue(nowNanos)
+                    } else if (queuedFrames >= restartFrames) {
+                        playing = true
+                        trim.onPlaybackStarted(nowNanos)
+                    }
                 }
 
                 if (elapsedMillis >= 60_000 && elapsedMillis % 1000 == 0) {

@@ -17,6 +17,12 @@ object MediaAudioBuffer {
     val presets = (wiredPresets + wirelessPresets).distinct().sorted()
 
     private const val HEADROOM_MILLIS = 200 // room above the start level so bursts after a gap fit
+    /**
+     * After each rebuffer music restarts [CUSHION_STEP_MILLIS] later, up to this much above the chosen delay,
+     * so a flaky connection plays through its gaps; [MusicCatchUp] skips back once the connection is calm.
+     */
+    const val CUSHION_MILLIS = 600
+    const val CUSHION_STEP_MILLIS = 100
     private const val MIN_TRACK_BUFFER_BYTES = 16 * 1024
     private const val MIN_START_BUFFER_BYTES = 4 * 1024
 
@@ -24,7 +30,8 @@ object MediaAudioBuffer {
     fun sanitizeWireless(millis: Int): Int = millis.takeIf { it in wirelessPresets } ?: DEFAULT_MILLIS
     fun sanitizeWired(millis: Int): Int = millis.takeIf { it in wiredPresets } ?: DEFAULT_MILLIS
 
-    data class Plan(val trackBufferBytes: Int, val startBytes: Int)
+    /** [maxStartBytes] is the start level with the whole cushion, for music only. */
+    data class Plan(val trackBufferBytes: Int, val startBytes: Int, val maxStartBytes: Int = startBytes)
 
     /** AudioTrack capacity and the amount to queue before play() for one output stream. */
     fun plan(isMedia: Boolean, sampleRate: Int, channels: Int, minBufferBytes: Int, mediaMillis: Int): Plan {
@@ -35,10 +42,13 @@ object MediaAudioBuffer {
         if (!isMedia) return lowLatency
         val bytesPerSecond = sampleRate.toLong() * channels.coerceIn(1, 2) * 2
         val start = (bytesPerSecond * sanitize(mediaMillis) / 1000).toInt()
-        val capacity = (bytesPerSecond * (sanitize(mediaMillis) + HEADROOM_MILLIS) / 1000).toInt()
+        val cushion = (bytesPerSecond * CUSHION_MILLIS / 1000).toInt()
+        val capacity = (bytesPerSecond * (sanitize(mediaMillis) + CUSHION_MILLIS + HEADROOM_MILLIS) / 1000).toInt()
+        val startBytes = maxOf(start, lowLatency.startBytes)
         return Plan(
             trackBufferBytes = maxOf(capacity, lowLatency.trackBufferBytes),
-            startBytes = maxOf(start, lowLatency.startBytes),
+            startBytes = startBytes,
+            maxStartBytes = startBytes + cushion,
         )
     }
 

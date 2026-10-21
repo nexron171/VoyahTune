@@ -1884,6 +1884,9 @@ private class AudioRenderer(
     private var playbackStarted = false
     private var prebufferBytes = 0
     private var startThresholdBytes = 0
+    /** The start level of the chosen delay; rebuffers raise [startThresholdBytes] above it up to [maxStartThresholdBytes]. */
+    private var baseStartThresholdBytes = 0
+    private var maxStartThresholdBytes = 0
     private var fadeApplied = false
     private var droppedPacketsLogged = false
     private var firstAacPayloadLogged = false
@@ -1919,6 +1922,13 @@ private class AudioRenderer(
     private val bufferProgress = AudioBufferProgress(if (format.channels >= 2) 4 else 2)
     private var underrunsAtPlaybackStart = 0
     private var clockTrim: MediaClockTrim? = null
+    private var catchUp: MusicCatchUp? = null
+    private var pcmSkip: PcmSkip? = null
+    /** Set by the receiving thread when packets stop for a while or stale ones are discarded. */
+    @Volatile private var lastStallNs = 0L
+    private var seenStallNs = 0L
+    private var skippedFrames = 0L
+    private var skipReports = 0
     /** Called when this call's track is routed to the earpiece; the sink moves the call to the loudspeaker. */
     @Volatile var onRoutedToEarpiece: (() -> Unit)? = null
     private var routingListener: AudioRouting.OnRoutingChangedListener? = null
@@ -1944,12 +1954,14 @@ private class AudioRenderer(
             val now = System.nanoTime()
             val previous = lastArrivalNs.getAndSet(now)
             if (previous != 0L) maxArrivalGapMs.accumulateAndGet((now - previous) / 1_000_000L, ::maxOf)
+            if (previous != 0L && now - previous > MusicCatchUp.STALL_GAP_NS) lastStallNs = now
             newestRtpSample = sample
             // Hold short Wi-Fi bursts intact. If compressed audio remains >1.5s behind for
             // another 1.5s, skip only stale undecoded packets to catch up to the live song.
             val removed = mediaLagGuard?.recover(queue, sample, AudioPacket::sample, now) ?: 0
             if (removed > 0) {
                 packetsDropped.addAndGet(removed)
+                lastStallNs = now
                 if (lagRecoveryReports < MAX_REBUFFER_REPORTS) {
                     lagRecoveryReports++
                     report("Audio: stale media packet backlog recovered audioType=${format.audioType} " +
@@ -2161,8 +2173,15 @@ private class AudioRenderer(
         diagnosticStage = "track-capacity"
         val capacityBytes = built.bufferSizeInFrames * frameBytes
         startThresholdBytes = MediaAudioBuffer.startBytesFor(plan.startBytes, capacityBytes, PREBUFFER_WRITE_CHUNK_BYTES)
+        baseStartThresholdBytes = startThresholdBytes
+        maxStartThresholdBytes = MediaAudioBuffer.startBytesFor(plan.maxStartBytes, capacityBytes, PREBUFFER_WRITE_CHUNK_BYTES)
         // Only music plays long enough for the clocks to drift apart; calls keep their echo reference exact.
-        clockTrim = if (mappedChannel == AudioChannel.MEDIA) MediaClockTrim(format.sampleRate, (startThresholdBytes / frameBytes).toLong()) else null
+        if (mappedChannel == AudioChannel.MEDIA) {
+            val targetFrames = (startThresholdBytes / frameBytes).toLong()
+            clockTrim = MediaClockTrim(format.sampleRate, targetFrames)
+            catchUp = MusicCatchUp(targetFrames, format.sampleRate)
+            pcmSkip = PcmSkip(pcmChannels, format.sampleRate / SKIP_FADES_PER_SECOND)
+        }
         val trackMetadata = runCatching {
             "api=${Build.VERSION.SDK_INT} trackState=${built.state} trackRate=${built.sampleRate} " +
                 "usage=${trackAttributes?.usage} contentType=${trackAttributes?.contentType} actualStream=${built.streamType} " +
@@ -2529,6 +2548,20 @@ private class AudioRenderer(
             applyFadeIn(data, offset, length)
             fadeApplied = true
         }
+        if (playbackStarted) followMusicClock(track)
+        val skip = pcmSkip
+        if (skip != null && skip.active) {
+            skip.process(data, offset, length)
+            if (skip.headBytes > 0) writeTrack(track, data, offset, skip.headBytes)
+            val end = offset + length
+            skippedFrames += (skip.tailOffset - offset - skip.headBytes) / frameBytes
+            if (skip.tailOffset < end) writeTrack(track, data, skip.tailOffset, end - skip.tailOffset)
+            return
+        }
+        writeTrack(track, data, offset, length)
+    }
+
+    private fun writeTrack(track: AudioTrack, data: ByteArray, offset: Int, length: Int) {
         var written = 0
         while (written < length && running) {
             val writeLength = if (playbackStarted) {
@@ -2565,7 +2598,7 @@ private class AudioRenderer(
             navigationAudioFocus?.pcmQueued(data, offset + written - count, count,
                 lastPcmWriteNs, totalWrittenFrames)
             if (playbackStarted) reportNavigationPlayback(track)
-            if (playbackStarted) trimClock(track)
+            if (playbackStarted) followMusicClock(track)
             if (!playbackStarted) {
                 prebufferBytes += count
                 if (prebufferBytes >= startThresholdBytes) {
@@ -2589,7 +2622,7 @@ private class AudioRenderer(
         underrunsAtPlaybackStart = track.underrunCount
         track.play()
         playbackStarted = true
-        clockTrim?.onPlaybackStarted()
+        clockTrim?.onPlaybackStarted(System.nanoTime())
         reportNavigationPlayback(track)
         if (rebufferCount > 0 && rebufferRecoverReportCount < MAX_REBUFFER_REPORTS) {
             rebufferRecoverReportCount++
@@ -2613,15 +2646,44 @@ private class AudioRenderer(
         if (device?.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) onRoutedToEarpiece?.invoke()
     }
 
-    private fun trimClock(track: AudioTrack) {
+    /**
+     * Music only. Wi-Fi never changes the playback rate: only a measured head-unit clock drift does (#610).
+     * Audio left late by a stall plays as a cushion until the connection is calm, then is skipped.
+     */
+    private fun followMusicClock(track: AudioTrack) {
         val trim = clockTrim ?: return
+        val catchUp = catchUp ?: return
         val now = System.nanoTime()
+        val stall = lastStallNs
+        if (stall != seenStallNs) {
+            seenStallNs = stall
+            catchUp.stalled(stall)
+            trim.restart(now)
+        }
+        if (pcmSkip?.active == true) {
+            // The level falls at once while a skip drops audio; that is not the head unit's clock.
+            trim.restart(now)
+            return
+        }
         val compressedRtpFrames = mediaLagGuard?.pendingFrames(queue, newestRtpSample, AudioPacket::sample)
             ?: 0L
         val compressedPcmFrames = compressedRtpFrames * format.sampleRate /
             format.rtpClockRate.coerceAtLeast(1)
-        trim.sample(bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes,
-            now, compressedPcmFrames)
+        val queuedFrames = bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes
+        trim.sample(queuedFrames, now, compressedPcmFrames)
+        catchUp.sample(queuedFrames + compressedPcmFrames, now)
+        val skipFrames = catchUp.framesToSkip(now)
+        if (skipFrames > 0) {
+            pcmSkip?.start(skipFrames)
+            trim.restart(now)
+            // The connection is calm again: the next rebuffer starts from the chosen delay.
+            startThresholdBytes = baseStartThresholdBytes
+            if (skipReports < MAX_REBUFFER_REPORTS) {
+                skipReports++
+                report("Audio: caught up audioType=${format.audioType} skippedMs=${skipFrames * 1000 / format.sampleRate} " +
+                    "nextCalmS=${catchUp.calmNs / 1_000_000_000L}")
+            }
+        }
         val rate = trim.rateDue(now) ?: return
         val result = runCatching { track.setPlaybackRate(rate) }.getOrDefault(AudioTrack.ERROR)
         if (result != AudioTrack.SUCCESS) {
@@ -2640,16 +2702,24 @@ private class AudioRenderer(
             // or discarding PCM, then use the configured start threshold again when music resumes.
             track.pause()
             playbackStarted = false
+            // The connection is flaky: restart later, so the next gap plays from the cushion instead of going silent.
+            if (maxStartThresholdBytes > startThresholdBytes) {
+                startThresholdBytes = minOf(startThresholdBytes +
+                    bytesPerSecond * MediaAudioBuffer.CUSHION_STEP_MILLIS / 1000, maxStartThresholdBytes)
+            }
             // Pausing retains queued PCM. Count it toward the restart threshold so a
             // blocking write cannot fill the paused track before we call play().
             prebufferBytes = bufferProgress.queuedBytes(track.playbackHeadPosition)
                 .coerceAtMost(startThresholdBytes.toLong()).toInt()
             lastPcmWriteNs = System.nanoTime()
             rebufferCount++
+            catchUp?.stalled(lastPcmWriteNs)
+            clockTrim?.restart(lastPcmWriteNs)
             if (rebufferPauseReportCount < MAX_REBUFFER_REPORTS) {
                 rebufferPauseReportCount++
                 val retainedMs = if (bytesPerSecond > 0) prebufferBytes * 1000L / bytesPerSecond else 0L
-                report("Audio: rebuffer paused audioType=${format.audioType} rebufferCount=$rebufferCount retainedMs=$retainedMs")
+                report("Audio: rebuffer paused audioType=${format.audioType} rebufferCount=$rebufferCount retainedMs=$retainedMs " +
+                    "restartMs=${if (bytesPerSecond > 0) startThresholdBytes * 1000L / bytesPerSecond else 0L}")
             }
         }
         // A short final burst may never reach the start threshold. Play it after a bounded wait.
@@ -2697,7 +2767,8 @@ private class AudioRenderer(
             "lastWriteError=${lastWriteErrorCode ?: "none"} zeroWrites=$zeroWritesThisWindow " +
             "partialWrites=$partialWritesThisWindow " +
             "decoderDroppedTotal=$inputDropped outputBuffersTotal=$outputBuffers rebuffers=$rebufferCount " +
-            "playbackRate=${clockTrim?.rate ?: -1} ended=$force"
+            "playbackRate=${clockTrim?.rate ?: -1} skippedMs=${skippedFrames * 1000 / format.sampleRate} " +
+            "startMs=${if (bytesPerSecond > 0) startThresholdBytes * 1000L / bytesPerSecond else -1} ended=$force"
         Log.i(STATS_TAG, line)
         report(line)
         if (format.codec != AudioCodecKind.LPCM) {
@@ -2808,5 +2879,7 @@ private class AudioRenderer(
         const val DECODED_BUFFER_LOG_INTERVAL = 50
         const val MAX_REBUFFER_REPORTS = 5
         const val MAX_QUEUE_FULL_REPORTS = 5
+        /** A skip fades out and back in over 5 ms each. */
+        const val SKIP_FADES_PER_SECOND = 200
     }
 }
