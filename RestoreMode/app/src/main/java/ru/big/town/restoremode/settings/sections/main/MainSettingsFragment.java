@@ -181,23 +181,32 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         if (size == null) {
             return;
         }
-        ArrayAdapter<String> adapter =
-                new ArrayAdapter<>(
-                        requireContext(),
-                        R.layout.settings_spinner_item,
-                        new String[] {"2 × 2", "3 × 1", "4 × 1"});
+        HeadlightWidgetLayout.Size[] sizes = HeadlightWidgetLayout.Size.values();
+        ArrayAdapter<HeadlightWidgetLayout.Size> adapter =
+                new ArrayAdapter<>(requireContext(), R.layout.settings_spinner_item, sizes);
         adapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
         size.setAdapter(adapter);
-        size.setSelection(TileSizeStore.width(preferences, HeadlightWidgetLayout.ID, 4) - 2);
+        int[] dimensions =
+                TileSizeStore.dimensions(
+                        preferences,
+                        HeadlightWidgetLayout.ID,
+                        HeadlightWidgetLayout.DEFAULT_WIDTH,
+                        HeadlightWidgetLayout.DEFAULT_HEIGHT);
+        size.setSelection(HeadlightWidgetLayout.size(dimensions[0], dimensions[1]).ordinal());
         size.setOnItemSelectedListener(
                 new AdapterView.OnItemSelectedListener() {
                     @Override
                     public void onItemSelected(
                             AdapterView<?> parent, View view, int position, long id) {
-                        int columns = position + 2;
-                        if (TileSizeStore.width(preferences, HeadlightWidgetLayout.ID, 4)
-                                != columns) {
-                            TileSizeStore.setWidth(preferences, HeadlightWidgetLayout.ID, columns);
+                        HeadlightWidgetLayout.Size selected = sizes[position];
+                        int[] current =
+                                TileSizeStore.dimensions(
+                                        preferences,
+                                        HeadlightWidgetLayout.ID,
+                                        HeadlightWidgetLayout.DEFAULT_WIDTH,
+                                        HeadlightWidgetLayout.DEFAULT_HEIGHT);
+                        if (current[0] != selected.width || current[1] != selected.height) {
+                            TileSizeStore.setHeadlightSize(preferences, selected);
                         }
                     }
 

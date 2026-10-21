@@ -1,14 +1,20 @@
 package ru.big.town.restoremode.widgets.headlights;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.view.View;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -34,44 +40,52 @@ public class HeadlightWidgetTest {
     public void allLayoutsExposeFourSeparateButtonsAndPreserveTheirOrder() throws Exception {
         Context context = RuntimeEnvironment.getApplication();
         float density = context.getResources().getDisplayMetrics().density;
-        for (int columns = 2; columns <= 4; columns++) {
+        for (HeadlightWidgetLayout.Size size : HeadlightWidgetLayout.Size.values()) {
             List<Integer> selected = new ArrayList<>();
-            HeadlightWidgetView widget = new HeadlightWidgetView(context, columns, selected::add);
+            HeadlightWidgetView widget =
+                    new HeadlightWidgetView(context, size.width, selected::add);
             Bundle state = state(HeadlightWidgetProtocol.OFF, -1);
             widget.update(state);
-            int width = Math.round(columns * 105 * density);
-            int height = Math.round(HeadlightWidgetLayout.height(columns) * 110 * density);
+            int width = Math.round(size.width * 105 * density);
+            int height = Math.round(size.height * 110 * density);
             widget.measure(exact(width), exact(height));
             widget.layout(0, 0, width, height);
             for (int mode = 0; mode < 4; mode++) {
                 View button = widget.getChildAt(mode + 1);
-                android.widget.LinearLayout cell = (android.widget.LinearLayout) button;
+                LinearLayout cell = (LinearLayout) button;
                 View symbol = cell.getChildAt(0);
                 assertEquals(
                         button.getWidth() / 2f, (symbol.getLeft() + symbol.getRight()) / 2f, 0.5f);
                 assertEquals(
                         button.getHeight() / 2f, (symbol.getTop() + symbol.getBottom()) / 2f, 0.5f);
                 if (mode == HeadlightWidgetProtocol.OFF || mode == HeadlightWidgetProtocol.AUTO) {
-                    assertTrue(symbol instanceof android.widget.TextView);
+                    assertTrue(symbol instanceof TextView);
                     assertEquals(
                             mode == HeadlightWidgetProtocol.OFF ? "Off" : "A",
-                            ((android.widget.TextView) symbol).getText().toString());
+                            ((TextView) symbol).getText().toString());
                 }
                 assertTrue(button.getWidth() >= 48 * density);
                 assertTrue(button.getHeight() >= 48 * density);
                 assertTrue(button.getRight() <= width);
                 assertTrue(button.getBottom() <= height);
+                if (mode > 0) {
+                    View previous = widget.getChildAt(mode);
+                    if (size.width == 1 || (size.width == 2 && mode == 2)) {
+                        assertTrue(button.getTop() > previous.getBottom());
+                        assertEquals(widget.getChildAt(1).getLeft(), button.getLeft());
+                    } else {
+                        assertTrue(button.getLeft() > previous.getRight());
+                        assertEquals(previous.getTop(), button.getTop());
+                    }
+                }
                 assertEquals(mode == HeadlightWidgetProtocol.OFF, button.isSelected());
                 button.performClick();
             }
             assertEquals(Arrays.asList(0, 1, 2, 3), selected);
-            assertEquals(
-                    columns == 2, widget.getChildAt(3).getTop() > widget.getChildAt(1).getTop());
             Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             widget.draw(new Canvas(bitmap));
             for (int mode = 0; mode < 4; mode++) {
-                android.widget.LinearLayout button =
-                        (android.widget.LinearLayout) widget.getChildAt(mode + 1);
+                LinearLayout button = (LinearLayout) widget.getChildAt(mode + 1);
                 View symbol = button.getChildAt(0);
                 int whitePixels = 0;
                 for (int y = button.getTop() + symbol.getTop();
@@ -81,21 +95,18 @@ public class HeadlightWidgetTest {
                             x < button.getLeft() + symbol.getRight();
                             x++) {
                         int pixel = bitmap.getPixel(x, y);
-                        if (android.graphics.Color.red(pixel) > 220
-                                && android.graphics.Color.green(pixel) > 220
-                                && android.graphics.Color.blue(pixel) > 220) {
+                        if (Color.red(pixel) > 220
+                                && Color.green(pixel) > 220
+                                && Color.blue(pixel) > 220) {
                             whitePixels++;
                         }
                     }
                 }
-                assertTrue("Missing white symbol: " + columns + "/" + mode, whitePixels > 10);
+                assertTrue("Missing white symbol: " + size + "/" + mode, whitePixels > 10);
             }
             String previewDirectory = System.getenv("VOYAH_WIDGET_PREVIEW_DIR");
             if (previewDirectory != null) {
-                File output =
-                        new File(
-                                previewDirectory,
-                                columns + "x" + HeadlightWidgetLayout.height(columns) + ".png");
+                File output = new File(previewDirectory, size.width + "x" + size.height + ".png");
                 output.getParentFile().mkdirs();
                 try (FileOutputStream stream = new FileOutputStream(output)) {
                     assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream));
@@ -107,37 +118,43 @@ public class HeadlightWidgetTest {
 
     @Test
     public void pendingAndDisconnectedStatesDisableCommandsWithoutOptimisticHighlight() {
-        HeadlightWidgetView widget =
-                new HeadlightWidgetView(RuntimeEnvironment.getApplication(), 3, mode -> {});
-        widget.update(state(HeadlightWidgetProtocol.OFF, HeadlightWidgetProtocol.PARKING));
-        assertTrue(widget.getChildAt(1).isSelected());
-        assertFalse(widget.getChildAt(2).isSelected());
-        assertTrue(widget.getChildAt(2).isActivated());
-        for (int mode = 0; mode < 4; mode++) {
-            assertFalse(widget.getChildAt(mode + 1).isEnabled());
-        }
-        widget.update(new Bundle());
-        for (int mode = 0; mode < 4; mode++) {
-            assertFalse(widget.getChildAt(mode + 1).isSelected());
-            assertFalse(widget.getChildAt(mode + 1).isEnabled());
+        for (int columns = 1; columns <= 4; columns++) {
+            HeadlightWidgetView widget =
+                    new HeadlightWidgetView(
+                            RuntimeEnvironment.getApplication(), columns, mode -> {});
+            widget.update(state(HeadlightWidgetProtocol.OFF, HeadlightWidgetProtocol.PARKING));
+            assertTrue(widget.getChildAt(1).isSelected());
+            assertFalse(widget.getChildAt(2).isSelected());
+            assertTrue(widget.getChildAt(2).isActivated());
+            for (int mode = 0; mode < 4; mode++) {
+                assertFalse(widget.getChildAt(mode + 1).isEnabled());
+            }
+            widget.update(new Bundle());
+            for (int mode = 0; mode < 4; mode++) {
+                assertFalse(widget.getChildAt(mode + 1).isSelected());
+                assertFalse(widget.getChildAt(mode + 1).isEnabled());
+            }
         }
     }
 
     @Test
     public void buttonLongPressDelegatesToTileDrag() {
-        int[] drags = {0};
-        List<Integer> commands = new ArrayList<>();
-        HeadlightWidgetView widget =
-                new HeadlightWidgetView(RuntimeEnvironment.getApplication(), 2, commands::add);
-        widget.setOnLongClickListener(
-                view -> {
-                    drags[0]++;
-                    return true;
-                });
-        widget.update(state(0, -1));
-        assertTrue(widget.getChildAt(2).performLongClick());
-        assertEquals(1, drags[0]);
-        assertTrue(commands.isEmpty());
+        for (int columns = 1; columns <= 4; columns++) {
+            int[] drags = {0};
+            List<Integer> commands = new ArrayList<>();
+            HeadlightWidgetView widget =
+                    new HeadlightWidgetView(
+                            RuntimeEnvironment.getApplication(), columns, commands::add);
+            widget.setOnLongClickListener(
+                    view -> {
+                        drags[0]++;
+                        return true;
+                    });
+            widget.update(state(0, -1));
+            assertTrue(widget.getChildAt(2).performLongClick());
+            assertEquals(1, drags[0]);
+            assertTrue(commands.isEmpty());
+        }
     }
 
     @Test
@@ -146,18 +163,67 @@ public class HeadlightWidgetTest {
         SharedPreferences preferences = context.getSharedPreferences("headlight-test", 0);
         preferences.edit().clear().commit();
         TileSizeStore.setWidth(preferences, "suspensionWidget", 5);
+        for (HeadlightWidgetLayout.Size previous : HeadlightWidgetLayout.Size.values()) {
+            for (HeadlightWidgetLayout.Size selected : HeadlightWidgetLayout.Size.values()) {
+                TileSizeStore.setHeadlightSize(preferences, previous);
+                TileSizeStore.setHeadlightSize(preferences, selected);
+                assertArrayEquals(
+                        new int[] {selected.width, selected.height},
+                        TileSizeStore.dimensions(
+                                context.getSharedPreferences("headlight-test", 0),
+                                HeadlightWidgetLayout.ID,
+                                4,
+                                1));
+            }
+        }
+        assertEquals(5, TileSizeStore.width(preferences, "suspensionWidget", 4));
+    }
+
+    @Test
+    public void defaultAndPreviouslySavedHorizontalSizesKeepTheirDimensions() {
+        SharedPreferences preferences =
+                RuntimeEnvironment.getApplication().getSharedPreferences("headlight-legacy", 0);
+        preferences.edit().clear().commit();
+        assertArrayEquals(
+                new int[] {4, 1},
+                TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
         for (int columns = 2; columns <= 4; columns++) {
-            TileSizeStore.setWidth(preferences, HeadlightWidgetLayout.ID, columns);
+            preferences.edit().putInt("tileWidth_" + HeadlightWidgetLayout.ID, columns).commit();
+            assertArrayEquals(
+                    new int[] {columns, columns == 2 ? 2 : 1},
+                    TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
             TileSizeStore.setHeight(preferences, HeadlightWidgetLayout.ID, 5);
             assertArrayEquals(
                     new int[] {columns, columns == 2 ? 2 : 1},
-                    TileSizeStore.dimensions(
-                            context.getSharedPreferences("headlight-test", 0),
-                            HeadlightWidgetLayout.ID,
-                            4,
-                            1));
+                    TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
         }
-        assertEquals(5, TileSizeStore.width(preferences, "suspensionWidget", 4));
+    }
+
+    @Test
+    public void verticalSizesRetainTheirHeightAndClampToSupportedDimensions() {
+        SharedPreferences preferences =
+                RuntimeEnvironment.getApplication().getSharedPreferences("headlight-vertical", 0);
+        preferences.edit().clear().commit();
+        TileSizeStore.setWidth(preferences, HeadlightWidgetLayout.ID, 1);
+        assertArrayEquals(
+                new int[] {1, 3},
+                TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
+        TileSizeStore.setHeight(preferences, HeadlightWidgetLayout.ID, 4);
+        assertArrayEquals(
+                new int[] {1, 4},
+                TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
+        TileSizeStore.setWidth(preferences, HeadlightWidgetLayout.ID, 1);
+        assertArrayEquals(
+                new int[] {1, 4},
+                TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
+        TileSizeStore.setHeight(preferences, HeadlightWidgetLayout.ID, 1);
+        assertArrayEquals(
+                new int[] {1, 3},
+                TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
+        TileSizeStore.setHeight(preferences, HeadlightWidgetLayout.ID, 5);
+        assertArrayEquals(
+                new int[] {1, 4},
+                TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
     }
 
     private static int exact(int size) {

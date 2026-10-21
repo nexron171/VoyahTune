@@ -69,8 +69,12 @@ public class TileSizeStore {
                     prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue));
         }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {
-            return HeadlightWidgetLayout.height(
-                    width(prefs, widgetId, HeadlightWidgetLayout.DEFAULT_WIDTH));
+            return HeadlightWidgetLayout.size(
+                            width(prefs, widgetId, HeadlightWidgetLayout.DEFAULT_WIDTH),
+                            prefs.getInt(
+                                    HEIGHT_KEY_PREFIX + widgetId,
+                                    HeadlightWidgetLayout.DEFAULT_HEIGHT))
+                    .height;
         }
         if (SystemWidgetLayout.isWidget(widgetId)) {
             return 1;
@@ -95,11 +99,13 @@ public class TileSizeStore {
             return;
         }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {
-            int columns = HeadlightWidgetLayout.width(value);
-            prefs.edit()
-                    .putInt(WIDTH_KEY_PREFIX + widgetId, columns)
-                    .putInt(HEIGHT_KEY_PREFIX + widgetId, HeadlightWidgetLayout.height(columns))
-                    .apply();
+            setHeadlightSize(
+                    prefs,
+                    HeadlightWidgetLayout.size(
+                            value,
+                            prefs.getInt(
+                                    HEIGHT_KEY_PREFIX + widgetId,
+                                    HeadlightWidgetLayout.DEFAULT_HEIGHT)));
             return;
         }
         if (SystemWidgetLayout.isWidget(widgetId)) {
@@ -142,6 +148,10 @@ public class TileSizeStore {
             return;
         }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {
+            setHeadlightSize(
+                    prefs,
+                    HeadlightWidgetLayout.size(
+                            width(prefs, widgetId, HeadlightWidgetLayout.DEFAULT_WIDTH), value));
             return;
         }
         prefs.edit()
@@ -157,6 +167,18 @@ public class TileSizeStore {
                                                 ? EnergyWidgetLayout.height(
                                                         widgetId, width(prefs, widgetId, 8), value)
                                                 : AppWidgetStore.clampHeight(value))
+                .apply();
+    }
+
+    public static void setHeadlightSize(
+            SharedPreferences preferences, HeadlightWidgetLayout.Size size) {
+        if (preferences == null || size == null) {
+            return;
+        }
+        preferences
+                .edit()
+                .putInt(WIDTH_KEY_PREFIX + HeadlightWidgetLayout.ID, size.width)
+                .putInt(HEIGHT_KEY_PREFIX + HeadlightWidgetLayout.ID, size.height)
                 .apply();
     }
 }
