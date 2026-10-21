@@ -629,6 +629,19 @@ Voyah-адаптере, чтобы не конкурировать с Native.
 постоянно тёмное оформление host UI и экрана ожидания; это не меняет тему проекции
 CarPlay, управляемую SWReason. Заголовок экрана подключения — CarPlay, кнопка
 возврата — «Вернуться в настройки»; подсказка жеста также называет их «настройки».
+Настройки внутри сессии открываются вертикальным свайпом вниз тремя пальцами
+по умолчанию; сохранённый выбор двух/четырёх пальцев или отключение жеста остаются
+в силе. После выхода за touch slop первое явно преобладающее направление
+фиксируется до конца жеста. Горизонтальное начало исключает открытие настроек
+и временный показ панелей при последующем отклонении вверх/вниз. Исторические
+MOVE-сэмплы обрабатываются перед текущим, поэтому объединение событий Android
+не меняет выбор направления. Поднятие пальца или смена их числа отменяет
+распознавание до UP/CANCEL; новый DOWN начинает независимый жест. Незавершённые
+касания в iPhone не возобновляются частично, чтобы не создавать ложные нажатия.
+Системный горизонтальный перенос между физическими дисплеями остаётся в OEM-маршруте:
+его допуск и Native-инъекция не меняются. Вертикальный свайп вверх сохраняет
+прежний опциональный временный показ системных панелей без открытия настроек.
+
 `CarPlayWindowPolicy` из app сохраняет
 видимые системные панели. На физических дисплеях 0/1 он резервирует 145dp OEM-дока
 и `status_bar_height`, используя плотность дисплея, а не масштаб UI DiPlay.
@@ -1674,7 +1687,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayVideoActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayVideoActivity.kt) | AppLocale.wrap/enforce для отдельного видеоэкрана. |
 | [common/src/main/java/com/shilapi/xcertplay/AdbClusterActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AdbClusterActivity.kt) | AppLocale.wrap/enforce для отдельного экрана карты. |
 | [common/src/main/java/com/shilapi/xcertplay/AudioChannelPreview.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AudioChannelPreview.kt) | Automatic использует OEM 3/1; проверять фактический AudioTrack stream и fallback. |
-| [common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt) | available → источники скорости/темы/аудиомаршруты Voyah; Siri keys переданы Native. Сохранить ownerDisplayId, последовательный transfer и guards уничтоженного host; передать app-owned requestUI callback, парковать main decoder при любом surface detach Voyah UI, запрашивать кадр при attach/adopt и откладывать скрытый resize (§4); подключить CarPlayWindowUi, тёмный экран ожидания с app-иконкой, заголовком CarPlay и явной отменой через shutdown(false) без killProcess (§5). |
+| [common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt) | available → источники скорости/темы/аудиомаршруты Voyah; Siri keys переданы Native. Сохранить ownerDisplayId, последовательный transfer и guards уничтоженного host; передать app-owned requestUI callback, парковать main decoder при любом surface detach Voyah UI, запрашивать кадр при attach/adopt и откладывать скрытый resize (§4); подключить CarPlayWindowUi, тёмный экран ожидания с app-иконкой, заголовком CarPlay и явной отменой через shutdown(false) без killProcess (§5). Фиксировать ось свайпа с учётом истории MOVE: горизонтальное начало не открывает настройки/панели до конца жеста (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt) | Defaults; projection launchDisplayId и делегирование VD-запуска Native с обработкой отказа (§4); фабрика home + обновление состояния; CarPlayWindowUi для границ окна и ошибки auth; одноразовый запрос автоподключения при открытии; home без ScrollView и idle/hotspot-подсказок, BG из палитры; AUDIO с буферами/обработкой звука/аудиофокусом без выбора каналов, пометка default у 1000 мс; скрытие ADVANCED во всех входах и поиске, фильтрация сохранённой категории; скрытие WHEEL_KEYS и LAUNCHER_BUBBLE по standalone policy (§5); guards OEM/ADB-разделов и vehicle-data probe в диагностике (§9). |
 | [common/src/main/java/com/shilapi/xcertplay/DiPlayBootstrap.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlayBootstrap.kt) | Вызов VoyahCarPlayDefaults.initialize до штатной загрузки identity. |
 | [common/src/main/java/com/shilapi/xcertplay/DiPlaySessionService.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/DiPlaySessionService.kt) | start/stop интеграции по жизни сервиса, сохранение сессии при onTaskRemoved на Voyah; локализованный context и уведомление. |
@@ -1889,15 +1902,19 @@ OEM-снимка и подтверждают переход чтением. IPC 
 жеста проекция получает исходные события. Изменение взаимного положения пальцев
 больше touch slop (pinch/вращение) или преимущественно вертикальное движение
 закрепляет жест за CarPlay до UP/CANCEL, включая смену числа пальцев.
-Только совместное преимущественно горизонтальное движение всех пальцев за
+Третий палец до захвата жеста закрепляет весь поток за проекцией до UP/CANCEL,
+в том числе после возвращения к двум пальцам: вертикальное открытие настроек
+и горизонтальный системный жест не становятся прокруткой Dashboard.
+Только совместное преимущественно горизонтальное движение двух пальцев за
 порог touch slop отправляет ACTION_CANCEL в прежний обработчик (включая
 long-press detector), после чего горизонтальный drag прокручивает
 HorizontalScrollView главной с существующим выравниванием по страницам при отпускании.
 Это позволяет выйти за пределы виджета шириной
 12 плиток и сохраняет pinch-to-zoom внутри CarPlay. Захваченный Dashboard жест
-остаётся у него до UP/CANCEL последнего пальца: оставшийся один палец
-не возобновляет ввод в CarPlay. Смена числа пальцев переустанавливает опорную
-координату без скачка; начальные позиции сопоставляются по pointer ID.
+остаётся у него до UP/CANCEL последнего пальца, включая добавление третьего:
+оставшийся один палец не возобновляет ввод в CarPlay. Смена числа пальцев
+переустанавливает опорную координату без скачка; начальные позиции сопоставляются
+по pointer ID.
 Смещение считается в экранных координатах, чтобы движение
 самого виджета при прокрутке не создавало обратную связь. Обычный touch slop
 отсекает дрожание. Для других приложений multi-touch остаётся прежним; тип
@@ -1906,7 +1923,8 @@ HorizontalScrollView главной с существующим выравнив
 При переносе адаптации сохранять helper и его подключение в DashboardActivity.
 Проверка: `CarPlayDashboardScrollTouchListenerTest` (один палец, два пальца без
 прокрутки, горизонтальный/вертикальный/диагональный и асимметричный pinch,
-вертикальный drag, горизонтальная прокрутка, смена числа пальцев, CANCEL,
+вертикальный drag, горизонтальная прокрутка двумя пальцами, трёхпальцевые свайпы
+в обеих осях без прокрутки, возврат с трёх к двум пальцам, смена числа пальцев, CANCEL,
 следующий жест, обычное приложение). Проверка на ГУ обязательна
 для подтверждения UX и маршрута касаний через Native; локальный тест её не заменяет.
 
@@ -2033,6 +2051,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Контракт | Существующие целевые тесты |
 | --- | --- |
 | Адаптированный UI | app `CarPlayHomeScreenUiTest`: точный набор текстов, три равные плитки по центру в 1280×720dp и 900×400dp, Back без disconnect, видимая кнопка «Выйти» под плитками и закрытие Activity вместе с task проекции без disconnect, бренд, монтаж через настоящую DiPlayActivity и переход в настройки. common `CarPlayHomeUiTest`: закрытие обоих UI tasks CarPlay с сохранением других tasks RestoreMode и фоновой сессии. `VoyahSettingsUiTest`: доступность AUDIO в UI/поиске и после recreate, сохранение USB/Wi-Fi буферов, скрытые каналы/ADVANCED, звуковые переключатели, SWReason, Wi-Fi Direct и сохранение явного отключения GPS. `MediaBufferPersistenceTest`: default 1000 мс без записи preference, сохранение прежних 300/500 мс и отдельного USB-буфера; `AudioFocusSettingsTest`: зависимые опции аудиофокуса. `VoyahConnectionUiTest`: тёмный экран даже в day mode, отсутствие DiPlay, соседние кнопки возврата/отмены, немедленное закрытие Activity до завершения teardown и до создания controller, закрытие controller/sink без открытия home и блокировка повторной отмены, сохранение сессии при возврате. |
+| Направление жеста настроек | common `CarPlayHostSettingsTest`: вертикальный свайп вниз, сохранённые 2/3/4 пальца и отключение, малое дрожание, горизонтальное начало в обе стороны с последующим вертикальным движением без настроек/панелей, история MOVE, запрет ложных касаний iPhone, смена числа пальцев, сброс по UP/CANCEL и независимость следующего жеста. |
 | Два значка OD и безопасная область | `Packaging/tests/test_carplay_allapps.js`; app `CarPlaySafeAreaTest`; common `CarPlayWindowUiTest`, `CarPlayHostVideoSurfaceTest` |
 | Защита сессии в памяти OD | `Packaging/tests/test_carplay_memory_protection.js`: приоритет только при session FGS, снятие защиты, изоляция Activity/процессов, несовместимый ABI; `test_vd_stability.js`: установка и откат hooks. |
 | Нажатия OD-дока | `Packaging/tests/test_dock_navigation_actions.js`; перенос обоих config extras и OD guards проверить с двух сторон |
@@ -2041,7 +2060,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Временный показ OEM-панелей OD | `test_od_carplay_chrome.js` и `test_od_carplay_statusbar.js`: срок 10 секунд, продление, отмена, поздний hide, изоляция дисплеев и чужой fullscreen, истечение без callback Native. На машине отдельно: белая кнопка, обе панели, отсутствие изменения геометрии/переподключения при показе и касания после отступа 30 px. |
 | Тап по боковому маркеру OD | `Packaging/tests/test_od_carplay_anchor.js`: короткий тап/long press/CANCEL/multitouch, исторические отсчёты drag, исходные MotionEvent и return value, другой foreground/шторка, ошибка чтения, оба физических дисплея. `test_hiboard_*` в `test_parallel_hook_loader.py`: автоматическое обнаружение, одна попытка, отдельный ready marker и 32-bit timeout. На машине отдельно: фактическая загрузка классов, тап по маркеру/точке, штатный drag и выключение через 10 секунд. |
 | Тема с двумя доками | shared `AirPlayVehicleThemeTest`, `VehicleClimateDockTest`, `Iap2WiredControlClientTest`, `Iap2WirelessControlClientTest`; common `CarPlayDockTest`, `CarPlayHostResolutionTest`. На iPhone отдельно проверять обе панели, температуры, отсутствие наложений, касания и читаемость. |
-| Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`, `carplay.CarPlayDashboardScrollTouchListenerTest` (pinch в CarPlay и горизонтальная прокрутка Dashboard); отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
+| Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`, `carplay.CarPlayDashboardScrollTouchListenerTest` (pinch в CarPlay, горизонтальная прокрутка Dashboard двумя пальцами и отсутствие захвата трёхпальцевых свайпов); отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
 | Возврат на главную и фон | `Packaging/tests/test_carplay_dashboard_navigation.js`; app `carplay.CarPlayDashboardDisplayTest`; common `CarPlayHostUiNavigationTest` (requestUI/controller без Activity), `VoyahSessionTransferTest`; shared `media.VideoSurfaceHandoffTest` |
 | Независимые сетки и перенос OD | app `DashboardTaskIsolationTest` (manifest, affinity, маршруты и плитка настроек), `OdDashboardTransferPolicyTest` (OD/PI и исключения CarPlay); Native `AppDisplayTaskPlanTest` (сохранение соседней сетки и CarPlay); `Packaging/tests/test_carplay_dashboard_navigation.js` (оба OEM-входа, дисплеи 0/1 и сохранение маршрутов CarPlay) |
 | Task/component/display | Native `CarPlayTargetTest` (выбор компонента home на 0/1 и projection на VD со старым ID; полноэкранные входы направляются в VD-хост до разрешения intent), `AppDisplayTaskPlanTest`, `SplitHostTaskSnapshotTest` (CarPlay на своём VD, исключение Dashboard/launcher, unknown display); app `CarPlayDashboardDisplayTest` (возврат с полноэкранного VD на физический экран хоста); common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
@@ -2126,7 +2145,8 @@ process/affinity), итоговые ABI/подписи/наличие assets, н
 | Полноэкранный CarPlay OD: уход, смерть и перенос | При другой верхней Activity или смерти хоста OEM dock/status возвращаются; при переносе 0↔1 исходный экран восстанавливает панели, новый скрывает. Проверить повторный запуск, перезапуск launcher, экран возврата по кнопке VoyahTune и отсутствие скрытия панелей под виджетом. |
 | Виджет ↔ Activity во время сессии | Старый UI уничтожен, iPhone переподключён, новый размер согласован; старый controller закрыт до нового, сервис/CAN-подписка перезапущены; неактивный виджет чёрный с иконкой, Dashboard не закрывается. |
 | Виджет CarPlay → системный Home → VoyahTune | Тот же VD, task и Host Activity; на Home Native принимает кадры в парковочную поверхность, после возврата живое изображение возвращается без нового подключения. |
-| Жесты внутри виджета CarPlay | Сведение/разведение пальцев масштабирует карту; совместное горизонтальное движение прокручивает Dashboard. Владелец распознанного жеста не меняется до отпускания всех пальцев; следующий жест обрабатывается независимо. |
+| Направление жеста внутри сессии CarPlay | Вертикальный свайп вниз тремя пальцами открывает настройки; горизонтальный в обе стороны переносит полноэкранное приложение между 0/1 без открытия настроек или показа панелей при последующем отклонении вверх/вниз. Сессия и изображение сохраняются после переноса; следующий вертикальный жест работает независимо. |
+| Жесты внутри виджета CarPlay | Сведение/разведение пальцев масштабирует карту; совместное горизонтальное движение двух пальцев прокручивает Dashboard. Третий палец до захвата оставляет поток проекции без прокрутки. Владелец распознанного жеста не меняется до отпускания всех пальцев; следующий жест обрабатывается независимо. |
 | Auto on/off, нет телефона, Back, home/settings | Нет нежелательных циклов запуска; все три UI показывают одно значение, таймера нет. |
 | Раздел CarPlay | Живое состояние; Disconnect завершает сессию, opening home не делает reconnect. |
 | Скорость/передача, отключённый GPS | km/h→m/s, корректные P/R/N/D, stale/unknown не передаются как действительные данные. |
