@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay
 
 import android.content.Context
+import com.shilapi.xcertplay.airplay.CarPlayUiScale
 
 /** Process-local access for the host settings, using DiPlay's own preferences and session. */
 object CarPlaySettingsAccess {
@@ -20,10 +21,30 @@ object CarPlaySettingsAccess {
     }
 
     @JvmStatic
+    fun fullscreen(context: Context): Boolean =
+        context.getSharedPreferences(AVAILABILITY_PREFERENCES, Context.MODE_PRIVATE)
+            .getBoolean("fullscreen", false)
+
+    @JvmStatic
+    fun setFullscreen(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(AVAILABILITY_PREFERENCES, Context.MODE_PRIVATE)
+            .edit().putBoolean("fullscreen", enabled).apply()
+    }
+
+    @JvmStatic
     fun autoConnect(context: Context): Boolean = DiPlayPreferences.autoConnect(context)
 
     @JvmStatic
     fun setAutoConnect(context: Context, enabled: Boolean) = DiPlayPreferences.saveAutoConnect(context, enabled)
+
+    @JvmStatic
+    fun uiScalePresets(): List<Int> = CarPlayUiScale.presets
+
+    @JvmStatic
+    fun uiScalePercent(context: Context): Int = AirPlayPersistence.loadUiScalePercent(context)
+
+    @JvmStatic
+    fun setUiScalePercent(context: Context, percent: Int) = AirPlayPersistence.saveUiScalePercent(context, percent)
 
     @JvmStatic
     fun themeByLight(context: Context): Boolean =

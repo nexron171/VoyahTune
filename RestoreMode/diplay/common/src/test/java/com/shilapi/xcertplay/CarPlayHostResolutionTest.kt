@@ -135,11 +135,43 @@ class CarPlayHostResolutionTest {
         assertTrue(DisplayDiagnosticSnapshot.report(activity).contains("software_decoder"))
     }
 
+    @Test fun settingsScaleIsReadForEachHandshakeAndKeepsTheVideoCanvasAndFixedTheme() {
+        CarPlayDock.save(activity, CarPlayDock.BOTTOM)
+        set("widthPhysicalMm", 300)
+        val initial = config(100, height = 720).main
+        val scales = listOf(75, 85, 100, 115)
+        val widths = listOf(400, 353, 300, 261)
+        val heights = listOf(151, 133, 113, 98)
+        for (index in scales.indices) {
+            CarPlaySettingsAccess.setUiScalePercent(activity, scales[index])
+            val display = currentConfig(height = 720).main
+            assertEquals(1920, display.widthPixels)
+            assertEquals(720, display.heightPixels)
+            assertEquals(widths[index], display.widthPhysicalMm)
+            assertEquals(heights[index], display.heightPhysicalMm)
+            assertEquals(initial.safeArea, display.safeArea)
+            assertEquals(initial.viewAreas, display.viewAreas)
+        }
+        assertEquals(300, initial.widthPhysicalMm)
+
+        CarPlayDock.save(activity, CarPlayDock.DUAL_SIDES)
+        val themed = currentConfig(height = 720).main
+        assertEquals(311, themed.widthPhysicalMm)
+        assertEquals(116, themed.heightPhysicalMm)
+        assertEquals(115, CarPlaySettingsAccess.uiScalePercent(activity))
+        CarPlayDock.save(activity, CarPlayDock.DRIVER_SIDE)
+        assertEquals(261, currentConfig(height = 720).main.widthPhysicalMm)
+    }
+
     private fun config(percent: Int, uiPercent: Int = 100, width: Int = 1920, height: Int = 990): AirPlayConfig {
         set("displayScalePercent", percent)
         set("uiScalePercent", uiPercent)
         AirPlayPersistence.saveDisplayScalePercent(activity, percent)
         AirPlayPersistence.saveUiScalePercent(activity, uiPercent)
+        return currentConfig(width, height)
+    }
+
+    private fun currentConfig(width: Int = 1920, height: Int = 990): AirPlayConfig {
         val sizeClass = Class.forName("com.shilapi.xcertplay.CarPlayHostActivity\$DisplaySize")
         val size = sizeClass.getDeclaredConstructor(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
             .apply { isAccessible = true }.newInstance(width, height)

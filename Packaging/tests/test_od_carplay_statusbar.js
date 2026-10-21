@@ -57,6 +57,7 @@ test('only the exact CarPlay Activity on a physical display owns the status bar'
     }
     const app = harness();
     for (const activity of ['ru.big.town.anative.SplitHostActivity',
+        'ru.big.town.anative.CarPlayWindowedActivity',
         'ru.big.town.anative.AdvanceActivity', 'com.shilapi.xcertplay.CarPlayHostActivity', '']) {
         app.top[0] = activity;
         app.controller.reconcile();
@@ -67,6 +68,19 @@ test('only the exact CarPlay Activity on a physical display owns the status bar'
     assert.deepEqual(app.visible, [false, true]);
     app.controller.request(0, true);
     assert.equal(app.visible[0], false, 'Late OEM show cannot cover CarPlay');
+});
+
+test('switching to windowed CarPlay releases status-bar ownership on both displays', () => {
+    const app = harness();
+    app.top[0] = app.top[1] = carPlay;
+    app.controller.reconcile();
+    assert.deepEqual(app.visible, [false, false]);
+    for (const displayId of [0, 1]) {
+        app.top[displayId] = 'ru.big.town.anative.CarPlayWindowedActivity';
+        app.controller.reconcile();
+        assert.equal(app.visible[displayId], true);
+    }
+    assert.deepEqual(app.visible, [true, true]);
 });
 
 test('temporary reveal defeats late OEM hide, renews and expires independently of Native', () => {

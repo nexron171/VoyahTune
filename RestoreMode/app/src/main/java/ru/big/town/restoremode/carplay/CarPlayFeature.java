@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.WeakHashMap;
 
 import ru.big.town.common.CarPlayTarget;
+import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.restoremode.dashboard.DashboardProfile;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.integration.config.SplitConfigSync;
@@ -41,6 +42,18 @@ public final class CarPlayFeature {
 
     public static boolean isEnabled(Context context) {
         return CarPlaySettingsAccess.isEnabled(context);
+    }
+
+    public static void setFullscreen(Context context, boolean enabled) {
+        Context application = context.getApplicationContext();
+        if (InfrastructureProfile.read(application) != InfrastructureProfile.OD
+                || CarPlaySettingsAccess.fullscreen(application) == enabled) {
+            return;
+        }
+        CarPlaySettingsAccess.setFullscreen(application, enabled);
+        // Window configuration is published without waiting for transport teardown.
+        CarPlaySettingsAccess.disconnect(() -> {});
+        SplitConfigSync.pushDock(application, DashboardProfile.driver().settingsPreferences(application));
     }
 
     public static void initialize(Application application) {

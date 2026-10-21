@@ -62,6 +62,20 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             }
             if (ru.big.town.common.InfrastructureProfile.read(context)
                     == ru.big.town.common.InfrastructureProfile.OD) {
+                if (intent.hasExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN)) {
+                    int fullscreen = intent.getBooleanExtra(
+                            ru.big.town.common.CarPlayTarget.FULLSCREEN, false) ? 1 : 0;
+                    int previousFullscreen = Settings.Global.getInt(
+                            context.getContentResolver(),
+                            ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING, 0);
+                    Settings.Global.putInt(
+                            context.getContentResolver(),
+                            ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING,
+                            fullscreen);
+                    if (previousFullscreen != fullscreen) {
+                        SplitHostActivity.refreshCarPlayWindowMode();
+                    }
+                }
                 for (String key :
                         new String[] {"dockHomeShortVoyahTune", "dockAllAppsShortVoyahTune"}) {
                     Settings.Global.putString(

@@ -883,7 +883,7 @@ class CarPlayHostActivity : ComponentActivity() {
         gestureFingerCount = AirPlayPersistence.loadSettingsGestureFingers(this)
         displayScalePercent = AirPlayPersistence.loadDisplayScalePercent(this)
         displayScaleTenths = CarPlayDisplayScale.sanitize((displayScalePercent + 5) / 10)
-        // Size is now chosen only through CarPlaySize; ignore the canvas scale older builds stored.
+        // Interface scale changes the reported physical size, independently of canvas resolution.
         uiScalePercent = CarPlayUiScale.DEFAULT
         hevcEnabled = AirPlayPersistence.loadHevcEnabled(this)
         hevcSoftwareDecoderEnabled =
@@ -5153,7 +5153,10 @@ class CarPlayHostActivity : ComponentActivity() {
             maximumHeightPixels = maxOf(maximumDetectedHeightPixels, size.height),
             referenceMillimeters = widthPhysicalMm,
             basis = physicalSizeBasis,
-        )
+        ).let { physical ->
+            // Read on negotiation so an existing host uses the saved scale after reconnecting.
+            CarPlayUiScale.physicalSize(physical, AirPlayPersistence.loadUiScalePercent(this))
+        }
 
     private fun safeAreaSummary(): String {
         if (mainDisplayDisableSafeArea) {

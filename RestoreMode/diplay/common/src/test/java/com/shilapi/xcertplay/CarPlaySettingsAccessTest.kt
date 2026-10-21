@@ -20,6 +20,8 @@ class CarPlaySettingsAccessTest {
     @Before
     fun prepare() {
         app.getSharedPreferences("diplay", 0).edit().clear().commit()
+        app.getSharedPreferences("xcertplay_airplay", 0).edit().clear().commit()
+        app.getSharedPreferences("voyah_carplay_availability", 0).edit().clear().commit()
         CarPlayBackgroundSession.clear()
     }
 
@@ -38,6 +40,31 @@ class CarPlaySettingsAccessTest {
         DiPlayPreferences.savePhone(app, "00:11:22:33:44:55", "Test iPhone")
         assertTrue(CarPlaySettingsAccess.hasPhone(app))
         assertEquals("Test iPhone", CarPlaySettingsAccess.phoneName(app))
+    }
+
+    @Test
+    fun interfaceScaleDefaultsTo100AndUsesTheSharedSanitizedPreference() {
+        assertEquals(listOf(75, 85, 100, 115), CarPlaySettingsAccess.uiScalePresets())
+        assertEquals(100, CarPlaySettingsAccess.uiScalePercent(app))
+        CarPlaySettingsAccess.setUiScalePercent(app, 85)
+        assertEquals(85, AirPlayPersistence.loadUiScalePercent(app))
+        AirPlayPersistence.saveUiScalePercent(app, 115)
+        assertEquals(115, CarPlaySettingsAccess.uiScalePercent(app))
+        CarPlaySettingsAccess.setUiScalePercent(app, 90)
+        assertEquals(100, CarPlaySettingsAccess.uiScalePercent(app))
+    }
+
+    @Test
+    fun fullscreenDefaultsOffAndSurvivesFeatureToggle() {
+        assertFalse(CarPlaySettingsAccess.fullscreen(app))
+        CarPlaySettingsAccess.setFullscreen(app, true)
+        CarPlaySettingsAccess.setEnabled(app, false)
+        assertTrue(CarPlaySettingsAccess.fullscreen(app))
+        CarPlaySettingsAccess.setEnabled(app, true)
+        assertTrue(CarPlaySettingsAccess.fullscreen(app))
+        CarPlaySettingsAccess.setFullscreen(app, false)
+        assertTrue(CarPlaySettingsAccess.isEnabled(app))
+        assertFalse(CarPlaySettingsAccess.fullscreen(app))
     }
 
     @Test

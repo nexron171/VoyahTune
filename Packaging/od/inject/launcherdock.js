@@ -285,6 +285,7 @@ Java.perform(function () {
     function ourInsetActivity(act) {
         act = cleanJavaString(act);
         return act.indexOf("SplitHostActivity") >= 0
+            || act === "ru.big.town.anative.CarPlayWindowedActivity"
             || act.indexOf("restoremode.MainActivity") >= 0
             || act === "ru.big.town.restoremode.passenger.PassengerDashboardActivity"
             || act === "com.shilapi.xcertplay.DiPlayActivity"

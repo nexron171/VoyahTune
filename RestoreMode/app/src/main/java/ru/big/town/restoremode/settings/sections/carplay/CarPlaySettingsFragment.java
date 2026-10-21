@@ -7,26 +7,35 @@ import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
 import android.widget.RadioGroup;
-import android.widget.Switch;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 
-import com.shilapi.xcertplay.CarPlaySettingsAccess;
 import com.shilapi.xcertplay.CarPlayDock;
+import com.shilapi.xcertplay.CarPlaySettingsAccess;
 import com.shilapi.xcertplay.DiPlayActivity;
 import com.shilapi.xcertplay.media.CarPlayAudioSettings;
 
-import ru.big.town.restoremode.R;
+import java.util.List;
+
 import ru.big.town.common.CarPlayAudioProtocol;
+import ru.big.town.common.InfrastructureProfile;
+import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.carplay.CarPlayAudioClient;
 import ru.big.town.restoremode.carplay.CarPlayFeature;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 
 public final class CarPlaySettingsFragment extends SettingsSectionFragment {
+    private static final List<Integer> UI_SCALE_PRESETS = CarPlaySettingsAccess.uiScalePresets();
+    private static final int[] UI_SCALE_LABELS = {
+            R.id.carPlayUiScalePreset75, R.id.carPlayUiScalePreset85,
+            R.id.carPlayUiScalePreset100, R.id.carPlayUiScalePreset115
+    };
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean updating;
     private boolean stopping;
+    private boolean uiScaleDragging;
     private CarPlayAudioClient audio;
     private CarPlayAudioClient.Volumes volumes = new CarPlayAudioClient.Volumes(null, null);
     private final boolean[] dragging = new boolean[4];
@@ -83,6 +92,15 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
             }
             updateState();
         });
+        Switch fullscreen = settingView(R.id.carPlayFullscreen);
+        fullscreen.setSaveEnabled(false);
+        fullscreen.setOnCheckedChangeListener((button, checked) -> {
+            if (updating || !CarPlayFeature.isEnabled(requireContext())
+                    || InfrastructureProfile.read(requireContext()) != InfrastructureProfile.OD) {
+                return;
+            }
+            CarPlayFeature.setFullscreen(requireContext(), checked);
+        });
         RadioGroup layouts = settingView(R.id.carPlayLayoutChoices);
         layouts.setSaveEnabled(false);
         layouts.setOnCheckedChangeListener((group, selected) -> {
@@ -93,7 +111,9 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                     : selected == R.id.carPlayLayoutBottom ? CarPlayDock.BOTTOM
                     : CarPlayDock.DRIVER_SIDE;
             CarPlayDock.Companion.save(requireContext(), dock);
+            updateState();
         });
+        bindUiScale();
         for (int i = 0; i < SLIDERS.length; i++) {
             bindVolume(i);
         }
@@ -140,6 +160,62 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         updateState();
     }
 
+    private void bindUiScale() {
+        uiScaleDragging = false;
+        SeekBar slider = settingView(R.id.carPlayUiScale);
+        slider.setSaveEnabled(false);
+        slider.setMax(UI_SCALE_PRESETS.size() - 1);
+        slider.setKeyProgressIncrement(1);
+        for (int index = 0; index < UI_SCALE_LABELS.length; index++) {
+            TextView label = settingView(UI_SCALE_LABELS[index]);
+            label.setText(getString(R.string.carplay_ui_scale_percent, UI_SCALE_PRESETS.get(index)));
+        }
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar view, int progress, boolean fromUser) {
+                if (!fromUser || updating || !view.isEnabled()
+                        || !CarPlayFeature.isEnabled(requireContext())
+                        || CarPlayDock.Companion.load(requireContext()) == CarPlayDock.DUAL_SIDES) {
+                    return;
+                }
+                int percent = UI_SCALE_PRESETS.get(progress);
+                CarPlaySettingsAccess.setUiScalePercent(requireContext(), percent);
+                showUiScale(percent);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar view) {
+                uiScaleDragging = true;
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar view) {
+                uiScaleDragging = false;
+                updateState();
+            }
+        });
+    }
+
+    private void showUiScale(int percent) {
+        String label = getString(R.string.carplay_ui_scale_value, percent);
+        ((TextView) settingView(R.id.carPlayUiScaleLabel)).setText(label);
+        settingView(R.id.carPlayUiScale).setContentDescription(label);
+    }
+
+    private void updateUiScale(boolean enabled, CarPlayDock dock) {
+        boolean fixedTheme = dock == CarPlayDock.DUAL_SIDES;
+        SeekBar slider = settingView(R.id.carPlayUiScale);
+        slider.setEnabled(enabled && !fixedTheme);
+        if (!uiScaleDragging || !slider.isEnabled()) {
+            int percent = fixedTheme ? 100 : CarPlaySettingsAccess.uiScalePercent(requireContext());
+            slider.setProgress(UI_SCALE_PRESETS.indexOf(percent));
+        }
+        showUiScale(UI_SCALE_PRESETS.get(slider.getProgress()));
+        settingView(R.id.carPlayUiScaleLabel).setAlpha(fixedTheme ? 0.5f : 1f);
+        settingView(R.id.carPlayUiScalePresets).setAlpha(fixedTheme ? 0.5f : 1f);
+        settingView(R.id.carPlayUiScaleFixedTheme).setVisibility(fixedTheme ? View.VISIBLE : View.GONE);
+    }
+
     private void bindVolume(int index) {
         SeekBar slider = settingView(SLIDERS[index]);
         slider.setSaveEnabled(false);
@@ -164,10 +240,12 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                 handler.removeCallbacks(volumeWrites[index]);
                 handler.postDelayed(volumeWrites[index], 120);
             }
+
             @Override
             public void onStartTrackingTouch(SeekBar view) {
                 dragging[index] = true;
             }
+
             @Override
             public void onStopTrackingTouch(SeekBar view) {
                 handler.removeCallbacks(volumeWrites[index]);
@@ -216,12 +294,18 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         boolean enabled = CarPlayFeature.isEnabled(requireContext());
         ((Switch) settingView(R.id.carPlayEnabled)).setChecked(enabled);
         settingView(R.id.carPlayEnabledContent).setVisibility(enabled ? View.VISIBLE : View.GONE);
+        settingView(R.id.carPlayFullscreenCard).setVisibility(
+                InfrastructureProfile.read(requireContext()) == InfrastructureProfile.OD
+                        ? View.VISIBLE : View.GONE);
+        ((Switch) settingView(R.id.carPlayFullscreen)).setChecked(
+                CarPlaySettingsAccess.fullscreen(requireContext()));
         CarPlayDock dock = CarPlayDock.Companion.load(requireContext());
         // The existing automatic Voyah profile uses the lower climate dock.
         int selected = dock == CarPlayDock.DUAL_SIDES ? R.id.carPlayLayoutAston
                 : dock == CarPlayDock.DRIVER_SIDE ? R.id.carPlayLayoutClassic
                 : R.id.carPlayLayoutBottom;
         ((RadioGroup) settingView(R.id.carPlayLayoutChoices)).check(selected);
+        updateUiScale(enabled, dock);
         Switch duckMusic = settingView(R.id.carPlayDuckMusic);
         if (duckMusic != null) {
             duckMusic.setChecked(CarPlayAudioSettings.duckMusic(requireContext()));
@@ -263,6 +347,7 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
 
     @Override
     public void onPause() {
+        uiScaleDragging = false;
         for (Runnable write : volumeWrites) {
             if (write != null) {
                 handler.removeCallbacks(write);
@@ -283,6 +368,7 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected void onSectionViewDestroyed() {
+        uiScaleDragging = false;
         if (audio != null) {
             audio.stop();
         }

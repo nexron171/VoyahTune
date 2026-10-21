@@ -2,7 +2,7 @@ package com.shilapi.xcertplay.airplay
 
 import kotlin.math.roundToInt
 
-/** Request a larger canvas for smaller CarPlay controls, then fit it to the same touch surface. */
+/** Discrete interface scales and display transformations for CarPlay. */
 object CarPlayUiScale {
     const val DEFAULT = 100
     val presets = listOf(75, 85, DEFAULT, 115)
@@ -14,6 +14,16 @@ object CarPlayUiScale {
         85 -> "Small"
         115 -> "Large"
         else -> "Default"
+    }
+
+    /** iOS sizes controls physically; a wider reported screen makes them smaller on the same surface. */
+    fun physicalSize(size: AirPlayPhysicalSizeMm, percent: Int): AirPlayPhysicalSizeMm {
+        val scale = sanitize(percent)
+        if (scale == DEFAULT) return size
+        fun millimeters(value: Int): Int = AirPlayDisplaySettings.sanitizeReportedPhysicalMm(
+            (value.toDouble() * DEFAULT / scale).roundToInt(),
+        )
+        return AirPlayPhysicalSizeMm(millimeters(size.widthMm), millimeters(size.heightMm))
     }
 
     fun apply(display: AirPlayDisplayConfig, percent: Int): AirPlayDisplayConfig {

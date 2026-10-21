@@ -15,6 +15,8 @@ public final class CarPlayTarget {
     public static final String ID = PACKAGE + "/" + ACTIVITY;
     public static final String LABEL = "VoyahTune CarPlay";
     public static final String ENABLED = "carPlayEnabled";
+    public static final String FULLSCREEN = "carPlayFullscreen";
+    public static final String FULLSCREEN_SETTING = "voyahtune_carplay_fullscreen";
     public static final String EXTRA_HOST_DISPLAY_ID = "carPlayHostDisplayId";
     public static final String EXTRA_PROJECTION_DISPLAY_ID = "carPlayProjectionDisplayId";
     public static final String ACTION_HOST_DISPLAY_CHANGED =

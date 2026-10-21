@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="carplay_enabled">Включить CarPlay</string>
+    <string name="carplay_fullscreen">Полноэкранный CarPlay</string>
+    <string name="carplay_fullscreen_description">Скрывать штатный док и статус-бар. Изменение сразу применяется и отключает текущую сессию CarPlay.</string>
     <string name="carplay_layout_title">Тема CarPlay</string>
     <string name="carplay_layout_classic">Обычный</string>
     <string name="carplay_layout_bottom">Док снизу</string>
     <string name="carplay_layout_aston">Aston Martin</string>
-    <string name="carplay_layout_reconnect">Тема применится при следующем переподключении CarPlay.</string>
+    <string name="carplay_layout_reconnect">Тема и масштаб применятся при следующем переподключении CarPlay.</string>
+    <string name="carplay_ui_scale_title">Масштаб интерфейса</string>
+    <string name="carplay_ui_scale_value">Масштаб интерфейса: %1$d%%</string>
+    <string name="carplay_ui_scale_percent">%1$d%%</string>
+    <string name="carplay_ui_scale_fixed">В теме Aston Martin масштаб задан самой темой и не меняется.</string>
     <string name="carplay_authentication_error">Не удалось загрузить ключи CarPlay. Установите полную сборку VoyahTune поверх текущей. Удалять приложение или сбрасывать его данные не требуется.</string>
     <string name="carplay_home_title">CarPlay</string>
     <string name="carplay_home_brand">VoyahTune</string>

@@ -197,6 +197,7 @@ test('only the live physical fullscreen host owns chrome; unrelated screens stay
 
     for (const activity of [
         'ru.big.town.anative.SplitHostActivity',
+        'ru.big.town.anative.CarPlayWindowedActivity',
         'ru.big.town.anative.AdvanceActivity',
         'com.shilapi.xcertplay.CarPlayHostActivity',
         'com.shilapi.xcertplay.DiPlayActivity',
@@ -216,6 +217,36 @@ test('only the live physical fullscreen host owns chrome; unrelated screens stay
     assert.equal(app.requests.length, 1);
     app.model.handleUpdateMainNavigationBar('stale.app', 'StaleActivity', true);
     assert.equal(app.dockVisible[0], false, 'Late OEM show cannot cover the fullscreen host');
+});
+
+test('windowed CarPlay keeps the OEM dock under ordinary inset-window policy', () => {
+    const app = harness();
+    app.context.cfg = () => '1';
+    vm.runInContext(['ourInsetActivity', 'dockKept'].map(production).join('\n'), app.context);
+    assert.equal(app.context.dockKept(nativePackage, nativePackage + '.CarPlayWindowedActivity'), true);
+    assert.equal(app.context.dockKept(nativePackage, carPlayActivity), false);
+    assert.equal(app.context.dockKept(nativePackage, nativePackage + '.OtherActivity'), false);
+    app.context.cfg = () => '0';
+    assert.equal(app.context.dockKept(nativePackage, nativePackage + '.CarPlayWindowedActivity'), false);
+});
+
+test('windowed CarPlay restores both OEM panels on either physical screen', () => {
+    for (const displayId of [0, 1]) {
+        const app = harness();
+        app.carPlay(displayId);
+        app.reconcile();
+        assert.equal(app.dockVisible[displayId], false);
+        assert.equal(app.statusVisible[displayId], false);
+        app.carPlay(displayId, nativePackage + '.CarPlayWindowedActivity');
+        app.reconcile();
+        assert.deepEqual(app.dockVisible, [true, true]);
+        assert.deepEqual(app.statusVisible, [true, true]);
+        assert.deepEqual(app.saved, [false, false]);
+        app.carPlay(displayId);
+        app.reconcile();
+        assert.equal(app.dockVisible[displayId], false);
+        assert.equal(app.statusVisible[displayId], false);
+    }
 });
 
 test('the access button reveals only its screen and expires without an Activity callback', () => {

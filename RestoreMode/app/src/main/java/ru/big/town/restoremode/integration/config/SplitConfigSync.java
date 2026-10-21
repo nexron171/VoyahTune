@@ -116,6 +116,8 @@ public final class SplitConfigSync {
         }
         if (ru.big.town.common.InfrastructureProfile.read(context)
                 == ru.big.town.common.InfrastructureProfile.OD) {
+            i.putExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN,
+                    com.shilapi.xcertplay.CarPlaySettingsAccess.fullscreen(context));
             i.putExtra("dockHomeShortVoyahTune", prefs.getBoolean("dockHomeShortVoyahTune", false));
             i.putExtra(
                     "dockAllAppsShortVoyahTune",
