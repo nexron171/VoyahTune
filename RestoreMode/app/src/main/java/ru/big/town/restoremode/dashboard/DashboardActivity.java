@@ -79,6 +79,7 @@ import ru.big.town.restoremode.integration.GlobalVars;
 import ru.big.town.restoremode.integration.config.SplitConfigSync;
 import ru.big.town.restoremode.scenarios.ScenarioQuickList;
 import ru.big.town.restoremode.scenarios.ScenarioStore;
+import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
 import ru.big.town.restoremode.widgets.apps.AppWidgetSessionStore;
@@ -1218,6 +1219,11 @@ public class DashboardActivity extends AppCompatActivity {
 
         resultIntent.putExtra("customCommand", customCommand);
         resultIntent.putExtra("customCommandCount", customCommandCount);
+        resultIntent.putExtra(
+                AdvanceActivity.EXTRA_SECTION,
+                dashboardProfile.isPassenger()
+                        ? SettingsSection.PASSENGER.identifier
+                        : SettingsSection.MAIN.identifier);
     }
 
     public void initIntentStarButton() {
@@ -2070,9 +2076,6 @@ public class DashboardActivity extends AppCompatActivity {
             }
 
             if (TileOrderStore.Tile.TYPE_SCENARIO.equals(tile.type)) {
-                if (dashboardProfile.isPassenger()) {
-                    continue;
-                }
                 ScenarioStore.Scenario scenario = ScenarioStore.find(settingsPreferences, tile.id);
                 if (scenario == null || !scenario.enabled) {
                     continue;

@@ -2,6 +2,9 @@ package ru.big.town.restoremode.settings.core;
 
 import ru.big.town.restoremode.R;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** Resource descriptors only; no section creates Views before it is selected. */
 public final class SettingsSectionLayouts {
     private SettingsSectionLayouts() {}
@@ -17,8 +20,7 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_forced_ev_suspension_maintenance),
         layout(R.layout.settings_main_launch_apps_suspension),
         layout(R.layout.settings_main_suspension_description),
-        layout(R.layout.settings_main_headlights),
-        layout(R.layout.settings_main_radio),
+        layout(R.layout.settings_main_headlights_radio),
         layout(R.layout.settings_main_carplay_heading),
         dynamic(DynamicContent.CARPLAY_WIDGETS),
         layout(R.layout.settings_main_energy_heading),
@@ -109,26 +111,19 @@ public final class SettingsSectionLayouts {
     private static final Item[] STEERING = {
         layout(R.layout.settings_steering_intro), layout(R.layout.settings_steering_button_actions)
     };
-    private static final Item[] PASSENGER = {
-        layout(R.layout.settings_passenger_intro),
-        layout(R.layout.settings_passenger_autostart),
-        layout(R.layout.settings_passenger_widgets_heading),
-        layout(R.layout.settings_passenger_trip_timer),
-        layout(R.layout.settings_main_cpu_ram),
-        layout(R.layout.settings_main_media),
-        layout(R.layout.settings_main_memory_task_manager),
-        layout(R.layout.settings_main_app_widgets_heading),
-        dynamic(DynamicContent.APP_WIDGETS),
-        layout(R.layout.settings_main_add_app_widget),
-        layout(R.layout.settings_passenger_shortcuts_heading),
-        dynamic(DynamicContent.SHORTCUTS),
-        layout(R.layout.settings_main_add_shortcut),
-        layout(R.layout.settings_main_dial_cards_heading),
-        dynamic(DynamicContent.DIAL_CARDS),
-        layout(R.layout.settings_main_add_dial_card),
-        layout(R.layout.settings_passenger_grid_heading),
-        layout(R.layout.settings_main_grid)
-    };
+    private static final Item[] PASSENGER = passengerLayouts();
+
+    private static Item[] passengerLayouts() {
+        List<Item> layouts = new ArrayList<>();
+        layouts.add(layout(R.layout.settings_passenger_intro));
+        layouts.add(layout(R.layout.settings_passenger_autostart));
+        for (Item item : MAIN) {
+            if (item.layoutResource != R.layout.settings_main_overview) {
+                layouts.add(item);
+            }
+        }
+        return layouts.toArray(new Item[0]);
+    }
 
     public enum DynamicContent {
         CARPLAY_WIDGETS,

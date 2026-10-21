@@ -79,10 +79,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
 
     private void bindMainWidgetSwitches() {
         bindMediaAutoStart();
-        bindShowSwitch(
-                R.id.switchShowPassengerDashboardTile,
-                "showPassengerDashboardTile",
-                false);
+        bindShowSwitch(R.id.switchShowPassengerDashboardTile, "showPassengerDashboardTile", false);
         bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer", true);
         bindShowSwitch(R.id.switchShowPowerHold, "showPowerHold", true);
         bindShowSwitch(R.id.switchShowWashMode, "showWashMode", true);
@@ -632,14 +629,19 @@ public class MainSettingsFragment extends SettingsSectionFragment {
             rows.add(
                     new SettingsList.Row(
                             "carplay:" + (entry == null ? "new" : entry.id),
-                            parent ->
-                                    CarPlayWidgetSettings.create(
-                                            requireContext(),
-                                            parent,
-                                            preferences,
-                                            entry,
-                                            this::canAddAppWidget,
-                                            this::refreshSettingsRows)));
+                            parent -> {
+                                View row =
+                                        CarPlayWidgetSettings.create(
+                                                requireContext(),
+                                                parent,
+                                                preferences,
+                                                profile(),
+                                                entry,
+                                                this::canAddAppWidget,
+                                                this::refreshSettingsRows);
+                                useLayoutPreferences(row);
+                                return row;
+                            }));
         }
     }
 
@@ -1056,8 +1058,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         if (autoStart == null) {
             return;
         }
-        autoStart.setChecked(
-                globalPreferences.getBoolean("mediaAutoStartLastPlayer", false));
+        autoStart.setChecked(globalPreferences.getBoolean("mediaAutoStartLastPlayer", false));
         autoStart.setOnCheckedChangeListener(
                 (button, checked) ->
                         globalPreferences
@@ -1088,17 +1089,19 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     @Override
     protected View decorateSettingsRow(int layout, View row) {
         if (layout == R.layout.settings_main_carplay_heading) {
-            row.setVisibility(ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(requireContext())
-                    ? View.VISIBLE : View.GONE);
+            row.setVisibility(
+                    ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(requireContext())
+                            ? View.VISIBLE
+                            : View.GONE);
         }
         if (profile().isPassenger()) {
             useLayoutPreferences(row);
         }
-        if (layout == R.layout.settings_main_radio
+        View radioCard = row.findViewById(R.id.radioWidgetCard);
+        if (radioCard != null
                 && ru.big.town.common.InfrastructureProfile.read(requireContext())
                         != ru.big.town.common.InfrastructureProfile.OD) {
-            row.setVisibility(View.GONE);
-            return row;
+            radioCard.setVisibility(View.GONE);
         }
         if (layout == R.layout.settings_main_add_shortcut) {
             return SettingsPanels.appSelectionPanel(

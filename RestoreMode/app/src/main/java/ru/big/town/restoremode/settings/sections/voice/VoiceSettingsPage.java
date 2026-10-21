@@ -292,8 +292,9 @@ public final class VoiceSettingsPage {
         shortcut.setOnCheckedChangeListener(
                 (button, checked) ->
                         preferences.edit().putBoolean("showVoiceCommand", checked).apply());
-        View siriRow = components.row(
-                "Включить Siri в CarPlay", "Работает при подключённом iPhone.", siri);
+        View siriRow =
+                components.row(
+                        "Включить Siri в CarPlay", "Работает при подключённом iPhone.", siri);
         if (!ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(activity)) {
             siriRow.setVisibility(View.GONE);
             siriHint.setVisibility(View.GONE);
@@ -484,6 +485,13 @@ public final class VoiceSettingsPage {
                     preferences.edit().putBoolean(HELP_EXPANDED, !expanded).apply();
                     refresh();
                 });
+        LinearLayout.LayoutParams spacing =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        spacing.topMargin = dp(16);
+        spacing.bottomMargin = expanded ? dp(16) : 0;
+        toggle.setLayoutParams(spacing);
         return toggle;
     }
 

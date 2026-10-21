@@ -12,31 +12,38 @@ import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 
-import java.util.function.BooleanSupplier;
-import java.util.function.IntConsumer;
-
 import ru.big.town.common.CarPlayTarget;
 import ru.big.town.restoremode.R;
+import ru.big.town.restoremode.dashboard.DashboardProfile;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
 import ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 
+import java.util.function.BooleanSupplier;
+import java.util.function.IntConsumer;
+
 final class CarPlayWidgetSettings {
     private final Context context;
     private final SharedPreferences preferences;
+    private final DashboardProfile profile;
     private final AppWidgetStore.Entry entry;
     private final View root;
 
     private CarPlayWidgetSettings(
-            Context context, ViewGroup parent, SharedPreferences preferences,
+            Context context,
+            ViewGroup parent,
+            SharedPreferences preferences,
+            DashboardProfile profile,
             AppWidgetStore.Entry entry) {
         this.context = context;
         this.preferences = preferences;
+        this.profile = profile;
         this.entry = entry;
-        root = LayoutInflater.from(context)
-                .inflate(R.layout.settings_main_carplay_widget, parent, false);
+        root =
+                LayoutInflater.from(context)
+                        .inflate(R.layout.settings_main_carplay_widget, parent, false);
     }
 
     static boolean isDedicated(AppWidgetStore.Entry entry) {
@@ -45,10 +52,15 @@ final class CarPlayWidgetSettings {
     }
 
     static View create(
-            Context context, ViewGroup parent, SharedPreferences preferences,
-            AppWidgetStore.Entry entry, BooleanSupplier canAdd, Runnable refreshRows) {
+            Context context,
+            ViewGroup parent,
+            SharedPreferences preferences,
+            DashboardProfile profile,
+            AppWidgetStore.Entry entry,
+            BooleanSupplier canAdd,
+            Runnable refreshRows) {
         CarPlayWidgetSettings settings =
-                new CarPlayWidgetSettings(context, parent, preferences, entry);
+                new CarPlayWidgetSettings(context, parent, preferences, profile, entry);
         settings.bind(canAdd, refreshRows);
         SettingsDesign.styleTree(settings.root);
         return settings.root;
@@ -59,53 +71,59 @@ final class CarPlayWidgetSettings {
         enabled.setChecked(entry != null);
         root.findViewById(R.id.carPlayWidgetOptions)
                 .setVisibility(entry == null ? View.GONE : View.VISIBLE);
-        enabled.setOnCheckedChangeListener((button, checked) -> {
-            if (checked && entry == null) {
-                if (!ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)
-                        || !canAdd.getAsBoolean()) {
-                    enabled.setChecked(false);
-                    return;
-                }
-                AppWidgetStore.Entry created = AppWidgetStore.add(preferences, CarPlayTarget.ID);
-                if (created == null) {
-                    enabled.setChecked(false);
-                    return;
-                }
-                created.width = 1;
-                created.height = 1;
-                AppWidgetStore.update(preferences, created);
-            } else if (!checked && entry != null) {
-                AppWidgetStore.remove(preferences, entry.id);
-            } else {
-                return;
-            }
-            TileOrderStore.sync(preferences, context.getPackageManager());
-            refreshRows.run();
-        });
+        enabled.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    if (checked && entry == null) {
+                        if (!ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)
+                                || !canAdd.getAsBoolean()) {
+                            enabled.setChecked(false);
+                            return;
+                        }
+                        AppWidgetStore.Entry created =
+                                AppWidgetStore.add(
+                                        preferences, CarPlayTarget.ID, profile.widgetIdPrefix());
+                        if (created == null) {
+                            enabled.setChecked(false);
+                            return;
+                        }
+                        created.width = 1;
+                        created.height = 1;
+                        AppWidgetStore.update(preferences, created);
+                    } else if (!checked && entry != null) {
+                        AppWidgetStore.remove(preferences, entry.id);
+                    } else {
+                        return;
+                    }
+                    syncTiles();
+                    refreshRows.run();
+                });
 
         RadioGroup mode = root.findViewById(R.id.carPlayWidgetMode);
         mode.check(isShortcut() ? R.id.carPlayWidgetShortcutMode : R.id.carPlayWidgetWindowMode);
         updateWindowControls();
-        mode.setOnCheckedChangeListener((group, checkedId) -> {
-            if (entry == null) {
-                return;
-            }
-            boolean shortcut = checkedId == R.id.carPlayWidgetShortcutMode;
-            if (shortcut == isShortcut()) {
-                return;
-            }
-            if (shortcut) {
-                rememberWindowSize();
-                entry.width = 1;
-                entry.height = 1;
-            } else {
-                entry.width = TileSizeStore.width(preferences, windowSizeKey(), 8);
-                entry.height = Math.max(minimumWindowHeight(),
-                        TileSizeStore.height(preferences, windowSizeKey(), 5));
-            }
-            saveEntry();
-            updateWindowControls();
-        });
+        mode.setOnCheckedChangeListener(
+                (group, checkedId) -> {
+                    if (entry == null) {
+                        return;
+                    }
+                    boolean shortcut = checkedId == R.id.carPlayWidgetShortcutMode;
+                    if (shortcut == isShortcut()) {
+                        return;
+                    }
+                    if (shortcut) {
+                        rememberWindowSize();
+                        entry.width = 1;
+                        entry.height = 1;
+                    } else {
+                        entry.width = TileSizeStore.width(preferences, windowSizeKey(), 8);
+                        entry.height =
+                                Math.max(
+                                        minimumWindowHeight(),
+                                        TileSizeStore.height(preferences, windowSizeKey(), 5));
+                    }
+                    saveEntry();
+                    updateWindowControls();
+                });
     }
 
     private boolean isShortcut() {
@@ -129,7 +147,15 @@ final class CarPlayWidgetSettings {
 
     private void saveEntry() {
         AppWidgetStore.update(preferences, entry);
-        TileOrderStore.sync(preferences, context.getPackageManager());
+        syncTiles();
+    }
+
+    private void syncTiles() {
+        TileOrderStore.sync(
+                preferences,
+                profile.settingsPreferences(context),
+                context.getPackageManager(),
+                profile.isPassenger());
     }
 
     private void updateWindowControls() {
@@ -144,19 +170,28 @@ final class CarPlayWidgetSettings {
         Switch autoStart = root.findViewById(R.id.carPlayWidgetAutoStart);
         autoStart.setOnCheckedChangeListener(null);
         autoStart.setChecked(entry.autoStart);
-        autoStart.setOnCheckedChangeListener((button, checked) -> {
-            entry.autoStart = checked;
-            saveEntry();
-        });
-        bindDimension(R.id.carPlayWidgetWidth, 1, 12, entry.width,
-                width -> resize(width, entry.height));
-        bindDimension(R.id.carPlayWidgetHeight, minimumWindowHeight(), 5, entry.height,
+        autoStart.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    entry.autoStart = checked;
+                    saveEntry();
+                });
+        bindDimension(
+                R.id.carPlayWidgetWidth, 1, 12, entry.width, width -> resize(width, entry.height));
+        bindDimension(
+                R.id.carPlayWidgetHeight,
+                minimumWindowHeight(),
+                5,
+                entry.height,
                 height -> resize(entry.width, height));
         SettingsPreviewView preview = root.findViewById(R.id.carPlayWidgetGrid);
         preview.setCells(entry.width, entry.height);
         TextView summary = root.findViewById(R.id.carPlayWidgetSizeSummary);
-        summary.setText(context.getString(R.string.carplay_widget_size_summary,
-                entry.width, entry.height, entry.width * entry.height));
+        summary.setText(
+                context.getString(
+                        R.string.carplay_widget_size_summary,
+                        entry.width,
+                        entry.height,
+                        entry.width * entry.height));
     }
 
     private void resize(int width, int height) {
@@ -171,8 +206,8 @@ final class CarPlayWidgetSettings {
         updateWindowControls();
     }
 
-    private void bindDimension(int viewId, int minimum, int maximum, int selected,
-            IntConsumer onChanged) {
+    private void bindDimension(
+            int viewId, int minimum, int maximum, int selected, IntConsumer onChanged) {
         Spinner spinner = root.findViewById(viewId);
         spinner.setOnItemSelectedListener(null);
         String[] values = new String[maximum - minimum + 1];
@@ -185,16 +220,18 @@ final class CarPlayWidgetSettings {
         adapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
         spinner.setAdapter(adapter);
         spinner.setSelection(selected - minimum);
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (position == parent.getSelectedItemPosition()) {
-                    onChanged.accept(position + minimum);
-                }
-            }
+        spinner.setOnItemSelectedListener(
+                new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(
+                            AdapterView<?> parent, View view, int position, long id) {
+                        if (position == parent.getSelectedItemPosition()) {
+                            onChanged.accept(position + minimum);
+                        }
+                    }
 
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
-        });
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {}
+                });
     }
 }
