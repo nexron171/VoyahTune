@@ -77,7 +77,8 @@ set_view_hook_line=$(grep -nF 'setView.implementation = function' "$AGENT" | cut
 [ "$receiver_line" -lt "$set_view_hook_line" ] \
     || fail "ViewRoot hook is installed before reversible WIN_RELOAD lifecycle"
 
-# Loader: exact main process, 64-bit or the specific 32-bit RdsApp, user 0 only, and one worker.
+# Loader: exact main process, 64-bit or an allowed 32-bit OEM/navigation target, user 0 only,
+# and one worker. Check ABI alternatives independently of their order and line wrapping.
 # A circuit breaker blocks two rapid restarts. Agent readiness must precede the active marker.
 for REQUIRED in \
         'APP_CLIENT=/data/local/bin/app_client.js' \
@@ -89,8 +90,14 @@ for REQUIRED in \
         'FC_CURRENT_ID=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE"' \
         'FC_ID_BEFORE=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE"' \
         '[ "$FC_UID" -lt 100000 ]' \
-        '*:*/app_process64|com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32|' \
-        'ru.yandex.yandexnavi:*/app_process32|ru.dublgis.dgismobile:*/app_process32) FC_INJECTOR=$FI' \
+        '*:*/app_process64' \
+        'com.qinggan.systemui:*/app_process32' \
+        'com.pateo.rdsapp:*/app_process32' \
+        'com.qinggan.cluster:*/app_process32' \
+        'com.qinggan.bluetoothphone:*/app_process32' \
+        'ru.yandex.yandexnavi:*/app_process32' \
+        'ru.dublgis.dgismobile:*/app_process32' \
+        'FC_INJECTOR=$FI ;;' \
         'reserve_injection_attempt "$FC_TARGET_ID" "$FC_TARGET_ATTEMPT"' \
         'grep -qF "$FC_TARGET_READY" "$FC_TRY"' \
         'grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"' \

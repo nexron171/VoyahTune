@@ -171,8 +171,8 @@ if grep -Fq 'dockPassenger' "$DOCK"; then
 fi
 grep -Fq 'com.qinggan.launcher.allapp.AllAppDataManager' "$DOCK" \
     || fail "third-party launchable apps are not added to the stock launcher"
-grep -Fq 'if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list);' "$DOCK" \
-    || fail "All Apps injection must cover both physical displays"
+grep -Fq 'if ((screenId === 0 || screenId === 1) && list !== null) addMissingApps(list, screenId);' "$DOCK" \
+    || fail "All Apps injection must preserve the physical screen for both displays"
 [ "$(grep -Fc 'pm.getInstalledApplications(0)' "$DOCK")" -eq 1 ] \
     || fail "installed app discovery must have one event-invalidated snapshot builder, not polling"
 grep -Fq 'var reloadData = Data.reload.overload();' "$DOCK" \
