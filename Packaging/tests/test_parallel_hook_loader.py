@@ -61,6 +61,8 @@ case "$script" in
         if [ ! -f "$root/missing_cluster_ready" ]; then echo '[cluster-units] hook ready v1'; fi
         if [ ! -f "$root/missing_navigation_ready" ]; then echo '[navigation-source] hook ready v1'; fi
         if [ ! -f "$root/missing_rds_ready" ]; then echo '[rds-restore] hook ready v1'; fi
+        if [ ! -f "$root/missing_statusbar_ready" ]; then echo '[carplay-statusbar] hook ready v1'; fi
+        if [ ! -f "$root/missing_anchor_ready" ]; then echo '[carplay-anchor] hook ready v1'; fi
         gate=none ;;
     voyahtune_phone_numbers.js)
         if [ ! -f "$root/missing_phone_ready" ]; then echo '[phone-numbers] hook ready v1'; fi
@@ -265,6 +267,54 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
             env=self.env,
             capture_output=True,
         )
+
+    def test_systemui_discovered_without_geometry_selection_once_per_identity(self):
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        marker = self.root / "voyahtune_app_client.com.qinggan.systemui.pid"
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_hiboard_discovered_once_and_requires_anchor_marker(self):
+        (self.root / "missing_anchor_ready").touch()
+        self.rds_probe(package="com.qinggan.app.hiboard", selected=False)
+        marker = self.root / "voyahtune_app_client.com.qinggan.app.hiboard.pid"
+        self.assertFalse(marker.exists())
+        self.rds_probe(package="com.qinggan.app.hiboard", selected=False)
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+        (self.root / "missing_anchor_ready").unlink()
+        (self.root / "generation.109").write_text("2\n")
+        self.rds_probe(package="com.qinggan.app.hiboard", selected=False)
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:2")
+
+    def test_hiboard_32_bit_timeout_requires_ready_markers(self):
+        (self.root / "app_client_timeout").touch()
+        self.rds_probe(package="com.qinggan.app.hiboard", selected=False,
+                       executable="/system/bin/app_process32")
+        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.app.hiboard.pid").exists())
+
+    def test_systemui_requires_its_own_ready_marker(self):
+        (self.root / "missing_statusbar_ready").touch()
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        self.assertFalse((self.root / "voyahtune_app_client.com.qinggan.systemui.pid").exists())
+        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.systemui.attempt").exists())
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_systemui_supports_32_bit_runtime(self):
+        self.rds_probe(package="com.qinggan.systemui", selected=False, executable="/system/bin/app_process32")
+        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.systemui.pid").exists())
+
+    def test_systemui_timeout_requires_both_ready_markers(self):
+        (self.root / "app_client_timeout").touch()
+        (self.root / "missing_statusbar_ready").touch()
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        marker = self.root / "voyahtune_app_client.com.qinggan.systemui.pid"
+        self.assertFalse(marker.exists())
+        (self.root / "missing_statusbar_ready").unlink()
+        (self.root / "generation.109").write_text("2\n")
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:2")
 
     def test_cluster_units_discovered_without_geometry_selection(self):
         self.rds_probe(package="com.qinggan.cluster", selected=False)

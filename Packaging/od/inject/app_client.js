@@ -18,13 +18,16 @@
 // keeps its native physical resolution; no VirtualDisplay or compositor upscaling is involved.
 
 // frida-inject 16.2.1 awaits RPC init before -e eternalizes/detaches the script.
-// Keep stdout connected until both ordinary bootstrap and the main-thread RDS hook finish.
+// Keep stdout connected until bootstrap and the main-thread OEM adapters finish.
 var appClientBootstrapResolve;
 var appClientBootstrap = new Promise(function (resolve) { appClientBootstrapResolve = resolve; });
 var appClientRdsReady = Promise.resolve();
+var appClientOemUiReady = Promise.resolve();
 if (typeof rpc !== "undefined") {
     rpc.exports = {init: function () {
-        return appClientBootstrap.then(function () { return appClientRdsReady; });
+        return appClientBootstrap.then(function () {
+            return Promise.all([appClientRdsReady, appClientOemUiReady]);
+        });
     }};
 }
 function scheduleRdsStationRestore(application) {
@@ -81,6 +84,18 @@ Java.perform(function () {
     }
 
     var packageName = "" + application.getPackageName();
+    if (packageName === "com.qinggan.systemui" || packageName === "com.qinggan.app.hiboard") {
+        appClientOemUiReady = new Promise(function (resolve) {
+            Java.scheduleOnMainThread(function () {
+                try {
+                    var installed = packageName === "com.qinggan.systemui"
+                            ? installCarPlayStatusBar(application) : installCarPlayAnchorTap(application);
+                    if (installed) console.log(READY_MARKER);
+                } finally { resolve(); }
+            });
+        });
+        return;
+    }
     if (packageName === "ru.yandex.yandexnavi" || packageName === "ru.dublgis.dgismobile") {
         installNavigationSource(application);
     }
@@ -535,6 +550,314 @@ Java.perform(function () {
         + " mapkitDpi=" + mapkitDpi + " mapkitHooks=" + mapkitHooksInstalled);
     } finally { appClientBootstrapResolve(); }
 });
+
+function createCarPlayAnchorTapTracker() {
+    var gestures = new Map();
+    return function (key, event, eligible, slop, maxDuration) {
+        if (!event || !eligible) {
+            gestures.delete(key);
+            return false;
+        }
+        if (event.action === 0) {
+            gestures.delete(key);
+            if (event.pointers === 1) gestures.set(key, event);
+            return false;
+        }
+        var down = gestures.get(key);
+        if (!down) return false;
+        var duration = event.time - down.time;
+        if (event.pointers !== 1 || event.pointer !== down.pointer || duration < 0
+                || duration >= maxDuration || (event.action !== 1 && event.action !== 2)
+                || Math.hypot(event.x - down.x, event.y - down.y) > slop) {
+            gestures.delete(key);
+            return false;
+        }
+        if (event.action !== 1) return false;
+        gestures.delete(key);
+        return true;
+    };
+}
+
+function installCarPlayAnchorTap(application) {
+    var original = null;
+    try {
+        var BlindsWindow = Java.use("com.qinggan.app.hiboard.BlindsWindow");
+        var ServiceManager = Java.use("com.qinggan.os.ServiceManager");
+        var SettingsGlobal = Java.use("android.provider.Settings$Global");
+        var SystemClock = Java.use("android.os.SystemClock");
+        var System = Java.use("java.lang.System");
+        var ViewConfiguration = Java.use("android.view.ViewConfiguration");
+        var Rect = Java.use("android.graphics.Rect");
+        var Log = Java.use("android.util.Log");
+        var controllers = {
+            VehicleHiBoardBarNew: Java.use("com.qinggan.app.hiboard.vehiclehiboard.main.VehicleHiBoardBarNew"),
+            VehicleHiBoardBarNewOTA: Java.use("com.qinggan.app.hiboard.vehiclehiboard.main.VehicleHiBoardBarNewOTA"),
+            SecondVehicleHiboardBar: Java.use("com.qinggan.app.hiboard.vehiclehiboard.second.SecondVehicleHiboardBar")
+        };
+        var track = createCarPlayAnchorTapTracker();
+        original = BlindsWindow.handleTouch.overload("android.view.MotionEvent");
+        original.implementation = function (motion) {
+            var tap = false;
+            var displayId = -1;
+            var key = null;
+            try {
+                key = String(System.identityHashCode(this));
+                var type = controllers[String(this.mTag.value)];
+                if (type) {
+                    var bar = Java.cast(this.mWindowStatusListener.value, type);
+                    var delegate = bar.mDelegateView.value;
+                    var display = delegate.getDisplay();
+                    displayId = display === null ? -1 : display.getDisplayId();
+                    var activity = ServiceManager.getDpyTopAppInfo(application, displayId, 2);
+                    var layout = this.mLp.value;
+                    var eligible = isCarPlayStatusBarTarget(activity, displayId)
+                            && layout.x.value === layout.minOffset.value
+                            && !this.isCollapsing.value.get() && !this.isExpanding.value.get();
+                    var lineBounds = Rect.$new();
+                    var line = bar.mLineView.value;
+                    var lineVisible = line !== null && line.getGlobalVisibleRect(lineBounds);
+                    var density = Number(delegate.getResources().getDisplayMetrics().density.value);
+                    var slop = Number(this.mScaledTouchSlop.value);
+                    var x = Number(motion.getX());
+                    var y = Number(motion.getY());
+                    var height = Number(delegate.getHeight());
+                    // The transparent edge window also covers the Native access button.
+                    var onMarker = lineVisible && y >= lineBounds.top.value - slop
+                            && y <= lineBounds.bottom.value + slop;
+                    var onAccessButton = y >= height - 50 * density;
+                    eligible = eligible && x >= 0 && x < delegate.getWidth()
+                            && y >= 0 && y < height && (onMarker || onAccessButton);
+                    for (var index = 0; index < motion.getHistorySize(); index++) {
+                        track(key, {action: 2, x: Number(motion.getHistoricalX(index)),
+                            y: Number(motion.getHistoricalY(index)), time: Number(motion.getHistoricalEventTime(index)),
+                            pointers: motion.getPointerCount(), pointer: motion.getPointerId(0)},
+                            eligible, slop, ViewConfiguration.getLongPressTimeout());
+                    }
+                    tap = track(key, {action: motion.getActionMasked(), x: x, y: y,
+                        time: Number(motion.getEventTime()), pointers: motion.getPointerCount(),
+                        pointer: motion.getPointerId(0)}, eligible, slop, ViewConfiguration.getLongPressTimeout());
+                } else {
+                    track(key, null, false);
+                }
+            } catch (error) {
+                if (key !== null) track(key, null, false);
+                Log.e("vt_carplay_anchor", "gesture observation failed: " + error);
+            }
+
+            // Every OEM event and return value remain intact, including the complete drag stream.
+            var result = original.call(this, motion);
+            if (tap) {
+                try {
+                    var activity = ServiceManager.getDpyTopAppInfo(application, displayId, 2);
+                    if (isCarPlayStatusBarTarget(activity, displayId)) {
+                        var written = SettingsGlobal.putLong(application.getContentResolver(),
+                                "voyahtune_carplay_chrome_reveal_until_" + displayId,
+                                Number(SystemClock.elapsedRealtime()) + 10000);
+                        if (written) Log.i("vt_carplay_anchor", "chrome requested display=" + displayId);
+                        else Log.w("vt_carplay_anchor", "chrome request rejected display=" + displayId);
+                    }
+                } catch (error) { Log.e("vt_carplay_anchor", "chrome request failed: " + error); }
+            }
+            return result;
+        };
+        console.log("[carplay-anchor] hook ready v1");
+        return true;
+    } catch (error) {
+        if (original !== null) original.implementation = null;
+        console.log("[carplay-anchor] hook failed v1: " + error);
+        return false;
+    }
+}
+
+function isCarPlayStatusBarTarget(activity, displayId) {
+    if (displayId !== 0 && displayId !== 1) return false;
+    var component = String(activity || "");
+    return component === "ru.big.town.anative.CarPlayFullscreenActivity"
+            || component === "ru.big.town.anative/.CarPlayFullscreenActivity"
+            || component === "ru.big.town.anative/ru.big.town.anative.CarPlayFullscreenActivity";
+}
+
+function createCarPlayStatusBarController(io) {
+    var owned = [false, false];
+    var timerPending = false;
+
+    function top(displayId) {
+        try { return io.top(displayId) || ""; }
+        catch (error) { io.error(error); return ""; }
+    }
+
+    function schedule() {
+        if (timerPending || !owned.some(function (hidden) { return hidden; })) return;
+        timerPending = true;
+        var delay = Math.min.apply(Math, [1000].concat([0, 1].map(function (displayId) {
+            return io.revealRemaining(displayId);
+        }).filter(function (remaining) { return remaining > 0; })));
+        io.schedule(function () {
+            timerPending = false;
+            reconcile();
+        }, delay);
+    }
+
+    function apply(displayId, visible, carPlay, receiver) {
+        if (carPlay) owned[displayId] = true;
+        try {
+            io.apply(displayId, visible, receiver);
+            owned[displayId] = carPlay;
+        } catch (error) {
+            io.error(error);
+        }
+        schedule();
+    }
+
+    function request(displayId, visible, receiver) {
+        var carPlay = isCarPlayStatusBarTarget(top(displayId), displayId);
+        apply(displayId, carPlay ? io.revealRemaining(displayId) > 0 : visible, carPlay, receiver);
+    }
+
+    function reconcile() {
+        for (var displayId = 0; displayId <= 1; displayId++) {
+            var activity = top(displayId);
+            var carPlay = isCarPlayStatusBarTarget(activity, displayId);
+            if (!carPlay && !owned[displayId]) continue;
+            try {
+                var visible = carPlay ? io.revealRemaining(displayId) > 0 : !io.stockHidden(activity, displayId);
+                apply(displayId, visible, carPlay, null);
+            } catch (error) {
+                io.error(error);
+            }
+        }
+        schedule();
+    }
+
+    return {request: request, reconcile: reconcile};
+}
+
+function installCarPlayStatusBar(application) {
+    var installed = [];
+    var observer = null;
+    try {
+        var Log = Java.use("android.util.Log");
+        var ServiceManager = Java.use("com.qinggan.os.ServiceManager");
+        var SystemApplication = Java.use("com.qinggan.systemui.SystemUIApplication");
+        var SystemBars = Java.use("com.qinggan.systemui.statusbar.SystemBars");
+        var PhoneStatusBar = Java.use("com.qinggan.systemui.statusbar.phone.PhoneStatusBar");
+        var InvisibleItem = Java.use("com.qinggan.systemui.statusbar.utils.StatusBarInvisibleItem");
+        var originalHit = InvisibleItem.isHit.overload("java.lang.String", "int");
+        var originals = [
+            PhoneStatusBar.addStatusBarWindow.overload("boolean"),
+            PhoneStatusBar.addStatusBarWindowSecond.overload("boolean")
+        ];
+        var statusBarApplication = Java.cast(application, SystemApplication);
+        var lastVisible = [null, null];
+        var SettingsGlobal = Java.use("android.provider.Settings$Global");
+        var SystemClock = Java.use("android.os.SystemClock");
+        var revealSetting = "voyahtune_carplay_chrome_reveal_until_";
+        var resolver = application.getContentResolver();
+
+        function revealRemaining(displayId) {
+            try {
+                var deadline = Number(SettingsGlobal.getLong(resolver, revealSetting + displayId, 0));
+                var remaining = deadline - Number(SystemClock.elapsedRealtime());
+                return remaining > 0 && remaining <= 10000 ? remaining : 0;
+            } catch (error) { return 0; }
+        }
+
+        function statusBar() {
+            var services = statusBarApplication.getServices();
+            for (var index = 0; index < services.length; index++) {
+                var service = services[index];
+                if (service !== null && SystemBars.class.isInstance(service)) {
+                    var bar = Java.cast(service, SystemBars).mStatusBar.value;
+                    if (bar !== null && PhoneStatusBar.class.isInstance(bar)) {
+                        return Java.cast(bar, PhoneStatusBar);
+                    }
+                }
+            }
+            throw new Error("PhoneStatusBar is not initialized");
+        }
+
+        var controller = createCarPlayStatusBarController({
+            revealRemaining: revealRemaining,
+            top: function (displayId) {
+                var activity = ServiceManager.getDpyTopAppInfo(application, displayId, 2);
+                return activity === null ? "" : String(activity);
+            },
+            stockHidden: function (activity, displayId) {
+                return originalHit.call(InvisibleItem, activity, displayId)
+                        && (!activity.endsWith("PictureMainActivity") || PhoneStatusBar.pictureFullScreen.value);
+            },
+            apply: function (displayId, visible, receiver) {
+                originals[displayId].call(receiver || statusBar(), visible);
+                if (lastVisible[displayId] !== visible) {
+                    lastVisible[displayId] = visible;
+                    Log.i("vt_carplay_statusbar", "visible=" + visible + " display=" + displayId);
+                }
+            },
+            schedule: function (callback, delay) {
+                setTimeout(function () { Java.scheduleOnMainThread(callback); }, delay);
+            },
+            error: function (error) { Log.e("vt_carplay_statusbar", String(error)); }
+        });
+
+        originalHit.implementation = function (activity, displayId) {
+            if (isCarPlayStatusBarTarget(activity, displayId)) return revealRemaining(displayId) === 0;
+            return originalHit.call(this, activity, displayId);
+        };
+        installed.push(originalHit);
+        originals.forEach(function (original, displayId) {
+            original.implementation = function (visible) {
+                controller.request(displayId, visible, this);
+            };
+            installed.push(original);
+        });
+
+        // Launcher requests only trigger reconciliation; the live top Activity owns visibility.
+        var Handler = Java.registerClass({
+            name: "ru.big.town.voyahtune.CarPlayStatusBarEvents",
+            implements: [Java.use("com.qinggan.bus.QGBusEventHandler")],
+            methods: {
+                onHandleEvent: function (event) {
+                    if (String(event.getSource()) !== "com.qinggan.app.launcher") return;
+                    Java.scheduleOnMainThread(function () { controller.reconcile(); });
+                }
+            }
+        });
+        var filter = Java.use("com.qinggan.bus.QGBusEventFilter").$new();
+        filter.addEventType("VOYAHTUNE_CARPLAY_STATUS_BAR_SYNC");
+        Java.use("com.qinggan.bus.QGBus").$new(application).subscribe(filter, Handler.$new());
+        var Observer = Java.registerClass({
+            name: "ru.big.town.voyahtune.CarPlayChromeObserver",
+            superClass: Java.use("android.database.ContentObserver"),
+            methods: {
+                $init: [{
+                    returnType: "void",
+                    argumentTypes: ["android.os.Handler"],
+                    implementation: function (handler) { this.$super.$init(handler); }
+                }],
+                onChange: [{
+                    returnType: "void",
+                    argumentTypes: ["boolean"],
+                    implementation: function () { controller.reconcile(); }
+                }]
+            }
+        });
+        observer = Observer.$new(Java.use("android.os.Handler").$new(
+                Java.use("android.os.Looper").getMainLooper()));
+        [0, 1].forEach(function (displayId) {
+            resolver.registerContentObserver(SettingsGlobal.getUriFor(revealSetting + displayId), false, observer);
+        });
+        controller.reconcile();
+        console.log("[carplay-statusbar] hook ready v1");
+        return true;
+    } catch (error) {
+        if (observer !== null) {
+            try { application.getContentResolver().unregisterContentObserver(observer); } catch (ignored) {}
+        }
+        installed.forEach(function (method) { method.implementation = null; });
+        console.log("[carplay-statusbar] hook failed v1: " + error);
+        return false;
+    }
+}
 
 // RDS persistence is intentionally in the RdsApp process: keep its OEM audio-focus and
 // asynchronous source-switch protocol instead of reimplementing them in another Binder client.

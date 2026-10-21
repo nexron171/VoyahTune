@@ -33,9 +33,15 @@ function harness(savedClaims = [false, false]) {
     const controllers = [];
     const overloads = {};
     const application = {};
+    application.getContentResolver = () => ({});
+    let now = 1000;
+    const revealUntil = [0, 0];
     const context = {
         OUR_PKG: nativePackage,
         CARPLAY_FULLSCREEN_HOST: carPlayActivity,
+        CARPLAY_CHROME_REVEAL_SETTING: 'voyahtune_carplay_chrome_reveal_until_',
+        SettingsGlobal: {getLong: (_, key) => revealUntil[Number(key.slice(-1))]},
+        SystemClock: {elapsedRealtime: () => now},
         TAG: 'test',
         cache: {fullscreen: {}},
         restoringCarPlayDock: [false, false],
@@ -76,8 +82,8 @@ function harness(savedClaims = [false, false]) {
         },
         dockKept: () => false,
         setTimeout(callback, delay) {
-            assert.equal(delay, 1000);
-            timers.push(callback);
+            assert(delay > 0 && delay <= 1000);
+            timers.push({callback, delay});
         },
         Java: {
             retain: model => model,
@@ -89,7 +95,7 @@ function harness(savedClaims = [false, false]) {
                             $new: () => ({
                                 publish(event) {
                                     assert.equal(event.destination, 'com.qinggan.systemui');
-                                    assert.equal(event.type, 'SYSTEMUI_STATUS_BAR_MODE_VISIBLE');
+                                    assert.equal(event.type, 'VOYAHTUNE_CARPLAY_STATUS_BAR_SYNC');
                                     const {displayId, isVisible} = event.data;
                                     assert(displayId === 0 || displayId === 1);
                                     assert.equal(typeof isVisible, 'boolean');
@@ -152,7 +158,7 @@ function harness(savedClaims = [false, false]) {
     vm.createContext(context);
     vm.runInContext([
         'cleanJavaString', 'isUserFullscreen', 'isCarPlayFullscreen', 'hidesPhysicalDock',
-        'carPlayChromeTransition', 'parseTopActivity', 'topActivityForScreen',
+        'carPlayChromeRevealRemaining', 'carPlayChromeTransition', 'parseTopActivity', 'topActivityForScreen',
         'rememberCarPlayChrome', 'setCarPlayStatusBarVisible', 'reconcileCarPlayStatusBar',
         'modelDockController', 'installFullscreenVisibilityGate', 'reconcilePhysicalDock',
         'reconcilePhysicalDisplays', 'scheduleCarPlayChromeCheck',
@@ -162,7 +168,12 @@ function harness(savedClaims = [false, false]) {
 
     return {
         context, model, top, dockVisible, statusVisible, saved, requests,
-        timers, errors, failStatus, failDock,
+        timers, errors, failStatus, failDock, revealUntil,
+        reveal(displayId) {
+            revealUntil[displayId] = now + 10000;
+            this.reconcile();
+        },
+        advance(duration) { now += duration; },
         carPlay(displayId, activity = carPlayActivity) {
             top[displayId] = nativePackage + '|' + activity;
         },
@@ -171,7 +182,9 @@ function harness(savedClaims = [false, false]) {
         },
         tick() {
             assert.equal(timers.length, 1, 'Only one watchdog may be queued');
-            timers.shift()();
+            const timer = timers.shift();
+            now += timer.delay;
+            timer.callback();
         },
     };
 }
@@ -203,6 +216,66 @@ test('only the live physical fullscreen host owns chrome; unrelated screens stay
     assert.equal(app.requests.length, 1);
     app.model.handleUpdateMainNavigationBar('stale.app', 'StaleActivity', true);
     assert.equal(app.dockVisible[0], false, 'Late OEM show cannot cover the fullscreen host');
+});
+
+test('the access button reveals only its screen and expires without an Activity callback', () => {
+    const app = harness();
+    app.carPlay(0);
+    app.carPlay(1);
+    app.reconcile();
+    app.reveal(0);
+    assert.deepEqual(app.dockVisible, [true, false]);
+    assert.deepEqual(app.statusVisible, [true, false]);
+    app.model.handleUpdateMainNavigationBar(nativePackage, carPlayActivity, false);
+    assert.equal(app.dockVisible[0], true, 'Late OEM hide cannot cancel the timed reveal');
+    for (let second = 0; second < 9; second++) app.tick();
+    assert.equal(app.dockVisible[0], true);
+    app.tick();
+    assert.deepEqual(app.dockVisible, [false, false]);
+    assert.deepEqual(app.statusVisible, [false, false]);
+});
+
+test('another press renews the deadline and cancellation immediately hides CarPlay chrome', () => {
+    const app = harness();
+    app.carPlay(0);
+    app.reveal(0);
+    for (let second = 0; second < 8; second++) app.tick();
+    app.reveal(0);
+    for (let second = 0; second < 8; second++) app.tick();
+    assert.equal(app.dockVisible[0], true);
+    app.revealUntil[0] = 0;
+    app.reconcile();
+    assert.equal(app.dockVisible[0], false);
+});
+
+test('a reveal cannot override unrelated fullscreen policy or migrate to another display', () => {
+    const app = harness();
+    app.carPlay(0);
+    app.reveal(0);
+    app.top[0] = 'video.player|VideoActivity';
+    app.context.cache.fullscreen['video.player'] = true;
+    app.carPlay(1);
+    app.reconcile();
+    assert.deepEqual(app.dockVisible, [false, false]);
+    assert.equal(app.statusVisible[1], false);
+});
+
+test('expired or implausible persisted deadlines cannot reveal CarPlay after reboot', () => {
+    const app = harness();
+    app.carPlay(0);
+    for (const deadline of [0, 1000, 11001, Number.NaN]) {
+        app.revealUntil[0] = deadline;
+        app.reconcile();
+        assert.equal(app.dockVisible[0], false);
+    }
+    app.revealUntil[0] = 11000;
+    app.reconcile();
+    app.advance(9999);
+    app.reconcile();
+    assert.equal(app.dockVisible[0], true);
+    app.advance(1);
+    app.reconcile();
+    assert.equal(app.dockVisible[0], false);
 });
 
 test('moving the host in both directions restores source chrome and hides destination chrome', () => {

@@ -39,6 +39,7 @@ Java.perform(function () {
     var CARPLAY_TARGET = "ru.big.town.restoremode/com.shilapi.xcertplay.DiPlayActivity";
     var CARPLAY_LAUNCHER = "ru.big.town.restoremode.carplay.CarPlayLauncherActivity";
     var CARPLAY_FULLSCREEN_HOST = "ru.big.town.anative.CarPlayFullscreenActivity";
+    var CARPLAY_CHROME_REVEAL_SETTING = "voyahtune_carplay_chrome_reveal_until_";
     var restoringCarPlayDock = [false, false];
     var RESTORE_PKG = "ru.big.town.restoremode";      // VoyahTune (UI) — открывается долгим тапом по «меню»
 
@@ -256,13 +257,26 @@ Java.perform(function () {
 
     function hidesPhysicalDock(foreground, displayId) {
         if (restoringCarPlayDock[displayId]) return false;
-        return isUserFullscreen(foreground.pkg) || isCarPlayFullscreen(foreground);
+        if (isCarPlayFullscreen(foreground)) return carPlayChromeRevealRemaining(displayId) === 0;
+        return isUserFullscreen(foreground.pkg);
+    }
+
+    function carPlayChromeRevealRemaining(displayId) {
+        if (displayId !== 0 && displayId !== 1) return 0;
+        try {
+            var deadline = Number(SettingsGlobal.getLong(
+                    ctx().getContentResolver(), CARPLAY_CHROME_REVEAL_SETTING + displayId, 0));
+            var remaining = deadline - Number(SystemClock.elapsedRealtime());
+            return remaining > 0 && remaining <= 10000 ? remaining : 0;
+        } catch (error) { return 0; }
     }
 
     // An unknown/live-failed foreground releases our claim instead of trusting a dead Activity.
-    function carPlayChromeTransition(foreground, hidden) {
-        var next = isCarPlayFullscreen(foreground);
-        return { hidden: next, changed: next !== hidden, restore: hidden && !next };
+    function carPlayChromeTransition(foreground, hidden, displayId) {
+        var carPlay = isCarPlayFullscreen(foreground);
+        var revealed = carPlay && carPlayChromeRevealRemaining(displayId) > 0;
+        var next = carPlay && !revealed;
+        return { hidden: next, changed: next !== hidden, restore: revealed || (hidden && !next) };
     }
 
     // Наши активити, которые САМИ отступают на полосу родного дока (их контент туда не залезает).
@@ -1739,6 +1753,7 @@ Java.perform(function () {
                                     + " display=" + sid)) return;
                             return origDismiss.call(this); // firmware fallback without controller fields
                         }
+                        if (isCarPlayFullscreen(fg) && carPlayChromeRevealRemaining(sid) > 0) return;
                         if (moving !== null) {
                             try { Java.use("android.util.Log").i("voyahdock", "dismiss BLOCKED " + label
                                     + " active transfer " + moving.pkg); } catch (ee) {}
@@ -1803,7 +1818,7 @@ Java.perform(function () {
                     data.putBoolean("isVisible", visible);
                     data.putInt("displayId", displayId);
                     event.setDestination("com.qinggan.systemui");
-                    event.setEventType("SYSTEMUI_STATUS_BAR_MODE_VISIBLE");
+                    event.setEventType("VOYAHTUNE_CARPLAY_STATUS_BAR_SYNC");
                     event.setData(data);
                     carPlayStatusBus.publish(event);
                     return true;
@@ -1814,7 +1829,7 @@ Java.perform(function () {
             }
 
             function reconcileCarPlayStatusBar(displayId, foreground) {
-                var transition = carPlayChromeTransition(foreground, carPlayChromeHidden[displayId]);
+                var transition = carPlayChromeTransition(foreground, carPlayChromeHidden[displayId], displayId);
                 if (transition.hidden && transition.changed) rememberCarPlayChrome(displayId, true);
                 if (transition.hidden || transition.restore) {
                     var visible = !transition.hidden;
@@ -1843,10 +1858,15 @@ Java.perform(function () {
                 }
             }
 
-            // TOP_ACTIVITY_CHANGED is primary; poll only while we own hidden chrome to cover process death.
+            // Keep the deadline independent of the Activity timer, including process death.
             function scheduleCarPlayChromeCheck() {
+                var remaining = [carPlayChromeRevealRemaining(0), carPlayChromeRevealRemaining(1)];
                 if (carPlayChromeCheckPending || retainedLauncherModel === null
-                        || !carPlayChromeHidden.some(function (hidden) { return hidden; })) return;
+                        || (!carPlayChromeHidden.some(function (hidden) { return hidden; })
+                            && !remaining.some(function (duration) { return duration > 0; }))) return;
+                var delay = Math.min.apply(Math, [1000].concat(remaining.filter(function (duration) {
+                    return duration > 0;
+                })));
                 carPlayChromeCheckPending = true;
                 setTimeout(function () {
                     Java.scheduleOnMainThread(function () {
@@ -1857,7 +1877,7 @@ Java.perform(function () {
                         }
                         scheduleCarPlayChromeCheck();
                     });
-                }, 1000);
+                }, delay);
             }
 
             function modelDockController(model, displayId) {
@@ -1881,6 +1901,9 @@ Java.perform(function () {
                             ? foreground.pkg : (requestedPkg || foreground.pkg);
                     var decisionActivity = foreground.live
                             ? foreground.act : (cleanJavaString(actArg) || foreground.act);
+                    if (isCarPlayFullscreen(foreground) && carPlayChromeRevealRemaining(displayId) > 0) {
+                        return original.call(this, pkgArg, actArg, true);
+                    }
                     if (!hidesPhysicalDock(
                             {pkg: decisionPkg, act: decisionActivity, live: foreground.live}, displayId)) {
                         return original.call(this, pkgArg, actArg, visible);
@@ -1954,6 +1977,35 @@ Java.perform(function () {
                     }, 300);
                 } catch (e) { Log.e(TAG, "[dock] schedule transfer recovery: " + e); }
             };
+
+            var ChromeObserver = Java.registerClass({
+                name: "ru.big.town.dock.CarPlayChromeObserver",
+                superClass: Java.use("android.database.ContentObserver"),
+                methods: {
+                    $init: [{
+                        returnType: "void",
+                        argumentTypes: ["android.os.Handler"],
+                        implementation: function (handler) { this.$super.$init(handler); }
+                    }],
+                    onChange: [{
+                        returnType: "void",
+                        argumentTypes: ["boolean"],
+                        implementation: function () {
+                            if (retainedLauncherModel !== null) {
+                                reconcilePhysicalDisplays(retainedLauncherModel, ctx(), "CarPlay access button");
+                            } else {
+                                updateAllNavbars();
+                            }
+                        }
+                    }]
+                }
+            });
+            var chromeObserver = ChromeObserver.$new(Java.use("android.os.Handler").$new(
+                    Java.use("android.os.Looper").getMainLooper()));
+            [0, 1].forEach(function (displayId) {
+                ctx().getContentResolver().registerContentObserver(
+                        SettingsGlobal.getUriFor(CARPLAY_CHROME_REVEAL_SETTING + displayId), false, chromeObserver);
+            });
 
             var topReceive = TopLM.onReceive.overload('android.content.Context', 'android.content.Intent');
             topReceive.implementation = function (context, intent) {
