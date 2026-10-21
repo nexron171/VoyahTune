@@ -702,6 +702,7 @@ function createCarPlayStatusBarController(io) {
         if (carPlay) owned[displayId] = true;
         try {
             io.apply(displayId, visible, receiver);
+            io.reportHidden(displayId, carPlay && !visible);
             owned[displayId] = carPlay;
         } catch (error) {
             io.error(error);
@@ -785,6 +786,14 @@ function installCarPlayStatusBar(application) {
             stockHidden: function (activity, displayId) {
                 return originalHit.call(InvisibleItem, activity, displayId)
                         && (!activity.endsWith("PictureMainActivity") || PhoneStatusBar.pictureFullScreen.value);
+            },
+            reportHidden: function (displayId, hidden) {
+                var key = "voyahtune_carplay_statusbar_hidden_" + displayId;
+                var value = hidden ? 1 : 0;
+                if (Number(SettingsGlobal.getInt(resolver, key, -1)) !== value
+                        && !SettingsGlobal.putInt(resolver, key, value)) {
+                    throw new Error("Settings.Global rejected status-bar visibility");
+                }
             },
             apply: function (displayId, visible, receiver) {
                 originals[displayId].call(receiver || statusBar(), visible);

@@ -702,23 +702,18 @@ public class SetModesService extends Service {
         BackButtonService.updatePosition();
     }
 
-    /**
-     * На пробуждении/загрузке гарантируем плавающие кнопки Назад/Home, если они включены. Просто
-     * перезапись secure-настройки тем же значением НЕ перебиндивает сервис и не пересоздаёт оверлей
-     * (окно снимается при засыпании) — поэтому: 1) если сервис доступности жив → просим его
-     * пере-показать оверлей ({@code reshow}); 2) если не жив → форсим переустановку a11y (off→on),
-     * чтобы система его подняла.
-     */
+    /** Restore removed windows or rebind accessibility without changing the user's overlay flag. */
     private void reassertFloatingBack() {
-        if (!prefs().getBoolean("floatingBack", false)) return;
+        if (!prefs().getBoolean("floatingBack", false)
+                && !BackButtonService.carPlayNavigationEnabled(this)) return;
         if (BackButtonService.reshow()) {
             Log.i(TAG, "reassertFloatingBack: сервис жив → оверлей пере-показан");
             return;
         }
         Log.i(TAG, "reassertFloatingBack: сервис не подключён → форс-переустановка a11y");
         BackButtonService.disableForReconnect(this);
-        mainHandler.removeCallbacks(floatingBackEnableRunnable);
-        mainHandler.postDelayed(floatingBackEnableRunnable, 800);
+        mainHandler.removeCallbacks(navigationAccessibilityRestoreRunnable);
+        mainHandler.postDelayed(navigationAccessibilityRestoreRunnable, 800);
     }
 
     // Автозапуск RestoreMode: дебаунс, чтобы серия wake-состояний подряд не открывала окно
@@ -1941,8 +1936,8 @@ public class SetModesService extends Service {
     private final Runnable autoLaunchRunnable = this::maybeAutoLaunchRestoreMode;
     private final Runnable passengerAutoLaunchRunnable = this::maybeAutoLaunchPassengerDashboard;
     private final Runnable mediaAutoLaunchRunnable = this::maybeAutoLaunchLastMediaPlayer;
-    private final Runnable floatingBackEnableRunnable =
-            () -> BackButtonService.setFloatingButtonEnabled(this, true);
+    private final Runnable navigationAccessibilityRestoreRunnable =
+            () -> BackButtonService.refreshAccessibility(this);
     private final Runnable carPowerReconnectRunnable = this::reconnectCarPowerOnWorker;
 
     private final BroadcastReceiver powerHoldStatusRequestReceiver =
@@ -2037,7 +2032,7 @@ public class SetModesService extends Service {
         mainHandler.removeCallbacks(autoLaunchRunnable);
         mainHandler.removeCallbacks(passengerAutoLaunchRunnable);
         mainHandler.removeCallbacks(mediaAutoLaunchRunnable);
-        mainHandler.removeCallbacks(floatingBackEnableRunnable);
+        mainHandler.removeCallbacks(navigationAccessibilityRestoreRunnable);
     }
 
     /**

@@ -36,11 +36,23 @@ function harness(savedClaims = [false, false]) {
     application.getContentResolver = () => ({});
     let now = 1000;
     const revealUntil = [0, 0];
+    const dockHidden = [-1, -1];
     const context = {
         OUR_PKG: nativePackage,
         CARPLAY_FULLSCREEN_HOST: carPlayActivity,
         CARPLAY_CHROME_REVEAL_SETTING: 'voyahtune_carplay_chrome_reveal_until_',
-        SettingsGlobal: {getLong: (_, key) => revealUntil[Number(key.slice(-1))]},
+        SettingsGlobal: {
+            getLong: (_, key) => revealUntil[Number(key.slice(-1))],
+            getInt: (_, key) => dockHidden[Number(key.slice(-1))],
+            putInt(_, key, value) {
+                assert(key.startsWith('voyahtune_carplay_dock_hidden_'));
+                const displayId = Number(key.slice(-1));
+                assert.equal(dockVisible[displayId], value !== 1,
+                    'Report visibility only after the OEM dock has changed');
+                dockHidden[displayId] = value;
+                return true;
+            },
+        },
         SystemClock: {elapsedRealtime: () => now},
         TAG: 'test',
         cache: {fullscreen: {}},
@@ -158,7 +170,8 @@ function harness(savedClaims = [false, false]) {
     vm.createContext(context);
     vm.runInContext([
         'cleanJavaString', 'isUserFullscreen', 'isCarPlayFullscreen', 'hidesPhysicalDock',
-        'carPlayChromeRevealRemaining', 'carPlayChromeTransition', 'parseTopActivity', 'topActivityForScreen',
+        'carPlayChromeRevealRemaining', 'reportCarPlayDockHidden', 'carPlayChromeTransition',
+        'parseTopActivity', 'topActivityForScreen',
         'rememberCarPlayChrome', 'setCarPlayStatusBarVisible', 'reconcileCarPlayStatusBar',
         'modelDockController', 'installFullscreenVisibilityGate', 'reconcilePhysicalDock',
         'reconcilePhysicalDisplays', 'scheduleCarPlayChromeCheck',
@@ -167,7 +180,7 @@ function harness(savedClaims = [false, false]) {
     context.installFullscreenVisibilityGate('handleUpdateSecondNavigationBar', 1);
 
     return {
-        context, model, top, dockVisible, statusVisible, saved, requests,
+        context, model, top, dockVisible, dockHidden, statusVisible, saved, requests,
         timers, errors, failStatus, failDock, revealUntil,
         reveal(displayId) {
             revealUntil[displayId] = now + 10000;
@@ -188,6 +201,35 @@ function harness(savedClaims = [false, false]) {
         },
     };
 }
+
+test('dock visibility reports follow hiding, reveal and display transfer', () => {
+    const app = harness();
+    app.carPlay(0);
+    app.reconcile();
+    assert.deepEqual(app.dockHidden, [1, -1]);
+    app.reveal(0);
+    assert.deepEqual(app.dockHidden, [0, -1]);
+    app.advance(10001);
+    app.reconcile();
+    assert.deepEqual(app.dockHidden, [1, -1]);
+    app.top[0] = 'com.qinggan.app.launcher|HomeActivity';
+    app.carPlay(1);
+    app.reconcile();
+    assert.deepEqual(app.dockHidden, [0, 1]);
+});
+
+test('a failed dock restoration retains the hidden report until recovery', () => {
+    const app = harness();
+    app.carPlay(0);
+    app.reconcile();
+    app.top[0] = 'com.qinggan.app.launcher|HomeActivity';
+    app.failDock[0] = true;
+    app.reconcile();
+    assert.equal(app.dockHidden[0], 1);
+    app.failDock[0] = false;
+    app.reconcile();
+    assert.equal(app.dockHidden[0], 0);
+});
 
 test('only the live physical fullscreen host owns chrome; unrelated screens stay intact', () => {
     const app = harness();

@@ -18,6 +18,7 @@ function harness() {
     const fail = [false, false];
     let now = 1000;
     const revealUntil = [0, 0];
+    const hiddenForCarPlay = [-1, -1];
     const controller = context.createCarPlayStatusBarController({
         revealRemaining(displayId) { return Math.max(0, revealUntil[displayId] - now); },
         top(displayId) {
@@ -30,11 +31,15 @@ function harness() {
             visible[displayId] = show;
             calls.push({displayId, show});
         },
+        reportHidden(displayId, hidden) {
+            assert(!hidden || !visible[displayId], 'Report hidden only after the OEM bar is hidden');
+            hiddenForCarPlay[displayId] = hidden ? 1 : 0;
+        },
         schedule: (callback, delay) => timers.push({callback, delay}),
         error: error => errors.push(error),
     });
     return {
-        top, visible, timers, errors, calls, fail, controller, revealUntil,
+        top, visible, hiddenForCarPlay, timers, errors, calls, fail, controller, revealUntil,
         reveal(displayId) {
             revealUntil[displayId] = now + 10000;
             controller.reconcile();
@@ -47,6 +52,25 @@ function harness() {
         },
     };
 }
+
+test('status reports are independent of the dock and follow successful OEM changes', () => {
+    const app = harness();
+    app.top[1] = carPlay;
+    app.controller.reconcile();
+    assert.deepEqual(app.hiddenForCarPlay, [-1, 1]);
+    app.reveal(1);
+    assert.equal(app.hiddenForCarPlay[1], 0);
+    app.revealUntil[1] = 0;
+    app.controller.reconcile();
+    assert.equal(app.hiddenForCarPlay[1], 1);
+    app.fail[1] = true;
+    app.top[1] = '';
+    app.controller.reconcile();
+    assert.equal(app.hiddenForCarPlay[1], 1);
+    app.fail[1] = false;
+    app.controller.reconcile();
+    assert.equal(app.hiddenForCarPlay[1], 0);
+});
 
 test('only the exact CarPlay Activity on a physical display owns the status bar', () => {
     for (const activity of [carPlay, 'ru.big.town.anative/.CarPlayFullscreenActivity',

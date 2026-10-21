@@ -271,6 +271,21 @@ Java.perform(function () {
         } catch (error) { return 0; }
     }
 
+    function reportCarPlayDockHidden(displayId, hidden) {
+        if (displayId !== 0 && displayId !== 1) return;
+        try {
+            var resolver = ctx().getContentResolver();
+            var key = "voyahtune_carplay_dock_hidden_" + displayId;
+            var value = hidden ? 1 : 0;
+            if (Number(SettingsGlobal.getInt(resolver, key, -1)) !== value
+                    && !SettingsGlobal.putInt(resolver, key, value)) {
+                throw new Error("Settings.Global rejected dock visibility");
+            }
+        } catch (error) {
+            Log.e(TAG, "[carplay-chrome] dock visibility report failed: " + error);
+        }
+    }
+
     // An unknown/live-failed foreground releases our claim instead of trusting a dead Activity.
     function carPlayChromeTransition(foreground, hidden, displayId) {
         var carPlay = isCarPlayFullscreen(foreground);
@@ -670,6 +685,10 @@ Java.perform(function () {
                 windowManager.removeView(root);
             }
             Log.i("voyahdock", "force hidden/detached " + label + " attached=" + attached);
+            try {
+                var displayId = managedScreenId(controller, -1);
+                reportCarPlayDockHidden(displayId, isCarPlayFullscreen(topActivityForScreen(displayId, null)));
+            } catch (error) { Log.e(TAG, "[dock] hidden visibility report failed: " + error); }
             return true;
         } catch (e) {
             Log.e(TAG, "[dock] force hide " + label + " failed: " + e);
@@ -1716,6 +1735,7 @@ Java.perform(function () {
                     return;
                 }
                 var result = controllerShow.call(this);
+                reportCarPlayDockHidden(sid, false);
                 try {
                     if (sid === 0) {
                         var navigationBar = runtimeObject(dockField(this, "mNavigationBar"));
@@ -1916,11 +1936,15 @@ Java.perform(function () {
                     var decisionActivity = foreground.live
                             ? foreground.act : (cleanJavaString(actArg) || foreground.act);
                     if (isCarPlayFullscreen(foreground) && carPlayChromeRevealRemaining(displayId) > 0) {
-                        return original.call(this, pkgArg, actArg, true);
+                        var shown = original.call(this, pkgArg, actArg, true);
+                        reportCarPlayDockHidden(displayId, false);
+                        return shown;
                     }
                     if (!hidesPhysicalDock(
                             {pkg: decisionPkg, act: decisionActivity, live: foreground.live}, displayId)) {
-                        return original.call(this, pkgArg, actArg, visible);
+                        var unchanged = original.call(this, pkgArg, actArg, visible);
+                        reportCarPlayDockHidden(displayId, false);
+                        return unchanged;
                     }
                     fgByScreen[displayId].pkg = decisionPkg;
                     if (!foreground.live) fgByScreen[displayId].act = cleanJavaString(actArg);
@@ -1932,11 +1956,14 @@ Java.perform(function () {
                     var controller = modelDockController(this, displayId);
                     var label = "model gate " + methodName + " display=" + displayId;
                     if (forceHideDockController(controller, label)) {
+                        reportCarPlayDockHidden(displayId, isCarPlayFullscreen(foreground));
                         Log.i("voyahdock", "model gate forced hidden display=" + displayId
                                 + " pkg=" + decisionPkg + " requestedVisible=" + visible);
                         return;
                     }
-                    return original.call(this, pkgArg, actArg, false);
+                    var hidden = original.call(this, pkgArg, actArg, false);
+                    reportCarPlayDockHidden(displayId, isCarPlayFullscreen(foreground));
+                    return hidden;
                 };
             }
 
@@ -1962,6 +1989,7 @@ Java.perform(function () {
                         } finally {
                             restoringCarPlayDock[displayId] = false;
                         }
+                        reportCarPlayDockHidden(displayId, false);
                         if (chrome.statusBarRestored) rememberCarPlayChrome(displayId, false);
                         Log.i(TAG, "[carplay-chrome] dock restored display=" + displayId + " reason=" + reason);
                         return;

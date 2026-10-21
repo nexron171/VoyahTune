@@ -84,6 +84,7 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                             intent.getBooleanExtra(key, false) ? "1" : "0");
                 }
             }
+            BackButtonService.refreshCarPlayNavigation(context);
             Intent reload = new Intent("ru.big.town.anative.DOCK_RELOAD");
             reload.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             context.sendBroadcast(reload);

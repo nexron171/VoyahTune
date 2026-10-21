@@ -32,6 +32,7 @@ public final class CarPlayFullscreenActivity extends SplitHostActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        BackButtonService.refreshCarPlayNavigation(this);
         accessEnabled = InfrastructureProfile.read(this) == InfrastructureProfile.OD;
         if (accessEnabled) {
             FrameLayout root = findViewById(R.id.splitHostRoot);
