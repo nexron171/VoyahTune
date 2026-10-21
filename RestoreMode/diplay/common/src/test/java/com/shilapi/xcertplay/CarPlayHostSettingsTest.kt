@@ -327,6 +327,77 @@ class CarPlayHostSettingsTest {
         }
     }
 
+    @Test fun horizontalSwipesCannotBecomeSettingsOrBarPeekGestures() {
+        val controller = mock(CarPlayController::class.java)
+        setField("controller", controller)
+        setField("temporarySystemBarsEnabled", true)
+        for (fingers in 2..4) {
+            setField("gestureFingerCount", fingers)
+            for (direction in listOf(-1, 1)) {
+                touch(MotionEvent.ACTION_DOWN, 1, 100f)
+                for (count in 2..fingers) touch(MotionEvent.ACTION_POINTER_DOWN, count, 100f)
+                assertTrue(sentTouches(controller).last().isEmpty())
+                org.mockito.Mockito.clearInvocations(controller)
+                touch(MotionEvent.ACTION_MOVE, fingers, 102f, x = 400f + direction * 64f)
+                touch(MotionEvent.ACTION_MOVE, fingers, 700f)
+                touch(MotionEvent.ACTION_MOVE, fingers, -500f)
+                touch(MotionEvent.ACTION_POINTER_UP, fingers, -500f)
+                touch(MotionEvent.ACTION_POINTER_DOWN, fingers, -500f)
+                touch(MotionEvent.ACTION_MOVE, fingers, 700f)
+                touch(MotionEvent.ACTION_UP, 1, 700f)
+                assertFalse(field("menuOpen") as Boolean)
+                assertFalse(field("temporarySystemBarsVisible") as Boolean)
+                assertFalse(field("gestureSequenceActive") as Boolean)
+                assertTrue(sentTouches(controller).isEmpty())
+            }
+        }
+        setField("gestureFingerCount", 3)
+        gesture(3)
+        assertTrue(field("menuOpen") as Boolean)
+    }
+
+    @Test fun batchedHorizontalMovementCannotBeReclassifiedByItsFinalVerticalSample() {
+        setField("temporarySystemBarsEnabled", true)
+        for (direction in listOf(-1, 1)) {
+            for (verticalDirection in listOf(-1, 1)) {
+                touch(MotionEvent.ACTION_DOWN, 1, 100f)
+                touch(MotionEvent.ACTION_POINTER_DOWN, 2, 100f)
+                touch(MotionEvent.ACTION_POINTER_DOWN, 3, 100f)
+                val event = touchEvent(MotionEvent.ACTION_MOVE, 3, 102f, 400f + direction * 64f)
+                val finalY = 100f + verticalDirection * 600f
+                try {
+                    event.addBatch(20, touchPositions(3, finalY, 400f), 0)
+                    dispatchTouch(event)
+                } finally {
+                    event.recycle()
+                }
+                assertFalse(field("menuOpen") as Boolean)
+                assertFalse(field("temporarySystemBarsVisible") as Boolean)
+                touch(MotionEvent.ACTION_UP, 1, finalY)
+            }
+        }
+    }
+
+    @Test fun smallHorizontalJitterDoesNotPreventAVerticalSettingsSwipe() {
+        touch(MotionEvent.ACTION_DOWN, 1, 100f)
+        touch(MotionEvent.ACTION_POINTER_DOWN, 2, 100f)
+        touch(MotionEvent.ACTION_POINTER_DOWN, 3, 100f)
+        touch(MotionEvent.ACTION_MOVE, 3, 101f, x = 402f)
+        touch(MotionEvent.ACTION_MOVE, 3, 700f)
+        assertTrue(field("menuOpen") as Boolean)
+    }
+
+    @Test fun cancellationClearsAnUndecidedThreeFingerGesture() {
+        touch(MotionEvent.ACTION_DOWN, 1, 100f)
+        touch(MotionEvent.ACTION_POINTER_DOWN, 2, 100f)
+        touch(MotionEvent.ACTION_POINTER_DOWN, 3, 100f)
+        touch(MotionEvent.ACTION_CANCEL, 3, 100f)
+        assertFalse(field("gestureSequenceActive") as Boolean)
+        assertFalse(field("gestureTracking") as Boolean)
+        gesture(3)
+        assertTrue(field("menuOpen") as Boolean)
+    }
+
     @Test fun optedInUpwardGestureRevealsBarsWithoutOpeningSettingsAndDownwardGestureKeepsWorking() {
         setField("temporarySystemBarsEnabled", true)
         invoke("applyFullscreenMode")
@@ -355,6 +426,11 @@ class CarPlayHostSettingsTest {
         // Exactly one empty-release when gesture tracking started; no mismatched CarPlay UP.
         org.mockito.Mockito.verify(controller, org.mockito.Mockito.times(1)).sendTouch(emptyList())
     }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun sentTouches(controller: CarPlayController): List<List<AirPlayContact>> =
+        org.mockito.Mockito.mockingDetails(controller).invocations
+            .filter { it.method.name == "sendTouch" }.map { it.arguments[0] as List<AirPlayContact> }
 
     @Test fun temporaryBarsSettingIsStagedInFullscreenSettingsAndDiscardable() {
         AirPlayPersistence.saveTemporarySystemBars(activity, false)
@@ -977,16 +1053,45 @@ class CarPlayHostSettingsTest {
         touch(MotionEvent.ACTION_UP, 1, y, x)
     }
 
-    private fun touch(action: Int, count: Int, y: Float, x: Float = 400f) {
-        val pointers = Array(count) { i -> MotionEvent.PointerProperties().apply { id = i; toolType = MotionEvent.TOOL_TYPE_FINGER } }
-        val positions = Array(count) { i -> MotionEvent.PointerCoords().apply { this.x = x + i * 50f; this.y = y; pressure = 1f; size = 1f } }
-        val indexedAction = if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP)
-            action or ((count - 1) shl MotionEvent.ACTION_POINTER_INDEX_SHIFT) else action
-        val event = MotionEvent.obtain(0, 10, indexedAction, count, pointers, positions, 0, 0, 1f, 1f, 0, 0, 0, 0)
+    private fun touch(action: Int, count: Int, y: Float, x: Float = 400f, view: View? = null) {
+        val event = touchEvent(action, count, y, x)
         try {
-            activity.javaClass.getDeclaredMethod("onHostTouch", View::class.java, MotionEvent::class.java)
-                .apply { isAccessible = true }.invoke(activity, field("gestureOverlay"), event)
-        } finally { event.recycle() }
+            dispatchTouch(event, view)
+        } finally {
+            event.recycle()
+        }
+    }
+
+    private fun touchEvent(action: Int, count: Int, y: Float, x: Float): MotionEvent {
+        val pointers = Array(count) { index ->
+            MotionEvent.PointerProperties().apply {
+                id = index
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+        }
+        val indexedAction = if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
+            action or ((count - 1) shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+        } else {
+            action
+        }
+        return MotionEvent.obtain(
+            0, 10, indexedAction, count, pointers, touchPositions(count, y, x),
+            0, 0, 1f, 1f, 0, 0, 0, 0,
+        )
+    }
+
+    private fun touchPositions(count: Int, y: Float, x: Float) = Array(count) { index ->
+        MotionEvent.PointerCoords().apply {
+            this.x = x + index * 50f
+            this.y = y
+            pressure = 1f
+            size = 1f
+        }
+    }
+
+    private fun dispatchTouch(event: MotionEvent, view: View? = null) {
+        activity.javaClass.getDeclaredMethod("onHostTouch", View::class.java, MotionEvent::class.java)
+            .apply { isAccessible = true }.invoke(activity, view ?: field("gestureOverlay"), event)
     }
 
     private fun attachController(): CarPlayController = CarPlayController(

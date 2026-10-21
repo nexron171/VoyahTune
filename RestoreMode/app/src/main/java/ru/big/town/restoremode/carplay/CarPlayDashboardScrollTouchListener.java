@@ -10,7 +10,7 @@ import android.widget.HorizontalScrollView;
 
 import java.util.function.BooleanSupplier;
 
-/** Routes parallel horizontal drags to the dashboard and pinch gestures to CarPlay. */
+/** Routes two-finger horizontal drags to the dashboard and other gestures to CarPlay. */
 public final class CarPlayDashboardScrollTouchListener implements View.OnTouchListener {
     private enum GestureOwner {
         UNDECIDED,
@@ -51,9 +51,12 @@ public final class CarPlayDashboardScrollTouchListener implements View.OnTouchLi
         }
 
         if (gestureOwner == GestureOwner.UNDECIDED && carPlayActive.getAsBoolean()) {
-            if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
+            if (event.getPointerCount() >= 3) {
+                // Keep settings and OEM display-transfer gestures out of dashboard paging.
+                gestureOwner = GestureOwner.PROJECTION;
+            } else if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
                 rememberPointerPositions(event);
-            } else if (action == MotionEvent.ACTION_MOVE && event.getPointerCount() >= 2) {
+            } else if (action == MotionEvent.ACTION_MOVE && event.getPointerCount() == 2) {
                 gestureOwner = resolveGestureOwner(event);
                 if (gestureOwner == GestureOwner.DASHBOARD) {
                     MotionEvent cancellation = MotionEvent.obtain(event);

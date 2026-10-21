@@ -164,14 +164,59 @@ public class CarPlayDashboardScrollTouchListenerTest {
     }
 
     @Test
-    public void pointerChangesDoNotJumpAndCancellationResetsGesture() {
-        scrollView.scrollTo(500, 0);
+    public void threeFingerHorizontalAndVerticalSwipesRemainInProjection() {
+        float[][] destinations = {
+                {200, 100, 300, 100, 400, 100},
+                {600, 100, 700, 100, 800, 100},
+                {400, 300, 500, 300, 600, 300},
+                {400, 0, 500, 0, 600, 0}
+        };
+        for (float[] destination : destinations) {
+            projectedActions.clear();
+            touch(MotionEvent.ACTION_DOWN, 400);
+            touch(SECOND_POINTER_DOWN, 400, 500);
+            touch(THIRD_POINTER_DOWN, 400, 500, 600);
+            touchAt(MotionEvent.ACTION_MOVE, destination);
+            touchAt(THIRD_POINTER_UP, destination);
+            touchAt(SECOND_POINTER_UP, Arrays.copyOf(destination, 4));
+            touchAt(MotionEvent.ACTION_UP, destination[0], destination[1]);
+
+            assertProjectedActions(
+                    MotionEvent.ACTION_DOWN, SECOND_POINTER_DOWN, THIRD_POINTER_DOWN,
+                    MotionEvent.ACTION_MOVE, THIRD_POINTER_UP, SECOND_POINTER_UP,
+                    MotionEvent.ACTION_UP);
+            assertDashboardUntouched();
+        }
+    }
+
+    @Test
+    public void liftingTheThirdFingerDoesNotReclassifyTheGestureAsDashboardPaging() {
         touch(MotionEvent.ACTION_DOWN, 400);
         touch(SECOND_POINTER_DOWN, 400, 500);
         touch(MotionEvent.ACTION_MOVE, 402, 502);
-        assertEquals(500, scrollView.getScrollX());
         touch(THIRD_POINTER_DOWN, 402, 502, 700);
         touch(THIRD_POINTER_UP, 402, 502, 700);
+        touch(MotionEvent.ACTION_MOVE, 202, 302);
+        touch(SECOND_POINTER_UP, 202, 302);
+        touch(MotionEvent.ACTION_UP, 202);
+
+        assertProjectedActions(
+                MotionEvent.ACTION_DOWN, SECOND_POINTER_DOWN, MotionEvent.ACTION_MOVE,
+                THIRD_POINTER_DOWN, THIRD_POINTER_UP, MotionEvent.ACTION_MOVE,
+                SECOND_POINTER_UP, MotionEvent.ACTION_UP);
+        assertDashboardUntouched();
+
+        touch(MotionEvent.ACTION_DOWN, 400);
+        touch(SECOND_POINTER_DOWN, 400, 500);
+        touch(MotionEvent.ACTION_MOVE, 200, 300);
+        assertTrue(scrollView.getScrollX() > 150);
+    }
+
+    @Test
+    public void pointerChangesDoNotJumpAfterDashboardCaptureAndCancellationResetsGesture() {
+        scrollView.scrollTo(500, 0);
+        touch(MotionEvent.ACTION_DOWN, 400);
+        touch(SECOND_POINTER_DOWN, 400, 500);
         touch(MotionEvent.ACTION_MOVE, 402, 502);
         assertEquals(500, scrollView.getScrollX());
         touch(MotionEvent.ACTION_MOVE, 602, 702);
@@ -186,7 +231,6 @@ public class CarPlayDashboardScrollTouchListenerTest {
         touch(MotionEvent.ACTION_DOWN, 200);
         assertProjectedActions(
                 MotionEvent.ACTION_DOWN, SECOND_POINTER_DOWN, MotionEvent.ACTION_MOVE,
-                THIRD_POINTER_DOWN, THIRD_POINTER_UP, MotionEvent.ACTION_MOVE,
                 MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_DOWN);
         assertEquals(1, scrollReleases);
     }

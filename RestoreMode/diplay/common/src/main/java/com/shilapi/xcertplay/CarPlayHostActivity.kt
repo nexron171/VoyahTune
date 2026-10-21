@@ -136,6 +136,12 @@ import kotlin.math.roundToInt
  * Apple devices are discovered by vendor ID; CH341 uses the configured VID/PID below.
  */
 class CarPlayHostActivity : ComponentActivity() {
+    private enum class SettingsGestureAxis {
+        UNDECIDED,
+        HORIZONTAL,
+        VERTICAL,
+    }
+
     private data class SettingsBaseline(
         val safeAreaRects: MutableMap<DisplaySize, SafeAreaRect?>,
         val customIconBytes: ByteArray?,
@@ -616,6 +622,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var settingsGestureHint: TextView? = null
     private var gestureSequenceActive = false
     private var gestureTracking = false
+    private var settingsGestureAxis = SettingsGestureAxis.UNDECIDED
     private var gestureStartX = 0f
     private var gestureStartY = 0f
     private var recoveryPendingAfterMenu = false
@@ -6515,11 +6522,13 @@ class CarPlayHostActivity : ComponentActivity() {
             MotionEvent.ACTION_DOWN -> {
                 gestureSequenceActive = false
                 gestureTracking = false
+                settingsGestureAxis = SettingsGestureAxis.UNDECIDED
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 if (gestureFingerCount > 0 && event.pointerCount == gestureFingerCount && !gestureSequenceActive) {
                     gestureSequenceActive = true
                     gestureTracking = true
+                    settingsGestureAxis = SettingsGestureAxis.UNDECIDED
                     gestureStartX = pointerCentroid(event, horizontal = true)
                     gestureStartY = pointerCentroid(event, horizontal = false)
                     controller?.sendTouch(emptyList())
@@ -6530,38 +6539,18 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
         if (gestureSequenceActive) {
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                gestureSequenceActive = false
+                gestureTracking = false
+                settingsGestureAxis = SettingsGestureAxis.UNDECIDED
+                return true
+            }
             if (event.actionMasked == MotionEvent.ACTION_POINTER_UP || event.pointerCount != gestureFingerCount) {
                 gestureTracking = false
             }
-            if (!gestureTracking || event.pointerCount != gestureFingerCount) {
-                if (event.actionMasked == MotionEvent.ACTION_UP ||
-                    event.actionMasked == MotionEvent.ACTION_CANCEL
-                ) {
-                    gestureSequenceActive = false
-                    gestureTracking = false
-                } else if (event.actionMasked == MotionEvent.ACTION_POINTER_UP) {
-                    gestureTracking = false
-                }
-                return true
-            }
+            if (!gestureTracking) return true
             if (event.actionMasked == MotionEvent.ACTION_MOVE) {
-                val deltaX = Math.abs(pointerCentroid(event, horizontal = true) - gestureStartX)
-                val deltaY = pointerCentroid(event, horizontal = false) - gestureStartY
-                if (
-                    Math.abs(deltaY) >= dp(SETTINGS_SWIPE_DISTANCE_DP) &&
-                    Math.abs(deltaY) >= deltaX * SETTINGS_SWIPE_DIRECTION_RATIO
-                ) {
-                    gestureTracking = false
-                    if (deltaY > 0) {
-                        gestureSequenceActive = false
-                        openSettingsMenu()
-                    } else {
-                        // Keep swallowing remaining finger-up events. Forwarding a release
-                        // without its matching press creates phantom taps inside CarPlay.
-                        showTemporarySystemBars()
-                    }
-                    return true
-                }
+                trackSettingsSwipe(event)
             }
             return true
         }
@@ -6593,10 +6582,56 @@ class CarPlayHostActivity : ComponentActivity() {
         return true
     }
 
-    private fun pointerCentroid(event: MotionEvent, horizontal: Boolean): Float {
+    private fun trackSettingsSwipe(event: MotionEvent) {
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+        // Batched moves must choose the same axis as individually delivered samples.
+        for (sample in 0..event.historySize) {
+            val historyIndex = if (sample < event.historySize) sample else -1
+            val currentX = pointerCentroid(event, horizontal = true, historyIndex = historyIndex)
+            val currentY = pointerCentroid(event, horizontal = false, historyIndex = historyIndex)
+            val horizontalDistance = Math.abs(currentX - gestureStartX)
+            val deltaY = currentY - gestureStartY
+            val verticalDistance = Math.abs(deltaY)
+            if (settingsGestureAxis == SettingsGestureAxis.UNDECIDED) {
+                settingsGestureAxis = when {
+                    horizontalDistance > touchSlop &&
+                        horizontalDistance >= verticalDistance * SETTINGS_SWIPE_DIRECTION_RATIO ->
+                        SettingsGestureAxis.HORIZONTAL
+                    verticalDistance > touchSlop &&
+                        verticalDistance >= horizontalDistance * SETTINGS_SWIPE_DIRECTION_RATIO ->
+                        SettingsGestureAxis.VERTICAL
+                    else -> continue
+                }
+            }
+            if (settingsGestureAxis == SettingsGestureAxis.HORIZONTAL) {
+                // Leave OEM display transfer alone; never reinterpret its remaining motion as settings.
+                gestureTracking = false
+                return
+            }
+            if (verticalDistance >= dp(SETTINGS_SWIPE_DISTANCE_DP) &&
+                verticalDistance >= horizontalDistance * SETTINGS_SWIPE_DIRECTION_RATIO
+            ) {
+                gestureTracking = false
+                if (deltaY > 0) {
+                    gestureSequenceActive = false
+                    openSettingsMenu()
+                } else {
+                    // A release without a matching press creates phantom taps inside CarPlay.
+                    showTemporarySystemBars()
+                }
+                return
+            }
+        }
+    }
+
+    private fun pointerCentroid(event: MotionEvent, horizontal: Boolean, historyIndex: Int = -1): Float {
         var total = 0f
         for (index in 0 until event.pointerCount) {
-            total += if (horizontal) event.getX(index) else event.getY(index)
+            total += when {
+                historyIndex < 0 -> if (horizontal) event.getX(index) else event.getY(index)
+                horizontal -> event.getHistoricalX(index, historyIndex)
+                else -> event.getHistoricalY(index, historyIndex)
+            }
         }
         return total / event.pointerCount
     }
