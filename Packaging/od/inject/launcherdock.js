@@ -523,10 +523,11 @@ Java.perform(function () {
             : "ru.big.town.restoremode.MainActivity";
     }
 
-    function isDashboardActivity(activityName) {
+    function isDashboardLaunchTarget(activityName) {
         if (activityName && activityName.charAt(0) === ".") activityName = RESTORE_PKG + activityName;
         return activityName === dashboardActivityForDisplay(0)
-            || activityName === dashboardActivityForDisplay(1);
+            || activityName === dashboardActivityForDisplay(1)
+            || activityName === RESTORE_PKG + ".VoiceAnimationPreviewActivity";
     }
 
     function openVoyahTuneOnDisplay(displayId) {
@@ -1013,7 +1014,7 @@ Java.perform(function () {
                     if (pkg === RESTORE_PKG) {
                         var component = intent.getComponent();
                         if ((component === null
-                                || isDashboardActivity(cleanJavaString(component.getClassName())))
+                                || isDashboardLaunchTarget(cleanJavaString(component.getClassName())))
                                 && openVoyahTuneOnDisplay(screenId)) return;
                         return startAppIntent.call(this, context, intent, screenIdArg);
                     }
@@ -1027,7 +1028,7 @@ Java.perform(function () {
                     var pkg = cleanJavaString(pkgArg);
                     var screenId = Number(screenIdArg);
                     if (pkg === RESTORE_PKG) {
-                        if (isDashboardActivity(cleanJavaString(classArg))
+                        if (isDashboardLaunchTarget(cleanJavaString(classArg))
                                 && openVoyahTuneOnDisplay(screenId)) return;
                         return startAppComponent.call(this, context, pkgArg, classArg, screenIdArg);
                     }

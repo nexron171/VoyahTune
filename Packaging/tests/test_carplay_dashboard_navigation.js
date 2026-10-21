@@ -33,7 +33,7 @@ const c = {
     ctx: () => ({startActivity(intent, bundle) { launches.push({intent, bundle}); }})
 };
 vm.createContext(c);
-vm.runInContext(['cleanJavaString', 'dashboardActivityForDisplay', 'isDashboardActivity',
+vm.runInContext(['cleanJavaString', 'dashboardActivityForDisplay', 'isDashboardLaunchTarget',
     'openVoyahTune', 'openVoyahTuneOnDisplay', 'launchFreeform'].map(production).join('\n'), c);
 for (const displayId of [0, 1, 20]) {
     assert.equal(c.openVoyahTune({getDisplay: () => ({getDisplayId: () => displayId})}), true);
@@ -72,7 +72,8 @@ const hooksEnd = source.indexOf('Log.i(TAG, "[allapps] fullscreen ActivityOption
 assert(hooksStart >= 0 && hooksEnd > hooksStart);
 vm.runInContext(source.slice(hooksStart, hooksEnd), c);
 for (const displayId of [0, 1]) {
-    for (const activity of [c.dashboardActivityForDisplay(0), c.dashboardActivityForDisplay(1), '.MainActivity']) {
+    for (const activity of [c.dashboardActivityForDisplay(0), c.dashboardActivityForDisplay(1), '.MainActivity',
+        '.VoiceAnimationPreviewActivity', c.RESTORE_PKG + '.VoiceAnimationPreviewActivity']) {
         const intent = {getComponent: () => ({getPackageName: () => c.RESTORE_PKG, getClassName: () => activity})};
         intentMethod.implementation({}, intent, displayId);
         assert.equal(launches.at(-1).intent.activity, c.dashboardActivityForDisplay(displayId));
@@ -80,7 +81,8 @@ for (const displayId of [0, 1]) {
         assert.equal(launches.at(-1).intent.activity, c.dashboardActivityForDisplay(displayId));
     }
     const count = launches.length;
-    for (const activity of ['com.shilapi.xcertplay.DiPlayActivity', 'ru.big.town.restoremode.carplay.CarPlayLauncherActivity']) {
+    for (const activity of ['com.shilapi.xcertplay.DiPlayActivity',
+        'ru.big.town.restoremode.carplay.CarPlayLauncherActivity', c.RESTORE_PKG + '.VoiceActivity']) {
         const intent = {getComponent: () => ({getPackageName: () => c.RESTORE_PKG, getClassName: () => activity})};
         intentMethod.implementation({}, intent, displayId);
         assert.equal(originalLaunches.at(-1).intent, intent);
@@ -89,4 +91,4 @@ for (const displayId of [0, 1]) {
     }
     assert.equal(launches.length, count);
 }
-console.log('PASS: OD dock and OEM icon launches reuse independent dashboard tasks; CarPlay entries are preserved');
+console.log('PASS: OD launcher routes cached voice-preview icons to the correct dashboard; CarPlay and voice actions are preserved');

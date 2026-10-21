@@ -8,9 +8,12 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
+import ru.big.town.common.DashboardTarget;
+
 /** Emulator-only entry: real overlay and renderer, synthetic voice envelope, no mic or Native. */
 public class VoiceAnimationPreviewActivity extends VoiceActivity
         implements Choreographer.FrameCallback {
+    private static final String EXTRA_ANIMATION_PREVIEW = "voiceAnimationPreview";
     private boolean running;
     private long started;
     private boolean listening = true;
@@ -23,6 +26,9 @@ public class VoiceAnimationPreviewActivity extends VoiceActivity
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (returnUnexpectedLaunchToDashboard(getIntent())) {
+            return;
+        }
         LinearLayout controls = new LinearLayout(this);
         controls.setGravity(Gravity.CENTER);
         String[] labels = {
@@ -53,7 +59,21 @@ public class VoiceAnimationPreviewActivity extends VoiceActivity
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (returnUnexpectedLaunchToDashboard(intent)) {
+            return;
+        }
         listening = true;
+    }
+
+    private boolean returnUnexpectedLaunchToDashboard(Intent intent) {
+        if (intent != null && intent.getBooleanExtra(EXTRA_ANIMATION_PREVIEW, false)) {
+            return false;
+        }
+        // OEM launchers may retain this component after its launcher filter is removed.
+        int displayId = getDisplay() != null && getDisplay().getDisplayId() == 1 ? 1 : 0;
+        startActivity(DashboardTarget.intent(displayId), DashboardTarget.options(displayId));
+        finish();
+        return true;
     }
 
     @Override

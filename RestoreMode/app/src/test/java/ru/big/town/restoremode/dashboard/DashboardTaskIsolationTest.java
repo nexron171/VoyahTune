@@ -79,6 +79,20 @@ public class DashboardTaskIsolationTest {
     }
 
     @Test
+    public void voiceAnimationPreviewCannotBeSelectedAsThePackageLauncher() {
+        Intent launcher = new Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setPackage(context.getPackageName());
+        Set<String> activities = context.getPackageManager().queryIntentActivities(launcher, 0).stream()
+                .map(resolved -> resolved.activityInfo.name)
+                .collect(Collectors.toSet());
+
+        assertTrue(activities.contains(DashboardTarget.DRIVER));
+        assertTrue(activities.contains(DashboardTarget.PASSENGER));
+        assertFalse(activities.contains(context.getPackageName() + ".VoiceAnimationPreviewActivity"));
+    }
+
+    @Test
     public void passengerSettingsAppearInNewAndSavedLayoutsWithoutChangingDriver() {
         TileOrderStore.save(
                 driver,
