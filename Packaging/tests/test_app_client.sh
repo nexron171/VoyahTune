@@ -92,7 +92,7 @@ for REQUIRED in \
         '*:*/app_process64|com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32|' \
         'ru.yandex.yandexnavi:*/app_process32|ru.dublgis.dgismobile:*/app_process32) FC_INJECTOR=$FI' \
         'reserve_injection_attempt "$FC_TARGET_ID" "$FC_TARGET_ATTEMPT"' \
-        'grep -qF "$APP_CLIENT_READY" "$FC_TRY"' \
+        'grep -qF "$FC_TARGET_READY" "$FC_TRY"' \
         'grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"' \
         'inject_app_client_bg "$FC_PACKAGE"' \
         'discover_app_client' \
@@ -112,7 +112,7 @@ reserve_line=$(printf '%s\n' "$fc_function" \
 inject_line=$(printf '%s\n' "$fc_function" \
     | grep -nF 'timeout -k 5 30 "$FC_TARGET_INJECTOR"' | cut -d: -f1)
 ready_line=$(printf '%s\n' "$fc_function" \
-    | grep -nF 'grep -qF "$APP_CLIENT_READY"' | cut -d: -f1)
+    | grep -nF 'grep -qF "$FC_TARGET_READY"' | cut -d: -f1)
 mark_line=$(printf '%s\n' "$fc_function" \
     | grep -nF 'mv -f "$FC_MARK_TMP" "$FC_TARGET_MARK"' | cut -d: -f1)
 [ "$reserve_line" -lt "$inject_line" ] || fail "client injection is not reserved before Frida"

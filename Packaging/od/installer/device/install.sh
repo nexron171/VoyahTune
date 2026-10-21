@@ -27,7 +27,7 @@ fi
 
 # Полный локальный preflight до первого ADB-вызова.
 for FULL_REQUIRED_ASSET in load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js \
-        app_client.js \
+        app_client.js voyahtune_phone_numbers.js \
         apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js apollo-safe-device.sh disable-third-party-loaders.sh repair-native-data.sh \
         voyahtune_keyboard_en_config.json \
         voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json \
@@ -682,6 +682,7 @@ install_required_data_file launcherdock.js /data/local/bin/launcherdock.js 644 |
 install_required_data_file multidisplay.js /data/local/bin/multidisplay.js 644 || exit 1
 install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644 || exit 1
 install_required_data_file app_client.js /data/local/bin/app_client.js 644 || exit 1
+install_required_data_file voyahtune_phone_numbers.js /data/local/bin/voyahtune_phone_numbers.js 644 || exit 1
 install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644 || exit 1
 install_required_data_file voyahtune_drive_reset.js /data/local/bin/voyahtune_drive_reset.js 644 || exit 1
 install_required_data_file voyahtune_acc_restore.js /data/local/bin/voyahtune_acc_restore.js 644 || exit 1

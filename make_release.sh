@@ -380,7 +380,7 @@ verify_release_payload() {
     if [ "$INFRASTRUCTURE" = pi ]; then
         required="$required loaderFrida injects.json clusternavi.js phone-num.js runyn.apk"
     else
-        required="$required load.bin app_client.js voyahtune_drive_reset.js voyahtune_acc_restore.js disable-third-party-loaders.sh repair-native-data.sh"
+        required="$required load.bin app_client.js voyahtune_phone_numbers.js voyahtune_drive_reset.js voyahtune_acc_restore.js disable-third-party-loaders.sh repair-native-data.sh"
     fi
     for payload in $required; do
         if [ ! -s "$out/$payload" ]; then

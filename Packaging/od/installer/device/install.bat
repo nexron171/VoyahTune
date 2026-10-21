@@ -11,7 +11,7 @@ exit /b %FULL_INSTALL_RESULT%
 
 :install_main
 cd /d "%~dp0" || exit /b 1
-for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 apollo-safe-device.sh disable-third-party-loaders.sh repair-native-data.sh voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
+for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js voyahtune_phone_numbers.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 apollo-safe-device.sh disable-third-party-loaders.sh repair-native-data.sh voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
     exit /b 1
 )
@@ -159,6 +159,8 @@ if errorlevel 1 exit /b 1
 call :install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file app_client.js /data/local/bin/app_client.js 644
+if errorlevel 1 exit /b 1
+call :install_required_data_file voyahtune_phone_numbers.js /data/local/bin/voyahtune_phone_numbers.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644
 if errorlevel 1 exit /b 1

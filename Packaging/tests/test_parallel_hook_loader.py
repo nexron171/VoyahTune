@@ -62,6 +62,9 @@ case "$script" in
         if [ ! -f "$root/missing_navigation_ready" ]; then echo '[navigation-source] hook ready v1'; fi
         if [ ! -f "$root/missing_rds_ready" ]; then echo '[rds-restore] hook ready v1'; fi
         gate=none ;;
+    voyahtune_phone_numbers.js)
+        if [ ! -f "$root/missing_phone_ready" ]; then echo '[phone-numbers] hook ready v1'; fi
+        gate=none ;;
     voyahtune_drive_reset.js)
         if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v2'; fi
         gate=none ;;
@@ -167,6 +170,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         enabled=True,
         package="com.pateo.rdsapp",
         selected=True,
+        phone_agent=True,
     ):
         if enabled:
             (self.root / "enable_rds").touch()
@@ -178,6 +182,11 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         if not exe.is_symlink():
             exe.symlink_to(executable)
         (self.root / "app_client.js").touch()
+        phone_script = self.root / "voyahtune_phone_numbers.js"
+        if phone_agent:
+            phone_script.touch()
+        elif phone_script.exists():
+            phone_script.unlink()
         selection = "settings() { echo null; }; "
         if package != "com.pateo.rdsapp":
             selection = (
@@ -192,11 +201,67 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
                 str(self.loader),
                 "--probe",
                 'APP_CLIENT="$FIXTURE/app_client.js"; '
+                'PHONE_NUMBERS_AGENT="$FIXTURE/voyahtune_phone_numbers.js"; '
                 + selection
                 + "fixture_discover_app_client; wait",
             ],
             check=True,
             timeout=10,
+            env=self.env,
+            capture_output=True,
+        )
+
+    def test_phone_numbers_discovered_without_geometry_selection(self):
+        for executable in ("/system/bin/app_process64", "/system/bin/app_process32"):
+            with self.subTest(executable=executable):
+                self.rds_probe(package="com.qinggan.bluetoothphone", selected=False,
+                               executable=executable)
+                marker = self.root / "voyahtune_app_client.com.qinggan.bluetoothphone.pid"
+                self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+                self.rds_probe(package="com.qinggan.bluetoothphone", selected=False,
+                               executable=executable)
+                self.assertEqual((self.root / "events").read_text().count(
+                    "start voyahtune_phone_numbers.js 109"), 1)
+                self.assertNotIn("start app_client.js 109", (self.root / "events").read_text())
+                marker.unlink()
+                (self.root / "voyahtune_app_client.com.qinggan.bluetoothphone.attempt").unlink()
+                (self.root / "events").write_text("")
+                (self.root / "proc/109/exe").unlink()
+
+    def test_phone_numbers_requires_ready_and_keeps_failed_attempt(self):
+        (self.root / "missing_phone_ready").touch()
+        self.rds_probe(package="com.qinggan.bluetoothphone", selected=False)
+        marker = self.root / "voyahtune_app_client.com.qinggan.bluetoothphone.pid"
+        self.assertFalse(marker.exists())
+        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.bluetoothphone.attempt").exists())
+        (self.root / "missing_phone_ready").unlink()
+        self.rds_probe(package="com.qinggan.bluetoothphone", selected=False)
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.root / "events").read_text().count(
+            "start voyahtune_phone_numbers.js 109"), 1)
+
+    def test_phone_numbers_rejects_secondary_android_user(self):
+        self.rds_probe(package="com.qinggan.bluetoothphone", uid=110109, selected=False)
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_phone_numbers_missing_agent_does_not_fall_back_to_geometry(self):
+        self.rds_probe(package="com.qinggan.bluetoothphone", selected=False, phone_agent=False)
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_phone_numbers_live_injector_keeps_apps_lane_and_busy_marker(self):
+        process = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.processes.append(process)
+        proc_dir = self.root / f"proc/{process.pid}"
+        proc_dir.mkdir()
+        agent = ROOT / "Packaging/od/inject/voyahtune_phone_numbers.js"
+        (proc_dir / "cmdline").write_text(f"frida-inject -p 109 -s {agent} ")
+        subprocess.run(
+            [
+                "sh", str(self.loader), "--probe",
+                "WORKER_LANE=apps; lane_injector_is_live && app_client_inject_is_live 109",
+            ],
+            check=True,
+            timeout=5,
             env=self.env,
             capture_output=True,
         )

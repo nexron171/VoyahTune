@@ -13,6 +13,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / 'Packaging/tests'
 COMMON = (
+    'test_phone_numbers.js',
     'test_android11_package_lifecycle.sh',
     'test_classic_release_identity.py',
     'test_stop_loader.py',
@@ -58,7 +59,7 @@ def assets(profile):
     required += [root/'tools/frida-inject-16.2.1-android-arm64']
     if profile == 'od':
         required += [root/'system/load.bin']
-        required += [root/'inject'/name for name in ('app_client.js', 'voyahtune_acc_restore.js', 'voyahtune_drive_reset.js')]
+        required += [root/'inject'/name for name in ('app_client.js', 'voyahtune_phone_numbers.js', 'voyahtune_acc_restore.js', 'voyahtune_drive_reset.js')]
         assert not (root/'loaderFrida').exists(), 'OD must use its own shell loader'
     else:
         required += [root/'loaderFrida'/name for name in ('main.go', 'go.mod', 'build.sh', 'injects.json')]

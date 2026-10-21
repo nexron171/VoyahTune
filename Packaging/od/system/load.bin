@@ -174,6 +174,8 @@ KEYBOARD_LOG=/data/local/tmp/voyahtune_keyboard.txt
 KEYBOARD_SEEN_ID=
 KEYBOARD_MODE_CURRENT=unknown
 APP_CLIENT=/data/local/bin/app_client.js
+PHONE_NUMBERS_AGENT=/data/local/bin/voyahtune_phone_numbers.js
+PHONE_NUMBERS_READY='[phone-numbers] hook ready v1'
 APP_CLIENT_FULLSCREEN_SETTING=voyahtune_fullscreen_apps
 APP_CLIENT_DPI_SETTING=voyahtune_dpi_packages
 APP_CLIENT_READY='[app-client] hook ready v1'
@@ -869,7 +871,7 @@ app_client_inject_is_live() {
         [ -r "$FC_INJECT_CMDLINE" ] || continue
         FC_INJECT_CMD=$(tr '\000' ' ' < "$FC_INJECT_CMDLINE" 2>/dev/null)
         case "$FC_INJECT_CMD" in
-            *"-p $1 "*"app_client.js"*) return 0 ;;
+            *"-p $1 "*"app_client.js"*|*"-p $1 "*"voyahtune_phone_numbers.js"*) return 0 ;;
         esac
     done
     return 1
@@ -937,6 +939,12 @@ inject_app_client_bg() {
     FC_TARGET_HISTORY=$8
     FC_TARGET_BLOCKED=$9
     FC_TARGET_REQUIRE_MAPKIT=${10}
+    FC_TARGET_SCRIPT=$APP_CLIENT
+    FC_TARGET_READY=$APP_CLIENT_READY
+    if [ "$FC_TARGET_PACKAGE" = com.qinggan.bluetoothphone ]; then
+        FC_TARGET_SCRIPT=$PHONE_NUMBERS_AGENT
+        FC_TARGET_READY=$PHONE_NUMBERS_READY
+    fi
 
     [ "$(cat "$FC_TARGET_MARK" 2>/dev/null)" = "$FC_TARGET_ID" ] && return 0
     [ "$(cat "$FC_TARGET_ATTEMPT" 2>/dev/null)" = "$FC_TARGET_ID" ] && return 0
@@ -995,7 +1003,7 @@ inject_app_client_bg() {
             || FC_ID_BEFORE=
         if [ "$FC_ID_BEFORE" = "$FC_TARGET_ID" ]; then
             timeout -k 5 30 "$FC_TARGET_INJECTOR" -p "$FC_TARGET_PID" \
-                -s "$APP_CLIENT" -e > "$FC_TRY" 2>&1
+                -s "$FC_TARGET_SCRIPT" -e > "$FC_TRY" 2>&1
             FC_RC=$?
         else
             printf '%s\n' "target identity changed before frida-inject" > "$FC_TRY"
@@ -1007,7 +1015,7 @@ inject_app_client_bg() {
         # the injector wrapper times out. Its two exact ready markers below and the
         # unchanged process identity confirm installation independently of that exit code.
         if { [ "$FC_RC" -eq 0 ] || [ "$FC_TARGET_PACKAGE" = com.pateo.rdsapp ]; } \
-                && grep -qF "$APP_CLIENT_READY" "$FC_TRY"; then
+                && grep -qF "$FC_TARGET_READY" "$FC_TRY"; then
             if [ "$FC_TARGET_REQUIRE_MAPKIT" != 1 ] \
                     || grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"; then
                 FC_READY_OK=1
@@ -1063,7 +1071,7 @@ discover_app_client() {
     FC_DPI_LIST=$(printf '%s' "$FC_DPI_LIST" | tr -d '[:space:]')
     # Navigation and OEM adapters run independently of geometry settings. Attach only to
     # existing exact main processes, using the same circuit breaker; never launch an app.
-    FC_LIST="com.pateo.rdsapp,com.qinggan.cluster,ru.yandex.yandexnavi,ru.dublgis.dgismobile${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
+    FC_LIST="com.pateo.rdsapp,com.qinggan.cluster,ru.yandex.yandexnavi,ru.dublgis.dgismobile,com.qinggan.bluetoothphone${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
     FC_SAVED_IFS=$IFS
     IFS=,
     for FC_DPI_PACKAGE in $FC_DPI_LIST; do
@@ -1136,6 +1144,7 @@ discover_app_client() {
         # remain 64-bit only.
         case "$FC_PACKAGE:$FC_EXE" in
             *:*/app_process64|com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32|\
+            com.qinggan.bluetoothphone:*/app_process32|\
             ru.yandex.yandexnavi:*/app_process32|ru.dublgis.dgismobile:*/app_process32) FC_INJECTOR=$FI ;;
             *)
                 reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
@@ -1144,7 +1153,11 @@ discover_app_client() {
                 continue
                 ;;
         esac
-        if [ ! -x "$FC_INJECTOR" ] || [ ! -r "$APP_CLIENT" ]; then
+        FC_SCRIPT=$APP_CLIENT
+        if [ "$FC_PACKAGE" = com.qinggan.bluetoothphone ]; then
+            FC_SCRIPT=$PHONE_NUMBERS_AGENT
+        fi
+        if [ ! -x "$FC_INJECTOR" ] || [ ! -r "$FC_SCRIPT" ]; then
             reserve_injection_attempt "$FC_ID" "$FC_ATTEMPT" || true
             loge "app client assets unavailable package=$FC_PACKAGE injector=$FC_INJECTOR"
             IFS=,
@@ -1714,6 +1727,9 @@ lane_injector_is_live() {
     for WI_PID in $(pidof frida-inject 2>/dev/null); do
         WI_CMD=$(tr '\000' ' ' < "/proc/$WI_PID/cmdline" 2>/dev/null)
         case "$WI_CMD" in *"$WI_SCRIPT"*) return 0 ;; esac
+        if [ "$WORKER_LANE" = apps ]; then
+            case "$WI_CMD" in *"$PHONE_NUMBERS_AGENT"*) return 0 ;; esac
+        fi
         if [ "$WORKER_LANE" = apollo ]; then
             case "$WI_CMD" in *"$DRIVE_RESET"*) return 0 ;; esac
         fi
