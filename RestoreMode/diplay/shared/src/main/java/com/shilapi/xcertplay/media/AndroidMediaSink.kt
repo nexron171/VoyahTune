@@ -371,7 +371,6 @@ class AndroidMediaSink(
     private val microphoneUplinks = ConcurrentHashMap<AudioStreamId, MicrophoneUplink>()
     private val audioModeLock = Any()
     private var communicationModeStream: AudioStreamId? = null
-    private var savedAudioMode = AudioManager.MODE_NORMAL
     private var callSpeaker: CallSpeaker? = null // guarded by audioModeLock
     private var earpieceFallbackTried = false // guarded by audioModeLock
     private val pendingVideoCodec = ConcurrentHashMap<Int, VideoCodec>()
@@ -650,7 +649,8 @@ class AndroidMediaSink(
                 MicrophoneUplink(config, onAudioDiagnostic,
                     speakerphoneCall = speakerphoneCall,
                     voyahCallCapture = voyahCallCapture,
-                    echoReference = if (config.audioType == TELEPHONY_AUDIO_TYPE) callEchoReferences[id] else null)
+                    echoReference = if (config.audioType == TELEPHONY_AUDIO_TYPE) callEchoReferences[id] else null,
+                    audioManager = audioManager)
             }
             if (!uplink.start()) {
                 microphoneUplinks.remove(id, uplink)
@@ -676,18 +676,18 @@ class AndroidMediaSink(
         synchronized(audioModeLock) {
             if (communicationModeStream != null) return
             // Select the HAL communication path before AudioRecord is created.
-            savedAudioMode = manager.mode
+            val before = manager.mode
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             communicationModeStream = id
             earpieceFallbackTried = false
             val speakerRequested = runCatching(callSpeakerphone).getOrDefault(false)
             if (speakerRequested) callSpeaker = CallSpeaker.on(manager)
-            Log.i("xcertplay-usb", "audio mode $savedAudioMode -> ${manager.mode} for telephony stream=$id")
+            Log.i("xcertplay-usb", "audio mode $before -> ${manager.mode} for telephony stream=$id")
             // The report, not just logcat: a head unit left in the voice path plays no media,
             // and that cannot be diagnosed from a car without adb. A failing report must not
             // disturb the mode, so it is the last thing done and it cannot throw out of here.
             runCatching {
-                onAudioDiagnostic("Audio: mode entered communication from=$savedAudioMode" +
+                onAudioDiagnostic("Audio: mode entered communication from=$before" +
                     " now=${manager.mode} stream=$id" +
                     if (speakerRequested) " loudspeaker=${callSpeaker != null}" else "")
             }
@@ -722,13 +722,17 @@ class AndroidMediaSink(
             // The report is built inside the try but sent outside it: reporting from in there
             // would let a failing callback be caught as a failed restore.
             val line = try {
-                manager.mode = savedAudioMode
+                // AudioService keeps one mode request per process and uses the newest. Setting back the mode found
+                // at the start would keep DiPlay asking for it after the process that set it, such as the Telecom
+                // call for the car's phone audio, lets go, and the head unit stays in the voice path (#987).
+                // MODE_NORMAL withdraws DiPlay's request: the mode returns to another process's, or to normal.
+                manager.mode = AudioManager.MODE_NORMAL
                 Log.i("xcertplay-usb", "audio mode restored to ${manager.mode}")
-                "Audio: mode restored requested=$savedAudioMode now=${manager.mode} stream=$active"
+                "Audio: mode restored requested=${AudioManager.MODE_NORMAL} now=${manager.mode} stream=$active"
             } catch (error: RuntimeException) {
-                Log.w("xcertplay-usb", "could not restore audio mode $savedAudioMode", error)
+                Log.w("xcertplay-usb", "could not restore audio mode", error)
                 val currentMode = runCatching { manager.mode.toString() }.getOrDefault("unknown")
-                "Audio: mode restore failed requested=$savedAudioMode now=$currentMode" +
+                "Audio: mode restore failed requested=${AudioManager.MODE_NORMAL} now=$currentMode" +
                     " error=${error.javaClass.simpleName}"
             }
             runCatching { onAudioDiagnostic(line) }

@@ -29,6 +29,10 @@ data class MicrophoneConfig(
             maxOf(1, sampleRate * frameMillis / 1000)
         }
 
+    /** The clock the RTP timestamps count in: the Opus format's rate, or the PCM sample rate. */
+    val rtpClockRate: Int
+        get() = if (codec == AudioCodecKind.OPUS) opusClockRate else sampleRate
+
     /** How far each packet moves the RTP timestamp, on the negotiated clock. */
     val rtpSamplesPerPacket: Int
         get() = if (codec == AudioCodecKind.OPUS) opusClockRate * OPUS_FRAME_MILLIS / 1000 else samplesPerPacket

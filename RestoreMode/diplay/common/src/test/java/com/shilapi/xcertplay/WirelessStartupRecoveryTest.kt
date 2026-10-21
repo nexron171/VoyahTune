@@ -1,5 +1,8 @@
 package com.shilapi.xcertplay
 
+import android.bluetooth.BluetoothAdapter
+import android.content.BroadcastReceiver
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -18,6 +21,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 import org.robolectric.util.ReflectionHelpers
@@ -143,6 +147,36 @@ class WirelessStartupRecoveryTest {
         assertTrue(ReflectionHelpers.getField(activity, "reconnectScheduled"))
         assertFalse(ReflectionHelpers.getField(activity, "startupRetryStopped"))
         assertEquals(View.GONE, retry.visibility)
+    }
+
+    // The back-off had reached 30 s on a Galaxy Note20: Bluetooth on, then half a minute of
+    // "Connecting to your iPhone…" before the next attempt.
+    @Test fun bluetoothTurningOnRunsTheRetryThatWaitsForIt() {
+        ReflectionHelpers.setField(activity, "reconnectAttempts", 4)
+        report(status = CarPlayStatus.Failed(BluetoothRadioCheck.RADIO_OFF))
+        val pending = ReflectionHelpers.getField<Runnable>(activity, "pendingReconnect")
+        val handler = ReflectionHelpers.getField<Handler>(activity, "mainHandler")
+        assertTrue(handler.hasCallbacks(pending))
+        bluetooth(BluetoothAdapter.STATE_TURNING_ON)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(ReflectionHelpers.getField(activity, "reconnectScheduled"))
+        bluetooth(BluetoothAdapter.STATE_ON)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(ReflectionHelpers.getField(activity, "reconnectScheduled"))
+        // It ran once, now; the delayed copy is gone.
+        assertFalse(handler.hasCallbacks(pending))
+    }
+
+    @Test fun bluetoothTurningOnLeavesAnyOtherRetryOnItsDelay() {
+        report()
+        bluetooth(BluetoothAdapter.STATE_ON)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(ReflectionHelpers.getField(activity, "reconnectScheduled"))
+    }
+
+    private fun bluetooth(state: Int) {
+        ReflectionHelpers.getField<BroadcastReceiver>(activity, "bluetoothOnReceiver").onReceive(activity,
+            Intent(BluetoothAdapter.ACTION_STATE_CHANGED).putExtra(BluetoothAdapter.EXTRA_STATE, state))
     }
 
     /** Fails every attempt with [status] until the retries stop, checking the screen names [cause] meanwhile. */

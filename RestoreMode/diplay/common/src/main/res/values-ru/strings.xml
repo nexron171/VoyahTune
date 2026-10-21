@@ -56,6 +56,10 @@
     <string name="preview_oem_label">Метка OEM:\u0020</string>
     <string name="preview_empty">(пусто)</string>
     <string name="preview_frame_rate">Частота кадров:\u0020</string>
+    <string name="preview_transport_hevc">HEVC (H.265, %1$s)</string>
+    <string name="preview_decoder_hardware">аппаратный</string>
+    <string name="preview_decoder_software">программный</string>
+    <string name="preview_list_separator">,\u0020</string>
     <string name="preview_detected_maximum">Обнаруженный максимум:\u0020</string>
     <string name="preview_physical_reference">Физический ориентир:\u0020</string>
     <string name="basis_widest_width">наибольшая ширина</string>
@@ -88,7 +92,7 @@
     <string name="audio_stream_unavailable">Тип потока %1$d недоступен здесь (состояние=%2$s)</string>
     <string name="resolution_handshake_prefix">Разрешение рукопожатия:\u0020</string>
     <string name="safe_area_full_screen_at">Безопасная область: полный экран \u0020</string>
-    <string name="settings_android9_compat">Следующие настройки недоступны и скрыты на Android 9 (API 28):\n• Wi-Fi P2P (5 ГГц) — вместо него используется LocalOnlyHotspot.\n• Программный декодер HEVC — вместо него используется аппаратное декодирование.</string>
+    <string name="settings_android9_compat">Следующие настройки недоступны и скрыты на Android 9 (API 28):\n• Программный декодер HEVC — вместо него используется аппаратное декодирование.</string>
     <string name="settings_mfi_address_hint">Адрес должен начинаться с http:// или https://. Токен необязателен и отправляется как Authorization bearer token.</string>
     <string name="language_section_title">Язык</string>
     <string name="language_app_language">Язык приложения</string>
@@ -199,7 +203,7 @@
     <string name="rect_fill_disable_safe_area_description">Запрашивает у iPhone полноэкранное изображение с прямыми углами. Попробуйте, если CarPlay оставляет полосу у края экрана или показывает цвет обоев в скруглённых углах. Пока параметр включён, безопасная область выше не используется. Применяется после «Сохранить и переподключить».</string>
     <string name="safe_area_disabled_rect_fill_summary">Безопасная область: выкл. (прямые углы, весь экран)</string>
     <string name="driving_side">Сторона управления</string>
-    <string name="efficient_video">Энергоэффективное видео</string>
+    <string name="efficient_video">Эффективное видео (HEVC)</string>
     <string name="enable_the_car_s_bluetooth_and_pair_your_iphone_first">Сначала включите Bluetooth автомобиля и свяжите iPhone.</string>
     <string name="error">Ошибка</string>
     <string name="exit_application">ВЫЙТИ ИЗ ПРИЛОЖЕНИЯ</string>
@@ -416,6 +420,8 @@
     <string name="option_size_large">Большой</string>
     <string name="option_size_medium">Средний</string>
     <string name="option_size_small">Маленький</string>
+    <string name="option_size_custom">Свой</string>
+    <string name="size_option_millimeters">%1$s · %2$d mm</string>
     <string name="option_theme_scenario">Сценарий · карта сбоку</string>
     <string name="option_theme_map">Карта · полная карта</string>
     <string name="option_theme_simple">Простой · карта сбоку</string>
@@ -458,6 +464,7 @@
     <string name="adb_dashboard_does_not_send_map">Приборная панель: %1$s, поэтому iPhone не передаёт карту.</string>
     <string name="adb_not_approved">DiPlay ещё не разрешён. Нажмите «Проверить доступ ADB» и разрешите DiPlay на экране машины.</string>
     <string name="adb_off">ADB по сети выключен. Включите его в параметрах разработчика головного устройства.</string>
+    <string name="adb_network_not_answering">Отладка по USB включена, но ADB по сети не отвечает. Включите ADB по сети в параметрах разработчика головного устройства. Если он уже включён, выключите его и включите снова.</string>
     <string name="adb_pairing_only">Это головное устройство поддерживает только беспроводную отладку с сопряжением, которую DiPlay пока не поддерживает.</string>
     <string name="navi_mode_off">Выкл.</string>
     <string name="navi_mode_turn_on_by_navi">Включать при навигации</string>
@@ -515,6 +522,8 @@
     <string name="video_while_parked_description">iOS 27: видео, которое вы отправляете в CarPlay с iPhone, показывается на экране машины, пока включён P. Плеер закрывается, когда вы выходите из P; без ADB видео выключено и iPhone играет только звук. Обычное видео по HTTPS (например, из Safari) работает; видео под защитой FairPlay, как Apple TV+, требует лицензированного приёмника и здесь не воспроизводится. Переподключает CarPlay. Нужен ADB по сети на головном устройстве.</string>
     <string name="cluster_song">Песня на приборной панели</string>
     <string name="cluster_song_description">Название и исполнитель песни из CarPlay показываются в музыкальной карточке на приборной панели, вместе с воспроизведением и паузой. Карточка отображается как источник «другое», потому что панель не рисует собственный источник CarPlay. Применяется сразу. Нужен ADB по сети на головном устройстве.</string>
+    <string name="cluster_song_gate">Автоактивация музыкальной карточки</string>
+    <string name="cluster_song_gate_description">Карточка не появляется, пока медиастек автомобиля не будет открыт. Открытие шлюза делает это: на мгновение появляется экран медиа, затем возврат в DiPlay. Оставьте выключенным, чтобы избежать мигания. Применяется сразу.</string>
     <string name="video_back_to_carplay">Назад в CarPlay</string>
     <string name="video_play">Воспроизвести</string>
     <string name="video_pause">Пауза</string>
@@ -746,6 +755,7 @@
     <string name="setup_iphone_none">iPhone ещё не выбран</string>
     <string name="setup_features_title">Функции</string>
     <string name="setup_features_description">Рекомендовано для %1$s. Включите нужное сейчас; всё остаётся в настройках и может быть изменено позже.</string>
+    <string name="setup_features_description_unknown">Включите нужное сейчас; всё остаётся в настройках и может быть изменено позже.</string>
     <string name="setup_cluster_route_conflict">Включён маршрут приборной панели DiLink 4. На DiLink 3 он мешает показу карты CarPlay на приборной панели.</string>
     <string name="setup_cluster_route_turn_off">Выключить</string>
     <string name="setup_badge_tested">Проверено на некоторых автомобилях</string>
@@ -990,4 +1000,10 @@
 
     <string name="settings_hotspot_interface">Интерфейс точки доступа (необязательно)</string>
     <string name="settings_hotspot_interface_description">Только для головных устройств, которые держат точку доступа на сетевом интерфейсе, не считающемся в Android точкой доступа Wi-Fi, например eth0.3 на некоторых устройствах Geely, Lynk &amp; Co и других Qualcomm. Оставьте пустым для автоматического поиска.</string>
+    <string name="cluster_projection_shape">Вид карты на приборной панели</string>
+    <string name="cluster_projection_shape_half">Половина экрана</string>
+    <string name="cluster_projection_shape_full">Весь экран</string>
+    <string name="cluster_projection_shape_description">При половине экрана скорость и состояние, которые панель обычно показывает, остаются рядом с картой; на весь экран карта занимает всю панель. DiPlay задаёт этот вид при каждом появлении карты CarPlay и иначе перекрывает вид, выбранный в машине. Требуется ADB по сети на головном устройстве.</string>
+    <string name="settings_cluster_speedometer_album_color">Цвет альбома для фона спидометра</string>
+    <string name="settings_cluster_speedometer_album_color_description">Плавно меняет фон на цвет рамки альбома. Сохраняет выбранную непрозрачность.</string>
 </resources>

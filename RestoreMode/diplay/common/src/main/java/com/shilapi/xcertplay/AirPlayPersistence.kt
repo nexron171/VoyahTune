@@ -88,6 +88,13 @@ object AirPlayPersistence {
     private const val KEY_LOW_LATENCY_DECODER = "low_latency_decoder"
     private const val KEY_FPS_COUNTER = "fps_counter"
     private const val KEY_CLUSTER_MAP = "cluster_map_enabled"
+
+    /**
+     * The Geely cluster projection switch is DiPlay's right now. The switch belongs to the head unit
+     * and carries no owner, and the process can be killed without running `onStop`, so the claim is
+     * kept on disk and handed back by the next run ([GeelyClusterProjection.releaseStale]).
+     */
+    private const val KEY_CLUSTER_PROJECTION_HELD = "geely_cluster_projection_held"
     private const val KEY_ADB_CLUSTER_ACTIVITY = "adb_cluster_activity_enabled"
     private const val KEY_CENTER_MAP_OVERLAY = "center_map_overlay"
     private const val KEY_CENTER_MAP_AUTO_HIDE = "center_map_auto_hide"
@@ -878,6 +885,13 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CLUSTER_MAP, enabled).apply()
     }
 
+    fun loadClusterProjectionHeld(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CLUSTER_PROJECTION_HELD, false)
+
+    fun saveClusterProjectionHeld(context: Context, held: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CLUSTER_PROJECTION_HELD, held).apply()
+    }
+
     /** The dashboard map as a card on the centre screen while DiPlay is in the background. */
     fun loadCenterMapOverlay(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CENTER_MAP_OVERLAY, false)
@@ -924,6 +938,14 @@ object AirPlayPersistence {
     fun saveClusterSpeedometerEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean("cluster_speedometer_enabled", enabled).apply()
+    }
+
+    fun loadClusterSpeedometerAlbumColor(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("cluster_speedometer_album_color", false)
+
+    fun saveClusterSpeedometerAlbumColor(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("cluster_speedometer_album_color", enabled).apply()
     }
 
     internal fun observeClusterSpeedometer(context: Context, changed: () -> Unit): () -> Unit {

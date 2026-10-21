@@ -2,6 +2,7 @@ package com.shilapi.xcertplay
 
 import android.content.Context
 import com.shilapi.xcertplay.hud.BydCarMusicRhythm
+import com.shilapi.xcertplay.hud.BydOutputSettings
 import com.shilapi.xcertplay.media.AmbientMusicSettings
 import com.shilapi.xcertplay.network.CarHotspotConfigRead
 import com.shilapi.xcertplay.network.CarHotspotConfigWrite
@@ -9,6 +10,7 @@ import com.shilapi.xcertplay.network.HotspotCredentials
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -66,5 +68,29 @@ class VoyahDisabledFeaturesTest {
         assertEquals(CarHotspotConfigWrite.Result.UNSUPPORTED_SDK,
             CarHotspotConfigWrite.write(context, credentials,
                 isCancelled = { error("No worker should start") }, log = {}).result)
+    }
+
+    @Test
+    fun savedMusicCardActivationRemainsDisabled() {
+        BydOutputSettings.setClusterSong(context, true)
+        BydOutputSettings.setClusterSongGate(context, true)
+
+        assertFalse(BydOutputSettings.clusterSong(context))
+        assertFalse(BydOutputSettings.clusterSongGate(context))
+        assertTrue(context.getSharedPreferences("diplay_byd_outputs", Context.MODE_PRIVATE)
+            .getBoolean("cluster_song_gate", false))
+    }
+
+    @Test
+    fun geelyProjectionCannotReadOrChangeVendorState() {
+        AirPlayPersistence.saveClusterProjectionHeld(context, true)
+        AirPlayPersistence.saveClusterMapEnabled(context, false)
+
+        assertNull(GeelyClusterProjection.status())
+        assertFalse(GeelyClusterProjection.set(true, context))
+        assertFalse(GeelyClusterProjection.set(false, context))
+        GeelyClusterProjection.releaseStale(context)
+
+        assertTrue(AirPlayPersistence.loadClusterProjectionHeld(context))
     }
 }

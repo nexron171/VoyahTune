@@ -15,13 +15,24 @@ internal class WiredStartWatchdog(
 ) {
     private var armed = false
     private var finished = false
+    private var rearmed = false
+    // The limit in force; a replaced timer that runs anyway finds a newer one and does nothing.
+    private var generation = 0
     private var cancelTimer: (() -> Unit)? = null
 
     /** The first `carplay-start-session` starts the limit; a repeated one keeps it. */
     @Synchronized fun startSessionSent() {
         if (armed || finished) return
         armed = true
-        cancelTimer = schedule(timeoutMillis, ::expire)
+        arm()
+    }
+
+    /** DiPlay's own second request after a late USB network ([WiredStartAgain]) gets a full limit, once. */
+    @Synchronized fun startSessionSentAgain() {
+        if (!armed || finished || rearmed) return
+        rearmed = true
+        cancel()
+        arm()
     }
 
     @Synchronized fun sessionActive() {
@@ -34,9 +45,14 @@ internal class WiredStartWatchdog(
         cancel()
     }
 
-    private fun expire() {
+    private fun arm() {
+        val armedGeneration = ++generation
+        cancelTimer = schedule(timeoutMillis) { expire(armedGeneration) }
+    }
+
+    private fun expire(armedGeneration: Int) {
         synchronized(this) {
-            if (finished) return
+            if (finished || armedGeneration != generation) return
             finished = true
             cancelTimer = null
         }

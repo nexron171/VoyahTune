@@ -21,20 +21,26 @@ object SettingsBackupCodec {
      */
     private val AIRPLAY_KEYS = setOf(
         "display_scale_tenths", "ui_scale_percent", "hevc_enabled", "hevc_software_decoder",
+        // The resolution percentage; display_scale_tenths is its older key, still read when this one is missing.
+        "display_scale_percent",
         "advanced_audio_channel_mapping", "audio_focus_enabled", "audio_focus_auto_yield",
         "disable_media_key_audio_focus", "media_audio_channel", "navigation_audio_channel",
         "navigation_stream_type", "wireless_enabled", "wireless_hotspot_mode", "wifi_p2p_preferred_channel", "wifi_direct_scan_pause",
+        "navigation_audio_attenuation_db",
         "manual_hotspot_band", "manual_hotspot_channel", "manual_hotspot_security", "app_appearance",
         "ambient_lux_threshold", "display_fps", "media_buffer_ms", "wired_media_buffer_ms", "main_buffered_audio",
+        "ambient_delay_seconds",
         "speech_without_8_16_khz", "car_bluetooth_audio", "call_echo_cancellation", "call_voice_filter",
+        "call_speakerphone",
         "smooth_video", "direct_video_output", "low_latency_decoder", "mtk_decoder_tuning", "fps_counter",
-        "adb_cluster_activity_enabled", "center_map_overlay", "center_map_auto_hide",
+        "adb_cluster_activity_enabled", "platform21_cluster_enabled", "center_map_overlay", "center_map_auto_hide",
         "center_map_follows_dashboard", "settings_gesture_fingers", "display_width_physical_mm",
         "display_physical_size_basis", "right_hand_drive", "hide_top_bar", "hide_bottom_bar",
         "temporary_system_bars",
         "harman_fullscreen", "safe_area_draw_outside", "main_display_disable_safe_area",
         "black_corner_radius_dp",
         "adapt_pip_resolution", "auto_start_on_boot", "bt_suspend_during_carplay", "hide_byd_call_popup",
+        "launcher_bubble", "launcher_bubble_size",
         "bt_suspend_delay_seconds", "location_reporting_enabled", "external_controller", "usb_charging_current",
     )
 

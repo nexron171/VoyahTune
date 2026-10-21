@@ -227,7 +227,7 @@ class CarPlayMediaEngine(
                         session.logDebug(
                             "Audio: rtp clock type=$type audioType=$audioType " +
                                 "audioFormat=0x${java.lang.Long.toHexString((stream["audioFormat"] as? Number)?.toLong() ?: 0L)} " +
-                                "measuredHz=$hz microphoneClockHz=${microphone?.opusClockRate ?: "none"}",
+                                "measuredHz=$hz microphoneClockHz=${microphone?.rtpClockRate ?: "none"}",
                         )
                     }
                     sink.onAudioRtp(streamId, format, rtp, sample)

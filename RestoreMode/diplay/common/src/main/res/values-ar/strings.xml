@@ -56,6 +56,10 @@
     <string name="preview_oem_label">وسم OEM:\u0020</string>
     <string name="preview_empty">(فارغ)</string>
     <string name="preview_frame_rate">معدل الإطارات:\u0020</string>
+    <string name="preview_transport_hevc">HEVC (H.265، %1$s)</string>
+    <string name="preview_decoder_hardware">عتادي</string>
+    <string name="preview_decoder_software">برمجي</string>
+    <string name="preview_list_separator">،\u0020</string>
     <string name="preview_detected_maximum">الحد الأقصى المكتشف:\u0020</string>
     <string name="preview_physical_reference">المرجع الفيزيائي:\u0020</string>
     <string name="basis_widest_width">أقصى عرض</string>
@@ -88,7 +92,7 @@
     <string name="audio_stream_unavailable">نوع البث %1$d غير متاح هنا (الحالة=%2$s)</string>
     <string name="resolution_handshake_prefix">دقة المصافحة:\u0020</string>
     <string name="safe_area_full_screen_at">المنطقة الآمنة: ملء الشاشة بحجم\u0020</string>
-    <string name="settings_android9_compat">الإعدادات التالية غير متاحة ومخفية على Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — يُستخدم LocalOnlyHotspot بدلاً منه.\n• مفكّك HEVC البرمجي — يُستخدم فك الترميز العتادي بدلاً منه.</string>
+    <string name="settings_android9_compat">الإعدادات التالية غير متاحة ومخفية على Android 9 (API 28):\n• مفكّك HEVC البرمجي — يُستخدم فك الترميز العتادي بدلاً منه.</string>
     <string name="settings_mfi_address_hint">يجب أن يبدأ العنوان بـ http:// أو https://. الرمز الاختياري ويُرسل كـ Authorization bearer token.</string>
     <string name="language_section_title">اللغة</string>
     <string name="language_app_language">لغة التطبيق</string>
@@ -199,7 +203,7 @@
     <string name="rect_fill_disable_safe_area_description">يطلب من iPhone صورة بملء الشاشة بزوايا قائمة. جرّبه عندما يترك CarPlay شريطًا عند حافة الشاشة أو يُظهر لون الخلفية في زواياه المستديرة. لا تُستخدم المنطقة الآمنة أعلاه أثناء تشغيله. يُطبّق بعد الحفظ وإعادة الاتصال.</string>
     <string name="safe_area_disabled_rect_fill_summary">المنطقة الآمنة: متوقفة (زوايا قائمة، ملء الشاشة)</string>
     <string name="driving_side">جانب القيادة</string>
-    <string name="efficient_video">فيديو كفؤ</string>
+    <string name="efficient_video">فيديو كفؤ (HEVC)</string>
     <string name="enable_the_car_s_bluetooth_and_pair_your_iphone_first">فعّل بلوتوث السيارة واقترن بـ iPhone أولاً.</string>
     <string name="error">خطأ</string>
     <string name="exit_application">إنهاء التطبيق</string>
@@ -416,6 +420,8 @@
     <string name="option_size_large">كبير</string>
     <string name="option_size_medium">متوسط</string>
     <string name="option_size_small">صغير</string>
+    <string name="option_size_custom">مخصص</string>
+    <string name="size_option_millimeters">%1$s · %2$d mm</string>
     <string name="option_theme_scenario">المشهد · خريطة جانبية</string>
     <string name="option_theme_map">الخريطة · خريطة كاملة</string>
     <string name="option_theme_simple">بسيط · خريطة جانبية</string>
@@ -458,6 +464,7 @@
     <string name="adb_dashboard_does_not_send_map">لوحة العدادات: %1$s، لذا لا يرسل iPhone الخريطة.</string>
     <string name="adb_not_approved">لم تتم الموافقة على DiPlay بعد. اضغط «التحقق من الوصول عبر ADB» ثم اسمح لـ DiPlay على شاشة السيارة.</string>
     <string name="adb_off">ADB عبر الشبكة متوقف. شغّله من خيارات المطوّر في وحدة القيادة.</string>
+    <string name="adb_network_not_answering">تصحيح أخطاء USB مفعّل، لكن ADB عبر الشبكة لا يستجيب. شغّل ADB عبر الشبكة من خيارات المطوّر في وحدة القيادة. إذا كان مشغّلًا بالفعل، فأوقفه ثم شغّله من جديد.</string>
     <string name="adb_pairing_only">توفر وحدة القيادة هذه تصحيح الأخطاء اللاسلكي مع الإقران فقط، وهو ما لا يدعمه DiPlay بعد.</string>
     <string name="navi_mode_off">إيقاف</string>
     <string name="navi_mode_turn_on_by_navi">التشغيل عند الملاحة</string>
@@ -515,6 +522,8 @@
     <string name="video_while_parked_description">iOS 27: يُعرض الفيديو الذي ترسله إلى CarPlay من iPhone على شاشة السيارة ما دامت السيارة على وضع P. يُغلق المشغل عند الخروج من P؛ وبدون ADB يبقى الفيديو متوقفًا ويشغّل iPhone الصوت فقط. يعمل فيديو HTTPS العادي (مثل Safari)؛ أما الفيديو المحمي بـ FairPlay مثل Apple TV+ فيحتاج إلى مستقبل مرخّص ولا يعمل هنا. يعيد الاتصال بـ CarPlay. يتطلب ADB عبر الشبكة على وحدة القيادة.</string>
     <string name="cluster_song">الأغنية على لوحة العدادات</string>
     <string name="cluster_song_description">يظهر اسم أغنية CarPlay والفنان في بطاقة الموسيقى على لوحة العدادات، مع التشغيل والإيقاف المؤقت. تظهر البطاقة كمصدر الموسيقى «آخر» في السيارة، لأن لوحة العدادات لا تعرض مصدر CarPlay الخاص. يُطبَّق فورًا. يتطلب ADB عبر الشبكة على وحدة القيادة.</string>
+    <string name="cluster_song_gate">تنشيط بطاقة الموسيقى تلقائياً</string>
+    <string name="cluster_song_gate_description">البطاقة لا تظهر حتى يُفعَّل مكدّس وسائط السيارة. فتح البوابة يُفعّله، فيظهر شاشة الوسائط لحظةً ثم يعود إلى DiPlay. اتركه متوقفًا لتجنّب الوميض. يُطبَّق فورًا.</string>
     <string name="video_back_to_carplay">العودة إلى CarPlay</string>
     <string name="video_play">تشغيل</string>
     <string name="video_pause">إيقاف مؤقت</string>
@@ -745,6 +754,7 @@
     <string name="setup_iphone_none">لم يتم اختيار iPhone بعد</string>
     <string name="setup_features_title">الميزات</string>
     <string name="setup_features_description">مقترحة لـ %1$s. فعّل ما تريده الآن؛ تبقى كل الخيارات في الإعدادات ويمكن تغييرها لاحقاً.</string>
+    <string name="setup_features_description_unknown">فعّل ما تريده الآن؛ تبقى كل الخيارات في الإعدادات ويمكن تغييرها لاحقاً.</string>
     <string name="setup_cluster_route_conflict">مسار لوحة العدادات الخاص بـ DiLink 4 مفعّل. في DiLink 3 يمنع ظهور خريطة CarPlay على لوحة العدادات.</string>
     <string name="setup_cluster_route_turn_off">إيقافه</string>
     <string name="setup_badge_tested">تم اختباره على بعض السيارات</string>
@@ -959,4 +969,10 @@
 
     <string name="settings_hotspot_interface">واجهة نقطة الاتصال (اختياري)</string>
     <string name="settings_hotspot_interface_description">لوحدات الرأس التي تشغّل نقطة الاتصال على واجهة شبكة لا يبلّغ عنها أندرويد كنقطة اتصال Wi-Fi، مثل eth0.3 في بعض وحدات Geely وLynk &amp; Co وغيرها من وحدات Qualcomm. اتركه فارغاً للعثور عليها تلقائياً.</string>
+    <string name="cluster_projection_shape">شكل خريطة لوحة العدادات</string>
+    <string name="cluster_projection_shape_half">نصف الشاشة</string>
+    <string name="cluster_projection_shape_full">ملء الشاشة</string>
+    <string name="cluster_projection_shape_description">يُبقي وضع نصف الشاشة السرعة وحالة السيارة اللتين تعرضهما اللوحة عادةً بجانب الخريطة؛ أما ملء الشاشة فتغطي الخريطة اللوحة بالكامل. يضبط DiPlay هذا الشكل عند ظهور خريطة CarPlay، وإلا فإنه يلغي الشكل المختار في السيارة. يتطلب ADB عبر الشبكة على وحدة القيادة.</string>
+    <string name="settings_cluster_speedometer_album_color">استخدام لون الألبوم لخلفية عداد السرعة</string>
+    <string name="settings_cluster_speedometer_album_color_description">يطابق لون إطار الألبوم بانتقالات سلسة مع الحفاظ على التعتيم المحدد.</string>
 </resources>

@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.backup
 
 import android.content.Context
+import com.shilapi.xcertplay.AirPlayPersistence
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -80,6 +81,32 @@ class SettingsBackupCodecTest {
         assertEquals(true, prefs("diplay").getBoolean("auto_connect", false))
         assertFalse(prefs("diplay").contains("page"))
         assertEquals(66, prefs("carplay_picture").getInt("brightness", 0))
+    }
+
+    // Each of these is saved under a name the list did not have, so an export left it behind: the
+    // resolution percentage (the list had only its older key) and settings added after the list.
+    @Test
+    fun aFreshUnitGetsBackTheResolutionAndTheNewerSettings() {
+        AirPlayPersistence.saveDisplayScalePercent(context, 85)
+        AirPlayPersistence.saveAmbientDelaySeconds(context, 10)
+        AirPlayPersistence.saveNavigationAudioAttenuationDb(context, -8)
+        AirPlayPersistence.saveCallSpeakerphone(context, true)
+        AirPlayPersistence.saveLegacyClusterEnabled(context, true)
+        AirPlayPersistence.saveLauncherBubble(context, true)
+        AirPlayPersistence.saveLauncherBubbleSize(context, 16)
+        val document = SettingsBackupCodec.export(context, "0.2.21")
+        prefs("xcertplay_airplay").edit().clear().commit()
+
+        assertFalse(SettingsBackupCodec.import(context, document).invalid)
+
+        assertEquals(85, AirPlayPersistence.loadDisplayScalePercent(context))
+        assertEquals(10, AirPlayPersistence.loadAmbientDelaySeconds(context))
+        assertEquals(-8, AirPlayPersistence.loadNavigationAudioAttenuationDb(context))
+        assertTrue(AirPlayPersistence.loadCallSpeakerphone(context))
+        assertTrue(AirPlayPersistence.loadLegacyClusterEnabled(context))
+        assertFalse(AirPlayPersistence.loadLauncherBubble(context))
+        assertTrue(prefs("xcertplay_airplay").getBoolean("launcher_bubble", false))
+        assertEquals(16, AirPlayPersistence.loadLauncherBubbleSize(context))
     }
 
     @Test

@@ -45,6 +45,36 @@ class WiredStartWatchdogTest {
         assertEquals(0, cancelled)
     }
 
+    @Test fun diPlaysOwnSecondRequestGetsAFullLimitOnce() {
+        val watch = watchdog()
+        watch.startSessionSent()
+        val first = timer
+        watch.startSessionSentAgain()
+        assertEquals(1, cancelled)
+        assertEquals(WiredStartWatchdog.TIMEOUT_MILLIS, delay)
+        first!!()
+        assertEquals(0, timeouts)
+        // A further one keeps that limit.
+        val second = timer
+        watch.startSessionSentAgain()
+        assertEquals(second, timer)
+        assertEquals(1, cancelled)
+        timer!!()
+        assertEquals(1, timeouts)
+    }
+
+    @Test fun noSecondLimitWithoutAFirstRequestOrAfterTheSession() {
+        val watch = watchdog()
+        watch.startSessionSentAgain()
+        assertNull(timer)
+        watch.startSessionSent()
+        watch.sessionActive()
+        watch.startSessionSentAgain()
+        assertEquals(1, cancelled)
+        timer!!()
+        assertEquals(0, timeouts)
+    }
+
     @Test fun anActiveSessionCancelsTheLimit() {
         val watch = watchdog()
         watch.startSessionSent()

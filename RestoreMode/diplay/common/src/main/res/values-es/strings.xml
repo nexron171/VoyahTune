@@ -56,6 +56,10 @@
     <string name="preview_oem_label">Etiqueta OEM:\u0020</string>
     <string name="preview_empty">(vacío)</string>
     <string name="preview_frame_rate">Frecuencia de imágenes:\u0020</string>
+    <string name="preview_transport_hevc">HEVC (H.265, %1$s)</string>
+    <string name="preview_decoder_hardware">hardware</string>
+    <string name="preview_decoder_software">software</string>
+    <string name="preview_list_separator">,\u0020</string>
     <string name="preview_detected_maximum">Máximo detectado:\u0020</string>
     <string name="preview_physical_reference">Referencia física:\u0020</string>
     <string name="basis_widest_width">ancho máximo</string>
@@ -88,7 +92,7 @@
     <string name="audio_stream_unavailable">El tipo de flujo %1$d no está disponible aquí (estado=%2$s)</string>
     <string name="resolution_handshake_prefix">Resolución del enlace:\u0020</string>
     <string name="safe_area_full_screen_at">Zona segura: pantalla completa en\u0020</string>
-    <string name="settings_android9_compat">Los siguientes ajustes no están disponibles y están ocultos en Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — se usa LocalOnlyHotspot en su lugar.\n• Decodificador por software HEVC — se usa la decodificación por hardware en su lugar.</string>
+    <string name="settings_android9_compat">Los siguientes ajustes no están disponibles y están ocultos en Android 9 (API 28):\n• Decodificador por software HEVC — se usa la decodificación por hardware en su lugar.</string>
     <string name="settings_mfi_address_hint">La dirección debe empezar por http:// o https://. El token es opcional y se envía como Authorization bearer token.</string>
     <string name="language_section_title">Idioma</string>
     <string name="language_app_language">Idioma de la aplicación</string>
@@ -199,7 +203,7 @@
     <string name="rect_fill_disable_safe_area_description">Pide al iPhone una imagen a pantalla completa con esquinas rectas. Pruébalo si CarPlay deja una franja en un borde o muestra el color del fondo en sus esquinas redondeadas. Mientras esté activado no se usa la zona segura de arriba. Se aplica tras Guardar y reconectar.</string>
     <string name="safe_area_disabled_rect_fill_summary">Zona segura: desactivada (esquinas rectas, pantalla completa)</string>
     <string name="driving_side">Lado de conducción</string>
-    <string name="efficient_video">Vídeo eficiente</string>
+    <string name="efficient_video">Vídeo eficiente (HEVC)</string>
     <string name="enable_the_car_s_bluetooth_and_pair_your_iphone_first">Activa primero el Bluetooth del coche y empareja tu iPhone.</string>
     <string name="error">Error</string>
     <string name="exit_application">SALIR DE LA APLICACIÓN</string>
@@ -416,6 +420,8 @@
     <string name="option_size_large">Grande</string>
     <string name="option_size_medium">Mediano</string>
     <string name="option_size_small">Pequeño</string>
+    <string name="option_size_custom">Personalizado</string>
+    <string name="size_option_millimeters">%1$s · %2$d mm</string>
     <string name="option_theme_scenario">Escenario · mapa lateral</string>
     <string name="option_theme_map">Mapa · mapa completo</string>
     <string name="option_theme_simple">Simple · mapa lateral</string>
@@ -458,6 +464,7 @@
     <string name="adb_dashboard_does_not_send_map">Panel: %1$s, así que el iPhone no envía el mapa.</string>
     <string name="adb_not_approved">DiPlay aún no está autorizado. Toca «Comprobar acceso ADB» y permite DiPlay en la pantalla del coche.</string>
     <string name="adb_off">ADB por red está desactivado. Actívalo en las opciones de desarrollador de la unidad principal.</string>
+    <string name="adb_network_not_answering">La depuración USB está activada, pero ADB por red no responde. Activa ADB por red en las opciones de desarrollador de la unidad principal. Si ya está activado, desactívalo y vuelve a activarlo.</string>
     <string name="adb_pairing_only">Esta unidad principal solo ofrece depuración inalámbrica con emparejamiento, que DiPlay aún no admite.</string>
     <string name="navi_mode_off">Apagado</string>
     <string name="navi_mode_turn_on_by_navi">Activar con la navegación</string>
@@ -515,6 +522,8 @@
     <string name="video_while_parked_description">iOS 27: el vídeo que envías a CarPlay desde el iPhone se reproduce en la pantalla del coche mientras está en P. El reproductor se cierra al salir de P; sin ADB el vídeo queda desactivado y el iPhone solo reproduce el audio. El vídeo HTTPS normal (por ejemplo, de Safari) funciona; el vídeo protegido con FairPlay, como Apple TV+, necesita un receptor con licencia y aquí no se reproduce. Vuelve a conectar CarPlay. Requiere ADB por red en la unidad principal.</string>
     <string name="cluster_song">Canción en el cuadro</string>
     <string name="cluster_song_description">El título y el artista de la canción de CarPlay aparecen en la tarjeta de música del cuadro de instrumentos, con reproducción y pausa. La tarjeta se muestra como la fuente de música «otra» del vehículo, porque el cuadro no dibuja la fuente propia de CarPlay. Se aplica al instante. Requiere ADB por red en la unidad principal.</string>
+    <string name="cluster_song_gate">Activar la tarjeta de música automáticamente</string>
+    <string name="cluster_song_gate_description">La tarjeta no se muestra hasta que la pila multimedia del coche se ha abierto. Abrir la puerta hace eso, lo que muestra brevemente la pantalla multimedia y luego vuelve a DiPlay. Déjalo desactivado para evitar el parpadeo. Se aplica al instante.</string>
     <string name="video_back_to_carplay">Volver a CarPlay</string>
     <string name="video_play">Reproducir</string>
     <string name="video_pause">Pausa</string>
@@ -745,6 +754,7 @@
     <string name="setup_iphone_none">Aún no se ha elegido un iPhone</string>
     <string name="setup_features_title">Funciones</string>
     <string name="setup_features_description">Sugeridas para %1$s. Activa ahora lo que quieras; todo sigue en Ajustes y se puede cambiar después.</string>
+    <string name="setup_features_description_unknown">Activa ahora lo que quieras; todo sigue en Ajustes y se puede cambiar después.</string>
     <string name="setup_cluster_route_conflict">La ruta de cuadro de DiLink 4 está activada. En DiLink 3 impide el mapa de CarPlay en el cuadro.</string>
     <string name="setup_cluster_route_turn_off">Desactivarla</string>
     <string name="setup_badge_tested">Probado en algunos coches</string>
@@ -910,4 +920,10 @@
 
     <string name="settings_hotspot_interface">Interfaz del punto de acceso (opcional)</string>
     <string name="settings_hotspot_interface_description">Solo para unidades que ejecutan su punto de acceso en una interfaz de red que Android no informa como punto de acceso Wi-Fi, por ejemplo eth0.3 en algunas unidades Geely, Lynk &amp; Co y otros Qualcomm. Déjalo vacío para encontrarla automáticamente.</string>
+    <string name="cluster_projection_shape">Forma del mapa del panel</string>
+    <string name="cluster_projection_shape_half">Pantalla partida</string>
+    <string name="cluster_projection_shape_full">Pantalla completa</string>
+    <string name="cluster_projection_shape_description">La pantalla partida mantiene junto al mapa la velocidad y el estado que el panel muestra normalmente; la pantalla completa deja que el mapa ocupe todo el panel. DiPlay fija la forma cada vez que aparece el mapa de CarPlay, que de lo contrario anula la forma elegida en el coche. Requiere ADB por red en la unidad principal.</string>
+    <string name="settings_cluster_speedometer_album_color">Usar el color del álbum en el fondo del velocímetro</string>
+    <string name="settings_cluster_speedometer_album_color_description">Iguala el color del borde del álbum con transiciones suaves. Conserva la opacidad elegida.</string>
 </resources>

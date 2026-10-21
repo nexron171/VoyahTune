@@ -61,6 +61,10 @@
     <string name="preview_oem_label">OEM名：\u0020</string>
     <string name="preview_empty">（なし）</string>
     <string name="preview_frame_rate">フレームレート：\u0020</string>
+    <string name="preview_transport_hevc">HEVC（H.265、%1$s）</string>
+    <string name="preview_decoder_hardware">ハードウェア</string>
+    <string name="preview_decoder_software">ソフトウェア</string>
+    <string name="preview_list_separator">、</string>
     <string name="preview_detected_maximum">検出した最大値：\u0020</string>
     <string name="preview_physical_reference">実画面サイズの基準：\u0020</string>
     <string name="basis_widest_width">最大幅</string>
@@ -94,7 +98,7 @@
     <string name="resolution_handshake_prefix">ネゴシエーション解像度：\u0020</string>
     <string name="safe_area_full_screen_at">セーフエリア：全画面\u0020</string>
     <string name="safe_area_mapping_summary">セーフエリア：%5$d×%6$d内の(%3$d, %4$d)に%1$d×%2$d</string>
-    <string name="settings_android9_compat">Android 9（API 28）では以下の設定が使えず、非表示になります。\n• Wi-Fi P2P（5 GHz）：代わりにLocalOnlyHotspotを使用します。\n• HEVCソフトウェアデコーダー：代わりにハードウェアデコードを使用します。</string>
+    <string name="settings_android9_compat">Android 9（API 28）では以下の設定が使えず、非表示になります。\n• HEVCソフトウェアデコーダー：代わりにハードウェアデコードを使用します。</string>
     <string name="settings_mfi_address_hint">アドレスはhttp://またはhttps://で始めてください。トークンは任意で、AuthorizationのBearerトークンとして送信されます。</string>
     <string name="a_familiar_drive">いつもの操作を車でも。</string>
     <string name="a_previous_wi_fi_direct_connection_is_still_running_reset">以前のWi-Fi Direct接続が残っています。接続するにはリセットしてください。</string>
@@ -204,7 +208,7 @@
     <string name="rect_fill_disable_safe_area_description">iPhoneに角の丸みがない全画面映像を要求します。CarPlay画面の端に余白が残る場合や、角に壁紙の色が見える場合にお試しください。有効にすると上記のセーフエリア設定は適用されません。「保存して再接続」の後に反映されます。</string>
     <string name="safe_area_disabled_rect_fill_summary">セーフエリア：無効（直角の角、全画面）</string>
     <string name="driving_side">運転席の位置</string>
-    <string name="efficient_video">高効率映像</string>
+    <string name="efficient_video">高効率映像（HEVC）</string>
     <string name="enable_the_car_s_bluetooth_and_pair_your_iphone_first">車のBluetoothをオンにし、先にiPhoneをペアリングしてください。</string>
     <string name="error">エラー</string>
     <string name="exit_application">アプリを終了</string>
@@ -468,6 +472,8 @@
     <string name="option_size_large">大</string>
     <string name="option_size_medium">中</string>
     <string name="option_size_small">小</string>
+    <string name="option_size_custom">カスタム</string>
+    <string name="size_option_millimeters">%1$s · %2$d mm</string>
     <string name="option_theme_scenario">シナリオ · サイドマップ</string>
     <string name="option_theme_map">地図 · 全画面</string>
     <string name="option_theme_simple">シンプル · サイドマップ</string>
@@ -531,6 +537,7 @@
     <string name="adb_dashboard_does_not_send_map">メーター：%1$s。iPhoneから地図映像は送信されません。</string>
     <string name="adb_not_approved">DiPlayはまだ許可されていません。「ADBへのアクセスを確認」をタップし、車の画面で許可してください。</string>
     <string name="adb_off">ネットワークADBがオフです。車載端末の開発者向けオプションでオンにしてください。</string>
+    <string name="adb_network_not_answering">USBデバッグはオンですが、ネットワークADBが応答しません。車載端末の開発者向けオプションでネットワークADBをオンにしてください。すでにオンの場合は、一度オフにしてからもう一度オンにしてください。</string>
     <string name="adb_pairing_only">この車載端末ではペアリングが必要なワイヤレスデバッグだけが利用でき、DiPlayはまだ対応していません。</string>
     <string name="navi_mode_off">オフ</string>
     <string name="navi_mode_turn_on_by_navi">ナビ使用時のみオン</string>
@@ -588,6 +595,8 @@
     <string name="video_while_parked_description">iOS 27向けの機能です。車を駐車（シフト位置P）した状態では、iPhoneからCarPlayへ送った動画を車載画面で再生できます。P以外に切り替えるとプレーヤーを閉じます。ADBがない場合は映像再生を無効にし、音声のみiPhoneで再生します。Safariなどから送る通常のHTTPS動画には対応しますが、Apple TV+などFairPlayで保護された動画にはライセンスを持つレシーバーが必要なため再生できません。CarPlayを再接続すると反映されます。車載端末のネットワークADBが必要です。</string>
     <string name="cluster_song">メーターに曲を表示</string>
     <string name="cluster_song_description">CarPlayの曲名とアーティストを、再生・一時停止状態とともにメーターの音楽カードに表示します。メーターがCarPlayの音源を直接表示できないため、車両の「その他の音楽」として表示されます。変更はすぐに反映されます。車載端末のネットワークADBが必要です。</string>
+    <string name="cluster_song_gate">音楽カードを自動起動</string>
+    <string name="cluster_song_gate_description">カードは車載メディアスタックが一度有効化されるまで表示されません。このスイッチをオンにすると代わりにメディアスタックを有効化し、その間メディア画面が一瞬前面に出てから DiPlay に戻ります。点滅を避けるにはオフにします。変更はすぐに反映されます。</string>
     <string name="video_back_to_carplay">CarPlayに戻る</string>
     <string name="video_play">再生</string>
     <string name="video_pause">一時停止</string>
@@ -910,6 +919,7 @@
     <string name="setup_iphone_none">iPhoneがまだ選択されていません</string>
     <string name="setup_features_title">機能</string>
     <string name="setup_features_description">%1$sにおすすめの機能です。使いたい機能をオンにしてください。後から設定画面で変更できます。</string>
+    <string name="setup_features_description_unknown">使いたい機能をオンにしてください。後から設定画面で変更できます。</string>
     <string name="setup_cluster_route_conflict">DiLink 4のメーター経路がオンです。DiLink 3ではメーターのCarPlay地図が停止します。</string>
     <string name="setup_cluster_route_turn_off">オフにする</string>
     <string name="setup_badge_tested">一部の車で動作確認済み</string>
@@ -1012,4 +1022,10 @@
 
     <string name="settings_hotspot_interface">ホットスポットのインターフェース（任意）</string>
     <string name="settings_hotspot_interface_description">Android が Wi-Fi ホットスポットとして報告しないネットワークインターフェースでホットスポットを動かすヘッドユニット専用です。一部の Geely、Lynk &amp; Co、その他の Qualcomm ユニットでは eth0.3 です。空欄のままにすると自動で検出します。</string>
+    <string name="cluster_projection_shape">ダッシュボード地図の表示形態</string>
+    <string name="cluster_projection_shape_half">小画面（小画面ナビ）</string>
+    <string name="cluster_projection_shape_full">全画面（全画面ナビ）</string>
+    <string name="cluster_projection_shape_description">小画面ではメーター本来の車速や状態表示が地図の横に残ります。全画面では地図がメーター全体を覆います。CarPlayの地図が表示されるとDiPlayがこの形態を設定するため、クルマ側で選んだナビモードは上書きされます。車載機のネットワークADBが必要です。</string>
+    <string name="settings_cluster_speedometer_album_color">速度計の背景にアルバムの色を使用</string>
+    <string name="settings_cluster_speedometer_album_color_description">アルバムの枠の色に滑らかに切り替わります。選択した不透明度は維持されます。</string>
 </resources>
