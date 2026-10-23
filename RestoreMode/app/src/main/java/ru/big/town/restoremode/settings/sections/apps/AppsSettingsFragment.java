@@ -12,8 +12,8 @@ import android.widget.TextView;
 
 import androidx.lifecycle.ViewModelProvider;
 
+import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.DockLongPressAction;
@@ -52,10 +52,8 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         dockSplit2Btn = settingView(R.id.buttonDockSplit2);
         dockIcon1Button = settingView(R.id.buttonDockIcon1);
         dockIcon2Button = settingView(R.id.buttonDockIcon2);
-        boolean supportsIcons =
-                InfrastructureProfile.read(requireContext()) == InfrastructureProfile.OD;
-        settingView(R.id.dockIconOptions1).setVisibility(supportsIcons ? View.VISIBLE : View.GONE);
-        settingView(R.id.dockIconOptions2).setVisibility(supportsIcons ? View.VISIBLE : View.GONE);
+        settingView(R.id.dockIconOptions1).setVisibility(View.VISIBLE);
+        settingView(R.id.dockIconOptions2).setVisibility(View.VISIBLE);
         dockIcon1Button.setOnClickListener(view -> pickDockIcon(1));
         dockIcon2Button.setOnClickListener(view -> pickDockIcon(2));
         refreshDockButtons();
@@ -528,6 +526,7 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected void bindSettingsRow() {
+        bindClusterNavigation();
         if (settingView(R.id.dockOverrideBlock) != null) {
             initDockOverride();
             bindClick(R.id.buttonDockApp1, view -> pickDockApp(1));
@@ -541,6 +540,26 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         }
         bindClick(R.id.buttonAddFullscreenApp, this::onAddFullscreenApp);
         bindClick(R.id.buttonAddSplit, this::onAddSplitPreset);
+    }
+
+    private void bindClusterNavigation() {
+        Switch toggle = settingView(R.id.switchClusterNavigation);
+        if (toggle == null) {
+            return;
+        }
+        toggle.setOnCheckedChangeListener(null);
+        toggle.setChecked(
+                preferences.getBoolean(
+                        ClusterNavigationSettings.ENABLED,
+                        ClusterNavigationSettings.DEFAULT_ENABLED));
+        toggle.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    preferences
+                            .edit()
+                            .putBoolean(ClusterNavigationSettings.ENABLED, checked)
+                            .apply();
+                    SplitConfigSync.pushClusterNavigation(requireContext(), preferences);
+                });
     }
 
     @Override

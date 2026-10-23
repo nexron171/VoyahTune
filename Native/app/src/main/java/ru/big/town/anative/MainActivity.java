@@ -1,8 +1,5 @@
 package ru.big.town.anative;
 
-
-import androidx.appcompat.app.AppCompatActivity;
-
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -14,11 +11,13 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import androidx.appcompat.app.AppCompatActivity;
 
 import ru.big.town.anative.databinding.ActivityMainBinding;
 import ru.big.town.common.InfrastructureProfile;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
     public static String driveMode = "INDIVIDUAL";
@@ -29,16 +28,18 @@ public class MainActivity extends AppCompatActivity {
     public static String customCommandStarButton1 = "";
     public static String customCommandStarButton2 = "";
 
-    private static boolean driveEnabled   = false;
+    private static boolean driveEnabled = false;
     private static boolean recycleEnabled = false;
-    private static boolean energyEnabled  = false;
+    private static boolean energyEnabled = false;
     // Opt-out flags: missing provider/cache values preserve the historical remember-last behaviour.
-    private static boolean driveRememberLast   = true;
-    private static boolean energyRememberLast  = true;
+    private static boolean driveRememberLast = true;
+    private static boolean energyRememberLast = true;
     private static boolean recycleRememberLast = true;
     private static boolean disablePedestrianSound = false;
+
     /** Форсированный электрорежим (колонка 19 провайдера RestoreMode). */
     private static boolean forcedEv = false;
+
     private static boolean suspensionMaintenance = false;
     private static boolean fragranceEnabled = false;
     private static int fragranceTaste = FragranceRestorePolicy.DEFAULT_TASTE;
@@ -52,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
     private static int apolloSpeedMode = 4;
     private static boolean apolloSpeedWarningEnabled = false;
 
-    //-------------- Вспомогательная шляпа не паримся ---------------------
+    // -------------- Вспомогательная шляпа не паримся ---------------------
     public static void printBytesArrayToLog(String TAG, byte[][] bytes) {
         for (byte[] b : bytes) {
             Log.i(TAG, printHexBinary(b));
@@ -95,7 +96,8 @@ public class MainActivity extends AppCompatActivity {
             int h = hexToBin(s.charAt(i));
             int l = hexToBin(s.charAt(i + 1));
             if (h == -1 || l == -1) {
-                throw new IllegalArgumentException("contains illegal character for hexBinary: " + s);
+                throw new IllegalArgumentException(
+                        "contains illegal character for hexBinary: " + s);
             }
 
             out[i / 2] = (byte) (h * 16 + l);
@@ -105,8 +107,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public static byte[][] arraysStr2arraysBytes(String[] cmds) {
-        if (cmds == null) {   // неизвестное имя режима (несовпадение ключа) → пустой набор, а не NPE
-            Log.w("$$$ MAIN arraysStr2arraysBytes $$$", "cmds=null (неизвестный режим?) → пустой набор");
+        if (cmds == null) { // неизвестное имя режима (несовпадение ключа) → пустой набор, а не NPE
+            Log.w(
+                    "$$$ MAIN arraysStr2arraysBytes $$$",
+                    "cmds=null (неизвестный режим?) → пустой набор");
             return new byte[0][];
         }
         int indexCmd = 0;
@@ -120,44 +124,51 @@ public class MainActivity extends AppCompatActivity {
         // нагрузки. В debug-режиме фактически отправляемые кадры уже логирует CanSender.
         return cmdsBytes;
     }
-    //-------------- Вспомогательная шляпа не паримся ---------------------
 
+    // -------------- Вспомогательная шляпа не паримся ---------------------
 
-    //------------- Загружаем нашу JNI ------------------------------------
+    // ------------- Загружаем нашу JNI ------------------------------------
     static {
         System.loadLibrary("anative");
     }
 
     public static native int cis_can_control_bytes(int cmdNum, byte[] bArr);
 
-
     private ActivityMainBinding binding;
 
-    //------------- OEM VehicleState-команды режимов энергии ----------------------------------------
+    // ------------- OEM VehicleState-команды режимов энергии
+    // ----------------------------------------
     public static byte[][] getCustomCommand() {
-        if (customCommand == null || customCommand.isEmpty()) return new byte[][]{{}};
+        if (customCommand == null || customCommand.isEmpty()) return new byte[][] {{}};
         String[] cmds = customCommand.split("\n");
         return arraysStr2arraysBytes(cmds);
     }
 
     public static byte[][] getCustomCommandStarButton1() {
-        if (customCommandStarButton1 == null || customCommandStarButton1.isEmpty()) return new byte[][]{{}};
+        if (customCommandStarButton1 == null || customCommandStarButton1.isEmpty())
+            return new byte[][] {{}};
         String[] cmds = customCommandStarButton1.split("\n");
         return arraysStr2arraysBytes(cmds);
     }
+
     public static byte[][] getCustomCommandStarButton2() {
-        if (customCommandStarButton2 == null || customCommandStarButton2.isEmpty()) return new byte[][]{{}};
+        if (customCommandStarButton2 == null || customCommandStarButton2.isEmpty())
+            return new byte[][] {{}};
         String[] cmds = customCommandStarButton2.split("\n");
         return arraysStr2arraysBytes(cmds);
     }
 
     public static boolean sendEnergyModeCommand(Context context, String mode) {
-        return sendOemBundleState(context,
-                VehicleRestorePolicy.SOC_MODE, VehicleRestorePolicy.SOC_MODE_ID,
-                VehicleRestorePolicy.requireEnergy(mode), "energy mode: " + mode);
+        return sendOemBundleState(
+                context,
+                VehicleRestorePolicy.SOC_MODE,
+                VehicleRestorePolicy.SOC_MODE_ID,
+                VehicleRestorePolicy.requireEnergy(mode),
+                "energy mode: " + mode);
     }
 
-    //------------- OEM VehicleState-команды режимов вождения ---------------------------------------
+    // ------------- OEM VehicleState-команды режимов вождения
+    // ---------------------------------------
     public static boolean sendDriveModeCommand(Context context, String mode) {
         return DriveModeCanTransport.send(context, mode);
     }
@@ -167,28 +178,32 @@ public class MainActivity extends AppCompatActivity {
         return DriveModeCanTransport.send(GlobalVars.SAVE_CONTEXT, mode);
     }
 
-    //------------- OEM VehicleState-команды рекуперации --------------------------------------------
+    // ------------- OEM VehicleState-команды рекуперации
+    // --------------------------------------------
     public static boolean sendRecuperationModeCommand(Context context, String mode) {
         if (context == null) return false;
         if (!VehicleRestorePolicy.allowsRecuperationRestore(
                 currentVehicleMode(context, "driveMode"))) {
-            Log.i("$$$ MainActivity recuperation $$$",
+            Log.i(
+                    "$$$ MainActivity recuperation $$$",
                     "Snow owns minimum recuperation; storing selection without CAN send");
             return true;
         }
-        return sendOemBundleState(context,
-                VehicleRestorePolicy.REGEN_LEVEL, VehicleRestorePolicy.REGEN_LEVEL_ID,
-                VehicleRestorePolicy.requireRecycle(mode), "recuperation level: " + mode);
+        return sendOemBundleState(
+                context,
+                VehicleRestorePolicy.REGEN_LEVEL,
+                VehicleRestorePolicy.REGEN_LEVEL_ID,
+                VehicleRestorePolicy.requireRecycle(mode),
+                "recuperation level: " + mode);
     }
 
-    private static boolean sendOemBundleState(Context context, String name, int stableId,
-                                              int value, String label) {
+    private static boolean sendOemBundleState(
+            Context context, String name, int stableId, int value, String label) {
         Map<String, Integer> values = new LinkedHashMap<>();
         values.put(name, value);
         Map<String, Integer> stableIds = new LinkedHashMap<>();
         stableIds.put(name, stableId);
-        return OemVehicleStateTransport.sendBundle(
-                context, values, stableIds, label).accepted();
+        return OemVehicleStateTransport.sendBundle(context, values, stableIds, label).accepted();
     }
 
     /** Немедленно применить форсированный EV (тоггл с главного экрана / из настроек). */
@@ -200,33 +215,43 @@ public class MainActivity extends AppCompatActivity {
             String savedEnergy = currentSavedMode(context, "energy");
             if ("FORCE_EV".equals(savedEnergy)) {
                 try {
-                    android.os.Bundle snapshot = context.getContentResolver().call(
-                            MODES_PROVIDER_URI, "driveHookV2", "snapshot", null);
-                    savedEnergy = snapshot == null ? "EV" : snapshot.getString("configuredEnergy", "EV");
-                } catch (RuntimeException e) { savedEnergy = "EV"; }
+                    android.os.Bundle snapshot =
+                            context.getContentResolver()
+                                    .call(MODES_PROVIDER_URI, "driveHookV2", "snapshot", null);
+                    savedEnergy =
+                            snapshot == null ? "EV" : snapshot.getString("configuredEnergy", "EV");
+                } catch (RuntimeException e) {
+                    savedEnergy = "EV";
+                }
             }
             try {
                 target = VehicleRestorePolicy.requireEnergy(savedEnergy);
             } catch (IllegalArgumentException e) {
-                Log.w("$$$ MainActivity forced EV $$$",
-                        "Invalid saved energy target; falling back to EV", e);
+                Log.w(
+                        "$$$ MainActivity forced EV $$$",
+                        "Invalid saved energy target; falling back to EV",
+                        e);
                 target = VehicleRestorePolicy.SOC_EV;
             }
         }
-        return sendOemBundleState(context,
-                VehicleRestorePolicy.SOC_MODE, VehicleRestorePolicy.SOC_MODE_ID, target,
+        return sendOemBundleState(
+                context,
+                VehicleRestorePolicy.SOC_MODE,
+                VehicleRestorePolicy.SOC_MODE_ID,
+                target,
                 "forced EV " + (on ? "on" : "off / restore saved energy"));
     }
 
-    //------------- Управление режимом наружного света через штатный CanBusService -------------------
-    public static boolean setHeadlights(Context context, boolean on){
+    // ------------- Управление режимом наружного света через штатный CanBusService
+    // -------------------
+    public static boolean setHeadlights(Context context, boolean on) {
         String command = on ? "LOW_BEAM" : "OUT_LAMP_OFF";
         Log.i("$$$ MainActivity setHeadlights $$$", "OEM CAN: " + command);
         return HeadlightCanTransport.send(context, on);
     }
 
     /** Отдельная пара для кнопок руля: ближний свет ↔ штатный автоматический режим. */
-    public static boolean setHeadlightsAutoLow(Context context, boolean lowBeam){
+    public static boolean setHeadlightsAutoLow(Context context, boolean lowBeam) {
         String command = lowBeam ? "LOW_BEAM" : "AUTO_LAMP_SWITCH";
         Log.i("$$$ MainActivity setHeadlights $$$", "OEM CAN: " + command);
         return HeadlightCanTransport.sendAutoPair(context, lowBeam);
@@ -247,7 +272,8 @@ public class MainActivity extends AppCompatActivity {
         // Если у плитки виджета отключён автозапуск, пользователь запускает приложение вручную.
         // При повторном открытии MainActivity — автоматически запускаем это приложение заново.
         // Это решает проблему: пользователь открыл MainActivity, потом запустил приложение через
-        // виджет (без автозапуска), и при возврате в MainActivity приложение должно запуститься снова.
+        // виджет (без автозапуска), и при возврате в MainActivity приложение должно запуститься
+        // снова.
         String lastManualApp = WidgetSupport.getLastManualApp(this);
         if (lastManualApp != null && !lastManualApp.isEmpty()) {
             try {
@@ -255,21 +281,25 @@ public class MainActivity extends AppCompatActivity {
                 getPackageManager().getApplicationInfo(lastManualApp, 0);
                 // Запускаем приложение
                 SetModesReceiverDynamic.openFreeformApp(this, lastManualApp, 0);
-                Log.i("$$$ MainActivity onCreate $$$", "Автозапуск последнего приложения: " + lastManualApp);
+                Log.i(
+                        "$$$ MainActivity onCreate $$$",
+                        "Автозапуск последнего приложения: " + lastManualApp);
             } catch (Exception e) {
-                Log.w("$$$ MainActivity onCreate $$$", "Не удалось автозапустить " + lastManualApp, e);
+                Log.w(
+                        "$$$ MainActivity onCreate $$$",
+                        "Не удалось автозапустить " + lastManualApp,
+                        e);
             }
         }
 
-        //binding = ActivityMainBinding.inflate(getLayoutInflater());
-        //setContentView(binding.getRoot());
+        // binding = ActivityMainBinding.inflate(getLayoutInflater());
+        // setContentView(binding.getRoot());
         setContentView(R.layout.activity_main);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
 
-
         // Example of a call to a native method
-//        TextView tv = binding.sampleText;
-//        tv.setText("----------");
+        //        TextView tv = binding.sampleText;
+        //        tv.setText("----------");
     }
 
     public static boolean setCanValues(int cmdNum, byte[][] cmds) {
@@ -277,7 +307,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public static boolean setCanValues(int cmdNum, byte[][] cmds, String label) {
-        //printBytesArrayToLog("$$$ MAIN setCanValues $$$",cmds);
+        // printBytesArrayToLog("$$$ MAIN setCanValues $$$",cmds);
         // Отправка идёт через CanSender: в режиме отладки команды логируются (эмуляция) с меткой,
         // иначе уходят в шину через cis_can_control_bytes.
         return CanSender.send(cmdNum, cmds, label);
@@ -288,12 +318,11 @@ public class MainActivity extends AppCompatActivity {
     /**
      * Загружает настройки режимов. Источник №1 — {@link ru.big.town.restoremode}-провайдер
      * (актуальные значения). Если он ещё не поднят (частый случай сразу после пробуждения),
-     * подхватываем последний удачно прочитанный снимок из локального кэша (NativePrefs),
-     * чтобы не применять пустые дефолты.
+     * подхватываем последний удачно прочитанный снимок из локального кэша (NativePrefs), чтобы не
+     * применять пустые дефолты.
      *
-     * @return 2 — прочитаны свежие данные из провайдера;
-     *         1 — провайдер недоступен, но применён локальный кэш;
-     *         0 — данных нет ни в провайдере, ни в кэше (применять нечего).
+     * @return 2 — прочитаны свежие данные из провайдера; 1 — провайдер недоступен, но применён
+     *     локальный кэш; 0 — данных нет ни в провайдере, ни в кэше (применять нечего).
      */
     public static int loadModes(Context context) {
         return loadModes(context, true);
@@ -301,16 +330,21 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * @param allowCache false — принимать только свежие данные провайдера (кэш не трогаем);
-     *                   используется ApplyEngine в первых попытках, чтобы дать провайдеру
-     *                   шанс подняться, прежде чем соглашаться на устаревший снимок.
+     *     используется ApplyEngine в первых попытках, чтобы дать провайдеру шанс подняться, прежде
+     *     чем соглашаться на устаревший снимок.
      */
     public static int loadModes(Context context, boolean allowCache) {
         Cursor cursor = null;
         try {
-            cursor = context.getContentResolver().query(Uri
-                            .parse("content://ru.big.town.restoremode.restoremodecontentprovider/"),
-                    null, null,
-                    null, null);
+            cursor =
+                    context.getContentResolver()
+                            .query(
+                                    Uri.parse(
+                                            "content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                                    null,
+                                    null,
+                                    null,
+                                    null);
             if (cursor != null && cursor.getCount() != 0 && cursor.getColumnCount() >= 5) {
                 cursor.moveToFirst();
                 driveMode = cursor.getString(0);
@@ -319,71 +353,123 @@ public class MainActivity extends AppCompatActivity {
                 customCommand = cursor.getString(3);
                 customCommandCount = cursor.getInt(4);
                 // cols 6,7,8 — флаги включения (0=отключено, fallback=false)
-                driveEnabled   = cursor.getColumnCount() > 6 && cursor.getInt(6) == 1;
+                driveEnabled = cursor.getColumnCount() > 6 && cursor.getInt(6) == 1;
                 recycleEnabled = cursor.getColumnCount() > 7 && cursor.getInt(7) == 1;
-                energyEnabled  = cursor.getColumnCount() > 8 && cursor.getInt(8) == 1;
+                energyEnabled = cursor.getColumnCount() > 8 && cursor.getInt(8) == 1;
                 // col 11 — «Отключить звук для пешеходов» (1=отключить, fallback=false)
                 disablePedestrianSound = cursor.getColumnCount() > 11 && cursor.getInt(11) == 1;
                 forcedEv = cursor.getColumnCount() > 19 && cursor.getInt(19) == 1;
                 suspensionMaintenance = cursor.getColumnCount() > 32 && cursor.getInt(32) == 1;
                 fragranceEnabled = cursor.getColumnCount() > 20 && cursor.getInt(20) == 1;
-                FragranceRestorePolicy.Settings fragrance = FragranceRestorePolicy.normalize(
-                        cursor.getColumnCount() > 21 ? cursor.getInt(21)
-                                : FragranceRestorePolicy.DEFAULT_TASTE,
-                        cursor.getColumnCount() > 22 ? cursor.getInt(22)
-                                : FragranceRestorePolicy.DEFAULT_DURATION,
-                        cursor.getColumnCount() > 23 ? cursor.getInt(23)
-                                : FragranceRestorePolicy.DEFAULT_INTENSITY);
+                FragranceRestorePolicy.Settings fragrance =
+                        FragranceRestorePolicy.normalize(
+                                cursor.getColumnCount() > 21
+                                        ? cursor.getInt(21)
+                                        : FragranceRestorePolicy.DEFAULT_TASTE,
+                                cursor.getColumnCount() > 22
+                                        ? cursor.getInt(22)
+                                        : FragranceRestorePolicy.DEFAULT_DURATION,
+                                cursor.getColumnCount() > 23
+                                        ? cursor.getInt(23)
+                                        : FragranceRestorePolicy.DEFAULT_INTENSITY);
                 fragranceTaste = fragrance.taste;
                 fragranceDuration = fragrance.duration;
                 fragranceIntensity = fragrance.intensity;
                 apolloTlcEnabled = cursor.getColumnCount() > 24 && cursor.getInt(24) == 1;
-                apolloTrafficLightsEnabled = cursor.getColumnCount() > 25
-                        && cursor.getInt(25) == 1;
-                apolloGreenSoundEnabled = cursor.getColumnCount() > 26
-                        && cursor.getInt(26) == 1;
-                apolloTrafficSignsEnabled = cursor.getColumnCount() > 27
-                        && cursor.getInt(27) == 1;
+                apolloTrafficLightsEnabled = cursor.getColumnCount() > 25 && cursor.getInt(25) == 1;
+                apolloGreenSoundEnabled = cursor.getColumnCount() > 26 && cursor.getInt(26) == 1;
+                apolloTrafficSignsEnabled = cursor.getColumnCount() > 27 && cursor.getInt(27) == 1;
                 apolloSpeedSignsEnabled = cursor.getColumnCount() > 37 && cursor.getInt(37) == 1;
-                apolloSpeedMode = ApolloRestorePolicy.normalizeSpeedMode(
-                        cursor.getColumnCount() > 39 ? cursor.getInt(39)
-                                : cursor.getColumnCount() > 38 && cursor.getInt(38) == 1 ? 2 : 4);
+                apolloSpeedMode =
+                        ApolloRestorePolicy.normalizeSpeedMode(
+                                cursor.getColumnCount() > 39
+                                        ? cursor.getInt(39)
+                                        : cursor.getColumnCount() > 38 && cursor.getInt(38) == 1
+                                                ? 2
+                                                : 4);
                 apolloSpeedWarningEnabled = cursor.getColumnCount() > 40 && cursor.getInt(40) == 1;
                 // cols 29..31 — opt-out remember-last flags. Older providers and SQL-style NULL
                 // both mean true, so an update never silently changes historical behaviour.
                 driveRememberLast = cursorBooleanDefaultTrue(cursor, 29);
                 energyRememberLast = cursorBooleanDefaultTrue(cursor, 30);
                 recycleRememberLast = cursorBooleanDefaultTrue(cursor, 31);
-                // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп WiperColdService
+                // col 13 — «Сервисный режим дворников в холодную погоду»: старт/стоп
+                // WiperColdService
                 boolean wiperColdMode = cursor.getColumnCount() > 13 && cursor.getInt(13) == 1;
                 // cols 14,15 — команды кнопок на руле (короткое/долгое нажатие)
                 if (cursor.getColumnCount() > 14) customCommandStarButton1 = cursor.getString(14);
                 if (cursor.getColumnCount() > 15) customCommandStarButton2 = cursor.getString(15);
-                // col 18 — «Пауза музыки при открытии двери водителя»: второй потребитель сигнала двери
+                // col 18 — «Пауза музыки при открытии двери водителя»: второй потребитель сигнала
+                // двери
                 boolean pauseMediaOnDoor = cursor.getColumnCount() > 18 && cursor.getInt(18) == 1;
-                applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor);
-                saveModesCache(context, wiperColdMode, pauseMediaOnDoor);
+                int playOnDoorColumn =
+                        cursor.getColumnIndex(ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR);
+                boolean playMediaOnDoor =
+                        playOnDoorColumn >= 0
+                                && cursor.getInt(playOnDoorColumn) == 1
+                                && InfrastructureProfile.read(context).usesAccHooks();
+                applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor, playMediaOnDoor);
+                saveModesCache(context, wiperColdMode, pauseMediaOnDoor, playMediaOnDoor);
                 ApplyEngine.noteLoadedModes(
-                        driveMode, energy, recycle,
-                        driveEnabled, energyEnabled, recycleEnabled,
-                        driveRememberLast, energyRememberLast, recycleRememberLast);
-                Log.i(MODES_LOG, "FRESH: driveEnabled=" + driveEnabled
-                        + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
-                        + " rememberLast=" + driveRememberLast + "/" + energyRememberLast
-                        + "/" + recycleRememberLast
-                        + " disablePedestrianSound=" + disablePedestrianSound
-                        + " fragranceEnabled=" + fragranceEnabled
-                        + " fragrance=" + fragranceTaste + "/" + fragranceDuration
-                        + "/" + fragranceIntensity
-                        + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
-                        + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
-                        + "/" + apolloSpeedSignsEnabled + "/" + apolloSpeedMode + "/" + apolloSpeedWarningEnabled
-                        + " wiperColdMode=" + wiperColdMode
-                        + " pauseMediaOnDoor=" + pauseMediaOnDoor);
+                        driveMode,
+                        energy,
+                        recycle,
+                        driveEnabled,
+                        energyEnabled,
+                        recycleEnabled,
+                        driveRememberLast,
+                        energyRememberLast,
+                        recycleRememberLast);
+                Log.i(
+                        MODES_LOG,
+                        "FRESH: driveEnabled="
+                                + driveEnabled
+                                + " recycleEnabled="
+                                + recycleEnabled
+                                + " energyEnabled="
+                                + energyEnabled
+                                + " rememberLast="
+                                + driveRememberLast
+                                + "/"
+                                + energyRememberLast
+                                + "/"
+                                + recycleRememberLast
+                                + " disablePedestrianSound="
+                                + disablePedestrianSound
+                                + " fragranceEnabled="
+                                + fragranceEnabled
+                                + " fragrance="
+                                + fragranceTaste
+                                + "/"
+                                + fragranceDuration
+                                + "/"
+                                + fragranceIntensity
+                                + " apollo="
+                                + apolloTlcEnabled
+                                + "/"
+                                + apolloTrafficLightsEnabled
+                                + "/"
+                                + apolloGreenSoundEnabled
+                                + "/"
+                                + apolloTrafficSignsEnabled
+                                + "/"
+                                + apolloSpeedSignsEnabled
+                                + "/"
+                                + apolloSpeedMode
+                                + "/"
+                                + apolloSpeedWarningEnabled
+                                + " wiperColdMode="
+                                + wiperColdMode
+                                + " pauseMediaOnDoor="
+                                + pauseMediaOnDoor);
                 return 2;
             } else {
-                Log.w(MODES_LOG, "Content provider not ready or missing columns"
-                        + (cursor != null ? " cols=" + cursor.getColumnCount() : " cursor=null"));
+                Log.w(
+                        MODES_LOG,
+                        "Content provider not ready or missing columns"
+                                + (cursor != null
+                                        ? " cols=" + cursor.getColumnCount()
+                                        : " cursor=null"));
             }
         } catch (Exception e) {
             Log.e(MODES_LOG, "Exception reading ContentProvider: " + e.getMessage());
@@ -404,17 +490,24 @@ public class MainActivity extends AppCompatActivity {
         return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
-    /** PI's bounded early check reads the next restore target without starting unrelated services. */
+    /**
+     * PI's bounded early check reads the next restore target without starting unrelated services.
+     */
     static EarlyDriveModeRestore.Settings readEarlyDriveRestoreSettings(Context context) {
-        try (Cursor cursor = context.getContentResolver().query(MODES_PROVIDER_URI, null, null, null, null)) {
+        try (Cursor cursor =
+                context.getContentResolver().query(MODES_PROVIDER_URI, null, null, null, null)) {
             if (cursor != null && cursor.moveToFirst() && cursor.getColumnCount() > 6) {
                 String mode = cursor.getString(0);
-                int configured = cursor.getColumnIndex(ru.big.town.common.DriveSelectionPolicy.CONFIGURED);
-                int override = cursor.getColumnIndex(ru.big.town.common.DriveSelectionPolicy.OVERRIDE);
+                int configured =
+                        cursor.getColumnIndex(ru.big.town.common.DriveSelectionPolicy.CONFIGURED);
+                int override =
+                        cursor.getColumnIndex(ru.big.town.common.DriveSelectionPolicy.OVERRIDE);
                 if (configured >= 0) {
                     String selected = override >= 0 ? cursor.getString(override) : "";
-                    mode = ru.big.town.common.DriveSelectionPolicy.valid(selected)
-                            ? selected : cursor.getString(configured);
+                    mode =
+                            ru.big.town.common.DriveSelectionPolicy.valid(selected)
+                                    ? selected
+                                    : cursor.getString(configured);
                 }
                 return new EarlyDriveModeRestore.Settings(mode, cursor.getInt(6) == 1);
             }
@@ -423,18 +516,29 @@ public class MainActivity extends AppCompatActivity {
         }
         SharedPreferences cache = nativePrefs(context);
         if (!cache.getBoolean("cacheValid", false)) return null;
-        return new EarlyDriveModeRestore.Settings(cache.getString("cacheDriveMode", null),
+        return new EarlyDriveModeRestore.Settings(
+                cache.getString("cacheDriveMode", null),
                 cache.getBoolean("cacheDriveEnabled", false));
     }
 
     /** Missing or NULL opt-out fields are enabled; only an explicit numeric zero disables them. */
     private static boolean cursorBooleanDefaultTrue(Cursor cursor, int column) {
-        return cursor.getColumnCount() <= column || cursor.isNull(column) || cursor.getInt(column) != 0;
+        return cursor.getColumnCount() <= column
+                || cursor.isNull(column)
+                || cursor.getInt(column) != 0;
     }
 
-    /** Сохраняет успешно прочитанный снимок настроек в NativePrefs (кэш на случай «глухого» пробуждения). */
-    private static void saveModesCache(Context context, boolean wiperColdMode, boolean pauseMediaOnDoor) {
-        nativePrefs(context).edit()
+    /**
+     * Сохраняет успешно прочитанный снимок настроек в NativePrefs (кэш на случай «глухого»
+     * пробуждения).
+     */
+    private static void saveModesCache(
+            Context context,
+            boolean wiperColdMode,
+            boolean pauseMediaOnDoor,
+            boolean playMediaOnDoor) {
+        nativePrefs(context)
+                .edit()
                 .putString("cacheDriveMode", driveMode)
                 .putString("cacheEnergy", energy)
                 .putString("cacheRecycle", recycle)
@@ -464,6 +568,7 @@ public class MainActivity extends AppCompatActivity {
                 .remove("cacheApolloStockUiEnabled")
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
+                .putBoolean("cachePlayMediaOnDoor", playMediaOnDoor)
                 .putBoolean("cacheValid", true)
                 .apply();
     }
@@ -475,25 +580,28 @@ public class MainActivity extends AppCompatActivity {
             Log.w(MODES_LOG, "No cached modes available");
             return false;
         }
-        driveMode          = p.getString("cacheDriveMode", driveMode);
-        energy             = p.getString("cacheEnergy", energy);
-        recycle            = p.getString("cacheRecycle", recycle);
-        customCommand      = p.getString("cacheCustomCommand", customCommand);
+        driveMode = p.getString("cacheDriveMode", driveMode);
+        energy = p.getString("cacheEnergy", energy);
+        recycle = p.getString("cacheRecycle", recycle);
+        customCommand = p.getString("cacheCustomCommand", customCommand);
         customCommandCount = p.getInt("cacheCustomCommandCount", customCommandCount);
-        driveEnabled       = p.getBoolean("cacheDriveEnabled", false);
-        recycleEnabled     = p.getBoolean("cacheRecycleEnabled", false);
-        energyEnabled      = p.getBoolean("cacheEnergyEnabled", false);
-        driveRememberLast  = p.getBoolean("cacheDriveRememberLast", true);
+        driveEnabled = p.getBoolean("cacheDriveEnabled", false);
+        recycleEnabled = p.getBoolean("cacheRecycleEnabled", false);
+        energyEnabled = p.getBoolean("cacheEnergyEnabled", false);
+        driveRememberLast = p.getBoolean("cacheDriveRememberLast", true);
         energyRememberLast = p.getBoolean("cacheEnergyRememberLast", true);
         recycleRememberLast = p.getBoolean("cacheRecycleRememberLast", true);
         disablePedestrianSound = p.getBoolean("cacheDisablePedestrianSound", false);
         forcedEv = p.getBoolean("cacheForcedEv", false);
         suspensionMaintenance = p.getBoolean("cacheSuspensionMaintenance", false);
         fragranceEnabled = p.getBoolean("cacheFragranceEnabled", false);
-        FragranceRestorePolicy.Settings fragrance = FragranceRestorePolicy.normalize(
-                p.getInt("cacheFragranceTaste", FragranceRestorePolicy.DEFAULT_TASTE),
-                p.getInt("cacheFragranceDuration", FragranceRestorePolicy.DEFAULT_DURATION),
-                p.getInt("cacheFragranceIntensity", FragranceRestorePolicy.DEFAULT_INTENSITY));
+        FragranceRestorePolicy.Settings fragrance =
+                FragranceRestorePolicy.normalize(
+                        p.getInt("cacheFragranceTaste", FragranceRestorePolicy.DEFAULT_TASTE),
+                        p.getInt("cacheFragranceDuration", FragranceRestorePolicy.DEFAULT_DURATION),
+                        p.getInt(
+                                "cacheFragranceIntensity",
+                                FragranceRestorePolicy.DEFAULT_INTENSITY));
         fragranceTaste = fragrance.taste;
         fragranceDuration = fragrance.duration;
         fragranceIntensity = fragrance.intensity;
@@ -502,35 +610,82 @@ public class MainActivity extends AppCompatActivity {
         apolloGreenSoundEnabled = p.getBoolean("cacheApolloGreenSoundEnabled", false);
         apolloTrafficSignsEnabled = p.getBoolean("cacheApolloTrafficSignsEnabled", false);
         apolloSpeedSignsEnabled = p.getBoolean("cacheApolloSpeedSignsEnabled", false);
-        apolloSpeedMode = ApolloRestorePolicy.normalizeSpeedMode(p.getInt("cacheApolloSpeedMode",
-                p.getBoolean("cacheApolloCruiseSpeedAdjustmentEnabled", false) ? 2 : 4));
+        apolloSpeedMode =
+                ApolloRestorePolicy.normalizeSpeedMode(
+                        p.getInt(
+                                "cacheApolloSpeedMode",
+                                p.getBoolean("cacheApolloCruiseSpeedAdjustmentEnabled", false)
+                                        ? 2
+                                        : 4));
         apolloSpeedWarningEnabled = p.getBoolean("cacheApolloSpeedWarningEnabled", false);
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
-        applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor);
+        boolean playMediaOnDoor =
+                p.getBoolean("cachePlayMediaOnDoor", false)
+                        && InfrastructureProfile.read(context).usesAccHooks();
+        applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor, playMediaOnDoor);
         ApplyEngine.noteLoadedModes(
-                driveMode, energy, recycle,
-                driveEnabled, energyEnabled, recycleEnabled,
-                driveRememberLast, energyRememberLast, recycleRememberLast);
-        Log.i(MODES_LOG, "CACHE: driveEnabled=" + driveEnabled
-                + " recycleEnabled=" + recycleEnabled + " energyEnabled=" + energyEnabled
-                + " rememberLast=" + driveRememberLast + "/" + energyRememberLast
-                + "/" + recycleRememberLast
-                + " disablePedestrianSound=" + disablePedestrianSound
-                + " fragranceEnabled=" + fragranceEnabled
-                + " fragrance=" + fragranceTaste + "/" + fragranceDuration
-                + "/" + fragranceIntensity
-                + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
-                + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
-                + "/" + apolloSpeedSignsEnabled + "/" + apolloSpeedMode + "/" + apolloSpeedWarningEnabled
-                + " wiperColdMode=" + wiperColdMode
-                + " pauseMediaOnDoor=" + pauseMediaOnDoor);
+                driveMode,
+                energy,
+                recycle,
+                driveEnabled,
+                energyEnabled,
+                recycleEnabled,
+                driveRememberLast,
+                energyRememberLast,
+                recycleRememberLast);
+        Log.i(
+                MODES_LOG,
+                "CACHE: driveEnabled="
+                        + driveEnabled
+                        + " recycleEnabled="
+                        + recycleEnabled
+                        + " energyEnabled="
+                        + energyEnabled
+                        + " rememberLast="
+                        + driveRememberLast
+                        + "/"
+                        + energyRememberLast
+                        + "/"
+                        + recycleRememberLast
+                        + " disablePedestrianSound="
+                        + disablePedestrianSound
+                        + " fragranceEnabled="
+                        + fragranceEnabled
+                        + " fragrance="
+                        + fragranceTaste
+                        + "/"
+                        + fragranceDuration
+                        + "/"
+                        + fragranceIntensity
+                        + " apollo="
+                        + apolloTlcEnabled
+                        + "/"
+                        + apolloTrafficLightsEnabled
+                        + "/"
+                        + apolloGreenSoundEnabled
+                        + "/"
+                        + apolloTrafficSignsEnabled
+                        + "/"
+                        + apolloSpeedSignsEnabled
+                        + "/"
+                        + apolloSpeedMode
+                        + "/"
+                        + apolloSpeedWarningEnabled
+                        + " wiperColdMode="
+                        + wiperColdMode
+                        + " pauseMediaOnDoor="
+                        + pauseMediaOnDoor);
         return true;
     }
 
     /** Побочные эффекты настроек: сервисы, связанные с дверью водителя. */
-    private static void applyModeSideEffects(Context context, boolean wiperColdMode, boolean pauseMediaOnDoor) {
-        applyDoorReactor(context, wiperColdMode, pauseMediaOnDoor);
+    private static void applyModeSideEffects(
+            Context context,
+            boolean wiperColdMode,
+            boolean pauseMediaOnDoor,
+            boolean playMediaOnDoor) {
+        applyDoorReactor(context, wiperColdMode, pauseMediaOnDoor, playMediaOnDoor);
     }
 
     // ------------------------------------------------------------------------
@@ -539,17 +694,19 @@ public class MainActivity extends AppCompatActivity {
     // Диагностический raw fallback для H97X. Production-путь BatteryHeatService использует
     // штатный OEM VehicleState API, чтобы CanBusService сам выбрал ABI конкретной платформы.
     private static final String[] BATTERY_HEAT_FRAMES = {
-            "65 08 00 00 c1 c0 00 00 00 00",
+        "65 08 00 00 c1 c0 00 00 00 00",
     };
 
     /**
-     * Ручной диагностический fallback. Автоматический и UI-пути его не вызывают. Шлёт
-     * {@link #BATTERY_HEAT_FRAMES} напрямую; пустой массив — безопасный no-op с логом.
+     * Ручной диагностический fallback. Автоматический и UI-пути его не вызывают. Шлёт {@link
+     * #BATTERY_HEAT_FRAMES} напрямую; пустой массив — безопасный no-op с логом.
      */
     public static boolean sendBatteryHeatCommand() {
         if (BATTERY_HEAT_FRAMES.length == 0) {
-            Log.w("$$$ MainActivity batteryHeat $$$",
-                    "sendBatteryHeatCommand: CAN-команда прогрева ещё не задана (заглушка BATTERY_HEAT_FRAMES)");
+            Log.w(
+                    "$$$ MainActivity batteryHeat $$$",
+                    "sendBatteryHeatCommand: CAN-команда прогрева ещё не задана (заглушка"
+                            + " BATTERY_HEAT_FRAMES)");
             return false;
         }
         return setCanValues(1, arraysStr2arraysBytes(BATTERY_HEAT_FRAMES), "battery preheat");
@@ -557,38 +714,44 @@ public class MainActivity extends AppCompatActivity {
 
     /** Use the OEM chassis setter so adjacent fields follow the installed firmware's encoding. */
     public static boolean sendSuspensionMaintenanceCommand(Context context, boolean enabled) {
-        return OemVehicleStateTransport.sendVehicleState(context,
-                VehicleRestorePolicy.SUSPENSION_MAINTENANCE,
-                VehicleRestorePolicy.SUSPENSION_MAINTENANCE_ID,
-                VehicleRestorePolicy.suspensionMaintenanceState(enabled),
-                "suspension maintenance " + (enabled ? "on" : "off")).accepted();
+        return OemVehicleStateTransport.sendVehicleState(
+                        context,
+                        VehicleRestorePolicy.SUSPENSION_MAINTENANCE,
+                        VehicleRestorePolicy.SUSPENSION_MAINTENANCE_ID,
+                        VehicleRestorePolicy.suspensionMaintenanceState(enabled),
+                        "suspension maintenance " + (enabled ? "on" : "off"))
+                .accepted();
     }
 
     /** Немедленно применить звук пешеходов (тоггл с главного экрана). disabled=true → заглушить. */
     public static boolean sendPedestrianSoundCommand(boolean disabled) {
         return OemVehicleStateTransport.sendVehicleState(
-                GlobalVars.SAVE_CONTEXT,
-                VehicleRestorePolicy.PEDESTRIAN_SOUND,
-                VehicleRestorePolicy.PEDESTRIAN_SOUND_ID,
-                VehicleRestorePolicy.pedestrianSoundState(disabled),
-                "pedestrian sound " + (disabled ? "off" : "on")).accepted();
+                        GlobalVars.SAVE_CONTEXT,
+                        VehicleRestorePolicy.PEDESTRIAN_SOUND,
+                        VehicleRestorePolicy.PEDESTRIAN_SOUND_ID,
+                        VehicleRestorePolicy.pedestrianSoundState(disabled),
+                        "pedestrian sound " + (disabled ? "off" : "on"))
+                .accepted();
     }
 
-    /**
-     * Старт/стоп {@link WiperColdService} — сервиса-реактора на открытие двери водителя. У него теперь
-     * два независимых потребителя сигнала двери: «Сервисный режим дворников» ({@code wiperCold}) и
-     * «Пауза музыки при открытии двери» ({@code pauseMediaOnDoor}). Оба флага дублируем в NativePrefs —
-     * сам сервис читает их и гейтит соответствующее действие; {@link SetModesService} по {@code wiperCold}
-     * решает про power-on reset дворников. Сервис живёт, пока включён хотя бы один потребитель.
-     */
-    public static void applyDoorReactor(Context context, boolean wiperEnabled, boolean pauseMediaOnDoor) {
+    /** Keep the door reactor alive while any consumer is enabled. */
+    public static void applyDoorReactor(
+            Context context,
+            boolean wiperEnabled,
+            boolean pauseMediaOnDoor,
+            boolean playMediaOnDoor) {
         if (context == null) return;
-        Log.i("$$$ DoorReactor $$$", "applyDoorReactor: wiper=" + wiperEnabled + " pauseMedia=" + pauseMediaOnDoor);
+        Log.i(
+                "$$$ DoorReactor $$$",
+                "applyDoorReactor: wiper=" + wiperEnabled + " pauseMedia=" + pauseMediaOnDoor);
         context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
-                .edit().putBoolean("wiperCold", wiperEnabled)
-                       .putBoolean("pauseMediaOnDoor", pauseMediaOnDoor).apply();
+                .edit()
+                .putBoolean("wiperCold", wiperEnabled)
+                .putBoolean("pauseMediaOnDoor", pauseMediaOnDoor)
+                .putBoolean(ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, playMediaOnDoor)
+                .apply();
         Intent intent = new Intent(context, WiperColdService.class);
-        if (wiperEnabled || pauseMediaOnDoor) {
+        if (wiperEnabled || pauseMediaOnDoor || playMediaOnDoor) {
             context.startForegroundService(intent);
         } else {
             // НЕ сбрасываем wiperServiceActive: если дворники по нашей оценке в сервисном
@@ -599,59 +762,102 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Builds one validated pass before the first OEM request is submitted. */
-    static CanRestorePlan createCanRestorePlan() { return createCanRestorePlan(true); }
+    static CanRestorePlan createCanRestorePlan() {
+        return createCanRestorePlan(true);
+    }
 
     static void appendApolloRestore(CanRestorePlan.Builder plan, Context context) {
         if (!InfrastructureProfile.read(context).usesAccHooks()) return;
-        ApolloRestorePolicy.appendPlan(plan, apolloTlcEnabled, apolloTrafficLightsEnabled,
-                apolloGreenSoundEnabled, apolloTrafficSignsEnabled, apolloSpeedSignsEnabled,
-                apolloSpeedMode, apolloSpeedWarningEnabled,
-                (capabilities, modes, switches) -> OemVehicleStateTransport.sendRestoreSequence(
-                        context, null, capabilities, modes, switches, ApolloRestorePolicy.stableIds(),
-                        "Apollo capabilities then ISA mode then PLC/GLA/TSR/ISA").accepted());
+        ApolloRestorePolicy.appendPlan(
+                plan,
+                apolloTlcEnabled,
+                apolloTrafficLightsEnabled,
+                apolloGreenSoundEnabled,
+                apolloTrafficSignsEnabled,
+                apolloSpeedSignsEnabled,
+                apolloSpeedMode,
+                apolloSpeedWarningEnabled,
+                (capabilities, modes, switches) ->
+                        OemVehicleStateTransport.sendRestoreSequence(
+                                        context,
+                                        null,
+                                        capabilities,
+                                        modes,
+                                        switches,
+                                        ApolloRestorePolicy.stableIds(),
+                                        "Apollo capabilities then ISA mode then PLC/GLA/TSR/ISA")
+                                .accepted());
     }
 
     static CanRestorePlan createCanRestorePlan(boolean includeModes) {
-        Log.i("$$$ MainActivity runCmds $$$", "driveMode: " + driveMode + " energy: " + energy + " recycle: " + recycle
-                + " | driveEnabled=" + driveEnabled + " energyEnabled=" + energyEnabled + " recycleEnabled=" + recycleEnabled
-                + " disablePedestrianSound=" + disablePedestrianSound
-                + " fragranceEnabled=" + fragranceEnabled
-                + " apollo=" + apolloTlcEnabled + "/" + apolloTrafficLightsEnabled
-                + "/" + apolloGreenSoundEnabled + "/" + apolloTrafficSignsEnabled
-                + "/" + apolloSpeedSignsEnabled + "/" + apolloSpeedMode + "/" + apolloSpeedWarningEnabled);
+        Log.i(
+                "$$$ MainActivity runCmds $$$",
+                "driveMode: "
+                        + driveMode
+                        + " energy: "
+                        + energy
+                        + " recycle: "
+                        + recycle
+                        + " | driveEnabled="
+                        + driveEnabled
+                        + " energyEnabled="
+                        + energyEnabled
+                        + " recycleEnabled="
+                        + recycleEnabled
+                        + " disablePedestrianSound="
+                        + disablePedestrianSound
+                        + " fragranceEnabled="
+                        + fragranceEnabled
+                        + " apollo="
+                        + apolloTlcEnabled
+                        + "/"
+                        + apolloTrafficLightsEnabled
+                        + "/"
+                        + apolloGreenSoundEnabled
+                        + "/"
+                        + apolloTrafficSignsEnabled
+                        + "/"
+                        + apolloSpeedSignsEnabled
+                        + "/"
+                        + apolloSpeedMode
+                        + "/"
+                        + apolloSpeedWarningEnabled);
         CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
         final Context context = GlobalVars.SAVE_CONTEXT;
         final boolean accHooks = InfrastructureProfile.read(context).usesAccHooks();
-        plan.addOnce("auto light saved service switch", () -> {
-            try {
-                AutoLightSettings.restore(context);
-                return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
-            } catch (RuntimeException e) {
-                Log.w(MODES_LOG, "Auto light service restore failed", e);
-                return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
-            }
-        });
+        plan.addOnce(
+                "auto light saved service switch",
+                () -> {
+                    try {
+                        AutoLightSettings.restore(context);
+                        return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+                    } catch (RuntimeException e) {
+                        Log.w(MODES_LOG, "Auto light service restore failed", e);
+                        return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+                    }
+                });
         final Map<String, Integer> primaryValues = new LinkedHashMap<>();
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
         final Map<String, Integer> apolloModes = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
-        plan.addOnce("Apollo stock subscription/exam UI", () -> {
-            ApolloSettingsRuntimeState.TargetApplyResult result =
-                    ApolloSettingsRuntimeState.applyTarget(context, false);
-            if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
-                return CanRestorePlan.OperationResult.CONFIRMED;
-            }
-            if (result == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
-                return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
-            }
-            return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
-        });
-
+        plan.addOnce(
+                "Apollo stock subscription/exam UI",
+                () -> {
+                    ApolloSettingsRuntimeState.TargetApplyResult result =
+                            ApolloSettingsRuntimeState.applyTarget(context, false);
+                    if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
+                        return CanRestorePlan.OperationResult.CONFIRMED;
+                    }
+                    if (result
+                            == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
+                        return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+                    }
+                    return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+                });
 
         if (includeModes && driveEnabled) {
-            if (!DriveModeCanTransport.appendStates(
-                    context, driveMode, primaryValues, stableIds)) {
+            if (!DriveModeCanTransport.appendStates(context, driveMode, primaryValues, stableIds)) {
                 throw new IllegalArgumentException("Unsupported drive mode: " + driveMode);
             }
         }
@@ -666,103 +872,138 @@ public class MainActivity extends AppCompatActivity {
             appendApolloRestore(plan, context);
         } else {
             // PI orders entitlements, ISA mode preparation, then switches.
-            ApolloRestorePolicy.appendTo(primaryValues, apolloModes, trailingValues,
-                    apolloTlcEnabled, apolloTrafficLightsEnabled,
-                    apolloGreenSoundEnabled, apolloTrafficSignsEnabled, apolloSpeedSignsEnabled);
+            ApolloRestorePolicy.appendTo(
+                    primaryValues,
+                    apolloModes,
+                    trailingValues,
+                    apolloTlcEnabled,
+                    apolloTrafficLightsEnabled,
+                    apolloGreenSoundEnabled,
+                    apolloTrafficSignsEnabled,
+                    apolloSpeedSignsEnabled);
             stableIds.putAll(ApolloRestorePolicy.stableIds());
         }
 
         OemVehicleStateTransport.StateValue fragranceDurationState = null;
         if (fragranceEnabled) {
-            FragranceRestorePolicy.Settings fragrance = FragranceRestorePolicy.normalize(
-                    fragranceTaste, fragranceDuration, fragranceIntensity);
+            FragranceRestorePolicy.Settings fragrance =
+                    FragranceRestorePolicy.normalize(
+                            fragranceTaste, fragranceDuration, fragranceIntensity);
             primaryValues.putAll(FragranceRestorePolicy.fragranceBundle(fragrance));
             stableIds.putAll(FragranceRestorePolicy.stableIds());
-            fragranceDurationState = new OemVehicleStateTransport.StateValue(
-                    new OemVehicleStateTransport.StateKey(
-                            FragranceRestorePolicy.DURATION_STATE,
-                            FragranceRestorePolicy.DURATION_STATE_ID),
-                    fragrance.duration);
+            fragranceDurationState =
+                    new OemVehicleStateTransport.StateValue(
+                            new OemVehicleStateTransport.StateKey(
+                                    FragranceRestorePolicy.DURATION_STATE,
+                                    FragranceRestorePolicy.DURATION_STATE_ID),
+                            fragrance.duration);
         }
 
         if (!primaryValues.isEmpty() || !trailingValues.isEmpty()) {
             final OemVehicleStateTransport.StateValue firstState = fragranceDurationState;
             final String appliedDrive = includeModes && driveEnabled ? driveMode : null;
-            final String appliedEnergy = !includeModes ? null : forcedEv ? "FORCE_EV" : energyEnabled ? energy : null;
-            final String appliedRecycle = recycleEnabled
-                    && VehicleRestorePolicy.allowsRecuperationRestore(driveMode) ? recycle : null;
-            plan.addOnce("OEM vehicle restore snapshot", () -> {
-                boolean accepted = OemVehicleStateTransport.sendRestoreSequence(
-                        context, firstState, primaryValues, apolloModes, trailingValues, stableIds,
-                        accHooks ? "drive/energy/fragrance then recuperation"
-                                : "drive/energy/fragrance/Apollo entitlements then ISA mode then switches/recuperation")
-                        .accepted();
-                if (!accepted) return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
-                // These are current vehicle targets, never writes to the pinned menu selection.
-                ApplyEngine.noteVehicleMode("driveMode", appliedDrive);
-                ApplyEngine.noteVehicleMode("energy", appliedEnergy);
-                ApplyEngine.noteVehicleMode("recycle", appliedRecycle);
-                return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
-            });
+            final String appliedEnergy =
+                    !includeModes ? null : forcedEv ? "FORCE_EV" : energyEnabled ? energy : null;
+            final String appliedRecycle =
+                    recycleEnabled && VehicleRestorePolicy.allowsRecuperationRestore(driveMode)
+                            ? recycle
+                            : null;
+            plan.addOnce(
+                    "OEM vehicle restore snapshot",
+                    () -> {
+                        boolean accepted =
+                                OemVehicleStateTransport.sendRestoreSequence(
+                                                context,
+                                                firstState,
+                                                primaryValues,
+                                                apolloModes,
+                                                trailingValues,
+                                                stableIds,
+                                                accHooks
+                                                        ? "drive/energy/fragrance then recuperation"
+                                                        : "drive/energy/fragrance/Apollo"
+                                                                + " entitlements then ISA mode then"
+                                                                + " switches/recuperation")
+                                        .accepted();
+                        if (!accepted) return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+                        // These are current vehicle targets, never writes to the pinned menu
+                        // selection.
+                        ApplyEngine.noteVehicleMode("driveMode", appliedDrive);
+                        ApplyEngine.noteVehicleMode("energy", appliedEnergy);
+                        ApplyEngine.noteVehicleMode("recycle", appliedRecycle);
+                        return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+                    });
         }
 
         // Independent TX58: the OEM setter preserves the neighbouring VSP frame fields.
         final boolean pedestrianDisabled = disablePedestrianSound;
         plan.addOnce(
                 "pedestrian sound mode " + (pedestrianDisabled ? "off" : "on"),
-                () -> OemVehicleStateTransport.sendVehicleState(
-                        context,
-                        VehicleRestorePolicy.PEDESTRIAN_SOUND,
-                        VehicleRestorePolicy.PEDESTRIAN_SOUND_ID,
-                        VehicleRestorePolicy.pedestrianSoundState(pedestrianDisabled),
-                        "pedestrian sound restore").accepted()
-                        ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
-                        : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
+                () ->
+                        OemVehicleStateTransport.sendVehicleState(
+                                                context,
+                                                VehicleRestorePolicy.PEDESTRIAN_SOUND,
+                                                VehicleRestorePolicy.PEDESTRIAN_SOUND_ID,
+                                                VehicleRestorePolicy.pedestrianSoundState(
+                                                        pedestrianDisabled),
+                                                "pedestrian sound restore")
+                                        .accepted()
+                                ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
+                                : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
         final boolean maintenance = suspensionMaintenance;
-        plan.addOnce("suspension maintenance " + (maintenance ? "on" : "off"),
-                () -> sendSuspensionMaintenanceCommand(context, maintenance)
-                        ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
-                        : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
+        plan.addOnce(
+                "suspension maintenance " + (maintenance ? "on" : "off"),
+                () ->
+                        sendSuspensionMaintenanceCommand(context, maintenance)
+                                ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
+                                : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
         if (accHooks) {
-            plan.addOnce("silent radio selection", () -> {
-                try {
-                    context.sendBroadcast(new Intent("ru.big.town.anative.RESTORE_RADIO_SELECTION")
-                            .setPackage("com.pateo.rdsapp"));
-                    // Delivery is not proof of tuning: RdsApp stages the choice without starting audio.
-                    Log.i(MODES_LOG, "Silent radio selection notification sent");
-                    return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
-                } catch (RuntimeException e) {
-                    Log.w(MODES_LOG, "Silent radio selection notification failed", e);
-                    return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
-                }
-            });
+            plan.addOnce(
+                    "silent radio selection",
+                    () -> {
+                        try {
+                            context.sendBroadcast(
+                                    new Intent("ru.big.town.anative.RESTORE_RADIO_SELECTION")
+                                            .setPackage("com.pateo.rdsapp"));
+                            // Delivery is not proof of tuning: RdsApp stages the choice without
+                            // starting audio.
+                            Log.i(MODES_LOG, "Silent radio selection notification sent");
+                            return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+                        } catch (RuntimeException e) {
+                            Log.w(MODES_LOG, "Silent radio selection notification failed", e);
+                            return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+                        }
+                    });
         }
         return plan.build();
     }
 
-
     /** Compatibility one-shot application of the current snapshot. */
     public static boolean runCmds() {
         try {
-            return createCanRestorePlan().sendPending(
-                    (frames, label) -> setCanValues(1, frames, label)).isComplete();
+            return createCanRestorePlan()
+                    .sendPending((frames, label) -> setCanValues(1, frames, label))
+                    .isComplete();
         } catch (IllegalArgumentException e) {
             Log.e("$$$ MainActivity runCmds $$$", "Permanent CAN plan error: " + e.getMessage());
             return false;
         }
     }
-    public static void setDriveMode(String driveMode){
+
+    public static void setDriveMode(String driveMode) {
         sendDriveModeCommand(driveMode);
     }
 
-    // Провайдер настроек RestoreMode — источник истины режимов (его читает loadModes/ApplyEngine и UI VoyahTune).
+    // Провайдер настроек RestoreMode — источник истины режимов (его читает loadModes/ApplyEngine и
+    // UI VoyahTune).
     private static final Uri MODES_PROVIDER_URI =
             Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
 
     /**
-     * Текущий СОХРАНЁННЫЙ режим (тот, что восстанавливается на пробуждении и показан в UI VoyahTune).
-     * Читаем из провайдера RestoreMode; фолбэк — статик Native.
-     * Используется как fallback, если текущее состояние машины ещё неизвестно.
+     * Текущий СОХРАНЁННЫЙ режим (тот, что восстанавливается на пробуждении и показан в UI
+     * VoyahTune). Читаем из провайдера RestoreMode; фолбэк — статик Native. Используется как
+     * fallback, если текущее состояние машины ещё неизвестно.
+     *
      * @param isEnergy true → энергорежим, иначе режим вождения.
      */
     public static String currentSavedMode(Context context, boolean isEnergy) {
@@ -789,27 +1030,36 @@ public class MainActivity extends AppCompatActivity {
         return "energy".equals(modeKey) ? energy : "recycle".equals(modeKey) ? recycle : driveMode;
     }
 
-    /** Steering cycles follow vehicle feedback / the last successful command, even when not saved. */
+    /**
+     * Steering cycles follow vehicle feedback / the last successful command, even when not saved.
+     */
     static String currentVehicleMode(Context context, String modeKey) {
         return ApplyEngine.currentVehicleMode(modeKey, currentSavedMode(context, modeKey));
     }
 
     private static boolean remembersMode(Context context, String modeKey) {
         int column = "driveMode".equals(modeKey) ? 29 : "energy".equals(modeKey) ? 30 : 31;
-        try (Cursor cursor = context.getContentResolver().query(
-                MODES_PROVIDER_URI, null, null, null, null)) {
+        try (Cursor cursor =
+                context.getContentResolver().query(MODES_PROVIDER_URI, null, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) {
                 return cursorBooleanDefaultTrue(cursor, column);
             }
         } catch (Exception e) {
             Log.w(MODES_LOG, "remember-last lookup: " + e.getMessage());
         }
-        String key = "driveMode".equals(modeKey) ? "cacheDriveRememberLast"
-                : "energy".equals(modeKey) ? "cacheEnergyRememberLast" : "cacheRecycleRememberLast";
+        String key =
+                "driveMode".equals(modeKey)
+                        ? "cacheDriveRememberLast"
+                        : "energy".equals(modeKey)
+                                ? "cacheEnergyRememberLast"
+                                : "cacheRecycleRememberLast";
         return nativePrefs(context).getBoolean(key, true);
     }
 
-    /** Быстрая проверка уже загруженного snapshot без повторного запроса к provider на каждый VState. */
+    /**
+     * Быстрая проверка уже загруженного snapshot без повторного запроса к provider на каждый
+     * VState.
+     */
     static boolean isLoadedMode(boolean isEnergy, String mode) {
         return isLoadedMode(isEnergy ? "energy" : "driveMode", mode);
     }
@@ -845,10 +1095,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Сохранить «последний активированный» режим как ИСТОЧНИК ИСТИНЫ: пишем в pref RestoreMode через
-     * провайдер (переживёт пробуждение + попадёт в UI VoyahTune), плюс освежаем статик Native и его кэш
-     * (fallback «глухого» пробуждения). Вызывает кнопка руля (SetModesReceiverDynamic.cycleMode); после
-     * снятия value-ID на голове — синк внешней смены режима (см. ModeFeedbackController).
+     * Сохранить «последний активированный» режим как ИСТОЧНИК ИСТИНЫ: пишем в pref RestoreMode
+     * через провайдер (переживёт пробуждение + попадёт в UI VoyahTune), плюс освежаем статик Native
+     * и его кэш (fallback «глухого» пробуждения). Вызывает кнопка руля
+     * (SetModesReceiverDynamic.cycleMode); после снятия value-ID на голове — синк внешней смены
+     * режима (см. ModeFeedbackController).
+     *
      * @param isEnergy true → энергорежим (pref "energy"), иначе режим вождения (pref "driveMode").
      */
     public static void persistSavedMode(Context context, boolean isEnergy, String mode) {
@@ -865,42 +1117,54 @@ public class MainActivity extends AppCompatActivity {
         persistSavedMode(context, modeKey, mode, true);
     }
 
-    private static void persistSavedMode(Context context, String modeKey, String mode,
-                                         boolean explicit) {
+    private static void persistSavedMode(
+            Context context, String modeKey, String mode, boolean explicit) {
         if (context == null || mode == null || mode.isEmpty()) return;
         if ("driveMode".equals(modeKey)) {
-            DriveSelectionStore.record(context, mode, ru.big.town.common.DriveSelectionPolicy.EXPLICIT);
+            DriveSelectionStore.record(
+                    context, mode, ru.big.town.common.DriveSelectionPolicy.EXPLICIT);
             return;
         }
         if ("energy".equals(modeKey)) {
             try {
                 android.content.ContentValues values = new android.content.ContentValues();
                 values.put("energySelection", mode);
-                if (context.getContentResolver().update(MODES_PROVIDER_URI, values, null, null) > 0) {
+                if (context.getContentResolver().update(MODES_PROVIDER_URI, values, null, null)
+                        > 0) {
                     energy = mode;
                     ApplyEngine.noteSavedMode("energy", mode);
                     ApplyEngine.driveSelectionSaved();
                 }
-            } catch (RuntimeException e) { Log.w(MODES_LOG, "Energy selection unavailable", e); }
+            } catch (RuntimeException e) {
+                Log.w(MODES_LOG, "Energy selection unavailable", e);
+            }
             return;
         }
-        if (explicit && InfrastructureProfile.read(context).usesAccHooks()
+        if (explicit
+                && InfrastructureProfile.read(context).usesAccHooks()
                 && "recycle".equals(modeKey)) {
             try {
                 android.content.ContentValues values = new android.content.ContentValues();
                 values.put("recycleSelection", mode);
-                if (context.getContentResolver().update(MODES_PROVIDER_URI, values, null, null) > 0) {
+                if (context.getContentResolver().update(MODES_PROVIDER_URI, values, null, null)
+                        > 0) {
                     recycle = mode;
                     ApplyEngine.noteSavedMode("recycle", mode);
-                    context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
-                            .putString("cacheRecycle", mode).apply();
+                    context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .putString("cacheRecycle", mode)
+                            .apply();
                     if (remembersMode(context, "recycle")) {
-                        context.sendBroadcast(new Intent("ru.big.town.anative.MODE_SYNCED")
-                                .setPackage("ru.big.town.restoremode")
-                                .putExtra("modeKey", "recycle").putExtra("mode", mode));
+                        context.sendBroadcast(
+                                new Intent("ru.big.town.anative.MODE_SYNCED")
+                                        .setPackage("ru.big.town.restoremode")
+                                        .putExtra("modeKey", "recycle")
+                                        .putExtra("mode", mode));
                     }
                 }
-            } catch (RuntimeException e) { Log.w(MODES_LOG, "Recuperation selection unavailable", e); }
+            } catch (RuntimeException e) {
+                Log.w(MODES_LOG, "Recuperation selection unavailable", e);
+            }
             return;
         }
         if (modeColumn(modeKey) < 0 || !remembersMode(context, modeKey)) return;
@@ -909,20 +1173,25 @@ public class MainActivity extends AppCompatActivity {
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
             cv.put(modeKey, mode);
-            // update() провайдера возвращает число записанных ключей (>0 = успех). Провайдер может быть на
-            // миг недоступен (перезапуск/переустановка) → ловим исключение и НЕ считаем запись успешной.
+            // update() провайдера возвращает число записанных ключей (>0 = успех). Провайдер может
+            // быть на
+            // миг недоступен (перезапуск/переустановка) → ловим исключение и НЕ считаем запись
+            // успешной.
             written = context.getContentResolver().update(MODES_PROVIDER_URI, cv, null, null) > 0;
             if (!written) return;
         } catch (Exception e) {
             Log.w(MODES_LOG, "persistSavedMode provider: " + e.getMessage());
         }
-        // Статик — состояние текущей сессии (совпадает с только что отправленным в CAN режимом), обновляем всегда.
+        // Статик — состояние текущей сессии (совпадает с только что отправленным в CAN режимом),
+        // обновляем всегда.
         if ("energy".equals(modeKey)) energy = mode;
         else if ("recycle".equals(modeKey)) recycle = mode;
         else driveMode = mode;
         ApplyEngine.noteSavedMode(modeKey, mode);
-        // Уведомить UI VoyahTune, чтобы селектор режима следил за текущим в реальном времени — даже когда
-        // режим сменили штатным меню машины или кнопкой руля при ОТКРЫТОМ экране «Настройки автомобиля».
+        // Уведомить UI VoyahTune, чтобы селектор режима следил за текущим в реальном времени — даже
+        // когда
+        // режим сменили штатным меню машины или кнопкой руля при ОТКРЫТОМ экране «Настройки
+        // автомобиля».
         try {
             Intent bi = new Intent("ru.big.town.anative.MODE_SYNCED");
             bi.setPackage("ru.big.town.restoremode");
@@ -930,21 +1199,34 @@ public class MainActivity extends AppCompatActivity {
             bi.putExtra("modeKey", modeKey);
             bi.putExtra("mode", mode);
             context.sendBroadcast(bi);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
         if (written) {
-            // Провайдер (источник истины) записан → синхронно освежаем кэш, чтобы «глухое» пробуждение
-            // (провайдер недоступен) восстановило именно этот режим и кэш НЕ расходился с провайдером.
-            // cacheValid НЕ трогаем: его выставляет только ПОЛНЫЙ снимок saveModesCache; частичный — нельзя.
+            // Провайдер (источник истины) записан → синхронно освежаем кэш, чтобы «глухое»
+            // пробуждение
+            // (провайдер недоступен) восстановило именно этот режим и кэш НЕ расходился с
+            // провайдером.
+            // cacheValid НЕ трогаем: его выставляет только ПОЛНЫЙ снимок saveModesCache; частичный
+            // — нельзя.
             try {
-                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
-                        .putString(modeCacheKey(modeKey), mode).apply();
-            } catch (Exception ignored) {}
+                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .putString(modeCacheKey(modeKey), mode)
+                        .apply();
+            } catch (Exception ignored) {
+            }
             Log.i(MODES_LOG, "persistSavedMode " + modeKey + "=" + mode + " (provider ok)");
         } else {
             // Не записали в источник истины → кэш НЕ трогаем (иначе разъедется с провайдером и на
-            // пробуждении provider-first всё равно вернёт старое). Режим применён в CAN, но не переживёт сон.
-            Log.w(MODES_LOG, "persistSavedMode " + modeKey + "=" + mode
-                    + " — провайдер НЕ записан, режим не переживёт пробуждение");
+            // пробуждении provider-first всё равно вернёт старое). Режим применён в CAN, но не
+            // переживёт сон.
+            Log.w(
+                    MODES_LOG,
+                    "persistSavedMode "
+                            + modeKey
+                            + "="
+                            + mode
+                            + " — провайдер НЕ записан, режим не переживёт пробуждение");
         }
     }
 
@@ -963,7 +1245,12 @@ public class MainActivity extends AppCompatActivity {
 
     /** Прочитать сохранённое состояние бинарного действия кнопки руля. */
     public static boolean currentSavedToggle(Context context, String key) {
-        int column = "disablePedestrianSound".equals(key) ? 11 : "forcedEv".equals(key) ? 19 : "suspensionMaintenance".equals(key) ? 32 : -1;
+        int column =
+                "disablePedestrianSound".equals(key)
+                        ? 11
+                        : "forcedEv".equals(key)
+                                ? 19
+                                : "suspensionMaintenance".equals(key) ? 32 : -1;
         if (column < 0) return false;
         Cursor c = null;
         try {
@@ -977,14 +1264,20 @@ public class MainActivity extends AppCompatActivity {
         } finally {
             if (c != null) c.close();
         }
-        return "forcedEv".equals(key) ? forcedEv
-                : "suspensionMaintenance".equals(key) ? suspensionMaintenance : disablePedestrianSound;
+        return "forcedEv".equals(key)
+                ? forcedEv
+                : "suspensionMaintenance".equals(key)
+                        ? suspensionMaintenance
+                        : disablePedestrianSound;
     }
 
     /** Сохранить бинарное действие и синхронизировать открытый UI VoyahTune. */
     public static void persistSavedToggle(Context context, String key, boolean value) {
-        if (context == null || (!"forcedEv".equals(key) && !"disablePedestrianSound".equals(key)
-                && !"suspensionMaintenance".equals(key) && !"autoLight".equals(key))) return;
+        if (context == null
+                || (!"forcedEv".equals(key)
+                        && !"disablePedestrianSound".equals(key)
+                        && !"suspensionMaintenance".equals(key)
+                        && !"autoLight".equals(key))) return;
         boolean written = false;
         try {
             android.content.ContentValues cv = new android.content.ContentValues();
@@ -1002,16 +1295,24 @@ public class MainActivity extends AppCompatActivity {
             bi.putExtra("key", key);
             bi.putExtra("value", value);
             context.sendBroadcast(bi);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
         if (written) {
             try {
-                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
-                        .putBoolean("forcedEv".equals(key) ? "cacheForcedEv"
-                                : "suspensionMaintenance".equals(key) ? "cacheSuspensionMaintenance"
-                                : "autoLight".equals(key) ? "autoLight"
-                                : "cacheDisablePedestrianSound", value)
+                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(
+                                "forcedEv".equals(key)
+                                        ? "cacheForcedEv"
+                                        : "suspensionMaintenance".equals(key)
+                                                ? "cacheSuspensionMaintenance"
+                                                : "autoLight".equals(key)
+                                                        ? "autoLight"
+                                                        : "cacheDisablePedestrianSound",
+                                value)
                         .apply();
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
             Log.i(MODES_LOG, "persistSavedToggle " + key + "=" + value + " (provider ok)");
         } else {
             Log.w(MODES_LOG, "persistSavedToggle " + key + "=" + value + " — провайдер НЕ записан");
@@ -1020,31 +1321,34 @@ public class MainActivity extends AppCompatActivity {
 
     public void onButtonClick(View v) {
         Log.i("$$$ MainActivity click $$$", "");
-//                IntentFilter filter = new IntentFilter();
-//        filter.addAction("android.os.action.POWER_SAVE_MODE_CHANGED");
-//        filter.addAction("android.intent.action.SCREEN_ON");
-//        filter.addAction("com.android.server.jobscheduler.GARAGE_MODE_StarButton");
-//        filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES");
-//        filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER");
-//
-//        // Register receiver with filter
-//        BroadcastReceiver setModesReceiver = new SetModesReceiver();
-//
-//        LocalBroadcastManager.getInstance(this).registerReceiver(setModesReceiver, filter);
-        //LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
+        //                IntentFilter filter = new IntentFilter();
+        //        filter.addAction("android.os.action.POWER_SAVE_MODE_CHANGED");
+        //        filter.addAction("android.intent.action.SCREEN_ON");
+        //        filter.addAction("com.android.server.jobscheduler.GARAGE_MODE_StarButton");
+        //        filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES");
+        //        filter.addAction("ru.big.town.anative.APPLY_DRIVE_MODES_FROM_POWERMANAGER");
+        //
+        //        // Register receiver with filter
+        //        BroadcastReceiver setModesReceiver = new SetModesReceiver();
+        //
+        //        LocalBroadcastManager.getInstance(this).registerReceiver(setModesReceiver,
+        // filter);
+        // LocalBroadcastManager.getInstance(this).sendBroadcast(new
+        // Intent("ru.big.town.anative.APPLY_DRIVE_MODES"));
         ApplyEngine.applyNow(null);
-        //initValueModes(getApplicationContext());
-        //runCmds();
+        // initValueModes(getApplicationContext());
+        // runCmds();
     }
+
     @Override
-        public void onPause(){
+    public void onPause() {
         Log.i("$$$ MainActivity click $$$", "onPause()");
         super.onPause();
     }
+
     @Override
-    public void onStop(){
+    public void onStop() {
         Log.i("$$$ MainActivity click $$$", "onStop()");
         super.onStop();
     }
-
 }

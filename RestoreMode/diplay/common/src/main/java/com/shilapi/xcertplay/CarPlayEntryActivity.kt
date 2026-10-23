@@ -9,6 +9,10 @@ import android.os.Bundle
 class CarPlayEntryActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!CarPlaySettingsAccess.isEnabled(this)) {
+            finish()
+            return
+        }
         val target = if (CarPlayBackgroundSession.hasSession()) {
             CarPlayHostActivity::class.java
         } else {

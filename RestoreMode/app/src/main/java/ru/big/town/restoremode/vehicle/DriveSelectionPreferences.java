@@ -3,6 +3,7 @@ package ru.big.town.restoremode.vehicle;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 
+import ru.big.town.common.DoorMediaSettings;
 import ru.big.town.common.DriveSelectionPolicy;
 
 /** Serializes durable target changes and hook bootstrap claims across provider Binder threads. */
@@ -132,6 +133,9 @@ public final class DriveSelectionPreferences {
                     e.putLong(CYCLE, prefs.getLong(CYCLE, 0) + 1)
                             .putLong(REV, prefs.getLong(REV, 0) + 1);
                     e.putString(SETTINGS_START, "pending");
+                    if (accHooks) {
+                        e.putBoolean(DoorMediaSettings.PLAY_PENDING, acc == 2);
+                    }
                     if (!preserve) {
                         e.putString(DriveSelectionPolicy.CURRENT, "")
                                 .putString("currentTripEnergy", "")
@@ -145,6 +149,20 @@ public final class DriveSelectionPreferences {
                     throw new IllegalStateException("ACC state not persisted");
                 }
             }
+        } else if (DoorMediaSettings.CLAIM_PLAY.equals(action)) {
+            boolean claim =
+                    accHooks
+                            && prefs.getInt(BOOT, -1) == boot
+                            && prefs.getInt(ACC, -1) == 2
+                            && prefs.getBoolean(DoorMediaSettings.PLAY_ON_DOOR, false)
+                            && prefs.getBoolean(DoorMediaSettings.PLAY_PENDING, false);
+            // Consume before sending Play; process restarts and failed delivery must not replay it.
+            if (claim && !prefs.edit().putBoolean(DoorMediaSettings.PLAY_PENDING, false).commit()) {
+                throw new IllegalStateException("Door media claim not persisted");
+            }
+            Bundle result = snapshot(prefs, accHooks);
+            result.putBoolean("claimed", claim);
+            return result;
         } else if ("nativeRestore".equals(action)) {
             if (!beginNativeRestore(prefs)) {
                 throw new IllegalStateException("Native restore state not persisted");

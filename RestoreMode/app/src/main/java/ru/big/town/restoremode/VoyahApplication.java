@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.Application;
 import android.os.Bundle;
 
+import ru.big.town.restoremode.dashboard.OdDashboardTransferPolicy;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
 
 /** Start warmup when VoyahTune becomes visible, not when a provider wakes its process. */
@@ -28,8 +29,14 @@ public final class VoyahApplication extends Application {
         if (isOtaProcess()) {
             return;
         }
-        com.shilapi.xcertplay.VoyahCarPlayIntegration.install(
-                new ru.big.town.restoremode.carplay.CarPlayVehicleBridge(this));
+        ru.big.town.restoremode.carplay.CarPlayFeature.initialize(this);
+        ru.big.town.restoremode.carplay.CarPlayVehicleBridge carPlayBridge =
+                new ru.big.town.restoremode.carplay.CarPlayVehicleBridge(this);
+        com.shilapi.xcertplay.VoyahCarPlayIntegration.install(carPlayBridge);
+        if (ru.big.town.common.InfrastructureProfile.read(this)
+                == ru.big.town.common.InfrastructureProfile.OD) {
+            com.shilapi.xcertplay.network.VoyahWifiScanPause.install(carPlayBridge);
+        }
         com.shilapi.xcertplay.CarPlayHomeUi.install(
                 ru.big.town.restoremode.carplay.CarPlayHomeScreen::new);
         com.shilapi.xcertplay.CarPlayWindowUi.install(
@@ -51,10 +58,20 @@ public final class VoyahApplication extends Application {
                     }
 
                     @Override
-                    public void onActivityCreated(Activity activity, Bundle state) {}
+                    public void onActivityCreated(Activity activity, Bundle state) {
+                        OdDashboardTransferPolicy.apply(activity);
+                    }
 
                     @Override
-                    public void onActivityResumed(Activity activity) {}
+                    public void onActivityResumed(Activity activity) {
+                        // OEM controllers attach with DecorView, after the resume callback.
+                        activity.getWindow().getDecorView().post(
+                                () -> {
+                                    if (!activity.isFinishing() && !activity.isDestroyed()) {
+                                        OdDashboardTransferPolicy.apply(activity);
+                                    }
+                                });
+                    }
 
                     @Override
                     public void onActivityPaused(Activity activity) {}

@@ -250,6 +250,24 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         }
     }
 
+    private void bindMediaPlay() {
+        View row = settingView(R.id.playMediaOnDoorRow);
+        Switch toggle = settingView(R.id.switchPlayMediaOnDoor);
+        if (row == null || toggle == null) return;
+        boolean supported =
+                ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks();
+        row.setVisibility(supported ? View.VISIBLE : View.GONE);
+        toggle.setChecked(
+                preferences.getBoolean(ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, false));
+        toggle.setOnCheckedChangeListener(
+                (button, checked) ->
+                        preferences
+                                .edit()
+                                .putBoolean(
+                                        ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, checked)
+                                .apply());
+    }
+
     private void initPedestrianSoundGroup() {
         RadioGroup group = settingView(R.id.pedestrianSoundGroup);
         if (group == null) {
@@ -581,6 +599,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         bindStockEnergyStatistics();
         bindWiperColdMode();
         bindMediaPause();
+        bindMediaPlay();
         initModeRadios();
         initModeEnableToggles();
         initModeRememberLastToggles();

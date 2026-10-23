@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voyah_wifi_scan_pause">Приостанавливать автоматический поиск Wi-Fi при CarPlay</string>
+    <string name="voyah_wifi_scan_pause_description">Приостанавливает фоновый поиск сетей и автоподключение во время Wi-Fi Direct CarPlay, чтобы уменьшить прерывания. Подключиться вручную можно в настройках Wi-Fi автомобиля. После завершения сессии возвращается прежний режим поиска. Применяется при следующем подключении.</string>
+</resources>

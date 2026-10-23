@@ -15,7 +15,32 @@ import org.robolectric.util.ReflectionHelpers
 class CarPlayEntryActivityTest {
     @After
     fun clearSession() {
+        CarPlaySettingsAccess.setEnabled(org.robolectric.RuntimeEnvironment.getApplication(), true)
         CarPlayBackgroundSession.clear()
+    }
+
+    @Test
+    fun disabledCarPlayRejectsLauncherEntryWithoutOpeningAHost() {
+        CarPlaySettingsAccess.setEnabled(org.robolectric.RuntimeEnvironment.getApplication(), false)
+        val controller = Robolectric.buildActivity(CarPlayEntryActivity::class.java).create()
+        try {
+            assertTrue(controller.get().isFinishing)
+            assertNull(shadowOf(controller.get()).nextStartedActivity)
+        } finally {
+            controller.destroy()
+        }
+    }
+
+    @Test
+    fun disabledCarPlayHostsFinishBeforeStartingTransport() {
+        CarPlaySettingsAccess.setEnabled(org.robolectric.RuntimeEnvironment.getApplication(), false)
+        val projection = Robolectric.buildActivity(CarPlayHostActivity::class.java).create()
+        assertTrue(projection.get().isFinishing)
+        projection.destroy()
+        val home = Robolectric.buildActivity(DiPlayActivity::class.java).create()
+        assertTrue(home.get().isFinishing)
+        home.destroy()
+        assertFalse(CarPlayBackgroundSession.hasSession())
     }
 
     @Test

@@ -59,7 +59,12 @@ case "$script" in
     app_client.js)
         echo '[app-client] hook ready v1'
         if [ ! -f "$root/missing_cluster_ready" ]; then echo '[cluster-units] hook ready v1'; fi
+        if [ ! -f "$root/missing_navigation_ready" ]; then echo '[navigation-source] hook ready v1'; fi
         if [ ! -f "$root/missing_rds_ready" ]; then echo '[rds-restore] hook ready v1'; fi
+        if [ ! -f "$root/missing_statusbar_ready" ]; then echo '[carplay-statusbar] hook ready v1'; fi
+        gate=none ;;
+    voyahtune_phone_numbers.js)
+        if [ ! -f "$root/missing_phone_ready" ]; then echo '[phone-numbers] hook ready v1'; fi
         gate=none ;;
     voyahtune_drive_reset.js)
         if [ ! -f "$root/missing_drive_ready" ]; then echo '[drive-reset] hook ready v2'; fi
@@ -166,6 +171,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         enabled=True,
         package="com.pateo.rdsapp",
         selected=True,
+        phone_agent=True,
     ):
         if enabled:
             (self.root / "enable_rds").touch()
@@ -177,6 +183,11 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         if not exe.is_symlink():
             exe.symlink_to(executable)
         (self.root / "app_client.js").touch()
+        phone_script = self.root / "voyahtune_phone_numbers.js"
+        if phone_agent:
+            phone_script.touch()
+        elif phone_script.exists():
+            phone_script.unlink()
         selection = "settings() { echo null; }; "
         if package != "com.pateo.rdsapp":
             selection = (
@@ -191,6 +202,7 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
                 str(self.loader),
                 "--probe",
                 'APP_CLIENT="$FIXTURE/app_client.js"; '
+                'PHONE_NUMBERS_AGENT="$FIXTURE/voyahtune_phone_numbers.js"; '
                 + selection
                 + "fixture_discover_app_client; wait",
             ],
@@ -200,12 +212,129 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
             capture_output=True,
         )
 
+    def test_phone_numbers_discovered_without_geometry_selection(self):
+        for executable in ("/system/bin/app_process64", "/system/bin/app_process32"):
+            with self.subTest(executable=executable):
+                self.rds_probe(package="com.qinggan.bluetoothphone", selected=False,
+                               executable=executable)
+                marker = self.root / "voyahtune_app_client.com.qinggan.bluetoothphone.pid"
+                self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+                self.rds_probe(package="com.qinggan.bluetoothphone", selected=False,
+                               executable=executable)
+                self.assertEqual((self.root / "events").read_text().count(
+                    "start voyahtune_phone_numbers.js 109"), 1)
+                self.assertNotIn("start app_client.js 109", (self.root / "events").read_text())
+                marker.unlink()
+                (self.root / "voyahtune_app_client.com.qinggan.bluetoothphone.attempt").unlink()
+                (self.root / "events").write_text("")
+                (self.root / "proc/109/exe").unlink()
+
+    def test_phone_numbers_requires_ready_and_keeps_failed_attempt(self):
+        (self.root / "missing_phone_ready").touch()
+        self.rds_probe(package="com.qinggan.bluetoothphone", selected=False)
+        marker = self.root / "voyahtune_app_client.com.qinggan.bluetoothphone.pid"
+        self.assertFalse(marker.exists())
+        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.bluetoothphone.attempt").exists())
+        (self.root / "missing_phone_ready").unlink()
+        self.rds_probe(package="com.qinggan.bluetoothphone", selected=False)
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.root / "events").read_text().count(
+            "start voyahtune_phone_numbers.js 109"), 1)
+
+    def test_phone_numbers_rejects_secondary_android_user(self):
+        self.rds_probe(package="com.qinggan.bluetoothphone", uid=110109, selected=False)
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_phone_numbers_missing_agent_does_not_fall_back_to_geometry(self):
+        self.rds_probe(package="com.qinggan.bluetoothphone", selected=False, phone_agent=False)
+        self.assertEqual((self.root / "events").read_text(), "")
+
+    def test_phone_numbers_live_injector_keeps_apps_lane_and_busy_marker(self):
+        process = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.processes.append(process)
+        proc_dir = self.root / f"proc/{process.pid}"
+        proc_dir.mkdir()
+        agent = ROOT / "Packaging/od/inject/voyahtune_phone_numbers.js"
+        (proc_dir / "cmdline").write_text(f"frida-inject -p 109 -s {agent} ")
+        subprocess.run(
+            [
+                "sh", str(self.loader), "--probe",
+                "WORKER_LANE=apps; lane_injector_is_live && app_client_inject_is_live 109",
+            ],
+            check=True,
+            timeout=5,
+            env=self.env,
+            capture_output=True,
+        )
+
+    def test_systemui_discovered_without_geometry_selection_once_per_identity(self):
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        marker = self.root / "voyahtune_app_client.com.qinggan.systemui.pid"
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_hiboard_is_not_injected_even_when_selected_for_fullscreen(self):
+        for executable in ("/system/bin/app_process64", "/system/bin/app_process32"):
+            for selected in (False, True):
+                with self.subTest(executable=executable, selected=selected):
+                    self.rds_probe(
+                        package="com.qinggan.app.hiboard",
+                        selected=selected,
+                        executable=executable,
+                    )
+                    self.assertEqual((self.root / "events").read_text(), "")
+                    self.assertFalse(
+                        (self.root / "voyahtune_app_client.com.qinggan.app.hiboard.pid").exists()
+                    )
+                    self.assertFalse(
+                        (self.root / "voyahtune_app_client.com.qinggan.app.hiboard.attempt").exists()
+                    )
+                    (self.root / "proc/109/exe").unlink()
+
+    def test_systemui_requires_its_own_ready_marker(self):
+        (self.root / "missing_statusbar_ready").touch()
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        self.assertFalse((self.root / "voyahtune_app_client.com.qinggan.systemui.pid").exists())
+        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.systemui.attempt").exists())
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_systemui_supports_32_bit_runtime(self):
+        self.rds_probe(package="com.qinggan.systemui", selected=False, executable="/system/bin/app_process32")
+        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.systemui.pid").exists())
+
+    def test_systemui_timeout_requires_both_ready_markers(self):
+        (self.root / "app_client_timeout").touch()
+        (self.root / "missing_statusbar_ready").touch()
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        marker = self.root / "voyahtune_app_client.com.qinggan.systemui.pid"
+        self.assertFalse(marker.exists())
+        (self.root / "missing_statusbar_ready").unlink()
+        (self.root / "generation.109").write_text("2\n")
+        self.rds_probe(package="com.qinggan.systemui", selected=False)
+        self.assertEqual(marker.read_text().strip(), "v2:test:109:2")
+
     def test_cluster_units_discovered_without_geometry_selection(self):
         self.rds_probe(package="com.qinggan.cluster", selected=False)
         marker = self.root / "voyahtune_app_client.com.qinggan.cluster.pid"
         self.assertEqual(marker.read_text().strip(), "v2:test:109:1")
         self.rds_probe(package="com.qinggan.cluster", selected=False)
         self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
+
+    def test_yandex_navigation_discovered_without_geometry_selection(self):
+        self.rds_probe(package="ru.yandex.yandexnavi", selected=False)
+        self.assertTrue((self.root / "voyahtune_app_client.ru.yandex.yandexnavi.pid").exists())
+
+    def test_dgis_navigation_supports_32_bit_without_geometry_selection(self):
+        self.rds_probe(package="ru.dublgis.dgismobile", selected=False,
+                       executable="/system/bin/app_process32")
+        self.assertTrue((self.root / "voyahtune_app_client.ru.dublgis.dgismobile.pid").exists())
+
+    def test_navigation_requires_specific_ready_marker(self):
+        (self.root / "missing_navigation_ready").touch()
+        self.rds_probe(package="ru.yandex.yandexnavi", selected=False)
+        self.assertFalse((self.root / "voyahtune_app_client.ru.yandex.yandexnavi.pid").exists())
 
     def test_cluster_units_supports_32_bit_process(self):
         self.rds_probe(package="com.qinggan.cluster", selected=False,

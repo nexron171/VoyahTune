@@ -262,6 +262,33 @@ public class AppWidgetStore {
         save(preferences, entries);
     }
 
+    /** Mixed widgets keep their other profiles; dedicated CarPlay tiles are switched off. */
+    public static void removeCarPlay(SharedPreferences preferences) {
+        List<Entry> entries = load(preferences);
+        boolean changed = false;
+        java.util.Iterator<Entry> iterator = entries.iterator();
+        while (iterator.hasNext()) {
+            Entry entry = iterator.next();
+            Profile selected = entry.selected();
+            if (!entry.profiles.removeIf(profile -> CarPlayTarget.isCarPlay(profile.packageName))) {
+                continue;
+            }
+            changed = true;
+            if (entry.profiles.isEmpty()) {
+                iterator.remove();
+            } else {
+                entry.selectedProfile = Math.max(0, entry.profiles.indexOf(selected));
+                if (CarPlayTarget.isCarPlay(selected.packageName)) {
+                    entry.autoStart = false;
+                }
+                entry.ensureProfiles();
+            }
+        }
+        if (changed) {
+            save(preferences, entries);
+        }
+    }
+
     public static Entry find(SharedPreferences preferences, String id) {
         for (Entry entry : load(preferences)) {
             if (entry.id.equals(id)) {

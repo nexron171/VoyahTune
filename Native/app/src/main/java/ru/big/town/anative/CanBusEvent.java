@@ -11,7 +11,8 @@ final class CanBusEvent {
         VEHICLE_STATE,
         AMBIENT_TEMPERATURE,
         ENERGY_TELEMETRY,
-        VEHICLE_SPEED
+        VEHICLE_SPEED,
+        CLIMATE
     }
 
     enum Origin {
@@ -44,6 +45,7 @@ final class CanBusEvent {
     final int second;
     final int third;
     final EnergyTelemetrySample telemetry;
+    final OemClimateState climate;
 
     private CanBusEvent(
             Kind kind,
@@ -67,7 +69,32 @@ final class CanBusEvent {
             int second,
             int third,
             EnergyTelemetrySample telemetry) {
+        this(
+                kind,
+                origin,
+                connectionEpoch,
+                sequence,
+                elapsedRealtime,
+                first,
+                second,
+                third,
+                telemetry,
+                null);
+    }
+
+    private CanBusEvent(
+            Kind kind,
+            Origin origin,
+            long connectionEpoch,
+            long sequence,
+            long elapsedRealtime,
+            int first,
+            int second,
+            int third,
+            EnergyTelemetrySample telemetry,
+            OemClimateState climate) {
         this.telemetry = telemetry;
+        this.climate = climate;
         this.kind = kind;
         this.origin = origin;
         this.connectionEpoch = connectionEpoch;
@@ -150,6 +177,12 @@ final class CanBusEvent {
                 Kind.ENERGY_TELEMETRY, origin, epoch, sequence, elapsed, sample.kind, 0, 0, sample);
     }
 
+    static CanBusEvent climate(
+            Origin origin, long epoch, long sequence, long elapsed, OemClimateState state) {
+        return new CanBusEvent(
+                Kind.CLIMATE, origin, epoch, sequence, elapsed, 0, 0, 0, null, state);
+    }
+
     int signalKey() {
         return (kind == Kind.VEHICLE_STATE || kind == Kind.ENERGY_TELEMETRY)
                 ? (kind.ordinal() << 24) ^ first
@@ -163,6 +196,7 @@ final class CanBusEvent {
     boolean samePayload(CanBusEvent other) {
         // Telemetry repeats refresh transport freshness, even when the measured value is unchanged.
         return kind != Kind.ENERGY_TELEMETRY
+                && kind != Kind.CLIMATE
                 && kind != Kind.VEHICLE_SPEED
                 && other != null
                 && kind == other.kind

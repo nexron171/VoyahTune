@@ -10,38 +10,49 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.KeyEvent;
 
+import ru.big.town.common.InfrastructureProfile;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * Single routing point for steering-wheel commands and door PAUSE_ONLY.
+ * Single routing point for steering-wheel commands and door playback actions.
  *
  * <p>For ordinary Android players a key is dispatched to one concrete {@link MediaController}; for
  * bridge players (AutoKit/CarPlay/Android Auto) the command is returned to the injected keymanager
- * hook, preserving the caller/path which is known to work on the head unit; OEM/Bluetooth remains on
- * the original Qinggan route.</p>
+ * hook, preserving the caller/path which is known to work on the head unit; OEM/Bluetooth remains
+ * on the original Qinggan route.
  */
 final class MediaControlRouter {
     private static final String TAG = "$$$ MediaControlRouter $$$";
 
-    static final String ROUTE_DIRECT     = "direct";
+    static final String ROUTE_DIRECT = "direct";
     static final String ROUTE_KEYMANAGER = "keymanager";
-    static final String ROUTE_NATIVE     = "native";
-    static final String ROUTE_NOOP       = "noop";
+    static final String ROUTE_NATIVE = "native";
+    static final String ROUTE_NOOP = "noop";
     private static final int MAX_SELECTION_ATTEMPTS = 3;
 
     private static final Object TARGET_LOCK = new Object();
     private static MediaSession.Token stickyToken;
-    /** True only while preserving the target of our own pause/toggle across its state transition. */
+
+    /**
+     * True only while preserving the target of our own pause/toggle across its state transition.
+     */
     private static boolean stickyPinned;
+
     private static final List<MediaSession.Token> lastActiveTokens = new ArrayList<>();
     private static boolean activeSnapshotInitialized;
+
     /** Active NowPlayingService generation allowed to commit observer-derived routing state. */
     private static long observerGeneration;
+
     /** Invalidates selections whose controller reads started before a newer edge/command. */
     private static long targetRevision;
-    /** Serializes active-session snapshots without replaying an old transition over a new command. */
+
+    /**
+     * Serializes active-session snapshots without replaying an old transition over a new command.
+     */
     private static long activeSnapshotRevision;
 
     private MediaControlRouter() {}
@@ -80,29 +91,66 @@ final class MediaControlRouter {
     }
 
     static Result dispatch(Context context, MediaControlPolicy.Command command) {
-        if (context == null || command == null) return nativeFallback(command, "", MediaControlPolicy.STATE_UNKNOWN);
+        if (context == null || command == null)
+            return nativeFallback(command, "", MediaControlPolicy.STATE_UNKNOWN);
         try {
-            MediaSessionManager msm = (MediaSessionManager) context.getSystemService(Context.MEDIA_SESSION_SERVICE);
+            MediaSessionManager msm =
+                    (MediaSessionManager) context.getSystemService(Context.MEDIA_SESSION_SERVICE);
             if (msm == null) return nativeFallback(command, "", MediaControlPolicy.STATE_UNKNOWN);
             List<MediaController> controllers = msm.getActiveSessions(null);
             if (controllers == null) controllers = Collections.emptyList();
             MediaController target = selectController(controllers);
+            if (command == MediaControlPolicy.Command.PLAY_ONLY) {
+                List<MediaControlPolicy.Candidate> sessions = new ArrayList<>();
+                for (MediaController controller : controllers)
+                    sessions.add(candidate(controller, false));
+                int index =
+                        LastMediaSessionStore.choose(
+                                sessions,
+                                controllers.indexOf(target),
+                                LastMediaSessionStore.read(context));
+                target = index >= 0 ? controllers.get(index) : null;
+            }
             logDecisionInput(command, controllers, target);
 
-            // With no Android session the wheel must remain OEM-native. Door PAUSE_ONLY instead asks
-            // keymanager for idempotent PAUSE=127; it must not blindly toggle an unknown player.
+            // With no session, door actions use explicit PLAY/PAUSE rather than a blind toggle.
             if (target == null) {
+                if (command == MediaControlPolicy.Command.PLAY_ONLY) {
+                    return new Result(
+                            ROUTE_KEYMANAGER,
+                            MediaControlPolicy.KEY_PLAY,
+                            "",
+                            MediaControlPolicy.STATE_UNKNOWN);
+                }
                 return command == MediaControlPolicy.Command.PAUSE_ONLY
-                        ? new Result(ROUTE_KEYMANAGER, MediaControlPolicy.KEY_PAUSE, "",
+                        ? new Result(
+                                ROUTE_KEYMANAGER,
+                                MediaControlPolicy.KEY_PAUSE,
+                                "",
                                 MediaControlPolicy.STATE_UNKNOWN)
                         : nativeFallback(command, "", MediaControlPolicy.STATE_UNKNOWN);
             }
 
             MediaControlPolicy.Candidate candidate = candidate(target, false);
-            MediaControlPolicy.Plan plan = MediaControlPolicy.plan(candidate, command);
+            MediaControlPolicy.Plan plan =
+                    "com.pateo.rdsapp".equals(candidate.packageName)
+                                    && InfrastructureProfile.read(context)
+                                            == InfrastructureProfile.OD
+                            ? MediaControlPolicy.radioPlan(candidate, command)
+                            : MediaControlPolicy.plan(candidate, command);
             Result result = executePlan(target, candidate, command, plan);
-            Log.i(TAG, "dispatch " + command + " -> route=" + result.route + " key=" + result.keyCode
-                    + " pkg=" + result.packageName + " stateClass=" + result.playbackClass);
+            Log.i(
+                    TAG,
+                    "dispatch "
+                            + command
+                            + " -> route="
+                            + result.route
+                            + " key="
+                            + result.keyCode
+                            + " pkg="
+                            + result.packageName
+                            + " stateClass="
+                            + result.playbackClass);
             return result;
         } catch (SecurityException e) {
             Log.w(TAG, "dispatch " + command + ": no MEDIA_CONTENT_CONTROL: " + e.getMessage());
@@ -233,7 +281,8 @@ final class MediaControlRouter {
             if (!canMutateObserverStateLocked(generation)) return;
             stickyToken = token;
             // A fresh inactive->active transition is stronger evidence than stale PLAYING states
-            // left behind by Bluetooth/bridge sessions. This is not an own-pause pin: once it becomes
+            // left behind by Bluetooth/bridge sessions. This is not an own-pause pin: once it
+            // becomes
             // inactive, another actually active session must be allowed to win.
             stickyPinned = false;
             targetRevision++;
@@ -275,8 +324,8 @@ final class MediaControlRouter {
         return null;
     }
 
-    private static SelectionAttempt selectControllerOnce(List<MediaController> controllers,
-                                                          long generation) {
+    private static SelectionAttempt selectControllerOnce(
+            List<MediaController> controllers, long generation) {
         observeActiveTransitions(controllers, generation);
 
         MediaSession.Token sticky;
@@ -293,8 +342,9 @@ final class MediaControlRouter {
         if (controllers.isEmpty()) {
             boolean stable;
             synchronized (TARGET_LOCK) {
-                stable = canMutateObserverStateLocked(generation)
-                        && targetRevision == expectedRevision;
+                stable =
+                        canMutateObserverStateLocked(generation)
+                                && targetRevision == expectedRevision;
                 if (stable) {
                     stickyToken = null;
                     stickyPinned = false;
@@ -330,17 +380,17 @@ final class MediaControlRouter {
             nextPinned = false;
             pinned = false;
         }
-        int index = MediaControlPolicy.chooseTarget(
-                candidates, "sticky", pinned || stickyActive);
-        MediaController selected = index >= 0 && index < controllers.size() ? controllers.get(index) : null;
-        if (selected != null && candidates.get(index).playbackClass == MediaControlPolicy.STATE_ACTIVE) {
+        int index = MediaControlPolicy.chooseTarget(candidates, "sticky", pinned || stickyActive);
+        MediaController selected =
+                index >= 0 && index < controllers.size() ? controllers.get(index) : null;
+        if (selected != null
+                && candidates.get(index).playbackClass == MediaControlPolicy.STATE_ACTIVE) {
             nextSticky = selected.getSessionToken();
             nextPinned = false;
         }
         boolean stable;
         synchronized (TARGET_LOCK) {
-            stable = canMutateObserverStateLocked(generation)
-                    && targetRevision == expectedRevision;
+            stable = canMutateObserverStateLocked(generation) && targetRevision == expectedRevision;
             if (stable) {
                 stickyToken = nextSticky;
                 stickyPinned = nextPinned;
@@ -351,7 +401,8 @@ final class MediaControlRouter {
     }
 
     /** Detects a newly active token even when a session was already PLAYING when it was added. */
-    private static void observeActiveTransitions(List<MediaController> controllers, long generation) {
+    private static void observeActiveTransitions(
+            List<MediaController> controllers, long generation) {
         final long expectedRevision;
         final long expectedSnapshotRevision;
         final boolean snapshotInitialized;
@@ -408,20 +459,42 @@ final class MediaControlRouter {
         return playbackClass(state) == MediaControlPolicy.STATE_ACTIVE;
     }
 
-    private static Result executePlan(MediaController target, MediaControlPolicy.Candidate candidate,
-                                      MediaControlPolicy.Command command,
-                                      MediaControlPolicy.Plan plan) {
+    private static Result executePlan(
+            MediaController target,
+            MediaControlPolicy.Candidate candidate,
+            MediaControlPolicy.Command command,
+            MediaControlPolicy.Plan plan) {
         switch (plan.operation) {
             case NONE:
                 return new Result(ROUTE_NOOP, 0, candidate.packageName, candidate.playbackClass);
 
             case NATIVE_QG:
                 rememberCommandTarget(target, command);
-                return new Result(ROUTE_NATIVE, plan.keyCode, candidate.packageName, candidate.playbackClass);
+                return new Result(
+                        ROUTE_NATIVE, plan.keyCode, candidate.packageName, candidate.playbackClass);
 
             case KEYMANAGER_KEY:
                 rememberCommandTarget(target, command);
-                return new Result(ROUTE_KEYMANAGER, plan.keyCode, candidate.packageName, candidate.playbackClass);
+                return new Result(
+                        ROUTE_KEYMANAGER,
+                        plan.keyCode,
+                        candidate.packageName,
+                        candidate.playbackClass);
+
+            case TRANSPORT_NEXT:
+                target.getTransportControls().skipToNext();
+                rememberCommandTarget(target, command);
+                return new Result(ROUTE_DIRECT, 0, candidate.packageName, candidate.playbackClass);
+
+            case TRANSPORT_PREVIOUS:
+                target.getTransportControls().skipToPrevious();
+                rememberCommandTarget(target, command);
+                return new Result(ROUTE_DIRECT, 0, candidate.packageName, candidate.playbackClass);
+
+            case TRANSPORT_PLAY:
+                target.getTransportControls().play();
+                rememberCommandTarget(target, command);
+                return new Result(ROUTE_DIRECT, 0, candidate.packageName, candidate.playbackClass);
 
             case TRANSPORT_PAUSE:
                 target.getTransportControls().pause();
@@ -431,41 +504,54 @@ final class MediaControlRouter {
             case TARGET_KEY:
                 boolean sent = dispatchTargetedKey(target, plan.keyCode);
                 if (!sent) {
-                    // No second semantic command was sent, so falling back to the same single key in
+                    // No second semantic command was sent, so falling back to the same single key
+                    // in
                     // keymanager cannot double-toggle the player.
                     rememberCommandTarget(target, command);
-                    return new Result(ROUTE_KEYMANAGER, plan.keyCode,
-                            candidate.packageName, candidate.playbackClass);
+                    return new Result(
+                            ROUTE_KEYMANAGER,
+                            plan.keyCode,
+                            candidate.packageName,
+                            candidate.playbackClass);
                 }
                 rememberCommandTarget(target, command);
-                return new Result(ROUTE_DIRECT, plan.keyCode,
-                        candidate.packageName, candidate.playbackClass);
+                return new Result(
+                        ROUTE_DIRECT, plan.keyCode, candidate.packageName, candidate.playbackClass);
 
             default:
-                return new Result(ROUTE_NATIVE, plan.keyCode,
-                        candidate.packageName, candidate.playbackClass);
+                return new Result(
+                        ROUTE_NATIVE, plan.keyCode, candidate.packageName, candidate.playbackClass);
         }
     }
 
     private static boolean dispatchTargetedKey(MediaController target, int keyCode) {
         if (target == null || keyCode == 0) return false;
         long t = SystemClock.uptimeMillis();
-        MediaKeyPairDelivery.Outcome outcome = MediaKeyPairDelivery.dispatch(down ->
-                target.dispatchMediaButtonEvent(new KeyEvent(
-                        t, t, down ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP, keyCode, 0)));
+        MediaKeyPairDelivery.Outcome outcome =
+                MediaKeyPairDelivery.dispatch(
+                        down ->
+                                target.dispatchMediaButtonEvent(
+                                        new KeyEvent(
+                                                t,
+                                                t,
+                                                down ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP,
+                                                keyCode,
+                                                0)));
         if (outcome == MediaKeyPairDelivery.Outcome.DOWN_ONLY) {
             Log.w(TAG, "target key UP failed/not accepted after DOWN; no fallback, key=" + keyCode);
         }
         return outcome != MediaKeyPairDelivery.Outcome.NOT_SENT;
     }
 
-    private static void rememberCommandTarget(MediaController target,
-                                              MediaControlPolicy.Command command) {
+    private static void rememberCommandTarget(
+            MediaController target, MediaControlPolicy.Command command) {
         if (target == null) return;
         synchronized (TARGET_LOCK) {
             stickyToken = target.getSessionToken();
-            stickyPinned = command == MediaControlPolicy.Command.PAUSE_ONLY
-                    || command == MediaControlPolicy.Command.PLAY_PAUSE;
+            stickyPinned =
+                    command == MediaControlPolicy.Command.PAUSE_ONLY
+                            || command == MediaControlPolicy.Command.PLAY_ONLY
+                            || command == MediaControlPolicy.Command.PLAY_PAUSE;
             targetRevision++;
         }
     }
@@ -506,47 +592,75 @@ final class MediaControlRouter {
     }
 
     private static Result safeFailure(MediaControlPolicy.Command command) {
+        if (command == MediaControlPolicy.Command.PLAY_ONLY) {
+            return new Result(
+                    ROUTE_KEYMANAGER,
+                    MediaControlPolicy.KEY_PLAY,
+                    "",
+                    MediaControlPolicy.STATE_UNKNOWN);
+        }
         return command == MediaControlPolicy.Command.PAUSE_ONLY
-                ? new Result(ROUTE_KEYMANAGER, MediaControlPolicy.KEY_PAUSE, "",
+                ? new Result(
+                        ROUTE_KEYMANAGER,
+                        MediaControlPolicy.KEY_PAUSE,
+                        "",
                         MediaControlPolicy.STATE_UNKNOWN)
                 : nativeFallback(command, "", MediaControlPolicy.STATE_UNKNOWN);
     }
 
-    private static Result nativeFallback(MediaControlPolicy.Command command, String pkg, int stateClass) {
+    private static Result nativeFallback(
+            MediaControlPolicy.Command command, String pkg, int stateClass) {
         return new Result(ROUTE_NATIVE, MediaControlPolicy.keyFor(command), pkg, stateClass);
     }
 
-    private static void logDecisionInput(MediaControlPolicy.Command command,
-                                         List<MediaController> controllers, MediaController selected) {
+    private static void logDecisionInput(
+            MediaControlPolicy.Command command,
+            List<MediaController> controllers,
+            MediaController selected) {
         StringBuilder sb = new StringBuilder("command=").append(command).append(" sessions=[");
         for (int i = 0; i < controllers.size(); i++) {
             MediaController c = controllers.get(i);
             PlaybackState ps = safePlaybackState(c);
             if (i > 0) sb.append(", ");
-            sb.append(i).append(':').append(safePackage(c))
-                    .append(" state=").append(ps == null ? "null" : ps.getState())
-                    .append(" actions=0x").append(Long.toHexString(ps == null ? 0L : ps.getActions()));
+            sb.append(i)
+                    .append(':')
+                    .append(safePackage(c))
+                    .append(" state=")
+                    .append(ps == null ? "null" : ps.getState())
+                    .append(" actions=0x")
+                    .append(Long.toHexString(ps == null ? 0L : ps.getActions()));
         }
         sb.append("] selected=").append(selected == null ? "none" : safePackage(selected));
         Log.i(TAG, sb.toString());
     }
 
     private static String safePackage(MediaController c) {
-        try { return c == null || c.getPackageName() == null ? "" : c.getPackageName(); }
-        catch (Exception e) { return ""; }
+        try {
+            return c == null || c.getPackageName() == null ? "" : c.getPackageName();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static PlaybackState safePlaybackState(MediaController c) {
-        try { return c == null ? null : c.getPlaybackState(); }
-        catch (Exception e) { return null; }
+        try {
+            return c == null ? null : c.getPlaybackState();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static boolean sameToken(MediaSession.Token a, MediaSession.Token b) {
         if (a == null || b == null) return a == b;
-        try { return a.equals(b); } catch (Exception e) { return false; }
+        try {
+            return a.equals(b);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
-    private static boolean containsToken(List<MediaSession.Token> tokens, MediaSession.Token target) {
+    private static boolean containsToken(
+            List<MediaSession.Token> tokens, MediaSession.Token target) {
         for (MediaSession.Token token : tokens) {
             if (sameToken(token, target)) return true;
         }

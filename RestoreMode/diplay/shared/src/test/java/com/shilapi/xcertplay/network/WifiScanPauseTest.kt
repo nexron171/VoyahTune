@@ -4,42 +4,67 @@ import android.content.Context
 import com.shilapi.xcertplay.adb.LocalAdb
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.function.BooleanSupplier
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], manifest = Config.NONE)
 class WifiScanPauseTest {
     private val context get() = RuntimeEnvironment.getApplication()
 
+    @After
+    fun resetHost() {
+        VoyahWifiScanPause.install(null)
+    }
+
     @Test
     fun controllerCloseInvalidatesQueuedPausesAndReleasesItsOwnLeaseOnce() {
-        val acquisitions = mutableListOf<Pair<Any, () -> Boolean>>()
+        val acquisitions = mutableListOf<Pair<Any, BooleanSupplier>>()
         val releases = mutableListOf<Any>()
-        val control = object : WifiScanPauseControl {
-            override fun acquire(app: Context, owner: Any, current: () -> Boolean, log: (String) -> Unit) {
+        VoyahWifiScanPause.install(object : VoyahWifiScanPause.Host {
+            override fun acquireWifiScanPause(owner: Any, current: BooleanSupplier) {
                 acquisitions.add(owner to current)
             }
 
-            override fun release(app: Context, owner: Any, log: (String) -> Unit) {
+            override fun releaseWifiScanPause(owner: Any) {
                 releases.add(owner)
             }
-        }
-        val pause = WifiScanPause(context, {}, control)
+        })
+        val pause = WifiScanPause(context, {}, forbiddenAdb())
         pause.pause()
         pause.pause()
         assertEquals(2, acquisitions.size)
         assertEquals(acquisitions[0].first, acquisitions[1].first)
-        assertTrue(acquisitions.all { it.second() })
+        assertTrue(acquisitions.all { it.second.asBoolean })
         pause.close()
         pause.close()
         pause.pause()
         assertEquals(2, acquisitions.size)
         assertEquals(listOf(acquisitions[0].first), releases)
-        assertTrue(acquisitions.none { it.second() })
+        assertTrue(acquisitions.none { it.second.asBoolean })
+    }
+
+    @Test
+    fun disabledPlatformWithoutAnOdHostNeverStartsAdbOrRecovery() {
+        val pause = WifiScanPause(context, {}, forbiddenAdb())
+        pause.pause()
+        pause.close()
+        WifiScanPause.restoreIfNeeded(context)
+    }
+
+    private fun forbiddenAdb() = object : WifiScanPauseControl {
+        override fun acquire(app: Context, owner: Any, current: () -> Boolean, log: (String) -> Unit) {
+            throw AssertionError("ADB must remain disabled")
+        }
+
+        override fun release(app: Context, owner: Any, log: (String) -> Unit) {
+            throw AssertionError("ADB cleanup must remain disabled")
+        }
     }
 
     @Test

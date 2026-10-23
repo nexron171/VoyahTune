@@ -58,6 +58,7 @@ data class Iap2IdentificationConfig(
     val chargingConnectors: EvChargingConnectors = EvChargingConnectors.CCS2_TYPE2,
     /** Also offer wheel speed ($PASCD) in the location component; needs [locationInformationEnabled]. */
     val vehicleSpeedEnabled: Boolean = false,
+    val carPlayThemeAssetIdentifier: String? = null,
 ) {
     constructor(
         name: String,
@@ -102,6 +103,9 @@ data class Iap2IdentificationConfig(
         }
         require(carPlayUsbInterfaceNumber in 0..0xff) {
             "carPlayUsbInterfaceNumber must be in 0..255"
+        }
+        carPlayThemeAssetIdentifier?.let {
+            require(it.isNotBlank() && '\u0000' !in it) { "CarPlay theme asset identifier must be non-blank without U+0000" }
         }
     }
 }
@@ -358,6 +362,7 @@ class Iap2IdentificationClient(private val session: Iap2Session) {
                         void(2)
                         u8(3, config.carPlayUsbInterfaceNumber)
                         void(4)
+                        config.carPlayThemeAssetIdentifier?.let { string(6, it) }
                     }
                 } else {
                     group(17) {
@@ -375,6 +380,7 @@ class Iap2IdentificationClient(private val session: Iap2Session) {
                         u16(3, 1)
                         void(4)
                         void(5)
+                        config.carPlayThemeAssetIdentifier?.let { string(6, it) }
                     }
                 }
                 if (config.vehicleStatusEnabled) electricVehicleComponents(config.manufacturer, config.chargingConnectors)

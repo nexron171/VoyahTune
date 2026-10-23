@@ -2,12 +2,13 @@ package ru.big.town.anative;
 
 import java.util.Objects;
 
-/** A dead or stalled CarPlay process cannot keep its last turn on the cluster indefinitely. */
-final class CarPlayNavigationLease {
+/** A dead or stalled navigation process cannot keep its last turn on the cluster indefinitely. */
+final class ClusterNavigationLease {
     static final long TIMEOUT_MS = 5000;
 
     static final class Maneuver {
-        final int icon, distance;
+        final int icon;
+        final int distance;
         final String road;
 
         Maneuver(int icon, int distance, String road) {
@@ -18,7 +19,9 @@ final class CarPlayNavigationLease {
 
         @Override
         public boolean equals(Object value) {
-            if (!(value instanceof Maneuver)) return false;
+            if (!(value instanceof Maneuver)) {
+                return false;
+            }
             Maneuver other = (Maneuver) value;
             return icon == other.icon && distance == other.distance && road.equals(other.road);
         }
@@ -31,9 +34,18 @@ final class CarPlayNavigationLease {
 
     private Maneuver maneuver;
     private long sampled;
+    private boolean enabled = true;
+
+    void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+        if (!enabled) {
+            clear();
+        }
+    }
 
     void update(boolean active, int icon, int distance, String road, long sampled, long now) {
-        if (!active
+        if (!enabled
+                || !active
                 || icon < 0
                 || icon > 9
                 || distance < 0
@@ -44,13 +56,17 @@ final class CarPlayNavigationLease {
             return;
         }
         String normalized = road == null ? "" : road.replace('\0', ' ');
-        if (normalized.length() > 120) normalized = normalized.substring(0, 120);
+        if (normalized.length() > 120) {
+            normalized = normalized.substring(0, 120);
+        }
         maneuver = new Maneuver(icon, distance, normalized);
         this.sampled = sampled;
     }
 
     Maneuver current(long now) {
-        if (now < sampled || now - sampled >= TIMEOUT_MS) clear();
+        if (now < sampled || now - sampled >= TIMEOUT_MS) {
+            clear();
+        }
         return maneuver;
     }
 

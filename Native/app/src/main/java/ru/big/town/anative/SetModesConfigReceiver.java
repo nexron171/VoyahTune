@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.provider.Settings;
 import android.util.Log;
 
+import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
 
 import java.lang.reflect.Method;
@@ -46,16 +47,34 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             BackButtonService.setSteeringBackEnabled(context, needsBackService);
             Log.i(TAG, "STEER_CONFIG зеркалирован");
         } else if ("ru.big.town.anative.DOCK_CONFIG".equals(action)) {
+            if (!intent.getBooleanExtra(ru.big.town.common.CarPlayTarget.ENABLED, true)
+                    && !ru.big.town.common.CarPlayTarget.isEnabled(context)) {
+                SetModesService.stopCarPlayHosts(context);
+            }
             SetModesReceiverDynamic.mirrorDock(context, intent, 1);
             SetModesReceiverDynamic.mirrorDock(context, intent, 2);
             SetModesReceiverDynamic.clearLegacyPassengerDock(context);
+            for (int slot = 1; slot <= 2; slot++) {
+                String key = DockIconStyle.configKey(slot);
+                DockIconStyle style = DockIconStyle.fromValue(intent.getStringExtra(key));
+                Settings.Global.putString(
+                        context.getContentResolver(), "voyahtune_" + key, style.value);
+            }
             if (ru.big.town.common.InfrastructureProfile.read(context)
                     == ru.big.town.common.InfrastructureProfile.OD) {
-                for (int slot = 1; slot <= 2; slot++) {
-                    String key = DockIconStyle.configKey(slot);
-                    DockIconStyle style = DockIconStyle.fromValue(intent.getStringExtra(key));
-                    Settings.Global.putString(
-                            context.getContentResolver(), "voyahtune_" + key, style.value);
+                if (intent.hasExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN)) {
+                    int fullscreen = intent.getBooleanExtra(
+                            ru.big.town.common.CarPlayTarget.FULLSCREEN, false) ? 1 : 0;
+                    int previousFullscreen = Settings.Global.getInt(
+                            context.getContentResolver(),
+                            ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING, 0);
+                    Settings.Global.putInt(
+                            context.getContentResolver(),
+                            ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING,
+                            fullscreen);
+                    if (previousFullscreen != fullscreen) {
+                        SplitHostActivity.refreshCarPlayWindowMode();
+                    }
                 }
                 for (String key :
                         new String[] {"dockHomeShortVoyahTune", "dockAllAppsShortVoyahTune"}) {
@@ -65,6 +84,7 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                             intent.getBooleanExtra(key, false) ? "1" : "0");
                 }
             }
+            BackButtonService.refreshCarPlayNavigation(context);
             Intent reload = new Intent("ru.big.town.anative.DOCK_RELOAD");
             reload.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             context.sendBroadcast(reload);
@@ -87,6 +107,17 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             Log.i(TAG, "APP_DPI_CONFIG зеркалирован + reload");
         } else if ("ru.big.town.anative.KEYBOARD_CONFIG".equals(action)) {
             applyKeyboardMode(context, intent.getStringExtra("keyboardMode"));
+        } else if (ClusterNavigationSettings.ACTION_CONFIG.equals(action)) {
+            boolean enabled =
+                    intent.getBooleanExtra(
+                            ClusterNavigationSettings.ENABLED,
+                            ClusterNavigationSettings.DEFAULT_ENABLED);
+            if (!Settings.Global.putInt(
+                    context.getContentResolver(),
+                    ClusterNavigationSettings.GLOBAL_ENABLED,
+                    enabled ? 1 : 0)) {
+                Log.e(TAG, "Cluster navigation setting was not saved");
+            }
         }
     }
 

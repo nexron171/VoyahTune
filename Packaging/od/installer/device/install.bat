@@ -11,7 +11,7 @@ exit /b %FULL_INSTALL_RESULT%
 
 :install_main
 cd /d "%~dp0" || exit /b 1
-for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 apollo-safe-device.sh voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
+for %%F in (adb.exe AdbWinApi.dll AdbWinUsbApi.dll load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js app_client.js voyahtune_phone_numbers.js apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js voyahtune_keyboard_en_config.json voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json frida-inject-16.2.1-android-arm64 apollo-safe-device.sh disable-third-party-loaders.sh repair-native-data.sh voyahtune.load.rc voyahtune.load.sh init.logcat.original.sh native.apk restore_mode.apk privapp-permissions-ru.big.town.anative.xml) do if not exist "%%F" (
     echo !!! Required file %%F is missing. The device was not changed.
     exit /b 1
 )
@@ -33,6 +33,8 @@ set CANBUS_PERMISSION_OWNER=
 if "%CANBUS_PERMISSION_PRESENT%"=="1" for /f "tokens=2 delims==" %%i in ('adb.exe shell "dumpsys package permissions ^| grep -A 32 -F 'Permission [com.qinggan.permission.WRITE_CANBUS]' ^| grep -F 'sourcePackage='" 2^>nul') do if not defined CANBUS_PERMISSION_OWNER set CANBUS_PERMISSION_OWNER=%%i
 if "%CANBUS_PERMISSION_PRESENT%"=="0" goto :canbus_permission_ok
 if "%CANBUS_PERMISSION_OWNER%"=="ru.big.town.anative" goto :canbus_permission_ok
+echo %CANBUS_PERMISSION_OWNER% | findstr /i /c:"cunba" /c:"voyahtweaks" >nul
+if not errorlevel 1 goto :canbus_permission_ok
 if "%CANBUS_PERMISSION_OWNER%"=="" (
     echo   WARNING: this firmware does not report the owner of com.qinggan.permission.WRITE_CANBUS.
     echo   Continuing. Android PackageManager will still reject a real duplicate permission.
@@ -83,6 +85,12 @@ if not exist "%BACKUP_DIR%" (
         exit /b 1
     )
 )
+
+echo === Checking and disabling third-party solutions ===
+call :install_required_system_file init.logcat.original.sh /system/etc/init.logcat.sh.voyahtune.new /system/etc/init.logcat.sh 644
+if errorlevel 1 exit /b 1
+adb.exe shell sh -s < disable-third-party-loaders.sh
+if errorlevel 1 exit /b 1
 
 echo === Backing up files to %BACKUP_DIR%\ ===
 call :backup_pull /data/local/bin/load.bin               load.bin
@@ -151,6 +159,8 @@ if errorlevel 1 exit /b 1
 call :install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file app_client.js /data/local/bin/app_client.js 644
+if errorlevel 1 exit /b 1
+call :install_required_data_file voyahtune_phone_numbers.js /data/local/bin/voyahtune_phone_numbers.js 644
 if errorlevel 1 exit /b 1
 call :install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644
 if errorlevel 1 exit /b 1
@@ -282,9 +292,13 @@ exit /b %errorlevel%
 
 :ensure_native_user_ready
 echo === Checking Native PackageManager data ^(Android 11 CE+DE^) ===
+adb.exe shell sh -s < repair-native-data.sh
+if errorlevel 1 exit /b 1
 call :native_user_data_ready
 if not errorlevel 1 goto :native_user_data_verified
 echo   Native is not fully registered; repairing it through installd.
+adb.exe shell "am force-stop --user 0 ru.big.town.anative"
+if errorlevel 1 exit /b 1
 adb.exe shell "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true"
 adb.exe shell "cmd package install-existing --user 0 --wait ru.big.town.anative"
 if errorlevel 1 exit /b 1

@@ -395,6 +395,7 @@ public class SettingsContentProvider extends ContentProvider {
                             ApolloSettings.SPEED_WARNING, // 40 — предупреждение о превышении (OD)
                             "passengerAutoStart", // 41 — автозапуск сетки пассажира
                             "mediaAutoStartLastPlayer", // 42 — автозапуск последнего плеера
+                            ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, // 43
                         });
 
         cursor.addRow(
@@ -444,6 +445,12 @@ public class SettingsContentProvider extends ContentProvider {
                     apolloSpeedWarningEnabled ? 1 : 0,
                     passengerAutoStart ? 1 : 0,
                     mediaAutoStartLastPlayer ? 1 : 0,
+                    ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()
+                                    && sharedPreferences.getBoolean(
+                                            ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR,
+                                            false)
+                            ? 1
+                            : 0,
                 });
         return cursor;
     }

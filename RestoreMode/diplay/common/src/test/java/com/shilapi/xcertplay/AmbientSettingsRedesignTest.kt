@@ -9,6 +9,7 @@ import android.widget.Switch
 import android.widget.TextView
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.media.AmbientColorSource
+import com.shilapi.xcertplay.media.AmbientIdleBehavior
 import com.shilapi.xcertplay.media.AmbientMusicSettings
 import java.util.concurrent.CompletableFuture
 import org.junit.Assert.*
@@ -43,13 +44,34 @@ class AmbientSettingsRedesignTest {
         assertEquals(listOf(text(R.string.settings_ambient_behavior_off)), lines)
     }
 
-    @Test fun followingMusicInOneAreaSaysTheOtherZoneStaysAtTheLowestLevel() {
+    @Test fun followingMusicInOneAreaDescribesTheIdleGlowAndLeavesTheOtherZoneAlone() {
         val lines = AmbientBehaviorText.lines(activity, AmbientMusicSettings.Values(enabled = true, music = true, brightness = 4, area = 1))
         assertEquals(
             listOf(
                 text(R.string.settings_ambient_behavior_follow, text(R.string.settings_ambient_front), 4),
-                text(R.string.settings_ambient_behavior_idle),
+                text(R.string.settings_ambient_behavior_idle_steady, text(R.string.settings_ambient_front), 4),
                 text(R.string.settings_ambient_behavior_other_zone),
+                text(R.string.settings_ambient_behavior_restore),
+            ),
+            lines,
+        )
+    }
+
+    @Test fun idleChoiceSelectsTheMatchingLine() {
+        fun idleLine(idle: AmbientIdleBehavior) = AmbientBehaviorText.lines(
+            activity, AmbientMusicSettings.Values(enabled = true, music = true, brightness = 3, area = 3, idle = idle),
+        )[1]
+        assertEquals(text(R.string.settings_ambient_behavior_idle_steady, text(R.string.settings_ambient_all), 3), idleLine(AmbientIdleBehavior.STEADY))
+        assertEquals(text(R.string.settings_ambient_behavior_idle_car), idleLine(AmbientIdleBehavior.CAR))
+        assertEquals(text(R.string.settings_ambient_behavior_idle), idleLine(AmbientIdleBehavior.OFF))
+    }
+
+    @Test fun levelZeroStillHandsTheLampsBackWhenTheCarsLightingIsChosen() {
+        val lines = AmbientBehaviorText.lines(activity, AmbientMusicSettings.Values(enabled = true, brightness = 0, idle = AmbientIdleBehavior.CAR))
+        assertEquals(
+            listOf(
+                text(R.string.settings_ambient_behavior_lowest),
+                text(R.string.settings_ambient_behavior_idle_car),
                 text(R.string.settings_ambient_behavior_restore),
             ),
             lines,
@@ -155,10 +177,27 @@ class AmbientSettingsRedesignTest {
         val slider = descendants(dialog.window!!.decorView).filterIsInstance<SeekBar>().single()
         slider.progress = 4
         assertTrue(texts(dialog).contains(text(R.string.settings_ambient_brightness_value, 4)))
-        assertTrue(texts(dialog).any { it.contains(text(R.string.settings_ambient_behavior_idle)) })
+        assertTrue(texts(dialog).any { it.contains(text(R.string.settings_ambient_behavior_idle_steady, text(R.string.settings_ambient_all), 4)) })
         slider.progress = 0
         assertTrue(texts(dialog).any { it.contains(text(R.string.settings_ambient_behavior_lowest)) })
-        assertFalse(texts(dialog).any { it.contains(text(R.string.settings_ambient_behavior_idle)) })
+        assertFalse(texts(dialog).any { it.contains(text(R.string.settings_ambient_behavior_idle_steady, text(R.string.settings_ambient_all), 0)) })
+    }
+
+    @Test fun idleChoiceIsOfferedAndSaved() {
+        val dialog = open()
+        val title = text(R.string.settings_ambient_idle)
+        val button = descendants(dialog.window!!.decorView).filterIsInstance<TextView>()
+            .single { it.text.toString() == "$title · ${text(R.string.settings_ambient_idle_steady)}" }
+        button.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        val picker = ShadowAlertDialog.getLatestAlertDialog()
+        shadowOf(picker).clickOnItem(1)
+        picker.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("$title · ${text(R.string.settings_ambient_idle_car)}", button.text.toString())
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(AmbientIdleBehavior.CAR, AmbientMusicSettings.load(activity).idle)
     }
 
     @Test fun lastSwatchCannotBeClearedInTheDialog() {

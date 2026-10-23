@@ -56,12 +56,14 @@ Payload размещается непосредственно в корнево�
 
 | Формат | Команда | Результат |
 | --- | --- | --- |
-| По старому, со скриптами | `./make_release.sh 3.22.0 --od` | Единый ZIP с install/remove |
-| Только единый payload | `./make_release.sh 3.22.0 --od --payload` | `payload_3.22.0-od.zip` и заготовка записи каталога |
+| По старому, со скриптами | `./make_release.sh --legacy 3.22.0 --od` | Единый ZIP с install/remove |
+| Только единый payload | `./make_release.sh 3.22.0 --od` | `payload_3.22.0-od.zip` и заготовка записи каталога |
 | Payload и GUI macOS | `./make_release.sh 3.22.0 --od --mac` | Payload ZIP и самостоятельный Universal GUI ZIP |
 | Только установщик macOS | `./Installer/scripts/build-all-macos.sh --mac` | Universal GUI без сборки Android |
 
-Для содержимого релиза без флагов формата используется классический ZIP; `--pi`/`--od` обязателен.
+Для OD без флагов формата собирается payload с `manifest.json` в корне ZIP;
+явный `--payload` также поддерживается. Для PI формат по умолчанию остаётся
+классическим, GUI-payload выбирается через `--pi --payload`. `--pi`/`--od` обязателен.
 Самостоятельная сборка общего GUI не принимает эти флаги. `--installers` собирает payload и GUI
 для всех платформ; флаги `--mac`, `--windows`, `--linux` ограничивают платформы.
 Windows ARM/Linux ARM не собираются. Windows x64/x86 выбираются через
@@ -306,7 +308,7 @@ APK. Изменённое рабочее дерево даёт revision с `-dir
 ## 4. Собрать по старому: ZIP со скриптами
 
 ```sh
-./make_release.sh 3.22.0 --od
+./make_release.sh --legacy 3.22.0 --od
 ```
 
 Скрипт запускает проверки Packaging, собирает единые APK обоих приложений,
@@ -323,17 +325,17 @@ Releases/build/VoyahTune-3.22.0-od/
 
 | Команда | Назначение |
 | --- | --- |
-| `./make_release.sh 3.22.0 --od --no-zip` | Собрать APK и папки, без новых ZIP |
-| `./make_release.sh 3.22.0 --od --no-build` | Перепаковать с APK из существующих папок этой версии в `Releases/build/` |
+| `./make_release.sh --legacy 3.22.0 --od --no-zip` | Собрать APK и папки, без новых ZIP |
+| `./make_release.sh --legacy 3.22.0 --od --no-build` | Перепаковать с APK из существующих папок этой версии в `Releases/build/` |
 
 `--no-build` не обновляет APK из изменённых исходников; для нового выпуска
-используйте обычную команду. `--legacy VERSION` остаётся совместимым псевдонимом
-старого режима.
+используйте команду без `--no-build`. Для OD классическая упаковка требует
+`--legacy` первым аргументом. Такой ZIP не подходит для импорта в GUI-установщик.
 
 ## 5. Независимые payload и GUI
 
 ```sh
-./make_release.sh 3.22.0 --od --payload
+./make_release.sh 3.22.0 --od
 ./Installer/scripts/build-all-macos.sh --mac
 ```
 

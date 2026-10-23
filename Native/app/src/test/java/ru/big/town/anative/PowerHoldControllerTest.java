@@ -27,8 +27,7 @@ public class PowerHoldControllerTest {
         FakeSession session = new FakeSession();
         session.gear = new PowerHoldController.Gear(3, 3);
 
-        assertEquals(PowerHoldPolicy.Outcome.NOT_IN_PARK,
-                controllerFor(session).activate());
+        assertEquals(PowerHoldPolicy.Outcome.NOT_IN_PARK, controllerFor(session).activate());
         assertEquals(java.util.Collections.singletonList("gear"), session.calls);
     }
 
@@ -36,14 +35,12 @@ public class PowerHoldControllerTest {
     public void missingAndLowSocStopBeforeBundle() {
         FakeSession missing = new FakeSession();
         missing.soc = null;
-        assertEquals(PowerHoldPolicy.Outcome.STATE_UNAVAILABLE,
-                controllerFor(missing).activate());
+        assertEquals(PowerHoldPolicy.Outcome.STATE_UNAVAILABLE, controllerFor(missing).activate());
         assertFalse(missing.calls.contains("bundle"));
 
         FakeSession low = new FakeSession();
         low.soc = 14;
-        assertEquals(PowerHoldPolicy.Outcome.LOW_BATTERY,
-                controllerFor(low).activate());
+        assertEquals(PowerHoldPolicy.Outcome.LOW_BATTERY, controllerFor(low).activate());
         assertFalse(low.calls.contains("bundle"));
     }
 
@@ -51,26 +48,56 @@ public class PowerHoldControllerTest {
     public void transportFailuresAreFailClosed() {
         FakeSession rejected = new FakeSession();
         rejected.sendAccepted = false;
-        assertEquals(PowerHoldPolicy.Outcome.TRANSPORT_FAILURE,
-                controllerFor(rejected).activate());
+        assertEquals(PowerHoldPolicy.Outcome.TRANSPORT_FAILURE, controllerFor(rejected).activate());
 
         PowerHoldController unavailable = new PowerHoldController(action -> null);
         assertEquals(PowerHoldPolicy.Outcome.TRANSPORT_FAILURE, unavailable.activate());
 
-        PowerHoldController throwing = new PowerHoldController(action -> {
-            throw new IllegalStateException("boom");
-        });
+        PowerHoldController throwing =
+                new PowerHoldController(
+                        action -> {
+                            throw new IllegalStateException("boom");
+                        });
         assertEquals(PowerHoldPolicy.Outcome.TRANSPORT_FAILURE, throwing.activate());
     }
 
     @Test
     public void acceptedRequestHasNoRetryOrCleanup() {
         FakeSession session = new FakeSession();
-        assertEquals(PowerHoldPolicy.Outcome.ACCEPTED,
-                controllerFor(session).activate());
+        assertEquals(PowerHoldPolicy.Outcome.ACCEPTED, controllerFor(session).activate());
         assertEquals(1, session.bundleCalls);
         assertTrue(session.sentValues.containsKey("POWER_HOLD_MODE_SWITCH"));
-        assertFalse(session.sentValues.containsValue(0));
+        assertEquals(Integer.valueOf(0), session.sentValues.get("SCENE_MODE_EXTENDER_SET"));
+    }
+
+    @Test
+    public void stockManagerOwnsActivationWithoutRawFallbackOrRetry() {
+        List<Boolean> options = new ArrayList<>();
+        PowerHoldController controller =
+                new PowerHoldController(
+                        action -> {
+                            throw new AssertionError("Raw CAN must not follow a stock request");
+                        },
+                        enabled -> {
+                            options.add(enabled);
+                            return enabled
+                                    ? PowerHoldPolicy.Outcome.ARMED
+                                    : PowerHoldPolicy.Outcome.RESULT_UNKNOWN;
+                        });
+        assertEquals(PowerHoldPolicy.Outcome.RESULT_UNKNOWN, controller.activate());
+        assertEquals(PowerHoldPolicy.Outcome.ARMED, controller.activate(true));
+        assertEquals(java.util.Arrays.asList(false, true), options);
+    }
+
+    @Test
+    public void stockExceptionDoesNotClaimVehicleRefused() {
+        PowerHoldController controller =
+                new PowerHoldController(
+                        null,
+                        enabled -> {
+                            throw new IllegalStateException("Reply lost");
+                        });
+        assertEquals(PowerHoldPolicy.Outcome.RESULT_UNKNOWN, controller.activate());
     }
 
     private static PowerHoldController controllerFor(FakeSession session) {

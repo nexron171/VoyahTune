@@ -69,6 +69,17 @@ class MicrophonePacketizerTest {
     }
 
     @Test
+    fun theReportedMicrophoneClockIsTheOneItsTimestampsCountIn() {
+        // Wired Siri on iOS 26.6.2 asked for 24 kHz LPCM (audioFormat 0x40): 480 ticks per 20 ms, not 48 kHz.
+        val wiredSiri = config(AudioCodecKind.LPCM, sampleRate = 24_000)
+        assertEquals(24_000, wiredSiri.rtpClockRate)
+        assertEquals(wiredSiri.rtpClockRate / 50, wiredSiri.rtpSamplesPerPacket)
+        val wirelessSiri = config(AudioCodecKind.OPUS, opusClockRate = 24_000)
+        assertEquals(24_000, wirelessSiri.rtpClockRate)
+        assertEquals(wirelessSiri.rtpClockRate / 50, wirelessSiri.rtpSamplesPerPacket)
+    }
+
+    @Test
     fun observedSiriPacketsUse480TicksWithoutChangingCapturedSamplesOrPayload() {
         assertPacketSequence(0x20000000L, 480)
     }

@@ -6,6 +6,12 @@ DiPlay is a modified version of [xcertplay by shilapi](https://github.com/shilap
 
 Upstream credits [LIVI](https://github.com/f-io/LIVI) and [Showcase](https://github.com/amineross/showcase) for protocol research. Existing source comments and attribution are preserved.
 
+The VoyahTune climate VSP schema, OPACK wire format, encrypted DataStream framing and display declarations
+are adapted from [f-io/LIVI](https://github.com/f-io/LIVI/tree/19baaa7447606ae36d75840add21b79a236b937f),
+Copyright 2026 Lasse Heitgres, GNU GPL-3.0-or-later. The adapted Kotlin sources are
+`OpackCodec.kt`, `VehicleStateProtocol.kt`, `VehicleStateChannel.kt` and `VehicleStateDisplayPanels.kt` under
+`shared/src/main/java/com/shilapi/xcertplay/airplay/`. The GPL text is in `../LICENSE`.
+
 ## Home and settings UI
 
 `common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt` adapts the palette, visual arrangement and interface copy of the [DiAuto project](https://github.com/shihabal3amri/DiAuto). DiAuto's source is licensed under AGPL version 3. The UI file is marked AGPL-3.0-only; its license text is included in `docs/licenses/DiAuto-AGPL-3.0.txt`.

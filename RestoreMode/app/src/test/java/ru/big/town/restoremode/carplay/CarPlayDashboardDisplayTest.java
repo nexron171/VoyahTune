@@ -65,6 +65,26 @@ public class CarPlayDashboardDisplayTest {
     }
 
     @Test
+    public void movingFullscreenHostOverridesLaunchIntentInBothDirections() {
+        for (int source = 0; source <= 1; source++) {
+            int destination = 1 - source;
+            CarPlayDashboardLauncher.rememberHostDisplay(42, source);
+            CarPlayDashboardLauncher.rememberHostDisplay(42, destination);
+            CarPlayDashboardLauncher.rememberInitialHostDisplay(42, source);
+
+            assertEquals(destination, CarPlayDashboardLauncher.targetDisplayId(42));
+        }
+    }
+
+    @Test
+    public void newProjectionCanInitializeItsOwnPhysicalDisplay() {
+        CarPlayDashboardLauncher.rememberHostDisplay(42, 0);
+        CarPlayDashboardLauncher.rememberInitialHostDisplay(43, 1);
+
+        assertEquals(1, CarPlayDashboardLauncher.targetDisplayId(43));
+    }
+
+    @Test
     public void invalidPhysicalHostCannotRedirectDashboardOntoAVirtualDisplay() {
         CarPlayDashboardLauncher.rememberDisplay(1);
         CarPlayDashboardLauncher.rememberHostDisplay(42, 20);

@@ -172,6 +172,142 @@ Java.perform(function () {
         try { installAgent(); } catch (e) { failAgent("install." + e); }
     }
 
+    // BEGIN_CARPLAY_WIFI_SCAN_PAUSE
+    function installCarPlayWifiScanPause(attempt) {
+        if (agentFailed) return;
+        var autojoinMethod = null;
+        var pollHandler = null;
+        var poll = null;
+        var active = false;
+        var restoreEnabled = false;
+        var manager = null;
+        var failureReported = false;
+        var stopped = false;
+        var leaseSetting = "voyahtune_carplay_wifi_scan_lease";
+        var leaseMillis = 10000;
+
+        function pendingService(reason) {
+            var error = new Error(reason);
+            error.wifiPending = true;
+            return error;
+        }
+
+        function reportFailure(error) {
+            if (failureReported) return;
+            failureReported = true;
+            Log.w(TAG, "CarPlay Wi-Fi scan pause unavailable: " + error);
+        }
+
+        function restore() {
+            if (!active) return;
+            autojoinMethod.call(manager, restoreEnabled);
+            if (Boolean(manager.mAutoJoinEnabledExternal.value) !== restoreEnabled) {
+                throw new Error("autojoin restore not confirmed");
+            }
+            active = false;
+            Log.i(TAG, "CarPlay Wi-Fi scans released; autojoin=" + restoreEnabled);
+        }
+
+        try {
+            var context = ATh.currentActivityThread().getSystemContext();
+            var resolver = context.getContentResolver();
+            var settings = Java.use("android.provider.Settings$Global");
+            var bootCount = settings.getInt.overload("android.content.ContentResolver", "java.lang.String", "int")
+                .call(settings, resolver, "boot_count", -1);
+            if (bootCount < 0) throw new Error("boot identity unavailable");
+
+            // Wi-Fi lives in its own module loader on Android 11.
+            var binder = Java.use("android.os.ServiceManager").getService("wifi");
+            if (binder === null) throw pendingService("Wi-Fi service unavailable");
+            var factory = Java.ClassFactory.get(binder.getClass().getClassLoader());
+            var service = Java.cast(binder, factory.use("com.android.server.wifi.WifiServiceImpl"));
+            if (service.mClientModeImpl.value === null) throw pendingService("Wi-Fi client pending");
+            var client = Java.cast(service.mClientModeImpl.value,
+                factory.use("com.android.server.wifi.ClientModeImpl"));
+            var managerClass = factory.use("com.android.server.wifi.WifiConnectivityManager");
+            if (client.mWifiConnectivityManager.value === null) throw pendingService("Wi-Fi manager pending");
+            manager = Java.retain(Java.cast(client.mWifiConnectivityManager.value, managerClass));
+            managerClass.class.getDeclaredField("mAutoJoinEnabledExternal");
+            autojoinMethod = managerClass.setAutoJoinEnabledExternal.overload("boolean");
+            pollHandler = Java.retain(Java.cast(manager.mEventHandler.value, Java.use("android.os.Handler")));
+
+            function pauseRequested() {
+                if (agentFailed || stopped) return false;
+                var raw = settings.getString(resolver, leaseSetting);
+                var match = /^(\d+):(\d+)$/.exec(raw === null ? "" : String(raw));
+                if (match === null || Number(match[1]) !== Number(bootCount)) return false;
+                var timestamp = Number(match[2]);
+                var now = Number(SystemClock.elapsedRealtime());
+                return timestamp > 0 && timestamp <= now && now - timestamp < leaseMillis;
+            }
+
+            var Poll = Java.registerClass({
+                name: "ru.big.town.voyahtune.OdCarPlayWifiScanPause",
+                implements: [Java.use("java.lang.Runnable")],
+                methods: {
+                    run: function () {
+                        try {
+                            if (pauseRequested()) {
+                                var newlyPaused = !active;
+                                if (!active) {
+                                    restoreEnabled = Boolean(manager.mAutoJoinEnabledExternal.value);
+                                    // Remember ownership before a vendor call that can fail after mutation.
+                                    active = true;
+                                    autojoinMethod.call(manager, false);
+                                }
+                                if (manager.mAutoJoinEnabledExternal.value) {
+                                    throw new Error("autojoin pause not confirmed");
+                                }
+                                if (newlyPaused) {
+                                    Log.i(TAG, "CarPlay Wi-Fi scans paused; previousAutojoin=" + restoreEnabled);
+                                }
+                            } else {
+                                restore();
+                            }
+                        } catch (error) {
+                            reportFailure(error);
+                            try { restore(); } catch (restoreError) { reportFailure(restoreError); }
+                        }
+                        if ((!agentFailed && !stopped) || active) {
+                            if (!pollHandler.postDelayed(poll, 1000)) {
+                                stopped = true;
+                                try { restore(); } catch (error) { reportFailure(error); }
+                                reportFailure("Wi-Fi handler stopped");
+                            }
+                        }
+                    }
+                }
+            });
+            poll = Poll.$new();
+
+            trackReplacement(autojoinMethod);
+            autojoinMethod.implementation = function (enabled) {
+                if (active && this.equals(manager)) {
+                    // Preserve external policy changes for release without restarting scans mid-session.
+                    restoreEnabled = enabled;
+                    return autojoinMethod.call(this, false);
+                }
+                return autojoinMethod.call(this, enabled);
+            };
+            if (!pollHandler.post(poll)) throw new Error("Wi-Fi handler unavailable");
+            installed.push("CarPlay.wifi-scan-pause");
+        } catch (error) {
+            stopped = true;
+            if (autojoinMethod !== null) {
+                try { autojoinMethod.implementation = null; }
+                catch (rollbackError) { throw rollbackError; }
+            }
+            if (error.wifiPending && (attempt || 0) < 30) {
+                setTimeout(function () {
+                    Java.perform(function () { installCarPlayWifiScanPause((attempt || 0) + 1); });
+                }, 1000);
+                return;
+            }
+            reportFailure(error);
+        }
+    }
+    // END_CARPLAY_WIFI_SCAN_PAUSE
+
     // BEGIN_CARPLAY_MEMORY_PROTECTION
     function installCarPlayMemoryProtection() {
         var hooks = [];
@@ -1168,6 +1304,7 @@ Java.perform(function () {
         }
 
         installCarPlayMemoryProtection();
+        installCarPlayWifiScanPause();
 
         // Root loader converts this generation-specific result to the compatible v1 worker snapshot.
         Log.i(TAG, "hooks installed [" + installed.join(", ") + "] uid=" + ourUid);

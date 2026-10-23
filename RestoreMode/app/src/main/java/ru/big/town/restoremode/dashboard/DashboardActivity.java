@@ -59,6 +59,7 @@ import com.google.android.material.snackbar.Snackbar;
 
 import ru.big.town.common.CarPlayTarget;
 import ru.big.town.common.CarPlayWidgetProtocol;
+import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.TripProtocol;
 import ru.big.town.restoremode.AdvanceActivity;
 import ru.big.town.restoremode.AdvanceActivityStarButton;
@@ -78,6 +79,7 @@ import ru.big.town.restoremode.integration.GlobalVars;
 import ru.big.town.restoremode.integration.config.SplitConfigSync;
 import ru.big.town.restoremode.scenarios.ScenarioQuickList;
 import ru.big.town.restoremode.scenarios.ScenarioStore;
+import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
 import ru.big.town.restoremode.widgets.apps.AppWidgetSessionStore;
@@ -92,6 +94,8 @@ import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetDashboard;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetDashboard;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
+import ru.big.town.restoremode.widgets.radio.RadioWidgetDashboard;
+import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
 import ru.big.town.restoremode.widgets.suspension.SuspensionWidgetView;
 import ru.big.town.restoremode.widgets.system.SystemWidgetDashboard;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
@@ -117,6 +121,16 @@ public class DashboardActivity extends AppCompatActivity {
 
     private SharedPreferences sharedPreferences;
     private SharedPreferences settingsPreferences;
+    private boolean carPlayFeatureReceiverRegistered;
+    private final BroadcastReceiver carPlayFeatureReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            carPlayWidgetGeneration++;
+            TileOrderStore.sync(sharedPreferences, settingsPreferences, getPackageManager(),
+                    dashboardProfile.isPassenger());
+            renderSplitTiles();
+        }
+    };
     private DashboardProfile dashboardProfile = DashboardProfile.driver();
     private int dashboardDisplayId;
     static final int MSG_RESULT = 4;
@@ -145,6 +159,8 @@ public class DashboardActivity extends AppCompatActivity {
     private static final int POWER_HOLD_ACTIVATING = 2;
     private static final int POWER_HOLD_ACTIVE = 3;
     private static final int POWER_HOLD_FAILED = 4;
+    private static final int POWER_HOLD_REQUESTED = 5;
+    private static final int POWER_HOLD_ARMED = 6;
     private static final int POWER_HOLD_EXIT_LOW_BATTERY = 1;
     private static final int POWER_HOLD_EXIT_TIME_UP = 2;
     private static final int POWER_HOLD_REQUEST_ACCEPTED = 1;
@@ -152,6 +168,9 @@ public class DashboardActivity extends AppCompatActivity {
     private static final int POWER_HOLD_REQUEST_LOW_BATTERY = 3;
     private static final int POWER_HOLD_REQUEST_STATE_UNAVAILABLE = 4;
     private static final int POWER_HOLD_REQUEST_TRANSPORT_FAILURE = 5;
+    private static final int POWER_HOLD_REQUEST_ARMED = 6;
+    private static final int POWER_HOLD_REQUEST_ACTIVE = 7;
+    private static final int POWER_HOLD_REQUEST_RESULT_UNKNOWN = 8;
     private Intent resultIntent = null;
     private Intent resultIntentStarButton = null;
     private SharedPreferences.Editor editor = null;
@@ -322,6 +341,8 @@ public class DashboardActivity extends AppCompatActivity {
         }
     }
 
+    private final RadioWidgetDashboard radioWidget = new RadioWidgetDashboard(this);
+
     private final HeadlightWidgetDashboard headlightWidget = new HeadlightWidgetDashboard(this);
 
     private void watchHeadlightWidget() {
@@ -380,6 +401,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     private void watchSuspension() {
         watchHeadlightWidget();
+        radioWidget.watch(
+                suspensionScreenResumed
+                        && sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false));
         uiHandler.removeCallbacks(suspensionUnavailable);
         boolean show =
                 suspensionScreenResumed
@@ -496,6 +520,14 @@ public class DashboardActivity extends AppCompatActivity {
                 powerHoldBadge.setText(R.string.power_hold_status_active);
                 powerHoldBadge.setBackgroundResource(R.drawable.pill_active);
                 break;
+            case POWER_HOLD_REQUESTED:
+                powerHoldBadge.setText(R.string.power_hold_status_requested);
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_pending);
+                break;
+            case POWER_HOLD_ARMED:
+                powerHoldBadge.setText(R.string.power_hold_status_armed);
+                powerHoldBadge.setBackgroundResource(R.drawable.pill_pending);
+                break;
             case POWER_HOLD_FAILED:
                 powerHoldBadge.setText(R.string.power_hold_status_failed);
                 powerHoldBadge.setBackgroundResource(R.drawable.pill_error);
@@ -513,6 +545,15 @@ public class DashboardActivity extends AppCompatActivity {
         switch (outcome) {
             case POWER_HOLD_REQUEST_ACCEPTED:
                 showSnack(getString(R.string.power_hold_request_accepted));
+                break;
+            case POWER_HOLD_REQUEST_ARMED:
+                showSnack(getString(R.string.power_hold_request_armed));
+                break;
+            case POWER_HOLD_REQUEST_ACTIVE:
+                showSnack(getString(R.string.power_hold_request_active));
+                break;
+            case POWER_HOLD_REQUEST_RESULT_UNKNOWN:
+                showSnack(getString(R.string.power_hold_request_result_unknown));
                 break;
             case POWER_HOLD_REQUEST_NOT_IN_PARK:
                 showSnack(getString(R.string.power_hold_request_not_in_park));
@@ -1178,6 +1219,11 @@ public class DashboardActivity extends AppCompatActivity {
 
         resultIntent.putExtra("customCommand", customCommand);
         resultIntent.putExtra("customCommandCount", customCommandCount);
+        resultIntent.putExtra(
+                AdvanceActivity.EXTRA_SECTION,
+                dashboardProfile.isPassenger()
+                        ? SettingsSection.PASSENGER.identifier
+                        : SettingsSection.MAIN.identifier);
     }
 
     public void initIntentStarButton() {
@@ -1221,15 +1267,23 @@ public class DashboardActivity extends AppCompatActivity {
         finish();
     }
 
-    /** Power Hold (leave car): подтверждение → шлём в SetModesService, тот дёргает CAN. */
     public void onButtonLeaveCar(View v) {
-        new MaterialAlertDialogBuilder(this, R.style.DarkDialog)
-                .setTitle(R.string.power_hold_title)
+        MaterialAlertDialogBuilder dialog =
+                new MaterialAlertDialogBuilder(this, R.style.DarkDialog);
+        View options =
+                android.view.LayoutInflater.from(dialog.getContext())
+                        .inflate(R.layout.dialog_power_hold, null);
+        android.widget.CompoundButton engineExtender =
+                options.findViewById(R.id.powerHoldEngineExtender);
+        dialog.setTitle(R.string.power_hold_title)
                 .setMessage(R.string.power_hold_confirmation)
+                .setView(options)
                 .setPositiveButton(
                         R.string.power_hold_activate,
                         (d, w) -> {
-                            boolean ok = sendMessageToService(MSG_LEAVE_CAR);
+                            boolean ok =
+                                    sendMessageToService(
+                                            MSG_LEAVE_CAR, engineExtender.isChecked() ? 1 : 0);
                             if (!ok) {
                                 showSnack(getString(R.string.service_not_ready));
                             }
@@ -1524,12 +1578,21 @@ public class DashboardActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (DashboardProfile.displayId(this) != dashboardDisplayId) {
+            // A system-restored task can still arrive on a different physical display.
+            recreate();
+            return;
+        }
         ru.big.town.restoremode.carplay.CarPlayDashboardLauncher.rememberDisplay(
                 getWindowManager().getDefaultDisplay().getDisplayId());
         TripLocationPermission.atStartup(this);
         TripLocationPermission.refresh(this);
         TripLocationPermission.sync(this);
         suspensionScreenResumed = true;
+        registerReceiver(carPlayFeatureReceiver,
+                new IntentFilter(ru.big.town.restoremode.carplay.CarPlayFeature.ACTION_CHANGED),
+                RECEIVER_NOT_EXPORTED);
+        carPlayFeatureReceiverRegistered = true;
         registerReceiver(
                 tripReceiver,
                 new IntentFilter(ACTION_TRIP_UPDATE),
@@ -1685,6 +1748,9 @@ public class DashboardActivity extends AppCompatActivity {
             return sharedPreferences.getBoolean("show_" + widgetId, false);
         }
         switch (widgetId) {
+            case RadioWidgetLayout.ID:
+                return InfrastructureProfile.read(this) == InfrastructureProfile.OD
+                        && sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false);
             case HeadlightWidgetLayout.ID:
                 return sharedPreferences.getBoolean(HeadlightWidgetLayout.VISIBLE, false);
             case "suspensionWidget":
@@ -1796,6 +1862,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (RadioWidgetLayout.ID.equals(widgetId)) {
+            return TileSizeStore.dimensions(sharedPreferences, widgetId, 2, 2);
+        }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {
             return TileSizeStore.dimensions(
                     sharedPreferences, widgetId, HeadlightWidgetLayout.DEFAULT_WIDTH, 1);
@@ -1879,6 +1948,7 @@ public class DashboardActivity extends AppCompatActivity {
         systemWidgets.resetViews();
         mediaWidgets.resetViews();
         headlightWidget.resetView();
+        radioWidget.resetView();
         watchSuspension();
         watchEnergyWidgets();
         appWidgetTileViews.clear();
@@ -2006,9 +2076,6 @@ public class DashboardActivity extends AppCompatActivity {
             }
 
             if (TileOrderStore.Tile.TYPE_SCENARIO.equals(tile.type)) {
-                if (dashboardProfile.isPassenger()) {
-                    continue;
-                }
                 ScenarioStore.Scenario scenario = ScenarioStore.find(settingsPreferences, tile.id);
                 if (scenario == null || !scenario.enabled) {
                     continue;
@@ -2095,6 +2162,10 @@ public class DashboardActivity extends AppCompatActivity {
                         } else {
                             widgetView = energyView;
                         }
+                        break;
+                    case RadioWidgetLayout.ID:
+                        int[] radioSize = getWidgetDimensions(tile.id);
+                        widgetView = radioWidget.create(radioSize[0], radioSize[1]);
                         break;
                     case HeadlightWidgetLayout.ID:
                         widgetView = headlightWidget.create(getWidgetDimensions(tile.id)[0]);
@@ -2928,6 +2999,10 @@ public class DashboardActivity extends AppCompatActivity {
             int profileDpi,
             String moveFromWidgetId,
             boolean retainedCarPlay) {
+        if (CarPlayTarget.isCarPlay(packageName)
+                && !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(this)) {
+            return;
+        }
         if (CarPlayTarget.opensActivity(packageName, entry.width, entry.height)) {
             if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
                 openAppOnDashboardDisplay(packageName);
@@ -3819,6 +3894,7 @@ public class DashboardActivity extends AppCompatActivity {
     private void requestCarPlayWidgets() {
         if (!suspensionScreenResumed
                 || destroyed
+                || !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(this)
                 || !GlobalVars.isBound
                 || GlobalVars.serviceMessenger == null) return;
         try {
@@ -3837,6 +3913,7 @@ public class DashboardActivity extends AppCompatActivity {
     private void restoreCarPlayWidgets(Bundle data) {
         if (!suspensionScreenResumed
                 || destroyed
+                || !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(this)
                 || data == null
                 || data.getLong(CarPlayWidgetProtocol.GENERATION) != carPlayWidgetGeneration)
             return;
@@ -4007,6 +4084,10 @@ public class DashboardActivity extends AppCompatActivity {
         cancelGridSnap();
         dashboardOpening = false;
         suspensionScreenResumed = false;
+        if (carPlayFeatureReceiverRegistered) {
+            unregisterReceiver(carPlayFeatureReceiver);
+            carPlayFeatureReceiverRegistered = false;
+        }
         carPlayWidgetGeneration++;
         systemWidgets.setResumed(false);
         mediaWidgets.setActive(false);
@@ -4046,6 +4127,7 @@ public class DashboardActivity extends AppCompatActivity {
         systemWidgets.close();
         mediaWidgets.close();
         headlightWidget.close();
+        radioWidget.close();
         if (tileDragController != null) {
             tileDragController.cancel();
         }

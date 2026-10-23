@@ -53,7 +53,7 @@
         </activity>
         <activity android:name=".carplay.CarPlayLauncherActivity"
             android:exported="true"
-            android:label="VoyahTune CarPlay"
+            android:label="@string/carplay_home_title"
             android:icon="@drawable/carplay_home_logo"
             android:taskAffinity="${applicationId}.carplay.launcher"
             android:excludeFromRecents="true"
@@ -130,6 +130,11 @@
             android:exported="true"
             android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
 
+        <receiver
+            android:name=".carplay.CarPlayHostDisplayReceiver"
+            android:exported="true"
+            android:permission="ru.big.town.anative.permission.BIND_SET_MODES_SERVICE" />
+
         <!-- Native reports an explicitly closed tile task. A manifest receiver also clears the
              session launch memory while Dashboard is not running, so "Close all" stays closed. -->
         <receiver
@@ -173,6 +178,7 @@
             android:name=".MainActivity"
             android:label="@string/voyahtune_app_name"
             android:icon="@mipmap/ic_restoremode"
+            android:launchMode="singleTask"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

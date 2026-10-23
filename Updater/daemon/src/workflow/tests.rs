@@ -39,15 +39,12 @@ fn persisted_selection_is_rechecked_before_download_and_apply() {
 
         let downgrade = selected_runtime("4.2.0-od", "4.1.0-od", "4.0.0");
         downgrade.lock().unwrap().state.phase = phase.into();
-        assert!(selected(&downgrade)
-            .unwrap_err()
-            .to_string()
-            .contains("OTA не поддерживает этот путь обновления"));
+        assert!(selected(&downgrade).is_ok());
     }
 }
 
 #[test]
-fn catalog_version_cannot_hide_an_older_payload() {
+fn od_does_not_compare_manifest_and_catalog_versions() {
     if !crate::restore_ui::enabled() {
         return;
     }
@@ -78,14 +75,11 @@ fn catalog_version_cannot_hide_an_older_payload() {
         archive_sha256: "a".repeat(64),
         archive_size: 1,
     };
-    assert!(verify_payload(&payload, &claims)
-        .unwrap_err()
-        .to_string()
-        .contains("Manifest не соответствует выбранному релизу"));
+    verify_payload(&payload, &claims).unwrap();
 }
 
 #[test]
-fn payload_opening_ignores_installer_minimum_only_for_od() {
+fn payload_opening_skips_metadata_validation_only_for_od() {
     use release_core::{
         compatibility::Requirements, infrastructure::Infrastructure, payload::Manifest,
         recipe::Recipe,
@@ -112,13 +106,14 @@ fn payload_opening_ignores_installer_minimum_only_for_od() {
     )
     .unwrap();
 
-    let error = open_ota_payload(directory.path())
-        .err()
-        .unwrap()
-        .to_string();
-    let expected = match infrastructure {
-        Infrastructure::Od => "PAYLOAD_MISSING",
-        Infrastructure::Pi => "INSTALLER_UPDATE_REQUIRED",
-    };
-    assert!(error.contains(expected), "{error}");
+    match infrastructure {
+        Infrastructure::Od => assert!(open_ota_payload(directory.path()).is_ok()),
+        Infrastructure::Pi => {
+            let error = open_ota_payload(directory.path())
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(error.contains("INSTALLER_UPDATE_REQUIRED"), "{error}");
+        }
+    }
 }

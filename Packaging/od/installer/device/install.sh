@@ -5,7 +5,7 @@
 #   2) VirtualDisplay-сплит (vd_bypass.js в system_server: обход ADD_TRUSTED_DISPLAY/INJECT_EVENTS),
 #   3) boot-scoped Apollo UI hook (apollo_tech.js; включается вручную в VoyahTune).
 # Boot-хук = свои RC-сервисы /system/etc/init/voyahtune.*.rc (setenforce 0 + load.bin watchdog).
-# Штатный /system/etc/init.logcat.sh не меняем, кроме узкой миграции нашего legacy-файла.
+# Install the bundled logcat startup and disable known third-party loaders.
 if [ ! -f ./dns-overlay.sh ]; then
     echo "!!! Не найден ./dns-overlay.sh — установка прервана до изменения устройства."
     exit 1
@@ -27,8 +27,8 @@ fi
 
 # Полный локальный preflight до первого ADB-вызова.
 for FULL_REQUIRED_ASSET in load.bin steeringwheelkeys.js launcherdock.js multidisplay.js vd_bypass.js \
-        app_client.js \
-        apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js apollo-safe-device.sh \
+        app_client.js voyahtune_phone_numbers.js \
+        apollo_tech.js voyahtune_drive_reset.js voyahtune_acc_restore.js keyboard_lock_en.js keyboard_ru.js apollo-safe-device.sh disable-third-party-loaders.sh repair-native-data.sh \
         voyahtune_keyboard_en_config.json \
         voyahtune_keyboard_ru_config.json voyahtune_skb_qwerty_ru.json \
         frida-inject-16.2.1-android-arm64 voyahtune.load.rc \
@@ -109,8 +109,10 @@ native_user_data_ready() {
 
 ensure_native_user_ready() {
     echo "=== Проверка PackageManager data Native (Android 11 CE+DE) ==="
+    adb shell sh -s < repair-native-data.sh || return 1
     if ! native_user_data_ready; then
         echo "  Native не зарегистрирован полностью — восстанавливаем через installd."
+        adb shell "am force-stop --user 0 ru.big.town.anative" || return 1
         adb shell "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true" || return 1
         NATIVE_INSTALL_RESULT=$(adb shell \
             "cmd package install-existing --user 0 --wait ru.big.town.anative" 2>&1) || {
@@ -159,7 +161,8 @@ case "$CANBUS_PERMISSION_DUMP" in
             in_block && /sourcePackage=/ {
                 sub(/^.*sourcePackage=/, ""); gsub(/[[:space:]]/, ""); print; exit
             }')
-        if [ "$CANBUS_PERMISSION_OWNER" != "ru.big.town.anative" ]; then
+        if [ "$CANBUS_PERMISSION_OWNER" != "ru.big.town.anative" ] \
+                && ! printf '%s\n' "$CANBUS_PERMISSION_OWNER" | grep -Eiq 'cunba|voyahtweaks'; then
             if [ -n "$CANBUS_PERMISSION_OWNER" ]; then
                 echo "!!! com.qinggan.permission.WRITE_CANBUS уже принадлежит $CANBUS_PERMISSION_OWNER."
             else
@@ -591,6 +594,11 @@ install_boot_hooks() {
     echo "  Boot-hook установлен и проверен."
 }
 
+echo "=== Проверка и отключение сторонних решений ==="
+install_required_system_file init.logcat.original.sh \
+    /system/etc/init.logcat.sh.voyahtune.new /system/etc/init.logcat.sh 644 || exit 1
+adb shell sh -s < disable-third-party-loaders.sh || exit 1
+
 echo "=== Бэкап перезаписываемых файлов в $BACKUP_DIR/ ==="
 backup_pull /data/local/bin/load.bin               load.bin || exit 1
 backup_pull /data/local/bin/steeringwheelkeys.js   steeringwheelkeys.js || exit 1
@@ -674,6 +682,7 @@ install_required_data_file launcherdock.js /data/local/bin/launcherdock.js 644 |
 install_required_data_file multidisplay.js /data/local/bin/multidisplay.js 644 || exit 1
 install_required_data_file vd_bypass.js /data/local/bin/vd_bypass.js 644 || exit 1
 install_required_data_file app_client.js /data/local/bin/app_client.js 644 || exit 1
+install_required_data_file voyahtune_phone_numbers.js /data/local/bin/voyahtune_phone_numbers.js 644 || exit 1
 install_required_data_file apollo_tech.js /data/local/bin/apollo_tech.js 644 || exit 1
 install_required_data_file voyahtune_drive_reset.js /data/local/bin/voyahtune_drive_reset.js 644 || exit 1
 install_required_data_file voyahtune_acc_restore.js /data/local/bin/voyahtune_acc_restore.js 644 || exit 1

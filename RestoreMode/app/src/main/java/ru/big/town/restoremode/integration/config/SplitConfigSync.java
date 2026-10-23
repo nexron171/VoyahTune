@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 
+import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
 import ru.big.town.common.ScenarioProtocol;
 import ru.big.town.common.ScreenBrightnessSettings;
@@ -37,6 +38,17 @@ public final class SplitConfigSync {
         pushKeyboard(context, prefs);
         pushScenarios(context, prefs);
         pushScreenBrightness(context, prefs);
+        pushClusterNavigation(context, prefs);
+    }
+
+    public static void pushClusterNavigation(Context context, SharedPreferences preferences) {
+        Intent intent = configIntent(ClusterNavigationSettings.ACTION_CONFIG);
+        intent.putExtra(
+                ClusterNavigationSettings.ENABLED,
+                preferences.getBoolean(
+                        ClusterNavigationSettings.ENABLED,
+                        ClusterNavigationSettings.DEFAULT_ENABLED));
+        context.sendBroadcast(intent);
     }
 
     /** Полный снимок сценариев; движок Native перечитывает его при изменении и на старте. */
@@ -86,18 +98,26 @@ public final class SplitConfigSync {
         String p1 = prefs.getString("dockOverride1", "");
         String p2 = prefs.getString("dockOverride2", "");
         Intent i = configIntent("ru.big.town.anative.DOCK_CONFIG");
+        boolean carPlayEnabled = ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context);
+        i.putExtra(ru.big.town.common.CarPlayTarget.ENABLED, carPlayEnabled);
+        if (!carPlayEnabled) {
+            if (ru.big.town.common.CarPlayTarget.isCarPlay(p1)) p1 = "";
+            if (ru.big.town.common.CarPlayTarget.isCarPlay(p2)) p2 = "";
+        }
         i.putExtra("dock1", p1.isEmpty() ? "none" : p1);
         i.putExtra("dock2", p2.isEmpty() ? "none" : p2);
         i.putExtra("dock1Dpi", p1.isEmpty() ? 0 : AppDpiStore.get(prefs, p1));
         i.putExtra("dock2Dpi", p2.isEmpty() ? 0 : AppDpiStore.get(prefs, p2));
+        for (int slot = 1; slot <= 2; slot++) {
+            DockIconStyle style =
+                    DockIconStyle.fromValue(
+                            prefs.getString(DockIconStyle.preferenceKey(slot), "default"));
+            i.putExtra(DockIconStyle.configKey(slot), style.value);
+        }
         if (ru.big.town.common.InfrastructureProfile.read(context)
                 == ru.big.town.common.InfrastructureProfile.OD) {
-            for (int slot = 1; slot <= 2; slot++) {
-                DockIconStyle style =
-                        DockIconStyle.fromValue(
-                                prefs.getString(DockIconStyle.preferenceKey(slot), "default"));
-                i.putExtra(DockIconStyle.configKey(slot), style.value);
-            }
+            i.putExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN,
+                    com.shilapi.xcertplay.CarPlaySettingsAccess.fullscreen(context));
             i.putExtra("dockHomeShortVoyahTune", prefs.getBoolean("dockHomeShortVoyahTune", false));
             i.putExtra(
                     "dockAllAppsShortVoyahTune",
@@ -129,7 +149,8 @@ public final class SplitConfigSync {
                             prefs.getBoolean(VoiceCommands.ENABLED, false),
                             prefs.getString(
                                     VoiceSteeringPolicy.PRESS_KEY, VoiceSteeringPolicy.LONG),
-                            prefs.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false),
+                            ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)
+                                    && prefs.getBoolean(VoiceSteeringPolicy.SIRI_ENABLED, false),
                             key,
                             resolveSteerActions(prefs.getString(key, "none"), prefs)));
         }

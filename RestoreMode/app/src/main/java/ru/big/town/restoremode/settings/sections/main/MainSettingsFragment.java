@@ -44,6 +44,7 @@ import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
+import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
@@ -78,10 +79,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
 
     private void bindMainWidgetSwitches() {
         bindMediaAutoStart();
-        bindShowSwitch(
-                R.id.switchShowPassengerDashboardTile,
-                "showPassengerDashboardTile",
-                false);
+        bindShowSwitch(R.id.switchShowPassengerDashboardTile, "showPassengerDashboardTile", false);
         bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer", true);
         bindShowSwitch(R.id.switchShowPowerHold, "showPowerHold", true);
         bindShowSwitch(R.id.switchShowWashMode, "showWashMode", true);
@@ -120,6 +118,9 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 false,
                 R.id.headlightSizeRow);
         bindHeadlightSize();
+        bindShowSwitch(R.id.switchShowRadio, RadioWidgetLayout.VISIBLE, false, R.id.radioSizeRow);
+        bindTileSizeSpinners(
+                R.id.radioSettingWidth, R.id.radioSettingHeight, RadioWidgetLayout.ID, 2, 2);
         bindShowSwitch(R.id.switchShowCpu, "show_cpuWidget", false, R.id.CpuSizeRow);
         bindTileSizeSpinners(
                 R.id.CpuSettingWidth, R.id.CpuSettingHeight, SystemWidgetLayout.CPU, 1, 1);
@@ -177,23 +178,32 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         if (size == null) {
             return;
         }
-        ArrayAdapter<String> adapter =
-                new ArrayAdapter<>(
-                        requireContext(),
-                        R.layout.settings_spinner_item,
-                        new String[] {"2 × 2", "3 × 1", "4 × 1"});
+        HeadlightWidgetLayout.Size[] sizes = HeadlightWidgetLayout.Size.values();
+        ArrayAdapter<HeadlightWidgetLayout.Size> adapter =
+                new ArrayAdapter<>(requireContext(), R.layout.settings_spinner_item, sizes);
         adapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
         size.setAdapter(adapter);
-        size.setSelection(TileSizeStore.width(preferences, HeadlightWidgetLayout.ID, 4) - 2);
+        int[] dimensions =
+                TileSizeStore.dimensions(
+                        preferences,
+                        HeadlightWidgetLayout.ID,
+                        HeadlightWidgetLayout.DEFAULT_WIDTH,
+                        HeadlightWidgetLayout.DEFAULT_HEIGHT);
+        size.setSelection(HeadlightWidgetLayout.size(dimensions[0], dimensions[1]).ordinal());
         size.setOnItemSelectedListener(
                 new AdapterView.OnItemSelectedListener() {
                     @Override
                     public void onItemSelected(
                             AdapterView<?> parent, View view, int position, long id) {
-                        int columns = position + 2;
-                        if (TileSizeStore.width(preferences, HeadlightWidgetLayout.ID, 4)
-                                != columns) {
-                            TileSizeStore.setWidth(preferences, HeadlightWidgetLayout.ID, columns);
+                        HeadlightWidgetLayout.Size selected = sizes[position];
+                        int[] current =
+                                TileSizeStore.dimensions(
+                                        preferences,
+                                        HeadlightWidgetLayout.ID,
+                                        HeadlightWidgetLayout.DEFAULT_WIDTH,
+                                        HeadlightWidgetLayout.DEFAULT_HEIGHT);
+                        if (current[0] != selected.width || current[1] != selected.height) {
+                            TileSizeStore.setHeadlightSize(preferences, selected);
                         }
                     }
 
@@ -342,6 +352,11 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         android.widget.Spinner widthSpinner = settingView(widthSpinnerId);
         android.widget.Spinner heightSpinner = settingView(heightSpinnerId);
         if (widthSpinner == null || heightSpinner == null) {
+            return;
+        }
+        if (RadioWidgetLayout.ID.equals(widgetId)) {
+            bindEnergySize(widthSpinner, widgetId, true, 2, 2, 3, null);
+            bindEnergySize(heightSpinner, widgetId, false, 2, 2, 5, null);
             return;
         }
         if (SystemWidgetLayout.isWidget(widgetId)) {
@@ -602,6 +617,9 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     }
 
     private void addCarPlayWidgetRows(List<SettingsList.Row> rows) {
+        if (!ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(requireContext())) {
+            return;
+        }
         List<AppWidgetStore.Entry> entries = AppWidgetStore.load(preferences);
         entries.removeIf(entry -> !CarPlayWidgetSettings.isDedicated(entry));
         if (entries.isEmpty()) {
@@ -611,14 +629,19 @@ public class MainSettingsFragment extends SettingsSectionFragment {
             rows.add(
                     new SettingsList.Row(
                             "carplay:" + (entry == null ? "new" : entry.id),
-                            parent ->
-                                    CarPlayWidgetSettings.create(
-                                            requireContext(),
-                                            parent,
-                                            preferences,
-                                            entry,
-                                            this::canAddAppWidget,
-                                            this::refreshSettingsRows)));
+                            parent -> {
+                                View row =
+                                        CarPlayWidgetSettings.create(
+                                                requireContext(),
+                                                parent,
+                                                preferences,
+                                                profile(),
+                                                entry,
+                                                this::canAddAppWidget,
+                                                this::refreshSettingsRows);
+                                useLayoutPreferences(row);
+                                return row;
+                            }));
         }
     }
 
@@ -1035,8 +1058,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         if (autoStart == null) {
             return;
         }
-        autoStart.setChecked(
-                globalPreferences.getBoolean("mediaAutoStartLastPlayer", false));
+        autoStart.setChecked(globalPreferences.getBoolean("mediaAutoStartLastPlayer", false));
         autoStart.setOnCheckedChangeListener(
                 (button, checked) ->
                         globalPreferences
@@ -1060,13 +1082,26 @@ public class MainSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected boolean cacheLayout(int layout) {
-        return layout != R.layout.settings_main_add_shortcut;
+        return layout != R.layout.settings_main_add_shortcut
+                && layout != R.layout.settings_main_carplay_heading;
     }
 
     @Override
     protected View decorateSettingsRow(int layout, View row) {
+        if (layout == R.layout.settings_main_carplay_heading) {
+            row.setVisibility(
+                    ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(requireContext())
+                            ? View.VISIBLE
+                            : View.GONE);
+        }
         if (profile().isPassenger()) {
             useLayoutPreferences(row);
+        }
+        View radioCard = row.findViewById(R.id.radioWidgetCard);
+        if (radioCard != null
+                && ru.big.town.common.InfrastructureProfile.read(requireContext())
+                        != ru.big.town.common.InfrastructureProfile.OD) {
+            radioCard.setVisibility(View.GONE);
         }
         if (layout == R.layout.settings_main_add_shortcut) {
             return SettingsPanels.appSelectionPanel(

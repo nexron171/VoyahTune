@@ -1,21 +1,10 @@
-use crate::{adb::Adb, infrastructure::Infrastructure, plans::Action, Error, Result};
+use crate::{adb::Adb, Error, Result};
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(15);
 
 // Feed this through stdin: putting the probe in argv would match its own process.
 pub(crate) const PROBE: &str = include_str!("cunba_probe.sh");
-
-pub(crate) fn check_installation(
-    adb: &Adb,
-    infrastructure: Infrastructure,
-    action: Action,
-) -> Result<()> {
-    if infrastructure == Infrastructure::Od && action == Action::Install {
-        check(adb, TIMEOUT)?;
-    }
-    Ok(())
-}
 
 pub(crate) fn check(adb: &Adb, timeout: Duration) -> Result<()> {
     let output = adb
@@ -25,12 +14,9 @@ pub(crate) fn check(adb: &Adb, timeout: Duration) -> Result<()> {
 }
 
 fn inspection_error(detail: impl ToString) -> Error {
-    Error::new(
-        "CUNBA_CHECK_FAILED",
-        "Не удалось проверить наличие CUNBA. Установка заблокирована.",
-    )
-    .detail(detail)
-    .retry("Проверьте подключение и системный доступ, затем повторите проверку автомобиля.")
+    Error::new("CUNBA_CHECK_FAILED", "Не удалось проверить наличие CUNBA.")
+        .detail(detail)
+        .retry("Проверьте подключение и системный доступ, затем повторите проверку автомобиля.")
 }
 
 fn validate(output: &str) -> Result<()> {
@@ -38,7 +24,7 @@ fn validate(output: &str) -> Result<()> {
         if let Some(evidence) = line.strip_prefix("CUNBA_FOUND\t") {
             return Err(Error::new(
                 "CUNBA_DETECTED",
-                "Обнаружены признаки CUNBA. Установка VoyahTune заблокирована.",
+                "Обнаружены признаки CUNBA.",
             )
             .detail(evidence)
             .retry("Остановите установку или согласитесь на отключение Cunba с перезагрузкой и повторной проверкой."));
@@ -51,26 +37,21 @@ fn validate(output: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn is_blocking_error(error: &Error) -> bool {
-    matches!(error.code.as_str(), "CUNBA_DETECTED" | "CUNBA_CHECK_FAILED")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn every_individual_signal_blocks_even_with_a_clear_marker() {
+    fn every_individual_signal_is_detected_even_with_a_clear_marker() {
         for evidence in ["file", "package", "process", "startup"] {
             let error = validate(&format!("CUNBA_CLEAR\nCUNBA_FOUND\t{evidence}")).unwrap_err();
             assert_eq!(error.code, "CUNBA_DETECTED");
             assert_eq!(error.detail, evidence);
-            assert!(is_blocking_error(&error));
         }
     }
 
     #[test]
-    fn only_a_complete_clear_result_allows_installation() {
+    fn only_a_complete_clear_result_confirms_absence() {
         assert!(validate("CUNBA_CLEAR").is_ok());
         for output in ["", "permission denied", "CUNBA_CLEAR\nunknown"] {
             assert_eq!(validate(output).unwrap_err().code, "CUNBA_CHECK_FAILED");
@@ -80,7 +61,7 @@ mod tests {
     #[cfg(unix)]
     mod device_probe {
         use super::*;
-        use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
+        use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 
         struct Device {
             directory: tempfile::TempDir,
@@ -187,25 +168,6 @@ mod tests {
                 device.write(path, content);
                 assert_eq!(device.run().unwrap_err().code, "CUNBA_CHECK_FAILED");
             }
-        }
-
-        #[test]
-        fn pi_and_removal_do_not_run_the_probe() {
-            let adb =
-                Adb::new(Path::new("/usr/bin/false"), crate::events::Events::quiet()).unwrap();
-            for (infrastructure, action) in [
-                (Infrastructure::Pi, Action::Install),
-                (Infrastructure::Pi, Action::Remove),
-                (Infrastructure::Od, Action::Remove),
-            ] {
-                assert!(check_installation(&adb, infrastructure, action).is_ok());
-            }
-            assert_eq!(
-                check_installation(&adb, Infrastructure::Od, Action::Install)
-                    .unwrap_err()
-                    .code,
-                "CUNBA_CHECK_FAILED"
-            );
         }
     }
 }

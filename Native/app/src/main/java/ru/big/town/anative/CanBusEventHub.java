@@ -54,7 +54,6 @@ final class CanBusEventHub {
     private static final int LIGHT_DIPPED_BEAM_INDEX = 7;
     private static final int LIGHT_HEAD_LIGHT_INDEX = 13;
     private static final int LIGHT_AUTO_LAMP_INDEX = 16;
-    private static final int AIR_TEMPERATURE_OUT_INDEX = 35;
     private static final int AIR_TEMPERATURE_INVALID = -9999;
 
     private static final int PRE_READY_CAPACITY = 64;
@@ -92,6 +91,9 @@ final class CanBusEventHub {
     private final Handler gearQueryHandler;
     private final AtomicBoolean gearQueryPending = new AtomicBoolean();
     private final AtomicBoolean speedQueryPending = new AtomicBoolean();
+    private final AtomicBoolean climateQueryPending = new AtomicBoolean();
+    private final Handler climateQueryHandler;
+    private long climateRevision; // eventLock
     private long speedRevision; // eventLock
     private long gearRevision; // eventLock
     private float preciseTicks = Float.NaN;
@@ -149,6 +151,9 @@ final class CanBusEventHub {
         HandlerThread gearThread = new HandlerThread("CanBusGearQuery");
         gearThread.start();
         gearQueryHandler = new Handler(gearThread.getLooper());
+        HandlerThread climateThread = new HandlerThread("CanBusClimateQuery");
+        climateThread.start();
+        climateQueryHandler = new Handler(climateThread.getLooper());
         ioExecutor =
                 command -> {
                     if (!ioHandler.post(command)) {
@@ -286,6 +291,51 @@ final class CanBusEventHub {
                         data.recycle();
                         reply.recycle();
                         speedQueryPending.set(false);
+                    }
+                });
+    }
+
+    void requestClimateSnapshot() {
+        if (!router.hasInterest(CanBusEventRouter.INTEREST_CLIMATE)
+                || !climateQueryPending.compareAndSet(false, true)) return;
+        climateQueryHandler.post(
+                () -> {
+                    IBinder binder;
+                    long epoch, revision;
+                    synchronized (eventLock) {
+                        binder = remote;
+                        epoch = activeEpoch;
+                        revision = climateRevision;
+                    }
+                    Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                    try {
+                        if (binder == null || epoch == 0) return;
+                        data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                        if (!binder.transact(30, data, reply, 0)) return;
+                        reply.readException();
+                        if (reply.readInt() == 0) return;
+                        OemClimateState state = OemClimateState.read(reply);
+                        synchronized (eventLock) {
+                            if (binder == remote
+                                    && epoch == activeEpoch
+                                    && readyEpoch == epoch
+                                    && revision == climateRevision) {
+                                climateRevision++;
+                                routeLocked(
+                                        CanBusEvent.climate(
+                                                CanBusEvent.Origin.SEED,
+                                                epoch,
+                                                ++nextSequence,
+                                                SystemClock.elapsedRealtime(),
+                                                state));
+                            }
+                        }
+                    } catch (RemoteException | RuntimeException error) {
+                        Log.w(TAG, "Climate snapshot unavailable", error);
+                    } finally {
+                        data.recycle();
+                        reply.recycle();
+                        climateQueryPending.set(false);
                     }
                 });
     }
@@ -1029,23 +1079,32 @@ final class CanBusEventHub {
                         }
                     case CB_AIR_CONDITION:
                         {
-                            if (!router.hasInterest(CanBusEventRouter.INTEREST_AMBIENT_TEMPERATURE))
+                            if (!router.hasInterest(CanBusEventRouter.INTEREST_AMBIENT_TEMPERATURE)
+                                    && !router.hasInterest(CanBusEventRouter.INTEREST_CLIMATE))
                                 return true;
                             data.enforceInterface(CALLBACK_DESCRIPTOR);
                             int outsideTemperature = AIR_TEMPERATURE_INVALID;
                             if (data.readInt() != 0) {
-                                for (int index = 0; index <= AIR_TEMPERATURE_OUT_INDEX; index++) {
-                                    if (index >= 11 && index <= 13) {
-                                        data.readFloat();
-                                    } else {
-                                        int value = data.readInt();
-                                        if (index == AIR_TEMPERATURE_OUT_INDEX) {
-                                            outsideTemperature = value;
-                                        }
+                                OemClimateState state = OemClimateState.read(data);
+                                outsideTemperature = state.outsideTemperature;
+                                if (router.hasInterest(CanBusEventRouter.INTEREST_CLIMATE)) {
+                                    synchronized (eventLock) {
+                                        if (epoch != activeEpoch) return true;
+                                        climateRevision++;
+                                        routeLocked(
+                                                CanBusEvent.climate(
+                                                        CanBusEvent.Origin.LIVE,
+                                                        epoch,
+                                                        ++nextSequence,
+                                                        SystemClock.elapsedRealtime(),
+                                                        state));
                                     }
                                 }
                             }
-                            routeAmbientTemperature(epoch, outsideTemperature);
+                            if (router.hasInterest(
+                                    CanBusEventRouter.INTEREST_AMBIENT_TEMPERATURE)) {
+                                routeAmbientTemperature(epoch, outsideTemperature);
+                            }
                             return true;
                         }
                     case CB_LIGHT_STATUS:

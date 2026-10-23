@@ -29,7 +29,8 @@ public final class HeadlightWidgetView extends FrameLayout {
 
     public HeadlightWidgetView(Context context, int width, IntConsumer selection) {
         super(context);
-        columns = HeadlightWidgetLayout.width(width) == 2 ? 2 : 4;
+        int tileWidth = HeadlightWidgetLayout.width(width);
+        columns = tileWidth <= 2 ? tileWidth : 4;
         setBackgroundResource(R.drawable.card_dark_ripple);
         heading = new TextView(context);
         heading.setTextSize(15);

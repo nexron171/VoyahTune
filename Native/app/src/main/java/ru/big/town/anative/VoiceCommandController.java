@@ -153,7 +153,12 @@ final class VoiceCommandController {
                                         : result == PowerHoldPolicy.Outcome.LOW_BATTERY
                                                 ? "Для Power Hold нужен заряд не ниже 15%"
                                                 : "Автомобиль не принял команду Power Hold";
-                        respond(reply, result == PowerHoldPolicy.Outcome.ACCEPTED, error);
+                        if (result == PowerHoldPolicy.Outcome.RESULT_UNKNOWN) {
+                            error = "Результат команды Power Hold неизвестен";
+                        } else if (result == PowerHoldPolicy.Outcome.STATE_UNAVAILABLE) {
+                            error = "Не удалось проверить состояние автомобиля для Power Hold";
+                        }
+                        respond(reply, result.isAccepted(), error);
                     });
             return;
         }

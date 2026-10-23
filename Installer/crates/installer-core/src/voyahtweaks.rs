@@ -1,4 +1,4 @@
-use crate::{adb::Adb, infrastructure::Infrastructure, plans::Action, Error, Result};
+use crate::{adb::Adb, Error, Result};
 use serde_json::json;
 use std::time::Duration;
 
@@ -8,17 +8,6 @@ const DIAGNOSTICS: &str = include_str!("voyahtweaks_diagnostics.sh");
 
 // Feed this through stdin: putting the probe in argv would match its own process.
 pub(crate) const PROBE: &str = include_str!("voyahtweaks_probe.sh");
-
-pub(crate) fn check_installation(
-    adb: &Adb,
-    infrastructure: Infrastructure,
-    action: Action,
-) -> Result<()> {
-    if infrastructure == Infrastructure::Od && action == Action::Install {
-        check(adb, TIMEOUT)?;
-    }
-    Ok(())
-}
 
 pub(crate) fn check(adb: &Adb, timeout: Duration) -> Result<()> {
     let output = adb
@@ -35,7 +24,7 @@ fn log_diagnostics(adb: &Adb, timeout: Duration) {
     let mut diagnostic_adb = adb.clone();
     diagnostic_adb.step = Some("voyahtweaks-diagnostics".into());
     if let Err(error) = diagnostic_adb.shell(DIAGNOSTICS, timeout) {
-        // Diagnostic failures must not replace the evidence that blocks installation.
+        // Diagnostic failures must not replace the detected loader evidence.
         let _ = diagnostic_adb.events.emit(
             "voyahtweaks-diagnostics-failed",
             diagnostic_adb.step.as_deref(),
@@ -48,7 +37,7 @@ fn log_diagnostics(adb: &Adb, timeout: Duration) {
 fn inspection_error(detail: impl ToString) -> Error {
     Error::new(
         "VOYAHTWEAKS_CHECK_FAILED",
-        "Не удалось проверить наличие VoyahTweaks. Установка заблокирована.",
+        "Не удалось проверить наличие VoyahTweaks.",
     )
     .detail(detail)
     .retry("Проверьте подключение и системный доступ, затем повторите проверку автомобиля.")
@@ -59,7 +48,7 @@ fn validate(output: &str) -> Result<()> {
         if let Some(evidence) = line.strip_prefix("VOYAHTWEAKS_FOUND\t") {
             return Err(Error::new(
                 "VOYAHTWEAKS_DETECTED",
-                "Найдены признаки VoyahTweaks. Установка VoyahTune заблокирована.",
+                "Найдены признаки VoyahTweaks.",
             )
             .detail(evidence)
             .retry("Остановите установку или согласитесь на отключение VoyahTweaks с перезагрузкой и повторной проверкой."));
@@ -72,13 +61,6 @@ fn validate(output: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn is_blocking_error(error: &Error) -> bool {
-    matches!(
-        error.code.as_str(),
-        "VOYAHTWEAKS_DETECTED" | "VOYAHTWEAKS_CHECK_FAILED"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,7 +70,6 @@ mod tests {
     fn evidence_overrides_clear_and_incomplete_output_blocks() {
         let error = validate("VOYAHTWEAKS_CLEAR\nVOYAHTWEAKS_FOUND\tstartup").unwrap_err();
         assert_eq!(error.code, "VOYAHTWEAKS_DETECTED");
-        assert!(is_blocking_error(&error));
         assert!(validate("VOYAHTWEAKS_CLEAR").is_ok());
         for output in ["", "permission denied", "VOYAHTWEAKS_CLEAR\nunknown"] {
             assert_eq!(
@@ -96,13 +77,6 @@ mod tests {
                 "VOYAHTWEAKS_CHECK_FAILED"
             );
         }
-    }
-
-    #[test]
-    fn pi_and_removal_do_not_run_device_commands() {
-        let adb = Adb::new(std::env::current_exe().unwrap(), Events::quiet()).unwrap();
-        check_installation(&adb, Infrastructure::Pi, Action::Install).unwrap();
-        check_installation(&adb, Infrastructure::Od, Action::Remove).unwrap();
     }
 
     #[cfg(unix)]
@@ -165,9 +139,8 @@ esac
                     .collect()
             }
 
-            fn assert_blocked(&self) {
-                let error =
-                    check_installation(&self.adb, Infrastructure::Od, Action::Install).unwrap_err();
+            fn assert_detected(&self) {
+                let error = check(&self.adb, TIMEOUT).unwrap_err();
                 assert_eq!(error.code, "VOYAHTWEAKS_DETECTED");
                 assert_eq!(error.detail, "file: /data/local/tmp/load.bin");
             }
@@ -184,7 +157,7 @@ esac
             fs::write(device.directory.path().join("load.bin"), &loader).unwrap();
             fs::write(device.directory.path().join("init.logcat.sh"), startup).unwrap();
 
-            device.assert_blocked();
+            device.assert_detected();
 
             let output: String = device
                 .events()
@@ -212,18 +185,18 @@ esac
             )
             .unwrap();
             let previous_events = device.events().len();
-            check_installation(&device.adb, Infrastructure::Od, Action::Install).unwrap();
+            check(&device.adb, TIMEOUT).unwrap();
             assert!(device.events()[previous_events..]
                 .iter()
                 .all(|event| event.step_id.as_deref() != Some("voyahtweaks-diagnostics")));
         }
 
         #[test]
-        fn missing_files_and_adb_failure_preserve_the_blocking_error() {
+        fn missing_files_and_adb_failure_preserve_the_detection() {
             let device = Device::new();
             let startup = "# startup is still collected when the loader is missing\n";
             fs::write(device.directory.path().join("init.logcat.sh"), startup).unwrap();
-            device.assert_blocked();
+            device.assert_detected();
             let output: String = device
                 .events()
                 .iter()
@@ -234,7 +207,7 @@ esac
             assert!(output.contains(startup));
 
             fs::write(device.directory.path().join("disconnected"), "").unwrap();
-            device.assert_blocked();
+            device.assert_detected();
             assert!(device.events().iter().any(|event| {
                 event.kind == "voyahtweaks-diagnostics-failed"
                     && event.data["error"]["code"] == "ADB_CONNECTION_LOST"

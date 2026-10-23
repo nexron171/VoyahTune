@@ -103,6 +103,24 @@ class CarPlayHostResolutionTest {
         assertEquals(100, get("displayScalePercent"))
     }
 
+    @Test fun savedLayoutsAlwaysAdvertiseStandardDriverDockWithoutVehicleTheme() {
+        for (savedLayout in listOf(null, "AUTOMATIC", "BOTTOM", "DUAL_SIDES", "DRIVER_SIDE")) {
+            activity.getSharedPreferences("diplay_carplay_dock", 0)
+                .edit().putString("dock", savedLayout).commit()
+            val configuration = config(100, width = 1920, height = 720)
+            assertNull(configuration.vehicleTheme)
+            assertFalse(configuration.rightHandDrive)
+            assertNotEquals("Center_Display", configuration.mainDisplayIdentifier)
+            assertEquals(1920, configuration.main.widthPixels)
+            assertEquals(720, configuration.main.heightPixels)
+            val display = configuration.main
+            assertEquals(
+                com.shilapi.xcertplay.airplay.AirPlayInfoPlist.DOCK_EDGE_DRIVER_SIDE,
+                display.viewAreas!![display.initialViewArea].dockEdge,
+            )
+        }
+    }
+
     @Test fun supersamplingDoesNotSilentlyFallBackToASoftwareDecoder() {
         decoder(maxWidth = 3840, maxHeight = 2160, hardware = false)
         val display = config(160).main
@@ -111,11 +129,41 @@ class CarPlayHostResolutionTest {
         assertTrue(DisplayDiagnosticSnapshot.report(activity).contains("software_decoder"))
     }
 
+    @Test fun settingsScaleIsReadForEachHandshakeAndKeepsTheVideoCanvas() {
+        set("widthPhysicalMm", 300)
+        val initial = config(100, height = 720).main
+        val scales = listOf(75, 85, 100, 115)
+        val widths = listOf(400, 353, 300, 261)
+        val heights = listOf(151, 133, 113, 98)
+        for (index in scales.indices) {
+            CarPlaySettingsAccess.setUiScalePercent(activity, scales[index])
+            val display = currentConfig(height = 720).main
+            assertEquals(1920, display.widthPixels)
+            assertEquals(720, display.heightPixels)
+            assertEquals(widths[index], display.widthPhysicalMm)
+            assertEquals(heights[index], display.heightPhysicalMm)
+            assertEquals(initial.safeArea, display.safeArea)
+            assertEquals(initial.viewAreas, display.viewAreas)
+        }
+        assertEquals(300, initial.widthPhysicalMm)
+
+        activity.getSharedPreferences("diplay_carplay_dock", 0)
+            .edit().putString("dock", "DUAL_SIDES").commit()
+        val display = currentConfig(height = 720).main
+        assertEquals(261, display.widthPhysicalMm)
+        assertEquals(98, display.heightPhysicalMm)
+        assertEquals(115, CarPlaySettingsAccess.uiScalePercent(activity))
+    }
+
     private fun config(percent: Int, uiPercent: Int = 100, width: Int = 1920, height: Int = 990): AirPlayConfig {
         set("displayScalePercent", percent)
         set("uiScalePercent", uiPercent)
         AirPlayPersistence.saveDisplayScalePercent(activity, percent)
         AirPlayPersistence.saveUiScalePercent(activity, uiPercent)
+        return currentConfig(width, height)
+    }
+
+    private fun currentConfig(width: Int = 1920, height: Int = 990): AirPlayConfig {
         val sizeClass = Class.forName("com.shilapi.xcertplay.CarPlayHostActivity\$DisplaySize")
         val size = sizeClass.getDeclaredConstructor(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
             .apply { isAccessible = true }.newInstance(width, height)

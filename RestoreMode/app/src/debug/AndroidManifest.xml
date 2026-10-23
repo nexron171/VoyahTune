@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <activity android:name=".IntegrationTaskManagerActivity" android:exported="false" android:theme="@style/Theme.RestoreMode.Settings" />
-        <activity android:name=".IntegrationMainActivity" android:exported="false" />
+        <activity
+            android:name=".IntegrationTaskManagerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RestoreMode.Settings" />
+        <activity
+            android:name=".IntegrationMainActivity"
+            android:exported="false" />
         <activity
             android:name=".VoiceAnimationPreviewActivity"
             android:label="Голос · тест анимации"
@@ -10,11 +15,6 @@
             android:launchMode="singleTask"
             android:taskAffinity="ru.big.town.restoremode.voicePreview"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
-            android:theme="@style/Theme.VoiceOverlay">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/Theme.VoiceOverlay" />
     </application>
 </manifest>

@@ -1,7 +1,7 @@
 //! Common Rust engine; classic commands are derived from Packaging/od/installer/device.
 //! Each checked result below corresponds to a checked branch in those scripts.
-//! OD installation also rejects evidence of conflicting CUNBA hooks.
-//! The approved VoyahHlCTRL remediation is an opt-in extension to the permission step.
+//! OD installation disables known third-party loaders before replacing runtime files.
+//! Known OD conflicts are handled automatically; PI retains its consent flow.
 mod native_data;
 mod readiness;
 
@@ -164,13 +164,6 @@ impl Engine {
             ));
         }
         let mut result = self.execute(request);
-        if result.as_ref().is_err_and(|error| {
-            crate::cunba::is_blocking_error(error) || crate::voyahtweaks::is_blocking_error(error)
-        }) && !self.ota_locked
-            && !self.restart_loader
-        {
-            return self.finish_report(result);
-        }
         if let Err(error) = self.ota_unlock() {
             if result.is_ok() {
                 result = Err(error);
@@ -398,16 +391,6 @@ impl Engine {
                 if e.restore_cunba && !crate::cunba_recovery::restoration_available(&e.adb, e.payload.manifest.infrastructure)? {
                     return Err(Error::new("CUNBA_RESTORE_UNAVAILABLE", "Резервные данные Cunba недоступны. Повторите проверку или удалите VoyahTune без восстановления Cunba."));
                 }
-                crate::cunba::check_installation(
-                    &e.adb,
-                    e.payload.manifest.infrastructure,
-                    r.action,
-                )?;
-                crate::voyahtweaks::check_installation(
-                    &e.adb,
-                    e.payload.manifest.infrastructure,
-                    r.action,
-                )?;
                 Ok(())
             },
         )?;
@@ -417,7 +400,9 @@ impl Engine {
             |e| e.ota_prepare(),
         )?;
         self.ignore(&format!("rm -f {DEVICE_STATE}/lock/owner 2>/dev/null; rmdir {DEVICE_STATE}/lock 2>/dev/null; rmdir {DEVICE_STATE} 2>/dev/null; true\n"));
-        if r.action != Action::Remove {
+        if r.action != Action::Remove
+            && self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Pi
+        {
             self.step(
                 "permission",
                 "Проверка владельца CAN-разрешения",
@@ -432,6 +417,28 @@ impl Engine {
         self.ota_lock()?; // remount may have rebooted; retain this desktop operation across boot.
         self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
         if r.action == Action::Install {
+            if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
+                self.step(
+                    "third-party-loaders",
+                    "Проверка и отключение сторонних решений",
+                    |e| {
+                        e.push_file(
+                            &e.payload.file("init.logcat.original.sh")?,
+                            "/system/etc/init.logcat.sh.voyahtune.new",
+                            LEGACY_INIT,
+                            0o644,
+                            true,
+                        )?;
+                        e.shell(include_str!(
+                            "../../../../Packaging/od/installer/common/disable-third-party-loaders.sh"
+                        ))?;
+                        e.permission_owner()?;
+                        e.ota_lock()?;
+                        Ok(())
+                    },
+                )?;
+            }
+
             self.step("backup", "Сохранение файлов перед заменой", |e| e.backup())?;
 
             self.step(
@@ -732,6 +739,14 @@ fi
     }
     fn validate_permission_owner(&self, dump: &str) -> Result<()> {
         if let Some(owner) = canbus::owner(dump) {
+            if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+                && owner.is_some_and(|package| {
+                    let package = package.to_ascii_lowercase();
+                    package.contains("cunba") || package.contains("voyahtweaks")
+                })
+            {
+                return Ok(());
+            }
             if owner != Some(NATIVE) && !(cfg!(windows) && owner.is_none()) {
                 return Err(self.fail(
                     "WRITE_CANBUS принадлежит другому пакету",
@@ -742,34 +757,42 @@ fi
         Ok(())
     }
     fn resolve_canbus_conflict(&self) -> Result<()> {
-        if let Some(consent) = &self.canbus_consent {
-            consent.begin();
-        }
-        if self.canbus_consent.as_ref().and_then(|c| c.decision()) != Some(true) {
-            self.adb.events.emit("canbus-conflict", self.adb.step.as_deref(), canbus::NOTICE,
+        let automatic =
+            self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od;
+        if !automatic {
+            if let Some(consent) = &self.canbus_consent {
+                consent.begin();
+            }
+            if self.canbus_consent.as_ref().and_then(|c| c.decision()) != Some(true) {
+                self.adb.events.emit("canbus-conflict", self.adb.step.as_deref(), canbus::NOTICE,
                 json!({"package":canbus::PACKAGE,"awaitingConfirmation":self.canbus_consent.is_some()}))?;
-        }
-        let Some(consent) = &self.canbus_consent else {
-            return Err(Error::new("ACTION_REQUIRED", canbus::NOTICE)
-                .retry("Подтвердите удаление com.voyah.hl.service в окне установщика."));
-        };
-        loop {
-            if self.cancel.load(Ordering::Relaxed) || consent.decision() == Some(false) {
-                return Err(Error::new(
+            }
+            let Some(consent) = &self.canbus_consent else {
+                return Err(Error::new("ACTION_REQUIRED", canbus::NOTICE)
+                    .retry("Подтвердите удаление com.voyah.hl.service в окне установщика."));
+            };
+            loop {
+                if self.cancel.load(Ordering::Relaxed) || consent.decision() == Some(false) {
+                    return Err(Error::new(
                     "CANCELLED",
                     "Удаление com.voyah.hl.service отменено. Установка не продолжена.",
                 )
                 .retry(
                     "Повторите установку, когда будете готовы удалить конфликтующее приложение.",
                 ));
+                }
+                if consent.decision() == Some(true) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
             }
-            if consent.decision() == Some(true) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
         }
-        self.adb.events.emit("canbus-removal-started", self.adb.step.as_deref(),
-            "Удаление com.voyah.hl.service подтверждено. Сохраняем системную папку перед удалением.", json!({}))?;
+        self.adb.events.emit(
+            "canbus-removal-started",
+            self.adb.step.as_deref(),
+            "Отключаем com.voyah.hl.service. Сохраняем системную папку на компьютере.",
+            json!({}),
+        )?;
         // Back up before remount or uninstall; a failed pull must not remove the app.
         if self.shell("if [ -d /system/priv-app/VoyahHlCTRL ]; then echo PRESENT; fi\n")?
             == "PRESENT"
@@ -802,7 +825,11 @@ fi
         self.ignore("am force-stop com.voyah.hl.service\n");
         // A system package may reject uninstall, or already be uninstalled for user 0.
         // Its system APK and stale permission registration still need removal.
-        self.ignore("pm uninstall --user 0 com.voyah.hl.service\n");
+        self.ignore(if automatic {
+            "pm uninstall -k --user 0 com.voyah.hl.service\n"
+        } else {
+            "pm uninstall --user 0 com.voyah.hl.service\n"
+        });
         self.shell("rm -rf /system/priv-app/VoyahHlCTRL && rm -rf /data/system/package_cache/*\n")?;
         self.adb.events.emit(
             "canbus-removal-reboot",
@@ -813,6 +840,9 @@ fi
         self.raw(&["reboot"])?
             .checked("ADB не принял перезагрузку после удаления VoyahHlCTRL")?;
         self.wait_boot(true)?;
+        if automatic {
+            self.writable(false)?;
+        }
         let dump = self.shell("dumpsys package permissions\n")?;
         if canbus::owner(&dump) == Some(Some(canbus::PACKAGE)) {
             return Err(self.fail(
@@ -1800,6 +1830,73 @@ pub fn default_adb(bundle: &Path) -> PathBuf {
 mod runtime_stop_tests {
     use super::*;
     use std::{os::unix::fs::PermissionsExt, process::Command};
+
+    #[test]
+    fn od_resolves_known_canbus_conflict_without_requesting_consent() {
+        let directory = tempfile::tempdir().unwrap();
+        let adb_path = directory.path().join("adb");
+        fs::write(
+            &adb_path,
+            r#"#!/bin/sh
+root=$(dirname "$0")
+printf '%s\n' "$*" >> "$root/commands"
+script=$(cat)
+printf '%s\n' "$script" >> "$root/commands"
+case "$script" in
+    *'if [ -d /system/priv-app/VoyahHlCTRL'*) echo ABSENT ;;
+    *'dumpsys package permissions'*)
+        echo 'Permission [com.qinggan.permission.WRITE_CANBUS]'
+        if [ -f "$root/disabled" ]; then echo 'sourcePackage=ru.big.town.anative'
+        else echo 'sourcePackage=com.voyah.hl.service'; fi ;;
+    *'pm list packages --user 0'*)
+        echo package:android
+        if [ ! -f "$root/disabled" ]; then echo package:com.voyah.hl.service; fi ;;
+    *'rm -rf /system/priv-app/VoyahHlCTRL'*) touch "$root/disabled" ;;
+    *'getprop sys.boot_completed'*) echo 1 ;;
+    *'ovw_rwtest'*) echo RW ;;
+esac
+exit 0
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&adb_path, fs::Permissions::from_mode(0o755)).unwrap();
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let events = captured.clone();
+        let payload = Payload {
+            root: directory.path().into(),
+            manifest: serde_json::from_value(json!({
+                "schema": 4, "infrastructure": "od", "product": "VoyahTune",
+                "releaseVersion": "4.3.3-od", "buildRevision": "test", "artifacts": []
+            }))
+            .unwrap(),
+        };
+        let mut engine = Engine::new(
+            &adb_path,
+            payload,
+            "CAR-001",
+            &directory.path().join("logs"),
+            Arc::new(move |event| events.lock().unwrap().push(event.clone())),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+        engine.permission_owner().unwrap();
+        let commands = fs::read_to_string(directory.path().join("commands")).unwrap();
+        assert!(commands.contains("pm uninstall -k --user 0 com.voyah.hl.service"));
+        assert!(commands.contains("reboot"));
+        assert!(!captured
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "canbus-conflict"));
+
+        fs::remove_file(directory.path().join("disabled")).unwrap();
+        engine.payload.manifest.infrastructure = crate::infrastructure::Infrastructure::Pi;
+        assert_eq!(
+            engine.permission_owner().unwrap_err().code,
+            "ACTION_REQUIRED"
+        );
+        assert!(!directory.path().join("disabled").exists());
+    }
 
     #[test]
     fn active_apk_repair_preserves_data_and_rejects_false_success() {

@@ -1,3 +1,4 @@
+mod application_log;
 mod config;
 mod device;
 mod dns;
@@ -6,6 +7,7 @@ mod install;
 mod install_tail;
 mod network;
 mod od_command;
+mod od_release;
 mod protocol;
 mod restore_ui;
 mod state;
@@ -168,6 +170,17 @@ fn run() -> io::Result<()> {
         .custom_flags(libc::O_NOFOLLOW)
         .open(root.join("daemon.lock"))?;
     lock.try_lock_exclusive()?;
+    let application_log = if restore_ui::enabled() {
+        match application_log::Service::start(root) {
+            Ok(service) => Some(service),
+            Err(error) => {
+                let _ = log(root, &format!("application_log_error {error}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
     log(root, "service_started")?;
     let (shared, jobs) = workflow::start()?;
     let listener = listener_from_init()?;
@@ -286,6 +299,10 @@ fn run() -> io::Result<()> {
                     Ok(json!({"schema":1,"ok":true}))
                 }
                 protocol::Request::Logs {} => Ok(json!({"schema":1,"ok":true,"logs":logs(root)?})),
+                protocol::Request::ApplicationLog { action, app_version } => application_log
+                    .as_ref()
+                    .ok_or_else(|| config::invalid("Системный журнал недоступен: требуется обновление OD root-службы через USB"))?
+                    .call(action, app_version),
             }
         })();
         let response =

@@ -1,4 +1,4 @@
-// H97X VehicleSettings account resets and VehicleAir user drive selections.
+// H97X VehicleSettings integration and VehicleAir user drive selections.
 // The original reset methods retain their ambient/retain behavior. Ordinary
 // setters, account sync and the separate CanBusService ACC path are outside this hook.
 Java.perform(function () {
@@ -7,6 +7,7 @@ Java.perform(function () {
     var READY = "[drive-reset] hook ready v2";
     var SENTINEL = "open_voyah.drive_reset.v2";
     var installed = [];
+    var cleanupActions = [];
     var Log = Java.use("android.util.Log");
     var System = Java.use("java.lang.System");
     function log(message) {
@@ -212,6 +213,187 @@ Java.perform(function () {
         } catch (error) {
             log("energy menu unsupported: " + error);
         }
+    }
+
+    function installPowerHoldBridge() {
+        var Outcome = {
+            ACCEPTED: 1,
+            NOT_IN_PARK: 2,
+            LOW_BATTERY: 3,
+            STATE_UNAVAILABLE: 4,
+            TRANSPORT_FAILURE: 5,
+            ARMED: 6,
+            ACTIVE: 7,
+            RESULT_UNKNOWN: 8,
+        };
+
+        var managerClass = Java.use(
+            "com.qinggan.scene.powerhold.PowerHoldModeManager",
+        );
+        var stateClass = Java.use("com.qinggan.canbus.VehicleState");
+        var gearClass = Java.use("com.qinggan.canbus.GearState");
+        var Intent = Java.use("android.content.Intent");
+        var Bundle = Java.use("android.os.Bundle");
+        var permission =
+            "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
+        var requestAction = "ru.big.town.anative.POWER_HOLD_OEM_REQUEST";
+        var statusAction = "ru.big.town.anative.POWER_HOLD_OEM_STATUS";
+        var notification =
+            managerClass.notifyActiveStatusChanged.overload("boolean");
+
+        function readyManager() {
+            var manager = managerClass.getInstance();
+            if (
+                manager.mContext.value === null ||
+                manager.mCanBusManager.value === null
+            ) {
+                throw new Error("Power Hold manager is not initialized");
+            }
+            return manager;
+        }
+
+        function publishStatus(manager) {
+            var intent = Intent.$new(statusAction);
+            intent.setPackage("ru.big.town.anative");
+            intent.putExtra
+                .overload("java.lang.String", "int")
+                .call(intent, "status", manager.getPowerHoldModeStatus());
+            app.sendBroadcast
+                .overload("android.content.Intent", "java.lang.String")
+                .call(app, intent, permission);
+        }
+
+        function validationOutcome(manager) {
+            var canBus = manager.mCanBusManager.value;
+            var gear = canBus.getGearStatus();
+            if (gear === null) return Outcome.STATE_UNAVAILABLE;
+            if (!gear.equals(gearClass.Parking.value))
+                return Outcome.NOT_IN_PARK;
+            var soc = canBus.getVehicleState(stateClass.BMS_SOC_DISPLAY.value);
+            if (soc < 0 || soc > 100) return Outcome.STATE_UNAVAILABLE;
+            return soc < 15 ? Outcome.LOW_BATTERY : Outcome.ACCEPTED;
+        }
+
+        var Receiver = Java.registerClass({
+            name: "ru.big.town.voyahtune.PowerHoldReceiver_" + Date.now(),
+            superClass: Java.use("android.content.BroadcastReceiver"),
+            methods: {
+                onReceive: {
+                    returnType: "void",
+                    argumentTypes: [
+                        "android.content.Context",
+                        "android.content.Intent",
+                    ],
+                    implementation: function (context, intent) {
+                        if (
+                            intent === null ||
+                            String(intent.getAction()) !== requestAction
+                        )
+                            return;
+                        var response = Bundle.$new();
+                        response.putInt("protocol", 1);
+                        response.putInt("outcome", Outcome.TRANSPORT_FAILURE);
+                        var commandStarted = false;
+                        try {
+                            var operation = String(
+                                intent.getStringExtra("operation"),
+                            );
+                            var deadline = Number(
+                                intent.getLongExtra("deadline", 0),
+                            );
+                            if (deadline <= Number(Clock.elapsedRealtime())) {
+                                this.setResultExtras(response);
+                                return;
+                            }
+                            var manager = readyManager();
+                            if (operation === "activate") {
+                                var outcome = validationOutcome(manager);
+                                if (outcome === Outcome.ACCEPTED) {
+                                    var status =
+                                        manager.getPowerHoldModeStatus();
+                                    if (status === 0) {
+                                        if (
+                                            deadline <=
+                                            Number(Clock.elapsedRealtime())
+                                        ) {
+                                            this.setResultExtras(response);
+                                            return;
+                                        }
+                                        // The manager owns arming, cancellation and the stock system properties.
+                                        commandStarted = true;
+                                        manager.enterPowerHoldMode(
+                                            intent.getBooleanExtra(
+                                                "engineExtender",
+                                                false,
+                                            ),
+                                            -1,
+                                        );
+                                        status =
+                                            manager.getPowerHoldModeStatus();
+                                    }
+                                    outcome =
+                                        status === 1
+                                            ? Outcome.ACTIVE
+                                            : status === 2
+                                              ? Outcome.ARMED
+                                              : Outcome.RESULT_UNKNOWN;
+                                }
+                                response.putInt("outcome", outcome);
+                            } else if (operation !== "status") {
+                                this.setResultExtras(response);
+                                return;
+                            }
+                            response.putInt(
+                                "status",
+                                manager.getPowerHoldModeStatus(),
+                            );
+                        } catch (error) {
+                            response.putInt(
+                                "outcome",
+                                commandStarted
+                                    ? Outcome.RESULT_UNKNOWN
+                                    : Outcome.STATE_UNAVAILABLE,
+                            );
+                            log("Power Hold request failed: " + error);
+                        }
+                        this.setResultExtras(response);
+                    },
+                },
+            },
+        });
+        var receiver = Receiver.$new();
+        app.registerReceiver
+            .overload(
+                "android.content.BroadcastReceiver",
+                "android.content.IntentFilter",
+                "java.lang.String",
+                "android.os.Handler",
+            )
+            .call(
+                app,
+                receiver,
+                Java.use("android.content.IntentFilter").$new(requestAction),
+                permission,
+                null,
+            );
+        cleanupActions.push(function () {
+            app.unregisterReceiver(receiver);
+        });
+        install(notification, function (active) {
+            var result = notification.call(this, active);
+            try {
+                publishStatus(this);
+            } catch (error) {
+                log("Power Hold status unavailable: " + error);
+            }
+            return result;
+        });
+        try {
+            publishStatus(readyManager());
+        } catch (error) {
+            log("Power Hold initial status unavailable: " + error);
+        }
+        log("Power Hold manager bridge ready");
     }
 
     try {
@@ -560,6 +742,23 @@ Java.perform(function () {
             }
             return result;
         });
+        var powerHoldHookStart = installed.length;
+        var powerHoldCleanupStart = cleanupActions.length;
+        try {
+            installPowerHoldBridge();
+        } catch (error) {
+            while (cleanupActions.length > powerHoldCleanupStart) {
+                try {
+                    cleanupActions.pop()();
+                } catch (_) {}
+            }
+            while (installed.length > powerHoldHookStart) {
+                try {
+                    installed.pop().implementation = null;
+                } catch (_) {}
+            }
+            log("Power Hold manager bridge unavailable: " + error);
+        }
         System.setProperty(SENTINEL, "installed");
         pulse();
         pulseTimer = setInterval(function () {
@@ -567,6 +766,11 @@ Java.perform(function () {
         }, 2000);
         log(READY);
     } catch (e) {
+        cleanupActions.forEach(function (cleanup) {
+            try {
+                cleanup();
+            } catch (_) {}
+        });
         for (var i = installed.length - 1; i >= 0; i--) {
             try {
                 installed[i].implementation = null;

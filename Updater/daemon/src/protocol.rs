@@ -18,6 +18,10 @@ pub enum Request {
         url: String,
     },
     Logs {},
+    ApplicationLog {
+        action: crate::application_log::Action,
+        app_version: Option<String>,
+    },
     Check {
         #[serde(default)]
         same_version: bool,
@@ -148,6 +152,26 @@ pub fn system_ui_uid(xml: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn application_log_has_no_external_path_or_upload_destination() {
+        let request = read_request(&mut &b"{\"command\":\"application_log\",\"action\":\"upload\",\"app_version\":\"4.3.3-od\"}\n"[..]).unwrap();
+        assert!(!crate::health::root_request_allowed(&request));
+        assert!(matches!(
+            request,
+            Request::ApplicationLog {
+                action: crate::application_log::Action::Upload,
+                ..
+            }
+        ));
+        for input in [
+            "{\"command\":\"application_log\",\"action\":\"upload\",\"path\":\"/data/secret\"}\n",
+            "{\"command\":\"application_log\",\"action\":\"upload\",\"url\":\"https://example.org\"}\n",
+            "{\"command\":\"application_log\",\"action\":\"shell\"}\n",
+        ] {
+            assert!(read_request(&mut input.as_bytes()).is_err());
+        }
+    }
     #[test]
     fn no_external_archive_url_or_install_command_is_accepted() {
         for request in [

@@ -1,5 +1,7 @@
 package ru.big.town.restoremode.carplay;
 
+import android.graphics.PointF;
+import android.util.SparseArray;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -8,15 +10,22 @@ import android.widget.HorizontalScrollView;
 
 import java.util.function.BooleanSupplier;
 
-/** Reserves multi-finger widget drags for the dashboard instead of the projection. */
+/** Routes two-finger horizontal drags to the dashboard and other gestures to CarPlay. */
 public final class CarPlayDashboardScrollTouchListener implements View.OnTouchListener {
+    private enum GestureOwner {
+        UNDECIDED,
+        PROJECTION,
+        DASHBOARD
+    }
+
     private final HorizontalScrollView scrollView;
     private final BooleanSupplier carPlayActive;
     private final View.OnTouchListener projectionListener;
     private final Runnable onScrollTouch;
     private final Runnable onScrollRelease;
     private final int touchSlop;
-    private boolean dashboardGesture;
+    private final SparseArray<PointF> pointerStartPositions = new SparseArray<>();
+    private GestureOwner gestureOwner = GestureOwner.UNDECIDED;
     private boolean dragging;
     private float previousScreenX;
 
@@ -38,31 +47,38 @@ public final class CarPlayDashboardScrollTouchListener implements View.OnTouchLi
     public boolean onTouch(View view, MotionEvent event) {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
-            dashboardGesture = false;
-            dragging = false;
+            resetGesture();
         }
 
-        if (!dashboardGesture
-                && carPlayActive.getAsBoolean()
-                && action == MotionEvent.ACTION_POINTER_DOWN
-                && event.getPointerCount() >= 2) {
-            MotionEvent cancellation = MotionEvent.obtain(event);
-            cancellation.setAction(MotionEvent.ACTION_CANCEL);
-            try {
-                projectionListener.onTouch(view, cancellation);
-            } finally {
-                cancellation.recycle();
+        if (gestureOwner == GestureOwner.UNDECIDED && carPlayActive.getAsBoolean()) {
+            if (event.getPointerCount() >= 3) {
+                // Keep settings and OEM display-transfer gestures out of dashboard paging.
+                gestureOwner = GestureOwner.PROJECTION;
+            } else if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
+                rememberPointerPositions(event);
+            } else if (action == MotionEvent.ACTION_MOVE && event.getPointerCount() == 2) {
+                gestureOwner = resolveGestureOwner(event);
+                if (gestureOwner == GestureOwner.DASHBOARD) {
+                    MotionEvent cancellation = MotionEvent.obtain(event);
+                    cancellation.setAction(MotionEvent.ACTION_CANCEL);
+                    try {
+                        projectionListener.onTouch(view, cancellation);
+                    } finally {
+                        cancellation.recycle();
+                    }
+                }
             }
-            dashboardGesture = true;
-            dragging = false;
-            previousScreenX = screenCenterX(event, -1);
-        }
-
-        if (!dashboardGesture) {
-            return projectionListener.onTouch(view, event);
         }
 
         boolean finished = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL;
+        if (gestureOwner != GestureOwner.DASHBOARD) {
+            boolean handled = projectionListener.onTouch(view, event);
+            if (finished) {
+                resetGesture();
+            }
+            return handled;
+        }
+
         ViewParent parent = view.getParent();
         if (parent != null) {
             parent.requestDisallowInterceptTouchEvent(!finished);
@@ -92,10 +108,78 @@ public final class CarPlayDashboardScrollTouchListener implements View.OnTouchLi
 
         if (finished) {
             onScrollRelease.run();
-            dashboardGesture = false;
-            dragging = false;
+            resetGesture();
         }
         return true;
+    }
+
+    private void resetGesture() {
+        gestureOwner = GestureOwner.UNDECIDED;
+        pointerStartPositions.clear();
+        dragging = false;
+    }
+
+    private void rememberPointerPositions(MotionEvent event) {
+        int excludedPointer =
+                event.getActionMasked() == MotionEvent.ACTION_POINTER_UP ? event.getActionIndex() : -1;
+        float screenOffsetX = event.getRawX() - event.getX();
+        float screenOffsetY = event.getRawY() - event.getY();
+        pointerStartPositions.clear();
+        for (int index = 0; index < event.getPointerCount(); index++) {
+            if (index != excludedPointer) {
+                pointerStartPositions.put(
+                        event.getPointerId(index),
+                        new PointF(event.getX(index) + screenOffsetX, event.getY(index) + screenOffsetY));
+            }
+        }
+        previousScreenX = screenCenterX(event, excludedPointer);
+    }
+
+    private GestureOwner resolveGestureOwner(MotionEvent event) {
+        if (pointerStartPositions.size() < 2) {
+            return GestureOwner.UNDECIDED;
+        }
+
+        float screenOffsetX = event.getRawX() - event.getX();
+        float screenOffsetY = event.getRawY() - event.getY();
+        float referenceDeltaX = 0;
+        float referenceDeltaY = 0;
+        float minimumDeltaX = Float.POSITIVE_INFINITY;
+        float maximumDeltaX = Float.NEGATIVE_INFINITY;
+        float totalDeltaX = 0;
+        float totalDeltaY = 0;
+
+        for (int index = 0; index < event.getPointerCount(); index++) {
+            PointF start = pointerStartPositions.get(event.getPointerId(index));
+            if (start == null) {
+                return GestureOwner.PROJECTION;
+            }
+            float deltaX = event.getX(index) + screenOffsetX - start.x;
+            float deltaY = event.getY(index) + screenOffsetY - start.y;
+            if (index == 0) {
+                referenceDeltaX = deltaX;
+                referenceDeltaY = deltaY;
+            }
+
+            // Relative finger motion identifies scaling or rotation even when the center moves.
+            if (Math.hypot(deltaX - referenceDeltaX, deltaY - referenceDeltaY) > touchSlop) {
+                return GestureOwner.PROJECTION;
+            }
+            minimumDeltaX = Math.min(minimumDeltaX, deltaX);
+            maximumDeltaX = Math.max(maximumDeltaX, deltaX);
+            totalDeltaX += deltaX;
+            totalDeltaY += deltaY;
+        }
+
+        boolean horizontalDrag = minimumDeltaX > touchSlop || maximumDeltaX < -touchSlop;
+        if (horizontalDrag && Math.abs(totalDeltaX) > Math.abs(totalDeltaY)) {
+            return GestureOwner.DASHBOARD;
+        }
+        if (Math.abs(totalDeltaY) / event.getPointerCount() > touchSlop
+                && Math.abs(totalDeltaY) >= Math.abs(totalDeltaX)) {
+            return GestureOwner.PROJECTION;
+        }
+        return GestureOwner.UNDECIDED;
     }
 
     private static float screenCenterX(MotionEvent event, int excludedPointer) {

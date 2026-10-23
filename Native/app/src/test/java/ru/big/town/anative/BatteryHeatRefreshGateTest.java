@@ -1,5 +1,6 @@
 package ru.big.town.anative;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -7,6 +8,19 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 public class BatteryHeatRefreshGateTest {
+    @Test
+    public void manualActivationReadsAfterAnAlreadyRunningConnectionSnapshot() {
+        BatteryHeatRefreshGate gate = new BatteryHeatRefreshGate();
+        BatteryHeatRefreshGate.Request connection = gate.offer(1L, true, "connection");
+        assertNull(gate.offer(1L, true, "manual-activation"));
+
+        BatteryHeatRefreshGate.Completion completion = gate.finish(connection);
+
+        assertFalse(completion.publish);
+        assertEquals("manual-activation", completion.next.reason);
+        assertTrue(gate.finish(completion.next).publish);
+    }
+
     @Test
     public void burstKeepsOneRunningAndOneMergedFollowUp() {
         BatteryHeatRefreshGate gate = new BatteryHeatRefreshGate();

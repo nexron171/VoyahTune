@@ -29,12 +29,19 @@ final class PowerHoldPolicy {
         NOT_IN_PARK(2),
         LOW_BATTERY(3),
         STATE_UNAVAILABLE(4),
-        TRANSPORT_FAILURE(5);
+        TRANSPORT_FAILURE(5),
+        ARMED(6),
+        ACTIVE(7),
+        RESULT_UNKNOWN(8);
 
         final int ipcCode;
 
         Outcome(int ipcCode) {
             this.ipcCode = ipcCode;
+        }
+
+        boolean isAccepted() {
+            return this == ACCEPTED || this == ARMED || this == ACTIVE;
         }
 
         static Outcome fromIpcCode(int code) {
@@ -45,8 +52,7 @@ final class PowerHoldPolicy {
         }
     }
 
-    private PowerHoldPolicy() {
-    }
+    private PowerHoldPolicy() {}
 
     static boolean isParking(int ordinal, int value) {
         return ordinal == PARKING_ORDINAL && value == PARKING_VALUE;
@@ -60,9 +66,13 @@ final class PowerHoldPolicy {
     }
 
     static Map<String, Integer> activationValues() {
+        return activationValues(false);
+    }
+
+    static Map<String, Integer> activationValues(boolean enableEngineExtender) {
         LinkedHashMap<String, Integer> values = new LinkedHashMap<>();
         values.put(POWER_HOLD_MODE_TIME, PERMANENT_DURATION);
-        values.put(SCENE_MODE_EXTENDER_SET, ENGINE_EXTENDER_ON);
+        values.put(SCENE_MODE_EXTENDER_SET, enableEngineExtender ? ENGINE_EXTENDER_ON : 0);
         values.put(POWER_HOLD_MODE_SWITCH, POWER_HOLD_ON);
         return Collections.unmodifiableMap(values);
     }

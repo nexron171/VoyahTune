@@ -20,10 +20,12 @@ import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.SmartSaveSettings;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -144,12 +146,25 @@ final class OemVehicleStateTransport {
         T run(Session session);
     }
 
+    interface ClimateSession {
+        OemClimateState read();
+
+        boolean send(ClimateCommand command);
+    }
+
+    interface ComfortClimateSession {
+        OemComfortClimateState read();
+
+        boolean send(StateValue command);
+    }
+
     private static final OemVehicleStateTransport INSTANCE = new OemVehicleStateTransport();
 
     private final Object connectionLock = new Object();
     private final Object schemaLock = new Object();
     private final Object transactionLock = new Object();
     private final Map<StateKey, Integer> resolvedOrdinals = new HashMap<>();
+    private final Map<String, Integer> climateOrdinals = new HashMap<>();
 
     private Context appContext;
     private IBinder canBusBinder;
@@ -242,6 +257,174 @@ final class OemVehicleStateTransport {
 
     static Result sendBundle(Context context, Map<StateKey, Integer> values, String label) {
         return INSTANCE.sendBundleInternal(context, immutableCopy(values), label);
+    }
+
+    static ClimateSession openClimateSession(Context context) {
+        Context app = INSTANCE.applicationContext(context);
+        if (app == null || !INSTANCE.resolveClimateSchema(app)) return null;
+        IBinder binder = INSTANCE.acquireBinder(app);
+        return binder == null ? null : INSTANCE.new BoundClimateSession(binder);
+    }
+
+    static ComfortClimateSession openComfortClimateSession(Context context) {
+        Context app = INSTANCE.applicationContext(context);
+        if (app == null) {
+            return null;
+        }
+        List<StateKey> keys = new ArrayList<>();
+        if (INSTANCE.resolveStates(app, OemSeatClimateState.KEYS)) {
+            keys.addAll(OemSeatClimateState.KEYS);
+        }
+        if (INSTANCE.resolveStates(
+                app, Collections.singleton(OemComfortClimateState.STEERING_WHEEL_HEATING))) {
+            keys.add(OemComfortClimateState.STEERING_WHEEL_HEATING);
+        }
+        if (keys.isEmpty()) {
+            return null;
+        }
+        IBinder binder = INSTANCE.acquireBinder(app);
+        return binder == null ? null : INSTANCE.new BoundComfortClimateSession(binder, keys);
+    }
+
+    private boolean resolveClimateSchema(Context context) {
+        synchronized (schemaLock) {
+            if (!climateOrdinals.isEmpty()) return true;
+            try {
+                ApplicationInfo info =
+                        context.getPackageManager().getApplicationInfo(CANBUS_PACKAGE, 0);
+                ClassLoader loader = new PathClassLoader(info.sourceDir, context.getClassLoader());
+                Class<?> schema =
+                        Class.forName("com.qinggan.canbus.AirConditionState", true, loader);
+                Method getState = schema.getMethod("getState");
+                Map<String, Integer> expected = new LinkedHashMap<>();
+                expected.put("AC_BLOWER", 1);
+                expected.put("AC_LEFT_TEMP", 3);
+                expected.put("AC_RIGHT_TEMP", 4);
+                expected.put("AC_SWITCH", 5);
+                expected.put("AC_AUTO", 7);
+                expected.put("AC_POWER_SWITCH", 8);
+                expected.put("AC_RECIRC_AIR", 11);
+                expected.put("AC_DUAL", 12);
+                expected.put("AC_FLOW_MODE", 13);
+                Map<String, Integer> resolved = new HashMap<>();
+                Object[] constants = schema.getEnumConstants();
+                if (constants == null) return false;
+                for (Object item : constants) {
+                    Enum<?> entry = (Enum<?>) item;
+                    Integer stableId = expected.get(entry.name());
+                    if (stableId == null) continue;
+                    if (!stableId.equals(getState.invoke(entry))) return false;
+                    resolved.put(entry.name(), entry.ordinal());
+                }
+                if (resolved.size() != expected.size()) return false;
+                climateOrdinals.putAll(resolved);
+                return true;
+            } catch (PackageManager.NameNotFoundException
+                    | ReflectiveOperationException
+                    | RuntimeException error) {
+                Log.w(TAG, "Installed climate schema unavailable", error);
+                return false;
+            }
+        }
+    }
+
+    private final class BoundComfortClimateSession implements ComfortClimateSession {
+        private final IBinder binder;
+        private final List<StateKey> keys;
+
+        BoundComfortClimateSession(IBinder binder, List<StateKey> keys) {
+            this.binder = binder;
+            this.keys = Collections.unmodifiableList(new ArrayList<>(keys));
+        }
+
+        @Override
+        public OemComfortClimateState read() {
+            synchronized (transactionLock) {
+                if (!isCurrentBinder(binder)) {
+                    return null;
+                }
+                Map<StateKey, Integer> values = new LinkedHashMap<>();
+                for (StateKey key : keys) {
+                    Integer value = transactVehicleState(binder, key, false);
+                    if (value == null) {
+                        return null;
+                    }
+                    values.put(key, value);
+                }
+                return new OemComfortClimateState(values);
+            }
+        }
+
+        @Override
+        public boolean send(StateValue command) {
+            if (command == null || !keys.contains(command.key)) {
+                return false;
+            }
+            synchronized (transactionLock) {
+                return transactSingle(binder, command, "CarPlay comfort climate").accepted();
+            }
+        }
+    }
+
+    private final class BoundClimateSession implements ClimateSession {
+        private final IBinder binder;
+
+        BoundClimateSession(IBinder binder) {
+            this.binder = binder;
+        }
+
+        @Override
+        public OemClimateState read() {
+            synchronized (transactionLock) {
+                if (!isCurrentBinder(binder)) return null;
+                Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                try {
+                    data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                    if (!binder.transact(30, data, reply, 0)) return null;
+                    reply.readException();
+                    return reply.readInt() == 0 ? null : OemClimateState.read(reply);
+                } catch (RemoteException | RuntimeException error) {
+                    Log.w(TAG, "Climate read unavailable", error);
+                    return null;
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+            }
+        }
+
+        @Override
+        public boolean send(ClimateCommand command) {
+            Integer ordinal;
+            synchronized (schemaLock) {
+                ordinal = climateOrdinals.get(command.field);
+            }
+            if (ordinal == null) return false;
+            synchronized (transactionLock) {
+                if (!isCurrentBinder(binder)) return false;
+                Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                try {
+                    data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                    data.writeInt(1);
+                    data.writeInt(ordinal);
+                    data.writeInt(command.stableId);
+                    data.writeInt(command.value);
+                    if (!CanSender.beginFrameAttemptForCurrentGuard()) return false;
+                    if (!binder.transact(31, data, reply, 0)) return false;
+                    reply.readException();
+                    Log.i(
+                            TAG,
+                            "Climate accepted-unconfirmed " + command.field + "=" + command.value);
+                    return true;
+                } catch (RemoteException | RuntimeException error) {
+                    Log.w(TAG, "Climate write failed; not retried", error);
+                    return false;
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+            }
+        }
     }
 
     static Result sendTemporaryEnergyMode(Context context, int mode, long revision, long cycle) {
@@ -826,6 +1009,10 @@ final class OemVehicleStateTransport {
     }
 
     private Integer transactVehicleState(IBinder binder, StateKey key) {
+        return transactVehicleState(binder, key, true);
+    }
+
+    private Integer transactVehicleState(IBinder binder, StateKey key, boolean logRead) {
         Integer ordinal;
         synchronized (schemaLock) {
             ordinal = resolvedOrdinals.get(key);
@@ -845,7 +1032,9 @@ final class OemVehicleStateTransport {
             }
             reply.readException();
             int value = reply.readInt();
-            Log.i(TAG, "TX57 getVehicleState " + key + "=" + value);
+            if (logRead) {
+                Log.i(TAG, "TX57 getVehicleState " + key + "=" + value);
+            }
             return value;
         } catch (RemoteException | RuntimeException e) {
             Log.e(TAG, "TX57 getVehicleState failed " + key, e);

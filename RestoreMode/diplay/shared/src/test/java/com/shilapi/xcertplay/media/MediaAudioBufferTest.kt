@@ -5,11 +5,12 @@ import org.junit.Test
 
 class MediaAudioBufferTest {
     @Test
-    fun `music buffers the chosen delay plus headroom`() {
+    fun `music buffers the chosen delay plus the rebuffer cushion and headroom`() {
         // 48 kHz stereo 16-bit = 192 000 bytes/s.
         val plan = MediaAudioBuffer.plan(true, 48_000, 2, minBufferBytes = 7_680, mediaMillis = 500)
         assertEquals(96_000, plan.startBytes)
-        assertEquals(134_400, plan.trackBufferBytes)
+        assertEquals(211_200, plan.maxStartBytes)
+        assertEquals(249_600, plan.trackBufferBytes)
     }
 
     @Test
@@ -60,7 +61,7 @@ class MediaAudioBufferTest {
     fun `shortest music buffer still keeps the low-latency floor and headroom`() {
         val plan = MediaAudioBuffer.plan(true, 48_000, 2, minBufferBytes = 7_680, mediaMillis = 50)
         assertEquals(9_600, plan.startBytes)
-        assertEquals(48_000, plan.trackBufferBytes)
+        assertEquals(163_200, plan.trackBufferBytes)
         // A device minimum above the preset wins over it.
         assertEquals(15_360, MediaAudioBuffer.plan(true, 48_000, 2, minBufferBytes = 15_360, mediaMillis = 50).startBytes)
     }

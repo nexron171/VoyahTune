@@ -292,6 +292,13 @@ public final class VoiceSettingsPage {
         shortcut.setOnCheckedChangeListener(
                 (button, checked) ->
                         preferences.edit().putBoolean("showVoiceCommand", checked).apply());
+        View siriRow =
+                components.row(
+                        "Включить Siri в CarPlay", "Работает при подключённом iPhone.", siri);
+        if (!ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(activity)) {
+            siriRow.setVisibility(View.GONE);
+            siriHint.setVisibility(View.GONE);
+        }
         LinearLayout card =
                 components.card(
                         components.row(
@@ -303,10 +310,7 @@ public final class VoiceSettingsPage {
                                 "Вызов кнопкой на руле",
                                 "Прежние действия выбранного нажатия сохраняются.",
                                 press),
-                        components.row(
-                                "Включить Siri в CarPlay",
-                                "Работает при подключённом iPhone.",
-                                siri),
+                        siriRow,
                         siriHint,
                         components.row(
                                 "Ярлык «Голосовая команда»",
@@ -481,6 +485,13 @@ public final class VoiceSettingsPage {
                     preferences.edit().putBoolean(HELP_EXPANDED, !expanded).apply();
                     refresh();
                 });
+        LinearLayout.LayoutParams spacing =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        spacing.topMargin = dp(16);
+        spacing.bottomMargin = expanded ? dp(16) : 0;
+        toggle.setLayoutParams(spacing);
         return toggle;
     }
 

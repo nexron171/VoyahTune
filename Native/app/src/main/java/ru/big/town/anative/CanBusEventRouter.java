@@ -24,6 +24,7 @@ final class CanBusEventRouter {
     static final int INTEREST_ENERGY_TELEMETRY = 1 << 6;
 
     static final int INTEREST_VEHICLE_SPEED = 1 << 7;
+    static final int INTEREST_CLIMATE = 1 << 8;
 
     private static final int DEFAULT_MAILBOX_CAPACITY = 32;
     // Consumer handlers may be the Android main looper. Yield after every callback so a retained
@@ -220,6 +221,8 @@ final class CanBusEventRouter {
                     return hasInterest(INTEREST_ENERGY_TELEMETRY);
                 case AMBIENT_TEMPERATURE:
                     return hasInterest(INTEREST_AMBIENT_TEMPERATURE);
+                case CLIMATE:
+                    return hasInterest(INTEREST_CLIMATE);
                 default:
                     return false;
             }

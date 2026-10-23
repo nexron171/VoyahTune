@@ -19,9 +19,15 @@ public class SmartSaveSessionTest {
             SmartSaveSession session = new SmartSaveSession(new SmartSavePolicy(false), START);
             assertEquals(WAIT, session.desiredMode(START, -1));
             for (int index = 0; index < order.length; index++) {
-                if (order[index] == 0) session.recordCharge(22, START);
-                if (order[index] == 1) session.recordTarget(25);
-                if (order[index] == 2) session.recordSpeed(0);
+                if (order[index] == 0) {
+                    session.recordCharge(22, START);
+                }
+                if (order[index] == 1) {
+                    session.recordTarget(25);
+                }
+                if (order[index] == 2) {
+                    session.recordSpeed(0);
+                }
                 assertEquals(index == 2 ? ELECTRIC : WAIT, session.desiredMode(START + index, -1));
             }
         }
@@ -64,12 +70,41 @@ public class SmartSaveSessionTest {
         session.recordSpeed(0);
         assertEquals(SAVE, session.desiredMode(START, ELECTRIC));
         assertTrue(policy.isChargingLocked());
-        session.recordCharge(25, START + 1);
-        assertEquals(ELECTRIC, session.desiredMode(START + 1, SAVE));
+        session.recordCharge(22.5f, START + 1);
+        assertEquals(SAVE, session.desiredMode(START + 1, SAVE));
+        assertTrue(policy.isChargingLocked());
+        session.recordSpeed(34);
+        assertEquals(SAVE, session.desiredMode(START + 1, SAVE));
+        assertTrue(policy.isChargingLocked());
+        session.recordSpeed(35);
+        assertEquals(SAVE, session.desiredMode(START + 1, SAVE));
         assertFalse(policy.isChargingLocked());
-        session.recordCharge(19.9f, START + 2);
+        session.recordSpeed(14);
+        assertEquals(ELECTRIC, session.desiredMode(START + 1, SAVE));
+        session.recordCharge(20, START + 2);
         assertEquals(SAVE, session.desiredMode(START + 2, ELECTRIC));
         assertTrue(policy.isChargingLocked());
+    }
+
+    @Test
+    public void staleRecoveredChargeCannotReleaseLockWhenSpeedReachesThirtyFive() {
+        SmartSavePolicy policy = new SmartSavePolicy(true);
+        SmartSaveSession session = new SmartSaveSession(policy, START);
+        session.recordCharge(77.5f, START);
+        session.recordTarget(80);
+        session.recordSpeed(0);
+        assertEquals(SAVE, session.desiredMode(START, SAVE));
+
+        session.recordSpeed(35);
+        assertEquals(SAVE, session.desiredMode(START + 90_001, SAVE));
+        assertEquals("stale charge", session.reason());
+        assertTrue(policy.isChargingLocked());
+
+        session.recordCharge(77.5f, START + 90_002);
+        assertEquals(SAVE, session.desiredMode(START + 90_002, SAVE));
+        assertFalse(policy.isChargingLocked());
+        session.recordSpeed(14);
+        assertEquals(ELECTRIC, session.desiredMode(START + 90_003, SAVE));
     }
 
     @Test

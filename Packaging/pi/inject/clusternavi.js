@@ -2,6 +2,23 @@
   Java.perform(function () {
     "use strict";
 
+    var application = Java.use("android.app.ActivityThread").currentApplication();
+    for (var attempt = 0; application === null && attempt < 30; attempt++) {
+      Java.use("java.lang.Thread").sleep(100);
+      application = Java.use("android.app.ActivityThread").currentApplication();
+    }
+    if (application === null) {
+      console.log("[navigation-source] Application is not ready");
+      return;
+    }
+    var packageName = String(application.getPackageName());
+    if (packageName === "ru.yandex.yandexnavi" || packageName === "ru.dublgis.dgismobile") {
+      installNavigationSource(application);
+      return;
+    }
+
+    installClusterNavigation();
+
     var TAG = "vt_clusternavi";
     var GUARD = "open_voyah.clusternavi.version";
     var VERSION = "v9";
@@ -601,3 +618,474 @@
     bootstrap();
   });
 })();
+
+// Kept identical in OD app_client.js and PI clusternavi.js; both are standalone agents.
+function createNavigationSourcePolicy() {
+    var yandexIcons = {
+        STRAIGHT: 1, SLIGHT_LEFT: 8, SLIGHT_RIGHT: 2, LEFT: 7, RIGHT: 3,
+        HARD_LEFT: 6, HARD_RIGHT: 4, FORK_LEFT: 8, FORK_RIGHT: 2,
+        UTURN_LEFT: 5, UTURN_RIGHT: 0, ENTER_ROUNDABOUT: 9, LEAVE_ROUNDABOUT: 9,
+        EXIT_LEFT: 8, EXIT_RIGHT: 2
+    };
+    var dgisIcons = {
+        from: 1, startA: 1, start: 1, crossroad_straight: 1,
+        crossroad_left: 7, crossroad_right: 3,
+        crossroad_keep_left: 8, crossroad_keep_right: 2,
+        crossroad_slightly_left: 8, crossroad_slightly_right: 2,
+        crossroad_sharply_left: 6, crossroad_sharply_right: 4,
+        crossroad_uturn: 5, turn_over_right_hand: 5,
+        turn_over_left_hand: 0, turn_over: 0, left_ring_exit: 9,
+        right_ring_exit: 0, ringroad_exit: 0,
+        ringroad_backward: 9, ringroad_forward: 9,
+        ringroad_left_135: 9, ringroad_left_180: 9,
+        ringroad_left_45: 9, ringroad_left_90: 9,
+        ringroad_right_135: 9, ringroad_right_45: 9, ringroad_right_90: 9
+    };
+
+    function icon(table, type) {
+        return Object.prototype.hasOwnProperty.call(table, type) ? table[type] : 0;
+    }
+
+    return {
+        yandexIcon: function (action) { return icon(yandexIcons, action); },
+        dgisIcon: function (name) {
+            return icon(dgisIcons, name.split("/").pop().replace(/\.svg$/, ""));
+        },
+        driving: function (mode) { return mode === "car"; },
+        meters: function (text) {
+            var match = /^\s*([0-9]+(?:[ \u00a0\u202f][0-9]{3})*(?:[.,][0-9]{1,2})?)\s*(km|км|m|м)\s*$/i.exec(text);
+            if (match === null) return -1;
+            var number = Number(match[1].replace(/[ \u00a0\u202f]/g, "").replace(",", "."));
+            var distance = number * (/^(km|км)$/i.test(match[2]) ? 1000 : 1);
+            return Number.isFinite(distance) && distance <= 2147483647 ? Math.round(distance) : -1;
+        }
+    };
+}
+
+function installNavigationSource(application) {
+    try {
+        var packageName = String(application.getPackageName());
+        if (packageName !== "ru.yandex.yandexnavi" && packageName !== "ru.dublgis.dgismobile") {
+            return false;
+        }
+        var policy = createNavigationSourcePolicy();
+        var SystemClock = Java.use("android.os.SystemClock");
+        var SettingsGlobal = Java.use("android.provider.Settings$Global");
+        var Bundle = Java.use("android.os.Bundle");
+        var Uri = Java.use("android.net.Uri");
+        var resolver = application.getContentResolver();
+        var endpoint = Uri.parse("content://ru.big.town.anative.cluster.navigation");
+        var callProvider = resolver.call.overload("android.net.Uri", "java.lang.String",
+            "java.lang.String", "android.os.Bundle");
+        var setting = "voyahtune_cluster_navigation_enabled";
+        var freshnessMs = 30000;
+        var mainPending = false;
+        var sending = false;
+        var pending = null;
+        var enabled = true;
+        var lastError = "";
+        var readSnapshot;
+
+        function now() { return Number(SystemClock.elapsedRealtime()); }
+
+        function warn(error) {
+            var message = String(error);
+            if (message === lastError) return;
+            lastError = message;
+            console.log("[navigation-source] " + packageName + ": " + message);
+        }
+
+        function queue(snapshot) {
+            pending = {snapshot: snapshot, sampled: now()};
+            if (sending) return;
+            sending = true;
+            setTimeout(function deliver() {
+                Java.perform(function () {
+                    var delivery = pending;
+                    pending = null;
+                    try {
+                        var value = delivery.snapshot;
+                        var data = Bundle.$new();
+                        data.putBoolean("navigationActive", value !== null && enabled);
+                        data.putInt("navigationIcon", value === null ? 0 : value.icon);
+                        data.putInt("navigationDistance", value === null ? 0 : value.distance);
+                        data.putString("navigationRoad", value === null ? "" : value.road);
+                        data.putLong("navigationTime", delivery.sampled);
+                        callProvider.call(resolver, endpoint, "maneuver", null, data);
+                    } catch (error) {
+                        warn(error);
+                    } finally {
+                        sending = false;
+                        if (pending !== null) {
+                            sending = true;
+                            setTimeout(deliver, 0);
+                        }
+                    }
+                });
+            }, 0);
+        }
+
+        if (packageName === "ru.yandex.yandexnavi") {
+            var Guidance = Java.use("com.yandex.navikit.guidance.internal.GuidanceBinding");
+            var UpcomingManoeuvre = Java.use("com.yandex.mapkit.navigation.automotive.UpcomingManoeuvre");
+            var WeakReference = Java.use("java.lang.ref.WeakReference");
+            var currentGuidance = null;
+            var candidateGuidance = null;
+            var listener = null;
+            var listenerReference = null;
+            var changedAt = -1;
+            var finished = false;
+            var listenerMethods = {};
+            ["onBackgroundGuidanceTaskRemoved", "onFasterAlternativeAnnotated",
+                "onFasterAlternativeUpdated", "onFreeDriveRouteChanged", "onManeuverAnnotated",
+                "onReachedWayPoint", "onStandingStatusUpdated"].forEach(function (name) {
+                listenerMethods[name] = function () {};
+            });
+            listenerMethods.onBackgroundGuidanceWillBeSuspended = function (reason) {
+                changedAt = -1;
+                queue(null);
+            };
+            listenerMethods.onParkingRouteBuilt = function (type) {};
+            listenerMethods.onLocationUpdated = function () { changedAt = now(); };
+            listenerMethods.onRoutePositionUpdated = function () { changedAt = now(); };
+            listenerMethods.onRouteChanged = function () {
+                finished = false;
+                changedAt = now();
+                queue(null);
+            };
+            listenerMethods.onFinishedRoute = function () {
+                finished = true;
+                queue(null);
+            };
+            var Listener = Java.registerClass({
+                name: "ru.big.town.navigation.YandexGuidanceListener",
+                implements: [Java.use("com.yandex.navikit.guidance.GuidanceListener")],
+                methods: listenerMethods
+            });
+            var getter = Guidance.getNextManeuver.overload();
+            var routeGetter = Guidance.route.overload();
+            var navigationGetter = Guidance.navigation.overload();
+            var onStart = Guidance.onStart.overload();
+            var constructor = Guidance.$init.overload("com.yandex.runtime.NativeObject");
+
+            function capture(candidate) {
+                if (currentGuidance !== null && currentGuidance.equals(candidate)) return;
+                if (candidateGuidance !== null) return;
+                candidateGuidance = Java.retain(candidate);
+                Java.scheduleOnMainThread(function () {
+                    var next = candidateGuidance;
+                    try {
+                        if (!next.isValid() || (currentGuidance !== null && next.route() === null)) return;
+                        var nextListener = Listener.$new();
+                        var nextReference = WeakReference.$new(nextListener);
+                        next.addGuidanceListener(nextReference);
+                        if (currentGuidance !== null) {
+                            try {
+                                if (currentGuidance.isValid()) {
+                                    currentGuidance.removeGuidanceListener(listenerReference);
+                                }
+                            } catch (error) { warn(error); }
+                            currentGuidance.$dispose();
+                            listenerReference.$dispose();
+                            listener.$dispose();
+                        }
+                        currentGuidance = next;
+                        candidateGuidance = null;
+                        listener = nextListener;
+                        listenerReference = nextReference;
+                        changedAt = now();
+                        finished = false;
+                    } catch (error) {
+                        warn(error);
+                    } finally {
+                        if (candidateGuidance !== null) {
+                            candidateGuidance.$dispose();
+                            candidateGuidance = null;
+                        }
+                    }
+                });
+            }
+
+            [getter, routeGetter, navigationGetter, onStart].forEach(function (method) {
+                method.implementation = function () {
+                    var result = method.call(this);
+                    try { capture(this); } catch (error) { warn(error); }
+                    return result;
+                };
+            });
+            // Constructors catch a cold start; getter hooks discover a route after late attach.
+            constructor.implementation = function (nativeObject) {
+                constructor.call(this, nativeObject);
+                try { capture(this); } catch (error) { warn(error); }
+            };
+
+            readSnapshot = function () {
+                if (currentGuidance === null || !currentGuidance.isValid() || finished
+                        || changedAt < 0 || now() - changedAt >= freshnessMs
+                        || currentGuidance.route() === null) return null;
+                var next = currentGuidance.getNextManeuver();
+                if (next === null) return null;
+                var guidance = currentGuidance.navigation().getGuidance();
+                var status = String(guidance.getRouteStatus().name());
+                if (guidance.getCurrentRoute() === null || (status !== "ON_ROUTE"
+                        && status !== "RETURNED_TO_ROUTE" && status !== "WAY_POINT_REACHED")) return null;
+                var point = next.getPoint();
+                var maneuvers = guidance.getWindshield().getManoeuvres();
+                for (var index = 0; index < maneuvers.size(); index++) {
+                    var maneuver = Java.cast(maneuvers.get(index), UpcomingManoeuvre);
+                    var position = maneuver.getPosition().getPoint();
+                    // Match the numeric distance to its own annotation, including chained turns.
+                    if (Math.abs(point.getLatitude() - position.getLatitude()) > 0.00001
+                            || Math.abs(point.getLongitude() - position.getLongitude()) > 0.00001) continue;
+                    var distance = Number(next.getDistance());
+                    if (!Number.isFinite(distance) || distance < 0 || distance > 2147483647) return null;
+                    var annotation = maneuver.getAnnotation();
+                    var road = annotation.getToponym();
+                    return {icon: policy.yandexIcon(String(annotation.getAction().name())),
+                        distance: Math.round(distance), road: road === null ? "" : String(road)};
+                }
+                return null;
+            };
+        } else {
+            var Dispatcher = Java.use("ru.dublgis.qsdk.IntegrationApplicationStateDispatcher");
+            var stateChanged = Dispatcher.setNavigationState.overload(
+                "java.lang.String", "java.lang.String", "java.lang.String", "java.lang.String",
+                "java.lang.String", "java.lang.String", "java.lang.String", "java.lang.String", "int");
+            var modeChanged = Dispatcher.setActiveNavigationMode.overload("java.lang.String");
+            var stateAt = -1;
+            var discovered = false;
+            var previousMode = "";
+            stateChanged.implementation = function (arrival, remaining, total, distance,
+                    icon, description, barrier, barrierDescription, progress) {
+                stateChanged.call(this, arrival, remaining, total, distance,
+                    icon, description, barrier, barrierDescription, progress);
+                try { stateAt = now(); } catch (error) { warn(error); }
+            };
+            modeChanged.implementation = function (mode) {
+                modeChanged.call(this, mode);
+                try {
+                    discovered = true;
+                    if (previousMode !== String(mode)) {
+                        stateAt = -1;
+                        previousMode = String(mode);
+                        queue(null);
+                    }
+                } catch (error) { warn(error); }
+            };
+            readSnapshot = function () {
+                var dispatcher = Dispatcher.sInstance.value;
+                if (dispatcher === null) return null;
+                if (!discovered) {
+                    discovered = true;
+                    previousMode = String(dispatcher.getActiveNavigationMode());
+                    stateAt = now();
+                }
+                if (!policy.driving(String(dispatcher.getActiveNavigationMode()))
+                        || stateAt < 0 || now() - stateAt >= freshnessMs
+                        || dispatcher.getSpeedInfo().mBadLocation.value) return null;
+                var state = dispatcher.getNavigationState();
+                var distance = policy.meters(String(state.mManeuverDistance.value));
+                if (distance < 0 || String(state.mManeuverIcon.value) === "") return null;
+                return {icon: policy.dgisIcon(String(state.mManeuverIcon.value)),
+                    distance: distance, road: String(state.mManeuverDescription.value || "")};
+            };
+        }
+
+        function tick() {
+            Java.perform(function () {
+                try {
+                    enabled = String(SettingsGlobal.getString(resolver, setting)) !== "0";
+                    if (!enabled) {
+                        queue(null);
+                        return;
+                    }
+                    if (mainPending) return;
+                    mainPending = true;
+                    Java.scheduleOnMainThread(function () {
+                        try { queue(readSnapshot()); }
+                        catch (error) { queue(null); warn(error); }
+                        finally { mainPending = false; }
+                    });
+                } catch (error) { warn(error); }
+            });
+        }
+        setInterval(tick, 1000);
+        tick();
+        console.log("[navigation-source] hook ready v1");
+        return true;
+    } catch (error) {
+        console.log("[navigation-source] hook unavailable: " + error);
+        return false;
+    }
+}
+
+function installClusterNavigation() {
+    var unitsReady = false;
+    try {
+        var GuidanceFormat = Java.use("com.qinggan.cluster.GuidanceFormat");
+        var distanceUnit = GuidanceFormat.toDistanceUnit.overload("android.content.Context", "int");
+        // The OEM formatter owns both the UTF-8 string and its packet length.
+        distanceUnit.implementation = function (context, distanceMeters) {
+            return distanceMeters < 1000 ? "m" : "km";
+        };
+        unitsReady = true;
+        console.log("[cluster-units] hook ready v1");
+    } catch (error) {
+        console.log("[cluster-units] hook unavailable: " + error);
+    }
+
+    try {
+        var ActivityThread = Java.use("android.app.ActivityThread");
+        var application = ActivityThread.currentApplication();
+        var context = application !== null ? application
+            : ActivityThread.currentActivityThread().getSystemContext();
+        var resolver = context.getContentResolver();
+        var SettingsGlobal = Java.use("android.provider.Settings$Global");
+        var Handler = Java.use("android.os.Handler");
+        var Looper = Java.use("android.os.Looper");
+        var mainHandler = Handler.$new(Looper.getMainLooper());
+        var setting = "voyahtune_cluster_navigation_enabled";
+        var descriptor = "com.qinggan.cluster.IInstrumentClusterManagerService";
+        var Contract = Java.use(descriptor);
+        var Stub = Java.use(descriptor + "$Stub");
+        var NaviInfo = Java.use("com.qinggan.cluster.info.NaviInfo");
+        var GuideState = Java.use("com.qinggan.cluster.info.GuideState");
+        var enabled = true;
+        var target = null;
+        var targetUpdate = null;
+        var hookedClasses = {};
+
+        function stoppedInfo() {
+            var info = NaviInfo.$new();
+            info.setGuideState(GuideState.MAN_STOP.value);
+            info.setDisplay(false);
+            info.setTbtIconId(0);
+            info.setNextDistance(0);
+            info.setCurrentRoadName("");
+            info.setTurnRoadName("");
+            info.setDestName("");
+            return info;
+        }
+
+        function clearOutput() {
+            if (enabled || target === null) return;
+            try {
+                targetUpdate.call(target, stoppedInfo());
+            } catch (error) {
+                console.log("[cluster-navigation] clear failed: " + error);
+            }
+        }
+
+        function refreshEnabled() {
+            try {
+                var value = SettingsGlobal.getString(resolver, setting);
+                var wasEnabled = enabled;
+                enabled = value === null || parseInt("" + value, 10) !== 0;
+                if (wasEnabled && !enabled && target !== null) {
+                    // Settings callbacks run on the OEM main looper; write on the Frida worker.
+                    setTimeout(function () { Java.perform(clearOutput); }, 0);
+                }
+            } catch (error) {
+                console.log("[cluster-navigation] setting unavailable: " + error);
+            }
+        }
+
+        function captureTarget(instance) {
+            if (target !== null && target.equals(instance)) return;
+            var className = "" + instance.getClass().getName();
+            var Implementation = Java.use(className);
+            var update = Implementation.updateNaviInfo.overload("com.qinggan.cluster.info.NaviInfo");
+            if (!hookedClasses[className]) {
+                update.implementation = function (info) {
+                    // Replace the object, leaving the caller's route state untouched.
+                    return update.call(this, enabled ? info : stoppedInfo());
+                };
+                hookedClasses[className] = true;
+            }
+            if (target !== null) target.$dispose();
+            target = Java.retain(Java.cast(instance, Implementation));
+            targetUpdate = update;
+            if (!enabled) clearOutput();
+        }
+
+        function findServiceTarget() {
+            try {
+                // ActivityThread keeps live services without an ART heap walk.
+                var thread = ActivityThread.currentActivityThread();
+                var servicesField = ActivityThread.class.getDeclaredField("mServices");
+                servicesField.setAccessible(true);
+                var services = Java.cast(servicesField.get(thread), Java.use("android.util.ArrayMap"));
+                for (var index = 0; index < services.size(); index++) {
+                    var service = services.valueAt(index);
+                    var type = service.getClass();
+                    if (("" + type.getName()).indexOf("InstrumentClusterService") < 0) continue;
+                    while (type !== null && ("" + type.getName()).indexOf("com.qinggan.cluster.") === 0) {
+                        var fields = type.getDeclaredFields();
+                        for (var fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
+                            try {
+                                fields[fieldIndex].setAccessible(true);
+                                var candidate = fields[fieldIndex].get(service);
+                                if (candidate !== null && Contract.class.isInstance(candidate)) {
+                                    captureTarget(candidate);
+                                    return true;
+                                }
+                            } catch (ignored) {}
+                        }
+                        type = type.getSuperclass();
+                    }
+                }
+            } catch (error) {
+                console.log("[cluster-navigation] service lookup unavailable: " + error);
+            }
+            return false;
+        }
+
+        // Validate the installed Parcelable before intercepting any OEM calls.
+        stoppedInfo();
+
+        // Discover the installed Stub implementation instead of fixing an anonymous class number.
+        var transact = Stub.onTransact.overload("int", "android.os.Parcel", "android.os.Parcel", "int");
+        transact.implementation = function (code, data, reply, flags) {
+            try {
+                captureTarget(this);
+            } catch (error) {
+                console.log("[cluster-navigation] writer hook unavailable: " + error);
+            }
+            return transact.call(this, code, data, reply, flags);
+        };
+        var Observer = Java.registerClass({
+            name: "ru.big.town.cluster.ManeuverSettingsObserver",
+            superClass: Java.use("android.database.ContentObserver"),
+            methods: {
+                $init: [{
+                    returnType: "void",
+                    argumentTypes: ["android.os.Handler"],
+                    implementation: function (handler) { this.$super.$init(handler); }
+                }],
+                onChange: [{
+                    returnType: "void",
+                    argumentTypes: ["boolean"],
+                    implementation: function () { refreshEnabled(); }
+                }]
+            }
+        });
+        resolver.registerContentObserver(SettingsGlobal.getUriFor(setting), false, Observer.$new(mainHandler));
+        refreshEnabled();
+
+        var attempts = 0;
+        function discoverService() {
+            if (target !== null || findServiceTarget()) return;
+            attempts++;
+            if (attempts < 15) {
+                setTimeout(function () { Java.perform(discoverService); }, 2000);
+            } else {
+                console.log("[cluster-navigation] awaiting first cluster Binder call");
+            }
+        }
+        discoverService();
+        console.log("[cluster-navigation] hook ready v1");
+    } catch (error) {
+        console.log("[cluster-navigation] hook unavailable: " + error);
+    }
+    return unitsReady;
+}

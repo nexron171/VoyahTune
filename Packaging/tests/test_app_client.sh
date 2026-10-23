@@ -26,6 +26,7 @@ require_before() {
 if command -v node > /dev/null 2>&1; then
     node --check "$AGENT"
     node "$ROOT/Packaging/tests/test_rds_restore.js"
+    node "$ROOT/Packaging/tests/test_rds_widget.js"
 fi
 sh -n "$LOADER"
 sh -n "$FULL_INSTALL"
@@ -76,7 +77,8 @@ set_view_hook_line=$(grep -nF 'setView.implementation = function' "$AGENT" | cut
 [ "$receiver_line" -lt "$set_view_hook_line" ] \
     || fail "ViewRoot hook is installed before reversible WIN_RELOAD lifecycle"
 
-# Loader: exact main process, 64-bit or the specific 32-bit RdsApp, user 0 only, and one worker.
+# Loader: exact main process, 64-bit or an allowed 32-bit OEM/navigation target, user 0 only,
+# and one worker. Check ABI alternatives independently of their order and line wrapping.
 # A circuit breaker blocks two rapid restarts. Agent readiness must precede the active marker.
 for REQUIRED in \
         'APP_CLIENT=/data/local/bin/app_client.js' \
@@ -88,9 +90,16 @@ for REQUIRED in \
         'FC_CURRENT_ID=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE"' \
         'FC_ID_BEFORE=$(process_identity "$FC_TARGET_PID" "$FC_TARGET_PACKAGE"' \
         '[ "$FC_UID" -lt 100000 ]' \
-        '*:*/app_process64|com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32) FC_INJECTOR=$FI' \
+        '*:*/app_process64' \
+        'com.qinggan.systemui:*/app_process32' \
+        'com.pateo.rdsapp:*/app_process32' \
+        'com.qinggan.cluster:*/app_process32' \
+        'com.qinggan.bluetoothphone:*/app_process32' \
+        'ru.yandex.yandexnavi:*/app_process32' \
+        'ru.dublgis.dgismobile:*/app_process32' \
+        'FC_INJECTOR=$FI ;;' \
         'reserve_injection_attempt "$FC_TARGET_ID" "$FC_TARGET_ATTEMPT"' \
-        'grep -qF "$APP_CLIENT_READY" "$FC_TRY"' \
+        'grep -qF "$FC_TARGET_READY" "$FC_TRY"' \
         'grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"' \
         'inject_app_client_bg "$FC_PACKAGE"' \
         'discover_app_client' \
@@ -110,7 +119,7 @@ reserve_line=$(printf '%s\n' "$fc_function" \
 inject_line=$(printf '%s\n' "$fc_function" \
     | grep -nF 'timeout -k 5 30 "$FC_TARGET_INJECTOR"' | cut -d: -f1)
 ready_line=$(printf '%s\n' "$fc_function" \
-    | grep -nF 'grep -qF "$APP_CLIENT_READY"' | cut -d: -f1)
+    | grep -nF 'grep -qF "$FC_TARGET_READY"' | cut -d: -f1)
 mark_line=$(printf '%s\n' "$fc_function" \
     | grep -nF 'mv -f "$FC_MARK_TMP" "$FC_TARGET_MARK"' | cut -d: -f1)
 [ "$reserve_line" -lt "$inject_line" ] || fail "client injection is not reserved before Frida"

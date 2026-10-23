@@ -36,6 +36,8 @@ data class AirPlayDisplayConfig(
      * the video stream to fill the entire display as right angles without requiring additional clipping.
      */
     val mainDisplayCornerMasks: Boolean? = null,
+    /** Separately opt into iOS's genuine corner-mask PNG stream (not the old square-corner mode). */
+    val useIphoneCornerMask: Boolean = false,
     /** When true, do not declare safeArea in viewAreas dictionary to avoid conflict with cornerMasks. */
     val mainDisplayDisableSafeArea: Boolean = (mainDisplayCornerMasks == true),
 )
@@ -96,7 +98,11 @@ data class AirPlayConfig(
      * default stream (#148, #341). When set, 8 and 16 kHz are not offered for default and alert audio.
      */
     val speechWithout8And16Khz: Boolean = false,
-)
+    val vehicleTheme: AirPlayVehicleTheme? = null,
+) {
+    val mainDisplayIdentifier: String
+        get() = vehicleTheme?.mainDisplayIdentifier ?: AirPlayInfoPlist.MAIN_UUID
+}
 
 /** The offer, SETUP and controls must all honor the user's audio-output setting. */
 internal val AirPlayConfig.bufferedAudioOutputEnabled: Boolean

@@ -272,4 +272,56 @@ class ClusterMapPresentationTest {
         }
     }
 
+    @Test fun musicUpdatesAndFadesPreserveTheActiveMapSurface() {
+        val id = display("fission_bg_xdjaVirtualSurface", "w1280dp-h480dp-mdpi")
+        val reported = mutableListOf<android.view.Surface?>()
+        val presentation = ClusterMapPresentation(context, manager.getDisplay(id)) { reported += it }
+        val surface = org.mockito.Mockito.mock(android.view.Surface::class.java)
+        val holder = org.mockito.Mockito.mock(android.view.SurfaceHolder::class.java)
+        org.mockito.Mockito.`when`(holder.surface).thenReturn(surface)
+        fun find(view: android.view.View): android.view.SurfaceView? {
+            if (view is android.view.SurfaceView) return view
+            if (view is android.view.ViewGroup) for (child in 0 until view.childCount) {
+                find(view.getChildAt(child))?.let { return it }
+            }
+            return null
+        }
+        try {
+            presentation.show()
+            val view = find(presentation.window!!.decorView) ?: error("Legacy route must use SurfaceView")
+            val callbacks = (view.holder as org.robolectric.shadows.ShadowSurfaceView.FakeSurfaceHolder).callbacks
+            callbacks.forEach { it.surfaceCreated(holder) }
+            assertSame(surface, presentation.outputSurface)
+            assertSame(surface, reported.last())
+            presentation.setStreamActive(true)
+            ClusterMusicSettings.saveEnabled(context, true)
+            ClusterMusicSettings.savePermanent(context, true)
+            val count = reported.size
+            repeat(10) { index ->
+                val art = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
+                ClusterMusicState.publish(com.shilapi.xcertplay.media.CarPlayNowPlaying(
+                    title = "Track $index", artworkTransferId = index), art)
+                ClusterMusicSettings.save(context, "size", 291 + index)
+                shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
+                assertSame(surface, presentation.outputSurface)
+                assertTrue(presentation.isShowing)
+                assertTrue(presentation.mapVisible)
+                assertEquals(count, reported.size)
+            }
+            ClusterMusicSettings.saveEnabled(context, false)
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertSame(surface, presentation.outputSurface)
+            callbacks.forEach { it.surfaceDestroyed(holder) }
+            assertNull(presentation.outputSurface)
+            assertNull(reported.last())
+            org.mockito.Mockito.verify(surface, org.mockito.Mockito.never()).release()
+        } finally {
+            presentation.dismiss()
+            ClusterMusicState.publish(com.shilapi.xcertplay.media.CarPlayNowPlaying(), null)
+            context.getSharedPreferences("xcertplay_airplay", 0).edit().clear().commit()
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            ShadowDisplayManager.removeDisplay(id)
+        }
+    }
+
 }

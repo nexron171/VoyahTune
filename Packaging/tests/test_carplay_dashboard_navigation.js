@@ -33,11 +33,14 @@ const c = {
     ctx: () => ({startActivity(intent, bundle) { launches.push({intent, bundle}); }})
 };
 vm.createContext(c);
-vm.runInContext(['openVoyahTune', 'openVoyahTuneOnDisplay', 'launchFreeform'].map(production).join('\n'), c);
+vm.runInContext(['cleanJavaString', 'dashboardActivityForDisplay', 'isDashboardLaunchTarget',
+    'openVoyahTune', 'openVoyahTuneOnDisplay', 'launchFreeform'].map(production).join('\n'), c);
 for (const displayId of [0, 1, 20]) {
     assert.equal(c.openVoyahTune({getDisplay: () => ({getDisplayId: () => displayId})}), true);
     const {intent, bundle} = launches.at(-1);
-    assert.equal(intent.activity, 'ru.big.town.restoremode.MainActivity');
+    assert.equal(intent.activity, displayId === 1
+        ? 'ru.big.town.restoremode.passenger.PassengerDashboardActivity'
+        : 'ru.big.town.restoremode.MainActivity');
     assert.equal(intent.action, 'ru.big.town.restoremode.OPEN_DASHBOARD');
     assert.equal(intent.category, undefined);
     assert.equal(intent.flags, 0x10000000 | 0x04000000 | 0x20000000);
@@ -50,9 +53,42 @@ assert.equal(launches.at(-1).bundle.displayId, 0);
 for (const displayId of [0, 1]) {
     assert.equal(c.launchFreeform(c.RESTORE_PKG, displayId), true);
     const {intent, bundle} = launches.at(-1);
-    assert.equal(intent.activity, 'ru.big.town.restoremode.MainActivity');
+    assert.equal(intent.activity, displayId === 1
+        ? 'ru.big.town.restoremode.passenger.PassengerDashboardActivity'
+        : 'ru.big.town.restoremode.MainActivity');
     assert.equal(intent.action, 'ru.big.town.restoremode.OPEN_DASHBOARD');
     assert.equal(intent.flags, 0x10000000 | 0x04000000 | 0x20000000);
     assert.equal(bundle.displayId, displayId);
 }
-console.log('PASS: OD dock gestures and app slots explicitly open Dashboard with CLEAR_TOP on the physical display');
+const originalLaunches = [];
+const intentMethod = {call(_, context, intent, displayId) { originalLaunches.push({intent, displayId}); }};
+const componentMethod = {call(_, context, pkg, activity, displayId) { originalLaunches.push({pkg, activity, displayId}); }};
+c.AppLauncher = {startApp: {overload(...types) { return types.length === 3 ? intentMethod : componentMethod; }}};
+c.packageFromIntent = intent => intent.getComponent().getPackageName();
+c.returnDockAppToScreen = () => false;
+c.isUserFullscreen = () => false;
+const hooksStart = source.indexOf('var startAppIntent = AppLauncher.startApp.overload(');
+const hooksEnd = source.indexOf('Log.i(TAG, "[allapps] fullscreen ActivityOptions routing installed");', hooksStart);
+assert(hooksStart >= 0 && hooksEnd > hooksStart);
+vm.runInContext(source.slice(hooksStart, hooksEnd), c);
+for (const displayId of [0, 1]) {
+    for (const activity of [c.dashboardActivityForDisplay(0), c.dashboardActivityForDisplay(1), '.MainActivity',
+        '.VoiceAnimationPreviewActivity', c.RESTORE_PKG + '.VoiceAnimationPreviewActivity']) {
+        const intent = {getComponent: () => ({getPackageName: () => c.RESTORE_PKG, getClassName: () => activity})};
+        intentMethod.implementation({}, intent, displayId);
+        assert.equal(launches.at(-1).intent.activity, c.dashboardActivityForDisplay(displayId));
+        componentMethod.implementation({}, c.RESTORE_PKG, activity, displayId);
+        assert.equal(launches.at(-1).intent.activity, c.dashboardActivityForDisplay(displayId));
+    }
+    const count = launches.length;
+    for (const activity of ['com.shilapi.xcertplay.DiPlayActivity',
+        'ru.big.town.restoremode.carplay.CarPlayLauncherActivity', c.RESTORE_PKG + '.VoiceActivity']) {
+        const intent = {getComponent: () => ({getPackageName: () => c.RESTORE_PKG, getClassName: () => activity})};
+        intentMethod.implementation({}, intent, displayId);
+        assert.equal(originalLaunches.at(-1).intent, intent);
+        componentMethod.implementation({}, c.RESTORE_PKG, activity, displayId);
+        assert.equal(originalLaunches.at(-1).activity, activity);
+    }
+    assert.equal(launches.length, count);
+}
+console.log('PASS: OD launcher routes cached voice-preview icons to the correct dashboard; CarPlay and voice actions are preserved');

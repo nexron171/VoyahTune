@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="carplay_enabled">Включить CarPlay</string>
+    <string name="carplay_fullscreen">Полноэкранный CarPlay</string>
+    <string name="carplay_fullscreen_description">Скрывать штатный док и статус-бар. Изменение сразу применяется и отключает текущую сессию CarPlay.</string>
+    <string name="carplay_ui_scale_reconnect">Масштаб применится при следующем переподключении CarPlay.</string>
+    <string name="carplay_ui_scale_title">Масштаб интерфейса</string>
+    <string name="carplay_ui_scale_value">Масштаб интерфейса: %1$d%%</string>
+    <string name="carplay_ui_scale_percent">%1$d%%</string>
     <string name="carplay_authentication_error">Не удалось загрузить ключи CarPlay. Установите полную сборку VoyahTune поверх текущей. Удалять приложение или сбрасывать его данные не требуется.</string>
     <string name="carplay_home_title">CarPlay</string>
     <string name="carplay_home_brand">VoyahTune</string>

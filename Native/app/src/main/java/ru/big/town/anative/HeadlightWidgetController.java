@@ -9,7 +9,6 @@ import android.os.Message;
 import android.os.Messenger;
 
 import ru.big.town.common.HeadlightWidgetProtocol;
-import ru.big.town.common.MessengerSubscription;
 
 import java.util.Collections;
 
@@ -22,14 +21,12 @@ final class HeadlightWidgetController {
     private final VehiclePort vehicle;
     private final HandlerThread thread = new HandlerThread("HeadlightWidget");
     private final Handler worker;
-    private final MessengerSubscription client = new MessengerSubscription();
+    private final WidgetClients clients = new WidgetClients();
     private final HeadlightWidgetState state = new HeadlightWidgetState();
     private final SharedPreferences preferences;
     private final SharedPreferences.OnSharedPreferenceChangeListener preferenceListener =
             this::onPreferenceChanged;
     private VehiclePort.Subscription subscription;
-    private Messenger owner;
-    private int clientSession;
     private int switchPosition = -1;
     private long generation;
     private boolean commandInFlight;
@@ -73,18 +70,13 @@ final class HeadlightWidgetController {
                     if (closed || reply == null) {
                         return;
                     }
-                    boolean current = reply.equals(owner) && session == clientSession;
+                    boolean current = clients.isWatching(reply, session);
                     if (what == HeadlightWidgetProtocol.UNWATCH) {
-                        if (current) {
+                        if (clients.unwatch(reply, session) && !clients.hasClients()) {
                             stopWatching();
                         }
                     } else if (what == HeadlightWidgetProtocol.WATCH) {
-                        if (!current) {
-                            stopWatching();
-                        }
-                        owner = reply;
-                        clientSession = session;
-                        client.set(reply);
+                        clients.watch(reply, session);
                         if (subscription == null) {
                             preferences.registerOnSharedPreferenceChangeListener(
                                     preferenceListener);
@@ -186,9 +178,7 @@ final class HeadlightWidgetController {
         data.putString(
                 HeadlightWidgetProtocol.MESSAGE,
                 automatic && state.message.isEmpty() ? "Автосвет" : state.message);
-        Message response = Message.obtain(null, HeadlightWidgetProtocol.STATE, 0, clientSession);
-        response.setData(data);
-        if (!client.send(response)) {
+        if (!clients.publish(HeadlightWidgetProtocol.STATE, data)) {
             stopWatching();
         }
     }
@@ -201,8 +191,7 @@ final class HeadlightWidgetController {
             subscription.close();
             subscription = null;
         }
-        client.clear();
-        owner = null;
+        clients.clear();
         switchPosition = -1;
         state.reset("Нет данных фар");
     }

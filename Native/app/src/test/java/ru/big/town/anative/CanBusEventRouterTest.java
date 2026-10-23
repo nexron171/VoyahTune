@@ -13,6 +13,25 @@ import java.util.concurrent.Executor;
 
 public class CanBusEventRouterTest {
     @Test
+    public void climateSnapshotsRefreshAndStaySeparateFromAmbientTemperature() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        List<CanBusEvent> climate = new ArrayList<>(), ambient = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_CLIMATE, null, Runnable::run, climate::add);
+        router.subscribe(
+                CanBusEventRouter.INTEREST_AMBIENT_TEMPERATURE, null, Runnable::run, ambient::add);
+        OemClimateState state = ClimateCommandTest.state(1, 0, 3, 1);
+        router.dispatch(CanBusEvent.climate(CanBusEvent.Origin.LIVE, 1, 1, 100, state));
+        router.dispatch(CanBusEvent.climate(CanBusEvent.Origin.SEED, 1, 2, 200, state));
+        router.dispatch(CanBusEvent.ambientTemperature(CanBusEvent.Origin.LIVE, 1, 3, 200, 19));
+        assertEquals(2, climate.size());
+        assertEquals(200, climate.get(1).elapsedRealtime);
+        assertEquals(1, ambient.size());
+        router.invalidateThrough(1);
+        router.dispatch(CanBusEvent.climate(CanBusEvent.Origin.LIVE, 1, 4, 300, state));
+        assertEquals(2, climate.size());
+    }
+
+    @Test
     public void unchangedSpeedRefreshesTimestampOnlyForSpeedSubscriber() {
         CanBusEventRouter router = new CanBusEventRouter();
         List<CanBusEvent> speed = new ArrayList<>(), gear = new ArrayList<>();

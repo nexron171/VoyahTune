@@ -12,4 +12,12 @@ class CarPlayDockTest {
         assertFalse(CarPlayDock.movesLive(CarPlayDock.AUTOMATIC, CarPlayDock.BOTTOM))
         assertFalse(CarPlayDock.movesLive(CarPlayDock.DRIVER_SIDE, CarPlayDock.AUTOMATIC))
     }
+
+    @Test
+    fun enteringOrLeavingTheVehicleThemeAlwaysReconnects() {
+        CarPlayDock.entries.forEach { dock ->
+            assertFalse(CarPlayDock.movesLive(CarPlayDock.DUAL_SIDES, dock))
+            assertFalse(CarPlayDock.movesLive(dock, CarPlayDock.DUAL_SIDES))
+        }
+    }
 }

@@ -10,7 +10,7 @@ import java.lang.reflect.Method
 
 /**
  * Starts the car's saved hotspot through the platform's IConnectivityManager.startTethering, which
- * WRITE_SETTINGS access authorizes up to Android 10. Every attempt is reported, so a firmware that
+ * WRITE_SETTINGS access authorizes on Android 8.0 to 10. Every attempt is reported, so a firmware that
  * refuses it can be told apart from a call that never reached the system.
  *
  * The binder object is a non-public IConnectivityManager.Stub.Proxy. Its own member can be unreachable
@@ -30,10 +30,18 @@ internal object PlatformTetheringStart {
     )
 
     /**
+     * The switch that relies on this call is offered on Android 8.0 to 10 only.
+     *
+     * Android 7 refuses the call from every app: its isTetheringSupported() asks UserManager.isAdminUser()
+     * under the caller's identity, which needs MANAGE_USERS ("You either need MANAGE_USERS or CREATE_USERS
+     * permission to: query user"). Android 8.0 asks under the system's identity. WifiManager.setWifiApEnabled
+     * skips that check, but on Android 7 only startTethering marks the access point for tethering, so a
+     * hotspot started that way would give the iPhone no address.
+     *
      * Android 11 moved tethering out of IConnectivityManager into the tethering module, which an app
-     * cannot reach, so the switch that relies on this call is offered up to Android 10 only.
+     * cannot reach.
      */
-    fun supported(sdk: Int = Build.VERSION.SDK_INT): Boolean = sdk in Build.VERSION_CODES.M..Build.VERSION_CODES.Q
+    fun supported(sdk: Int = Build.VERSION.SDK_INT): Boolean = sdk in Build.VERSION_CODES.O..Build.VERSION_CODES.Q
 
     fun start(context: Context, receiver: ResultReceiver, log: (String) -> Unit) {
         val failures = mutableListOf<String>()

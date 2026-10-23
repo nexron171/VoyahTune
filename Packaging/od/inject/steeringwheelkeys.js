@@ -151,7 +151,7 @@ Java.perform(function () {
     }
 
     function allowedMediaKey(kc) {
-        return kc === 85 || kc === 87 || kc === 88 || kc === 127;
+        return kc === 85 || kc === 87 || kc === 88 || kc === 126 || kc === 127;
     }
 
     // Receiver accepts only Native: the permission is checked against the SENDER at registration.

@@ -846,19 +846,12 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                                 .show());
     }
 
-    /** Открыть отдельную пассажирскую activity на дисплее 1, не трогая водительскую задачу. */
+    /** Open the passenger task without moving or clearing the driver dashboard. */
     static void openPassengerDashboard(Context context) {
         try {
-            Intent intent = new Intent();
-            intent.setClassName(
-                    SetModesService.RESTOREMODE_PKG,
-                    SetModesService.RESTOREMODE_PASSENGER_MAIN);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
-            options.setLaunchDisplayId(1);
-            android.os.Bundle bundle = options.toBundle();
-            bundle.putInt("android.activity.windowingMode", 1);
-            context.startActivity(intent, bundle);
+            context.startActivity(
+                    ru.big.town.common.DashboardTarget.intent(1),
+                    ru.big.town.common.DashboardTarget.options(1));
             Log.i(TAG, "OPEN_PASSENGER_DASHBOARD display=1");
         } catch (RuntimeException error) {
             Log.w(TAG, "OPEN_PASSENGER_DASHBOARD failed: " + error.getMessage());

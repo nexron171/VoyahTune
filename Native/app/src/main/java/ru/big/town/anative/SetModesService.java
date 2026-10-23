@@ -150,6 +150,7 @@ public class SetModesService extends Service {
                 case ru.big.town.common.CarPlayVehicleProtocol.UNWATCH:
                 case ru.big.town.common.CarPlayVehicleProtocol.NAVIGATION:
                 case ru.big.town.common.CarPlayAudioProtocol.FOCUS:
+                case ru.big.town.common.CarPlayClimateProtocol.SET:
                     if (carPlayAudio == null)
                         carPlayAudio = new CarPlayAudioController(SetModesService.this);
                     if (carPlayVehicle == null)
@@ -208,7 +209,7 @@ public class SetModesService extends Service {
                     break;
 
                 case MSG_LEAVE_CAR:
-                    requestPowerHold();
+                    requestPowerHold(msg.arg1 == 1);
                     break;
 
                 case MSG_WASH_MODE:
@@ -506,7 +507,7 @@ public class SetModesService extends Service {
         SplitHostActivity.launchSingle(this, packageName, dpi, 0);
     }
 
-    protected void requestPowerHold() {
+    protected void requestPowerHold(boolean enableEngineExtender) {
         Log.i(TAG, "handleMessage() MSG_LEAVE_CAR");
         PowerHoldStatusTracker tracker = powerHoldStatusTracker;
         if (tracker == null) {
@@ -521,7 +522,8 @@ public class SetModesService extends Service {
                             "power hold",
                             () -> {
                                 PowerHoldController controller = powerHoldController;
-                                if (controller != null) outcome.set(controller.activate());
+                                if (controller != null)
+                                    outcome.set(controller.activate(enableEngineExtender));
                                 Log.i(TAG, "power hold activation outcome=" + outcome.get());
                             },
                             () -> tracker.finishActivation(requestGeneration, outcome.get()));
@@ -700,23 +702,18 @@ public class SetModesService extends Service {
         BackButtonService.updatePosition();
     }
 
-    /**
-     * На пробуждении/загрузке гарантируем плавающие кнопки Назад/Home, если они включены. Просто
-     * перезапись secure-настройки тем же значением НЕ перебиндивает сервис и не пересоздаёт оверлей
-     * (окно снимается при засыпании) — поэтому: 1) если сервис доступности жив → просим его
-     * пере-показать оверлей ({@code reshow}); 2) если не жив → форсим переустановку a11y (off→on),
-     * чтобы система его подняла.
-     */
+    /** Restore removed windows or rebind accessibility without changing the user's overlay flag. */
     private void reassertFloatingBack() {
-        if (!prefs().getBoolean("floatingBack", false)) return;
+        if (!prefs().getBoolean("floatingBack", false)
+                && !BackButtonService.carPlayNavigationEnabled(this)) return;
         if (BackButtonService.reshow()) {
             Log.i(TAG, "reassertFloatingBack: сервис жив → оверлей пере-показан");
             return;
         }
         Log.i(TAG, "reassertFloatingBack: сервис не подключён → форс-переустановка a11y");
         BackButtonService.disableForReconnect(this);
-        mainHandler.removeCallbacks(floatingBackEnableRunnable);
-        mainHandler.postDelayed(floatingBackEnableRunnable, 800);
+        mainHandler.removeCallbacks(navigationAccessibilityRestoreRunnable);
+        mainHandler.postDelayed(navigationAccessibilityRestoreRunnable, 800);
     }
 
     // Автозапуск RestoreMode: дебаунс, чтобы серия wake-состояний подряд не открывала окно
@@ -856,7 +853,7 @@ public class SetModesService extends Service {
 
             // Прямой запуск (Native — priv-app с START_ACTIVITIES_FROM_BACKGROUND).
             try {
-                startActivity(i);
+                startActivity(i, ru.big.town.common.DashboardTarget.options(0));
             } catch (Exception ignored) {
             }
 
@@ -875,7 +872,8 @@ public class SetModesService extends Service {
                                 0,
                                 i,
                                 android.app.PendingIntent.FLAG_IMMUTABLE
-                                        | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+                                        | android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                                ru.big.town.common.DashboardTarget.options(0));
                 Notification n =
                         new NotificationCompat.Builder(this, CH)
                                 .setSmallIcon(R.drawable.ic_launcher_foreground)
@@ -1312,6 +1310,7 @@ public class SetModesService extends Service {
 
     protected void startEmbeddedDisplay(
             String widgetId, String packageName, Surface surface, int width, int height, int dpi) {
+        if (CarPlayTarget.isCarPlay(packageName) && !CarPlayTarget.isEnabled(this)) return;
         if (widgetId == null
                 || widgetId.isEmpty()
                 || packageName == null
@@ -1887,16 +1886,16 @@ public class SetModesService extends Service {
         startForegroundService(intent);
     }
 
-    /**
-     * Восстанавливает WiperColdService (реактор двери) на старте, если включён хотя бы один его
-     * потребитель: сервисный режим дворников ({@code wiperCold}) или пауза музыки при открытии
-     * двери ({@code pauseMediaOnDoor}).
-     */
+    /** Restore the door reactor when any saved door action is enabled. */
     private void restoreWiperColdState() {
         boolean wiper = prefs().getBoolean("wiperCold", false);
         boolean pauseMedia = prefs().getBoolean("pauseMediaOnDoor", false);
         Log.i(TAG, "restoreWiperColdState: wiperCold=" + wiper + " pauseMediaOnDoor=" + pauseMedia);
-        if (wiper || pauseMedia) {
+        boolean playMedia =
+                InfrastructureProfile.read(this).usesAccHooks()
+                        && prefs().getBoolean(
+                                        ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, false);
+        if (wiper || pauseMedia || playMedia) {
             Intent intent = new Intent(this, WiperColdService.class);
             startForegroundService(intent);
         }
@@ -1937,8 +1936,8 @@ public class SetModesService extends Service {
     private final Runnable autoLaunchRunnable = this::maybeAutoLaunchRestoreMode;
     private final Runnable passengerAutoLaunchRunnable = this::maybeAutoLaunchPassengerDashboard;
     private final Runnable mediaAutoLaunchRunnable = this::maybeAutoLaunchLastMediaPlayer;
-    private final Runnable floatingBackEnableRunnable =
-            () -> BackButtonService.setFloatingButtonEnabled(this, true);
+    private final Runnable navigationAccessibilityRestoreRunnable =
+            () -> BackButtonService.refreshAccessibility(this);
     private final Runnable carPowerReconnectRunnable = this::reconnectCarPowerOnWorker;
 
     private final BroadcastReceiver powerHoldStatusRequestReceiver =
@@ -1952,11 +1951,16 @@ public class SetModesService extends Service {
             };
 
     /**
-     * Сообщает хосту, что задача ушла с виртуального дисплея плитки: перед полноэкранным
-     * запуском или при явном закрытии. В последнем случае хост также удаляет запись сеанса.
+     * Сообщает хосту, что задача ушла с виртуального дисплея плитки: перед полноэкранным запуском
+     * или при явном закрытии. В последнем случае хост также удаляет запись сеанса.
      */
     static void notifyEmbeddedTaskLeft(Context context, String pkg) {
         notifyEmbeddedTaskLeft(context, pkg, false);
+    }
+
+    static void stopCarPlayHosts(Context context) {
+        notifyEmbeddedTaskLeft(context, CarPlayTarget.ID, true);
+        SplitHostActivity.closeFullscreenCarPlayHostExcept(-1);
     }
 
     static void notifyEmbeddedTaskLeft(Context context, String pkg, boolean closed) {
@@ -2028,7 +2032,7 @@ public class SetModesService extends Service {
         mainHandler.removeCallbacks(autoLaunchRunnable);
         mainHandler.removeCallbacks(passengerAutoLaunchRunnable);
         mainHandler.removeCallbacks(mediaAutoLaunchRunnable);
-        mainHandler.removeCallbacks(floatingBackEnableRunnable);
+        mainHandler.removeCallbacks(navigationAccessibilityRestoreRunnable);
     }
 
     /**
