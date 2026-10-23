@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "runtimeDirectory": "/data/local/bin/voyahtune-new",
+  "stateDirectory": "/data/local/tmp/voyahtune-new",
+  "healthDirectory": "/data/local/open_voyah/new",
+  "service": "voyahtune_load",
+  "nativeContract": "driveHookV2",
+  "nativeRestorePolicy": "acc-hooks",
+  "files": [
+    {"source": "system/voyahtune.load.rc", "destination": "/system/etc/init/voyahtune.load.rc", "mode": "0644"},
+    {"source": "system/voyahtune.load.sh", "destination": "/system/etc/init.voyahtune.load.sh", "mode": "0755"},
+    {"source": "system/stop-loader.sh", "destination": "/data/local/bin/voyahtune-new/stop-loader.sh", "mode": "0755"}
+  ]
+}

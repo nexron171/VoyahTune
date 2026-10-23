@@ -1,0 +1,100 @@
+{
+  "acc-restore.js": {
+    "sources": [
+      "agents/acc-restore.js"
+    ],
+    "ready": [
+      "[acc-restore] hook ready v2"
+    ]
+  },
+  "drive-reset.js": {
+    "sources": [
+      "agents/drive-reset.js"
+    ],
+    "ready": [
+      "[drive-reset] hook ready v2"
+    ]
+  },
+  "apollo.js": {
+    "sources": [
+      "agents/apollo.js"
+    ],
+    "ready": [
+      "[apollo] hook ready"
+    ]
+  },
+  "steering.js": {
+    "sources": [
+      "agents/steering.js"
+    ],
+    "ready": [
+      "[steering] hook ready v1"
+    ]
+  },
+  "launcher.js": {
+    "sources": [
+      "adapters/launcher/split-navigation.js",
+      "adapters/launcher/shared-navigation.js",
+      "agents/launcher.js"
+    ],
+    "ready": [
+      "[launcher] hook ready v1"
+    ]
+  },
+  "windows.js": {
+    "sources": [
+      "agents/windows.js"
+    ],
+    "ready": [
+      "[windows] hook ready v1"
+    ]
+  },
+  "multidisplay.js": {
+    "sources": [
+      "agents/multidisplay.js"
+    ],
+    "ready": [
+      "[multidisplay] hook ready v2"
+    ]
+  },
+  "keyboard-en.js": {
+    "sources": [
+      "agents/keyboard-en.js"
+    ],
+    "ready": [
+      "[keyboard-en] hook ready v1"
+    ]
+  },
+  "keyboard-ru.js": {
+    "sources": [
+      "agents/keyboard-ru.js"
+    ],
+    "ready": [
+      "[keyboard-ru] hook ready v1"
+    ]
+  },
+  "phone-numbers.js": {
+    "sources": [
+      "agents/phone-numbers.js"
+    ],
+    "ready": [
+      "[phone-numbers] hook ready v1"
+    ]
+  },
+  "cluster-navigation.js": {
+    "sources": [
+      "agents/cluster-navigation.js"
+    ],
+    "ready": [
+      "[cluster] hook ready v1"
+    ]
+  },
+  "app-client.js": {
+    "sources": [
+      "agents/app-client.js"
+    ],
+    "ready": [
+      "[app-client] hook ready v1"
+    ]
+  }
+}
