@@ -525,11 +525,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var maximumDetectedWidthPixels = 0
     private var maximumDetectedHeightPixels = 0
     private var rightHandDrive = false
-    private var carPlayDock = CarPlayDock.AUTOMATIC
     /** The view areas the next session declares (see createAirPlayConfig). */
     private var pendingViewAreas: CarPlayViewAreas? = null
-    /** The dock the running session declared; null before the first connection. */
-    private var sessionDock: CarPlayDock? = null
     private var hideTopBar = true
     private var hideBottomBar = true
     private var temporarySystemBarsEnabled = false
@@ -908,7 +905,6 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun loadPersistedSettings() {
-        carPlayDock = CarPlayDock.load(this)
         carPlayNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         ambientLightThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
         ambientDelaySeconds = AirPlayPersistence.loadAmbientDelaySeconds(this)
@@ -3100,13 +3096,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(26) },
         )
-        pageFor("display").addView(
-            buildDockSection(),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(26) },
-        )
         content = pageFor("display")
 
         val resolutionControl = DisplaySettingsSection.createResolutionSlider(
@@ -3556,7 +3545,6 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveOemLabel(this, oemLabel)
         AirPlayPersistence.saveDebugLogsEnabled(this, debugLogsEnabled)
         AirPlayPersistence.saveRightHandDrive(this, rightHandDrive)
-        CarPlayDock.save(this, carPlayDock)
         AirPlayPersistence.saveHideTopBar(this, hideTopBar)
         AirPlayPersistence.saveHideBottomBar(this, hideBottomBar)
         AirPlayPersistence.saveTemporarySystemBars(this, temporarySystemBarsEnabled)
@@ -3594,7 +3582,7 @@ class CarPlayHostActivity : ComponentActivity() {
         locationReportingEnabled, autoStartOnBoot, advancedAudioChannelMapping, displayScaleTenths,
         displayScalePercent, fps, widthPhysicalMm, physicalSizeBasis, hevcEnabled,
         hevcSoftwareDecoderEnabled, manufacturer, model, oemLabel, debugLogsEnabled, rightHandDrive,
-        carPlayDock, hideTopBar, hideBottomBar, temporarySystemBarsEnabled,
+        hideTopBar, hideBottomBar, temporarySystemBarsEnabled,
         safeAreaDrawOutside, mainDisplayDisableSafeArea, blackCornerRadiusDp,
     ).joinToString("|").hashCode()
 
@@ -4086,60 +4074,6 @@ class CarPlayHostActivity : ComponentActivity() {
         iconPreviewView = preview
         iconStatusView = status
         updateAirPlayIconPreview()
-        return section
-    }
-
-    // Between the driver's side and the bottom the dock moves at once (and is saved at once) when the
-    // running session declared both; to or from automatic waits for Save, which reconnects.
-    private fun buildDockSection(): View {
-        val section = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        section.addView(
-            menuText(getString(R.string.carplay_dock), 20f, MENU_SECONDARY),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ),
-        )
-        val group = RadioGroup(this).apply {
-            orientation = RadioGroup.HORIZONTAL
-        }
-        val labels = mapOf(
-            CarPlayDock.AUTOMATIC to R.string.carplay_dock_automatic,
-            CarPlayDock.DRIVER_SIDE to R.string.carplay_dock_driver_side,
-            CarPlayDock.BOTTOM to R.string.carplay_dock_bottom,
-            CarPlayDock.DUAL_SIDES to R.string.carplay_dock_dual_sides,
-        )
-        val buttons = CarPlayDock.entries.associateWith { dock ->
-            RadioButton(this).apply {
-                id = View.generateViewId()
-                text = getString(labels.getValue(dock))
-                setTextColor(MENU_PRIMARY)
-                isChecked = carPlayDock == dock
-            }.also { group.addView(it) }
-        }
-        group.setOnCheckedChangeListener { _, checkedId ->
-            val next = buttons.entries.firstOrNull { it.value.id == checkedId }?.key ?: return@setOnCheckedChangeListener
-            carPlayDock = next
-            val from = sessionDock
-            val areas = sessionDisplay?.viewAreas
-            val target = next.edge?.let { areas?.withDock(it) }
-            if (from != null && areas != null && target != null && CarPlayDock.movesLive(from, next) &&
-                controller?.showViewArea(target) == true
-            ) {
-                areas.use(target)
-                CarPlayDock.save(this, next)
-            }
-        }
-        section.addView(
-            group,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8) },
-        )
-        section.addView(menuText(getString(R.string.carplay_dock_hint), 16f, MENU_SECONDARY))
         return section
     }
 
@@ -4926,7 +4860,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun createAirPlayConfig(size: DisplaySize): AirPlayConfig {
         // The home settings page can change the name while this host stays alive.
         if (!menuOpen) oemLabel = AirPlayPersistence.loadOemLabel(this)
-        val dock = CarPlayDock.load(this).also { sessionDock = it }
+        val dock = CarPlayDock.load(this)
         val mainDisplay = createMainDisplayConfig(size, dock)
         val carBluetoothAudio = AirPlayPersistence.loadCarBluetoothAudio(this)
         if (carBluetoothAudio) logCarBluetoothAudio()
@@ -4949,26 +4883,11 @@ class CarPlayHostActivity : ComponentActivity() {
             mainBufferedAudio = AirPlayPersistence.loadMainBufferedAudio(this),
             speechWithout8And16Khz = AirPlayPersistence.loadSpeechWithout8And16Khz(this),
             disableAudioOutput = carBluetoothAudio,
-            vehicleTheme = dock.theme,
         )
     }
 
     private fun createMainDisplayConfig(size: DisplaySize, dock: CarPlayDock): AirPlayDisplayConfig {
         val knobPrimary = AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this)
-        dock.theme?.let { theme ->
-            val display = theme.mainDisplay(fps, if (knobPrimary) 3 else 1)
-            pendingViewAreas = null
-            val request = "Display request dock=$dock surface=${size.width}x${size.height}"
-            val details = "Vehicle theme asset=${theme.assetIdentifier} version=${theme.assetVersion} sdk=${theme.sdkVersion}"
-            val effective = "Display effective canvas=${display.widthPixels}x${display.heightPixels} " +
-                "physical=${display.widthPhysicalMm}x${display.heightPhysicalMm}mm layout=fixed " +
-                "display=${theme.mainDisplayIdentifier}"
-            displayDiagnosticAttempt = DisplayDiagnosticSnapshot.begin(this, request, details, effective)
-            appendLog(request)
-            appendLog(details)
-            appendLog(effective)
-            return display
-        }
         val alignedSize = evenDisplaySize(size)
         val physical = resolvePhysicalSize(alignedSize)
         val baseDisplay = AirPlayDisplayConfig(

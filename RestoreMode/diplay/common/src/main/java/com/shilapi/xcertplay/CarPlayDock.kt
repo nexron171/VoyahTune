@@ -16,15 +16,8 @@ enum class CarPlayDock(val edge: Int?, val theme: AirPlayVehicleTheme? = null) {
     DUAL_SIDES(AirPlayInfoPlist.DOCK_EDGE_DRIVER_SIDE, AirPlayVehicleTheme.DUAL_SIDE_DOCKS);
 
     companion object {
-        private const val PREFS = "diplay_carplay_dock"
-        private const val KEY_DOCK = "dock"
-
-        fun load(context: Context): CarPlayDock =
-            entries.firstOrNull { it.name == context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_DOCK, null) }
-                ?: AUTOMATIC
-
-        fun save(context: Context, dock: CarPlayDock) =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_DOCK, dock.name).apply()
+        /** Keep the standard layout even when preferences contain a retired theme or edge. */
+        fun load(@Suppress("UNUSED_PARAMETER") context: Context): CarPlayDock = DRIVER_SIDE
 
         /** Changing the theme or automatic layout requires a new session. */
         fun movesLive(from: CarPlayDock, to: CarPlayDock): Boolean =

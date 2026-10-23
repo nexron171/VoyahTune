@@ -6,12 +6,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
-import android.widget.RadioGroup;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 
-import com.shilapi.xcertplay.CarPlayDock;
 import com.shilapi.xcertplay.CarPlaySettingsAccess;
 import com.shilapi.xcertplay.DiPlayActivity;
 import com.shilapi.xcertplay.media.CarPlayAudioSettings;
@@ -101,18 +99,6 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
             }
             CarPlayFeature.setFullscreen(requireContext(), checked);
         });
-        RadioGroup layouts = settingView(R.id.carPlayLayoutChoices);
-        layouts.setSaveEnabled(false);
-        layouts.setOnCheckedChangeListener((group, selected) -> {
-            if (updating || !CarPlayFeature.isEnabled(requireContext())) {
-                return;
-            }
-            CarPlayDock dock = selected == R.id.carPlayLayoutAston ? CarPlayDock.DUAL_SIDES
-                    : selected == R.id.carPlayLayoutBottom ? CarPlayDock.BOTTOM
-                    : CarPlayDock.DRIVER_SIDE;
-            CarPlayDock.Companion.save(requireContext(), dock);
-            updateState();
-        });
         bindUiScale();
         for (int i = 0; i < SLIDERS.length; i++) {
             bindVolume(i);
@@ -174,8 +160,7 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
             @Override
             public void onProgressChanged(SeekBar view, int progress, boolean fromUser) {
                 if (!fromUser || updating || !view.isEnabled()
-                        || !CarPlayFeature.isEnabled(requireContext())
-                        || CarPlayDock.Companion.load(requireContext()) == CarPlayDock.DUAL_SIDES) {
+                        || !CarPlayFeature.isEnabled(requireContext())) {
                     return;
                 }
                 int percent = UI_SCALE_PRESETS.get(progress);
@@ -202,18 +187,14 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         settingView(R.id.carPlayUiScale).setContentDescription(label);
     }
 
-    private void updateUiScale(boolean enabled, CarPlayDock dock) {
-        boolean fixedTheme = dock == CarPlayDock.DUAL_SIDES;
+    private void updateUiScale(boolean enabled) {
         SeekBar slider = settingView(R.id.carPlayUiScale);
-        slider.setEnabled(enabled && !fixedTheme);
+        slider.setEnabled(enabled);
         if (!uiScaleDragging || !slider.isEnabled()) {
-            int percent = fixedTheme ? 100 : CarPlaySettingsAccess.uiScalePercent(requireContext());
+            int percent = CarPlaySettingsAccess.uiScalePercent(requireContext());
             slider.setProgress(UI_SCALE_PRESETS.indexOf(percent));
         }
         showUiScale(UI_SCALE_PRESETS.get(slider.getProgress()));
-        settingView(R.id.carPlayUiScaleLabel).setAlpha(fixedTheme ? 0.5f : 1f);
-        settingView(R.id.carPlayUiScalePresets).setAlpha(fixedTheme ? 0.5f : 1f);
-        settingView(R.id.carPlayUiScaleFixedTheme).setVisibility(fixedTheme ? View.VISIBLE : View.GONE);
     }
 
     private void bindVolume(int index) {
@@ -299,13 +280,7 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                         ? View.VISIBLE : View.GONE);
         ((Switch) settingView(R.id.carPlayFullscreen)).setChecked(
                 CarPlaySettingsAccess.fullscreen(requireContext()));
-        CarPlayDock dock = CarPlayDock.Companion.load(requireContext());
-        // The existing automatic Voyah profile uses the lower climate dock.
-        int selected = dock == CarPlayDock.DUAL_SIDES ? R.id.carPlayLayoutAston
-                : dock == CarPlayDock.DRIVER_SIDE ? R.id.carPlayLayoutClassic
-                : R.id.carPlayLayoutBottom;
-        ((RadioGroup) settingView(R.id.carPlayLayoutChoices)).check(selected);
-        updateUiScale(enabled, dock);
+        updateUiScale(enabled);
         Switch duckMusic = settingView(R.id.carPlayDuckMusic);
         if (duckMusic != null) {
             duckMusic.setChecked(CarPlayAudioSettings.duckMusic(requireContext()));

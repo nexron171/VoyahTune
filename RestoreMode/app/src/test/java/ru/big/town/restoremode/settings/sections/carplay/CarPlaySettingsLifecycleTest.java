@@ -2,6 +2,7 @@ package ru.big.town.restoremode.settings.sections.carplay;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.robolectric.Shadows.shadowOf;
 
@@ -16,7 +17,6 @@ import android.os.Messenger;
 import android.os.RemoteException;
 import android.view.KeyEvent;
 import android.view.View;
-import android.widget.RadioGroup;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -48,7 +48,7 @@ import ru.big.town.restoremode.carplay.CarPlayFeature;
 public class CarPlaySettingsLifecycleTest {
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
-    public void featureSwitchHidesContentAndThemeAndScalePersistForReconnect() throws Exception {
+    public void featureSwitchPreservesScaleAndIgnoresRetiredLayouts() throws Exception {
         Messenger nativeService = new Messenger(new Handler(Looper.getMainLooper(), message -> true));
         shadowOf(RuntimeEnvironment.getApplication()).setComponentNameAndServiceForBindService(
                 new ComponentName("ru.big.town.anative", "ru.big.town.anative.SetModesService"),
@@ -79,23 +79,17 @@ public class CarPlaySettingsLifecycleTest {
                 assertEquals(selectedFullscreen, config.getBooleanExtra(CarPlayTarget.FULLSCREEN, !selectedFullscreen));
                 assertEquals("ru.big.town.anative.SetModesConfigReceiver", config.getComponent().getClassName());
             }
-            RadioGroup choices = root.findViewById(R.id.carPlayLayoutChoices);
             SeekBar scale = root.findViewById(R.id.carPlayUiScale);
             assertTrue(scale.isEnabled());
             assertEquals(3, scale.getMax());
             assertEquals(2, scale.getProgress());
             assertEquals(100, CarPlaySettingsAccess.uiScalePercent(controller.get()));
-            assertEquals(3, choices.getChildCount());
-            int[] views = {R.id.carPlayLayoutClassic, R.id.carPlayLayoutBottom, R.id.carPlayLayoutAston};
-            CarPlayDock[] docks = {CarPlayDock.DRIVER_SIDE, CarPlayDock.BOTTOM, CarPlayDock.DUAL_SIDES};
-            for (int index = 0; index < views.length; index++) {
-                choices.check(views[index]);
-                assertEquals(docks[index], CarPlayDock.Companion.load(controller.get()));
-                assertEquals(docks[index] != CarPlayDock.DUAL_SIDES, scale.isEnabled());
+            for (String storedLayout : new String[] {"AUTOMATIC", "BOTTOM", "DUAL_SIDES", "DRIVER_SIDE"}) {
+                controller.get().getSharedPreferences("diplay_carplay_dock", 0)
+                        .edit().putString("dock", storedLayout).commit();
+                assertEquals(CarPlayDock.DRIVER_SIDE, CarPlayDock.Companion.load(controller.get()));
             }
-            assertEquals(View.VISIBLE, root.findViewById(R.id.carPlayUiScaleFixedTheme).getVisibility());
-            choices.check(R.id.carPlayLayoutBottom);
-            assertEquals(View.GONE, root.findViewById(R.id.carPlayUiScaleFixedTheme).getVisibility());
+            assertNull(CarPlayDock.Companion.load(controller.get()).getTheme());
             int[] progress = {1, 0, 1, 2, 3};
             int[] percents = {85, 75, 85, 100, 115};
             for (int index = 0; index < progress.length; index++) {
@@ -123,9 +117,10 @@ public class CarPlaySettingsLifecycleTest {
             }
             preview.recycle();
             fullscreen.setChecked(true);
-            choices.check(R.id.carPlayLayoutAston);
-            assertFalse(scale.isEnabled());
-            assertEquals(2, scale.getProgress());
+            controller.get().getSharedPreferences("diplay_carplay_dock", 0)
+                    .edit().putString("dock", "DUAL_SIDES").commit();
+            assertTrue(scale.isEnabled());
+            assertEquals(3, scale.getProgress());
             assertEquals(115, CarPlaySettingsAccess.uiScalePercent(controller.get()));
             enabled.setChecked(false);
             shadowOf(Looper.getMainLooper()).idle();
@@ -147,11 +142,8 @@ public class CarPlaySettingsLifecycleTest {
             assertTrue(CarPlayFeature.isEnabled(controller.get()));
             assertEquals(View.VISIBLE, root.findViewById(R.id.carPlayEnabledContent).getVisibility());
             assertTrue(((Switch) root.findViewById(R.id.carPlayFullscreen)).isChecked());
-            choices = root.findViewById(R.id.carPlayLayoutChoices);
-            assertEquals(R.id.carPlayLayoutAston, choices.getCheckedRadioButtonId());
+            assertEquals(CarPlayDock.DRIVER_SIDE, CarPlayDock.Companion.load(controller.get()));
             scale = root.findViewById(R.id.carPlayUiScale);
-            assertFalse(scale.isEnabled());
-            choices.check(R.id.carPlayLayoutClassic);
             assertTrue(scale.isEnabled());
             assertEquals(3, scale.getProgress());
             assertEquals(115, CarPlaySettingsAccess.uiScalePercent(controller.get()));
