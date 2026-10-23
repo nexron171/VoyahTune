@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <dimen name="carplay_chrome_access_width">30px</dimen>
-    <dimen name="carplay_chrome_access_height">50dp</dimen>
-    <dimen name="carplay_chrome_access_dot_size">14dp</dimen>
-    <string name="carplay_chrome_access_description">Показать док и статус-бар на 10 секунд</string>
-</resources>

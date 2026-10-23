@@ -62,7 +62,6 @@ case "$script" in
         if [ ! -f "$root/missing_navigation_ready" ]; then echo '[navigation-source] hook ready v1'; fi
         if [ ! -f "$root/missing_rds_ready" ]; then echo '[rds-restore] hook ready v1'; fi
         if [ ! -f "$root/missing_statusbar_ready" ]; then echo '[carplay-statusbar] hook ready v1'; fi
-        if [ ! -f "$root/missing_anchor_ready" ]; then echo '[carplay-anchor] hook ready v1'; fi
         gate=none ;;
     voyahtune_phone_numbers.js)
         if [ ! -f "$root/missing_phone_ready" ]; then echo '[phone-numbers] hook ready v1'; fi
@@ -275,23 +274,23 @@ if [ "${1:-}" = --probe ]; then eval "$2"; exit; fi
         self.rds_probe(package="com.qinggan.systemui", selected=False)
         self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
 
-    def test_hiboard_discovered_once_and_requires_anchor_marker(self):
-        (self.root / "missing_anchor_ready").touch()
-        self.rds_probe(package="com.qinggan.app.hiboard", selected=False)
-        marker = self.root / "voyahtune_app_client.com.qinggan.app.hiboard.pid"
-        self.assertFalse(marker.exists())
-        self.rds_probe(package="com.qinggan.app.hiboard", selected=False)
-        self.assertEqual((self.root / "events").read_text().count("start app_client.js 109"), 1)
-        (self.root / "missing_anchor_ready").unlink()
-        (self.root / "generation.109").write_text("2\n")
-        self.rds_probe(package="com.qinggan.app.hiboard", selected=False)
-        self.assertEqual(marker.read_text().strip(), "v2:test:109:2")
-
-    def test_hiboard_32_bit_timeout_requires_ready_markers(self):
-        (self.root / "app_client_timeout").touch()
-        self.rds_probe(package="com.qinggan.app.hiboard", selected=False,
-                       executable="/system/bin/app_process32")
-        self.assertTrue((self.root / "voyahtune_app_client.com.qinggan.app.hiboard.pid").exists())
+    def test_hiboard_is_not_injected_even_when_selected_for_fullscreen(self):
+        for executable in ("/system/bin/app_process64", "/system/bin/app_process32"):
+            for selected in (False, True):
+                with self.subTest(executable=executable, selected=selected):
+                    self.rds_probe(
+                        package="com.qinggan.app.hiboard",
+                        selected=selected,
+                        executable=executable,
+                    )
+                    self.assertEqual((self.root / "events").read_text(), "")
+                    self.assertFalse(
+                        (self.root / "voyahtune_app_client.com.qinggan.app.hiboard.pid").exists()
+                    )
+                    self.assertFalse(
+                        (self.root / "voyahtune_app_client.com.qinggan.app.hiboard.attempt").exists()
+                    )
+                    (self.root / "proc/109/exe").unlink()
 
     def test_systemui_requires_its_own_ready_marker(self):
         (self.root / "missing_statusbar_ready").touch()

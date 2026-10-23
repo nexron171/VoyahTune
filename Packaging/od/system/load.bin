@@ -1014,8 +1014,7 @@ inject_app_client_bg() {
         # Eternalized OEM hooks can survive the injector's timeout. Require both target-specific
         # ready markers and the unchanged process identity before accepting that outcome.
         if { [ "$FC_RC" -eq 0 ] || [ "$FC_TARGET_PACKAGE" = com.pateo.rdsapp ] \
-                || { { [ "$FC_TARGET_PACKAGE" = com.qinggan.systemui ] \
-                    || [ "$FC_TARGET_PACKAGE" = com.qinggan.app.hiboard ]; } && [ "$FC_RC" -eq 124 ]; }; } \
+                || { [ "$FC_TARGET_PACKAGE" = com.qinggan.systemui ] && [ "$FC_RC" -eq 124 ]; }; } \
                 && grep -qF "$FC_TARGET_READY" "$FC_TRY"; then
             if [ "$FC_TARGET_REQUIRE_MAPKIT" != 1 ] \
                     || grep -qF "$MAPKIT_DPI_CLIENT_READY" "$FC_TRY"; then
@@ -1031,9 +1030,6 @@ inject_app_client_bg() {
             FC_READY_OK=0
         fi
         case "$FC_TARGET_PACKAGE" in
-            com.qinggan.app.hiboard)
-                grep -qF '[carplay-anchor] hook ready v1' "$FC_TRY" || FC_READY_OK=0
-                ;;
             com.qinggan.systemui)
                 grep -qF '[carplay-statusbar] hook ready v1' "$FC_TRY" || FC_READY_OK=0
                 ;;
@@ -1078,7 +1074,7 @@ discover_app_client() {
     FC_DPI_LIST=$(printf '%s' "$FC_DPI_LIST" | tr -d '[:space:]')
     # Navigation and OEM adapters run independently of geometry settings. Attach only to
     # existing exact main processes, using the same circuit breaker; never launch an app.
-    FC_LIST="com.qinggan.systemui,com.qinggan.app.hiboard,com.pateo.rdsapp,com.qinggan.cluster,ru.yandex.yandexnavi,ru.dublgis.dgismobile,com.qinggan.bluetoothphone${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
+    FC_LIST="com.qinggan.systemui,com.pateo.rdsapp,com.qinggan.cluster,ru.yandex.yandexnavi,ru.dublgis.dgismobile,com.qinggan.bluetoothphone${FC_FULLSCREEN_LIST:+,$FC_FULLSCREEN_LIST}"
     FC_SAVED_IFS=$IFS
     IFS=,
     for FC_DPI_PACKAGE in $FC_DPI_LIST; do
@@ -1096,11 +1092,12 @@ discover_app_client() {
     for FC_PACKAGE in $FC_LIST; do
         IFS=$FC_SAVED_IFS
         FC_PACKAGE=$(printf '%s' "$FC_PACKAGE" | tr -d '[:space:]')
-        # Core OEM targets have dedicated workers. Optional app geometry must not attach another
-        # agent to them concurrently (the supported client scope is third-party applications).
+        # Optional app geometry must not attach to core OEM windows or their gesture handlers.
+        # Dedicated workers manage the core targets that require hooks.
         case "$FC_PACKAGE" in
             com.qinggan.keymanager.service|com.qinggan.systemservice|com.qinggan.app.launcher|\
-            com.qinggan.canbus.service|com.qinggan.app.vehiclesetting|com.qinggan.app.vehicle|com.qinggan.app.qgime)
+            com.qinggan.canbus.service|com.qinggan.app.vehiclesetting|com.qinggan.app.vehicle|\
+            com.qinggan.app.qgime|com.qinggan.app.hiboard)
                 IFS=,
                 continue
                 ;;
@@ -1150,7 +1147,7 @@ discover_app_client() {
         # OEM and navigation adapters support either runtime ABI; other geometry targets
         # remain 64-bit only.
         case "$FC_PACKAGE:$FC_EXE" in
-            *:*/app_process64|com.qinggan.systemui:*/app_process32|com.qinggan.app.hiboard:*/app_process32|\
+            *:*/app_process64|com.qinggan.systemui:*/app_process32|\
             com.pateo.rdsapp:*/app_process32|com.qinggan.cluster:*/app_process32|com.qinggan.bluetoothphone:*/app_process32|\
             ru.yandex.yandexnavi:*/app_process32|ru.dublgis.dgismobile:*/app_process32) FC_INJECTOR=$FI ;;
             *)

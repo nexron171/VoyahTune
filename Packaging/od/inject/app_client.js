@@ -84,12 +84,11 @@ Java.perform(function () {
     }
 
     var packageName = "" + application.getPackageName();
-    if (packageName === "com.qinggan.systemui" || packageName === "com.qinggan.app.hiboard") {
+    if (packageName === "com.qinggan.systemui") {
         appClientOemUiReady = new Promise(function (resolve) {
             Java.scheduleOnMainThread(function () {
                 try {
-                    var installed = packageName === "com.qinggan.systemui"
-                            ? installCarPlayStatusBar(application) : installCarPlayAnchorTap(application);
+                    var installed = installCarPlayStatusBar(application);
                     if (installed) console.log(READY_MARKER);
                 } finally { resolve(); }
             });
@@ -550,124 +549,6 @@ Java.perform(function () {
         + " mapkitDpi=" + mapkitDpi + " mapkitHooks=" + mapkitHooksInstalled);
     } finally { appClientBootstrapResolve(); }
 });
-
-function createCarPlayAnchorTapTracker() {
-    var gestures = new Map();
-    return function (key, event, eligible, slop, maxDuration) {
-        if (!event || !eligible) {
-            gestures.delete(key);
-            return false;
-        }
-        if (event.action === 0) {
-            gestures.delete(key);
-            if (event.pointers === 1) gestures.set(key, event);
-            return false;
-        }
-        var down = gestures.get(key);
-        if (!down) return false;
-        var duration = event.time - down.time;
-        if (event.pointers !== 1 || event.pointer !== down.pointer || duration < 0
-                || duration >= maxDuration || (event.action !== 1 && event.action !== 2)
-                || Math.hypot(event.x - down.x, event.y - down.y) > slop) {
-            gestures.delete(key);
-            return false;
-        }
-        if (event.action !== 1) return false;
-        gestures.delete(key);
-        return true;
-    };
-}
-
-function installCarPlayAnchorTap(application) {
-    var original = null;
-    try {
-        var BlindsWindow = Java.use("com.qinggan.app.hiboard.BlindsWindow");
-        var ServiceManager = Java.use("com.qinggan.os.ServiceManager");
-        var SettingsGlobal = Java.use("android.provider.Settings$Global");
-        var SystemClock = Java.use("android.os.SystemClock");
-        var System = Java.use("java.lang.System");
-        var ViewConfiguration = Java.use("android.view.ViewConfiguration");
-        var Rect = Java.use("android.graphics.Rect");
-        var Log = Java.use("android.util.Log");
-        var controllers = {
-            VehicleHiBoardBarNew: Java.use("com.qinggan.app.hiboard.vehiclehiboard.main.VehicleHiBoardBarNew"),
-            VehicleHiBoardBarNewOTA: Java.use("com.qinggan.app.hiboard.vehiclehiboard.main.VehicleHiBoardBarNewOTA"),
-            SecondVehicleHiboardBar: Java.use("com.qinggan.app.hiboard.vehiclehiboard.second.SecondVehicleHiboardBar")
-        };
-        var track = createCarPlayAnchorTapTracker();
-        original = BlindsWindow.handleTouch.overload("android.view.MotionEvent");
-        original.implementation = function (motion) {
-            var tap = false;
-            var displayId = -1;
-            var key = null;
-            try {
-                key = String(System.identityHashCode(this));
-                var type = controllers[String(this.mTag.value)];
-                if (type) {
-                    var bar = Java.cast(this.mWindowStatusListener.value, type);
-                    var delegate = bar.mDelegateView.value;
-                    var display = delegate.getDisplay();
-                    displayId = display === null ? -1 : display.getDisplayId();
-                    var activity = ServiceManager.getDpyTopAppInfo(application, displayId, 2);
-                    var layout = this.mLp.value;
-                    var eligible = isCarPlayStatusBarTarget(activity, displayId)
-                            && layout.x.value === layout.minOffset.value
-                            && !this.isCollapsing.value.get() && !this.isExpanding.value.get();
-                    var lineBounds = Rect.$new();
-                    var line = bar.mLineView.value;
-                    var lineVisible = line !== null && line.getGlobalVisibleRect(lineBounds);
-                    var density = Number(delegate.getResources().getDisplayMetrics().density.value);
-                    var slop = Number(this.mScaledTouchSlop.value);
-                    var x = Number(motion.getX());
-                    var y = Number(motion.getY());
-                    var height = Number(delegate.getHeight());
-                    // The transparent edge window also covers the Native access button.
-                    var onMarker = lineVisible && y >= lineBounds.top.value - slop
-                            && y <= lineBounds.bottom.value + slop;
-                    var onAccessButton = y >= height - 50 * density;
-                    eligible = eligible && x >= 0 && x < delegate.getWidth()
-                            && y >= 0 && y < height && (onMarker || onAccessButton);
-                    for (var index = 0; index < motion.getHistorySize(); index++) {
-                        track(key, {action: 2, x: Number(motion.getHistoricalX(index)),
-                            y: Number(motion.getHistoricalY(index)), time: Number(motion.getHistoricalEventTime(index)),
-                            pointers: motion.getPointerCount(), pointer: motion.getPointerId(0)},
-                            eligible, slop, ViewConfiguration.getLongPressTimeout());
-                    }
-                    tap = track(key, {action: motion.getActionMasked(), x: x, y: y,
-                        time: Number(motion.getEventTime()), pointers: motion.getPointerCount(),
-                        pointer: motion.getPointerId(0)}, eligible, slop, ViewConfiguration.getLongPressTimeout());
-                } else {
-                    track(key, null, false);
-                }
-            } catch (error) {
-                if (key !== null) track(key, null, false);
-                Log.e("vt_carplay_anchor", "gesture observation failed: " + error);
-            }
-
-            // Every OEM event and return value remain intact, including the complete drag stream.
-            var result = original.call(this, motion);
-            if (tap) {
-                try {
-                    var activity = ServiceManager.getDpyTopAppInfo(application, displayId, 2);
-                    if (isCarPlayStatusBarTarget(activity, displayId)) {
-                        var written = SettingsGlobal.putLong(application.getContentResolver(),
-                                "voyahtune_carplay_chrome_reveal_until_" + displayId,
-                                Number(SystemClock.elapsedRealtime()) + 10000);
-                        if (written) Log.i("vt_carplay_anchor", "chrome requested display=" + displayId);
-                        else Log.w("vt_carplay_anchor", "chrome request rejected display=" + displayId);
-                    }
-                } catch (error) { Log.e("vt_carplay_anchor", "chrome request failed: " + error); }
-            }
-            return result;
-        };
-        console.log("[carplay-anchor] hook ready v1");
-        return true;
-    } catch (error) {
-        if (original !== null) original.implementation = null;
-        console.log("[carplay-anchor] hook failed v1: " + error);
-        return false;
-    }
-}
 
 function isCarPlayStatusBarTarget(activity, displayId) {
     if (displayId !== 0 && displayId !== 1) return false;
